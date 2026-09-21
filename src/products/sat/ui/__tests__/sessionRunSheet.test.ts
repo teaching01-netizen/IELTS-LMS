@@ -3,8 +3,11 @@ import type { ExamPlanSection, ExamSessionRuntime, SectionRuntimeState } from ".
 import {
   buildSatRunSheet,
   formatRunSheetClock,
+  formatRunSheetRemaining,
   formatRunSheetWindow,
   SAT_RUN_SHEET_TIME_ZONE,
+  satModuleSlotLabel,
+  satRunSheetCurrentRows,
   type SatRunSheetRow,
 } from "../sessionRunSheet";
 
@@ -880,6 +883,146 @@ describe("module tiling invariants", () => {
   });
 });
 
+// The module clock was the missing fact: the sheet named every stage but only
+// the section row ever counted anything down, so "which module is the room in,
+// and how long does it have?" took arithmetic across three rows. Each live row
+// now carries its own window's remainder.
+describe("run sheet module clocks", () => {
+  function liveReadingWriting(overrides: Partial<SectionRuntimeState> = {}) {
+    return buildSatRunSheet({
+      plan: [readingWritingPlan, mathPlan],
+      runtime: runtime([
+        runtimeSection("reading-writing", 0, {
+          status: "live",
+          actualStartAt: SCHEDULED_START,
+          ...overrides,
+        }),
+        runtimeSection("math", 1),
+      ]),
+      scheduledStartAt: SCHEDULED_START,
+      now: "2026-09-20T02:20:00.000Z", // 09:20 ICT, inside Module 1
+    });
+  }
+
+  it("counts down the section and the module the room is inside", () => {
+    const sheet = liveReadingWriting();
+    // Section 09:00–10:04 → 44 minutes left; Module 1 09:00–09:32 → 12.
+    expect(rowById(sheet.rows, "reading-writing:section").remainingSeconds).toBe(2_640);
+    expect(rowById(sheet.rows, "reading-writing:module:m1").remainingSeconds).toBe(720);
+    expect(formatRunSheetRemaining(720)).toBe("12:00");
+  });
+
+  it("reports no window for a row the room has not reached or has finished", () => {
+    const sheet = liveReadingWriting();
+    // Upcoming rows report nothing: their window and length are on the row, and
+    // a clamped 0:00 would read as live.
+    expect(rowById(sheet.rows, "reading-writing:module:m2").remainingSeconds).toBeNull();
+    expect(rowById(sheet.rows, "reading-writing:break").remainingSeconds).toBeNull();
+    expect(rowById(sheet.rows, "math:section").remainingSeconds).toBeNull();
+
+    const finished = buildSatRunSheet({
+      plan: [readingWritingPlan],
+      runtime: runtime([
+        runtimeSection("reading-writing", 0, {
+          status: "completed",
+          actualStartAt: SCHEDULED_START,
+          actualEndAt: "2026-09-20T03:04:00.000Z",
+        }),
+      ]),
+      scheduledStartAt: SCHEDULED_START,
+      now: "2026-09-20T03:20:00.000Z",
+    });
+    expect(rowById(finished.rows, "reading-writing:section").remainingSeconds).toBeNull();
+    expect(rowById(finished.rows, "reading-writing:module:m1").remainingSeconds).toBeNull();
+  });
+
+  it("freezes the clock on the window a pause landed on", () => {
+    const sheet = liveReadingWriting({
+      status: "paused",
+      pausedAt: "2026-09-20T02:20:00.000Z",
+    });
+    // The pause landed at 09:20: the section had 44 minutes, Module 1 had 12,
+    // and neither is running. The candidates' own timers are frozen with it.
+    expect(rowById(sheet.rows, "reading-writing:section").status).toBe("paused");
+    expect(rowById(sheet.rows, "reading-writing:section").remainingSeconds).toBe(2_640);
+    expect(rowById(sheet.rows, "reading-writing:module:m1").remainingSeconds).toBe(720);
+  });
+
+  it("reads each module clock off the extension-shifted window", () => {
+    const sheet = liveReadingWriting({ extensionMinutes: 10 });
+    // The extension stretches the section to 09:00–10:14 (54 minutes left at
+    // 09:20) and its surplus lands on the module the cohort is inside, so
+    // Module 1 runs 09:00–09:42 — 22 minutes left — and Module 2 still closes
+    // the section at 10:14. Neither row may claim time the other already owns.
+    expect(rowById(sheet.rows, "reading-writing:section").remainingSeconds).toBe(3_240);
+    expect(rowById(sheet.rows, "reading-writing:module:m1").remainingSeconds).toBe(1_320);
+    expect(rowById(sheet.rows, "reading-writing:module:m2").status).toBe("upcoming");
+    // …and the two module rows still meet each other and the section end exactly.
+    const module1 = rowById(sheet.rows, "reading-writing:module:m1");
+    const module2 = rowById(sheet.rows, "reading-writing:module:m2");
+    expect(module1.plannedEndAt).toBe(module2.plannedStartAt);
+    expect(module2.plannedEndAt).toBe(rowById(sheet.rows, "reading-writing:section").plannedEndAt);
+  });
+
+  it("hands the header the rows it highlights", () => {
+    const sheet = liveReadingWriting();
+    const current = satRunSheetCurrentRows(sheet);
+    expect(current.section?.id).toBe("reading-writing:section");
+    expect(current.module?.id).toBe("reading-writing:module:m1");
+    expect(current.module?.label).toBe("Module 1");
+    expect(current.break).toBeNull();
+
+    // On the break between sections the room's current rows say so: the break
+    // is live, no module is.
+    const onBreak = buildSatRunSheet({
+      plan: [readingWritingPlan, mathPlan],
+      runtime: runtime([
+        runtimeSection("reading-writing", 0, {
+          status: "completed",
+          actualStartAt: SCHEDULED_START,
+          actualEndAt: "2026-09-20T03:04:00.000Z",
+        }),
+        runtimeSection("math", 1),
+      ]),
+      scheduledStartAt: SCHEDULED_START,
+      now: "2026-09-20T03:07:00.000Z", // 10:07 ICT, on the break
+    });
+    const breakRows = satRunSheetCurrentRows(onBreak);
+    expect(breakRows.break?.id).toBe("reading-writing:break");
+    expect(breakRows.module).toBeNull();
+  });
+
+  it("never names a module clock the room cannot read", () => {
+    const sheet = buildSatRunSheet({
+      plan: [readingWritingPlan],
+      runtime: { sections: [], actualStartAt: null, status: "not_started", serverNow: SCHEDULED_START },
+      scheduledStartAt: SCHEDULED_START,
+      now: SCHEDULED_START,
+    });
+    const current = satRunSheetCurrentRows(sheet);
+    expect(current.section).toBeNull();
+    expect(current.module).toBeNull();
+    expect(rowById(sheet.rows, "reading-writing:module:m1").remainingSeconds).toBeNull();
+  });
+});
+
+// The staff room names a candidate's slot from the role the projection carries,
+// not from an authored title: Module 1 is the base module and Module 2 is
+// whichever branch routing picked.
+describe("satModuleSlotLabel", () => {
+  it("names the adaptive slot and nothing else", () => {
+    expect(satModuleSlotLabel("base")).toBe("Module 1");
+    expect(satModuleSlotLabel("lower_branch")).toBe("Module 2 · Lower");
+    expect(satModuleSlotLabel("higher_branch")).toBe("Module 2 · Higher");
+  });
+
+  it("returns null when there is no adaptive module to name", () => {
+    expect(satModuleSlotLabel("none")).toBeNull();
+    expect(satModuleSlotLabel(null)).toBeNull();
+    expect(satModuleSlotLabel(undefined)).toBeNull();
+  });
+});
+
 describe("run sheet Bangkok formatting", () => {
   it("pins the display zone regardless of the runtime's local timezone", () => {
     expect(SAT_RUN_SHEET_TIME_ZONE).toBe("Asia/Bangkok");
@@ -888,6 +1031,17 @@ describe("run sheet Bangkok formatting", () => {
     expect(formatRunSheetClock("2026-09-20T18:30:00.000Z")).toBe("01:30");
     expect(formatRunSheetClock(null)).toBe("—");
     expect(formatRunSheetClock("not-a-date")).toBe("—");
+  });
+
+  it("formats a remaining window the way staff read it", () => {
+    expect(formatRunSheetRemaining(720)).toBe("12:00");
+    expect(formatRunSheetRemaining(9)).toBe("0:09");
+    expect(formatRunSheetRemaining(3_900)).toBe("1:05:00");
+    // No running window, and a clock that somehow reads backwards, both round
+    // to the sheet's "nothing to show" / "over" marks rather than inventing one.
+    expect(formatRunSheetRemaining(null)).toBe("—");
+    expect(formatRunSheetRemaining(undefined)).toBe("—");
+    expect(formatRunSheetRemaining(-30)).toBe("0:00");
   });
 
   it("dates a window that leaves the reference day", () => {

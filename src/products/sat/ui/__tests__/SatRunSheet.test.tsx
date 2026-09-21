@@ -231,4 +231,98 @@ describe('SatRunSheet', () => {
     expect(screen.getByText('Clock 20 min · plan 64 min')).toBeInTheDocument();
     expect(screen.getAllByText('Plan 32 min · 10 min on the clock')).toHaveLength(2);
   });
+
+  // The column the reported bug was about: the sheet named every stage but only
+  // the section row ever counted anything down, so "how long does Module 1 have?"
+  // was arithmetic across rows. Every live row now carries its own window's
+  // remainder, read off the same server clock the candidates' timers use.
+  it('counts down the section and the module the room is inside, and nothing else', () => {
+    render(
+      <SatRunSheet
+        plan={plan}
+        runtime={runtimeWith([
+          {
+            sectionKey: 'reading-writing' as ExamSessionRuntime['sections'][number]['sectionKey'],
+            label: 'Reading & Writing',
+            order: 0,
+            plannedDurationMinutes: 64,
+            gapAfterMinutes: 10,
+            status: 'live',
+            availableAt: null,
+            actualStartAt: START,
+            actualEndAt: null,
+            pausedAt: null,
+            accumulatedPausedSeconds: 0,
+            extensionMinutes: 0,
+          },
+          {
+            sectionKey: 'math' as ExamSessionRuntime['sections'][number]['sectionKey'],
+            label: 'Math',
+            order: 1,
+            plannedDurationMinutes: 70,
+            gapAfterMinutes: 0,
+            status: 'locked',
+            availableAt: null,
+            actualStartAt: null,
+            actualEndAt: null,
+            pausedAt: null,
+            accumulatedPausedSeconds: 0,
+            extensionMinutes: 0,
+          },
+        ])}
+        scheduledStartAt={START}
+        now="2026-09-20T02:20:00.000Z" // 09:20 ICT, inside Module 1
+      />
+    );
+
+    expect(screen.getByText('Remaining')).toBeInTheDocument();
+    // Section 09:00–10:04 has 44 minutes left at 09:20; Module 1 09:00–09:32 has 12.
+    expect(screen.getByText('44:00')).toBeInTheDocument();
+    expect(screen.getByText('12:00')).toBeInTheDocument();
+
+    // Seven rows for this plan (four Reading & Writing, three Math), and only
+    // the two the room is inside have a running window: everything else reads as
+    // no window at all rather than a 0:00 that would look live.
+    const cells = Array.from(document.querySelectorAll('[data-sat-run-sheet-remaining]'));
+    expect(cells).toHaveLength(7);
+    expect(cells.filter((cell) => cell.textContent === '—')).toHaveLength(5);
+  });
+
+  // A paused room keeps the window the pause landed on: the candidates' own
+  // clocks are frozen, so the clock staff read must freeze with them.
+  it('freezes every running clock while the room is paused', () => {
+    render(
+      <SatRunSheet
+        plan={[plan[0]]}
+        runtime={runtimeWith([
+          {
+            sectionKey: 'reading-writing' as ExamSessionRuntime['sections'][number]['sectionKey'],
+            label: 'Reading & Writing',
+            order: 0,
+            plannedDurationMinutes: 64,
+            gapAfterMinutes: 10,
+            status: 'paused',
+            availableAt: null,
+            actualStartAt: START,
+            actualEndAt: null,
+            pausedAt: '2026-09-20T02:20:00.000Z', // 09:20 ICT
+            accumulatedPausedSeconds: 0,
+            extensionMinutes: 0,
+          },
+        ])}
+        scheduledStartAt={START}
+        now="2026-09-20T03:00:00.000Z" // 10:00 ICT, 40 minutes after the pause
+      />
+    );
+
+    // The windows the pause landed on, not what the wall clock would say now —
+    // and the pause landed during Module 1 (44 minutes left of the section, 12
+    // of the module), not in the Module 2 the room had not reached yet.
+    expect(screen.getByText('44:00')).toBeInTheDocument();
+    expect(screen.getByText('12:00')).toBeInTheDocument();
+    expect(screen.getAllByText('Paused')).toHaveLength(2);
+    const moduleRow = document.querySelector('[data-sat-run-sheet-row="module"]');
+    expect(moduleRow).toHaveAttribute('data-sat-run-sheet-status', 'paused');
+    expect(moduleRow).toHaveTextContent('Module 1');
+  });
 });

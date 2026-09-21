@@ -189,26 +189,41 @@ type SessionRuntime struct {
 
 // StudentSessionSummary mirrors Rust StudentSessionSummary (camelCase).
 type StudentSessionSummary struct {
-	AttemptID                   string          `json:"attemptId"`
-	StudentID                   string          `json:"studentId"`
-	StudentName                 string          `json:"studentName"`
-	StudentEmail                string          `json:"studentEmail"`
-	ScheduleID                  string          `json:"scheduleId"`
-	Status                      string          `json:"status"`
-	CurrentSection              string          `json:"currentSection"`
-	TimeRemaining               int             `json:"timeRemaining"`
-	RuntimeStatus               string          `json:"runtimeStatus"`
-	RuntimeCurrentSection       *string         `json:"runtimeCurrentSection"`
-	RuntimeTimeRemainingSeconds int             `json:"runtimeTimeRemainingSeconds"`
-	RuntimeDeadlineAt           *time.Time      `json:"runtimeDeadlineAt"`
-	RuntimeServerNow            *time.Time      `json:"runtimeServerNow"`
-	RuntimeSectionStatus        *string         `json:"runtimeSectionStatus"`
-	RuntimeWaiting              bool            `json:"runtimeWaiting"`
-	Violations                  json.RawMessage `json:"violations"`
-	Warnings                    int             `json:"warnings"`
-	LastActivity                time.Time       `json:"lastActivity"`
-	ExamID                      string          `json:"examId"`
-	ExamName                    string          `json:"examName"`
+	AttemptID                   string     `json:"attemptId"`
+	StudentID                   string     `json:"studentId"`
+	StudentName                 string     `json:"studentName"`
+	StudentEmail                string     `json:"studentEmail"`
+	ScheduleID                  string     `json:"scheduleId"`
+	Status                      string     `json:"status"`
+	CurrentSection              string     `json:"currentSection"`
+	TimeRemaining               int        `json:"timeRemaining"`
+	RuntimeStatus               string     `json:"runtimeStatus"`
+	RuntimeCurrentSection       *string    `json:"runtimeCurrentSection"`
+	RuntimeTimeRemainingSeconds int        `json:"runtimeTimeRemainingSeconds"`
+	RuntimeDeadlineAt           *time.Time `json:"runtimeDeadlineAt"`
+	RuntimeServerNow            *time.Time `json:"runtimeServerNow"`
+	// RuntimeCurrentModuleRole is the active SAT module's adaptive slot
+	// (base / lower_branch / higher_branch). The staff room labels the module a
+	// candidate is sitting (Module 1, Module 2 — Lower) from it instead of
+	// re-parsing the authored title. Null outside SAT and between modules.
+	RuntimeCurrentModuleRole *string `json:"runtimeCurrentModuleRole"`
+	// RuntimeModuleDeadlineAt and RuntimeModuleRemainingSeconds are the
+	// candidate's MODULE clock — the countdown their own screen shows, which is
+	// room-anchored now (a late entry is given what the room has left of the
+	// module) and can end before its section does. The section clock above stays
+	// the room's shared clock, so staff read the two side by side. Live modules
+	// publish a deadline for the client to tick from; a paused module publishes
+	// its frozen remainder and no deadline, and a module that never started
+	// publishes neither.
+	RuntimeModuleDeadlineAt       *time.Time      `json:"runtimeModuleDeadlineAt"`
+	RuntimeModuleRemainingSeconds *int            `json:"runtimeModuleRemainingSeconds"`
+	RuntimeSectionStatus          *string         `json:"runtimeSectionStatus"`
+	RuntimeWaiting                bool            `json:"runtimeWaiting"`
+	Violations                    json.RawMessage `json:"violations"`
+	Warnings                      int             `json:"warnings"`
+	LastActivity                  time.Time       `json:"lastActivity"`
+	ExamID                        string          `json:"examId"`
+	ExamName                      string          `json:"examName"`
 }
 
 // ProctorAlert mirrors Rust ProctorAlert (camelCase; "type" is the JSON key).
@@ -934,7 +949,7 @@ type studentSessionRow struct {
 	presenceHBAt                                               sql.NullTime
 	presenceHBStatus                                           sql.NullString
 	providerKey                                                string
-	satModuleTitle, satModuleKey                               sql.NullString
+	satModuleTitle, satModuleKey, satModuleRole                sql.NullString
 	satStartedAt, satPausedAt                                  sql.NullTime
 	satAllocated, satExtension, satAccum                       sql.NullInt64
 }
@@ -946,7 +961,7 @@ const studentSessionColumns = "sa.id, sa.candidate_id, sa.candidate_name, sa.can
 	"COALESCE(sa.proctor_status, 'active'), sa.last_warning_id, " +
 	"presence.last_heartbeat_at, presence.last_heartbeat_status, " +
 	"e.provider_key, " +
-	"sat_module.title, sat_module.module_key, " +
+	"sat_module.title, sat_module.module_key, sat_module.adaptive_role, " +
 	"sat_attempt.started_at, sat_attempt.paused_at, " +
 	"sat_attempt.allocated_seconds, sat_attempt.extension_seconds, sat_attempt.accumulated_paused_seconds"
 
@@ -969,7 +984,7 @@ func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSes
 		&r.proctorStatus, &r.lastWarningID,
 		&r.presenceHBAt, &r.presenceHBStatus,
 		&r.providerKey,
-		&r.satModuleTitle, &r.satModuleKey,
+		&r.satModuleTitle, &r.satModuleKey, &r.satModuleRole,
 		&r.satStartedAt, &r.satPausedAt,
 		&r.satAllocated, &r.satExtension, &r.satAccum,
 	); err != nil {
@@ -1007,6 +1022,47 @@ func jsonStringField(raw json.RawMessage, key string) string {
 	}
 	s, _ := obj[key].(string)
 	return s
+}
+
+// satModuleInts reads one SAT module attempt's clock columns (allocated
+// seconds, extension, accumulated pause), defaulting each to zero. One reader
+// for the two projections below so the legacy module clock and the room-anchored
+// one can never disagree about what the row holds.
+func satModuleInts(row studentSessionRow) (int, int, int) {
+	alloc, ext, acc := 0, 0, 0
+	if row.satAllocated.Valid {
+		alloc = int(row.satAllocated.Int64)
+	}
+	if row.satExtension.Valid {
+		ext = int(row.satExtension.Int64)
+	}
+	if row.satAccum.Valid {
+		acc = int(row.satAccum.Int64)
+	}
+	return alloc, ext, acc
+}
+
+// satModuleClock projects one SAT module's own clock: the deadline the client
+// ticks from plus the remaining window at `now`, both derived from the same
+// window the delivery service hands the candidate (started_at over
+// allocated + extension + returned pause time). A live module publishes a
+// deadline; a paused one publishes only its frozen remainder (its window is not
+// running, so a ticking deadline would be a lie); a module that never started
+// publishes neither.
+func satModuleClock(started, paused *time.Time, allocated, extension, accumulated int, now time.Time) (*time.Time, *int) {
+	if started == nil {
+		return nil, nil
+	}
+	remaining := satAttemptRemaining(started, paused, allocated, extension, accumulated, now)
+	if paused != nil {
+		return nil, &remaining
+	}
+	total := allocated + extension + accumulated
+	if total < 0 {
+		total = 0
+	}
+	deadline := started.Add(time.Duration(total) * time.Second)
+	return &deadline, &remaining
 }
 
 // satAttemptRemaining ports Rust compute_sat_attempt_remaining_seconds.
@@ -1105,18 +1161,25 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 	isSAT := row.providerKey == "sat"
 	cohortTimedSAT := isSAT && examruntime.IsCohortTimed(runtime.TimingModel)
 	timeRemaining := runtime.CurrentSectionRemainingSeconds
-	if isSAT && !cohortTimedSAT {
-		alloc, ext, acc := 0, 0, 0
-		if row.satAllocated.Valid {
-			alloc = int(row.satAllocated.Int64)
+	// The candidate's own MODULE clock, for every SAT timing model: the module a
+	// candidate is sitting has its own window, and since the window is the room's
+	// (delivery clamps a late entry to the room's remaining time) it is comparable
+	// across the roster. Projected for cohort-timed SAT too — that is the clock the
+	// student's screen shows, and the proctor needs both it and the section clock.
+	var moduleDeadline *time.Time
+	var moduleRemaining *int
+	var moduleRole *string
+	if isSAT {
+		alloc, ext, acc := satModuleInts(row)
+		moduleDeadline, moduleRemaining = satModuleClock(
+			nullTimePtr(row.satStartedAt), nullTimePtr(row.satPausedAt), alloc, ext, acc, runtime.ServerNow)
+		if row.satModuleRole.Valid && strings.TrimSpace(row.satModuleRole.String) != "" {
+			role := strings.TrimSpace(row.satModuleRole.String)
+			moduleRole = &role
 		}
-		if row.satExtension.Valid {
-			ext = int(row.satExtension.Int64)
+		if !cohortTimedSAT {
+			timeRemaining = satAttemptRemaining(nullTimePtr(row.satStartedAt), nullTimePtr(row.satPausedAt), alloc, ext, acc, runtime.ServerNow)
 		}
-		if row.satAccum.Valid {
-			acc = int(row.satAccum.Int64)
-		}
-		timeRemaining = satAttemptRemaining(nullTimePtr(row.satStartedAt), nullTimePtr(row.satPausedAt), alloc, ext, acc, runtime.ServerNow)
 	}
 	currentSection := row.currentModule
 	if isSAT {
@@ -1169,26 +1232,29 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 	}
 	serverNow := runtime.ServerNow
 	return StudentSessionSummary{
-		AttemptID:                   row.id,
-		StudentID:                   row.candidateID,
-		StudentName:                 row.candidateName,
-		StudentEmail:                row.candidateEmail,
-		ScheduleID:                  row.scheduleID,
-		Status:                      status,
-		CurrentSection:              currentSection,
-		TimeRemaining:               timeRemaining,
-		RuntimeStatus:               runtime.Status,
-		RuntimeCurrentSection:       runtimeCurrentSection,
-		RuntimeTimeRemainingSeconds: runtimeRemaining,
-		RuntimeDeadlineAt:           runtimeDeadline,
-		RuntimeServerNow:            &serverNow,
-		RuntimeSectionStatus:        sectionStatus,
-		RuntimeWaiting:              runtimeWaiting,
-		Violations:                  violations,
-		Warnings:                    warnings,
-		LastActivity:                lastActivity,
-		ExamID:                      row.examID,
-		ExamName:                    row.examTitle,
+		AttemptID:                     row.id,
+		StudentID:                     row.candidateID,
+		StudentName:                   row.candidateName,
+		StudentEmail:                  row.candidateEmail,
+		ScheduleID:                    row.scheduleID,
+		Status:                        status,
+		CurrentSection:                currentSection,
+		TimeRemaining:                 timeRemaining,
+		RuntimeStatus:                 runtime.Status,
+		RuntimeCurrentSection:         runtimeCurrentSection,
+		RuntimeTimeRemainingSeconds:   runtimeRemaining,
+		RuntimeDeadlineAt:             runtimeDeadline,
+		RuntimeServerNow:              &serverNow,
+		RuntimeCurrentModuleRole:      moduleRole,
+		RuntimeModuleDeadlineAt:       moduleDeadline,
+		RuntimeModuleRemainingSeconds: moduleRemaining,
+		RuntimeSectionStatus:          sectionStatus,
+		RuntimeWaiting:                runtimeWaiting,
+		Violations:                    violations,
+		Warnings:                      warnings,
+		LastActivity:                  lastActivity,
+		ExamID:                        row.examID,
+		ExamName:                      row.examTitle,
 	}
 }
 

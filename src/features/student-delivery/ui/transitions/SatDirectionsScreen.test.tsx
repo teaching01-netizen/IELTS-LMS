@@ -14,6 +14,10 @@ function renderScreen(overrides: Record<string, unknown> = {}) {
   return render(
     <SatDirectionsScreen
       module={baseModule}
+      // The route always resolves a window when a module is pending, so the
+      // default here is what a real caller hands in for a module the server said
+      // nothing about.
+      moduleWindow={{ seconds: baseModule.durationSeconds, source: "authored" }}
       sectionLabel="Section 1: Reading and Writing"
       runtimeStatus="live"
       proctorStatus="active"
@@ -25,6 +29,56 @@ function renderScreen(overrides: Record<string, unknown> = {}) {
     />
   );
 }
+
+// The pre-entry half of the late-join bug: a candidate who arrives after the
+// room has already spent part of Module 1 must not be told the authored length
+// and then be handed the room's remainder. The screen quotes the window
+// application policy resolved for this module — the server's own StartModule
+// clamp when it published one, the authored length when it did not — and only
+// formats it, so the copy cannot disagree with the clock the student lands in.
+describe("SatDirectionsScreen module window (late arrival)", () => {
+  it("quotes the authored length when the server published no window", () => {
+    renderScreen();
+    expect(screen.getByText("32 minutes · 27 questions")).toBeInTheDocument();
+  });
+
+  it("quotes the room's remainder when that is what entry will grant", () => {
+    renderScreen({ moduleWindow: { seconds: 12 * 60, source: "granted" } });
+    expect(screen.getByText("12 minutes left in this module · 27 questions")).toBeInTheDocument();
+    expect(screen.queryByText("32 minutes · 27 questions")).not.toBeInTheDocument();
+  });
+
+  // Arriving after the room's Module 1 window has closed: the candidate is
+  // granted nothing and routed on, so the screen must not promise a module.
+  it("says there is no time left when the room has closed the module", () => {
+    renderScreen({ moduleWindow: { seconds: 0, source: "granted" } });
+    expect(screen.getByText("No time left in this module · 27 questions")).toBeInTheDocument();
+    expect(screen.queryByText(/^32 minutes/)).not.toBeInTheDocument();
+  });
+
+  it("never rounds a sub-minute granted window up to a minute", () => {
+    renderScreen({ moduleWindow: { seconds: 45, source: "granted" } });
+    expect(
+      screen.getByText("Less than a minute left in this module · 27 questions"),
+    ).toBeInTheDocument();
+  });
+
+  // The remainder language belongs to a GRANTED window only. An authored length
+  // is never described as time the room has left, whatever its size — the source
+  // decides the wording, not the magnitude, so a change to the fallback rule
+  // lands in the policy and not here.
+  it("never describes an authored length as a remainder", () => {
+    renderScreen({ moduleWindow: { seconds: 1920, source: "authored" } });
+    expect(screen.queryByText(/left in this module/)).not.toBeInTheDocument();
+    expect(screen.getByText("32 minutes · 27 questions")).toBeInTheDocument();
+  });
+
+  // No pending module, no claim: the resolved window travels with the module.
+  it("prepares the next module when there is no window to quote", () => {
+    renderScreen({ moduleWindow: null });
+    expect(screen.getByText("Preparing the next module.")).toBeInTheDocument();
+  });
+});
 
 describe("SatDirectionsScreen gate (Phase 6b)", () => {
   it("names the begin destination and carries the cleared-calculator notice", async () => {

@@ -77,12 +77,19 @@ func TestLoadTimingRuntimeRowReadOnce(t *testing.T) {
 			"accumulated_paused_seconds", "extension_minutes", "completion_reason",
 			"projected_start_at", "projected_end_at",
 		}).AddRow("sec-1", "rt-1", "rw", "Reading", 0, 30, 0, "live", nil, now, nil, nil, 0, 0, nil, nil, nil))
-	timing, status, err := deliverySvc(db).loadTiming(context.Background(), "sched-1", "sat", now)
+	timing, status, room, err := deliverySvc(db).loadTiming(context.Background(), "sched-1", "sat", now)
 	if err != nil {
 		t.Fatalf("loadTiming failed: %v", err)
 	}
 	if status != "live" || timing.Authority != "cohort_runtime" {
 		t.Fatalf("unexpected timing: %+v %s", timing, status)
+	}
+	// Round 147: the runtime's own section rows ride back with the snapshot — the
+	// same sections leg, no extra statement — because publishEntryWindows reads
+	// the room's section instants from them to tell a candidate what entering a
+	// module will actually grant.
+	if len(room) != 1 || room[0].SectionKey != "rw" || room[0].ActualStartAt == nil || !room[0].ActualStartAt.Equal(now) {
+		t.Fatalf("runtime sections must ride back with the timing snapshot: %+v", room)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("duplicate runtime-header probe (pre-144 shape): %v", err)

@@ -36,15 +36,39 @@ export function mergeAuthoritativeTiming(
   return carryBetweenSections(incoming);
 }
 
+/**
+ * The one convention for a server-published duration: one real second per real
+ * second since the payload landed, frozen while the clock the number belongs to
+ * is stopped.
+ *
+ * Device skew cancels — the payload instant and `now` are both read from the
+ * same local clock — and transit is absorbed, because the server computed the
+ * number against its own instant while the elapsed time is measured from the
+ * moment the payload arrived. Every published countdown that is not an absolute
+ * deadline drains through here, so the pre-entry module window and the module
+ * clock the student lands in cannot disagree about what the server granted.
+ */
+export function drainSinceSnapshot(
+  seconds: number,
+  snapshotReceivedAt: number,
+  now: number,
+  running: boolean,
+): number {
+  const published = Math.max(0, Math.floor(seconds));
+  if (!running) return published;
+  const elapsedSinceSnapshot = Math.max(0, Math.floor((now - snapshotReceivedAt) / 1_000));
+  return Math.max(0, published - elapsedSinceSnapshot);
+}
+
 export function snapshotRemainingSeconds(
   attempt: AssessmentModuleAttemptSnapshot | undefined,
   snapshotReceivedAt: number,
   now: number,
 ): number {
   if (!attempt) return 0;
+  // A paused or unstarted module never ticks: the published remainder stands.
   if (attempt.pausedAt || !attempt.startedAt) return Math.max(0, attempt.remainingSeconds ?? 0);
-  const elapsedSinceSnapshot = Math.max(0, Math.floor((now - snapshotReceivedAt) / 1_000));
-  return Math.max(0, (attempt.remainingSeconds ?? 0) - elapsedSinceSnapshot);
+  return drainSinceSnapshot(attempt.remainingSeconds ?? 0, snapshotReceivedAt, now, true);
 }
 
 /**

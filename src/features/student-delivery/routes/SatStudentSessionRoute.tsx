@@ -350,6 +350,7 @@ export function SatStudentSessionRoute({
         runtimeStatus={data.scheduleRuntimeStatus}
         proctorStatus={data.proctorStatus}
         isStarting={exam.isStarting}
+        moduleWindow={exam.pendingModuleWindow}
         stageReady={exam.pendingStageReady}
         entryRecoverable={exam.autoEntryRecoverable}
         autoStartPending={exam.entryAutoStartPending}

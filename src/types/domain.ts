@@ -355,10 +355,16 @@ export interface ProctorPresence {
  * adaptive branch per candidate. `adaptiveRole` is `none` on a non-adaptive
  * section (IELTS/ACT).
  */
+/**
+ * The adaptive slot of one SAT module: Module 1 is the base module and exactly
+ * one of the two branches is Module 2. `none` is a non-adaptive section.
+ */
+export type SatAdaptiveRole = "none" | "base" | "lower_branch" | "higher_branch";
+
 export interface ExamPlanModule {
   moduleKey: string;
   title: string;
-  adaptiveRole: "none" | "base" | "lower_branch" | "higher_branch";
+  adaptiveRole: SatAdaptiveRole;
   durationMinutes: number;
 }
 

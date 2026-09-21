@@ -79,6 +79,68 @@ describe('SatSessionRoomRoute', () => {
     expect(screen.getByText(/Anchored to the proctor's start at 09:00/)).toBeInTheDocument();
   });
 
+  // Bug fix: the staff page must say which SECTION and which MODULE the room is
+  // in, with each module's own clock. Before this the stage header named only the
+  // section, the roster row read "reading · active" (a section key), and the
+  // detail panel labelled a section key "Current module", so nothing on the page
+  // could tell Module 1 from Module 2.
+  it('names the section and the module clock for the room and for each student', () => {
+    const clocked = {
+      ...student,
+      runtimeCurrentSection: 'reading-writing',
+      runtimeSectionStatus: 'live' as const,
+      runtimeModuleRole: 'base' as const,
+      runtimeModuleRemainingSeconds: 780,
+      runtimeModuleDeadlineAt: '2026-08-30T02:18:00Z',
+    };
+    controllerMock.mockReset();
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [clocked], alerts: [], error: null, isLoading: false,
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+
+    // The stage header: the section's ordinal plus the module the room's clock
+    // has reached, with that module's own countdown.
+    const slot = document.querySelector('[data-sat-room-stage-slot]');
+    expect(slot?.textContent).toContain('Section 1 · Module 1');
+    expect(slot?.textContent).toMatch(/module clock \d{1,2}:\d{2}$/);
+    // The hero figure stays the room's shared clock, and says so.
+    expect(document.querySelector('.sat-room__stage-clock-caption')?.textContent).toBe('Section clock');
+
+    // The roster row: section label, module slot, then the candidate's module
+    // clock beside the room's shared section clock.
+    const row = screen.getByRole('option', { name: 'Open Ananda S.' });
+    expect(row).toHaveTextContent('Reading & Writing · Module 1 · active');
+    expect(row.querySelector('.sat-room__row-time')?.textContent).toMatch(/^\d{1,2}:\d{2}$/);
+    expect(row.querySelector('.sat-room__row-sub')?.textContent).toBe('Section clock 25:00');
+
+    // The detail panel separates the two, and names the module slot rather than
+    // repeating the section key in the module field.
+    const detailValue = (label: string) =>
+      Array.from(document.querySelectorAll('.sat-room__workspace dl dt')).find((node) => node.textContent === label)?.parentElement?.querySelector('dd')?.textContent ?? null;
+    expect(detailValue('Current section')).toBe('Reading & Writing');
+    expect(detailValue('Current module')).toBe('Module 1');
+    expect(detailValue('Module clock')).toMatch(/^\d{1,2}:\d{2}$/);
+    expect(detailValue('Section clock')).toBe('25:00');
+
+    // The inspector carries the room-level module too, beside the section.
+    const inspector = (label: string) =>
+      Array.from(document.querySelectorAll('.sat-room__inspector .sat-inspector__row dt')).find((node) => node.textContent === label)?.parentElement?.querySelector('dd')?.textContent ?? null;
+    expect(inspector('Current stage')).toBe('Reading & Writing');
+    expect(inspector('Current module')).toBe('Module 1');
+  });
+
+  // The projection's module clock is absent until a module is started, and the
+  // page must show the absence rather than a synthesized 0:00.
+  it('shows no module clock for a student who has not started a module', () => {
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    const row = screen.getByRole('option', { name: 'Open Ananda S.' });
+    expect(row.querySelector('.sat-room__row-sub')).toBeNull();
+    expect(row).not.toHaveTextContent('Module 1');
+  });
+
   it('keeps per-action pending isolated: one student action never freezes session controls', async () => {
     const { examDeliveryService } = await import('../../../../features/proctor/infrastructure/proctorGateway');
     let releaseExtend: ((value: { success: boolean }) => void) | null = null;

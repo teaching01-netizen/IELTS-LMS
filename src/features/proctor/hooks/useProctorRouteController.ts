@@ -35,6 +35,9 @@ function mapBackendSessionSummary(payload: {
   runtimeTimeRemainingSeconds: number;
   runtimeDeadlineAt?: string | null | undefined;
   runtimeServerNow?: string | null | undefined;
+  runtimeModuleRole?: StudentSession["runtimeModuleRole"] | null | undefined;
+  runtimeModuleDeadlineAt?: string | null | undefined;
+  runtimeModuleRemainingSeconds?: number | null | undefined;
   runtimeSectionStatus?: StudentSession["runtimeSectionStatus"] | null | undefined;
   runtimeWaiting: boolean;
   violations: StudentSession["violations"];
@@ -59,6 +62,9 @@ function mapBackendSessionSummary(payload: {
     runtimeTimeRemainingSeconds: payload.runtimeTimeRemainingSeconds,
     runtimeDeadlineAt: payload.runtimeDeadlineAt ?? null,
     runtimeServerNow: payload.runtimeServerNow ?? null,
+    runtimeModuleRole: payload.runtimeModuleRole ?? null,
+    runtimeModuleDeadlineAt: payload.runtimeModuleDeadlineAt ?? null,
+    runtimeModuleRemainingSeconds: payload.runtimeModuleRemainingSeconds ?? null,
     runtimeSectionStatus: payload.runtimeSectionStatus ?? undefined,
     runtimeWaiting: payload.runtimeWaiting,
     violations: payload.violations ?? [],

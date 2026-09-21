@@ -40,6 +40,7 @@
 import type {
   ExamPlanSection,
   ExamSessionRuntime,
+  SatAdaptiveRole,
   SectionRuntimeState,
 } from "../../../types/domain";
 
@@ -59,8 +60,23 @@ export interface SatRunSheetRow {
   id: string;
   kind: SatRunSheetRowKind;
   label: string;
+  /**
+   * The authored name of the row when it says more than the label (a module's
+   * own title against its `Module 1` / `Module 2` slot, an extension, a cut
+   * clock). Null when the label already carries the whole name.
+   */
+  title: string | null;
   /** Extra truth for the row: branch lengths, extension, pause. */
   detail: string | null;
+  /**
+   * Seconds left in this row's own window on the room's clock, for the row the
+   * room is inside right now. Null for every other row: a projected or upcoming
+   * row has no running window to count down (its window and length are on the
+   * row), and a finished one would only report a clamped 0:00 that reads as
+   * "live". A paused row reports the window the pause landed on — the same
+   * freeze the candidates' own clocks show.
+   */
+  remainingSeconds: number | null;
   /** Authored length from the exam plan, null when only the runtime knows the row. */
   plannedDurationMinutes: number | null;
   /** The runtime snapshot length in force (sections only), null otherwise. */
@@ -104,6 +120,40 @@ export interface SatRunSheetInput {
 
 const MINUTE_MS = 60_000;
 const SECOND_MS = 1_000;
+
+/**
+ * Seconds left in one row's own window on the room's clock, for the row the
+ * room is inside right now. A paused room reports the window the pause landed on
+ * (its clock is not running, and the candidates' own timers are frozen with it);
+ * every other row reports nothing rather than a clamped 0:00 that would read as
+ * "live".
+ */
+function rowRemainingSeconds(args: {
+  status: SatRunSheetRowStatus;
+  endMs: number | null;
+  nowMs: number | null;
+  pausedAtMs: number | null;
+}): number | null {
+  if (args.status !== "live" && args.status !== "paused") return null;
+  if (args.endMs === null) return null;
+  const referenceMs = args.pausedAtMs ?? args.nowMs;
+  if (referenceMs === null) return null;
+  return Math.max(0, Math.ceil((args.endMs - referenceMs) / 1_000));
+}
+
+/**
+ * A remaining window as staff read it off the sheet: `mm:ss`, or `h:mm:ss` once
+ * the window is an hour or longer. `—` when the row has no running window.
+ */
+export function formatRunSheetRemaining(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "—";
+  const safe = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safe / 60);
+  const rest = String(safe % 60).padStart(2, "0");
+  if (minutes < 60) return `${minutes}:${rest}`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}:${String(minutes % 60).padStart(2, "0")}:${rest}`;
+}
 
 const clockFormatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: SAT_RUN_SHEET_TIME_ZONE,
@@ -187,6 +237,31 @@ function roleLabel(role: string): string {
   if (role === "higher_branch") return "Higher";
   if (role === "base") return "Base";
   return "Module";
+}
+
+/**
+ * The module slot one adaptive role denotes, in the words the room uses:
+ * Module 1 is the base module and "Module 2" is whichever branch routing picked
+ * for that candidate.
+ *
+ * The staff room labels a candidate's current module from this — the roster row
+ * and the detail panel name the slot beside the section, so a proctor reading
+ * "Section 1 · Module 2" knows a candidate has moved on without reading anyone
+ * else's row. Null when there is no adaptive slot to name (a non-adaptive
+ * section, or a candidate between modules): the caller renders nothing rather
+ * than a guess.
+ */
+export function satModuleSlotLabel(role: SatAdaptiveRole | null | undefined): string | null {
+  switch (role) {
+    case "base":
+      return "Module 1";
+    case "lower_branch":
+      return "Module 2 · Lower";
+    case "higher_branch":
+      return "Module 2 · Higher";
+    default:
+      return null;
+  }
 }
 
 /** One authored section, normalised from `ExamPlanSection`. */
@@ -315,7 +390,10 @@ function moduleStatus(
  */
 interface ModuleSlot {
   idSuffix: string;
+  /** `Module 1`, `Module 2`, … — the slot the room talks in. */
   label: string;
+  /** The authored module name, when it adds anything to the slot label. */
+  title: string | null;
   detail: string | null;
   /** Authored minutes; the section window's surplus is added separately. */
   minutes: number;
@@ -345,7 +423,8 @@ function moduleSlots(modules: AuthoredSection["modules"]): ModuleSlot[] {
     if (baseModule) {
       slots.push({
         idSuffix: "m1",
-        label: baseModule.title || baseModule.moduleKey,
+        label: "Module 1",
+        title: baseModule.title || baseModule.moduleKey,
         detail: roleLabel(baseModule.adaptiveRole),
         minutes: baseModule.durationMinutes,
       });
@@ -354,7 +433,8 @@ function moduleSlots(modules: AuthoredSection["modules"]): ModuleSlot[] {
     if (onlyBranch) {
       slots.push({
         idSuffix: "m2",
-        label: onlyBranch.title || onlyBranch.moduleKey,
+        label: "Module 2",
+        title: onlyBranch.title || onlyBranch.moduleKey,
         detail: roleLabel(onlyBranch.adaptiveRole),
         minutes: onlyBranch.durationMinutes,
       });
@@ -366,7 +446,8 @@ function moduleSlots(modules: AuthoredSection["modules"]): ModuleSlot[] {
       );
       slots.push({
         idSuffix: "m2",
-        label: longest.title || longest.moduleKey,
+        label: "Module 2",
+        title: longest.title || longest.moduleKey,
         detail: branchModules
           .map((module) => `${roleLabel(module.adaptiveRole)} ${module.durationMinutes}′`)
           .join(" · "),
@@ -376,7 +457,8 @@ function moduleSlots(modules: AuthoredSection["modules"]): ModuleSlot[] {
   } else if (baseModule) {
     slots.push({
       idSuffix: "m1",
-      label: baseModule.title || baseModule.moduleKey,
+      label: "Module 1",
+      title: baseModule.title || baseModule.moduleKey,
       detail: roleLabel(baseModule.adaptiveRole),
       minutes: baseModule.durationMinutes,
     });
@@ -384,12 +466,15 @@ function moduleSlots(modules: AuthoredSection["modules"]): ModuleSlot[] {
   for (const module of sequentialModules) {
     slots.push({
       idSuffix: module.moduleKey,
-      label: module.title || module.moduleKey,
+      label: `Module ${slots.length + 1}`,
+      title: module.title || module.moduleKey,
       detail: roleLabel(module.adaptiveRole),
       minutes: module.durationMinutes,
     });
   }
-  return slots;
+  // The slot label is the room's name for the module ("Module 1", "Module 2");
+  // an authored title that only repeats it adds nothing.
+  return slots.map((slot) => (slot.title === slot.label ? { ...slot, title: null } : slot));
 }
 
 /**
@@ -467,6 +552,12 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
     const endMs =
       actualEndMs ?? laterOf(derivedEndMs, parseInstant(live?.projectedEndAt));
     const status = sectionStatus(live);
+    // A paused room's clock stopped where the pause landed: which module the
+    // room is inside is read at THAT instant, not at the wall clock that kept
+    // running. Otherwise a pause during Module 1 would mark Module 2 as the row
+    // the room is sitting in, and the Remaining column would show a window the
+    // candidates never saw.
+    const positionMs = parseInstant(live?.pausedAt) ?? nowMs;
 
     const runtimeMismatch =
       runtimeMinutes !== null && planMinutes !== null && runtimeMinutes !== planMinutes;
@@ -480,6 +571,13 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
       id: `${stage.sectionKey}:section`,
       kind: "section",
       label: `Section ${index + 1} · ${stage.label}`,
+      title: null,
+      remainingSeconds: rowRemainingSeconds({
+        status,
+        endMs,
+        nowMs,
+        pausedAtMs: parseInstant(live?.pausedAt),
+      }),
       detail: details.length > 0 ? details.join(" · ") : null,
       plannedDurationMinutes: planMinutes,
       runtimeDurationMinutes: runtimeMinutes,
@@ -509,7 +607,7 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
         // authored length and the surplus lands on the module the cohort is
         // inside (or the last one while the run is still ahead of it).
         const absorbing =
-          windowMs > authoredMs ? absorbIndex(slots, startMs, nowMs) : -1;
+          windowMs > authoredMs ? absorbIndex(slots, startMs, positionMs) : -1;
         let moduleCursorMs = startMs;
         let prefixMs = 0;
         slots.forEach((slot, slotIndex) => {
@@ -535,10 +633,24 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
           }
           const allottedMs = moduleEndMs - moduleCursorMs;
           const compressed = allottedMs < authoredSlotMs;
+          const moduleRowStatus = moduleStatus(
+            status,
+            moduleCursorMs,
+            moduleEndMs,
+            positionMs,
+            slotIndex === 0
+          );
           rows.push({
             id: `${stage.sectionKey}:module:${slot.idSuffix}`,
             kind: "module",
             label: slot.label,
+            title: slot.title,
+            remainingSeconds: rowRemainingSeconds({
+              status: moduleRowStatus,
+              endMs: moduleEndMs,
+              nowMs,
+              pausedAtMs: parseInstant(live?.pausedAt),
+            }),
             detail: slot.detail,
             plannedDurationMinutes: slot.minutes,
             runtimeDurationMinutes: null,
@@ -546,13 +658,7 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
             mismatchNote: compressed
               ? `Plan ${slot.minutes} min · ${Math.round(allottedMs / MINUTE_MS)} min on the clock`
               : null,
-            status: moduleStatus(
-              status,
-              moduleCursorMs,
-              moduleEndMs,
-              nowMs,
-              slotIndex === 0
-            ),
+            status: moduleRowStatus,
             plannedStartAt: toIso(moduleCursorMs),
             plannedEndAt: toIso(moduleEndMs),
             // The section opens by serving Module 1, so its start IS Module 1's
@@ -607,6 +713,13 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
           id: `${stage.sectionKey}:break`,
           kind: "break",
           label: `Break · ${gapMinutes} min`,
+          title: null,
+          remainingSeconds: rowRemainingSeconds({
+            status: breakStatus,
+            endMs: actualBreakEndMs ?? breakEndMs,
+            nowMs,
+            pausedAtMs: null,
+          }),
           detail: null,
           plannedDurationMinutes: gapMinutes,
           runtimeDurationMinutes: null,
@@ -632,4 +745,25 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
     rows,
     plannedEndAt: toIso(plannedEndMs),
   };
+}
+
+export interface SatRunSheetCurrentRows {
+  section: SatRunSheetRow | null;
+  module: SatRunSheetRow | null;
+  break: SatRunSheetRow | null;
+}
+
+/**
+ * Where the room is right now, in one place: the section, the module slot and
+ * the break the cohort is inside. A paused room keeps its current rows (the
+ * pause froze the window it landed on), so the room's header reads the same
+ * stage the table highlights instead of inventing a second answer to "which
+ * module are we in?".
+ */
+export function satRunSheetCurrentRows(sheet: SatRunSheet): SatRunSheetCurrentRows {
+  const current = (kind: SatRunSheetRowKind): SatRunSheetRow | null =>
+    sheet.rows.find(
+      (row) => row.kind === kind && (row.status === "live" || row.status === "paused")
+    ) ?? null;
+  return { section: current("section"), module: current("module"), break: current("break") };
 }

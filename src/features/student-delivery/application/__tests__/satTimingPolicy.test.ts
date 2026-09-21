@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { AssessmentModuleAttemptSnapshot } from "../../contracts/assessmentDelivery";
 import {
   satBreakCountdownSeconds,
   satClockOffsetMs,
   satCountdown,
   satExpectedStageKey,
+  satModuleWindow,
   satPersonalClockRunning,
   satSectionWaitSeconds,
   satSharedClockRunning,
@@ -13,6 +15,159 @@ import {
 const LEGACY = "legacy_section_v1" as const;
 const STAGE = "cohort_stage_v2" as const;
 const SECTION = "cohort_section_v3" as const;
+
+function pendingAttempt(
+  overrides: Partial<AssessmentModuleAttemptSnapshot> = {},
+): AssessmentModuleAttemptSnapshot {
+  return {
+    id: "ma-rw-m1",
+    moduleId: "rw-m1",
+    state: "not_started",
+    allocatedSeconds: 1920,
+    availableAt: null,
+    startedAt: null,
+    pausedAt: null,
+    accumulatedPausedSeconds: 0,
+    extensionSeconds: 0,
+    deadlineAt: null,
+    remainingSeconds: null,
+    entryWindowSeconds: 720,
+    completionReason: null,
+    rawCorrect: null,
+    operationalQuestionCount: null,
+    toolState: {},
+    revision: 1,
+    ...overrides,
+  };
+}
+
+// The pre-entry half of the late-join fix: the screen may only promise what the
+// server's own clamp will grant. Before this, a candidate who joined late read
+// the authored module length and then met a much shorter clock on the next
+// screen — the same complaint, one screen earlier.
+//
+// satModuleWindow is the ONE place that decides which of the two claims applies,
+// and the same drain convention the module clock uses
+// (domain/satTiming.drainSinceSnapshot) ticks it, so the promise cannot diverge
+// from the clock the student lands in.
+describe("SAT entry-window policy (late arrival)", () => {
+  const SNAPSHOT_AT = 1_000_000;
+  const AUTHORED = 1920;
+
+  it("carries the server's published window, ticked since the payload landed", () => {
+    expect(
+      satModuleWindow({
+        attempt: pendingAttempt(),
+        authoredSeconds: AUTHORED,
+        snapshotReceivedAt: SNAPSHOT_AT,
+        now: SNAPSHOT_AT,
+        running: true,
+      }),
+    ).toEqual({ seconds: 720, source: "granted" });
+    // Twenty seconds later the room's window is twenty seconds shorter: the
+    // promise is the same instants the write path clamps to, not a screenshot.
+    expect(
+      satModuleWindow({
+        attempt: pendingAttempt(),
+        authoredSeconds: AUTHORED,
+        snapshotReceivedAt: SNAPSHOT_AT,
+        now: SNAPSHOT_AT + 20_000,
+        running: true,
+      }),
+    ).toEqual({ seconds: 700, source: "granted" });
+  });
+
+  it("reports an already-elapsed room window as no time at all", () => {
+    expect(
+      satModuleWindow({
+        attempt: pendingAttempt({ entryWindowSeconds: 0 }),
+        authoredSeconds: AUTHORED,
+        snapshotReceivedAt: SNAPSHOT_AT,
+        now: SNAPSHOT_AT,
+        running: true,
+      }),
+    ).toEqual({ seconds: 0, source: "granted" });
+  });
+
+  it("freezes the promise while the room's clock is stopped", () => {
+    expect(
+      satModuleWindow({
+        attempt: pendingAttempt(),
+        authoredSeconds: AUTHORED,
+        snapshotReceivedAt: SNAPSHOT_AT,
+        now: SNAPSHOT_AT + 120_000,
+        running: false,
+      }),
+    ).toEqual({ seconds: 720, source: "granted" });
+  });
+
+  it("falls back to the authored length on every frame the server said nothing", () => {
+    // Started: the module's own deadlineAt/remainingSeconds are the truth, so
+    // the pre-entry window must not outlive entry.
+    expect(
+      satModuleWindow({
+        attempt: pendingAttempt({ state: "active", startedAt: "2026-09-20T02:00:00.000Z" }),
+        authoredSeconds: AUTHORED,
+        snapshotReceivedAt: SNAPSHOT_AT,
+        now: SNAPSHOT_AT,
+        running: true,
+      }),
+    ).toEqual({ seconds: AUTHORED, source: "authored" });
+    // Older payloads, legacy providers, a section that has not opened.
+    expect(
+      satModuleWindow({
+        attempt: pendingAttempt({ entryWindowSeconds: null }),
+        authoredSeconds: AUTHORED,
+        snapshotReceivedAt: SNAPSHOT_AT,
+        now: SNAPSHOT_AT,
+        running: true,
+      }),
+    ).toEqual({ seconds: AUTHORED, source: "authored" });
+    expect(
+      satModuleWindow({
+        attempt: undefined,
+        authoredSeconds: AUTHORED,
+        snapshotReceivedAt: SNAPSHOT_AT,
+        now: SNAPSHOT_AT,
+        running: true,
+      }),
+    ).toEqual({ seconds: AUTHORED, source: "authored" });
+  });
+
+  // The wire pin, client side. The backend ships this field as JSON
+  // (delivery.ModuleAttempt.tag: json:"entryWindowSeconds"); if either side
+  // renames it, this read yields undefined, the claim silently reverts to the
+  // authored length, and every other test still passes. So the key below is
+  // parsed from a RAW payload — deliberately untyped, because a typed literal
+  // would let tsc catch a rename the wire would not — and is asserted by name
+  // against the same string the Go test pins
+  // (TestModuleAttemptEntryWindowJSONKey).
+  it("reads the field the server actually ships, by name", () => {
+    const wire = JSON.parse(
+      '{"id":"ma-rw-m1","moduleId":"rw-m1","state":"not_started",' +
+        '"allocatedSeconds":1920,"startedAt":null,"deadlineAt":null,' +
+        '"remainingSeconds":null,"entryWindowSeconds":720}',
+    ) as AssessmentModuleAttemptSnapshot;
+    expect(satModuleWindow({
+      attempt: wire,
+      authoredSeconds: AUTHORED,
+      snapshotReceivedAt: SNAPSHOT_AT,
+      now: SNAPSHOT_AT,
+      running: true,
+    })).toEqual({ seconds: 720, source: "granted" });
+    // and the server's "nothing to say" still crosses as null, not as 0: a
+    // missing key would be indistinguishable from a closed module.
+    const silent = JSON.parse('{"state":"not_started","entryWindowSeconds":null}') as
+      AssessmentModuleAttemptSnapshot;
+    expect(satModuleWindow({
+      attempt: silent,
+      authoredSeconds: AUTHORED,
+      snapshotReceivedAt: SNAPSHOT_AT,
+      now: SNAPSHOT_AT,
+      running: true,
+    })).toEqual({ seconds: AUTHORED, source: "authored" });
+  });
+});
 
 describe("SAT countdown policy (SAT-003)", () => {
   // The bug this policy exists to prevent: a cohort-section module whose

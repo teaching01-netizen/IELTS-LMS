@@ -53,6 +53,7 @@ import {
   satClockOffsetMs,
   satCountdown,
   satExpectedStageKey,
+  satModuleWindow,
   satPersonalClockRunning,
   satSectionWaitSeconds,
   satSharedClockRunning,
@@ -1310,6 +1311,20 @@ export function useSatExamController({
   // clock, so its personal clock is both. SAT-003 policy lives in
   // application/satTimingPolicy.ts: display is what the student reads, expiry is
   // the only clock allowed to close the module.
+  // The claim the directions screen may make about the module the student is
+  // about to open, resolved once here: the server's own clamp published ahead of
+  // entry, drained on the same clock convention the module clock uses, or the
+  // authored length when the server published nothing. Null only while no module
+  // is pending, so the screen never has to decide what the promise is.
+  const pendingModuleWindow = pendingModule
+    ? satModuleWindow({
+        attempt: pendingAttempt,
+        authoredSeconds: pendingModule.durationSeconds,
+        snapshotReceivedAt,
+        now,
+        running: cohortStageRunning,
+      })
+    : null;
   const { displaySeconds: remainingSeconds, expirySeconds: expiryRemainingSeconds } = satCountdown({
     timingModel: effectiveTiming?.timingModel,
     stageKey: effectiveTiming?.stageKey ?? null,
@@ -1496,6 +1511,7 @@ export function useSatExamController({
     isSubmitting,
     isStarting,
     pendingModule,
+    pendingModuleWindow,
     pendingBreakSeconds,
     pendingSectionWaitSeconds,
     pendingStageReady,

@@ -68,6 +68,28 @@ void subscribers;
 void subscribeSharedClock;
 void getSharedNow;
 
+/**
+ * The room's `now` in ms: the shared tick plus the same server-vs-device
+ * correction every countdown uses. A surface that has to show several windows at
+ * once (the staff run sheet, whose section, module and break rows all count down
+ * together) reads this and derives each row from the one instant, instead of
+ * pairing one deadline per hook call.
+ */
+export function useServerClockNowMs(
+  serverNow?: string | null,
+  options?: { coarse?: boolean }
+): number {
+  const subscribe = options?.coarse ? subscribeCoarseClock : subscribePreciseClock;
+  const getNow = options?.coarse ? getCoarseNow : getPreciseNow;
+  const nowMs = useSyncExternalStore(subscribe, getNow, getNow);
+  const clockOffsetMs = useMemo(() => {
+    if (!serverNow) return 0;
+    const serverNowMs = Date.parse(serverNow);
+    return Number.isFinite(serverNowMs) ? serverNowMs - Date.now() : 0;
+  }, [serverNow]);
+  return nowMs + clockOffsetMs;
+}
+
 export function resolveAuthoritativeRemainingSeconds(options: {
   deadlineAt?: string | null;
   clockOffsetMs: number;

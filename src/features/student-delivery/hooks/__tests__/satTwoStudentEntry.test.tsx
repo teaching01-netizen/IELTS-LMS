@@ -185,10 +185,11 @@ function live(attemptId: string, revision: number, runtime: CohortRuntimeState):
   };
 }
 
-/** The student's own start response: their module clock now runs from THEIR
- * entry instant, while the shared section deadline stays put. The module clock
- * is the countdown the student reads, capped by the shared section clock — that
- * is exactly what Part B asserts. */
+/** A start response: the module attempt is live and its window ends at the
+ * ROOM's boundary — the section's start plus the module's authored length —
+ * whatever instant this student entered at. The module clock is the countdown
+ * the student reads, capped by the shared section clock; that both students read
+ * the same one is exactly what Part B asserts. */
 function opened(
   attemptId: string,
   revision: number,
@@ -233,13 +234,19 @@ interface CohortRuntimeState {
    * an ACTIVE module attempt from THEIR started_at — a re-bootstrap after
    * entry must not look like a fresh waiting student (duplicate starts). */
   startedAtMs: Record<string, number>;
-  /** Per-attempt personal module deadline. A room pause freezes the module
-   * window it had when the pause landed (pauseSATModules) and the resume gives
-   * the paused wall time back to that deadline (resumeSATModules); a proctor
-   * extension extends every active started module with the room
-   * (extendSATModules). The client displays this clock, so the fake has to
-   * model it, not just the section clock. */
+  /** Per-attempt module deadline, which starts at the ROOM's boundary (delivery
+   * clamps a late entry to what is left of it) and is then credited by the proctor
+   * commands the way the backend does. A room pause freezes the module window it
+   * had when the pause landed (pauseSATModules) and the resume gives the paused
+   * wall time back to that deadline (resumeSATModules); a proctor extension
+   * extends every active started module with the room (extendSATModules). The
+   * client displays this clock, so the fake has to model it, not just the section
+   * clock. */
   moduleDeadlineMs: Record<string, number>;
+  /** The room's boundary for the module being sat: the section's start plus the
+   * module's authored length. Every student's window ends here, however late they
+   * checked in. */
+  roomModuleDeadlineMs: number | null;
   modulePausedRemainingMs: Record<string, number>;
   modulesPausedAtMs: number | null;
   starts: string[];
@@ -262,6 +269,7 @@ function createCohort() {
     pausedRemainingMs: null,
     startedAtMs: {},
     moduleDeadlineMs: {},
+    roomModuleDeadlineMs: null,
     modulePausedRemainingMs: {},
     modulesPausedAtMs: null,
     starts: [],
@@ -273,6 +281,9 @@ function createCohort() {
     startProctor() {
       state.status = "live";
       state.deadlineMs = T0_MS + 120_000;
+      // The room opens Module 1: its window is the section's start plus the
+      // module's authored 60s, not 60s from whenever a student arrives.
+      state.roomModuleDeadlineMs = T0_MS + 60_000;
       state.revision = 1;
     },
     pause() {
@@ -336,8 +347,13 @@ function createCohort() {
       }
       const startedAt = state.startedAtMs[attemptId] ?? Date.now();
       state.startedAtMs[attemptId] = startedAt;
+      // delivery.StartModule clamps a cohort module window to the ROOM's
+      // boundary: allocated = boundary - now, so the delivered deadline is the
+      // boundary (or the entry instant once the boundary has already elapsed,
+      // i.e. the module is over for the room and allocates zero).
+      const roomBoundary = state.roomModuleDeadlineMs ?? startedAt + 60_000;
       const moduleDeadlineMs =
-        state.moduleDeadlineMs[attemptId] ?? startedAt + 60_000;
+        state.moduleDeadlineMs[attemptId] ?? Math.max(startedAt, roomBoundary);
       state.moduleDeadlineMs[attemptId] = moduleDeadlineMs;
       return Promise.resolve(opened(attemptId, state.revision, startedAt, moduleDeadlineMs));
     },
@@ -471,15 +487,16 @@ describe("SAT two-student waiting-room convergence", () => {
     }
   });
 
-  // Part B — the module clock. A enters at T+0, B at T+12; each reads THEIR
-  // OWN module allotment (60s from their entry instant), capped by the one
-  // shared section clock. This is the cross-student property that still holds:
-  // both clocks are capped by the same section deadline, so neither student can
-  // outrun the room, and the skew between them is exactly the entry skew. It
-  // survives refresh, continued local ticking, pause, resume, and a proctor
-  // extension, all of which the fake credits to the module clocks the way
-  // pauseSATModules/resumeSATModules/extendSATModules do.
-  it("gives each student their own module clock, both capped by the shared section clock", async () => {
+  // Part B — the module clock belongs to the ROOM. A enters at T+0, B at T+12;
+  // delivery clamps each module window to the room's boundary (Module 1 ends at
+  // the section's start plus the module's authored 60s), so a late entry is
+  // handed only what is LEFT of the module instead of a fresh window of its own.
+  // Both students therefore read the same clock — the one the proctor's run
+  // sheet and the server expiry are on — and the shared section deadline stays
+  // the cap on both. It survives refresh, continued local ticking, pause,
+  // resume, and a proctor extension, all of which the fake credits to the module
+  // clocks the way pauseSATModules/resumeSATModules/extendSATModules do.
+  it("gives both students the same room-anchored module clock, capped by the shared section clock", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(SERVER_NOW));
     try {
@@ -510,30 +527,28 @@ describe("SAT two-student waiting-room convergence", () => {
       expect(studentA.result.current.state.phase).toBe("module");
       expect(studentB.result.current.state.phase).toBe("module");
 
-      // Observed at T+20: A is 40s into its 60s module clock, B is 52s in
-      // (started T+12), and the shared section clock reads 100 for both. The
-      // skew between the two students IS the entry skew — that is what a
-      // per-module clock means — while neither may outrun the section clock.
+      // Observed at T+20: both sit inside the room's Module 1 window, which ends
+      // at T+60 — 40 seconds left for BOTH, however late one checked in. The
+      // entry skew is gone, and neither module clock outruns the shared section
+      // clock (100 here).
       expect(studentA.result.current.remainingSeconds).toBe(40);
-      expect(studentB.result.current.remainingSeconds).toBe(52);
-      expect(
-        Math.abs(studentA.result.current.remainingSeconds - studentB.result.current.remainingSeconds),
-      ).toBe(12);
+      expect(studentB.result.current.remainingSeconds).toBe(40);
       expect(studentA.result.current.remainingSeconds).toBeLessThanOrEqual(100);
       expect(studentB.result.current.remainingSeconds).toBeLessThanOrEqual(100);
 
-      // Refresh B against the server: both keep their own module clock.
+      // Refresh against the server: the ROOM's window is what both read back.
       await wake();
       expect(studentA.result.current.remainingSeconds).toBe(40);
-      expect(studentB.result.current.remainingSeconds).toBe(52);
+      expect(studentB.result.current.remainingSeconds).toBe(40);
 
-      // A loses its socket and keeps ticking locally for 15s: each module clock
-      // advances from its own deadline — no reset, no drift.
+      // A loses its socket and keeps ticking locally for 15s: a room-anchored
+      // module clock advances from the shared boundary — no reset, no drift, and
+      // no divergence between the two students.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(15_000);
       });
       expect(studentA.result.current.remainingSeconds).toBe(25);
-      expect(studentB.result.current.remainingSeconds).toBe(37);
+      expect(studentB.result.current.remainingSeconds).toBe(25);
 
       // Proctor pauses: both module clocks freeze at the window the pause
       // landed on and stay frozen across 10s of wall time; nobody's module
@@ -543,7 +558,7 @@ describe("SAT two-student waiting-room convergence", () => {
       const frozenA = studentA.result.current.remainingSeconds;
       const frozenB = studentB.result.current.remainingSeconds;
       expect(frozenA).toBe(25);
-      expect(frozenB).toBe(37);
+      expect(frozenB).toBe(25);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
@@ -559,7 +574,7 @@ describe("SAT two-student waiting-room convergence", () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
       expect(studentA.result.current.remainingSeconds).toBe(20);
-      expect(studentB.result.current.remainingSeconds).toBe(32);
+      expect(studentB.result.current.remainingSeconds).toBe(20);
 
       // Proctor extends +5 minutes: every running module clock gains exactly
       // 300s, and the shared section clock stays the cap for both.
@@ -571,9 +586,13 @@ describe("SAT two-student waiting-room convergence", () => {
       const afterB = studentB.result.current.remainingSeconds;
       expect(afterA - beforeA).toBe(300);
       expect(afterB - beforeB).toBe(300);
-      expect(afterA).toBeLessThanOrEqual(380);
-      expect(afterB).toBeLessThanOrEqual(380);      studentA.unmount();
-        studentB.unmount();
+      // Still one room clock, now ending at T+370 — inside the extended section
+      // clock (T+420), which remains the cap for both students.
+      expect(afterA).toBe(320);
+      expect(afterB).toBe(320);
+
+      studentA.unmount();
+      studentB.unmount();
     } finally {
       vi.useRealTimers();
     }
