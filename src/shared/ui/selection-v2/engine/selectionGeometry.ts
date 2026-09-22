@@ -25,6 +25,7 @@ import type {
   SelectionDirection,
   SelectionEdge,
   SelectionHandleGeometry,
+  SelectionPresentation,
   SelectionRect,
   TextPoint,
 } from '../domain/selectionTypes';
@@ -125,6 +126,105 @@ export function selectionHandleGeometry(
     start: handleGeometryFor('start', lines, direction),
     end: handleGeometryFor('end', lines, direction),
   };
+}
+
+/**
+ * The accessible size of one handle control — `--selection-target` in
+ * `styles/selection.css`, the full 44×44 a finger actually needs.
+ *
+ * The DOM control keeps this box for accessibility; the POINTER acquisition
+ * rule below is directional instead. The two are deliberately different sizes
+ * of claim: a 44px accessibility target is not a 44px unconditional drag
+ * acquisition (see `canAcquireSelectionHandle`).
+ */
+const SELECTION_HANDLE_TARGET_PX = 44;
+
+/**
+ * How far an acquisition zone may reach past its line's outward edge.
+ *
+ * The handle's optical anchor sits exactly ON the line edge, and a hit test
+ * against a rendered box arrives with sub-pixel — often sub-device-pixel —
+ * rounding, so a strict comparison would reject a press on the very anchor it
+ * is meant to accept. Two pixels cover that rounding while staying far inside
+ * the line's body, which is the part that must never acquire.
+ */
+const HANDLE_ANCHOR_EPSILON_PX = 2;
+
+/**
+ * The pair `canAcquireSelectionHandle` judges: this edge's endpoint and the
+ * line it belongs to — the selection's FIRST line for `start`, its LAST for
+ * `end` — read straight off the paint.
+ *
+ * One owner because there are two callers that must never disagree: the
+ * overlay arbitrates a press with it and the hook's entry gate enforces the
+ * same rule with it, both against the same paint. A second copy of "which line
+ * is this handle's" in each layer is an answer waiting to drift.
+ */
+export function handleAcquisitionFor(
+  presentation: SelectionPresentation,
+  edge: SelectionEdge,
+): { handle: SelectionHandleGeometry | null; line: SelectionRect | null } {
+  const handle = edge === 'start' ? presentation.startHandle : presentation.endHandle;
+  const line = edge === 'start'
+    ? presentation.rects[0] ?? null
+    : presentation.rects[presentation.rects.length - 1] ?? null;
+  return { handle, line };
+}
+
+/**
+ * Whether a press may BEGIN a drag on this handle.
+ *
+ * Acquisition is strict so that tracking can be permissive: a resting
+ * selection may only be resized from the outward side of one of its two VISIBLE
+ * endpoints, and once acquired the finger may travel anywhere — including over
+ * the selected text and past the other endpoint.
+ *
+ * This is the short-selection fix. Two 44×44 boxes on a two-word selection
+ * geometrically overlap above and below the highlighted line, so treating the
+ * whole box as draggable made the MIDDLE of the selection grab an endpoint.
+ * The rule therefore has two gates: the press must be inside the accessible
+ * box centred on the endpoint, AND on the handle's own side of its own line —
+ * `stem: 'up'` accepts only at/above the line's top edge, `stem: 'down'` only
+ * at/below its bottom. A coordinate inside the body of the selected line can
+ * satisfy neither, no matter which handle box physically covers it.
+ *
+ * Pure geometry — endpoint, its first/last line, and a client coordinate — so
+ * the arbitration in `SelectionOverlay` is testable without a browser and the
+ * 44px DOM button never has to decide anything by itself.
+ */
+export function canAcquireSelectionHandle(
+  handle: SelectionHandleGeometry,
+  line: SelectionRect | null,
+  x: number,
+  y: number,
+): boolean {
+  if (!line || line.width <= 0 || line.height <= 0) return false;
+  const half = SELECTION_HANDLE_TARGET_PX / 2;
+  if (x < handle.x - half || x > handle.x + half) return false;
+  if (y < handle.y - half || y > handle.y + half) return false;
+  if (handle.stem === 'up') return y <= line.top + HANDLE_ANCHOR_EPSILON_PX;
+  return y >= line.top + line.height - HANDLE_ANCHOR_EPSILON_PX;
+}
+
+/**
+ * Whether a viewport coordinate is inside the painted body of the selection.
+ *
+ * The selected text is an explicit NO-DRAG zone: a press here preserves the
+ * selection and consumes the gesture rather than dismissing it or letting the
+ * same pointerdown start another selection (see `SelectionOverlay`).
+ */
+export function selectionContainsPoint(
+  rects: readonly SelectionRect[],
+  x: number,
+  y: number,
+): boolean {
+  for (const rect of rects) {
+    if (
+      x >= rect.left && x <= rect.left + rect.width
+      && y >= rect.top && y <= rect.top + rect.height
+    ) return true;
+  }
+  return false;
 }
 
 /* ------------------------------------------------------------------ caret -- */

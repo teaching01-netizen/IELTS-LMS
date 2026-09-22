@@ -611,20 +611,36 @@ test('reduced motion greets the magnifier already settled, on every frame', asyn
 });
 
 /**
- * Where the two handles are, in the coordinates the overlay positions them at.
- *
- * Read from the inline transform rather than a rect, because a rect is exactly
- * what the reachability case below must not trust on its own.
+ * The raw paint both endpoint reads below derive from, parsed ONCE: each
+ * handle's `translate3d` (rounded to integer pixels, as the overlay wrote it)
+ * and the painted first line's origin — in one round-trip, so a frame cannot
+ * land between the transforms and the line they are judged against.
  */
-async function endpoints(page: Page) {
+async function handlePaint(page: Page) {
   return page.evaluate(() => {
     const read = (edge: string) => {
       const transform = document.querySelector(`[data-student-selection-handle="${edge}"]`)?.style.transform ?? '';
       const match = /translate3d\((-?[\d.]+)px, (-?[\d.]+)px/.exec(transform);
       return match ? { x: Math.round(Number(match[1])), y: Math.round(Number(match[2])) } : null;
     };
-    return { start: read('start'), end: read('end') };
+    const line = document.querySelector('[data-student-selection-line]')?.getBoundingClientRect();
+    return {
+      start: read('start'),
+      end: read('end'),
+      origin: line ? { x: Math.round(line.left), y: Math.round(line.top) } : null,
+    };
   });
+}
+
+/**
+ * Where the two handles are, in the coordinates the overlay positions them at.
+ *
+ * Read from the inline transform rather than a rect, because a rect is exactly
+ * what the reachability case below must not trust on its own.
+ */
+async function endpoints(page: Page) {
+  const { start, end } = await handlePaint(page);
+  return { start, end };
 }
 
 /**
@@ -1198,6 +1214,194 @@ test('the handles are painted and hittable, and dragging one moves only that end
   expect(afterStart.end, 'the other end stayed where it was left').toEqual(afterEnd.end);
   expect(afterStart.start!.x).toBeGreaterThan(afterEnd.start!.x + 10);
   expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('');
+});
+
+/**
+ * How many presses actually reached the gesture — one intent, counted once.
+ *
+ * The diagnostics WIPE this buffer on every pointerdown whose target is inside
+ * the root, so a count is "since the last in-root press": comparing across a
+ * press that lands outside the root (on the highlight paint, the toolbar) is
+ * exact, and after an in-root press the answer is what THAT press produced.
+ */
+async function pointerDownIntents(page: Page) {
+  return page.evaluate(() => {
+    const surface = window.__studentTouchSelectionDebug?.snapshot().surfaces
+      .find((item) => item['surface'] === 'SAT stimulus');
+    const events = (surface?.['events'] ?? []) as { stage: string; pointerDownSeen?: boolean }[];
+    // The hook's own record, not the diagnostics module's raw capture listener
+    // (which sees every pointerdown whether or not the overlay consumed it).
+    return events.filter((event) => event.stage === 'pointerdown' && event.pointerDownSeen === true).length;
+  });
+}
+
+/**
+ * Each endpoint's position RELATIVE to the painted line it belongs to.
+ *
+ * Read relative rather than as raw viewport transforms: the shell settles its
+ * toolbar around a selection and the passage can shift under it, and a uniform
+ * shift of the whole paint is NOT an endpoint moving. What an inert press must
+ * leave identical is each endpoint's place ON the selection.
+ */
+async function endpointGeometry(page: Page) {
+  const { start, end, origin } = await handlePaint(page);
+  if (!origin || !start || !end) return { start, end, origin };
+  return {
+    start: { x: start.x - origin.x, y: start.y - origin.y },
+    end: { x: end.x - origin.x, y: end.y - origin.y },
+  };
+}
+
+/**
+ * Where a resting selection may be moved FROM — on a selection short enough
+ * that the two endpoint controls physically overlap (docs/selectionui.md).
+ *
+ * The rule: a resting selection can only be RESIZED by acquiring one of its
+ * two visible endpoint handles. A press inside the selected text must never
+ * move either endpoint, never open the magnifier, and never begin a new
+ * selection — one physical pointerdown holds exactly one intent. The fixture
+ * word is deliberately two glyphs wide (`of`), so both 44×44 accessible boxes
+ * cover the highlighted midpoint: before the fix, a press there landed on the
+ * end handle's invisible target and dragged it.
+ */
+test("a short selection's middle belongs to neither handle, and one press holds one intent", async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const region = page.locator('[data-sat-annotation-region="stimulus"]');
+  await drag(page, region, 'of', browserName, isMobile);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+  // The shell raises its toolbar after the release and settles it over the next
+  // frames; sample geometry only once that is done, so a settle mid-gesture
+  // cannot be mistaken for an endpoint moving.
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  await nextFrames(page, 4);
+
+  // The premise, measured rather than assumed: the two accessible boxes really
+  // do overlap over the text — without this the case below would silently be
+  // testing a wide selection instead.
+  const overlap = await page.evaluate(() => {
+    const start = document.querySelector('[data-student-selection-handle="start"]')!.getBoundingClientRect();
+    const end = document.querySelector('[data-student-selection-handle="end"]')!.getBoundingClientRect();
+    return start.right > end.left;
+  });
+  expect(overlap, 'the two 44px targets must overlap for this case to mean anything').toBe(true);
+
+  const before = await endpointGeometry(page);
+  expect(before.start).not.toBeNull();
+  expect(before.end).not.toBeNull();
+  const line = await page.locator('[data-student-selection-line]').first().boundingBox();
+  const midpoint = { x: line!.x + line!.width / 2, y: line!.y + line!.height / 2 };
+  // The midpoint must be the selection itself: if the shell's toolbar covered
+  // it, the press below would be a command on the menu rather than a press on
+  // the selected text, and the case would prove nothing.
+  const onToolbar = await page.evaluate((point) => {
+    const hit = document.elementFromPoint(point.x, point.y);
+    return !!hit?.closest('[data-sat-selection-toolbar], [data-selection-action-menu]');
+  }, midpoint);
+  expect(onToolbar, 'the midpoint must resolve to the selection, not the toolbar').toBe(false);
+
+  const intentsBefore = await pointerDownIntents(page);
+
+  // 1. The middle: pressed, travelled 40px each way, released. Nothing may
+  // move, no loupe may open, and the press may not also begin a new gesture.
+  const finger = await press(page, region, browserName);
+  await finger.down(midpoint);
+  await finger.move({ x: midpoint.x - 40, y: midpoint.y });
+  await finger.move({ x: midpoint.x + 40, y: midpoint.y });
+  await expect(page.locator('[data-selection-loupe]')).toBeHidden();
+  await finger.release();
+  await nextFrames(page);
+
+  expect(await endpointGeometry(page), 'the pressed midpoint moved neither endpoint').toEqual(before);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+  await expect(page.locator('[data-selection-loupe]')).toBeHidden();
+  expect(await pointerDownIntents(page), 'that press ended at the midpoint; it did not also begin a new gesture').toBe(intentsBefore);
+
+  // 2. The visible end handle DOES acquire — and once acquired, the finger may
+  // travel through the very midpoint that refused it.
+  const handle = await grabHandle(page, browserName, 'end');
+  await handle.move(midpoint.x, midpoint.y);
+  await nextFrames(page);
+  const dragged = await endpointGeometry(page);
+  expect(dragged!.start, 'only the acquired endpoint moved').toEqual(before.start);
+  expect(dragged!.end!.x, 'the acquired endpoint followed the finger').toBeLessThan(before.end!.x);
+  await expect(page.locator('[data-selection-loupe]')).toBeVisible();
+
+  // 3. Release over the prose (the finger is AT the midpoint), not over the
+  // handle it started on: the loupe is gone within the next frame.
+  await handle.release();
+  await nextFrames(page, 1);
+  expect(await page.locator('[data-selection-loupe]').count(), 'gone within one frame of the release').toBe(0);
+});
+
+/**
+ * A mark inside the prose is OUTSIDE the selection (docs/selectionui.md): the
+ * tap is dismissed AND consumed in the overlay's capture pass, so the same
+ * pointerdown can never begin the next selection — while the mark's own
+ * command, its editor, still opens. One press, one intent per layer: the
+ * selection layer reads dismissal, the product reads its click.
+ */
+
+test("a tap on a mark while a selection rests dismisses the selection and still opens that mark's editor", async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const region = page.locator('[data-sat-annotation-region="stimulus"]');
+
+  // 1. A mark exists: select the opening words and press a colour.
+  await drag(page, region, 'Several researchers', browserName, isMobile);
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  await page.locator('[data-sat-selection-toolbar="true"]').getByRole('button', { name: /yellow/i }).click();
+  const mark = region.locator('[data-sat-annotation-control="true"]');
+  await expect(mark).toHaveText('Several researchers');
+
+  // 2. The first span still rests after the colour was applied — its handles
+  // stay painted. The doc's grammar, in order: a press on the prose OUTSIDE it
+  // dismisses that selection and ends there (a prose drag would be consumed
+  // the same way, which is why this is a plain tap),
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+  const prose = await coordinates(region, 'built environment');
+  const finger = await press(page, region, browserName);
+  await finger.down(prose.from);
+  await finger.release();
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(0);
+
+  // — and only the NEXT gesture creates the selection that will rest here.
+  await drag(page, region, 'built environment', browserName, isMobile);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+
+  // The mark must really be what is under the finger — if the resting
+  // selection's toolbar covered it, the tap would be a command on the menu and
+  // would prove nothing about a mark.
+  const box = (await mark.boundingBox())!;
+  const coveredBy = await page.evaluate(({ x, y }) => {
+    const hit = document.elementFromPoint(x, y);
+    const markElement = document.querySelector('[data-sat-annotation-control="true"]')!;
+    return markElement === hit || markElement.contains(hit)
+      ? null
+      : `${hit?.tagName ?? 'nothing'}${hit?.closest('[data-sat-selection-toolbar="true"]') ? ' (toolbar)' : ''}`;
+  }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  expect(coveredBy, 'the mark must be hittable, not behind the toolbar').toBeNull();
+
+  // A real tap: real touch events, so the browser decides whether a click
+  // follows the pointerdown the overlay is about to consume.
+  await mark.tap();
+
+  // The doc's half: dismissed in capture AND the pointerdown consumed — the
+  // gesture's own handler never saw this press, so no hidden new selection
+  // began under it (docs/selectionui.md, outside → dismiss + consume).
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(0);
+  await expect(page.locator('[data-selection-loupe]')).toHaveCount(0);
+  // The diagnostics wipe their buffer on every press INSIDE the root (this tap
+  // included), so what remains is exactly what the tap itself produced: no
+  // flagged `pointerdown` record means the gesture's own handler never ran.
+  expect(await pointerDownIntents(page), 'the consumed press reached no gesture').toBe(0);
+
+  // The product's half: the mark's own command survives the consumed press —
+  // its editor opens, exactly as it does with no selection on screen.
+  await expect(mark).toHaveAttribute('data-sat-annotation-active', 'true');
+  await expect(page.locator('[data-sat-annotation-edit-controls="true"]')).toBeVisible();
 });
 
 test('preview keeps native selection and diagnostics are opt-in', async ({ page }) => {

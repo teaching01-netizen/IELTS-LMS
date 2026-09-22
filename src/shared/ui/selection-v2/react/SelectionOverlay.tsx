@@ -5,6 +5,7 @@ import { SelectionHandle } from './SelectionHandle';
 import { SelectionLoupe } from './SelectionLoupe';
 import type { SelectionPresentation, SelectionPointerState } from '../domain/selectionTypes';
 import { selectionMovesEndpoint } from '../domain/selectionTypes';
+import { canAcquireSelectionHandle, handleAcquisitionFor, selectionContainsPoint } from '../engine/selectionGeometry';
 import type { SelectionHandlePointerEvent } from './useStudentSelectionGesture';
 import '../styles/selection.css';
 
@@ -18,7 +19,29 @@ import '../styles/selection.css';
  *
  * It paints LINES, HANDLES and the MAGNIFIER, and it owns dismissal — because
  * dismissal is about the student's intent rather than a product's rules: a tap
- * anywhere outside the selection, or Escape, ends it. It does NOT own a menu.
+ * anywhere outside the selection, or Escape, ends it — decided HERE, in this
+ * capture pass, not somewhere further down the event path. It does NOT own a
+ * menu.
+ *
+ * IT ALSO OWNS PRESS ARBITRATION, because "what did this finger mean" is intent,
+ * not geometry. One physical pointerdown may hold exactly ONE intent, resolved
+ * here in capture before any part of the page can act on it:
+ *
+ *   action menu → a command, passed through untouched
+ *   handle      → a drag may BEGIN only from the handle's outward zone
+ *                 (`canAcquireSelectionHandle`); a press anywhere else on the
+ *                 — possibly overlapping — 44px box is the selection's body
+ *   body        → the selected text is a no-drag zone: preserved and consumed,
+ *                 never dismissed, never reaching the prose's own pointerdown
+ *   outside     → dismissed in this same capture pass; consumed exactly when
+ *                 the gesture's own pointerdown would otherwise see it — one
+ *                 press, one intent, every other control keeps its press
+ *
+ * Without the middle row, a short selection's two 44px endpoint boxes overlap
+ * over the highlighted text and a press in the MIDDLE grabs an endpoint; without
+ * the body row it reaches the prose and the same press dismisses the old
+ * selection AND starts a new one. Both are the same violation: two intents in
+ * one pointerdown.
  *
  * It used to take an `actions` prop and render the shared menu for a product.
  * That path had no caller, and it could not have one: this overlay only exists
@@ -41,6 +64,14 @@ export interface SelectionOverlaySelection extends SelectionPresentation {
   adjusting: boolean;
   beginHandleAdjustment: (edge: 'start' | 'end', event: SelectionHandlePointerEvent) => void;
   dismiss: () => void;
+  /**
+   * Whether this press would reach the gesture's own pointerdown — the same
+   * guards, answered by the one place that owns them (`wouldBeginGesture` on
+   * the hook's return). The outside branch asks it so one pointerdown can
+   * dismiss the selection AND be consumed when it would otherwise begin the
+   * next one, while toolbars, inputs and every other control keep their press.
+   */
+  wouldBeginGesture: (event: Event) => boolean;
 }
 
 export interface SelectionOverlayProps {
@@ -72,6 +103,11 @@ export function SelectionOverlay({
 
   const dismissRef = useRef(selection.dismiss);
   dismissRef.current = selection.dismiss;
+  // The current paint, read live by the listeners below: rects and handles are
+  // re-measured every frame, and a listener bound once must not arbitrate
+  // today's press with yesterday's geometry.
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
 
   useEffect(() => {
     if (!visible) return;
@@ -81,17 +117,61 @@ export function SelectionOverlay({
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       dismissRef.current();
     };
-    // A pointer down outside the selection is a student saying "not this". The
-    // layer itself opts out of hit testing entirely, so anything that reaches
-    // this listener is outside the paint — but the chrome the exam draws for the
-    // selection is not "outside": a press on a handle is a drag, and a press on
-    // the product's contextual menu is a command, so both read as being inside it.
+
+    /** Consume one press: nothing below this listener may learn it happened. */
+    const consume = (event: Event) => {
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+    };
+
+    // Capture phase — the intents that must be decided BEFORE anything in the
+    // page can act on them. The chrome the exam draws for the selection is not
+    // "outside": a press on the product's contextual menu is a command, and a
+    // press on a handle is a drag — but only from the handle's outward zone.
     const onPointerDown = (event: Event) => {
       const target = event.target;
-      if (target instanceof Element
-        && target.closest('[data-selection-action-menu], [data-student-selection-handle]')) return;
+      if (target instanceof Element && target.closest('[data-selection-action-menu]')) return;
+      const { clientX, clientY } = event as PointerEvent;
+      const current = selectionRef.current;
+      // Handle and body arbitration only govern a RESTING selection; a grab
+      // outside `selected` is refused by the session anyway. A second finger
+      // during a live gesture falls to the outside branch below, which ends
+      // the gesture with the same effects the prose's own pointerdown used to
+      // produce — while consuming the press, so it cannot double as anything.
+      const resting = current.phase === 'selected';
+      const handleElement = target instanceof Element
+        ? target.closest('[data-student-selection-handle]')
+        : null;
+      if (handleElement) {
+        if (!resting) return;
+        const edge = handleElement.getAttribute('data-student-selection-handle') === 'start' ? 'start' : 'end';
+        const { handle, line } = handleAcquisitionFor(current, edge);
+        if (handle && canAcquireSelectionHandle(handle, line, clientX, clientY)) return;
+        // Inside the box but not in the outward zone: the boxes overlap the
+        // text, so this press is ON the selection — the body's intent.
+        consume(event);
+        return;
+      }
+      if (resting && selectionContainsPoint(current.rects, clientX, clientY)) {
+        // The selected text is a no-drag zone: preserve the selection, open
+        // nothing, move nothing, and let this pointerdown END here rather than
+        // both dismissing the old selection and starting a new one.
+        consume(event);
+        return;
+      }
+      // Outside: dismiss HERE, in capture — the literal rule (one press, one
+      // intent): this same physical press ends the old selection, and when the
+      // gesture's own pointerdown would otherwise see it, it is consumed so it
+      // can never also be the beginning of a new one (the prose would
+      // otherwise find `idle` and open a hidden `selected → idle → pending`).
+      // Presses the gesture would never handle — the product's toolbar, an
+      // answer field, any control — are dismissed but NOT consumed: they
+      // cannot reach the gesture's handler anyway, so consumption would only
+      // break the rest of the page. Menu and handle presses resolved above.
       dismissRef.current();
+      if (current.wouldBeginGesture(event)) consume(event);
     };
+
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('pointerdown', onPointerDown, true);
     return () => {

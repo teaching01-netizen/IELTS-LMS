@@ -143,6 +143,21 @@ function handleEvent(edge: { current: Element | null }, x: number, y: number, po
   return { pointerId, clientX: x, clientY: y, currentTarget: edge.current };
 }
 
+/**
+ * jsdom measures nothing, and a grab may only begin from the paint's OWN handle
+ * geometry (the acquisition gate reads it) — so any test that grabs a handle
+ * gives the range real measurements, exactly as a browser would. The two lines
+ * land the handles at (10, 100) and (50, 144): every acquisition coordinate
+ * below presses there.
+ */
+function mockMeasuredLines() {
+  const rects = [
+    { left: 10, top: 100, width: 100, height: 20 } as DOMRect,
+    { left: 10, top: 124, width: 40, height: 20 } as DOMRect,
+  ];
+  vi.spyOn(Range.prototype, 'getClientRects').mockReturnValue(rects as unknown as DOMRectList);
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
@@ -444,6 +459,7 @@ function restingSelection(handlers: Handlers = {}) {
   const end = document.createElement('button');
   const start = document.createElement('button');
   document.body.append(start, end);
+  mockMeasuredLines();
   touchDown(harnessed.prose, 0);
   hold(harnessed.frames);
   touchMove(harnessed.prose, 11);
@@ -468,6 +484,7 @@ describe('handle adjustment', () => {
    */
   it('adjusts the edge the student grabbed on a word a hold claimed, from either end', () => {
     const { prose, frames, view } = harness();
+    mockMeasuredLines();
     const start = document.createElement('button');
     const end = document.createElement('button');
     document.body.append(start, end);
@@ -483,7 +500,7 @@ describe('handle adjustment', () => {
 
     claimWord();
     act(() => {
-      view.result.current.beginHandleAdjustment('start', handleEvent({ current: start }, 6, 10, 7));
+      view.result.current.beginHandleAdjustment('start', handleEvent({ current: start }, 10, 100, 7));
     });
     touchMove(start, 3, 10, 7);
     frame(frames);
@@ -500,7 +517,7 @@ describe('handle adjustment', () => {
     frame(frames);
     claimWord();
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 10, 10, 8));
+      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 50, 144, 8));
     });
     touchMove(end, 13, 10, 8);
     frame(frames);
@@ -512,7 +529,7 @@ describe('handle adjustment', () => {
     const { prose, frames, view, end } = restingSelection();
 
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 10, 7));
+      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 50, 144, 7));
     });
     frame(frames);
     expect(view.result.current.adjusting).toBe(true);
@@ -534,7 +551,7 @@ describe('handle adjustment', () => {
     // fixed end must leave the finger owning the endpoint it grabbed, with the
     // range still forward and the handle relabelled.
     act(() => {
-      view.result.current.beginHandleAdjustment('start', handleEvent({ current: start }, 0, 10, 7));
+      view.result.current.beginHandleAdjustment('start', handleEvent({ current: start }, 10, 100, 7));
     });
     frame(frames);
     expect(view.result.current.phase).toBe('adjusting-start');
@@ -552,7 +569,7 @@ describe('handle adjustment', () => {
     const { frames, view, end } = restingSelection();
 
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 10, 7));
+      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 50, 144, 7));
     });
 
     expect(capture).toHaveBeenCalledWith(7);
@@ -562,7 +579,7 @@ describe('handle adjustment', () => {
     const { frames, view, end, onSelect } = restingSelection();
 
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 10, 7));
+      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 50, 144, 7));
     });
     touchMove(end, 16, 10, 7);
     frame(frames);
@@ -577,14 +594,33 @@ describe('handle adjustment', () => {
 
   it('ignores a grab while a finger is still down', () => {
     const { prose, frames, view, end } = harness();
+    mockMeasuredLines();
 
     touchDown(prose, 0);
     hold(frames);
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 10, 7));
+      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 50, 144, 7));
     });
 
+    // The acquisition passes — the press is on the outward zone — and it is
+    // the MACHINE that refuses, so this asserts the second gate, not the first.
     expect(view.result.current.phase).toBe('selecting');
+  });
+
+  it('refuses a grab that does not acquire, even called directly on the gesture', () => {
+    const { frames, view, end } = restingSelection();
+
+    // Inside the end handle's 44px box but above its own line's bottom edge:
+    // the press the overlay consumes. The entry gate refuses it too, so no
+    // caller can bypass the directional rule (docs/selectionui.md #1).
+    act(() => {
+      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 60, 130, 7));
+    });
+    frame(frames);
+
+    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.adjusting).toBe(false);
+    expect(view.result.current.selectionText).toBe('alpha beta ');
   });
 });
 
@@ -699,8 +735,10 @@ describe('edge auto-scroll while adjusting', () => {
 
     const { frames, view, end } = restingSelection({ scrollContainer: () => container });
 
+    // The grab must satisfy the acquisition rule (on the handle, at the paint);
+    // it is the MOVE below that puts the finger in the edge band.
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 690, 7));
+      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 50, 144, 7));
     });
     touchMove(end, 11, 690, 7);
     act(() => {
@@ -971,5 +1009,90 @@ describe('the snap key: one tick per new caret position', () => {
       expect(vibrate.mock.calls.every(([milliseconds]) => milliseconds === 8)).toBe(true);
       expect(view.result.current.pointer!.snapRevision).toBe(baseline + 3);
     });
+  });
+});
+
+/**
+ * Every terminal signal ends the gesture — and after any of them the loupe's
+ * precondition (a pointer the session OWNS) is gone before the next painted
+ * frame.
+ *
+ * The Safari failure these pin: capture reports held, so no listener was ever
+ * installed on the document, and the terminal event arrives there instead —
+ * the machine then stays in `adjusting-*` with the loupe open forever. The
+ * fix keeps a document backup for the terminal events, reads a lost capture as
+ * a cancel, and clears the presentation refs in ONE place so a stale
+ * `lastPointer` can never stand in for contact that ended.
+ */
+describe('a gesture ends on every terminal signal', () => {
+  it('releases exactly once when capture claims to hold but the pointerup arrives at the document', () => {
+    vi.spyOn(Element.prototype, 'hasPointerCapture').mockReturnValue(true);
+    const { frames, view, end, onSelect } = restingSelection();
+
+    act(() => {
+      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 50, 144, 7));
+    });
+    frame(frames);
+    expect(view.result.current.phase).toBe('adjusting-end');
+
+    act(() => {
+      fireEvent.pointerUp(document, { pointerId: 7 });
+    });
+    frame(frames);
+
+    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.adjusting).toBe(false);
+    expect(view.result.current.pointer).toBeNull();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+
+    // A duplicate delivery — the same physical release reaching a backup
+    // listener twice — must not report the selection a second time.
+    act(() => {
+      fireEvent.pointerUp(document, { pointerId: 7 });
+    });
+    frame(frames);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(view.result.current.phase).toBe('selected');
+  });
+
+  it('leaves the adjusting phase when the browser loses the pointer capture', () => {
+    vi.spyOn(Element.prototype, 'hasPointerCapture').mockReturnValue(true);
+    const { frames, view, end } = restingSelection();
+
+    act(() => {
+      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 50, 144, 7));
+    });
+    frame(frames);
+    expect(view.result.current.phase).toBe('adjusting-end');
+
+    act(() => {
+      const lost = new Event('lostpointercapture', { bubbles: true });
+      Object.defineProperty(lost, 'pointerId', { value: 7 });
+      end.dispatchEvent(lost);
+    });
+    frame(frames);
+
+    // The cancel policy (nothing reported, the platform takes the gesture
+    // back) with the same presentation cleanup: no adjusting phase, and no
+    // pointer for a loupe to be gated on.
+    expect(view.result.current.phase).toBe('idle');
+    expect(view.result.current.adjusting).toBe(false);
+    expect(view.result.current.selectionText).toBe('');
+    expect(view.result.current.pointer).toBeNull();
+  });
+
+  it('exposes no pointer the moment the finger lifts, before any frame runs', () => {
+    const { prose, frames, view } = harness();
+
+    touchDown(prose, 0);
+    hold(frames);
+    touchMove(prose, 11);
+    frame(frames);
+    expect(view.result.current.pointer).not.toBeNull();
+
+    touchUp(prose, 11);
+
+    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.pointer).toBeNull();
   });
 });

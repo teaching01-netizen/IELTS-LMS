@@ -174,12 +174,21 @@ export function createSelectionSession(options: {
    * The one derivation: what the two endpoints describe, as a range and as the
    * endpoints that own it.
    *
-   * A drag between two different positions wins. A drag that returned to where it
-   * started — and a hold that never travelled — leaves the machine owning one
+   * A drag between two different positions wins. A drag that returned to where
+   * it started — and a hold that never travelled — leaves the machine owning one
    * character, and the honest answer is then the WORD under the finger: that is
    * what a long press means, it is what the overlay paints, and its boundaries
    * are therefore the endpoints the student is holding. Returning those two
    * together is what keeps the paint and the ownership from drifting apart.
+   *
+   * BUT ONLY ON THE INITIAL CLAIM, where no span exists yet to contradict.
+   * Coincident endpoints also arise when a handle being ADJUSTED reaches the
+   * fixed one, and expanding there snaps a selection the student can see back
+   * to a whole word they did not ask for — visibly unstable on a short
+   * selection. So a coincident pair keeps the last non-collapsed span until the
+   * finger crosses it; the word path runs only when there is no such span (the
+   * claim), and a crossover returns to the dragged branch above — no word, no
+   * jump.
    */
   const spanOf = (current: SelectionMachineState): OwnedSpan => {
     const { fixed, moving } = current;
@@ -190,6 +199,7 @@ export function createSelectionSession(options: {
       if (dragged) return { range: dragged, fixed, moving };
     }
     if (!fixed) return EMPTY_SPAN;
+    if (span.range && !span.range.collapsed) return span;
     const range = createWordRangeAt(fixed, expandToWordAt(fixed, options.segmenter, options.words));
     if (!range || range.collapsed) return { range, fixed, moving };
     if (range.startContainer.nodeType !== Node.TEXT_NODE || range.endContainer.nodeType !== Node.TEXT_NODE) {
