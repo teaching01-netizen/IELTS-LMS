@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
-import type { AnnotationPlacement, SatAnnotationMode } from './satSelectionGeometry';
+import type { SelectionMenuMode, SelectionMenuPlacement } from '@shared/ui/selection-v2/engine/selectionPlacement';
 
 /**
  * The chrome of the annotation surface, in one place for every surface that has
@@ -42,7 +42,7 @@ const SURFACE_FLOATING =
   + ' shadow-[var(--sat-shadow-floating)]';
 
 export interface SatAnnotationSurfaceChrome {
-  mode: SatAnnotationMode | null;
+  mode: SelectionMenuMode | null;
   /** Toolbar against the selection, with a caret pointing at it. */
   floating: boolean;
   /** Mounted but out of the way: off screen, or waiting for geometry to settle. */
@@ -57,7 +57,7 @@ export interface SatAnnotationSurfaceChrome {
   style: CSSProperties;
 }
 
-export function satAnnotationSurfaceChrome(placement: AnnotationPlacement | null): SatAnnotationSurfaceChrome {
+export function satAnnotationSurfaceChrome(placement: SelectionMenuPlacement | null): SatAnnotationSurfaceChrome {
   const mode = placement?.mode ?? null;
   const floating = mode === 'floating';
   const hidden = mode === null || mode === 'hidden';
@@ -145,7 +145,7 @@ export function SatAnnotationSurfaceBody({
  * engine's border-box coordinates and the browser's padding-box positioning
  * agree.
  */
-export function SatAnnotationCaret({ placement }: { placement: AnnotationPlacement | null }) {
+export function SatAnnotationCaret({ placement }: { placement: SelectionMenuPlacement | null }) {
   if (!placement || placement.mode !== 'floating' || placement.clamped) return null;
   return (
     <span aria-hidden="true" className="sat-annotation-caret-layer">

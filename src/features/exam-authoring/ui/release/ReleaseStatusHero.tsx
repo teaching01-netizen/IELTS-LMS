@@ -41,7 +41,7 @@ export function ReleaseStatusHero({
     >
       <div className="flex items-start gap-3">
         <div
-          className={`mt-0.5 flex h-10 w-10 items-center justify-center rounded-full ${tone === "emerald" ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200" : tone === "amber" ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200" : "bg-muted text-muted-foreground"}`}
+          className={`mt-0.5 flex h-10 w-10 items-center justify-center rounded-full ${tone === "emerald" ? "bg-green-100 text-green-800" : tone === "amber" ? "bg-amber-100 text-amber-800" : "bg-muted text-muted-foreground"}`}
         >
           {isChecking && state !== "published" ? (
             <LoaderCircle size={19} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />

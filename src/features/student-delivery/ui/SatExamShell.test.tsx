@@ -519,4 +519,40 @@ describe("SatExamShell", () => {
       "Low time: 5 minutes remaining"
     );
   });
+
+  it("renders the content box at the student's screen zoom without resizing the box", () => {
+    render(
+      <SatExamShell
+        {...props({
+          readingPreferences: { ...createSatReadingPreferences(), examZoom: 0.75 },
+        })}
+      />,
+    );
+    const box = document.querySelector<HTMLElement>("[data-sat-content-zoom]")!;
+    expect(box).toHaveAttribute("data-sat-content-zoom", "0.75");
+    // zoom scales what is inside the box; the box itself stays exactly the pane
+    // region it fills. A compensated width here (calc(100% / zoom)) would draw
+    // the exam wider than its pane and get it clipped.
+    expect(box.style.zoom).toBe("0.75");
+    expect(box.style.width).toBe("100%");
+    expect(box.style.height).toBe("100%");
+  });
+
+  it("offers Fit to screen in Display, and measures rather than guesses when pressed", () => {
+    const onReadingPreferencesChange = vi.fn();
+    const onScreenZoomDecided = vi.fn();
+    render(<SatExamShell {...props({ onReadingPreferencesChange, onScreenZoomDecided })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fit to screen" }));
+
+    // This page has no panes to measure, so the walk ends without inventing a
+    // zoom: the exam renders the student's 100%, and no decision is reported.
+    expect(document.querySelector("[data-sat-content-zoom]")).toHaveAttribute(
+      "data-sat-content-zoom",
+      "1",
+    );
+    expect(onReadingPreferencesChange).not.toHaveBeenCalled();
+    expect(onScreenZoomDecided).not.toHaveBeenCalled();
+  });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { AnnotationPlacement } from './satSelectionGeometry';
+import type { SelectionMenuPlacement } from '@shared/ui/selection-v2/engine/selectionPlacement';
 
 /**
  * Focus the first actionable control of annotation chrome, exactly once per
@@ -16,7 +16,7 @@ import type { AnnotationPlacement } from './satSelectionGeometry';
  * is not placement: one is geometry, the other is where the caret goes.
  */
 export function useSatAnnotationAutofocus(
-  placement: AnnotationPlacement | null,
+  placement: SelectionMenuPlacement | null,
   anchorKey: string,
   containerRef: React.RefObject<HTMLElement | null>,
 ): void {

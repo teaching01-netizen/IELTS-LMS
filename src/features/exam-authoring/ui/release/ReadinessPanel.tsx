@@ -62,7 +62,7 @@ export function ReadinessPanel({
         </p>
       ) : null}
       {staleBanner ? (
-        <p role="status" className="mt-4 rounded-xl bg-amber-100 p-3 text-sm leading-6 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+        <p role="status" className="mt-4 rounded-xl bg-amber-100 p-3 text-sm leading-6 text-amber-800">
           {staleBanner}
         </p>
       ) : null}
@@ -100,7 +100,7 @@ export function ReadinessPanel({
           onIssueClick={onIssueClick}
         />
       ) : readiness ? (
-        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-green-100 px-4 py-3 text-sm font-medium text-green-800 dark:bg-green-950 dark:text-green-200">
+        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-green-100 px-4 py-3 text-sm font-medium text-green-800">
           <CheckCircle2 size={17} aria-hidden="true" /> No blocking release issues.
         </div>
       ) : null}
@@ -163,7 +163,7 @@ function IssueList({
               className="flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             >
               {warning ? (
-                <Info size={16} className="mt-0.5 shrink-0 text-amber-800 dark:text-amber-200" aria-hidden="true" />
+                <Info size={16} className="mt-0.5 shrink-0 text-amber-800" aria-hidden="true" />
               ) : (
                 <AlertTriangle
                   size={16}

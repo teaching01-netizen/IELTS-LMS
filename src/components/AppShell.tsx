@@ -18,7 +18,7 @@ import { Outlet } from 'react-router-dom';
  * Current responsibilities:
  * - Render child routes via Outlet
  * - Future: Global error boundary
- * - Future: Global providers (theme, error reporting)
+ * - Future: Global error reporting
  */
 export function AppShell() {
   return <Outlet />;

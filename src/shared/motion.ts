@@ -63,3 +63,66 @@ export const authoringMotion = {
     mass: 1,
   } satisfies Transition,
 } as const;
+
+/*
+ * Selection Engine v2's overlay: the one surface that must never lag a finger.
+ *
+ * Two moments, and neither invents a number beyond its own token. The grip
+ * releasing is small geometry (the `snap` spring a segmented control's thumb
+ * settles with). The magnifier opening is a TWEEN, not a spring: the shared
+ * springs settle in ~0.25-0.35s, which is right for something arriving and
+ * staying, and wrong for a lens that has to be usable while the finger is already
+ * moving — at 120ms it is simply there, which is what a precision instrument
+ * should feel like, and it is inside the ~100-150ms budget the interaction
+ * language allows an entrance. Nothing else about the overlay moves: the finger,
+ * the caret and the measured lines are written directly every frame, because a
+ * spring on the data would make the selection trail the finger it belongs to.
+ *
+ * The scales are magnitudes, not timings, so no component can invent its own
+ * entrance. They apply strictly INSIDE the boxes the engine measures: a handle's
+ * 44px target and the loupe's lens keep their exact measured geometry, so an
+ * animation can never move something a student is aiming at, or something a
+ * placement decision was computed from.
+ */
+export const selectionMotion = {
+  /** Grip appearing, and settling back after an adjustment. Small geometry. */
+  grip: authoringMotion.snap,
+  /** The magnifier opening: a short tween, never a spring. */
+  loupe: { duration: 0.12, ease: AUTHORING_EASE },
+  /** Grip's first painted frame, as a fraction of its settled size. */
+  gripEnterScale: 0.6,
+  /** Grip while an endpoint is dragged — the release springs back from this. */
+  gripHeldScale: 1.14,
+  /** The magnifier's first painted frame, as a fraction of its settled size. */
+  loupeEnterScale: 0.94,
+  /**
+   * THE TICK — the one moment here driven by an EVENT rather than by a frame.
+   *
+   * When the resolved caret crosses into a new character boundary, the
+   * precision indicators are displaced to their peak on that frame and spring
+   * back from it. Deliberately NOT a rise-and-fall over a duration: the caret
+   * did not ease into its new position (it is discrete), so its feedback must
+   * not either — an eased swell reads as a wobble the student's own finger
+   * appears to be causing.
+   *
+   * Overdamped on purpose. At mass 0.35 the critical damping is 35.5, so 60
+   * puts it well past the point of ever crossing its own resting size: what is
+   * left is a return, ~80% of the way home in 100ms, with no second bounce and
+   * no loop. That is the difference between Apple's tick and a jiggle.
+   */
+  caretSnap: {
+    type: 'spring',
+    stiffness: 900,
+    damping: 60,
+    mass: 0.35,
+  } satisfies Transition,
+  /** The lens's column tick at its peak: 1 → 1.08 → 1. */
+  caretSnapMarkerScale: 1.08,
+  /**
+   * A handle's grip at its peak, as a factor INSIDE the target rather than an
+   * absolute: the grip's own scale is whatever the settle says (1.14 held, 1
+   * resting), and the tick is nested around it, so 1.14 × 1.035 peaks at ~1.18
+   * — about 3.5% either way, and never on the 44px target itself.
+   */
+  caretSnapGripScale: 1.035,
+} as const;

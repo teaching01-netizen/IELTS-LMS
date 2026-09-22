@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { SatPageError, SatPageLoading } from '../ui/SatPage';
 import { logError, logInfo } from '../../../shared/observability/errorLogger';
 import { useAuthSession } from '../../../features/auth/authSession';
-import { useAuthoritativeDeadlineClock } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
+import { useAuthoritativeDeadlineClock, useServerClockNowMs } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { useProctorRouteController } from '../../../features/proctor/hooks/useProctorRouteController';
 import { examDeliveryService } from '../../../features/proctor/infrastructure/proctorGateway';
 import type { StudentSession } from '../../../types';
@@ -12,6 +12,8 @@ import type { ExamSessionRuntime } from '../../../types/domain';
 import { SatConfirmDialog } from '../ui/ConfirmDialog';
 import { SatMenu, type SatMenuItem } from '../ui/Menu';
 import { SatEyebrow, SatSearchField, type SatStatusTone, SatStatusPill } from '../ui/SatPage';
+import { SatRunSheet } from '../ui/SatRunSheet';
+import { buildSatRunSheet, satModuleSlotLabel, satRunSheetCurrentRows } from '../ui/sessionRunSheet';
 import '../ui/sat-session-room.css';
 
 const WARN_MESSAGE = 'Please return your attention to the exam.';
@@ -38,6 +40,18 @@ function roomStatusTone(status: string): SatStatusTone {
   if (status === 'not_started') return 'info';
   if (status === 'completed') return 'finished';
   return 'cancelled';
+}
+
+/**
+ * The room's name for the section a candidate is in: the runtime section label
+ * when the key resolves — the same label the stage header and the run sheet use
+ * — otherwise the raw value the projection carried. Null when the projection
+ * names nothing, so the row renders no empty half.
+ */
+function sectionLabelFor(runtime: ExamSessionRuntime | null, key: string | null | undefined): string | null {
+  const raw = typeof key === 'string' ? key.trim() : '';
+  if (!raw) return null;
+  return runtime?.sections.find((section) => section.sectionKey === raw)?.label?.trim() || raw;
 }
 
 function studentTone(student: StudentSession): string {
@@ -86,6 +100,34 @@ export function SatSessionRoomRoute() {
     fallbackSeconds: runtime?.currentSectionRemainingSeconds ?? 0,
     running: runtime?.status === 'live' && currentStageStatus === 'live',
   });
+  // The room's own clock: the shared 1s tick corrected onto the server's
+  // instant, so every window on this page counts down together. Before this,
+  // only the section clock ticked and each module window was a static span.
+  const serverNowMs = useServerClockNowMs(runtime?.serverNow ?? null);
+  // ONE projection for the header and the table: the room builds the run sheet
+  // from its own ticking clock and hands the same rows to the table, so "which
+  // section and which module are we in?" has exactly one answer on the page.
+  const runSheet = useMemo(
+    () => buildSatRunSheet({
+      plan: runtime?.examPlan ?? null,
+      runtime: runtime ?? null,
+      scheduledStartAt: schedule?.startTime ?? null,
+      now: new Date(serverNowMs).toISOString(),
+    }),
+    [runtime, schedule?.startTime, serverNowMs],
+  );
+  const stageRows = satRunSheetCurrentRows(runSheet);
+  // The stage, named the way the run sheet names it: `Section 1 · Module 1`.
+  // The ordinal comes from the sheet's own section rows (the plan and the
+  // runtime merged), so the header can never disagree with the table below it.
+  const stageSectionOrdinal = stageRows.section
+    ? runSheet.rows.filter((row) => row.kind === 'section').indexOf(stageRows.section) + 1
+    : 0;
+  const stageSlot = [
+    stageSectionOrdinal > 0 ? `Section ${stageSectionOrdinal}` : null,
+    stageRows.module ? stageRows.module.label : stageRows.break ? 'Break' : null,
+  ].filter(Boolean).join(' · ');
+  const stageModuleRemainingSeconds = stageRows.module?.remainingSeconds ?? null;
   const proctorName = session?.user.displayName?.trim() || session?.user.email || 'Proctor';
   const openAlerts = controller.alerts.filter((alert) => !alert.isAcknowledged).length;
   const isStale = Boolean(controller.error);
@@ -212,11 +254,21 @@ export function SatSessionRoomRoute() {
                 <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div className="min-w-0">
                     <h2>{currentStage}</h2>
+                    {stageSlot ? <p className="sat-room__stage-slot" data-sat-room-stage-slot>{stageSlot}{stageModuleRemainingSeconds !== null ? ` · module clock ${formatRemaining(stageModuleRemainingSeconds)}` : ''}</p> : null}
                     <p className="sat-room__stage-note">{sessionLive ? 'Server-authoritative session clock' : 'Session timing begins when you start the session.'}</p>
                   </div>
-                  <p className={'sat-room__clock' + (sessionLive ? '' : ' sat-room__clock--idle')} aria-label={sessionLive ? 'Time remaining in this stage' : 'Session not started'}>{sessionLive ? formatRemaining(stageRemainingSeconds) : '—:—'}</p>
+                  <div className="shrink-0 sm:text-right">
+                    <p className={'sat-room__clock' + (sessionLive ? '' : ' sat-room__clock--idle')} aria-label={sessionLive ? 'Time remaining in this stage' : 'Session not started'}>{sessionLive ? formatRemaining(stageRemainingSeconds) : '—:—'}</p>
+                    {stageRows.module ? <p className="sat-room__stage-clock-caption">Section clock</p> : null}
+                  </div>
                 </div>
               </div>
+
+              {/* The cohort's planned run, in Thailand time: every section,
+                  module and break, with the status the runtime has reached.
+                  Session-level, so it renders with or without a student
+                  selected. */}
+              <SatRunSheet sheet={runSheet} />
 
               {openAlerts > 0 && selectedStudent ? (
                 <button type="button" onClick={() => setAttentionFilter('needs')} className="sat-banner-enter mt-4 flex w-full items-center gap-2 rounded-2xl border border-amber-700/15 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3.5 py-2.5 text-left text-[11px] font-medium text-amber-800 hover:bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">
@@ -225,7 +277,7 @@ export function SatSessionRoomRoute() {
                 </button>
               ) : null}
 
-              {selectedStudent ? <StudentDetail student={selectedStudent} pendingActions={pendingActions} blocked={isStale} onAddTime={(minutes) => { if (isStale || !selectedStudent) return; setConfirm({ kind: 'extend-student', minutes, studentId: selectedStudent.id, studentName: selectedStudent.name, remainingLabel: formatRemaining(selectedStudent.runtimeTimeRemainingSeconds ?? selectedStudent.timeRemaining) }); }} onWarn={() => { if (!selectedStudent) return; setConfirm({ kind: 'warn', studentId: selectedStudent.id, studentName: selectedStudent.name }); }} onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`)} onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`)} onTerminate={() => { if (selectedStudent) setConfirm({ kind: 'terminate', studentId: selectedStudent.id, studentName: selectedStudent.name }); }} /> : (
+              {selectedStudent ? <StudentDetail student={selectedStudent} runtime={runtime} pendingActions={pendingActions} blocked={isStale} onAddTime={(minutes) => { if (isStale || !selectedStudent) return; setConfirm({ kind: 'extend-student', minutes, studentId: selectedStudent.id, studentName: selectedStudent.name, remainingLabel: formatRemaining(selectedStudent.runtimeTimeRemainingSeconds ?? selectedStudent.timeRemaining) }); }} onWarn={() => { if (!selectedStudent) return; setConfirm({ kind: 'warn', studentId: selectedStudent.id, studentName: selectedStudent.name }); }} onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`)} onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`)} onTerminate={() => { if (selectedStudent) setConfirm({ kind: 'terminate', studentId: selectedStudent.id, studentName: selectedStudent.name }); }} /> : (
                 <div className="sat-room__empty">
                   <div className="sat-room__empty-content">
                     <span className="sat-room__empty-icon" aria-hidden="true"><UserRound size={20} /></span>
@@ -248,6 +300,10 @@ export function SatSessionRoomRoute() {
             <dl>
               <div className="sat-inspector__row"><dt>Status</dt><dd>{runtimeLabel(runtime.status)}</dd></div>
               <div className="sat-inspector__row"><dt>Current stage</dt><dd>{currentStage}</dd></div>
+              {/* The module the room's clock has reached, beside the section: the
+                  same rows the header and the run sheet render, never a second
+                  opinion about where the cohort is. */}
+              <div className="sat-inspector__row"><dt>Current module</dt><dd>{stageRows.module?.label ?? (stageRows.break ? 'Break' : '—')}</dd></div>
             </dl>
           </section>
           <section className="sat-inspector__section">
@@ -306,10 +362,28 @@ function SatRoomStudentRow({ student, runtime, selected, onSelect }: { student: 
     running,
     coarse: running && fallbackSeconds > 300,
   });
-  return <button type="button" id={`sat-room-student-${student.id}`} role="option" aria-selected={selected} aria-label={`Open ${student.name}`} aria-current={selected || undefined} tabIndex={-1} onClick={onSelect} className="sat-room__row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><div className="min-w-0"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${studentTone(student)}`} /><p className="sat-room__row-name">{student.name}</p>{student.warnings > 0 || student.violations.length > 0 ? <AlertTriangle size={12} className="shrink-0 text-[var(--sat-staff-warning-dot,#d97706)]" /> : null}</div><p className="sat-room__row-meta pl-3.5">{String(student.runtimeCurrentSection ?? student.currentSection)} · {student.status}</p></div><div className="text-right"><p className="sat-room__row-time">{formatRemaining(remaining)}</p></div></button>;
+  // The candidate's own MODULE clock, beside the room's section clock: their
+  // screen counts the module window down (room-anchored now, so a late entry is
+  // given what the room has left of the module), and it can end before the
+  // section does. Same 1s tick and the same server offset as the section clock.
+  const moduleKnown = student.runtimeModuleRemainingSeconds != null || student.runtimeModuleDeadlineAt != null;
+  const moduleRemaining = useAuthoritativeDeadlineClock({
+    deadlineAt: student.runtimeModuleDeadlineAt ?? null,
+    serverNow: student.runtimeServerNow ?? runtime?.serverNow ?? null,
+    fallbackSeconds: student.runtimeModuleRemainingSeconds ?? fallbackSeconds,
+    running: running && student.runtimeModuleDeadlineAt != null,
+    coarse: running && fallbackSeconds > 300,
+  });
+  const moduleSlot = satModuleSlotLabel(student.runtimeModuleRole);
+  const rowMeta = [
+    sectionLabelFor(runtime, student.runtimeCurrentSection ?? student.currentSection),
+    moduleSlot,
+    student.status,
+  ].filter(Boolean).join(' · ');
+  return <button type="button" id={`sat-room-student-${student.id}`} role="option" aria-selected={selected} aria-label={`Open ${student.name}`} aria-current={selected || undefined} tabIndex={-1} onClick={onSelect} className="sat-room__row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><div className="min-w-0"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${studentTone(student)}`} /><p className="sat-room__row-name">{student.name}</p>{student.warnings > 0 || student.violations.length > 0 ? <AlertTriangle size={12} className="shrink-0 text-[var(--sat-staff-warning-dot,#d97706)]" /> : null}</div><p className="sat-room__row-meta pl-3.5">{rowMeta}</p></div><div className="text-right"><p className="sat-room__row-time">{moduleKnown ? formatRemaining(moduleRemaining) : formatRemaining(remaining)}</p>{moduleKnown ? <p className="sat-room__row-sub">Section clock {formatRemaining(remaining)}</p> : null}</div></button>;
 }
 
-function StudentDetail({ student, pendingActions, blocked, onAddTime, onWarn, onPause, onResume, onTerminate }: { student: StudentSession; pendingActions: ReadonlySet<string>; blocked: boolean; onAddTime: (minutes: number) => void; onWarn: () => void; onPause: () => void; onResume: () => void; onTerminate: () => void }) {
+function StudentDetail({ student, runtime, pendingActions, blocked, onAddTime, onWarn, onPause, onResume, onTerminate }: { student: StudentSession; runtime: ExamSessionRuntime | null; pendingActions: ReadonlySet<string>; blocked: boolean; onAddTime: (minutes: number) => void; onWarn: () => void; onPause: () => void; onResume: () => void; onTerminate: () => void }) {
   const anyStudentPending = pendingActions.has('student-extend-5') || pendingActions.has('student-extend-10') || pendingActions.has('student-warn') || pendingActions.has('student-pause') || pendingActions.has('student-resume') || pendingActions.has('student-terminate');
   const remaining = useAuthoritativeDeadlineClock({
     deadlineAt: student.runtimeDeadlineAt ?? null,
@@ -317,10 +391,26 @@ function StudentDetail({ student, pendingActions, blocked, onAddTime, onWarn, on
     fallbackSeconds: student.runtimeTimeRemainingSeconds ?? student.timeRemaining,
     running: student.runtimeStatus === 'live' && student.runtimeSectionStatus === 'live' && student.status !== 'terminated',
   });
+  // Both clocks, side by side, for the one candidate the proctor is looking at:
+  // the module window their own screen counts down, and the room's shared
+  // section clock. A candidate whose module has ended while the section runs on
+  // is visible here instead of only in the roster.
+  const moduleKnown = student.runtimeModuleRemainingSeconds != null || student.runtimeModuleDeadlineAt != null;
+  const moduleRunning = student.runtimeStatus === 'live' && student.status !== 'terminated';
+  const moduleRemaining = useAuthoritativeDeadlineClock({
+    deadlineAt: student.runtimeModuleDeadlineAt ?? null,
+    serverNow: student.runtimeServerNow ?? runtime?.serverNow ?? null,
+    fallbackSeconds: student.runtimeModuleRemainingSeconds ?? student.runtimeTimeRemainingSeconds ?? student.timeRemaining,
+    running: moduleRunning && student.runtimeModuleDeadlineAt != null,
+  });
+  const sectionLabel = sectionLabelFor(runtime, student.runtimeCurrentSection);
+  const moduleSlot = satModuleSlotLabel(student.runtimeModuleRole);
   return <div className="pt-8"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><SatEyebrow>Student</SatEyebrow><h2 className="mt-1.5 truncate text-[19px] font-semibold tracking-[-0.02em]">{student.name}</h2><p className="mt-1 text-[12px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">{student.studentId}{student.email ? ` · ${student.email}` : ''}</p></div><div><SatMenu label="Student actions" compact align="end" width={176} icon={MoreHorizontal} items={[{ id: 'extend-5', label: 'Add 5 minutes…', disabled: anyStudentPending || blocked, onSelect: () => onAddTime(5) }, { id: 'warn', label: 'Send warning…', disabled: anyStudentPending || blocked, onSelect: onWarn }, { id: 'toggle', label: student.status === 'paused' ? 'Resume attempt' : 'Pause attempt', disabled: anyStudentPending || blocked, onSelect: student.status === 'paused' ? onResume : onPause }, { id: 'terminate', label: 'End attempt…', destructive: true, disabled: anyStudentPending || blocked, separatorBefore: true, onSelect: onTerminate }]} /></div></div>
     <dl className="mt-6 grid gap-x-8 gap-y-4 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-5 sm:grid-cols-3">
-      <div><dt className="sat-room__eyebrow">Current module</dt><dd className="mt-1.5 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#18181b)]">{String(student.runtimeCurrentSection ?? student.currentSection)}</dd></div>
-      <div><dt className="sat-room__eyebrow">Time remaining</dt><dd className="mt-1 text-[20px] font-semibold tabular-nums tracking-[-0.03em] text-[var(--sat-staff-text-primary,#18181b)]">{formatRemaining(remaining)}</dd></div>
+      <div><dt className="sat-room__eyebrow">Current section</dt><dd className="mt-1.5 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#18181b)]">{sectionLabel ?? '—'}</dd></div>
+      <div><dt className="sat-room__eyebrow">Current module</dt><dd className="mt-1.5 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#18181b)]">{moduleSlot ?? student.currentSection ?? '—'}</dd></div>
+      <div><dt className="sat-room__eyebrow">Module clock</dt><dd className="mt-1 text-[20px] font-semibold tabular-nums tracking-[-0.03em] text-[var(--sat-staff-text-primary,#18181b)]">{moduleKnown ? formatRemaining(moduleRemaining) : '—'}</dd></div>
+      <div><dt className="sat-room__eyebrow">Section clock</dt><dd className="mt-1.5 text-[14px] font-semibold tabular-nums text-[var(--sat-staff-text-primary,#18181b)]">{formatRemaining(remaining)}</dd></div>
       <div><dt className="sat-room__eyebrow">Attempt</dt><dd className="mt-1.5 text-[14px] font-semibold capitalize text-[var(--sat-staff-text-primary,#18181b)]">{student.status}</dd></div>
     </dl>
     <div className="mt-7 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-5"><h3 className="text-[14px] font-semibold tracking-[-0.01em]">Attention</h3>{student.warnings === 0 && student.violations.length === 0 ? <div className="mt-3 flex items-center gap-2 text-[13px] font-medium text-[var(--sat-staff-text-secondary,#515154)]"><span className="h-1.5 w-1.5 rounded-full bg-[var(--sat-staff-success-dot,#059669)]" />No current warnings or integrity events.</div> : <div className="mt-3 space-y-2">{student.warnings > 0 ? <div className="rounded-[10px] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5 text-[13px] font-medium text-[var(--sat-staff-warning-text,#92400e)]">{student.warnings} proctor warning{student.warnings === 1 ? '' : 's'}</div> : null}{student.violations.slice(0, 5).map((violation) => <div key={violation.id} className="rounded-[10px] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5"><p className="text-[12px] font-semibold capitalize text-[var(--sat-staff-warning-text,#92400e)]">{violation.type.replace(/_/g, ' ')}</p><p className="mt-0.5 text-[12px] font-medium leading-5 text-[var(--sat-staff-warning-text,#92400e)]">{violation.description}</p></div>)}</div>}</div>

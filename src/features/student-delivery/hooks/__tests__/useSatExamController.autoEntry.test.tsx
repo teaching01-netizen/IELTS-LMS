@@ -713,6 +713,119 @@ describe("useSatExamController auto-entry", () => {
     },
   );
 
+  // Bug 1 (pre-entry half): the directions screen used to quote the authored
+  // module length, so a late arrival was promised the full module and then
+  // handed the room's remainder. The server publishes the window its own clamp
+  // will grant (entryWindowSeconds), and the controller resolves it to the claim
+  // the screen may make — including the zero case, where entry grants nothing
+  // and the room routes the candidate on.
+  it("carries the server's entry window for the module the student is about to open", async () => {
+    const late = liveFirstModuleBootstrap(2);
+    late.attempt.moduleAttempts[0]!.entryWindowSeconds = 45;
+    gatewayMocks.bootstrap.mockResolvedValue(late);
+    // Entry stays in flight, so the student is still on the directions screen.
+    gatewayMocks.startModule.mockImplementation(() => new Promise(() => {}));
+
+    const hook = renderController();
+
+    await waitFor(() =>
+      expect(hook.result.current.pendingModuleWindow?.source).toBe("granted"),
+    );
+    expect(hook.result.current.state.phase).toBe("directions");
+    // 45 seconds, less the second or two this frame took: the authored 60 in the
+    // fixture is NOT what the screen would claim.
+    expect(hook.result.current.pendingModuleWindow?.seconds).toBeGreaterThanOrEqual(44);
+    expect(hook.result.current.pendingModuleWindow?.seconds).toBeLessThanOrEqual(45);
+    expect(hook.result.current.data?.sections[0]?.modules[0]?.durationSeconds).toBe(60);
+  });
+
+  it("reports an already-closed module as no time left rather than the authored length", async () => {
+    const closed = liveFirstModuleBootstrap(2);
+    closed.attempt.moduleAttempts[0]!.entryWindowSeconds = 0;
+    gatewayMocks.bootstrap.mockResolvedValue(closed);
+    gatewayMocks.startModule.mockImplementation(() => new Promise(() => {}));
+
+    const hook = renderController();
+
+    await waitFor(() =>
+      expect(hook.result.current.data?.attempt.moduleAttempts[0]?.entryWindowSeconds).toBe(0),
+    );
+    expect(hook.result.current.pendingModuleWindow).toEqual({ seconds: 0, source: "granted" });
+  });
+
+  // The server saying nothing is the authored length, named as such — the claim
+  // and its provenance come from one place, so no surface has to re-decide.
+  it("falls back to the authored length, and says so, when no window is published", async () => {
+    const quiet = liveFirstModuleBootstrap(2);
+    delete quiet.attempt.moduleAttempts[0]!.entryWindowSeconds;
+    gatewayMocks.bootstrap.mockResolvedValue(quiet);
+    gatewayMocks.startModule.mockImplementation(() => new Promise(() => {}));
+
+    const hook = renderController();
+
+    await waitFor(() =>
+      expect(hook.result.current.pendingModuleWindow?.source).toBe("authored"),
+    );
+    expect(hook.result.current.pendingModuleWindow?.seconds).toBe(60);
+  });
+
+  // The whole late-arrival path, not just the number: a candidate who arrives
+  // after the room has closed Module 1's window is told there is no time left,
+  // AND is still entered — the zero is the room's verdict, not a reason to
+  // strand them. The server finalizes Module 1 on its own clock and routes the
+  // branch module, so the candidate ends up in the room's Module 2 with whatever
+  // the section has left, which is also the window the branch payload publishes
+  // for its own pre-entry screen.
+  it("routes a candidate who arrives after Module 1's window into the room's Module 2", async () => {
+    const closedModuleOne = liveFirstModuleBootstrap(2);
+    closedModuleOne.attempt.moduleAttempts[0]!.entryWindowSeconds = 0;
+    gatewayMocks.bootstrap.mockResolvedValue(closedModuleOne);
+    // Entry grants nothing: the same call finalizes Module 1 and hands back the
+    // routed branch, whose own published window is the section's remainder.
+    const routed = timedOutBranchBootstrap("higher_branch", 3);
+    routed.attempt.moduleAttempts[1]!.entryWindowSeconds = 15 * 60;
+    // The first start is held in flight so the pre-entry claim can be read on
+    // the screen before the room's answer replaces it.
+    let releaseStart: ((payload: AssessmentDeliveryBootstrap) => void) | null = null;
+    gatewayMocks.startModule
+      .mockImplementationOnce(
+        () =>
+          new Promise<AssessmentDeliveryBootstrap>((resolve) => {
+            releaseStart = resolve;
+          }),
+      )
+      .mockResolvedValue(openedModule(routed, MODULE_RW_M2, 4));
+
+    const hook = renderController();
+
+    await waitFor(() =>
+      expect(hook.result.current.pendingModuleWindow).toEqual({ seconds: 0, source: "granted" }),
+    );
+    // Still entered: the claim is honest and the flow moves, rather than parking
+    // the candidate on a screen for a module that will never open.
+    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
+    expect(gatewayMocks.startModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {
+      moduleId: MODULE_RW,
+    });
+    // The room's answer: Module 1 closed on the shared clock and the routed
+    // branch is what the candidate now has.
+    await act(async () => {
+      releaseStart?.(routed);
+    });
+    // Module 1 ended on the room's clock, so the branch opens with no student
+    // action — the payload a reload or a reconnect would see.
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(
+      hook.result.current.state.phase === "module" && hook.result.current.state.moduleKey,
+    ).toBe(MODULE_RW_M2);
+    expect(gatewayMocks.startModule).toHaveBeenLastCalledWith("schedule", ATTEMPT_ID, {
+      moduleId: MODULE_RW_M2,
+    });
+    // and the branch module's own published window is the section remainder the
+    // room will really grant, so its pre-entry screen agrees too.
+    expect(routed.attempt.moduleAttempts[1]!.entryWindowSeconds).toBe(15 * 60);
+  });
+
   // Module-advance fix (AT-01/AT-02/AT-10): Module 1's clock ran out, so the
   // routed Module 2 opens with no student action. Which branch the student gets
   // is the server's routing decision; the client only enters what the payload

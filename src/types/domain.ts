@@ -350,6 +350,45 @@ export interface ProctorPresence {
   lastHeartbeat: string;
 }
 
+/**
+ * One authored module of a section plan: Module 1 (base) plus exactly one
+ * adaptive branch per candidate. `adaptiveRole` is `none` on a non-adaptive
+ * section (IELTS/ACT).
+ */
+/**
+ * The adaptive slot of one SAT module: Module 1 is the base module and exactly
+ * one of the two branches is Module 2. `none` is a non-adaptive section.
+ */
+export type SatAdaptiveRole = "none" | "base" | "lower_branch" | "higher_branch";
+
+export interface ExamPlanModule {
+  moduleKey: string;
+  title: string;
+  adaptiveRole: SatAdaptiveRole;
+  durationMinutes: number;
+}
+
+/**
+ * One authored section of the published version a schedule runs, with the
+ * candidate-facing length (Module 1 + the longer branch). Present only on the
+ * proctor session detail read; the staff run sheet projects it against the
+ * runtime's live sections.
+ */
+export interface ExamPlanSection {
+  /**
+   * The authored section key (`reading-writing`, `math`, or a legacy provider
+   * key). Deliberately a plain string: the SAT keys are not members of
+   * ModuleType, and the backend projection carries whatever the version
+   * authored.
+   */
+  sectionKey: string;
+  label: string;
+  order: number;
+  durationMinutes: number;
+  gapAfterMinutes: number;
+  modules: ExamPlanModule[];
+}
+
 export interface ExamSessionRuntime {
   id: string;
   scheduleId: string;
@@ -374,6 +413,11 @@ export interface ExamSessionRuntime {
   isOverrun: boolean;
   totalPausedSeconds: number;
   sections: SectionRuntimeState[];
+  /**
+   * Authored run sheet of the pinned published version (proctor detail read
+   * only). Null on the summary and student reads, which do not carry it.
+   */
+  examPlan?: ExamPlanSection[] | null | undefined;
   proctorPresence?: ProctorPresence[] | undefined;
   revision?: number | null | undefined;
   createdAt: string;

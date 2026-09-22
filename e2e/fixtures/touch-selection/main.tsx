@@ -14,11 +14,25 @@ import { SatAccessibilityDebugRoute } from '../../../src/app/router/dev/SatAcces
 const params = new URLSearchParams(location.search);
 const owned = params.get('preview') !== '1';
 const phrase = 'Alpha beta gamma delta. The student selects this passage.';
+// Two fixture-owned paragraphs for the caret-alignment e2e: real Thai clusters
+// and a real RTL run, rendered through the same passage path as everything else.
+// The literals are duplicated in e2e/student-owned-touch-selection.spec.ts on
+// purpose — a page bundle cannot import a Playwright file.
+//
+// They sit at the FRONT of the content deliberately: the loupe's cloned picture
+// strips element classes (privacy contract), so container-scoped paragraph
+// spacing — 8px between paragraphs in this pane — is missing from the clone and
+// the divergence accumulates 8px per preceding paragraph. Paragraph one has
+// none, so source and clone agree exactly where these carets resolve. Closing
+// that gap for later paragraphs needs a product fix in buildPicture (preserve
+// layout-affecting descendant styles), out of scope for this test-only change.
+const rtlPhrase = 'هذا نص عربي بسيط عن الطقس والمدينة والحدائق والشوارع';
+const thaiPhrase = 'ภาษาไทย คนในประเทศไทย พูดภาษาไทย ทุกวัน';
 const state: ExamState = {
   title: 'Touch selection fixture', type: 'Academic', activeModule: 'reading',
   activePassageId: 'passage-1', activeListeningPartId: null,
   config: createDefaultConfig('Academic', 'Academic'),
-  reading: { passages: [{ id: 'passage-1', title: 'Passage 1', content: [phrase, ...Array(15).fill(phrase)].join('\n\n'), images: [], blocks: [] }] },
+  reading: { passages: [{ id: 'passage-1', title: 'Passage 1', content: [rtlPhrase, thaiPhrase, phrase, ...Array(15).fill(phrase)].join('\n\n'), images: [], blocks: [] }] },
   listening: { parts: [] }, writing: { task1Prompt: '', task2Prompt: '' },
   speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
 } as ExamState;

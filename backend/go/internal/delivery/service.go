@@ -170,17 +170,27 @@ type DeliverySection struct {
 
 // ModuleAttempt is one attempt-scoped module row with Go-computed timing.
 type ModuleAttempt struct {
-	ID                       string          `json:"id"`
-	ModuleID                 string          `json:"moduleId"`
-	State                    string          `json:"state"`
-	AllocatedSeconds         int             `json:"allocatedSeconds"`
-	AvailableAt              *time.Time      `json:"availableAt"`
-	StartedAt                *time.Time      `json:"startedAt"`
-	PausedAt                 *time.Time      `json:"pausedAt"`
-	AccumulatedPausedSeconds int             `json:"accumulatedPausedSeconds"`
-	ExtensionSeconds         int             `json:"extensionSeconds"`
-	DeadlineAt               *time.Time      `json:"deadlineAt"`
-	RemainingSeconds         *int64          `json:"remainingSeconds"`
+	ID                       string     `json:"id"`
+	ModuleID                 string     `json:"moduleId"`
+	State                    string     `json:"state"`
+	AllocatedSeconds         int        `json:"allocatedSeconds"`
+	AvailableAt              *time.Time `json:"availableAt"`
+	StartedAt                *time.Time `json:"startedAt"`
+	PausedAt                 *time.Time `json:"pausedAt"`
+	AccumulatedPausedSeconds int        `json:"accumulatedPausedSeconds"`
+	ExtensionSeconds         int        `json:"extensionSeconds"`
+	DeadlineAt               *time.Time `json:"deadlineAt"`
+	RemainingSeconds         *int64     `json:"remainingSeconds"`
+	// EntryWindowSeconds is what THIS candidate will be granted if they enter
+	// this module right now: the room-anchored window StartModule writes, computed
+	// by the same two functions the write path uses (cohortModuleWindowEnd,
+	// cohortModuleWindowSeconds). It exists only where the authored length would
+	// overstate — a SAT cohort-section module that has not started, whose row
+	// carries an allotment, and whose section clock is the running stage — so a
+	// late arrival is told the room's remainder instead of a fresh module. Nil
+	// everywhere else: a started module's deadlineAt/remainingSeconds are the
+	// truth, and a module in a section that has not opened has no room window yet.
+	EntryWindowSeconds       *int            `json:"entryWindowSeconds"`
 	CompletionReason         *string         `json:"completionReason"`
 	RawCorrect               *int64          `json:"rawCorrect"`
 	OperationalQuestionCount *int64          `json:"operationalQuestionCount"`
@@ -341,10 +351,14 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
-	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, providerKey, now)
+	timing, runtimeStatus, roomSections, err := s.loadTiming(ctx, scheduleID, providerKey, now)
 	if err != nil {
 		return nil, err
 	}
+	// Tell a candidate what entering each module would actually grant them, on
+	// the same room clock the write path clamps to. Non-SAT/legacy payloads and
+	// modules with no running section window keep their authored length.
+	publishEntryWindows(moduleAttempts, sections, timing, roomSections, now)
 	return &Bootstrap{
 		ScheduleID:            scheduleID,
 		ExamID:                examID,
@@ -923,24 +937,30 @@ func (s *Service) loadAttemptControl(ctx context.Context, attemptID string, boun
 //
 // Non-SAT providers keep the legacy attempt clock: a legacy run has no cohort
 // runtime to wait for.
-func (s *Service) loadTiming(ctx context.Context, scheduleID, providerKey string, now time.Time) (TimingSnapshot, string, error) {
+//
+// Round 147: the runtime's own section rows ride back with the snapshot. They
+// cost no extra statement (the sections leg is already loaded) and they are what
+// publishEntryWindows reads to tell a candidate what entering a module will
+// actually grant them — the same rows the write path's gate reads, so the
+// promise and the grant cannot drift.
+func (s *Service) loadTiming(ctx context.Context, scheduleID, providerKey string, now time.Time) (TimingSnapshot, string, []proctor.SessionRuntimeSection, error) {
 	var status string
 	err := s.db.QueryRowContext(ctx, "SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&status)
 	if err == sql.ErrNoRows {
 		if examruntime.IsPreStartCohort(providerKey) {
 			runtime := proctor.NotStartedRuntimeForProvider(scheduleID, "", providerKey, now)
-			return timingFromRuntime(runtime), runtime.Status, nil
+			return timingFromRuntime(runtime), runtime.Status, runtime.Sections, nil
 		}
-		return TimingSnapshot{Authority: "legacy_attempt", TimingModel: examruntime.TimingModelLegacy, StageStatus: "live", ServerNow: now}, "live", nil
+		return TimingSnapshot{Authority: "legacy_attempt", TimingModel: examruntime.TimingModelLegacy, StageStatus: "live", ServerNow: now}, "live", nil, nil
 	}
 	if err != nil {
-		return TimingSnapshot{}, "", err
+		return TimingSnapshot{}, "", nil, err
 	}
 	runtime, err := proctor.LoadSessionRuntimeByStatus(ctx, s.db, scheduleID, status)
 	if err != nil {
-		return TimingSnapshot{}, "", err
+		return TimingSnapshot{}, "", nil, err
 	}
-	return timingFromRuntime(runtime), runtime.Status, nil
+	return timingFromRuntime(runtime), runtime.Status, runtime.Sections, nil
 }
 
 func timingFromRuntime(runtime proctor.SessionRuntime) TimingSnapshot {
@@ -1119,12 +1139,12 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 			// SAT-006: the gate owns the authoritative in-tx time; the legacy
 			// personal-deadline check uses that same instant, not the pre-tx
 			// wall clock this request captured before waiting for its locks.
-			gate, gateNow, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID)
+			gated, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID)
 			if err != nil {
 				return err
 			}
-			if gate == timingGateLegacy {
-				if err := ensureSaveModuleAdmitted(active, gateNow); err != nil {
+			if gated.gate == timingGateLegacy {
+				if err := ensureSaveModuleAdmitted(active, gated.now); err != nil {
 					return err
 				}
 			}
@@ -1493,6 +1513,26 @@ const (
 	timingGateCohortSection
 )
 
+// moduleTimingGateResult is what moduleTimingGateTx hands back: the model-narrowed
+// gate, the authoritative in-tx instant, and — for a section-keyed cohort
+// runtime — the ROOM's window for the module being started.
+//
+// roomWindowEnd exists because a module window must belong to the room, not to
+// the candidate's arrival: Module 1's window is the section's start plus its
+// authored length, and the adaptive branch module that closes a section ends
+// with the section's own clock. StartModule clamps the new attempt's
+// allocated_seconds to it, and every other reader keeps deriving the deadline
+// from started_at + allocated_seconds, so one rule owns the window and a late
+// joiner reads the clock the proctor and the run sheet are already on.
+type moduleTimingGateResult struct {
+	gate timingGate
+	now  time.Time
+	// roomWindowEnd is meaningful only alongside roomWindowKnown: a zero
+	// instant is a legitimate boundary (a window that has already elapsed).
+	roomWindowEnd   time.Time
+	roomWindowKnown bool
+}
+
 // dbTimeTx reads the authoritative database instant inside the transaction.
 // Deadline authority must be the time at which the transaction holds its
 // locks, never a wall-clock sample taken before lock acquisition (SAT-006).
@@ -1510,7 +1550,7 @@ func dbTimeTx(ctx context.Context, t tx.Tx) (time.Time, error) {
 // read from the DB after the runtime/section rows are locked, so a request
 // that waited past the deadline is judged by the moment it can mutate, not a
 // timestamp captured before it entered the transaction (SAT-006).
-func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, moduleID string) (timingGate, time.Time, error) {
+func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, moduleID string) (moduleTimingGateResult, error) {
 	var timingModel sql.NullString
 	var activeStage sql.NullString
 	if err := t.QueryRowContext(ctx,
@@ -1518,36 +1558,39 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		scheduleID).Scan(&timingModel, &activeStage); err != nil {
 		if err == sql.ErrNoRows {
 			now, nerr := dbTimeTx(ctx, t)
-			return timingGateLegacy, now, nerr
+			return moduleTimingGateResult{gate: timingGateLegacy, now: now}, nerr
 		}
-		return timingGate(0), time.Time{}, err
+		return moduleTimingGateResult{}, err
 	}
 	switch timingModel.String {
 	case examruntime.TimingModelCohortStage:
 	case examruntime.TimingModelCohortSection:
 	default:
 		now, nerr := dbTimeTx(ctx, t)
-		return timingGateLegacy, now, nerr
+		return moduleTimingGateResult{gate: timingGateLegacy, now: now}, nerr
 	}
 	var sectionKey, adaptiveRole string
+	// duration_seconds rides along so the cohort window below can be derived
+	// from the module's authored length without a second read of the same row.
+	var authoredSeconds int
 	if err := t.QueryRowContext(ctx,
-		"SELECT s.section_key, m.adaptive_role FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?",
-		moduleID).Scan(&sectionKey, &adaptiveRole); err != nil {
+		"SELECT s.section_key, m.adaptive_role, m.duration_seconds FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?",
+		moduleID).Scan(&sectionKey, &adaptiveRole, &authoredSeconds); err != nil {
 		if err == sql.ErrNoRows {
-			return timingGate(0), time.Time{}, apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+			return moduleTimingGateResult{}, apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
 		}
-		return timingGate(0), time.Time{}, err
+		return moduleTimingGateResult{}, err
 	}
 	expected := sectionKey
 	if timingModel.String == examruntime.TimingModelCohortStage {
 		suffix, err := saveStageSuffix(adaptiveRole)
 		if err != nil {
-			return timingGate(0), time.Time{}, err
+			return moduleTimingGateResult{}, err
 		}
 		expected = sectionKey + ":" + suffix
 	}
 	if !activeStage.Valid || activeStage.String != expected {
-		return timingGate(0), time.Time{}, assessmentConflict("SECTION_NOT_ACTIVE", "SAT section `"+expected+"` is not active for this cohort.")
+		return moduleTimingGateResult{}, assessmentConflict("SECTION_NOT_ACTIVE", "SAT section `"+expected+"` is not active for this cohort.")
 	}
 	var status string
 	var actualStart, pausedAt sql.NullTime
@@ -1556,31 +1599,161 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		"SELECT rs.status, rs.actual_start_at, rs.paused_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR UPDATE",
 		scheduleID, expected).Scan(&status, &actualStart, &pausedAt, &plannedMinutes, &extensionMinutes, &pausedSeconds); err != nil {
 		if err == sql.ErrNoRows {
-			return timingGate(0), time.Time{}, assessmentConflict("SECTION_CLOCK_MISSING", "The authoritative SAT section clock is missing.")
+			return moduleTimingGateResult{}, assessmentConflict("SECTION_CLOCK_MISSING", "The authoritative SAT section clock is missing.")
 		}
-		return timingGate(0), time.Time{}, err
+		return moduleTimingGateResult{}, err
 	}
 	if pausedAt.Valid {
-		return timingGate(0), time.Time{}, assessmentConflict("RUNTIME_PAUSED", "The SAT cohort clock is paused.")
+		return moduleTimingGateResult{}, assessmentConflict("RUNTIME_PAUSED", "The SAT cohort clock is paused.")
 	}
 	if status != "live" {
-		return timingGate(0), time.Time{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section is not live.")
+		return moduleTimingGateResult{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section is not live.")
 	}
 	if !actualStart.Valid {
-		return timingGate(0), time.Time{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section clock has not started.")
+		return moduleTimingGateResult{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section clock has not started.")
 	}
 	now, err := dbTimeTx(ctx, t)
 	if err != nil {
-		return timingGate(0), time.Time{}, err
+		return moduleTimingGateResult{}, err
 	}
 	deadline := saveStageDeadline(actualStart.Time.UTC(), pausedInt(plannedMinutes), pausedInt(extensionMinutes), pausedInt(pausedSeconds))
 	if !now.Before(deadline) {
-		return timingGate(0), time.Time{}, assessmentConflict("DEADLINE_EXPIRED", "The SAT section clock has expired.")
+		return moduleTimingGateResult{}, assessmentConflict("DEADLINE_EXPIRED", "The SAT section clock has expired.")
 	}
 	if timingModel.String == examruntime.TimingModelCohortStage {
-		return timingGateCohortStage, now, nil
+		return moduleTimingGateResult{gate: timingGateCohortStage, now: now}, nil
 	}
-	return timingGateCohortSection, now, nil
+	return moduleTimingGateResult{
+		gate:            timingGateCohortSection,
+		now:             now,
+		roomWindowEnd:   cohortModuleWindowEnd(actualStart.Time.UTC(), authoredSeconds, adaptiveRole, deadline),
+		roomWindowKnown: true,
+	}, nil
+}
+
+// cohortModuleWindowEnd is the room's boundary for one module of a
+// section-keyed cohort section: Module 1 (the base module) ends at the
+// SECTION's start plus its authored length, and the adaptive branch module that
+// closes the section ends with the section's own clock. The section deadline
+// caps either one — an extension, an accumulated pause or a repaired section
+// length must never let a module window run past the clock every candidate in
+// the room shares.
+func cohortModuleWindowEnd(sectionStart time.Time, authoredSeconds int, adaptiveRole string, sectionDeadline time.Time) time.Time {
+	if adaptiveRole != "base" || authoredSeconds <= 0 {
+		return sectionDeadline
+	}
+	base := sectionStart.Add(time.Duration(authoredSeconds) * time.Second)
+	if base.After(sectionDeadline) {
+		return sectionDeadline
+	}
+	return base
+}
+
+// cohortModuleWindowSeconds is the window a cohort module may be given: its own
+// allotment, never more than the room has left of the module's boundary. An
+// elapsed boundary allocates zero — the module is over for the room, and the
+// server's timeout path (never a fresh personal window) decides what happens
+// next: the reconciler finalizes the module and the adaptive successor opens
+// with whatever the section still has.
+func cohortModuleWindowSeconds(allocatedSeconds int, roomWindowEnd, now time.Time) int {
+	if allocatedSeconds <= 0 {
+		return allocatedSeconds
+	}
+	remaining := int(roomWindowEnd.Sub(now) / time.Second)
+	if remaining >= allocatedSeconds {
+		return allocatedSeconds
+	}
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// modulePlacement is one delivered module's section and authored length: what
+// the entry-window projection needs to place a module row inside the room.
+// Read off the delivered sections the same payload ships, so the projection
+// costs no extra statement.
+type modulePlacement struct {
+	sectionKey      string
+	adaptiveRole    string
+	durationSeconds int
+}
+
+func deliveredModulePlacements(sections []DeliverySection) map[string]modulePlacement {
+	placements := make(map[string]modulePlacement)
+	for _, section := range sections {
+		for _, module := range section.Modules {
+			placements[module.ID] = modulePlacement{
+				sectionKey:      section.SectionKey,
+				adaptiveRole:    module.AdaptiveRole,
+				durationSeconds: module.DurationSeconds,
+			}
+		}
+	}
+	return placements
+}
+
+// publishEntryWindows fills ModuleAttempt.EntryWindowSeconds for the modules the
+// room's clock currently governs.
+//
+// This is the read-side twin of the StartModule clamp and deliberately runs the
+// SAME functions over the same runtime facts, so the window a candidate is
+// promised before they enter and the window the server grants them on entry
+// cannot drift apart: the pre-entry screen used to quote the authored module
+// length, which a late arrival never received. Only the active section's
+// not-yet-started modules get one — a module whose section has not opened has no
+// room window to publish, and a started module's own deadline is the truth.
+//
+// A paused room publishes the window the pause landed on (frozen, exactly as the
+// candidates' own timers and the staff run sheet read it), so the promise made
+// while the room is paused is the one that holds on resume.
+func publishEntryWindows(attempts []ModuleAttempt, sections []DeliverySection, timing TimingSnapshot, room []proctor.SessionRuntimeSection, now time.Time) {
+	if timing.TimingModel != examruntime.TimingModelCohortSection || timing.StageKey == nil {
+		return
+	}
+	stage := sectionRuntimeByKey(room, *timing.StageKey)
+	if stage == nil || stage.ActualStartAt == nil {
+		return
+	}
+	if stage.Status != "live" && stage.Status != "paused" {
+		return
+	}
+	reference := now
+	if stage.PausedAt != nil {
+		reference = *stage.PausedAt
+	}
+	sectionDeadline := saveStageDeadline(*stage.ActualStartAt,
+		int64(stage.PlannedDurationMinutes), int64(stage.ExtensionMinutes),
+		int64(stage.AccumulatedPausedSeconds))
+	placements := deliveredModulePlacements(sections)
+	for index := range attempts {
+		attempt := &attempts[index]
+		// A row with no allotment has no authored window to clamp: leave the
+		// field nil rather than publish a zero the screen would read as "this
+		// module has no time".
+		if attempt.State != "not_started" || attempt.AllocatedSeconds <= 0 {
+			continue
+		}
+		placement, ok := placements[attempt.ModuleID]
+		if !ok || placement.sectionKey != *timing.StageKey {
+			continue
+		}
+		boundary := cohortModuleWindowEnd(*stage.ActualStartAt,
+			placement.durationSeconds, placement.adaptiveRole, sectionDeadline)
+		window := cohortModuleWindowSeconds(attempt.AllocatedSeconds, boundary, reference)
+		attempt.EntryWindowSeconds = &window
+	}
+}
+
+// sectionRuntimeByKey finds one runtime section row, nil when the runtime has no
+// row for that key (the run's version no longer carries the section).
+func sectionRuntimeByKey(room []proctor.SessionRuntimeSection, key string) *proctor.SessionRuntimeSection {
+	for index := range room {
+		if room[index].SectionKey == key {
+			return &room[index]
+		}
+	}
+	return nil
 }
 
 func saveStageSuffix(adaptiveRole string) (string, error) {

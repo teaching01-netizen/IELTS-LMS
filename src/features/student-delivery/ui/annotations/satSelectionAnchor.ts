@@ -4,12 +4,13 @@ import type { SatTextAnchor } from '../../domain/satResponses';
  * Turning an anchor into the DOM it names: the block, the Range, and where that
  * Range sits on screen line by line.
  *
- * This is the MEASURING half of placement, and it is deliberately not in
- * `satSelectionGeometry`: that module decides, from plain numbers, and a pure
- * decision cannot be tested or reasoned about if it can also read the DOM. Every
- * function here returns null rather than guessing, because "cannot measure" is a
- * real answer the caller has an honest response to (a reachable fallback
- * position), and a plausible-looking substitute rect would be worse than none.
+ * This is the MEASURING half of placement, and it is deliberately not in the
+ * rule itself (`placeSelectionMenu`): that function decides, from plain numbers,
+ * and a pure decision cannot be tested or reasoned about if it can also read the
+ * DOM. Every function here returns null rather than guessing, because "cannot
+ * measure" is a real answer the caller has an honest response to (a reachable
+ * fallback position), and a plausible-looking substitute rect would be worse
+ * than none.
  */
 
 function regionAndNode(anchor: SatTextAnchor): { region: string; nodeId: string } | null {

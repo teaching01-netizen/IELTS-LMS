@@ -544,6 +544,8 @@ type planQuerier interface {
 // runtimePlanIn derives the persisted cohort clock plan from the pinned
 // published version, reading through q. Disabled config sections are omitted
 // so a proctor start cannot create clocks for a section the author turned off.
+// Adaptive section lengths come from the version's modules
+// (candidateSectionSecondsByKey), not from the stored section row alone.
 //
 // The plan is then intersected with the backing Student Access link's section
 // scope (when the schedule has one): a link may only NARROW the run, never
@@ -567,6 +569,19 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 		return nil, "", err
 	}
 	enabled := configuredRuntimeSections(configRaw.String)
+	// A candidate sits Module 1 plus exactly ONE adaptive branch, so an adaptive
+	// section's clock is base + the LONGER branch — never the sum of every
+	// authored module. assessment_sections.duration_seconds can still hold the
+	// pre-CandidateSectionSeconds overstatement (0065 repaired the rows, but a
+	// version published before it, or any future write path that forgets the
+	// rule, would leak the inflated value straight into the student's countdown),
+	// so the plan derives the candidate length itself whenever the section has
+	// adaptive roles. Non-adaptive sections (IELTS/ACT) have none and keep their
+	// authored duration.
+	candidateSeconds, err := candidateSectionSecondsByKey(ctx, q, sch.PublishedVersionID)
+	if err != nil {
+		return nil, "", err
+	}
 	rows, err := q.QueryContext(ctx, "SELECT section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id", sch.PublishedVersionID)
 	if err != nil {
 		return nil, "", err
@@ -581,6 +596,9 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 		}
 		if !examdomain.ValidSectionKey(effectiveProvider, key) || (enabled != nil && !enabled[key]) || !linkAllowsSection(linkSections, key) {
 			continue
+		}
+		if candidate, ok := candidateSeconds[key]; ok {
+			durationSeconds = candidate
 		}
 		plan = append(plan, examruntime.PlanEntry{
 			SectionKey:      key,
@@ -606,6 +624,59 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 		timingModel = examruntime.TimingModelCohortSection
 	}
 	return plan, timingModel, nil
+}
+
+// candidateSectionSecondsByKey reads the candidate-facing length of every
+// adaptive section in one version. The read stays role-agnostic: every authored
+// module row is folded through exams.AdaptiveRoleSeconds, which owns the role
+// vocabulary (matched with the collation semantics the SQL read relied on), the
+// duplicate-role rule (largest wins) and the guard (a base and at least one
+// branch prove a length). Section keys are preserved verbatim, exactly as the
+// SQL read did — runtimePlanIn validates the raw key against the provider
+// allowlist, so only a blank key is skipped here. A section the owner rejects is
+// absent from the map and keeps the authored assessment_sections duration,
+// because an incomplete shape cannot prove a candidate length and the authored
+// value is what the author saw.
+func candidateSectionSecondsByKey(ctx context.Context, q planQuerier, versionID string) (map[string]int, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT s.section_key, m.adaptive_role, m.duration_seconds
+		FROM assessment_modules m
+		JOIN assessment_sections s ON s.id = m.section_id
+		WHERE s.exam_version_id = ?`, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	clocks := map[string]*examdomain.AdaptiveRoleSeconds{}
+	for rows.Next() {
+		var key, role string
+		var seconds int
+		if err := rows.Scan(&key, &role, &seconds); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		clock := clocks[key]
+		if clock == nil {
+			clock = &examdomain.AdaptiveRoleSeconds{}
+			clocks[key] = clock
+		}
+		clock.AddModule(role, seconds)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// exams owns the guard and the arithmetic: the section proves a candidate
+	// length only with a base and a branch, and then it is base + the LONGER
+	// branch — never the sum of every authored module.
+	out := map[string]int{}
+	for key, clock := range clocks {
+		if seconds, ok := clock.CandidateSeconds(); ok {
+			out[key] = seconds
+		}
+	}
+	return out, nil
 }
 
 // linkEnabledSections reads the section scope of the Student Access link

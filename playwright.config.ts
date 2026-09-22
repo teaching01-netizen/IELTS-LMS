@@ -2,6 +2,8 @@ import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import dotenv from "dotenv";
 
+const inheritedEnv = { ...process.env };
+
 // Playwright loads its web-server environment before globalSetup runs. Load
 // the same local/CI defaults here so the Go API receives a complete config.
 dotenv.config({ path: path.resolve(".env"), override: false });
@@ -26,6 +28,11 @@ const backendRuntimeEnv = {
   APP_ENV: process.env["APP_ENV"] ?? "test",
   ENVIRONMENT: process.env["ENVIRONMENT"] ?? "test",
   MIGRATIONS_DIR: process.env["MIGRATIONS_DIR"] ?? "migrations",
+  // Keep local runtime-contract tests fast while allowing CI/operators to
+  // override the cadence for a slower shared database.
+  WORKER_MAINTENANCE_INTERVAL_SECS: inheritedEnv["WORKER_MAINTENANCE_INTERVAL_SECS"] ?? "1",
+  WORKER_FALLBACK_INTERVAL_SECS: inheritedEnv["WORKER_FALLBACK_INTERVAL_SECS"] ?? "1",
+  LIVE_UPDATE_POLL_INTERVAL_MS: inheritedEnv["LIVE_UPDATE_POLL_INTERVAL_MS"] ?? "100",
 };
 const backendFeatureEnv = {
   VITE_BACKEND_API_URL: backendApiUrl,

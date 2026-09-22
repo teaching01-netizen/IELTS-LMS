@@ -3,7 +3,7 @@ import { satAnnotationSurfaceChrome, type SatAnnotationSurfaceChrome } from './S
 import { useSatAnnotationAutofocus } from './useSatAnnotationAutofocus';
 import { useSatAnnotationDismiss } from './useSatAnnotationDismiss';
 import { useSatAnnotationPlacement } from './useSatAnnotationPlacement';
-import type { AnnotationPlacement } from './satSelectionGeometry';
+import type { SelectionMenuPlacement } from '@shared/ui/selection-v2/engine/selectionPlacement';
 
 /**
  * Everything a surface needs to exist, in one call: where it goes, the chrome
@@ -34,7 +34,7 @@ export function useSatAnnotationSurface(
     onDismiss: () => void;
   },
 ): {
-  placement: AnnotationPlacement | null;
+  placement: SelectionMenuPlacement | null;
   chrome: SatAnnotationSurfaceChrome;
   /** The surface's own node: measured for placement, scoped for the caret and for dismissal. */
   containerRef: React.RefObject<HTMLDivElement | null>;

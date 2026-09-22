@@ -3,10 +3,10 @@ import type { SatTextAnchor } from '../../domain/satResponses';
 import { readSatAnnotationBudgets, readSatAnnotationSeconds } from './satAnnotationBudgets';
 import { measureSatAnnotation } from './satAnnotationPlacementRuntime';
 import {
-  hiddenSatAnnotationPlacement,
-  placeSatAnnotationSurface,
-  type AnnotationPlacement,
-} from './satSelectionGeometry';
+  hiddenSelectionMenu,
+  placeSelectionMenu,
+  type SelectionMenuPlacement,
+} from '@shared/ui/selection-v2/engine/selectionPlacement';
 
 /** Mirror of `--sat-annotation-settle`, used when the token is unreadable. */
 const SETTLE_FALLBACK_SECONDS = 0.08;
@@ -29,7 +29,7 @@ const UNMEASURABLE_INSET = 8;
 /** Everything that has to be remembered across measurements. One owner. */
 interface SatAnnotationPlacementSession {
   /** The last decision, fed back to the engine for hysteresis. */
-  previous: AnnotationPlacement | null;
+  previous: SelectionMenuPlacement | null;
   /** The selection this session belongs to; a different one starts over. */
   anchor: SatTextAnchor | null;
   /** Has this selection's surface been shown? Until it has, it waits to settle. */
@@ -65,7 +65,8 @@ export interface SatAnnotationPlacementOptions {
  * rotates the device, or the on-screen keyboard moves the visual viewport.
  *
  * This hook owns TIMING and nothing else — the measurement lives in
- * `satAnnotationPlacementRuntime`, the decision in `placeSatAnnotationSurface`.
+ * `satAnnotationPlacementRuntime`, and the decision in the shared rule
+ * (`placeSelectionMenu`), the same one every other product's menu uses.
  * Three behaviours are its whole job:
  *
  * - COALESCING. Scroll, resize and visual-viewport events arrive in bursts; each
@@ -89,19 +90,19 @@ export function useSatAnnotationPlacement(
   anchor: SatTextAnchor | null,
   options: SatAnnotationPlacementOptions = {},
 ): {
-  placement: AnnotationPlacement | null;
+  placement: SelectionMenuPlacement | null;
   containerRef: React.RefObject<HTMLDivElement | null>;
   measure: () => void;
 } {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [placement, setPlacement] = useState<AnnotationPlacement | null>(null);
+  const [placement, setPlacement] = useState<SelectionMenuPlacement | null>(null);
   const session = useRef<SatAnnotationPlacementSession>(newSession());
   const frameRef = useRef<number | null>(null);
   const settleRef = useRef<number | null>(null);
   const touch = options.touch === true;
 
   /** Take a decision as final: it is what the student sees from now on. */
-  const reveal = useCallback((next: AnnotationPlacement) => {
+  const reveal = useCallback((next: SelectionMenuPlacement) => {
     session.current.revealed = true;
     session.current.waitingSince = -1;
     session.current.previous = next;
@@ -153,14 +154,14 @@ export function useSatAnnotationPlacement(
       if (!settled) {
         if (session.current.waitingSince < 0) session.current.waitingSince = now;
         if (now - session.current.waitingSince < settleMs * SETTLE_WAIT_LIMIT) {
-          setPlacement(hiddenSatAnnotationPlacement());
+          setPlacement(hiddenSelectionMenu());
           armRemeasure(session.current.changedAt + settleMs - now);
           return;
         }
       }
     }
 
-    reveal(placeSatAnnotationSurface({
+    reveal(placeSelectionMenu({
       anchor: measurement.anchor,
       bounds: measurement.bounds,
       viewport: measurement.viewport,
@@ -214,7 +215,7 @@ export function useSatAnnotationPlacement(
       session.current.previous = null;
       session.current.changedAt = Date.now();
       session.current.waitingSince = Date.now();
-      setPlacement(hiddenSatAnnotationPlacement());
+      setPlacement(hiddenSelectionMenu());
       armRemeasure(settleCapMs());
     };
 

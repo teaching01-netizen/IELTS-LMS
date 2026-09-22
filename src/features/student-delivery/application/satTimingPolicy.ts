@@ -11,6 +11,8 @@
  * deadline hook, and the payload reads; this module owns the rules.
  */
 
+import type { AssessmentModuleAttemptSnapshot } from "../contracts/assessmentDelivery";
+import { drainSinceSnapshot } from "../domain/satTiming";
 import {
   isCohortTimingModel,
   isSectionKeyedCohortModel,
@@ -162,6 +164,73 @@ export function satCountdown(input: {
       ? input.authoritativeSeconds
       : Math.min(input.personalSeconds, input.authoritativeSeconds);
   return { displaySeconds: capped, expirySeconds: capped };
+}
+
+/**
+ * The window a pre-entry claim may quote, and where it came from — the single
+ * decision point for that claim. A surface that renders it formats the number;
+ * it never decides for itself whether the server has one to give.
+ */
+export interface SatModuleWindow {
+  /**
+   * The seconds the claim may quote: the window the server published for this
+   * module, drained since the payload landed, or the authored allotment when the
+   * server published nothing.
+   */
+  seconds: number;
+  /**
+   * `granted` — entering this module will hand this candidate this much, per the
+   * server's own clamp: a late arrival reads the room's remainder, and 0 once
+   * the room has closed the module. `authored` — the server published no window,
+   * so the authored length is still the honest claim and no remainder language
+   * may be used.
+   */
+  source: "granted" | "authored";
+}
+
+/**
+ * What entering the pending module will actually grant this candidate.
+ *
+ * The pre-entry screen used to quote the AUTHORED module length, which the room
+ * may no longer have: delivery clamps a cohort module's window to the room's own
+ * boundary (Module 1 ends at the section's start plus its authored length; the
+ * branch module ends with the section), so a student who joins late is handed
+ * the remainder — or nothing, when the room has already closed that module. The
+ * server publishes that clamp ahead of entry (`entryWindowSeconds`), so this
+ * resolves the claim from the server's own arithmetic rather than re-deriving
+ * the boundary here, and drains it with `drainSinceSnapshot` — the same
+ * convention `personalModuleRemainingSeconds` uses — so the promise and the
+ * module clock the student lands in cannot diverge.
+ *
+ * The authored length is the answer for every frame the server said nothing
+ * about: no module attempt yet, a non-cohort provider, a payload from before the
+ * field existed, or a module that has already started, whose own
+ * deadlineAt/remainingSeconds are the truth and whose pre-entry window must not
+ * outlive entry. A paused room's clock is stopped, so the published window is
+ * returned whole; between polls it drains at real time, exactly as the running
+ * countdowns do.
+ */
+export function satModuleWindow(input: {
+  attempt: AssessmentModuleAttemptSnapshot | undefined;
+  authoredSeconds: number;
+  snapshotReceivedAt: number;
+  now: number;
+  running: boolean;
+}): SatModuleWindow {
+  const authored: SatModuleWindow = {
+    seconds: Math.max(0, Math.round(input.authoredSeconds)),
+    source: "authored",
+  };
+  const attempt = input.attempt;
+  if (!attempt || attempt.startedAt || attempt.state !== "not_started") return authored;
+  const published = attempt.entryWindowSeconds;
+  if (published === null || published === undefined || !Number.isFinite(published)) {
+    return authored;
+  }
+  return {
+    seconds: drainSinceSnapshot(published, input.snapshotReceivedAt, input.now, input.running),
+    source: "granted",
+  };
 }
 
 /**

@@ -96,7 +96,7 @@ function mediaBlocks(css: string, query: string): string[] {
 describe('owned touch selection CSS', () => {
   // The selection itself is what iOS and Android attach their Copy / Look Up /
   // Share bar to, so on a coarse pointer the exam removes the platform's
-  // selection and supplies its own (`useStudentTouchTextSelection`). These
+  // selection and supplies its own (`useStudentSelectionGesture`). These
   // assertions pin the half that cannot be tested in jsdom: which devices get
   // it, which surfaces it covers, and what it must never touch.
   const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8').replace(

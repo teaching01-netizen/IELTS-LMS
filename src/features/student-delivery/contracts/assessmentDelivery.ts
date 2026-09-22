@@ -28,6 +28,14 @@ export interface AssessmentModuleAttemptSnapshot {
   extensionSeconds: number;
   deadlineAt: string | null;
   remainingSeconds: number | null;
+  /**
+   * What entering this module will actually grant, on the room's clock: the
+   * server's own StartModule clamp published BEFORE entry, so a late arrival is
+   * not promised the authored length. Present only while the module has not
+   * started — a started module's deadlineAt/remainingSeconds are the truth —
+   * and absent on older payloads and on non-cohort providers.
+   */
+  entryWindowSeconds?: number | null;
   completionReason: string | null;
   rawCorrect: number | null;
   operationalQuestionCount: number | null;

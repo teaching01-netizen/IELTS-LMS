@@ -61,9 +61,14 @@ func TestTimingContractSATWithoutRuntimeIsNotStartedCohort(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery("SELECT status FROM exam_session_runtimes").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
 	now := time.Now().UTC()
-	timing, status, err := deliverySvc(db).loadTiming(context.Background(), "schedule", "sat", now)
+	timing, status, room, err := deliverySvc(db).loadTiming(context.Background(), "schedule", "sat", now)
 	if err != nil {
 		t.Fatalf("loadTiming failed: %v", err)
+	}
+	// Nothing has started, so there is no room clock and no module window to
+	// promise: the entry-window projection has nothing to publish here.
+	if len(room) != 0 {
+		t.Fatalf("pre-start SAT must carry no runtime sections: %+v", room)
 	}
 	if status != "not_started" {
 		t.Fatalf("pre-start SAT status = %q, want not_started", status)
@@ -104,9 +109,12 @@ func TestTimingContractLegacyWithoutRuntimePreservesLegacyBehavior(t *testing.T)
 			t.Fatal(err)
 		}
 		mock.ExpectQuery("SELECT status FROM exam_session_runtimes").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
-		timing, status, err := deliverySvc(db).loadTiming(context.Background(), "schedule", provider, time.Now())
+		timing, status, room, err := deliverySvc(db).loadTiming(context.Background(), "schedule", provider, time.Now())
 		if err != nil || status != "live" || timing.Authority != "legacy_attempt" || timing.TimingModel != "legacy_section_v1" || timing.StageStatus != "live" {
 			t.Fatalf("unexpected legacy projection for %s: %+v %s %v", provider, timing, status, err)
+		}
+		if room != nil {
+			t.Fatalf("legacy projection for %s must carry no runtime sections: %+v", provider, room)
 		}
 		if timing.StageKey != nil || timing.DeadlineAt != nil {
 			t.Fatalf("legacy projection for %s must carry no cohort clock: %+v", provider, timing)
@@ -139,7 +147,7 @@ func TestTimingContractPreStartAgreesWithProctorProjection(t *testing.T) {
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
 
 	ctx := context.Background()
-	timing, runtimeStatus, err := deliverySvc(db).loadTiming(ctx, "schedule", "sat", time.Now())
+	timing, runtimeStatus, _, err := deliverySvc(db).loadTiming(ctx, "schedule", "sat", time.Now())
 	if err != nil {
 		t.Fatalf("loadTiming failed: %v", err)
 	}

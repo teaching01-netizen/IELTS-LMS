@@ -129,6 +129,26 @@ func TestEnsureWritableBetweenSections(t *testing.T) {
 	}
 }
 
+func TestEnsureWritableAllowsOnlyClosingGraceAfterBreakIsPublished(t *testing.T) {
+	now := time.Now().UTC()
+	graceUntil := now.Add(30 * time.Second)
+	a, g := openAttempt(), liveGate(now)
+	a.ClosingGraceUntil = &graceUntil
+	g.WaitingForNextSection = true
+	g.SectionLive = false
+
+	if err := ensureWritable(a, g, now); err != nil {
+		t.Fatalf("a write inside the response grace must remain writable: %v", err)
+	}
+
+	afterGrace := graceUntil.Add(time.Nanosecond)
+	err := ensureWritable(a, g, afterGrace)
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.Code != apperrors.CodeAttemptNotWritable || appErr.Message != "Exam runtime is waiting." {
+		t.Fatalf("after grace want waiting rejection, got %v", err)
+	}
+}
+
 // The section verdicts carry distinct messages, so a client can tell "the
 // proctor paused your section" from "your section has not opened yet".
 func TestEnsureWritableSectionMessages(t *testing.T) {

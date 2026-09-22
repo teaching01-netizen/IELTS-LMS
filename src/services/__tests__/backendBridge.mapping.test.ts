@@ -103,6 +103,8 @@ describe('backendBridge contract mappings', () => {
         examId: 'exam-1',
         providerKey: 'sat',
         status: 'live',
+        nextSectionStartAt: '2026-01-01T09:15:00.000Z',
+        examPlan: [],
         currentSectionRemainingSeconds: 1800,
         waitingForNextSection: false,
         isOverrun: false,
@@ -132,6 +134,43 @@ describe('backendBridge contract mappings', () => {
 
     expect(mapped.providerKey).toBe('sat');
     expect(mapped.sections[0]?.order).toBe(2);
+    expect(mapped.nextSectionStartAt).toBe('2026-01-01T09:15:00.000Z');
+    expect(mapped.examPlan).toBeNull();
+  });
+
+  it('preserves an omitted next-section instant as omitted and an explicit null as authoritative', () => {
+    const base = {
+      id: 'runtime-1',
+      scheduleId: 'sched-1',
+      examId: 'exam-1',
+      providerKey: 'sat' as const,
+      status: 'live' as const,
+      currentSectionRemainingSeconds: 1800,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      createdAt: '2026-01-01T09:00:00.000Z',
+      updatedAt: '2026-01-01T09:10:00.000Z',
+      sections: [],
+    };
+    const omitted = mapBackendRuntime(base, {
+      providerKey: 'sat',
+      examTitle: 'Exam',
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+    });
+    const ended = mapBackendRuntime(
+      { ...base, nextSectionStartAt: null },
+      {
+        providerKey: 'sat',
+        examTitle: 'Exam',
+        cohortName: 'Cohort A',
+        deliveryMode: 'proctor_start',
+      },
+    );
+
+    expect(omitted.nextSectionStartAt).toBeUndefined();
+    expect(ended.nextSectionStartAt).toBeNull();
   });
 
   it('throws when backend envelope is successful but missing data', async () => {

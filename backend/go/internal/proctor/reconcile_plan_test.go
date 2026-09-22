@@ -57,13 +57,13 @@ func TestPlanSectionAdvance(t *testing.T) {
 		wantComplete *time.Time
 	}{
 		{
-			name:         "after the five-second closing grace the section moves",
+			name:         "at the deadline the section advances without waiting for response grace",
 			runtime:      reconcileRuntime{activeSectionKey: ptr("reading-writing")},
 			sections:     []runtimeSection{rw, math},
 			autoSubmit:   true,
-			asOf:         deadline.Add(6 * time.Second),
+			asOf:         deadline,
 			wantKinds:    []advanceStepKind{stepCompleteSection, stepStartSection},
-			wantStartAt:  ptrTime(deadline.Add(6 * time.Second)),
+			wantStartAt:  ptrTime(deadline),
 			wantComplete: ptrTime(deadline),
 		},
 		{

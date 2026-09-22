@@ -1,0 +1,258 @@
+/*
+ * Selection Engine v2 — the surface a student touches.
+ *
+ * Materials, not decorations: translucency, one hairline edge and a soft
+ * elevation, so the contextual chrome reads as something temporarily attached to
+ * the text rather than a panel of the page. Everything here is a token so a
+ * product can retheme the ink without reimplementing the interaction.
+ */
+
+.selection-v2 {
+  --selection-fill: rgba(0, 122, 255, 0.22);
+  --selection-accent: rgb(0, 122, 255);
+  /* A hairline that reads on a page, not a highlight: the lens sits on white
+     prose, where a translucent WHITE edge is no edge at all. */
+  --selection-material-edge: rgba(15, 23, 42, 0.16);
+  --selection-material-shadow: rgba(15, 23, 42, 0.28);
+  /* Softer than the chrome's: the lens is an instrument held over the words, not
+     a card resting on them. */
+  --selection-loupe-shadow: rgba(15, 23, 42, 0.2);
+  --selection-target: 44px;
+}
+
+/* ---------------------------------------------------------------- lines --- */
+
+.selection-v2-highlight {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+}
+
+.selection-v2-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 2px;
+  background-color: var(--selection-fill);
+  /* Transform-only movement: the geometry pass writes a transform per frame,
+     never a left/top pair that would invalidate layout under the finger. */
+  will-change: transform;
+}
+
+/* -------------------------------------------------------------- handles --- */
+
+.selection-v2-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: var(--selection-target);
+  height: var(--selection-target);
+  padding: 0;
+  border: 0;
+  background: none;
+  /* The dot is small; the target is not. A student never has to hit 10px. */
+  pointer-events: auto;
+  touch-action: none;
+  will-change: transform;
+}
+
+.selection-v2-grip {
+  position: relative;
+  display: block;
+  width: 12px;
+  height: 26px;
+}
+
+/* The grip's TICK: the wrapper that swells and springs back when the resolved
+   caret crosses into a new character boundary (see `useCaretSnapMotion`).
+
+   It is a SEPARATE element on purpose, and it is the only shape that makes all
+   three rules hold at once: the grip's own settle animation stays exactly where
+   it is (it still carries `initial`/`animate` itself), the 44px target above is
+   never transformed (a control that eases toward its endpoint is a control the
+   finger misses), and scaling this wrapper scales the grip AND its pseudo-element
+   stem and dot with it, because they are laid out inside it. Sized to its content
+   by the handle's `place-items: center`, so its box is the grip's box and its
+   origin is the grip's centre. */
+.selection-v2-grip-tick {
+  display: block;
+}
+
+.selection-v2-grip::before {
+  /* The stem, pointing back at the text it belongs to. */
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 2px;
+  height: 18px;
+  transform: translateX(-1px);
+  border-radius: 1px;
+  background-color: var(--selection-accent);
+}
+
+.selection-v2-grip::after {
+  position: absolute;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  content: '';
+  border-radius: 9999px;
+  background-color: var(--selection-accent);
+  box-shadow: 0 1px 3px var(--selection-material-shadow);
+}
+
+.selection-v2-handle[data-stem='up'] .selection-v2-grip::before {
+  top: 8px;
+}
+
+.selection-v2-handle[data-stem='up'] .selection-v2-grip::after {
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.selection-v2-handle[data-stem='down'] .selection-v2-grip::before {
+  top: 0;
+}
+
+.selection-v2-handle[data-stem='down'] .selection-v2-grip::after {
+  bottom: 0;
+  transform: translateX(-50%);
+}
+
+.selection-v2-handle:focus-visible {
+  outline: 2px solid var(--selection-accent);
+  outline-offset: 2px;
+  border-radius: 9999px;
+}
+
+/* ---------------------------------------------------------------- loupe --- */
+
+/* The positioning box. Its size and inline transform are the geometry the
+   engine and the tests rely on, so nothing here animates: no transition, no
+   keyframes, no spring. */
+.selection-v2-loupe {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* The material, and the only part that moves (its entrance). It fills the box
+   above, so the magnifier can scale in without its measured box changing on any
+   frame. */
+.selection-v2-loupe-frame {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 9999px;
+  border: 1px solid var(--selection-material-edge);
+  /* The document's own backdrop, written inline when it is known; white is the
+     answer for prose on a page, where no ancestor declares one. */
+  background-color: #fff;
+  box-shadow:
+    0 8px 24px var(--selection-loupe-shadow),
+    0 1px 4px var(--selection-loupe-shadow);
+  /* Grew out of the finger: the frame scales about its own centre. */
+  transform-origin: 50% 50%;
+}
+
+/* The picture. Its width is the document's own width, written inline, and its
+   transform is the one thing that changes while the finger moves — so nothing
+   here may influence layout: no padding, no border, no `contain`, nothing that
+   would make this second layout of the prose disagree with the first. */
+.selection-v2-loupe-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+/* The index: the exact column under the finger, at the centre of the lens. Two
+   pixels, unscaled (it is in the frame, not in the picture), and lifted off the
+   prose with a white ring so it reads over any ink it crosses. */
+.selection-v2-loupe-marker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 22px;
+  /* Centred on that column both ways — by MARGIN rather than by `transform`,
+     because `transform` is now the tick's (see `useCaretSnapMotion`) and an
+     inline transform would silently delete a `translate()` living here. The two
+     margins do exactly what the old half-shifts did: `top`/`left` put the mark's
+     own corner at the middle of the lens, and without the vertical shift the tick
+     hangs BELOW the point it is indexing — a column mark that points at the next
+     line down is worse than no mark at all. */
+  margin-left: -1px;
+  margin-top: -11px;
+  border-radius: 1px;
+  background-color: var(--selection-accent);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+
+/* -------------------------------------------------------- floating layer --- */
+
+.selection-v2-layer {
+  position: fixed;
+  inset: 0;
+  /*
+   * The layer is the viewport, and it does not clip. Both halves have to be said
+   * out loud, because the popover the adapter prefers arrives with the platform's
+   * own box: `width/height: fit-content`, `margin: auto`, `overflow: auto`, plus a
+   * UA border, padding and Canvas background. Every child here is absolutely
+   * positioned, so `fit-content` resolves to 0 and the layer collapses to a 0×0
+   * scroll container at the origin — the lines still painted (they are composited
+   * by `will-change`), while the handles, whose box never leaves it, were clipped
+   * out of both paint and hit testing. A student then touched the handle's own
+   * rectangle, hit the prose instead, and lost the selection.
+   */
+  width: auto;
+  height: auto;
+  margin: 0;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  /* Nothing here is a target except the controls that opt back in. */
+  pointer-events: none;
+}
+
+/*
+ * There is deliberately no menu material here. The contextual menu's surface
+ * belongs to the product that raises it — SAT's toolbar is dressed by
+ * `--sat-*` tokens and its own classes — and this file styles only what the
+ * ENGINE draws: the selected lines, the handles, the magnifier. The menu
+ * component owns the grammar (role, keyboard walk, dismissal, and the geometry
+ * the rule decided); the product owns the material.
+ */
+
+/*
+ * The overlay's entrances are JS-driven (see `useSelectionMotion`), which is why
+ * the app's `MotionConfig reducedMotion="user"` and this policy — not a CSS
+ * block — are what a reduced-motion student is served. What is left to guard
+ * here is the CSS half of the same promise: a platform that asks for less motion
+ * never gets a decorative animation from this file either.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .selection-v2 *,
+  .selection-v2 *::before,
+  .selection-v2 *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .selection-v2 {
+    --selection-fill: rgba(0, 90, 200, 0.42);
+    --selection-material-edge: rgba(0, 0, 0, 0.5);
+  }
+}

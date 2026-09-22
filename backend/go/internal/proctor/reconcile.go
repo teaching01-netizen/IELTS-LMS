@@ -12,18 +12,18 @@ import (
 	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
-// sectionClosingGrace is the extra time a section stays writable after its
-// planned deadline. It is the same five seconds the V2 write gate uses
-// (closing_grace_until / SyncV2TimingInTx), so the worker advances exactly
-// when the gate closes.
-const sectionClosingGrace = examruntime.SectionClosingGrace
+// sectionClosingGrace is the response-durability window that remains available
+// to writes already in flight when the shared section boundary is published.
+// The runtime itself advances at the authored deadline; this grace is no longer
+// used to delay the student break.
+const sectionClosingGrace = 30 * time.Second
 
 // autoSubmitExpr is the authored auto-submit flag. It is written once and
 // interpolated into the candidate scan so the three predicates cannot drift.
 const autoSubmitExpr = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(v.config_snapshot, '$.progression.autoSubmit')), 'true')"
 
 // AutoAdvanceOutcome identifies one schedule whose authoritative runtime
-// moved because its active section passed the server-side closing grace.
+// moved because its active section reached the server-side deadline.
 type AutoAdvanceOutcome struct {
 	ScheduleID      string
 	RuntimeRevision int64
@@ -64,9 +64,9 @@ type sectionReconcileCandidate struct {
 	autoSubmit bool
 }
 
-// ReconcileExpiredSections advances live runtime sections whose database-clock
-// deadline plus the closing grace has elapsed, honours the authored
-// between-section gap, and flags sections that ran past their window without
+// ReconcileExpiredSections advances live runtime sections at their database-clock
+// deadline, honours the authored between-section gap, and flags sections that ran
+// past their window without
 // being advanced (auto-submit disabled, or paused). Each schedule is
 // reconciled in its own transaction so one slow or contended cohort does not
 // hold the candidate scan open. The lock order remains
@@ -95,14 +95,15 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 			WHERE r.status = 'live'
 			  AND r.active_section_key IS NOT NULL
 			  AND (
-					-- A live section past its deadline + closing grace: advance.
+					-- A live section at its deadline: advance immediately so the
+					-- authored break starts at the shared boundary.
 					(
 					  rs.status = 'live'
 					  AND rs.actual_start_at IS NOT NULL
 					  AND `+autoSubmitExpr+` = 'true'
 					  AND ? >= DATE_ADD(
 							rs.actual_start_at,
-							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + `+graceSeconds+`) SECOND
+							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds) SECOND
 						  )
 					)
 					-- Between sections: the authored gap has elapsed, start the next.
@@ -253,7 +254,7 @@ type advancePlan struct {
 
 // planSectionAdvance is the cohort section state machine:
 //
-//	live(N) --deadline(N)+grace--> completed(N), waiting = true
+//	live(N) --deadline(N)--> completed(N), waiting = true
 //	        --end(N)+gap(N->N+1)--> live(N+1), waiting = false
 //
 // One plan may catch up through several expired sections after a worker
@@ -300,16 +301,20 @@ func planSectionAdvance(runtime reconcileRuntime, locked []runtimeSection, autoS
 				return plan
 			}
 			deadline := active.deadline()
-			if asOf.Before(deadline.Add(sectionClosingGrace)) {
-				return plan
-			}
 			if !autoSubmit || active.pausedAt != nil {
 				// Auto-advance is disabled, or the clock is frozen: the section
-				// stays live past its window, which is what the proctor needs
-				// to see. Flag it once rather than every sweep.
+				// stays live past its window. Preserve the response grace before
+				// flagging the overrun so proctors still see the same durability
+				// window.
+				if asOf.Before(deadline.Add(sectionClosingGrace)) {
+					return plan
+				}
 				if !overrun {
 					plan.steps = append(plan.steps, advanceStep{kind: stepFlagOverrun})
 				}
+				return plan
+			}
+			if asOf.Before(deadline) {
 				return plan
 			}
 			effectiveAt := deadline

@@ -204,12 +204,35 @@
   color: var(--sat-staff-text-primary, #18181b);
 }
 
+/* The room's current stage in the run sheet's own words: `Section 1 ·
+   Module 2 — Lower · module clock 12:34`. The module half is the slot the
+   cohort's clock has reached and the module clock is that row's own countdown,
+   so the header answers "section and module" without a trip to the table. */
+.sat-room__stage-slot {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--sat-staff-text-secondary, #515154);
+}
+
 .sat-room__stage-note {
   margin: 6px 0 0;
   max-width: 46ch;
   font-size: 13px;
   line-height: 1.5;
   color: var(--sat-staff-text-secondary, #515154);
+}
+
+/* Names the hero figure, which stays the room's SHARED section clock while the
+   module clock sits in the stage line above it. */
+.sat-room__stage-clock-caption {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
 }
 
 .sat-room__clock {
@@ -338,6 +361,17 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--sat-staff-text-secondary, #515154);
+}
+
+/* The room's shared section clock under the row's own module clock, so a
+   proctor can tell "this candidate's module ends in 4 minutes" apart from
+   "the section has 26 minutes left" at a glance. */
+.sat-room__row-sub {
+  margin: 2px 0 0;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
 }
 
 @media (prefers-reduced-motion: reduce) {

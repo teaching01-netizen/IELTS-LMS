@@ -41,7 +41,7 @@ func TestModuleTimingGateRejectsWhenInTxTimePassedDeadline(t *testing.T) {
 			AddRow("cohort_stage_v2", "math:m1"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s")).
 		WithArgs("mod-1").
-		WillReturnRows(sqlmock.NewRows([]string{"section_key", "adaptive_role"}).AddRow("math", "base"))
+		WillReturnRows(sqlmock.NewRows([]string{"section_key", "adaptive_role", "duration_seconds"}).AddRow("math", "base", 2100))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r")).
 		WithArgs("sched-1", "math:m1").
 		WillReturnRows(sqlmock.NewRows([]string{"status", "actual_start_at", "paused_at", "planned_duration_minutes", "extension_minutes", "accumulated_paused_seconds"}).
@@ -51,7 +51,7 @@ func TestModuleTimingGateRejectsWhenInTxTimePassedDeadline(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(deadline.Add(time.Second)))
 	mock.ExpectRollback()
 
-	gate, gateNow, err := svc.moduleTimingGateTx(context.Background(), tx, "sched-1", "mod-1")
+	gated, err := svc.moduleTimingGateTx(context.Background(), tx, "sched-1", "mod-1")
 	_ = tx.Rollback()
 	if deliveryCodeOf(err) != apperrors.CodeAssessmentConflict {
 		t.Fatalf("post-lock deadline must reject with ASSESSMENT_CONFLICT, got %v", err)
@@ -59,8 +59,8 @@ func TestModuleTimingGateRejectsWhenInTxTimePassedDeadline(t *testing.T) {
 	if appErr, ok := apperrors.As(err); !ok || appErr.Details["reason"] != "DEADLINE_EXPIRED" {
 		t.Fatalf("expected reason DEADLINE_EXPIRED, got %v", err)
 	}
-	if gate != timingGate(0) || !gateNow.IsZero() {
-		t.Fatalf("rejected gate must return zero values, got gate=%v now=%v", gate, gateNow)
+	if gated.gate != timingGate(0) || !gated.now.IsZero() {
+		t.Fatalf("rejected gate must return zero values, got gate=%v now=%v", gated.gate, gated.now)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestModuleTimingGateAdmitsWhenInTxTimeBeforeDeadline(t *testing.T) {
 			AddRow("cohort_stage_v2", "math:m1"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s")).
 		WithArgs("mod-1").
-		WillReturnRows(sqlmock.NewRows([]string{"section_key", "adaptive_role"}).AddRow("math", "base"))
+		WillReturnRows(sqlmock.NewRows([]string{"section_key", "adaptive_role", "duration_seconds"}).AddRow("math", "base", 2100))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r")).
 		WithArgs("sched-1", "math:m1").
 		WillReturnRows(sqlmock.NewRows([]string{"status", "actual_start_at", "paused_at", "planned_duration_minutes", "extension_minutes", "accumulated_paused_seconds"}).
@@ -100,15 +100,18 @@ func TestModuleTimingGateAdmitsWhenInTxTimeBeforeDeadline(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(inTx))
 	mock.ExpectCommit()
 
-	gate, gateNow, err := svc.moduleTimingGateTx(context.Background(), tx, "sched-1", "mod-1")
+	gated, err := svc.moduleTimingGateTx(context.Background(), tx, "sched-1", "mod-1")
 	if err != nil {
 		t.Fatalf("pre-deadline in-tx instant must admit, got %v", err)
 	}
-	if gate != timingGateCohortStage {
-		t.Fatalf("expected cohort-stage gate, got %v", gate)
+	if gated.gate != timingGateCohortStage {
+		t.Fatalf("expected cohort-stage gate, got %v", gated.gate)
 	}
-	if !gateNow.Equal(inTx.UTC()) {
-		t.Fatalf("gate must return the in-tx authoritative time: got %v want %v", gateNow, inTx.UTC())
+	if !gated.now.Equal(inTx.UTC()) {
+		t.Fatalf("gate must return the in-tx authoritative time: got %v want %v", gated.now, inTx.UTC())
+	}
+	if gated.roomWindowKnown {
+		t.Fatal("a stage-keyed cohort runtime has no shared module window to project")
 	}
 	_ = tx.Commit()
 	if err := mock.ExpectationsWereMet(); err != nil {

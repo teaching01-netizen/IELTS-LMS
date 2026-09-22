@@ -3,6 +3,7 @@ import { hasStructuredContent } from "../../../exam-authoring/api/renderingPubli
 import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import type { AssessmentDeliveryModule } from "../../contracts/assessmentDelivery";
 import { studentModuleTitle } from "../../application/satRuntimeSelectors";
+import type { SatModuleWindow } from "../../application/satTimingPolicy";
 import { canEnterModule } from "../../application/satEntry";
 import { SAT_COPY } from "../../domain/satCopy";
 import { SatCenterModal } from "../primitives/SatCenterModal";
@@ -22,6 +23,13 @@ export interface SatDirectionsScreenProps {
   // the student — a branch module waiting for a click — so the button must work.
   // Absent reads as true: the automatic path owns entry unless told otherwise.
   autoStartPending?: boolean | undefined;
+  // The window this module will actually give the candidate, already resolved by
+  // application policy (`satModuleWindow`): the server's clamp published before
+  // entry, or the authored length when the server published nothing. Null only
+  // while no module is pending — the route derives module and window from the
+  // same pending module, so they travel together — and this screen only formats
+  // what it is handed.
+  moduleWindow?: SatModuleWindow | null | undefined;
   error: string | null;
   onStart: () => void;
   onExit: () => void | Promise<void>;
@@ -30,6 +38,24 @@ export interface SatDirectionsScreenProps {
   secondaryActionLabel?: string | undefined;
   onSecondaryAction?: (() => void) | undefined;
   secondaryActionPending?: boolean | undefined;
+}
+
+/**
+ * How long the module they are about to open will last. Formatting only: which
+ * of the two claims applies is decided once, in
+ * application/satTimingPolicy.satModuleWindow, so the copy below cannot
+ * contradict the clock the student lands in. An authored length with a minute
+ * left is not "less than a minute left" — that language belongs to a granted
+ * window the room has nearly spent.
+ */
+function moduleTimingLine(questionCount: number, window: SatModuleWindow): string {
+  const questions = `${questionCount} questions`;
+  if (window.source === "authored") {
+    return `${Math.round(window.seconds / 60)} minutes · ${questions}`;
+  }
+  if (window.seconds <= 0) return `No time left in this module · ${questions}`;
+  if (window.seconds < 60) return `Less than a minute left in this module · ${questions}`;
+  return `${Math.floor(window.seconds / 60)} minutes left in this module · ${questions}`;
 }
 
 export function SatDirectionsScreen(props: SatDirectionsScreenProps) {
@@ -80,8 +106,8 @@ export function SatDirectionsScreen(props: SatDirectionsScreenProps) {
           {props.module ? studentModuleTitle(props.module) : "Next module"}
         </p>
         <p className="mt-5 sat-type-control-primary leading-7 text-[var(--sat-text-secondary)]">
-          {props.module
-            ? `${Math.round(props.module.durationSeconds / 60)} minutes · ${props.module.targetQuestionCount} questions`
+          {props.module && props.moduleWindow
+            ? moduleTimingLine(props.module.targetQuestionCount, props.moduleWindow)
             : "Preparing the next module."}
         </p>
 

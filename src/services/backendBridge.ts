@@ -6,6 +6,8 @@ import type {
   CohortControlEvent,
   ExamEntity,
   ExamEvent,
+  ExamPlanModule,
+  ExamPlanSection,
   ExamSchedule,
   ExamSessionRuntime,
   ExamVersion,
@@ -156,6 +158,22 @@ type BackendRuntimeSectionState = {
   projectedEndAt?: string | null | undefined;
 };
 
+type BackendExamPlanModule = {
+  moduleKey: string;
+  title: string;
+  adaptiveRole: ExamPlanModule["adaptiveRole"];
+  durationMinutes: number;
+};
+
+type BackendExamPlanSection = {
+  sectionKey: string;
+  label: string;
+  order: number;
+  durationMinutes: number;
+  gapAfterMinutes: number;
+  modules?: BackendExamPlanModule[] | null | undefined;
+};
+
 type BackendExamSessionRuntime = {
   id: string;
   scheduleId: string;
@@ -170,6 +188,7 @@ type BackendExamSessionRuntime = {
   currentSectionKey?: ModuleType | null | undefined;
   currentSectionRemainingSeconds: number;
   currentSectionDeadlineAt?: string | null | undefined;
+  nextSectionStartAt?: string | null | undefined;
   serverNow?: string | undefined;
   waitingForNextSection: boolean;
   isOverrun: boolean;
@@ -177,6 +196,7 @@ type BackendExamSessionRuntime = {
   createdAt: string;
   updatedAt: string;
   sections: BackendRuntimeSectionState[];
+  examPlan?: BackendExamPlanSection[] | null | undefined;
 };
 
 const revisionCachePolicy = { maxEntries: 500, ttlMs: 30 * 60 * 1000 };
@@ -596,6 +616,10 @@ export function mapBackendRuntime(
     currentSectionKey: payload.currentSectionKey ?? null,
     currentSectionRemainingSeconds: payload.currentSectionRemainingSeconds,
     currentSectionDeadlineAt: payload.currentSectionDeadlineAt ?? null,
+    // Preserve undefined versus null: undefined means an older/partial
+    // projection omitted the field, while null is the authoritative signal
+    // that the between-sections window has ended.
+    nextSectionStartAt: payload.nextSectionStartAt,
     serverNow: payload.serverNow ?? payload.updatedAt,
     waitingForNextSection: payload.waitingForNextSection,
     isOverrun: payload.isOverrun,
@@ -620,7 +644,35 @@ export function mapBackendRuntime(
     })),
     createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,
+    examPlan: mapBackendExamPlan(payload.examPlan),
   };
+}
+
+/**
+ * The authored run sheet is detail-read only: the summary and student reads
+ * omit it, so an absent or malformed field maps to null rather than an empty
+ * plan ("no plan to show" must never render as a plan of zero sections).
+ */
+function mapBackendExamPlan(
+  plan: BackendExamPlanSection[] | null | undefined
+): ExamPlanSection[] | null {
+  // Summary and WebSocket runtime DTOs serialize their detail-only plan as an
+  // empty array. Treat that as absent so a later summary cannot erase the plan
+  // already loaded by the proctor detail read.
+  if (!Array.isArray(plan) || plan.length === 0) return null;
+  return plan.map((section) => ({
+    sectionKey: section.sectionKey,
+    label: section.label,
+    order: section.order,
+    durationMinutes: section.durationMinutes,
+    gapAfterMinutes: section.gapAfterMinutes,
+    modules: (Array.isArray(section.modules) ? section.modules : []).map((module) => ({
+      moduleKey: module.moduleKey,
+      title: module.title,
+      adaptiveRole: module.adaptiveRole,
+      durationMinutes: module.durationMinutes,
+    })),
+  }));
 }
 
 export function mapBackendControlEvent(payload: {

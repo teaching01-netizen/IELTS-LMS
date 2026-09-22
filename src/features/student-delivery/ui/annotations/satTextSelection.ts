@@ -1,4 +1,4 @@
-import type { TextPoint } from '@shared/ui/touch-selection/touchSelectionPoint';
+import type { TextPoint } from '@shared/ui/selection-v2/domain/selectionTypes';
 import type { SatTextAnchor } from '../../domain/satResponses';
 
 export interface SatTextSelectionOptions {

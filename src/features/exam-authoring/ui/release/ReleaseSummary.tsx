@@ -89,7 +89,7 @@ export function ReleaseSummary({
             </div>
           ) : null}
           {dirtyCount > 0 ? (
-            <div role="status" className="mb-4 flex items-start gap-2 rounded-xl bg-amber-100 p-3 text-xs leading-5 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <div role="status" className="mb-4 flex items-start gap-2 rounded-xl bg-amber-100 p-3 text-xs leading-5 text-amber-800">
               <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
               Save all delivery changes before publishing.
             </div>

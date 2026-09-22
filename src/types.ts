@@ -1,4 +1,4 @@
-import type { ExamStatus, RuntimeStatus, SectionRuntimeStatus } from './types/domain';
+import type { ExamStatus, RuntimeStatus, SatAdaptiveRole, SectionRuntimeStatus } from './types/domain';
 import type { StudentAnswerValue } from './types/answers';
 
 export type ExamType = 'Academic' | 'General Training' | 'ACT';
@@ -795,6 +795,16 @@ export interface StudentSession {
   runtimeTimeRemainingSeconds?: number | undefined;
   runtimeDeadlineAt?: string | null | undefined;
   runtimeServerNow?: string | null | undefined;
+  /**
+   * The SAT module the candidate is sitting, as their own module clock. The
+   * staff room labels it `Module 1` / `Module 2 — Lower` and counts it down
+   * beside the shared section clock, because a candidate's module can end
+   * before its section does and a late entry is given what the room has left of
+   * the module rather than a fresh window of their own.
+   */
+  runtimeModuleRole?: SatAdaptiveRole | null | undefined;
+  runtimeModuleDeadlineAt?: string | null | undefined;
+  runtimeModuleRemainingSeconds?: number | null | undefined;
   runtimeSectionStatus?: SectionRuntimeStatus | undefined;
   runtimeWaiting?: boolean | undefined;
   violations: Violation[];

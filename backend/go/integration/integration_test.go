@@ -8,14 +8,22 @@ import (
 	"os"
 	"testing"
 
+	platformdb "example.com/ielts-proctoring/internal/platform/db"
 	_ "github.com/go-sql-driver/mysql"
 )
 
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dsn := os.Getenv("TEST_MYSQL_DSN")
-	if dsn == "" {
+	raw := os.Getenv("TEST_MYSQL_DSN")
+	if raw == "" {
 		t.Skip("TEST_MYSQL_DSN not set; integration suite requires real MySQL/TiDB")
+	}
+	// Same session discipline as the application pool: without it a fixture
+	// connection on the host's SYSTEM zone and the app's UTC read path render
+	// the same TIMESTAMP column hours apart, so backdated clock fixtures flake.
+	dsn, err := platformdb.NormalizeDSN(raw)
+	if err != nil {
+		t.Fatalf("normalize TEST_MYSQL_DSN: %v", err)
 	}
 	pool, err := sql.Open("mysql", dsn)
 	if err != nil {

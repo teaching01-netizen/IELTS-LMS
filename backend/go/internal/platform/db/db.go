@@ -69,6 +69,18 @@ func OpenRole(cfg config.Config, role Role) (*sql.DB, error) {
 	return pool, nil
 }
 
+// NormalizeDSN applies the application's session discipline to a raw DSN so
+// any pool opened with sql.Open agrees with the app's rendering of the same
+// instant (loc=UTC + time_zone='+00:00' on every connection). Test harnesses
+// that write clock fixtures need this: the schedule/runtime clock columns are
+// MySQL TIMESTAMP, whose rendering depends on the session zone, so a pool left
+// on the host's SYSTEM zone reads back an instant offset by the host offset -
+// which turns a backdated fixture into a flaky comparison instead of a finding
+// about the service under test.
+func NormalizeDSN(raw string) (string, error) {
+	return normalizeMySQLDSN(raw)
+}
+
 // ReportPoolStats maps one database/sql snapshot to the pool gauges with
 // a role label (plan E3 dashboards + §7 baseline item 4: pool waits split
 // API/worker). Callers pass pool.Stats() — zero new deps. Role values are

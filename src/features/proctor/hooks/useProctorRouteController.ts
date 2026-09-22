@@ -20,6 +20,7 @@ import type {
 import type { ExamSchedule, ExamSessionRuntime } from "../../../types/domain";
 import type { ProctorPresence } from "../../../types/domain";
 import type { ProctorScheduleMetrics } from "../contracts";
+import { mergeProctorRuntime } from "../domain/mergeProctorRuntime";
 
 function mapBackendSessionSummary(payload: {
   attemptId: string;
@@ -35,6 +36,9 @@ function mapBackendSessionSummary(payload: {
   runtimeTimeRemainingSeconds: number;
   runtimeDeadlineAt?: string | null | undefined;
   runtimeServerNow?: string | null | undefined;
+  runtimeModuleRole?: StudentSession["runtimeModuleRole"] | null | undefined;
+  runtimeModuleDeadlineAt?: string | null | undefined;
+  runtimeModuleRemainingSeconds?: number | null | undefined;
   runtimeSectionStatus?: StudentSession["runtimeSectionStatus"] | null | undefined;
   runtimeWaiting: boolean;
   violations: StudentSession["violations"];
@@ -59,6 +63,9 @@ function mapBackendSessionSummary(payload: {
     runtimeTimeRemainingSeconds: payload.runtimeTimeRemainingSeconds,
     runtimeDeadlineAt: payload.runtimeDeadlineAt ?? null,
     runtimeServerNow: payload.runtimeServerNow ?? null,
+    runtimeModuleRole: payload.runtimeModuleRole ?? null,
+    runtimeModuleDeadlineAt: payload.runtimeModuleDeadlineAt ?? null,
+    runtimeModuleRemainingSeconds: payload.runtimeModuleRemainingSeconds ?? null,
     runtimeSectionStatus: payload.runtimeSectionStatus ?? undefined,
     runtimeWaiting: payload.runtimeWaiting,
     violations: payload.violations ?? [],
@@ -363,12 +370,6 @@ export function useProctorRouteController(
       setDetailPollIntervalMs(degradedMode ? 8_000 : 15_000);
       setScheduleMetrics(metrics);
       setSchedules(filteredSummaries.map((summary) => proctorFacade.mapSchedule(summary.schedule)));
-      setRuntimeSnapshots(
-        filteredSummaries.map((summary) =>
-          proctorFacade.mapRuntime(summary.runtime, proctorFacade.mapSchedule(summary.schedule))
-        )
-      );
-
       for (const detail of filteredDetails) {
         const scheduleId = detail.schedule.id;
         scheduleStudentIdsRef.current.set(
@@ -378,37 +379,34 @@ export function useProctorRouteController(
       }
 
       setRuntimeSnapshots((current) => {
-        const bySchedule = new Map(current.map((runtime) => [runtime.scheduleId, runtime]));
+        // Summary refreshes omit the detail-only exam plan. Merge them into the
+        // existing runtime instead of replacing it, so a poll that arrives
+        // before its detail query cannot erase the run sheet.
+        const bySchedule = new Map(
+          filteredSummaries.map((summary) => {
+            const schedule = proctorFacade.mapSchedule(summary.schedule);
+            const mapped = proctorFacade.mapRuntime(summary.runtime, schedule);
+            return [
+              schedule.id,
+              mergeProctorRuntime(
+                current.find((runtime) => runtime.scheduleId === schedule.id),
+                mapped,
+              ),
+            ] as const;
+          }),
+        );
         for (const detail of filteredDetails) {
           const schedule = proctorFacade.mapSchedule(detail.schedule);
           const mapped = proctorFacade.mapRuntime(detail.runtime, schedule);
           const existing = bySchedule.get(detail.schedule.id);
-          // Revision guard + presence merge: never regress a newer WS
-          // snapshot, and union presence lists by proctorId (newest
-          // heartbeat wins) so poll/WS races keep every proctor visible.
-          if (existing && (mapped.revision ?? -1) <= (existing.revision ?? -1)) {
-            const mergedPresence = new Map(
-              [
-                ...(existing.proctorPresence ?? []),
-                ...(detail.presence ?? []).map(mapBackendProctorPresence),
-              ].map((entry) => [entry.proctorId, entry])
-            );
-            bySchedule.set(detail.schedule.id, {
-              ...existing,
-              proctorPresence: [...mergedPresence.values()],
-            });
-            continue;
-          }
-          const mergedPresence = new Map(
-            [
-              ...(existing?.proctorPresence ?? []),
-              ...(detail.presence ?? []).map(mapBackendProctorPresence),
-            ].map((entry) => [entry.proctorId, entry])
+          bySchedule.set(
+            detail.schedule.id,
+            mergeProctorRuntime(
+              existing,
+              mapped,
+              (detail.presence ?? []).map(mapBackendProctorPresence),
+            ),
           );
-          bySchedule.set(detail.schedule.id, {
-            ...mapped,
-            proctorPresence: [...mergedPresence.values()],
-          });
         }
         return [...bySchedule.values()];
       });
@@ -571,10 +569,7 @@ export function useProctorRouteController(
           if (existing && incomingRevision <= existingRevision) return current;
           return [
             ...current.filter((runtime) => runtime.scheduleId !== scheduleId),
-            {
-              ...mapped,
-              proctorPresence: existing?.proctorPresence ?? [],
-            },
+            mergeProctorRuntime(existing, mapped),
           ];
         });
       } catch {

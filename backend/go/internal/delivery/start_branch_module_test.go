@@ -30,15 +30,16 @@ import (
 func deliveryCohortRuntimeAndModule(
 	mock sqlmock.Sqlmock,
 	activeSection, moduleSectionKey, adaptiveRole string,
+	authoredSeconds int,
 ) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key"}).
 			AddRow("cohort_section_v3", activeSection))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT s.section_key, m.adaptive_role FROM assessment_modules m JOIN assessment_sections s")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT s.section_key, m.adaptive_role, m.duration_seconds FROM assessment_modules m JOIN assessment_sections s")).
 		WithArgs("mod-1").
-		WillReturnRows(sqlmock.NewRows([]string{"section_key", "adaptive_role"}).
-			AddRow(moduleSectionKey, adaptiveRole))
+		WillReturnRows(sqlmock.NewRows([]string{"section_key", "adaptive_role", "duration_seconds"}).
+			AddRow(moduleSectionKey, adaptiveRole, authoredSeconds))
 }
 
 // deliveryCohortSectionGate stages the rest of moduleTimingGateTx once the stage
@@ -69,13 +70,16 @@ func TestDeliveryStartBranchModuleUnderLiveCohortSection(t *testing.T) {
 	deliverySaveBegin(mock)
 	deliveryModuleWorkableTx(mock)
 	deliveryModuleRow(mock, "not_started", now)
-	deliveryCohortRuntimeAndModule(mock, "reading-writing", "reading-writing", "higher_branch")
+	deliveryCohortRuntimeAndModule(mock, "reading-writing", "reading-writing", "higher_branch", 1920)
 	deliveryCohortSectionGate(mock, "live", "reading-writing", now.Add(-time.Minute))
 	// The CAS is the assertion: sqlmock fails the test unless this statement was
 	// actually issued with the module row's id, i.e. the branch module passed the
-	// gate and transitioned not_started -> active.
+	// gate and transitioned not_started -> active. The window it is given is the
+	// room's (the section's own clock for the branch module); the exact arithmetic
+	// is pinned by the cohort module-window tests and by the unit tests over the
+	// pure rule.
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET phase = 'exam'")).
 		WithArgs("att-1").
@@ -117,7 +121,7 @@ func TestDeliveryStartBranchModuleRefusedWhenSectionNotActive(t *testing.T) {
 	deliveryModuleRow(mock, "not_started", now)
 	// The module belongs to reading-writing while math is the active stage: the
 	// gate refuses before it ever reads the section clock.
-	deliveryCohortRuntimeAndModule(mock, "math", "reading-writing", "lower_branch")
+	deliveryCohortRuntimeAndModule(mock, "math", "reading-writing", "lower_branch", 1920)
 	// No clock read, no CAS, no phase update, no events: the tx rolls back with
 	// the module still not_started.
 	mock.ExpectRollback()

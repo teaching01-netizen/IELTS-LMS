@@ -83,10 +83,11 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 		// SAT-006: the gate reads the authoritative DB time after the runtime
 		// and section rows are locked; that instant — not the pre-tx wall
 		// clock — judges both the cohort deadline and the personal window.
-		gate, gateNow, err := s.moduleTimingGateTx(ctx, t, scheduleID, module.moduleID)
+		gated, err := s.moduleTimingGateTx(ctx, t, scheduleID, module.moduleID)
 		if err != nil {
 			return err
 		}
+		gateNow := gated.now
 		if module.state == "active" && module.startedAt != nil {
 			rev, err := s.appendModuleEventsTx(ctx, t, scheduleID, bearerAttemptID, liveEventModuleStarted)
 			if err != nil {
@@ -98,12 +99,24 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 		if module.state != "not_started" {
 			return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module cannot be started in its current state.")
 		}
-		if gate.usesPersonalDeadline() && module.availableAt != nil && gateNow.Before(*module.availableAt) {
+		if gated.gate.usesPersonalDeadline() && module.availableAt != nil && gateNow.Before(*module.availableAt) {
 			return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module is not available until the scheduled break ends.")
 		}
+		// Room-anchored window (cohort_section_v3): the candidate's module clock is
+		// the clock the whole room is on. Module 1's window is the section's start
+		// plus its authored length and the branch module ends with the section, so
+		// a candidate who opens a module late gets what is LEFT of the room's
+		// window — never a fresh window measured from their own arrival. An
+		// already-elapsed window allocates zero: the module is over for the room,
+		// and the timeout path finalizes it into the adaptive successor rather
+		// than handing the late joiner time the room does not have.
+		allocatedSeconds := module.allocatedSeconds
+		if gated.roomWindowKnown {
+			allocatedSeconds = cohortModuleWindowSeconds(allocatedSeconds, gated.roomWindowEnd, gateNow)
+		}
 		res, err := t.ExecContext(ctx,
-			"UPDATE assessment_module_attempts SET state = 'active', available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'",
-			gateNow, gateNow, module.id)
+			"UPDATE assessment_module_attempts SET state = 'active', allocated_seconds = ?, available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'",
+			allocatedSeconds, gateNow, gateNow, module.id)
 		if err != nil {
 			return err
 		}
@@ -187,12 +200,12 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 		}
 		// SAT-006: deadline authority is the in-tx DB instant the gate returns,
 		// read after the runtime/module locks were acquired.
-		gate, gateNow, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID)
+		gated, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID)
 		if err != nil {
 			return err
 		}
-		if gate.usesPersonalDeadline() {
-			if err := ensureSaveModuleAdmitted(active, gateNow); err != nil {
+		if gated.gate.usesPersonalDeadline() {
+			if err := ensureSaveModuleAdmitted(active, gated.now); err != nil {
 				return err
 			}
 		}
@@ -393,10 +406,14 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
-	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, providerKey, now)
+	timing, runtimeStatus, roomSections, err := s.loadTiming(ctx, scheduleID, providerKey, now)
 	if err != nil {
 		return nil, err
 	}
+	// Write-then-read: this response is built after the write committed, so the
+	// entry windows it publishes already reflect it (a module that just started
+	// carries its own window, and nothing else is promised).
+	publishEntryWindows(moduleAttempts, sections, timing, roomSections, now)
 	return &Bootstrap{
 		ScheduleID:            scheduleID,
 		ExamID:                examID,

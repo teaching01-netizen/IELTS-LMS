@@ -39,6 +39,13 @@ describe("satCopy controlled vocabulary", () => {
     expect(SAT_COPY.displaySettings.reset).toBe("Reset display settings");
   });
 
+  it("names the fit for its outcome, never for a direction", () => {
+    // The exam may already be showing 75%, so "zoom out" would describe a
+    // direction the control does not always take; the student gets a view that
+    // stops scrolling either way.
+    expect(SAT_COPY.displaySettings.fitToScreen).toBe("Fit to screen");
+  });
+
   it("keeps ONE note concept, with no Save button to contradict autosave", () => {
     expect(SAT_COPY.notes.title).toBe("Notes");
     expect(SAT_COPY.notes.unavailableInMath).toContain("Math");

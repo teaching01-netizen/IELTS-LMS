@@ -568,6 +568,11 @@ func exactReplay(ctx context.Context, q tx.Tx, io saveIO, cmd SaveResponsesComma
 
 // ensureWritable enforces terminal/pause/deadline/grace/proctor gates.
 func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
+	// The runtime publishes the shared break at the section deadline, while an
+	// already-open response writer keeps the existing 30-second durability
+	// window. This keeps the student clock and the response-save guarantee from
+	// being coupled to the reconciler's polling cadence.
+	closingGraceActive := a.ClosingGraceUntil != nil && !now.After(*a.ClosingGraceUntil)
 	switch a.DeliveryStatus {
 	case "submitted", "terminated", "locked", "cancelled":
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Attempt is closed.", HTTPStatus: 422}
@@ -581,7 +586,7 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	if gate.Status != "" && gate.Status != "live" {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
 	}
-	if gate.WaitingForNextSection {
+	if gate.WaitingForNextSection && !closingGraceActive {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is waiting.", HTTPStatus: 422}
 	}
 	// Section liveness (audit finding 3). These flags used to be computed by both
@@ -595,7 +600,7 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	if gate.SectionPaused {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is paused.", HTTPStatus: 422}
 	}
-	if !gate.SectionLive {
+	if !gate.SectionLive && !closingGraceActive {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is not live.", HTTPStatus: 422}
 	}
 	if a.ClosingGraceUntil != nil && now.After(*a.ClosingGraceUntil) {

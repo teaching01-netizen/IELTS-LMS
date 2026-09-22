@@ -37,6 +37,23 @@ func planLinkScopeRows(mock sqlmock.Sqlmock, scheduleID string, scope any) {
 		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections"}).AddRow(scope))
 }
 
+// planModuleRows stages the version's authored module rows — (section_key,
+// adaptive_role, duration_seconds), exactly as the role-agnostic read returns
+// them: the runtime plan folds them through exams.AdaptiveRoleSeconds to derive
+// an adaptive section's candidate length (Module 1 plus the longer branch).
+// Staged separately from planSectionRows because the derivation is the point —
+// the stored section row may disagree. Non-adaptive roles are staged too and
+// must be ignored by the fold.
+func planModuleRows(mock sqlmock.Sqlmock, rows ...[]driver.Value) {
+	out := sqlmock.NewRows([]string{"section_key", "adaptive_role", "duration_seconds"})
+	for _, row := range rows {
+		out.AddRow(row...)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m")).
+		WithArgs("pv-1").
+		WillReturnRows(out)
+}
+
 // planSectionRows stages the version's authored section rows.
 func planSectionRows(mock sqlmock.Sqlmock, rows ...[]driver.Value) {
 	out := sqlmock.NewRows([]string{"section_key", "title", "display_order", "duration_seconds", "break_after_seconds"})
@@ -89,6 +106,7 @@ func TestRuntimePlanInNarrowsToLinkScope(t *testing.T) {
 	db, mock := testPlanQuerier(t)
 	planVersionRows(mock, "{}", "Academic")
 	planLinkScopeRows(mock, "sched-1", `["reading-writing"]`)
+	planModuleRows(mock)
 	planSectionRows(mock,
 		[]driver.Value{"reading-writing", "Reading and Writing", 0, 3840, 0},
 		[]driver.Value{"math", "Math", 1, 4200, 0})
@@ -111,6 +129,7 @@ func TestRuntimePlanInNarrowsToMathOnly(t *testing.T) {
 	db, mock := testPlanQuerier(t)
 	planVersionRows(mock, "{}", "Academic")
 	planLinkScopeRows(mock, "sched-1", `["math"]`)
+	planModuleRows(mock)
 	planSectionRows(mock,
 		[]driver.Value{"reading-writing", "Reading and Writing", 0, 3840, 0},
 		[]driver.Value{"math", "Math", 1, 4200, 0})
@@ -127,6 +146,7 @@ func TestRuntimePlanInUnscopedLinkKeepsEverySection(t *testing.T) {
 	db, mock := testPlanQuerier(t)
 	planVersionRows(mock, "{}", "Academic")
 	planLinkScopeRows(mock, "sched-1", nil)
+	planModuleRows(mock)
 	planSectionRows(mock,
 		[]driver.Value{"reading-writing", "Reading and Writing", 0, 3840, 0},
 		[]driver.Value{"math", "Math", 1, 4200, 0})
@@ -146,6 +166,7 @@ func TestRuntimePlanInWithoutLinkKeepsEverySection(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("enabled_sections FROM assessment_access_links WHERE schedule_id")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
+	planModuleRows(mock)
 	planSectionRows(mock,
 		[]driver.Value{"reading-writing", "Reading and Writing", 0, 3840, 0},
 		[]driver.Value{"math", "Math", 1, 4200, 0})
@@ -163,6 +184,7 @@ func TestRuntimePlanInFiltersConfigFallback(t *testing.T) {
 	db, mock := testPlanQuerier(t)
 	planVersionRows(mock, `{"sections":{"reading-writing":{"enabled":true,"order":0,"duration":64},"math":{"enabled":true,"order":1,"duration":70}}}`, "Academic")
 	planLinkScopeRows(mock, "sched-1", `["reading-writing"]`)
+	planModuleRows(mock)
 	planSectionRows(mock)
 
 	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
@@ -178,6 +200,7 @@ func TestRuntimePlanInFiltersHardcodedFallback(t *testing.T) {
 	db, mock := testPlanQuerier(t)
 	planVersionRows(mock, "", "Academic")
 	planLinkScopeRows(mock, "sched-1", `["math"]`)
+	planModuleRows(mock)
 	planSectionRows(mock)
 
 	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
@@ -193,6 +216,7 @@ func TestRuntimePlanInCannotWidenPastVersionConfig(t *testing.T) {
 	db, mock := testPlanQuerier(t)
 	planVersionRows(mock, `{"sections":{"reading-writing":{"enabled":true,"order":0,"duration":64},"math":{"enabled":false,"order":1,"duration":70}}}`, "Academic")
 	planLinkScopeRows(mock, "sched-1", `["reading-writing","math"]`)
+	planModuleRows(mock)
 	planSectionRows(mock)
 
 	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
@@ -208,6 +232,7 @@ func TestRuntimePlanInCannotWidenPastVersionConfig(t *testing.T) {
 func TestRuntimePlanInWithoutScheduleIDSkipsScopeRead(t *testing.T) {
 	db, mock := testPlanQuerier(t)
 	planVersionRows(mock, "{}", "Academic")
+	planModuleRows(mock)
 	planSectionRows(mock,
 		[]driver.Value{"reading-writing", "Reading and Writing", 0, 3840, 0},
 		[]driver.Value{"math", "Math", 1, 4200, 0})
@@ -217,6 +242,163 @@ func TestRuntimePlanInWithoutScheduleIDSkipsScopeRead(t *testing.T) {
 		t.Fatalf("runtimePlanIn must succeed: %v", err)
 	}
 	assertPlanKeys(t, plan, "reading-writing", "math")
+}
+
+// The stored section length can be the pre-CandidateSectionSeconds
+// overstatement (0065's Math 105 minutes, Reading & Writing 96). The runtime
+// clock is derived from the modules instead, so a stale row cannot put the
+// cohort on an extra branch-long wait after Module 2.
+func TestRuntimePlanInDerivesCandidateSectionLengthFromModules(t *testing.T) {
+	db, mock := testPlanQuerier(t)
+	planVersionRows(mock, "{}", "Academic")
+	planLinkScopeRows(mock, "sched-1", nil)
+	planModuleRows(mock,
+		[]driver.Value{"math", "base", 2100},
+		[]driver.Value{"math", "lower_branch", 2100},
+		[]driver.Value{"math", "higher_branch", 2100})
+	planSectionRows(mock, []driver.Value{"math", "Math", 0, 6300, 0})
+
+	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
+	if err != nil {
+		t.Fatalf("runtimePlanIn must succeed: %v", err)
+	}
+	if len(plan) != 1 {
+		t.Fatalf("expected one plan entry, got %+v", plan)
+	}
+	if plan[0].DurationMinutes != 70 {
+		t.Fatalf("a candidate sits Module 1 plus ONE branch: want 70 minutes, got %d (stored row said 105)", plan[0].DurationMinutes)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The branch a candidate sits is chosen by routing, so the section length is
+// base + the LONGER branch. Base 30 + higher 40 = 70 — not base*2 (60) and not
+// the sum of all three (95).
+func TestRuntimePlanInUsesTheLongerBranch(t *testing.T) {
+	db, mock := testPlanQuerier(t)
+	planVersionRows(mock, "{}", "Academic")
+	planLinkScopeRows(mock, "sched-1", nil)
+	planModuleRows(mock,
+		[]driver.Value{"math", "base", 1800},
+		[]driver.Value{"math", "lower_branch", 2100},
+		[]driver.Value{"math", "higher_branch", 2400})
+	planSectionRows(mock, []driver.Value{"math", "Math", 0, 5700, 0})
+
+	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
+	if err != nil {
+		t.Fatalf("runtimePlanIn must succeed: %v", err)
+	}
+	if plan[0].DurationMinutes != 70 {
+		t.Fatalf("want base 30 + higher 40 = 70 minutes, got %d", plan[0].DurationMinutes)
+	}
+}
+
+// The SQL this fold replaced compared adaptive_role under the column's
+// utf8mb4_0900_ai_ci collation, so a stored 'BASE' or 'Lower_Branch' matched
+// the adaptive vocabulary — and the schema's CHECK admits those variants (it
+// rejects padded roles, whose comparison is NO PAD). The Go fold must reproduce
+// that comparison, or the section silently keeps the authored row: 105 minutes
+// here, exactly the pre-candidate-length overstatement this derivation exists
+// to keep off the clock.
+func TestRuntimePlanInFoldsCaseVariantRolesLikeTheRemovedSQL(t *testing.T) {
+	db, mock := testPlanQuerier(t)
+	planVersionRows(mock, "{}", "Academic")
+	planLinkScopeRows(mock, "sched-1", nil)
+	planModuleRows(mock,
+		[]driver.Value{"math", "BASE", 2100},
+		[]driver.Value{"math", "Lower_Branch", 2400},
+		[]driver.Value{"math", "higher_branch", 1800})
+	planSectionRows(mock, []driver.Value{"math", "Math", 0, 6300, 0})
+
+	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
+	if err != nil {
+		t.Fatalf("runtimePlanIn must succeed: %v", err)
+	}
+	if plan[0].DurationMinutes != 75 {
+		t.Fatalf("case-variant roles must fold like the SQL collation: want 2100 + 2400 = 75 minutes, got %d (authored row said 105)", plan[0].DurationMinutes)
+	}
+}
+
+// A section with no adaptive roles (IELTS/ACT) has no candidate shape to
+// derive: its authored length stands.
+func TestRuntimePlanInKeepsAuthoredLengthWithoutAdaptiveRoles(t *testing.T) {
+	db, mock := testPlanQuerier(t)
+	planVersionRows(mock, "{}", "Academic")
+	planLinkScopeRows(mock, "sched-1", nil)
+	planModuleRows(mock)
+	planSectionRows(mock, []driver.Value{"reading-writing", "Reading and Writing", 0, 3600, 0})
+
+	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
+	if err != nil {
+		t.Fatalf("runtimePlanIn must succeed: %v", err)
+	}
+	if plan[0].DurationMinutes != 60 {
+		t.Fatalf("a non-adaptive section keeps its authored length: want 60, got %d", plan[0].DurationMinutes)
+	}
+}
+
+// An incomplete adaptive shape (no branch modules yet) cannot prove a candidate
+// length; the plan falls back to what the author sees rather than inventing one.
+func TestRuntimePlanInKeepsAuthoredLengthForIncompleteAdaptiveShape(t *testing.T) {
+	db, mock := testPlanQuerier(t)
+	planVersionRows(mock, "{}", "Academic")
+	planLinkScopeRows(mock, "sched-1", nil)
+	planModuleRows(mock, []driver.Value{"math", "base", 2100})
+	planSectionRows(mock, []driver.Value{"math", "Math", 0, 4200, 0})
+
+	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
+	if err != nil {
+		t.Fatalf("runtimePlanIn must succeed: %v", err)
+	}
+	if plan[0].DurationMinutes != 70 {
+		t.Fatalf("want the authored 70 minutes, got %d", plan[0].DurationMinutes)
+	}
+}
+
+// Duplicate role rows keep the largest value — the rule the SQL MAX(...) used
+// to own inside the query and exams.AdaptiveRoleSeconds now owns — so a stray
+// smaller authored row can never shorten a candidate's clock.
+func TestRuntimePlanInKeepsLargestDuplicateRoleSeconds(t *testing.T) {
+	db, mock := testPlanQuerier(t)
+	planVersionRows(mock, "{}", "Academic")
+	planLinkScopeRows(mock, "sched-1", nil)
+	planModuleRows(mock,
+		[]driver.Value{"math", "base", 1500},
+		[]driver.Value{"math", "base", 2100},
+		[]driver.Value{"math", "lower_branch", 1800})
+	planSectionRows(mock, []driver.Value{"math", "Math", 0, 6000, 0})
+
+	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
+	if err != nil {
+		t.Fatalf("runtimePlanIn must succeed: %v", err)
+	}
+	if plan[0].DurationMinutes != 65 {
+		t.Fatalf("want the larger duplicate base + lower branch = 65 minutes, got %d", plan[0].DurationMinutes)
+	}
+}
+
+// The fold ignores roles outside the adaptive vocabulary — 'none' is the only
+// non-adaptive value the schema's CHECK admits (an empty role is rejected with
+// Error 3819): it contributes nothing, so the authored section length stands.
+// The old SQL made the same choice with an IN (...) filter.
+func TestRuntimePlanInIgnoresUnknownModuleRoles(t *testing.T) {
+	db, mock := testPlanQuerier(t)
+	planVersionRows(mock, "{}", "Academic")
+	planLinkScopeRows(mock, "sched-1", nil)
+	planModuleRows(mock,
+		[]driver.Value{"reading-writing", "none", 3600},
+		[]driver.Value{"reading-writing", "none", 1800})
+	planSectionRows(mock, []driver.Value{"reading-writing", "Reading and Writing", 0, 3600, 0})
+
+	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
+	if err != nil {
+		t.Fatalf("runtimePlanIn must succeed: %v", err)
+	}
+	if plan[0].DurationMinutes != 60 {
+		t.Fatalf("unknown roles must not prove a candidate length: want the authored 60 minutes, got %d", plan[0].DurationMinutes)
+	}
 }
 
 // The stored scope parser fails open: NULL, empty, malformed, and unrecognized

@@ -8,8 +8,10 @@ import {
 } from "../../domain/satReadingPreferences";
 import {
   clearSatReadingPreferences,
+  hasSatExamZoomDecision,
   loadSatReadingPreferences,
   satReadingPreferencesKey,
+  saveSatExamZoomDecision,
   saveSatReadingPreferences,
 } from "../../infrastructure/satReadingPreferencesStore";
 
@@ -95,10 +97,16 @@ describe("SAT reading preferences", () => {
       ...createSatReadingPreferences(),
       lineSpacing: "relaxed",
     });
+    saveSatExamZoomDecision("schedule-1", "attempt-1");
+    saveSatExamZoomDecision("schedule-1", "attempt-2");
     clearSatReadingPreferences("schedule-1", "attempt-1");
     expect(
       window.localStorage.getItem(satReadingPreferencesKey("schedule-1", "attempt-1"))
     ).toBeNull();
+    // The attempt's zoom decision is attempt-scoped state too: it is cleared
+    // with its preferences, and only for that attempt.
+    expect(hasSatExamZoomDecision("schedule-1", "attempt-1")).toBe(false);
+    expect(hasSatExamZoomDecision("schedule-1", "attempt-2")).toBe(true);
     expect(loadSatReadingPreferences("schedule-1", "attempt-2").lineSpacing).toBe("relaxed");
 
     window.localStorage.setItem(satReadingPreferencesKey("schedule-1", "broken"), "{not json");
