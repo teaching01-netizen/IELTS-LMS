@@ -3,19 +3,22 @@ import { createSelectionSession, type SelectionSession } from '../engine/selecti
 import { followPointer, type PointerFollow } from '../engine/pointerCapture';
 import { createFrameScheduler, type FrameScheduler } from '../engine/selectionScheduler';
 import { createAutoScrollRunner, type AutoScrollRunner } from '../engine/selectionAutoScroll';
-import { createWordSegmentCache, defaultWordSegmenter } from '../domain/selectionSegmenter';
+import {
+  createWordSegmentCache,
+  defaultGraphemeSegmenter,
+  defaultWordSegmenter,
+} from '../domain/selectionSegmenter';
 import type { SelectionActivation, SelectionEffect } from '../domain/selectionMachine';
 import {
   IDLE_SELECTION,
   selectionMovesEndpoint,
   type CaretGeometry,
-  type SelectionEdge,
   type SelectionPointerState,
   type SelectionPresentation,
   type SelectionRect,
   type TextPoint,
 } from '../domain/selectionTypes';
-import { canAcquireSelectionHandle, caretGeometryFromTextPoint, handleAcquisitionFor } from '../engine/selectionGeometry';
+import { caretGeometryFromTextPoint } from '../engine/selectionGeometry';
 import { describeTouchSelectionNode, type TouchSelectionDiagnostics } from '../../touch-selection/touchSelectionDiagnostics';
 
 /**
@@ -180,8 +183,22 @@ export interface StudentSelectionGesture extends SelectionPresentation {
   pointer: SelectionPointerState | null;
   /** True while the finger is moving an endpoint of a resting selection. */
   adjusting: boolean;
-  /** Wire a handle's pointerdown to this to start adjusting that edge. */
-  beginHandleAdjustment: (edge: SelectionEdge, event: SelectionHandlePointerEvent) => void;
+  /**
+   * Report a press on a resting selection, and answer with what became of it.
+   *
+   * The press is reported as a coordinate and the element the finger landed on —
+   * nothing else. The endpoint it adjusts is the SESSION's decision, taken once,
+   * by measured geometry over both endpoints against the paint the session owns
+   * (`resolveHandleAcquisition`, called from `grab`) — not by the caller naming an
+   * edge, and not by which control the paint order happened to put under the
+   * finger.
+   *
+   * True when a drag BEGAN — the caller has authoritative knowledge that this
+   * press is the handle's, and no part of the page may also act on it. False when
+   * it acquired neither endpoint (the selection's own body, or outside it) and
+   * when the machine refused it: nothing started, and nothing was consumed.
+   */
+  beginHandleAdjustment: (event: SelectionHandlePointerEvent) => boolean;
   /** Dismiss the selection: a tap outside, Escape, or a completed action. */
   dismiss: () => void;
   /**
@@ -294,6 +311,10 @@ export function useStudentSelectionGesture(
   // drag republishes many times a second.
   const wordCache = useMemo(() => createWordSegmentCache(), []);
   const segmenter = useMemo(() => defaultWordSegmenter(), []);
+  // Built once beside the word segmenter, and for the same reason: a handle drag
+  // republishes many times a second, and the session's own memo is what makes
+  // each of those a lookup rather than a rescan of the node.
+  const graphemes = useMemo(() => defaultGraphemeSegmenter(), []);
   const session = useRef<SelectionSession | null>(null);
 
   /**
@@ -308,7 +329,7 @@ export function useStudentSelectionGesture(
    * The options it is created with are only the starting ones — every press
    * adopts the current activation and tolerance before it claims anything.
    */
-  const initialOptions = useRef({ activation, moveTolerancePx, segmenter, words: wordCache });
+  const initialOptions = useRef({ activation, moveTolerancePx, segmenter, words: wordCache, graphemes });
   const ensureSession = useCallback((): SelectionSession => {
     if (!session.current) {
       const first = initialOptions.current;
@@ -317,6 +338,7 @@ export function useStudentSelectionGesture(
         moveTolerancePx: first.moveTolerancePx,
         segmenter: first.segmenter,
         words: first.words,
+        graphemes: first.graphemes,
       });
     }
     return session.current;
@@ -408,6 +430,11 @@ export function useStudentSelectionGesture(
       rangeText: range?.toString().slice(0, 200) ?? '',
       rangeCollapsed: range?.collapsed ?? null,
       rangeRectCount: paint.rects.length,
+      // The granularity the span is spelled in travels with every published
+      // frame, beside the span itself: it is the session's state, and a trace that
+      // records what was selected without recording which of the two models
+      // produced it cannot answer the one question the distinction exists for.
+      granularity: active.granularity(),
     });
 
     anchor.current = paint.anchorRect;
@@ -820,29 +847,38 @@ export function useStudentSelectionGesture(
 
   currentHandlers.current = { move: handleMove, up: handleUp, cancel: handleCancel };
 
-  const beginHandleAdjustment = useCallback((edge: SelectionEdge, event: SelectionHandlePointerEvent) => {
-    if (!live.current.enabled) return;
-    // THE acquisition gate, at the gesture's entry rather than in whichever
-    // layer happens to render the handle (docs/selectionui.md #1). The rule is
-    // about what a press may BEGIN, so it is enforced where the grab happens:
-    // every caller — the handle's own pointerdown, a future wiring, a test —
-    // funnels through this one function and cannot bypass it. The overlay
-    // consults the same pure rule only to decide whether to CONSUME a
-    // non-acquiring press; refusal here is what makes the rule hold without
-    // that caller's cooperation. The geometry is the paint's own: the handles
-    // the student can see are exactly the ones this press must satisfy.
-    const { handle, line } = handleAcquisitionFor(presentation, edge);
-    if (!handle || !canAcquireSelectionHandle(handle, line, event.clientX, event.clientY)) return;
+  /**
+   * The gesture's ONE entry for a press on a resting selection
+   * (docs/selectionui.md #8).
+   *
+   * It reports the press to the session and performs what the session's answer
+   * implies — that is the whole of it. The endpoint used to be resolved HERE, over
+   * a `presentation` snapshot of a frame that had already been painted, and again
+   * in `SelectionOverlay` over the same snapshot before deciding what to consume:
+   * one press arbitrated twice, in two layers, each free to keep its own copy of
+   * the answer in step. The session now decides once, from the paint IT measures —
+   * the very span the handles were drawn around — because the two 44px controls
+   * overlap on any selection narrower than they are: the control a press was
+   * delivered to is not the endpoint it belongs to, and arbitration that starts
+   * from that control throws away a press the other endpoint was entitled to.
+   *
+   * A refusal is reported as `false` rather than performed here: the layer that
+   * received the press is the one that knows what a refusal MEANS for it — the
+   * selection's own body, or a press outside it — and it consumes accordingly
+   * instead of treating the press as a dismissal.
+   */
+  const beginHandleAdjustment = useCallback((event: SelectionHandlePointerEvent): boolean => {
+    if (!live.current.enabled) return false;
     // The session decides, and it decides from the span the last frame painted:
     // the handles were drawn around the range the student can see, so that is the
     // range the grab has to mean. It refuses anything but a resting selection.
     const effects = ensureSession().grab({
-      edge,
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
+      root: rootRef.current,
     });
-    if (!effects) return;
+    if (!effects) return false;
     event.preventDefault?.();
     // The handle is the capture target, so the drag keeps arriving after the
     // finger leaves the 12px dot it started on.
@@ -851,7 +887,8 @@ export function useStudentSelectionGesture(
     pointerIsText.current = false;
     currentEffects.current(effects);
     ensureScheduler().schedule();
-  }, [ensureScheduler, ensureSession, presentation, rootRef]);
+    return true;
+  }, [ensureScheduler, ensureSession, rootRef]);
 
   /* ------------------------------------------------------------------ *
    * Wiring.

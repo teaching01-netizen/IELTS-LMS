@@ -18,10 +18,12 @@ import { SectionHeading, ReleaseLoadingSurface } from "./release/releaseChrome";
 import {
   candidateSecondsForShell,
   canPublishFromBlockers,
-  getFreshBlockers,
+  getSATPublishBlockers,
   getFreshWarnings,
   getPublishBlockers,
   isReadinessFresh,
+  isSATPublishReadinessIssue,
+  isSATPublishReadinessValid,
   summarizeStaleReadiness,
 } from "./release/releaseSelectors";
 import { releaseSurfaceClass, useReleaseOnline } from "./release/releaseUi";
@@ -218,8 +220,9 @@ function ReleasePageBody(props: {
   } = props;
 
   const readinessFresh = isReadinessFresh(readiness, shell);
-  const blockers = getFreshBlockers(readiness, readinessFresh);
-  const warnings = getFreshWarnings(readiness, readinessFresh);
+  const blockers = getSATPublishBlockers(readiness, readinessFresh);
+  const warnings = getFreshWarnings(readiness, readinessFresh).filter(isSATPublishReadinessIssue);
+  const readinessValid = isSATPublishReadinessValid(readiness, readinessFresh);
   const stale = summarizeStaleReadiness(readiness, shell);
   // Candidate time = base M1 + the longer M2 branch + break per section.
   // section.durationSeconds sums every authored module, which overstates the
@@ -231,7 +234,7 @@ function ReleasePageBody(props: {
   const publishBlockers = getPublishBlockers({
     lifecycleState: releaseState.state,
     readinessFresh,
-    readinessValid: Boolean(readinessFresh && readiness?.valid),
+    readinessValid,
     blockerCount: blockers.length,
     dirtyCount: dirtySections.size,
     isPublishing,
@@ -260,6 +263,7 @@ function ReleasePageBody(props: {
         <ReleaseStatusHero
           releaseState={releaseState}
           readiness={readinessFresh ? readiness : null}
+          readinessValid={readinessValid}
           isChecking={isChecking}
           dirtyCount={dirtySections.size}
         />

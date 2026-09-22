@@ -1,6 +1,11 @@
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, Info, LoaderCircle, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw } from "lucide-react";
 import type { AssessmentValidationIssue, AssessmentValidationReport } from "../../contracts/assessment";
+import {
+  getSATPublishBlockers,
+  SAT_PUBLISH_READINESS_FAMILIES,
+  readinessFamilyForIssue,
+} from "./releaseSelectors";
 import { releaseDisabledButtonClass, releaseSurfaceClass, readinessToneClass } from "./releaseUi";
 
 interface ReadinessPanelProps {
@@ -22,8 +27,12 @@ export function ReadinessPanel({
   onRefresh,
   onIssueClick,
 }: ReadinessPanelProps) {
-  const blockers = readiness?.errors ?? [];
-  const warnings = readiness?.warnings ?? [];
+  const blockers = getSATPublishBlockers(readiness, true);
+  const familyCounts = SAT_PUBLISH_READINESS_FAMILIES.map((family) => ({
+    ...family,
+    count: blockers.filter((issue) => readinessFamilyForIssue(issue)?.id === family.id).length,
+  }));
+  const publishReady = Boolean(readiness && blockers.length === 0);
   return (
     <section aria-label="Release checks" aria-busy={isChecking} className={`${releaseSurfaceClass} p-5 sm:p-6`}>
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -79,58 +88,45 @@ export function ReadinessPanel({
 
       {readiness ? (
         <div className="mt-5 grid gap-3 sm:grid-cols-2" aria-live="polite">
-          <ReadinessCount
-            icon={blockers.length === 0 ? <CheckCircle2 size={17} aria-hidden="true" /> : <AlertTriangle size={17} aria-hidden="true" />}
-            label="Blocking issues"
-            value={blockers.length}
-            tone={blockers.length === 0 ? "success" : "danger"}
-          />
-          <ReadinessCount
-            icon={<Info size={17} aria-hidden="true" />}
-            label="Recommendations"
-            value={warnings.length}
-            tone={warnings.length === 0 ? "neutral" : "warning"}
-          />
+          {familyCounts.map((family) => {
+            const passed = family.count === 0;
+            return (
+              <div
+                key={family.id}
+                className={`flex items-center justify-between rounded-2xl px-4 py-3 ${readinessToneClass[passed ? "success" : "danger"]}`}
+              >
+                <div className="flex items-center gap-2">
+                  {passed ? (
+                    <CheckCircle2 size={17} aria-hidden="true" />
+                  ) : (
+                    <AlertTriangle size={17} aria-hidden="true" />
+                  )}
+                  <span className="text-sm font-medium">{family.label}</span>
+                </div>
+                <span className="text-xs font-semibold">
+                  {passed ? "Complete" : `${family.count} issue${family.count === 1 ? "" : "s"}`}
+                </span>
+              </div>
+            );
+          })}
         </div>
       ) : null}
       {blockers.length > 0 ? (
         <IssueList
-          title="Must fix before publishing"
+          title="Fix before publishing"
           issues={blockers}
           onIssueClick={onIssueClick}
         />
-      ) : readiness ? (
+      ) : publishReady ? (
         <div className="mt-4 flex items-center gap-2 rounded-2xl bg-green-100 px-4 py-3 text-sm font-medium text-green-800">
-          <CheckCircle2 size={17} aria-hidden="true" /> No blocking release issues.
+          <CheckCircle2 size={17} aria-hidden="true" /> Ready to publish.
+        </div>
+      ) : readiness ? (
+        <div role="alert" className="mt-4 rounded-2xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          Publish checks are failing. Run checks again.
         </div>
       ) : null}
-
-      {warnings.length > 0 ? (
-        <IssueList title="Recommendations" issues={warnings} onIssueClick={onIssueClick} warning />
-      ) : null}
     </section>
-  );
-}
-
-function ReadinessCount({
-  icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  tone: "success" | "danger" | "warning" | "neutral";
-}) {
-  return (
-    <div className={`flex items-center justify-between rounded-2xl px-4 py-3 ${readinessToneClass[tone]}`}>
-      <div className="flex items-center gap-2">
-        {icon}
-        <span className="text-sm font-medium">{label}</span>
-      </div>
-      <span className="text-lg font-semibold tracking-[-0.02em] tabular-nums">{value}</span>
-    </div>
   );
 }
 
@@ -140,12 +136,10 @@ function IssueList({
   title,
   issues,
   onIssueClick,
-  warning = false,
 }: {
   title: string;
   issues: AssessmentValidationIssue[];
   onIssueClick: (issue: AssessmentValidationIssue) => void;
-  warning?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? issues : issues.slice(0, INITIAL_ISSUE_LIMIT);
@@ -162,15 +156,11 @@ function IssueList({
               onClick={() => onIssueClick(issue)}
               className="flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             >
-              {warning ? (
-                <Info size={16} className="mt-0.5 shrink-0 text-amber-800" aria-hidden="true" />
-              ) : (
-                <AlertTriangle
-                  size={16}
-                  className="mt-0.5 shrink-0 text-destructive"
-                  aria-hidden="true"
-                />
-              )}
+              <AlertTriangle
+                size={16}
+                className="mt-0.5 shrink-0 text-destructive"
+                aria-hidden="true"
+              />
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-foreground">{issue.message}</span>
                 <span className="mt-0.5 block truncate text-xs text-muted-foreground">

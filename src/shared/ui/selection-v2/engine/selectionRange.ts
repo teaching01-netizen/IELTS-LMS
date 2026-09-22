@@ -12,6 +12,7 @@
  */
 
 import { clampTextPointTo, compareTextPoints } from './selectionPoint';
+import type { NodeWordSegment, WordDragSide } from '../domain/selectionSegmenter';
 import type { TextPoint } from '../domain/selectionTypes';
 
 /**
@@ -57,6 +58,69 @@ export function createSelectionRangeWithin(
   const clampedB = clampTextPointTo(b, boundary);
   if (!clampedA || !clampedB) return null;
   return createSelectionRange(clampedA, clampedB);
+}
+
+/**
+ * A position kept inside the span it describes.
+ *
+ * The caret the lens magnifies and the range the student sees are two views of
+ * one selection, so a caret pointing at a character the highlight does not cover
+ * would describe a range that does not exist. A position past either end is
+ * pulled to that end.
+ *
+ * A span that runs ACROSS nodes — a word run into the next paragraph, or through
+ * an inline element — is clamped by the end the position is in: a point in the
+ * start container only cannot precede the span's start, and one in the end
+ * container only cannot follow its end. Every node between them is inside the
+ * span by construction. A position in a node the span does not touch is left
+ * alone: there is no span between them to be inside of — that case already went
+ * through `createSelectionRange`'s ordering and the boundary clamp.
+ */
+export function clampPointToRange(point: TextPoint, range: Range): TextPoint {
+  const inStart = point.node === range.startContainer;
+  const inEnd = point.node === range.endContainer;
+  if (!inStart && !inEnd) return point;
+  if (inStart && inEnd) {
+    const offset = Math.max(range.startOffset, Math.min(range.endOffset, point.offset));
+    return offset === point.offset ? point : { node: point.node, offset };
+  }
+  const offset = inStart
+    ? Math.max(range.startOffset, point.offset)
+    : Math.min(range.endOffset, point.offset);
+  return offset === point.offset ? point : { node: point.node, offset };
+}
+
+/**
+ * The run a body-touch drag means once the finger has LEFT the claimed node.
+ *
+ * An inline element splitting a word and the next paragraph are the same
+ * gesture to a student, so the rule is the one `resolveWordDragSpan` states, read
+ * through document order instead of offsets: the claim's far side is fixed and
+ * the word the finger reached supplies the moving edge — its start when the
+ * finger's node precedes the claim, its end when it follows. Both edges stay on
+ * word boundaries, which is the whole point: a body gesture may not produce a
+ * partial word, and the earlier fall-through to raw offsets did exactly that the
+ * moment a drag crossed a node boundary (`eta ga` out of `beta` + `gamma`).
+ *
+ * `target` is null where the node the finger reached holds no word at all (a
+ * whitespace-only inline node, an empty one). The claim then stands, for the same
+ * reason `resolveWordDragSpan` leaves it standing: "no word there" is not a
+ * reason to resize what the student can see — and it is certainly not a reason to
+ * fall back to the characters under the finger. A node that is not in the same
+ * document as the claim cannot describe a span to it either, so that stands too.
+ */
+export function resolveWordRunAcrossNodes(
+  origin: NodeWordSegment,
+  target: NodeWordSegment | null,
+): { fixed: TextPoint; moving: TextPoint; side: WordDragSide } {
+  const claimStart = { node: origin.node, offset: origin.start };
+  const claimEnd = { node: origin.node, offset: origin.end };
+  if (!target) return { fixed: claimStart, moving: claimEnd, side: 'unchanged' };
+  const order = compareTextPoints({ node: target.node, offset: target.start }, claimStart);
+  if (order === 0) return { fixed: claimStart, moving: claimEnd, side: 'unchanged' };
+  return order < 0
+    ? { fixed: claimEnd, moving: { node: target.node, offset: target.start }, side: 'before' }
+    : { fixed: claimStart, moving: { node: target.node, offset: target.end }, side: 'after' };
 }
 
 /**

@@ -22,7 +22,6 @@ export function ReleaseSummary({
   examTitle,
   releaseState,
   blockerCount,
-  warningCount,
   dirtyCount,
   publishBlockers,
   canPublish,
@@ -77,7 +76,11 @@ export function ReleaseSummary({
             <SummaryRow
               label="Readiness"
               value={`${blockerCount} blocker${blockerCount === 1 ? "" : "s"}`}
-              detail={`${warningCount} recommendation${warningCount === 1 ? "" : "s"}`}
+              detail={
+                blockerCount === 0
+                  ? "Question text, answer choices, module count, and correct answers pass"
+                  : "Resolve the required publish checks"
+              }
             />
           )}
         </dl>

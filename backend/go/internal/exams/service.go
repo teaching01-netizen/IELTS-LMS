@@ -3,9 +3,9 @@
 // It mirrors backend/crates/application/src/builder.rs (create/list/get/
 // update/save-draft/publish/delete + validate + version/event accessors) with
 // constructor injection, ctx everywhere, explicit SQL and no package globals.
-// provider_key awareness: ielts is the default neutral provider; sat delegates
-// draft-shape validation to the SAT blueprint (see authoring); ACT widens
-// ExamType + the science section key (migration 0050 lineage).
+// provider_key awareness: ielts is the default neutral provider; sat uses its
+// normalized four-rule publish contract; ACT widens ExamType + the science
+// section key (migration 0050 lineage).
 package exams
 
 import (
@@ -23,6 +23,7 @@ import (
 	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // Provider keys.
@@ -860,14 +861,29 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 		} else if draftRev != req.Revision {
 			return conflictError("Draft changed while publish checks were running. Run the checks again.")
 		}
-		if isEmptySnapshot(content) {
-			return validationError("Draft content is missing. Save a draft before publishing.")
+		provider := EffectiveProviderKey(providerKey, examType)
+		if provider != ProviderSAT {
+			if isEmptySnapshot(content) {
+				return validationError("Draft content is missing. Save a draft before publishing.")
+			}
+			if isEmptySnapshot(config) {
+				return validationError("Draft configuration is missing. Save a draft before publishing.")
+			}
+			if issues := validateContentShape(content, config, provider); len(issues) > 0 {
+				return validationError("Draft content is invalid: " + issues[0].Message)
+			}
 		}
-		if isEmptySnapshot(config) {
-			return validationError("Draft configuration is missing. Save a draft before publishing.")
-		}
-		if issues := validateContentShape(content, config, EffectiveProviderKey(providerKey, examType)); len(issues) > 0 {
-			return validationError("Draft content is invalid: " + issues[0].Message)
+		if provider == ProviderSAT {
+			issues, err := satpublish.ValidateDraft(ctx, q, draftID)
+			if err != nil {
+				return err
+			}
+			if len(issues) > 0 {
+				first := issues[0]
+				rejection := validationError("SAT publish requirements are not met: " + first.Message)
+				rejection.Details = map[string]any{"code": first.Code, "path": first.Path}
+				return rejection
+			}
 		}
 		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET is_draft = FALSE, is_published = TRUE, publish_notes = ?, revision = revision + 1 WHERE id = ?", nullableStrPtr(req.PublishNotes), draftID); err != nil {
 			return err
@@ -1091,7 +1107,7 @@ func (s *Service) ListEvents(ctx context.Context, examID string) ([]Event, error
 
 // GetValidation mirrors builder validate_exam for the IELTS path (non-empty
 // title + draft snapshots + content/config structural checks) and returns a
-// publish-gate report. SAT adaptive validation lives in authoring.Validate;
+// publish-gate report. SAT uses the normalized four-rule publish contract;
 // ACT science sections are allow-listed here.
 func (s *Service) GetValidation(ctx context.Context, examID string) (ValidationReport, error) {
 	exam, err := s.Get(ctx, examID)
@@ -1099,6 +1115,23 @@ func (s *Service) GetValidation(ctx context.Context, examID string) (ValidationR
 		return ValidationReport{}, err
 	}
 	rep := ValidationReport{Errors: []ValidationIssue{}, Warnings: []ValidationIssue{}, ValidatedAt: time.Now().UTC(), ExamID: examID}
+	if EffectiveProviderKey(exam.ProviderKey, exam.ExamType) == ProviderSAT {
+		if exam.CurrentDraftVersionID == nil {
+			rep.Errors = append(rep.Errors, ValidationIssue{Field: "contentSnapshot", Message: "Draft content is missing. Save a draft before publishing."})
+			rep.CanPublish = false
+			return rep, nil
+		}
+		rep.DraftVersionID = exam.CurrentDraftVersionID
+		issues, err := satpublish.ValidateDraft(ctx, s.db, *exam.CurrentDraftVersionID)
+		if err != nil {
+			return ValidationReport{}, err
+		}
+		for _, issue := range issues {
+			rep.Errors = append(rep.Errors, ValidationIssue{Field: issue.Path, Message: issue.Message})
+		}
+		rep.CanPublish = len(rep.Errors) == 0
+		return rep, nil
+	}
 	if strings.TrimSpace(exam.Title) == "" {
 		rep.Errors = append(rep.Errors, ValidationIssue{Field: "title", Message: "Exam title is required."})
 	}

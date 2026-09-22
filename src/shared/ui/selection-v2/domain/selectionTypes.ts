@@ -99,6 +99,28 @@ export type SelectionPhase =
   | 'adjusting-start'
   | 'adjusting-end';
 
+/**
+ * What a gesture's endpoints are SPELLED IN — the semantic distinction the whole
+ * model turns on (docs/selectionui.md):
+ *
+ *   BODY TOUCH  → `word`      a long press claims the word under the finger, and
+ *                             every later body move is a whole-word run measured
+ *                             from it; characters are not addressable this way
+ *   HANDLE DRAG → `grapheme`  a handle is the precision instrument: only the
+ *                             endpoint it holds moves, and only between characters
+ *                             a student can see (never inside an emoji or a Thai
+ *                             cluster)
+ *
+ * It is a field of the machine's STATE rather than a flag beside it, because one
+ * transition decides both it and the phase, and because it has to outlive the
+ * gesture that set it: after the finger lifts, `selected` alone cannot say whether
+ * the span in hand is a whole-word run or a handle's precise one, and the release
+ * re-derives the span from exactly that answer. Idle is `word`, so a press — the
+ * body gesture the machine is always armed for — starts word-granular; only `grab`
+ * moves it, and only for a resting selection.
+ */
+export type SelectionGranularity = 'word' | 'grapheme';
+
 /** The writing direction of the surface a selection was made in. */
 export type SelectionDirection = 'ltr' | 'rtl';
 

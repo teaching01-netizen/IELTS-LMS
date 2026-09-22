@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  canAcquireSelectionHandle,
   caretGeometryFromTextPoint,
   handleGeometryFor,
   mergeSelectionLines,
+  resolveHandleAcquisition,
   selectionAnchorRect,
   selectionDirection,
   selectionHandleGeometry,
   selectionRectsFrom,
 } from '../engine/selectionGeometry';
-import type { SelectionRect, TextPoint } from '../domain/selectionTypes';
+import { IDLE_SELECTION, type SelectionDirection, type SelectionRect, type TextPoint } from '../domain/selectionTypes';
 
 const rect = (left: number, top: number, width: number, height: number): SelectionRect => ({ left, top, width, height });
 
@@ -96,6 +98,89 @@ describe('the anchor box', () => {
   it('unions the lines, because a menu hangs off the whole selection', () => {
     expect(selectionAnchorRect(lines)).toEqual(rect(10, 100, 200, 44));
     expect(selectionAnchorRect([])).toBeNull();
+  });
+});
+
+/**
+ * WHICH ENDPOINT A PRESS GRABS — the one decision that may not come from the DOM.
+ *
+ * A selection narrower than 44px puts its two accessible boxes on top of each
+ * other, and a line box short enough puts one of them over the other's entire
+ * outward zone, so the control a press is delivered to is not evidence of which
+ * endpoint the student aimed at. These cases are therefore stated as paints and
+ * coordinates — the function's only inputs — and each one names the endpoint the
+ * press belongs to.
+ */
+describe('handle acquisition', () => {
+  /** A resting one-line selection, with both handles on that line. */
+  function resting(lines: SelectionRect[], direction: SelectionDirection = 'ltr') {
+    const { start, end } = selectionHandleGeometry(lines, direction);
+    return { ...IDLE_SELECTION, id: 'selection:1', phase: 'selected' as const, rects: lines, startHandle: start, endHandle: end };
+  }
+
+  /** A two-character word: 20px wide, and a line a real passage would have. */
+  const word = resting([rect(10, 100, 20, 21)]);
+
+  it('takes the press for the only endpoint whose outward zone accepts it', () => {
+    // Above the line: the start handle's zone, and the end handle's box does not
+    // reach here at all.
+    expect(resolveHandleAcquisition(word, 16, 99)).toBe('start');
+    // Below it: the end handle's zone, and the start handle's box does not reach.
+    expect(resolveHandleAcquisition(word, 24, 122)).toBe('end');
+  });
+
+  it('acquires NEITHER endpoint from the selected text, even inside both boxes', () => {
+    // The middle of a short word: inside both 44px boxes, on neither outward
+    // side. This is the selection's body — inert, never resized.
+    expect(canAcquireSelectionHandle(word.startHandle!, word.rects[0]!, 20, 110)).toBe(false);
+    expect(canAcquireSelectionHandle(word.endHandle!, word.rects[0]!, 20, 110)).toBe(false);
+    expect(resolveHandleAcquisition(word, 20, 110)).toBeNull();
+  });
+
+  it('never lets the endpoint the press landed on refuse a zone the other one accepts', () => {
+    // The paint that made this rule load-bearing: a 21px line puts the end
+    // handle's 44px box over the start handle's upward zone (its top edge is 1px
+    // above the line's top). A press there belongs to the START, and a caller
+    // that asked only the control it landed on would refuse it.
+    // The end handle's box is centred on the line's bottom edge (y = 121), so it
+    // reaches up to y = 99 — over the start handle's outward zone, which is the
+    // line's top edge and the two pixels above it. A press at y = 101 belongs to
+    // the START, whatever the end control's box covers.
+    expect(word.endHandle!.y - 22).toBeLessThanOrEqual(101);
+    expect(canAcquireSelectionHandle(word.endHandle!, word.rects[0]!, 20, 101)).toBe(false);
+    expect(resolveHandleAcquisition(word, 20, 101)).toBe('start');
+  });
+
+  it('gives a two-zone press to the nearer optical anchor', () => {
+    // A line 4px tall: the two zones overlap, and the nearer anchor is the
+    // start's. Synthetic — real text is never this short — and the only way to
+    // reach the branch at all.
+    const flat = resting([rect(10, 100, 20, 4)]);
+    expect(resolveHandleAcquisition(flat, 12, 102)).toBe('start');
+    expect(resolveHandleAcquisition(flat, 28, 102)).toBe('end');
+  });
+
+  it('resolves an exact tie by the pointer\u2019s side of the span, in reading order', () => {
+    const flat = resting([rect(10, 100, 20, 4)]);
+    // Exactly between the two anchors: the earlier endpoint's, and the midpoint
+    // itself counts as the earlier side.
+    expect(resolveHandleAcquisition(flat, 20, 102)).toBe('start');
+
+    // The same paint read right to left: the reading-order start is the RIGHT
+    // edge, so that same coordinate is now the end's. One rule, no extra case.
+    const rtl = resting([rect(10, 100, 20, 4)], 'rtl');
+    expect(rtl.startHandle!.x).toBeGreaterThan(rtl.endHandle!.x);
+    expect(resolveHandleAcquisition(rtl, 20, 102)).toBe('end');
+  });
+
+  it('answers from the paint alone, so nothing about the DOM can change it', () => {
+    // The same paint and coordinate twice: identical, because the only inputs
+    // are the measured geometry and the point.
+    const press = { x: 16, y: 99, first: resolveHandleAcquisition(word, 16, 99) };
+    expect(resolveHandleAcquisition({ ...word }, press.x, press.y)).toBe(press.first);
+    // And a paint with no measurable handles acquires nothing rather than
+    // guessing an endpoint.
+    expect(resolveHandleAcquisition({ ...IDLE_SELECTION, phase: 'selected' }, 16, 99)).toBeNull();
   });
 });
 

@@ -131,9 +131,9 @@ const unpublishedChangesRelease: AssessmentReleaseState = {
 };
 
 const blockingIssue: AssessmentValidationIssue = {
-  code: "sat.metadata.domain.required",
-  path: "examQuestion:q-17:metadata.domain",
-  message: "Choose the SAT domain for this question.",
+  code: "question.prompt.required",
+  path: "examQuestion:q-17:prompt",
+  message: "Question text is required.",
   blocking: true,
 };
 
@@ -211,7 +211,7 @@ describe("SatDeliveryReleasePage", () => {
     expect(onBackToBuilder).toHaveBeenCalledOnce();
   });
 
-  it("keeps warning-only drafts publishable", () => {
+  it("does not surface legacy timing recommendations", () => {
     const warning: AssessmentValidationIssue = {
       code: "sat.delivery.nonstandard_timing",
       path: "reading-writing.rw-m1.duration",
@@ -225,7 +225,27 @@ describe("SatDeliveryReleasePage", () => {
     );
 
     expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
-    expect(screen.getByText("1 recommendation")).toBeInTheDocument();
+    expect(screen.queryByText("1 recommendation")).not.toBeInTheDocument();
+    expect(screen.getByText("Ready to publish.")).toBeInTheDocument();
+  });
+
+  it("does not block on legacy optional findings", () => {
+    const legacyIssue: AssessmentValidationIssue = {
+      code: "sat.metadata.domain.required",
+      path: "examQuestion:q-17:metadata.domain",
+      message: "Choose the SAT domain for this question.",
+      blocking: true,
+    };
+    render(
+      <SatDeliveryReleasePage
+        {...pageProps({
+          readiness: { ...readyReport, valid: false, errors: [legacyIssue] },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+    expect(screen.queryByText(legacyIssue.message)).not.toBeInTheDocument();
   });
   it("surfaces blockers and forwards question issue navigation", () => {
     const onIssueClick = vi.fn();
@@ -243,7 +263,7 @@ describe("SatDeliveryReleasePage", () => {
     );
 
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /Choose the SAT domain/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Question text is required/ }));
     expect(onIssueClick).toHaveBeenCalledWith(blockingIssue);
   });
 
@@ -430,8 +450,8 @@ describe("SatDeliveryReleasePage", () => {
 
   it("expands long issue lists on demand instead of silently truncating", () => {
     const errors = Array.from({ length: 25 }, (_, index) => ({
-      code: `sat.blocker.${index}`,
-      path: `section.${index}`,
+      code: "question.prompt.required",
+      path: `examQuestion:q-${index}:prompt`,
       message: `Blocking issue ${index}`,
       blocking: true,
     }));

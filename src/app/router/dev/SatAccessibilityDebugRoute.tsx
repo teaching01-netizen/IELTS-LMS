@@ -98,6 +98,24 @@ const oversizedStimulus = paragraph(
 
 const oversizedReadingQuestion: DeliveredQuestion = { ...readingQuestion, stimulus: oversizedStimulus };
 
+/**
+ * A stimulus whose CHARACTERS are the point (`?clusters=1`).
+ *
+ * A handle is the precision instrument, and precision is measured in characters a
+ * student can SEE: the family emoji below is eleven UTF-16 code units, the flag
+ * two, the Thai syllable with its tone mark four, and `café` two — each of them one
+ * character on screen, so an endpoint that moved by offset would anchor an
+ * annotation to a fragment of one. The default stimulus is pure ASCII and cannot
+ * show the difference either way, so the cluster text is opt-in: nothing that does
+ * not ask for it changes shape.
+ */
+const clusterStimulus = paragraph(
+  "stimulus",
+  "Several \u{1F469}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466} \u{1F1F9}\u{1F1ED} ก่อน cafe\u0301 researchers examined how urban tree cover changes surface temperature."
+);
+
+const clusterReadingQuestion: DeliveredQuestion = { ...readingQuestion, stimulus: clusterStimulus };
+
 const mathQuestion: DeliveredQuestion = {
   ...readingQuestion,
   examQuestionId: "debug-math-q1",
@@ -143,6 +161,8 @@ export function SatAccessibilityDebugRoute() {
   const longPassage = params.get("long") === "1";
   /** A passage longer than any pane, for the cases that need overflow itself. */
   const oversizedPassage = params.get("long") === "2";
+  /** A stimulus made of multi-code-unit characters, for the handle-precision cases. */
+  const clusters = params.get("clusters") === "1";
   /**
    * Auto-fit, as real delivery runs it (once, when the exam opens).
    *
@@ -185,11 +205,13 @@ export function SatAccessibilityDebugRoute() {
     ? mathQuestion
     : spr
       ? sprQuestion
-      : oversizedPassage
-        ? oversizedReadingQuestion
-        : longPassage
-          ? longReadingQuestion
-          : readingQuestion;
+      : clusters
+        ? clusterReadingQuestion
+        : oversizedPassage
+          ? oversizedReadingQuestion
+          : longPassage
+            ? longReadingQuestion
+            : readingQuestion;
   const navigationItems = [0, 1, 2].map((index) => ({
     id: `debug-${index}`,
     index,

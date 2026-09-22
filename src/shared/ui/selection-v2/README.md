@@ -14,7 +14,9 @@ the behaviour, instead of in whichever file happened to be open.
 domain/                     pure decisions, no DOM, no React
   selectionTypes.ts         the shared vocabulary (TextPoint, rects, phases, presentation)
   selectionMachine.ts       the gesture's transitions; returns effects, performs none
-  selectionSegmenter.ts     Intl.Segmenter-first word boundaries (Thai, CJK, RTL, emoji)
+  selectionSegmenter.ts     Intl.Segmenter-first word boundaries (Thai, CJK, RTL, emoji),
+                            the whole-word run a body-touch drag means, and the
+                            grapheme boundary a handle endpoint may stop on
 
 engine/                     DOM primitives and the one session; no React, no scheduling
   selectionPoint.ts         coordinate → TextPoint (native caret APIs + geometry fallback)
@@ -65,6 +67,55 @@ nothing needs one. `useStudentSelectionGesture.test.tsx` asserts it with a spy o
   range the student can see and the range a drag acts on cannot disagree. This is
   the defect that shipped twice: a hold claimed one character while the overlay
   painted the word, and the handle at the word's start moved the word's end.
+- *Whether the selection's own chrome or body received a press* →
+  `react/SelectionOverlay.tsx`'s capture pass, which is also the only place that
+  CONSUMES one (see below). It is the half the session cannot own: whether a press
+  belongs to this surface at all is about the page underneath it. The endpoint it
+  may begin is not, and that is reported rather than decided.
+- *Whether a finger is choosing words or characters* → `domain/selectionMachine.ts`,
+  as `granularity` (`SelectionGranularity`, the spec's `'word' | 'grapheme'`), plus
+  the claimed word the same session keeps as `anchor`. The granularity is a field
+  of the machine's STATE rather than a flag beside it: one transition decides it
+  and the phase together — a press is `word` and a `grab` is the one transition
+  that makes it `grapheme` — so the two cannot disagree, and it survives the
+  release, which is what tells the re-derived span whether it is a whole-word run
+  or a handle's precise one. A BODY gesture adopts the word under the press and
+  every later body move is a whole-word run measured from it
+  (`resolveWordDragSpan`), through the release that leaves the selection resting —
+  so the word the student can see is the word the engine keeps, and the opposite
+  edge of the claimed word cannot move. The run is spelled in whole words even
+  when the finger LEAVES the node it claimed the word in — a paragraph splits its
+  words across inline elements (an annotated `<mark>`, an `<em>`), and a drag can
+  reach the next block — so the anchor (a `NodeWordSegment`, carrying its node)
+  decides the side by document order and the far edge is the whole word the finger
+  reached (`resolveWordRunAcrossNodes`). A node with no word in it leaves the claim
+  standing, exactly as a gap inside one node does; dropping the anchor there is
+  what let raw offsets produce `eta ga` from `beta` + `gamma`. A grabbed handle DROPS the anchor and
+  places only its own endpoint, on a GRAPHEME boundary (`snapToGraphemeBoundary`):
+  precision is the handle's job, and a character several code units long — an
+  emoji, a flag, a combining accent, a Thai cluster — can never be cut in half.
+  The two granularities meet in one place instead of being inferred from whichever
+  component handled the event.
+- *Which endpoint a press grabs* → the same session, in `grab`, applying the
+  pure rule from `engine/selectionGeometry.ts` (`resolveHandleAcquisition`) to the
+  paint the session itself measures. A selection narrower than the 44px controls
+  that adjust it puts both of their boxes on the same coordinates, and the one the
+  browser delivers a press to is decided by render order — so a press inside the
+  START handle's outward zone can arrive at the END control, whose refusal would
+  consume it as the selection's own body and leave the handle the student aimed at
+  inert. Both zones are evaluated independently and the answer is a fact about the
+  paint: the only one that accepts, else the nearer optical anchor, else the
+  pointer's side of the span in reading order.
+
+  The RULE lives in the engine because it is geometry; the DECISION lives here
+  because it is about the selection — and it is made once. It used to be made
+  twice: `SelectionOverlay` resolved it to know what to consume, and
+  `beginHandleAdjustment` resolved it again to know what to move, each against its
+  own snapshot of a frame. The overlay now REPORTS a press (its coordinates, and
+  the control the browser delivered it to) and reads the verdict, which is what
+  tells it a drag began — so no component names an endpoint, no component can
+  name a different one than the geometry does, and the endpoints a press is judged
+  against are the handles the student can see.
 - *Which frame geometry is read in* → `engine/selectionScheduler.ts`.
 - *Where a menu goes* → `engine/selectionPlacement.ts`, one decision for every
   product; products map it to their own chrome (`satAnnotationSurfaceChrome`) and

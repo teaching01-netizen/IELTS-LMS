@@ -30,7 +30,12 @@
  */
 
 import { compareTextPoints } from '../engine/selectionPoint';
-import type { SelectionEdge, SelectionPhase, TextPoint } from './selectionTypes';
+import type {
+  SelectionEdge,
+  SelectionGranularity,
+  SelectionPhase,
+  TextPoint,
+} from './selectionTypes';
 
 /** How a gesture claims the text: a hold, or the drag an armed tool already meant. */
 export type SelectionActivation = 'long-press' | 'drag';
@@ -50,6 +55,18 @@ export interface SelectionMachineState {
   moving: TextPoint | null;
   /** Which visual end `moving` currently sits at, in reading order. */
   movingEdge: SelectionEdge;
+  /**
+   * Whether the endpoints are whole words or precise characters.
+   *
+   * `word` is the state every gesture starts in — a body press claims text — and
+   * `grapheme` is what a `grab` makes of it, because a handle is the precision
+   * instrument. Only those two transitions decide it, and no other transition
+   * touches it, which is what makes it survive the RELEASE: the finger lifting
+   * leaves `selected`, and the granularity the span was spelled in has to come
+   * with it or the release would re-derive a word where the student had placed a
+   * character (see `SelectionGranularity`).
+   */
+  granularity: SelectionGranularity;
 }
 
 export type SelectionMachineEvent =
@@ -90,6 +107,9 @@ export function idleSelectionState(
     fixed: null,
     moving: null,
     movingEdge: 'end',
+    // The machine is armed for a BODY gesture: a press is the only thing that can
+    // start from idle, and a press means words until a handle says otherwise.
+    granularity: 'word',
   };
 }
 
@@ -294,6 +314,10 @@ export function reduceSelection(
         state: {
           ...state,
           phase: phaseForEdge(event.edge),
+          // The one transition that leaves word granularity: what this finger
+          // moves is a CHARACTER boundary, not a word run, from here until the
+          // selection is dismissed.
+          granularity: 'grapheme',
           pointerId: event.pointerId,
           pointerType: 'handle',
           origin: { x: event.x, y: event.y },

@@ -93,7 +93,7 @@ describe('what the overlay animates, and what it must not', () => {
   const handle = { edge: 'end', x: 120, y: 240, direction: 'ltr', stem: 'down' } as const;
 
   it('keeps the handle target exactly where the engine measured it', () => {
-    render(<SelectionHandle handle={handle} label="Adjust selection end" onPointerDown={() => {}} />);
+    render(<SelectionHandle handle={handle} label="Adjust selection end" />);
 
     // The thing a finger aims at: the measurement, written straight through.
     const target = document.querySelector('[data-student-selection-handle="end"]') as HTMLElement;

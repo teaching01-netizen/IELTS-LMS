@@ -8,6 +8,7 @@ import { formatPublishedDate } from "./releaseSelectors";
 interface ReleaseStatusHeroProps {
   releaseState: AssessmentReleaseState;
   readiness: AssessmentValidationReport | null;
+  readinessValid?: boolean;
   isChecking: boolean;
   dirtyCount: number;
 }
@@ -15,13 +16,15 @@ interface ReleaseStatusHeroProps {
 export function ReleaseStatusHero({
   releaseState,
   readiness,
+  readinessValid,
   isChecking,
   dirtyCount,
 }: ReleaseStatusHeroProps) {
   const publishedVersion = releaseState.currentPublishedVersion;
+  const effectiveReadinessValid = readinessValid ?? Boolean(readiness?.valid);
   const state = getHeroState({
     releaseState,
-    readinessValid: Boolean(readiness?.valid),
+    readinessValid: effectiveReadinessValid,
     hasReadiness: readiness !== null,
     isChecking,
     dirtyCount,
@@ -29,7 +32,7 @@ export function ReleaseStatusHero({
   const { heading, description } = getHeroCopy(state, {
     releaseState,
     dirtyCount,
-    readinessValid: Boolean(readiness?.valid),
+    readinessValid: effectiveReadinessValid,
   });
   const tone = getHeroTone(state);
 
