@@ -324,9 +324,17 @@ export function settlePicture(picture: LoupePicture, box: PictureBox): LoupePict
 }
 
 /**
- * THE MAPPING. The finger's own position in the document, moved to the centre of
- * the lens: the picture is the document's layout, and this is the one place the two
+ * THE MAPPING. The point the lens is LOOKING AT — the caret the engine
+ * resolved, snapped to a character boundary — moved to the centre of the lens:
+ * the picture is the document's layout, and this is the one place the two
  * coordinate systems are reconciled.
+ *
+ * It is deliberately not the finger. The lens's own box already follows the
+ * finger (see `lensPlacement`), and a lens whose content followed it too would
+ * be an instrument with no index: everything it showed would slide continuously
+ * with the hand, including the whitespace between two characters. Pointing the
+ * content at the resolved caret is what makes the words inside hold still while
+ * the finger moves within one glyph and SNAP when it crosses into the next.
  *
  * The picture's measured origin is part of the distance, because the layer the
  * transform is written on is not where the picture begins. Both terms are needed
@@ -335,19 +343,22 @@ export function settlePicture(picture: LoupePicture, box: PictureBox): LoupePict
  */
 export function pictureTranslation(
   picture: LoupePicture,
-  finger: { x: number; y: number },
+  point: { x: number; y: number },
   lens: number,
   magnification: number,
 ): { left: number; top: number } {
   return {
-    left: lens / 2 - magnification * (picture.origin.x + finger.x - picture.left),
-    top: lens / 2 - magnification * (picture.origin.y + finger.y - picture.top),
+    left: lens / 2 - magnification * (picture.origin.x + point.x - picture.left),
+    top: lens / 2 - magnification * (picture.origin.y + point.y - picture.top),
   };
 }
 
 /**
  * The lens's own positioning box: centred under the finger, lifted above it so the
  * lens is not sitting under the hand that is holding it.
+ *
+ * The instrument follows the hand; what it SHOWS does not (see
+ * `pictureTranslation`). Two positions, two jobs.
  */
 export function lensPlacement(
   finger: { x: number; y: number },

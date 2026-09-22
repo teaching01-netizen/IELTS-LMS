@@ -66,6 +66,21 @@
   height: 26px;
 }
 
+/* The grip's TICK: the wrapper that swells and springs back when the resolved
+   caret crosses into a new character boundary (see `useCaretSnapMotion`).
+
+   It is a SEPARATE element on purpose, and it is the only shape that makes all
+   three rules hold at once: the grip's own settle animation stays exactly where
+   it is (it still carries `initial`/`animate` itself), the 44px target above is
+   never transformed (a control that eases toward its endpoint is a control the
+   finger misses), and scaling this wrapper scales the grip AND its pseudo-element
+   stem and dot with it, because they are laid out inside it. Sized to its content
+   by the handle's `place-items: center`, so its box is the grip's box and its
+   origin is the grip's centre. */
+.selection-v2-grip-tick {
+  display: block;
+}
+
 .selection-v2-grip::before {
   /* The stem, pointing back at the text it belongs to. */
   content: '';
@@ -165,11 +180,15 @@
   left: 50%;
   width: 2px;
   height: 22px;
-  /* Centred on that column, both ways. `top`/`left` position the mark's own
-     corner at the middle of the lens, so without the vertical half-shift the tick
+  /* Centred on that column both ways — by MARGIN rather than by `transform`,
+     because `transform` is now the tick's (see `useCaretSnapMotion`) and an
+     inline transform would silently delete a `translate()` living here. The two
+     margins do exactly what the old half-shifts did: `top`/`left` put the mark's
+     own corner at the middle of the lens, and without the vertical shift the tick
      hangs BELOW the point it is indexing — a column mark that points at the next
      line down is worse than no mark at all. */
-  transform: translate(-1px, -50%);
+  margin-left: -1px;
+  margin-top: -11px;
   border-radius: 1px;
   background-color: var(--selection-accent);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);

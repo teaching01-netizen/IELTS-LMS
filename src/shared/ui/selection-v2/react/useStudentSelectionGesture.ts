@@ -7,11 +7,15 @@ import { createWordSegmentCache, defaultWordSegmenter } from '../domain/selectio
 import type { SelectionActivation, SelectionEffect } from '../domain/selectionMachine';
 import {
   IDLE_SELECTION,
+  selectionMovesEndpoint,
+  type CaretGeometry,
   type SelectionEdge,
+  type SelectionPointerState,
   type SelectionPresentation,
   type SelectionRect,
   type TextPoint,
 } from '../domain/selectionTypes';
+import { caretGeometryFromTextPoint } from '../engine/selectionGeometry';
 import { describeTouchSelectionNode, type TouchSelectionDiagnostics } from '../../touch-selection/touchSelectionDiagnostics';
 
 /**
@@ -129,6 +133,27 @@ export interface StudentSelectionGestureOptions {
   scrollContainer?: ((root: HTMLElement) => HTMLElement | null) | undefined;
   /** Opt-in, local diagnostics supplied by the session boundary. */
   diagnostics?: TouchSelectionDiagnostics | undefined;
+  /**
+   * The haptic half of a caret crossing: one short buzz when the resolved caret
+   * moves to a DIFFERENT text position, and never a continuous one.
+   *
+   * Injected like every other platform seam here (`resolveCaretAtPoint`,
+   * `isCoarsePointer`, `requestFrame`), and for the same reason: the Vibration
+   * API ships in Chrome for Android and Samsung Internet and does not exist in
+   * iOS Safari at all, so the honest default is a feature-detected function that
+   * is simply absent there — while a test can pass a spy and assert that it
+   * fires once per new offset, is throttled, and never becomes a hum, which it
+   * could not assert against a device anyway. Returning false means "the platform
+   * declined"; that is always allowed and never an error.
+   */
+  vibrate?: ((milliseconds: number) => boolean) | undefined;
+  /**
+   * The clock the haptic floor reads, injected beside `vibrate` for the reason
+   * the repo's DI rule gives: time is a dependency. With the clock as a seam a
+   * test drives the window exactly; without one it can only spy `Date.now` and
+   * arrange its timestamps to clear production's `lastHapticAt = 0` sentinel.
+   */
+  now?: (() => number) | undefined;
   /** Test seam: frames are injectable, so "one read per frame" is assertable. */
   requestFrame?: ((callback: () => void) => number) | undefined;
   cancelFrame?: ((handle: number) => void) | undefined;
@@ -146,8 +171,13 @@ export interface SelectionHandlePointerEvent {
 export interface StudentSelectionGesture extends SelectionPresentation {
   /** Where a menu may hang: the union box of the painted lines. */
   anchorRect: SelectionRect | null;
-  /** The finger's last known position, for the magnifier to sit under. */
-  pointer: { x: number; y: number } | null;
+  /**
+   * The two positions the pointer has: where the hand is, and what the text
+   * resolved to. See `SelectionPointerState` — the lens's BOX follows `finger`
+   * and its CONTENT follows `caret`, and conflating them is what makes a tick
+   * drift through whitespace instead of snapping to a character.
+   */
+  pointer: SelectionPointerState | null;
   /** True while the finger is moving an endpoint of a resting selection. */
   adjusting: boolean;
   /** Wire a handle's pointerdown to this to start adjusting that edge. */
@@ -175,6 +205,41 @@ interface PointerRecord {
   pointerId: number;
 }
 
+/** One haptic tick's length: a tap, not a buzz — short enough to count as feedback. */
+const CARET_HAPTIC_MS = 8;
+
+/**
+ * At most one tick per this long.
+ *
+ * The caret only ever changes on a real boundary crossing, but a fast drag can
+ * cross several in a few frames, and without a floor the tick becomes a hum —
+ * continuous vibration is an alarm, not a confirmation. The floor is what keeps
+ * "only on a new offset" true in feel as well as in causality.
+ */
+const CARET_HAPTIC_THROTTLE_MS = 50;
+
+/**
+ * The platform's own haptic, or nothing at all.
+ *
+ * FEATURE-DETECTED RATHER THAN ASSUMED: `navigator.vibrate` is simply absent on
+ * iOS — Safari does not expose the Taptic Engine to web content and no amount of
+ * feature detection changes that — so "not there" is the ordinary case on the
+ * device most likely to be held, and it must cost nothing and throw nothing.
+ * A browser that has it may still refuse (a silent profile, a permission), and a
+ * refusal is an answer, not a fault.
+ */
+function platformVibrate(milliseconds: number): boolean {
+  if (typeof navigator === 'undefined') return false;
+  // Called on `navigator` itself rather than extracted: a bound or borrowed
+  // reference is the one way a platform's own implementation can reject `this`.
+  if (typeof navigator.vibrate !== 'function') return false;
+  try {
+    return navigator.vibrate(milliseconds);
+  } catch {
+    return false;
+  }
+}
+
 export function useStudentSelectionGesture(
   options: StudentSelectionGestureOptions,
 ): StudentSelectionGesture {
@@ -194,6 +259,8 @@ export function useStudentSelectionGesture(
     diagnostics,
     requestFrame,
     cancelFrame,
+    vibrate = platformVibrate,
+    now = Date.now,
   } = options;
 
   const [presentation, setPresentation] = useState<SelectionPresentation>(IDLE_SELECTION);
@@ -204,12 +271,12 @@ export function useStudentSelectionGesture(
   const live = useRef({
     enabled, activation, resolveCaretAtPoint, onSelect, boundaryFor, isExcludedTarget,
     isCoarsePointer, longPressMs, moveTolerancePx, clearOnSelect, scrollContainer,
-    diagnostics,
+    diagnostics, vibrate, now,
   });
   live.current = {
     enabled, activation, resolveCaretAtPoint, onSelect, boundaryFor, isExcludedTarget,
     isCoarsePointer, longPressMs, moveTolerancePx, clearOnSelect, scrollContainer,
-    diagnostics,
+    diagnostics, vibrate, now,
   };
 
   // Segmentation is built once: ICU segmentation is not free, and a propagating
@@ -256,6 +323,30 @@ export function useStudentSelectionGesture(
    */
   const pointerIsText = useRef(false);
   const lastPointer = useRef<PointerRecord | null>(null);
+  /**
+   * Where the endpoint the session ADOPTED actually is on screen.
+   *
+   * Derived from the session's own moving endpoint — never from the raw finger
+   * and never from the candidate coordinate that was handed to it — so boundary
+   * clamping, handle crossover and word expansion are already applied by the
+   * time the lens is pointed at it, and the tick cannot describe a range the
+   * student cannot see. Measured in the frame (below), never in an event.
+   */
+  const resolvedCaret = useRef<CaretGeometry | null>(null);
+  /**
+   * The endpoint the last caret measurement was taken from — the thing a change
+   * is a change AGAINST.
+   *
+   * Compared as `{node, offset}`, never as coordinates: two frames that resolve
+   * the same boundary are the same caret whether the finger moved 3px or 30, and
+   * a comparison in pixels would tick inside a character, which is exactly the
+   * causality this exists to get right.
+   */
+  const caretEndpoint = useRef<TextPoint | null>(null);
+  /** The snap key: how many times the caret has been at a DIFFERENT position. */
+  const snapRevision = useRef(0);
+  /** When the last haptic fired, so the tick can never become a hum. */
+  const lastHapticAt = useRef(0);
   const binding = useRef<PointerFollow | null>(null);
   const handleTarget = useRef<Element | null>(null);
   const scheduler = useRef<FrameScheduler | null>(null);
@@ -322,11 +413,40 @@ export function useStudentSelectionGesture(
   }, [ensureSession, rootRef]);
 
   /**
+   * Say that the caret moved — on the haptic channel.
+   *
+   * Only ever called from where `{node, offset}` was seen to change, so there is
+   * exactly one definition of "a new caret offset" in this engine and it is the
+   * same one the visual tick is driven by. The floor below is the difference
+   * between a device that answers every crossing and one that hums.
+   */
+  const tickCaret = useCallback(() => {
+    const buzz = live.current.vibrate;
+    if (!buzz) return;
+    // Read through the injected clock: time is a dependency here exactly as
+    // `vibrate` is, and a floor the test cannot drive would be assertable only
+    // by spying the machine's own clock.
+    const at = live.current.now();
+    if (at - lastHapticAt.current < CARET_HAPTIC_THROTTLE_MS) return;
+    lastHapticAt.current = at;
+    try {
+      buzz(CARET_HAPTIC_MS);
+    } catch {
+      // A platform that refuses is not a failure worth breaking a frame over.
+    }
+  }, []);
+
+  /**
    * Resolve, measure and publish — from a frame, and nowhere else.
    *
    * The finger's latest position is resolved against the text only when the
    * session says the position means something for the phase it is in, so a
    * pending gesture that has not travelled yet costs no layout work at all.
+   *
+   * THE SNAPPED CARET IS RESOLVED HERE TOO, in this same frame and immediately
+   * after the caret resolution: one pass over layout per frame, and never a
+   * second reader on `pointermove` — which is also what keeps the caret and the
+   * range it describes measured at the same instant.
    */
   const runFrame = useCallback(() => {
     const active = ensureSession();
@@ -347,8 +467,35 @@ export function useStudentSelectionGesture(
         );
       }
     }
+
+    // After the session has adopted the move: its endpoint is the source of
+    // truth, and it is measured only while an endpoint is actually moving —
+    // the phases in which the lens may be open. Outside them there is nothing to
+    // magnify, and reading a caret on every scroll frame of a resting selection
+    // would be a layout read for a lens that is not on screen.
+    const endpoint = selectionMovesEndpoint(active.phase()) ? active.movingEndpoint() : null;
+
+    // THE SNAP KEY IS THIS COMPARISON, and nothing else. Same node and offset →
+    // no revision, no tick, no haptic: a finger travelling inside one glyph is
+    // invisible to everything downstream. A different position advances the
+    // revision once, and that single number is what the marker and the grip
+    // spring from. Re-appearing after the gesture ended is not a change either —
+    // the endpoint it came back to is compared against the one it left as, and
+    // an opening lens has its own entrance.
+    const previous = caretEndpoint.current;
+    if (
+      endpoint
+      && previous
+      && (previous.node !== endpoint.node || previous.offset !== endpoint.offset)
+    ) {
+      snapRevision.current += 1;
+      tickCaret();
+    }
+    caretEndpoint.current = endpoint;
+    resolvedCaret.current = endpoint ? caretGeometryFromTextPoint(endpoint) : null;
+
     publish();
-  }, [ensureSession, publish, rootRef]);
+  }, [ensureSession, publish, rootRef, tickCaret]);
   runFrameRef.current = runFrame;
 
   /* ------------------------------------------------------------------ *
@@ -381,6 +528,8 @@ export function useStudentSelectionGesture(
     ensureSession().reset();
     anchor.current = null;
     lastPointer.current = null;
+    resolvedCaret.current = null;
+    caretEndpoint.current = null;
     pointerIsText.current = false;
     handleTarget.current = null;
   }, [clearHoldTimer, detachScrollSuppressor, ensureSession, releaseBinding]);
@@ -738,7 +887,13 @@ export function useStudentSelectionGesture(
   return {
     ...presentation,
     anchorRect: anchor.current,
-    pointer: lastPointer.current ? { x: lastPointer.current.x, y: lastPointer.current.y } : null,
+    pointer: lastPointer.current
+      ? {
+          finger: { x: lastPointer.current.x, y: lastPointer.current.y },
+          caret: resolvedCaret.current,
+          snapRevision: snapRevision.current,
+        }
+      : null,
     adjusting: presentation.phase === 'adjusting-start' || presentation.phase === 'adjusting-end',
     beginHandleAdjustment,
     dismiss,

@@ -133,9 +133,9 @@ describe('the overlay follows a finger without rebuilding anything', () => {
     const sourceRef = { current: source } as RefObject<HTMLElement | null>;
     const cloneNode = vi.spyOn(Node.prototype, 'cloneNode');
 
-    const { rerender } = render(<SelectionLoupe open point={{ x: 10, y: 200 }} sourceRef={sourceRef} />);
+    const { rerender } = render(<SelectionLoupe open fingerPoint={{ x: 10, y: 200 }} sourceRef={sourceRef} />);
     for (let move = 0; move < 50; move += 1) {
-      rerender(<SelectionLoupe open point={{ x: 10 + move, y: 200 + move }} sourceRef={sourceRef} />);
+      rerender(<SelectionLoupe open fingerPoint={{ x: 10 + move, y: 200 + move }} sourceRef={sourceRef} />);
     }
 
     expect(cloneNode).toHaveBeenCalledTimes(1);

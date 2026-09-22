@@ -12,7 +12,12 @@ async function coordinates(surface: Locator, phrase: string) {
       if (start < 0) continue;
       const point = (offset: number) => {
         const range = document.createRange();
-        range.setStart(node!, offset); range.setEnd(node!, offset + 1);
+        // Clamped to the node's last character: a phrase that ENDS the paragraph
+        // (the fixture's RTL/Thai ones do) has no character after it, and a range
+        // one past the node is an IndexSizeError rather than a coordinate.
+        // Mid-node phrases — every earlier caller — are unaffected.
+        const at = Math.min(offset, node!.data.length - 1);
+        range.setStart(node!, at); range.setEnd(node!, at + 1);
         const rect = range.getBoundingClientRect();
         return { x: rect.left + 1, y: rect.top + rect.height / 2 };
       };
@@ -287,8 +292,9 @@ test('the magnifier is a picture of the prose, not a second exam surface', async
     const passage = source.getBoundingClientRect();
     return {
       scale,
-      // The centre of the lens: where the finger's own coordinate is mapped, and
-      // where the column tick is painted.
+      // The centre of the lens: what the PICTURE is pointed at (a character
+      // boundary the engine resolved) and where the column tick is painted. Read
+      // from the lens's own box rather than from anything the component believes.
       centre: { x: lens.left + lens.width / 2, y: lens.top + lens.height / 2 },
       marker: { x: marker.left + marker.width / 2, y: marker.top + marker.height / 2 },
       top: lens.top,
@@ -342,14 +348,18 @@ test('the magnifier is a picture of the prose, not a second exam surface', async
   // pixels from where the finger is.
   expect(geometry.picture.width).toBeCloseTo(geometry.passage.width * geometry.scale, 0);
   expect(geometry.picture.height).toBeCloseTo(geometry.passage.height * geometry.scale, 0);
-  // Second, the finger's own document coordinate is the coordinate at the CENTRE
-  // of the lens, which is the column the tick indexes. A picture of the right size
-  // in the wrong place satisfies the first claim and still shows the student the
-  // wrong words: it is how a lens full of correctly laid-out prose came to display
-  // a character boundary eight document pixels away from the finger.
-  const pointed = await lensMisalignment(page, gesture.finger);
-  expect(pointed!.x).toBeLessThan(1.5);
-  expect(pointed!.y).toBeLessThan(1.5);
+  // Second, the two coordinates the lens keeps apart. The INSTRUMENT is over the
+  // hand — the lens's box is centred on the finger, asserted above and below.
+  // The PICTURE is over the caret: the document coordinate at the centre of the
+  // lens is the character boundary the engine resolved, which is where the tick
+  // sits. That is usually a fraction of a glyph away from the finger and can be a
+  // whole word away on a claim that expanded to a word — asserting the finger's
+  // own coordinate instead is what this file used to do, and it is the old
+  // contract: a loupe that reports where the hand is rather than what was chosen.
+  const caret = await resolvedCaretAt(page, region, gesture.finger);
+  const pointed = await lensMisalignment(page, caret);
+  expect(pointed!.x, 'the picture is centred on the resolved caret, not on the finger').toBeLessThan(1.5);
+  expect(pointed!.y, 'the picture is centred on the resolved caret, not on the finger').toBeLessThan(1.5);
   // And the tick itself is drawn on that column, so the mark the student reads and
   // the mapping the engine applies are the same claim.
   const offBy = (mapped: number, centre: number) => Math.abs(mapped - centre);
@@ -406,34 +416,36 @@ test('the magnifier follows the finger while a handle is dragged, line by line',
   await expect(page.locator('[data-selection-loupe]')).toBeVisible();
   await expect.poll(() => loupeFrameScale(page)).toBe(1);
   await nextFrames(page);
-  const first = await lensMisalignment(page, handle.at());
+  const firstCaret = await resolvedCaretAt(page, region, handle.at());
+  const first = await lensMisalignment(page, firstCaret);
 
   const down = { x: along.x + 4, y: along.y + 34 };
   await handle.move(down.x, down.y);
   await nextFrames(page);
-  const second = await lensMisalignment(page, handle.at());
+  const secondCaret = await resolvedCaretAt(page, region, handle.at());
+  const second = await lensMisalignment(page, secondCaret);
 
-  // It is still a camera at each place the finger went, not only at the first.
+  // It is still a camera at each place the finger went, not only at the first —
+  // aimed at whatever caret that position resolved to.
   expect(first!.x).toBeLessThan(1.5);
   expect(first!.y).toBeLessThan(1.5);
   expect(second!.x).toBeLessThan(1.5);
   expect(second!.y).toBeLessThan(1.5);
-  // And it travelled with the finger: the picture slides inside the lens by the
-  // finger's own distance, magnified, which is what puts the document at the
-  // finger's new coordinate under the tick — character by character within a
-  // line, and line by line when the finger crosses one. A lens holding one cached
-  // word moves with the finger and its contents do not.
-  expect(second!.translate!.x - first!.translate!.x).toBeCloseTo(-(down.x - along.x) * second!.scale, 0);
-  expect(second!.translate!.y - first!.translate!.y).toBeCloseTo(-(down.y - along.y) * second!.scale, 0);
+  // And it travelled: the picture slides inside the lens by the CARET's own
+  // distance, magnified — the finger's distance less the snap, because the caret
+  // only moves when it crosses a boundary. Measured against the caret at both
+  // ends rather than against the finger, since a picture that moved by exactly
+  // the finger's distance would be the old contract rather than this one. A lens
+  // holding one cached word fails both, because its content does not move at all.
+  expect(second!.translate!.x - first!.translate!.x).toBeCloseTo(-(secondCaret.x - firstCaret.x) * second!.scale, 0);
+  expect(second!.translate!.y - first!.translate!.y).toBeCloseTo(-(secondCaret.y - firstCaret.y) * second!.scale, 0);
 
   // The same claim in the form a student would state it, after the finger has been
   // carried across a line and then across another: the character under the tick is
-  // the character under the finger. The geometry above can agree with itself while
-  // the picture is placed for a box the passage no longer has — both sides of the
-  // sum move together — so the mapping is also asserted the way the requirement
-  // asks for it, by character rather than by pixel. Aimed at a later line's own
-  // ink, read from the passage rather than guessed at, so the finger really is over
-  // a character for the claim to be about.
+  // the one the caret resolved to there. The geometry above can agree with itself
+  // while the picture is placed for a box the passage no longer has — both sides
+  // of the sum move together — so the mapping is also asserted the way the
+  // requirement asks for it, by character rather than by pixel.
   // `canopy density` is the furthest line inside this passage's scroll band that
   // still sits clear of the engine's 72px edge band (the container is only ~218px
   // tall here), so the drag crosses lines without the engine auto-scrolling the
@@ -448,13 +460,18 @@ test('the magnifier follows the finger while a handle is dragged, line by line',
   // of a difference — while telling the student they are on a different character
   // than they are. The index under the tick is the answer to the question they are
   // actually asking.
-  const underFinger = await characterUnder(region, handle.at());
+  const fingerInk = await characterUnder(region, handle.at());
+  expect(fingerInk, 'the finger has to be over real ink for this to mean anything').not.toBeNull();
+  const acrossCaret = await resolvedCaretAt(page, region, handle.at());
   const underTick = await characterUnder(page.locator('[data-selection-loupe-source]'), await lensCentre(page));
-  expect(underFinger, 'the finger has to be over real ink for this to mean anything').not.toBeNull();
-  expect(underTick).toEqual(underFinger);
-  const third = await lensMisalignment(page, handle.at());
-  expect(third!.x).toBeLessThan(1.5);
-  expect(third!.y).toBeLessThan(1.5);
+  expect(underTick, 'the tick sits on the caret the engine resolved').not.toBeNull();
+  // The tick is drawn ON a boundary, so the rects of the characters either side
+  // of it both contain the centre point — which is why this asserts the caret's
+  // OWN characters rather than the character under the finger.
+  expect(underTick!.index).toBe(characterAtCaret(acrossCaret));
+  const third = await lensMisalignment(page, acrossCaret);
+  expect(third!.x, 'the picture is pointed at the caret, line by line').toBeLessThan(1.5);
+  expect(third!.y, 'the picture is pointed at the caret, line by line').toBeLessThan(1.5);
 
   await handle.release();
   await expect(page.locator('[data-selection-loupe]')).toBeHidden();
@@ -495,7 +512,8 @@ test('the lens re-reads a passage that moved under it without a scroll or a resi
   await expect(page.locator('[data-selection-loupe]')).toBeVisible();
   await expect.poll(() => loupeFrameScale(page)).toBe(1);
   await nextFrames(page);
-  const before = await lensMisalignment(page, handle.at());
+  const beforeCaret = await resolvedCaretAt(page, region, handle.at());
+  const before = await lensMisalignment(page, beforeCaret);
   expect(before!.y).toBeLessThan(1.5);
 
   // The page moves the passage: an ancestor's box changes, so the passage is not
@@ -510,18 +528,20 @@ test('the lens re-reads a passage that moved under it without a scroll or a resi
   const after = (await coordinates(region, 'built environment')).from;
   await handle.move(after.x, after.y);
   await nextFrames(page);
-  const shifted = await lensMisalignment(page, handle.at());
+  const shiftedCaret = await resolvedCaretAt(page, region, handle.at());
+  const shifted = await lensMisalignment(page, shiftedCaret);
   expect(shifted!.x).toBeLessThan(1.5);
   expect(shifted!.y).toBeLessThan(1.5);
 
-  // And in the form a student would recognise: the same character under the tick
-  // as under the finger — which a lens translated for the old box fails by a whole
-  // line, not by a pixel.
+  // And in the form a student would recognise: the character under the tick is the
+  // one the caret resolved to on this frame — which a lens translated for the old
+  // box fails by a whole line, not by a pixel.
   const centre = await lensCentre(page);
-  const underFinger = await characterUnder(region, handle.at());
+  const fingerInk = await characterUnder(region, handle.at());
   const underTick = await characterUnder(page.locator('[data-selection-loupe-source]'), centre);
-  expect(underFinger).not.toBeNull();
-  expect(underTick).toEqual(underFinger);
+  expect(fingerInk).not.toBeNull();
+  expect(underTick, 'the tick sits on the caret the engine resolved').not.toBeNull();
+  expect(underTick!.index).toBe(characterAtCaret(shiftedCaret));
 
   await handle.release();
   await expect(page.locator('[data-selection-loupe]')).toBeHidden();
@@ -666,6 +686,125 @@ async function nextFrames(page: Page, frames = 2) {
 }
 
 /**
+ * A finger the test keeps down and moves by hand: press, claim, NUDGE.
+ *
+ * `drag` ends (or hands off) its gesture, and `grabHandle` starts on a handle —
+ * neither can hold the page still and then move3.5 pixels, which is the only way
+ * to observe the difference this suite now hinges on: a lens BOX that follows
+ * every pixel against CONTENT that must not move until the caret does. Real
+ * touch events on Chromium (where these tests run), synthetic ones elsewhere —
+ * the same bargain `drag` makes.
+ */
+async function press(page: Page, surface: Locator, browserName: string) {
+  if (browserName === 'chromium') {
+    const cdp = await page.context().newCDPSession(page);
+    let at = { x: 0, y: 0 };
+    return {
+      down: async (point: { x: number; y: number }) => {
+        at = point;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...point, id: 1 }] });
+      },
+      move: async (point: { x: number; y: number }) => {
+        at = point;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...point, id: 1 }] });
+      },
+      at: () => at,
+      release: async () => {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await cdp.detach();
+      },
+    };
+  }
+  let at = { x: 0, y: 0 };
+  return {
+    down: async (point: { x: number; y: number }) => {
+      at = point;
+      await surface.dispatchEvent('pointerdown', { pointerId: 1, pointerType: 'touch', clientX: point.x, clientY: point.y });
+    },
+    move: async (point: { x: number; y: number }) => {
+      at = point;
+      await surface.dispatchEvent('pointermove', { pointerId: 1, pointerType: 'touch', clientX: point.x, clientY: point.y });
+    },
+    at: () => at,
+    release: async () => {
+      await surface.dispatchEvent('pointerup', { pointerId: 1, pointerType: 'touch', clientX: at.x, clientY: at.y });
+    },
+  };
+}
+
+/**
+ * The roomiest glyph inside `phrase`: where a3.5px nudge is provably still
+ * inside ONE character. Measured from the page's own layout rather than assumed
+ * from a font size — the claim "same glyph" has to come from the renderer.
+ */
+async function widestGlyph(surface: Locator, phrase: string) {
+  return surface.evaluate((root, text) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) {
+      const start = node.data.indexOf(text);
+      if (start < 0) continue;
+      let best: DOMRect | null = null;
+      for (let index = start; index < start + text.length; index += 1) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + 1);
+        const rect = range.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && (!best || rect.width > best.width)) best = rect;
+      }
+      if (best) return { x: best.left, y: best.top, width: best.width, height: best.height };
+      throw new Error(`No measurable glyph in: ${text}`);
+    }
+    throw new Error(`Missing text: ${text}`);
+  }, phrase);
+}
+
+/**
+ * Frame-by-frame truth about the two precision indicators: their deviation from
+ * identity (0 = not moving), whether both elements exist, and the snap revision
+ * that says the EVENT which would start them had arrived.
+ *
+ * Sampled on `requestAnimationFrame` because "the bounce never happened" and
+ * "the sampler never looked" are the same observation otherwise — the same rule
+ * the entrance test states for reduced motion, applied to the tick.
+ */
+async function sampleTick(page: Page, frames = 24) {
+  return page.evaluate(async (count) => {
+    const marker = document.querySelector('[data-selection-loupe-marker]');
+    const gripTick = document.querySelector('.selection-v2-grip-tick');
+    const deviation = (element: Element | null): number => {
+      if (!element) return -1;
+      const transform = getComputedStyle(element).transform;
+      if (!transform || transform === 'none') return 0;
+      const matrix = new DOMMatrixReadOnly(transform);
+      return Math.max(Math.abs(matrix.a - 1), Math.abs(matrix.d - 1));
+    };
+    const markerDeviations: number[] = [];
+    const gripDeviations: number[] = [];
+    for (let frame = 0; frame < count; frame += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      markerDeviations.push(deviation(marker));
+      gripDeviations.push(deviation(gripTick));
+    }
+    return {
+      markerPresent: marker !== null,
+      gripPresent: gripTick !== null,
+      revision: marker?.getAttribute('data-snap-revision') ?? null,
+      gripWitness: document.querySelector('[data-student-selection-handle] .selection-v2-grip')?.getAttribute('data-selection-motion') ?? null,
+      markerDeviations,
+      gripDeviations,
+    };
+  }, frames);
+}
+
+/** The picture's own offset INSIDE the lens, as the string it is written with. */
+async function loupeContentTransform(page: Page) {
+  return page.evaluate(() =>
+    (document.querySelector('[data-selection-loupe-content]') as HTMLElement | null)?.style.transform ?? null,
+  );
+}
+
+/**
  * The one claim the lens makes, in the coordinate system it makes it in: where
  * the finger's own document coordinate lands, against the centre of the lens.
  *
@@ -680,12 +819,18 @@ async function nextFrames(page: Page, frames = 2) {
  * of finger travel, and a test that watched that would be watching the lens move.
  * `null` when the lens is not on screen at all.
  */
-async function lensMisalignment(page: Page, finger: { x: number; y: number }) {
-  return page.evaluate((point) => {
+
+/**
+ * The same mapping over any surface: `sourceSelector` defaults to the SAT
+ * stimulus, and the IELTS passage passes its own highlightable surface — the
+ * picture is measured against whatever the lens was cloned from.
+ */
+async function lensMisalignment(page: Page, finger: { x: number; y: number }, sourceSelector = '[data-sat-annotation-region="stimulus"]') {
+  return page.evaluate(({ point, sourceSelector }) => {
     const content = document.querySelector('[data-selection-loupe-content]') as HTMLElement | null;
     const clone = document.querySelector('[data-selection-loupe-source]') as HTMLElement | null;
     const lens = document.querySelector('[data-selection-loupe]');
-    const source = document.querySelector('[data-sat-annotation-region="stimulus"]');
+    const source = document.querySelector(sourceSelector);
     if (!content || !clone || !lens || !source) return null;
     const lensRect = lens.getBoundingClientRect();
     const picture = clone.getBoundingClientRect();
@@ -698,7 +843,7 @@ async function lensMisalignment(page: Page, finger: { x: number; y: number }) {
       y: Math.abs(picture.top + (point.y - passage.top) * scale - (lensRect.top + lensRect.height / 2)),
       translate: translate ? { x: Number(translate[1]), y: Number(translate[2]) } : null,
     };
-  }, finger);
+  }, { point: finger, sourceSelector });
 }
 
 /**
@@ -711,6 +856,244 @@ async function lensCentre(page: Page) {
     const lens = document.querySelector('[data-selection-loupe]')!.getBoundingClientRect();
     return { x: lens.left + lens.width / 2, y: lens.top + lens.height / 2 };
   });
+}
+
+/**
+ * The caret the platform resolves for a finger — the position the engine adopts,
+ * and therefore what the lens CONTENT is pointed at.
+ *
+ * Built entirely from the browser's own answers rather than from anything the
+ * component reports: `caretPositionFromPoint` (with `caretRangeFromPoint` for
+ * engines that only ship the legacy API) and the real rect of the glyph beside
+ * the boundary. That is the same definition the engine uses, arrived at from
+ * outside it — the only kind of oracle a claim about "does the lens point at the
+ * caret" can be, and the reason this can be asserted without a component
+ * diagnostic to agree with.
+ *
+ * This is what replaced the old check that "the finger's own document coordinate
+ * lands at the centre of the lens". The finger is ANALOG and the caret is
+ * DISCRETE: the lens's BOX follows the finger (asserted separately, and still
+ * true), while its picture follows a CHARACTER BOUNDARY — typically a fraction of
+ * a glyph from the finger, and further on a long-press claim that expanded to a
+ * whole word. `caretPositionFromPoint` may answer with an ELEMENT rather than a
+ * text node — a point between two glyphs, or in the whitespace at a line's end
+ * (where a finger travelling between lines spends its time), hit-tests to
+ * "somewhere inside this box, at child index n", which is not yet a character.
+ * The engine resolves that by measurement — nearest rendered run, then the side
+ * of the nearest character's midpoint — and so does this helper, by the same
+ * rule. Sharing the engine's DEFINITION of where the caret is leaves the claim
+ * under test fully independent: that the lens points THERE instead of at the
+ * hand is still measured from nothing but DOM geometry.
+ *
+ * Viewport coordinates for `lensMisalignment`, plus the character index in
+ * `root` counted exactly the way `characterUnder` counts it.
+ */
+async function resolvedCaretAt(page: Page, root: Locator, finger: { x: number; y: number }) {
+  return root.evaluate((scope, point) => {
+    const doc = document as Document & {
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    };
+
+    // The engine's resolution chain, spelled out independently: precise answers
+    // first, an element answer held as a HINT about where to measure, geometry
+    // last — in that order, because a renderer can answer precisely through one
+    // spelling and coarsely through the other, and geometry must not shadow a
+    // precise answer.
+    let hit: Text | null = null;
+    let hint: Element | null = null;
+    let hitOffset = 0;
+
+    const inScope = (candidate: Node | null): boolean => !!candidate && scope.contains(candidate);
+    const elementFor = (candidate: Node | null): Element | null => {
+      if (!inScope(candidate)) return null;
+      return candidate!.nodeType === Node.ELEMENT_NODE ? (candidate as Element) : candidate!.parentElement;
+    };
+    const asPrecise = (candidate: Node | null, at: number): Text | null => {
+      if (candidate?.nodeType !== Node.TEXT_NODE) return null;
+      const run = candidate as Text;
+      if (run.data.length === 0 || !inScope(run)) return null;
+      hitOffset = Math.max(0, Math.min(run.data.length, Math.trunc(at)));
+      return run;
+    };
+
+    if (typeof doc.caretPositionFromPoint === 'function') {
+      const position = doc.caretPositionFromPoint(point.x, point.y);
+      hit = asPrecise(position?.offsetNode ?? null, position?.offset ?? 0);
+      hint = elementFor(position?.offsetNode ?? null);
+    }
+    if (!hit && typeof doc.caretRangeFromPoint === 'function') {
+      const range = doc.caretRangeFromPoint(point.x, point.y);
+      if (range) {
+        hit = asPrecise(range.startContainer, range.startOffset);
+        hint = hint ?? elementFor(range.startContainer);
+      }
+    }
+
+    const distanceToRect = (rect: DOMRect, x: number, y: number) =>
+      Math.hypot(
+        Math.max(rect.left - x, 0, x - (rect.left + rect.width)),
+        Math.max(rect.top - y, 0, y - (rect.top + rect.height)),
+      );
+    const rectsOf = (read: () => DOMRectList | null): DOMRect[] => {
+      try {
+        const list = read();
+        if (!list) return [];
+        return Array.from(list).filter((rect) => rect.width > 0 && rect.height > 0);
+      } catch {
+        return [];
+      }
+    };
+
+    let node: Text;
+    let offset: number;
+    if (hit) {
+      node = hit;
+      offset = hitOffset;
+    } else {
+      // The element the renderer named — or the element under the point, or the
+      // passage itself — is where the measurement looks.
+      const atPoint = document.elementFromPoint(point.x, point.y);
+      const within = hint ?? (inScope(atPoint) ? atPoint : null) ?? scope;
+      const walker = document.createTreeWalker(within, NodeFilter.SHOW_TEXT);
+      let candidate: Text | null;
+      let nearest: Text | null = null;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      while ((candidate = walker.nextNode() as Text | null)) {
+        if (candidate.data.length === 0) continue;
+        const rects = rectsOf(() => {
+          const range = document.createRange();
+          range.selectNodeContents(candidate!);
+          return range.getClientRects();
+        });
+        for (const rect of rects) {
+          const distance = distanceToRect(rect, point.x, point.y);
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearest = candidate;
+          }
+        }
+      }
+      if (!nearest) throw new Error('the platform answered with an element and no text measures inside it');
+      node = nearest;
+
+      // Then the offset on whichever side of the nearest character's midpoint
+      // the point fell: the same rule a text cursor obeys, arrived at from
+      // geometry. A character whose rect CONTAINS the point wins immediately —
+      // nothing later can be closer — which is what makes a gap resolve onto
+      // one of the lines that bounds it rather than into the gap itself.
+      offset = 0;
+      let offsetDistance = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < node.data.length; index += 1) {
+        const rects = rectsOf(() => {
+          const range = document.createRange();
+          range.setStart(node, index);
+          range.setEnd(node, index + 1);
+          return range.getClientRects();
+        });
+        let contained = false;
+        for (const rect of rects) {
+          const distance = distanceToRect(rect, point.x, point.y);
+          const side = point.x < rect.left + rect.width / 2 ? index : index + 1;
+          if (distance === 0) {
+            offset = side;
+            contained = true;
+            break;
+          }
+          if (distance < offsetDistance) {
+            offsetDistance = distance;
+            offset = side;
+          }
+        }
+        if (contained) break;
+      }
+    }
+
+    const text = node.data;
+    offset = Math.max(0, Math.min(offset, text.length));
+    const glyph = (from: number, to: number) => {
+      if (from < 0 || to > text.length) return null;
+      const range = document.createRange();
+      range.setStart(node!, from);
+      range.setEnd(node!, to);
+      const rect = range.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 ? rect : null;
+    };
+    const previous = glyph(offset - 1, offset);
+    const next = glyph(offset, offset + 1);
+    if (!previous && !next) throw new Error('no measurable glyph beside the resolved caret');
+
+    const rtl = getComputedStyle((node as Text).parentElement ?? scope).direction === 'rtl';
+    const sameLine = !!(previous && next && Math.abs(previous.top - next.top) < 1);
+    // One rule, three cases — the same one the engine applies. On a line the
+    // boundary is the edge the two glyphs share; at a WRAP it belongs to the line
+    // the following glyph is on (never a gap the finger may be travelling in); at
+    // either end of the node it is the outer edge of the one glyph there is.
+    let x: number;
+    let box: DOMRect;
+    if (previous && next && !sameLine) {
+      x = rtl ? next.right : next.left;
+      box = next;
+    } else if (previous && next) {
+      x = rtl ? previous.left : previous.right;
+      box = next;
+    } else if (previous) {
+      x = rtl ? previous.left : previous.right;
+      box = previous;
+    } else {
+      x = rtl ? next!.right : next!.left;
+      box = next!;
+    }
+
+    // The character index, counted the way `characterUnder` counts it: every
+    // character of every text node under this root, in document order.
+    let counted: number | null = null;
+    let index = 0;
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+    let scanned: Text | null;
+    while ((scanned = walker.nextNode() as Text | null)) {
+      if (scanned === node) {
+        counted = index + offset;
+        break;
+      }
+      index += scanned.data.length;
+    }
+    if (counted === null) throw new Error('the resolved caret is outside the passage under test');
+
+    return {
+      x,
+      y: box.top + box.height / 2,
+      index: counted,
+      onFollowingLine: previous !== null && next !== null && !sameLine,
+      charBefore: offset > 0 ? text[offset - 1] : null,
+      charAfter: offset < text.length ? text[offset] : null,
+    };
+  }, finger);
+}
+
+/**
+ * The character `characterUnder` should report for a tick drawn ON `caret`.
+ *
+ * The tick lands exactly on a boundary, so the rect of the character before it
+ * and of the character after it both CONTAIN the point — which is why the old
+ * "same character as under the finger" comparison had to be replaced rather than
+ * tightened: it was measuring the wrong coordinate, not measuring it imprecisely.
+ * Whichever neighbour has ink is the answer a student reads; whitespace on both
+ * sides falls back to the first hit, as `characterUnder` itself does.
+ */
+function characterAtCaret(caret: Awaited<ReturnType<typeof resolvedCaretAt>>): number {
+  if (caret.onFollowingLine) return caret.index;
+  // The caret's own character is the nearest one that HAS a glyph at the
+  // boundary — the same rule `characterUnder` lives by (`rect.width > 0`). A
+  // combining mark (Thai vowel signs, Arabic diacritics) renders as a zero-width
+  // unit: naming it here would promise a character the oracle, correctly, can
+  // never return, and every such caret would mismatch by exactly one index. The
+  // boundary's visible character in that case is the following base.
+  const hasOwnGlyph = (value: string | null | undefined) =>
+    Boolean(value && value.trim() !== '' && !/^\p{M}/u.test(value));
+  if (hasOwnGlyph(caret.charBefore)) return caret.index - 1;
+  if (caret.charAfter && caret.charAfter.trim() !== '') return caret.index;
+  return caret.index - 1;
 }
 
 /**
@@ -881,3 +1264,225 @@ for (const product of ['IELTS', 'SAT'] as const) {
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('');
   });
 }
+
+/*
+ * THE THREE PROOFS A JSDOM SUITE CANNOT MAKE: a real renderer, real glyphs,
+ * real frames. Each pins one claim docs/selectionui.md makes about what the
+ * student perceives — sub-glyph travel is analog in the box and discrete in the
+ * content; the snap fires and the bounce obeys the platform's preference; and
+ * the caret geometry is MEASURED, including for scripts and directions a mock
+ * cannot shape.
+ */
+
+test('a 3.5px nudge inside one glyph moves the lens box and leaves the loupe content byte-identical', async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'The magnifier only exists on the owned touch selection.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const region = page.locator('[data-sat-annotation-region="stimulus"]');
+
+  // The spec's case at real scale: 3–5px of finger travel that stays inside ONE
+  // glyph, with both sample points on the same side of that glyph's midpoint —
+  // which is where a caret position changes. The glyph is chosen from the
+  // layout, and wide enough that "inside it" is a measurement, not a hope.
+  const glyph = await widestGlyph(region, 'extreme heat');
+  expect(glyph.width, 'the chosen glyph must hold a 3.5px nudge past its midpoint').toBeGreaterThanOrEqual(9);
+  const claim = (await coordinates(region, 'extreme heat')).from;
+  const p1 = { x: glyph.x + glyph.width / 2 + 0.5, y: glyph.y + glyph.height / 2 };
+  expect(p1.x - claim.x, 'the claim move must exceed the 8px tolerance to own the gesture').toBeGreaterThan(8);
+  const p2 = { x: p1.x + 3.5, y: p1.y };
+
+  const finger = await press(page, region, browserName);
+  await finger.down(claim);
+  await finger.move(p1);
+  await expect(page.locator('[data-selection-loupe]')).toBeVisible();
+  await expect.poll(() => loupeFrameScale(page)).toBe(1);
+  await nextFrames(page);
+
+  const before = await page.evaluate(() => ({
+    content: (document.querySelector('[data-selection-loupe-content]') as HTMLElement).style.transform,
+    box: document.querySelector('[data-selection-loupe]')!.getBoundingClientRect().left,
+    revision: document.querySelector('[data-selection-loupe-marker]')?.getAttribute('data-snap-revision') ?? null,
+  }));
+  const caretBefore = await resolvedCaretAt(page, region, p1);
+
+  await finger.move(p2);
+  await nextFrames(page);
+  const after = await page.evaluate(() => ({
+    content: (document.querySelector('[data-selection-loupe-content]') as HTMLElement).style.transform,
+    box: document.querySelector('[data-selection-loupe]')!.getBoundingClientRect().left,
+    revision: document.querySelector('[data-selection-loupe-marker]')?.getAttribute('data-snap-revision') ?? null,
+  }));
+  const caretAfter = await resolvedCaretAt(page, region, p2);
+
+  // The premise, from the independent oracle: one glyph, one boundary — the
+  // resolved caret is the SAME position before and after the nudge.
+  expect(caretAfter.index, 'both points must resolve to the same caret for "inside one glyph" to mean anything').toBe(caretBefore.index);
+
+  // The CONTENT is discrete: byte-identical transform, no sub-pixel creep, and
+  // no snap event that would have said a new character was reached.
+  expect(after.content, 'loupe content must not move while the caret does not').toBe(before.content);
+  expect(after.revision).toBe(before.revision);
+
+  // The BOX is analog: it travelled the finger's own 3.5px.
+  expect(after.box - before.box, 'the lens box follows the finger, pixel for pixel').toBeCloseTo(3.5, 1);
+
+  await finger.release();
+  await expect(page.locator('[data-selection-loupe]')).toBeHidden();
+});
+
+test('a caret crossing is a measurable tick under the default preference — the sampler can see it', async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'The magnifier only exists on the owned touch selection.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const region = page.locator('[data-sat-annotation-region="stimulus"]');
+  await drag(page, region, 'extreme heat', browserName, isMobile);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+
+  // The contrast half of the reduced-motion proof: without a sampler that CAN
+  // see the bounce, "the bounce never appeared" would also describe a sampler
+  // that never looked. Grab, cross, and watch from the very next frame.
+  const handle = await grabHandle(page, browserName, 'end');
+  await expect(page.locator('[data-selection-loupe]')).toBeVisible();
+  await nextFrames(page);
+  const revision0 = await page.locator('[data-selection-loupe-marker]').getAttribute('data-snap-revision');
+
+  await handle.move(handle.origin.x + 55, handle.origin.y);
+  const seen = await sampleTick(page);
+
+  expect(seen.markerPresent, 'the lens is open, so its marker is the tick\'s stage').toBe(true);
+  expect(seen.gripPresent, 'the dragged handle carries the other precision indicator').toBe(true);
+  expect(Number(seen.revision), 'the crossing must have arrived as an event').toBeGreaterThan(Number(revision0));
+  // Both indicators displaced and sprang back — the tick exists in a real
+  // browser, at a magnitude no slow frame could mistake for stillness.
+  expect(Math.max(...seen.markerDeviations), 'the marker bounced under the default preference').toBeGreaterThan(0.001);
+  expect(Math.max(...seen.gripDeviations), 'the grip bounced under the default preference').toBeGreaterThan(0.001);
+
+  await handle.release();
+  await expect(page.locator('[data-selection-loupe]')).toBeHidden();
+});
+
+test('reduced motion keeps the snap — event fired, content jumped — while the bounce never starts', async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'The magnifier only exists on the owned touch selection.');
+  // Before the document loads, the way the entrance test does it: motion reads
+  // the preference once per document, so a student who has it set at the OS
+  // level arrives to a document that already knows.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const region = page.locator('[data-sat-annotation-region="stimulus"]');
+  await drag(page, region, 'extreme heat', browserName, isMobile);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+
+  const handle = await grabHandle(page, browserName, 'end');
+  await expect(page.locator('[data-selection-loupe]')).toBeVisible();
+  await nextFrames(page);
+  const revision0 = await page.locator('[data-selection-loupe-marker]').getAttribute('data-snap-revision');
+  const contentBefore = await loupeContentTransform(page);
+
+  // ONE crossing, sampled from the frame it happens on — the pairing the spec
+  // names, observed rather than inferred: the event must arrive (revision
+  // advances, the picture jumps to the new boundary) and neither precision
+  // indicator may leave identity on any sampled frame.
+  await handle.move(handle.origin.x + 55, handle.origin.y);
+  const seen = await sampleTick(page);
+  const contentAfter = await loupeContentTransform(page);
+
+  expect(seen.markerPresent).toBe(true);
+  expect(seen.gripPresent).toBe(true);
+  expect(Number(seen.revision), 'reduced motion must not swallow the snap: the caret change still happened').toBeGreaterThan(Number(revision0));
+  expect(contentAfter, 'the lens content still jumped to the new boundary — that is information, not decoration').not.toBe(contentBefore);
+  expect(seen.gripWitness, 'the platform preference reached the grip, as the entrance test proves for the frame').toBe('reduced');
+  // The bounce, and only the bounce: identity on every frame of both indicators,
+  // which the companion test above proves this sampler would catch if it ran.
+  expect(Math.max(...seen.markerDeviations), 'the marker never started its bounce').toBeLessThanOrEqual(0.001);
+  expect(Math.max(...seen.gripDeviations), 'the grip never started its bounce').toBeLessThanOrEqual(0.001);
+
+  await handle.release();
+  await expect(page.locator('[data-selection-loupe]')).toBeHidden();
+});
+
+test('RTL: the caret the lens points at comes from real glyph edges in a right-to-left run', async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'The magnifier only exists on the owned touch selection.');
+  // Literals duplicated from e2e/fixtures/touch-selection/main.tsx, which owns
+  // these paragraphs: a fixture cannot add passages to the SAT debug route (that
+  // is product code), and the IELTS path renders any passage text through the
+  // same surface, engine and lens.
+  // Fixture paragraphs are placed FIRST (see fixtures/touch-selection/main.tsx):
+  // the loupe clone drops container-scoped paragraph spacing, so any preceding
+  // paragraph shifts the picture by 8px. Paragraph one has none — source and
+  // clone agree exactly here, and every assertion below stays as strict as it
+  // is for Latin text.
+  const phrase = 'هذا نص عربي بسيط عن الطقس والمدينة والحدائق والشوارع';
+  await page.goto(fixture);
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+  const surface = page.locator(passage);
+  // CENTRED, not merely visible: these paragraphs are the pane's last, so
+  // `scrollIntoViewIfNeeded` parks them at the bottom — inside the engine's 72px
+  // edge band, where a held finger keeps auto-scrolling the passage and nothing
+  // can rest long enough to be measured. Centering keeps the gesture clear of
+  // both bands, the same rule the handle-drag test states for its positions.
+  await page.locator('p').filter({ hasText: phrase }).evaluate((element) => {
+    element.scrollIntoView({ block: 'center', behavior: 'instant' });
+  });
+  // A fixture cannot put `dir` on a product-rendered <p>, so the RUN is
+  // right-to-left: the paragraph and the lens's picture (mounted at the document
+  // root, inheriting the same direction) flip together, and every computed
+  // `direction` — the engine's edge rule and the oracle's — reads `rtl`.
+  await page.evaluate(() => {
+    document.documentElement.dir = 'rtl';
+  });
+
+  const gesture = await drag(page, surface, phrase, browserName, isMobile, { hold: true });
+  await expect(page.locator('[data-selection-loupe]')).toBeVisible();
+  await expect.poll(() => loupeFrameScale(page)).toBe(1);
+  await nextFrames(page);
+
+  // The claim, measured from actual DOM geometry: in RTL the boundary is the
+  // SHARED edge the glyphs have — the preceding glyph's LEFT — and the lens's
+  // picture sits on it to within the same 1.5px every other case uses.
+  const caret = await resolvedCaretAt(page, surface, gesture.finger);
+  const pointed = await lensMisalignment(page, caret, passage);
+  expect(pointed!.x, 'the picture is centred on the resolved caret of the RTL run').toBeLessThan(1.5);
+  expect(pointed!.y, 'the picture is centred on the resolved caret of the RTL run').toBeLessThan(1.5);
+  const underTick = await characterUnder(page.locator('[data-selection-loupe-source]'), await lensCentre(page));
+  expect(underTick, 'the tick sits on the caret the engine resolved').not.toBeNull();
+  expect(underTick!.index).toBe(characterAtCaret(caret));
+
+  await gesture.finish();
+  await expect(page.locator('[data-selection-loupe]')).toBeHidden();
+});
+
+test('Thai: the caret the lens points at comes from real shaped clusters, not code units', async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'The magnifier only exists on the owned touch selection.');
+  // Literals duplicated from e2e/fixtures/touch-selection/main.tsx — see the RTL
+  // test above for why the fixture owns these paragraphs.
+  const phrase = 'ภาษาไทย คนในประเทศไทย พูดภาษาไทย ทุกวัน';
+  await page.goto(fixture);
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+  const surface = page.locator(passage);
+  // Centred for the same reason as the RTL test: clear of the auto-scroll band.
+  await page.locator('p').filter({ hasText: phrase }).evaluate((element) => {
+    element.scrollIntoView({ block: 'center', behavior: 'instant' });
+  });
+
+  const gesture = await drag(page, surface, phrase, browserName, isMobile, { hold: true });
+  await expect(page.locator('[data-selection-loupe]')).toBeVisible();
+  await expect.poll(() => loupeFrameScale(page)).toBe(1);
+  await nextFrames(page);
+
+  // A Thai cluster's rendered width has nothing to do with how many code units
+  // it is made of — the one case `fontSize * characterIndex` cannot survive.
+  // Both sides are the browser's own: the engine resolves the position with a
+  // `Range`, the oracle measures the same position with `Range`s, and the lens
+  // must sit on that boundary to within the shared tolerance.
+  const caret = await resolvedCaretAt(page, surface, gesture.finger);
+  const pointed = await lensMisalignment(page, caret, passage);
+  expect(pointed!.x, 'the picture is centred on the resolved caret of the Thai run').toBeLessThan(1.5);
+  expect(pointed!.y, 'the picture is centred on the resolved caret of the Thai run').toBeLessThan(1.5);
+  const underTick = await characterUnder(page.locator('[data-selection-loupe-source]'), await lensCentre(page));
+  expect(underTick, 'the tick sits on the caret the engine resolved').not.toBeNull();
+  expect(underTick!.index).toBe(characterAtCaret(caret));
+
+  await gesture.finish();
+  await expect(page.locator('[data-selection-loupe]')).toBeHidden();
+});

@@ -367,6 +367,14 @@ describe("SatStudentSessionRoute between-sections window", () => {
     expect(screen.queryByText("Waiting for the break to start")).not.toBeInTheDocument();
   });
 
+  it("shows a configured two-minute break as 2:00 when the break starts", () => {
+    renderRoute(mathData(), { breakSeconds: 120, waitSeconds: 0 });
+
+    expect(screen.getByText("On break")).toBeInTheDocument();
+    expect(screen.getByRole("timer")).toHaveTextContent("2:00");
+    expect(screen.queryByText("0:00")).not.toBeInTheDocument();
+  });
+
   it("renders the early-finish wait instead of a break until the section clock runs out", () => {
     renderRoute(mathData(), { breakSeconds: 0, waitSeconds: 300 });
 
@@ -385,7 +393,7 @@ describe("SatStudentSessionRoute between-sections window", () => {
       { phase: "break", autoEntryRecoverable: true },
     );
 
-    expect(screen.getByRole("timer")).toHaveTextContent("0:00");
+    expect(screen.getByRole("timer")).toHaveTextContent("—");
     expect(screen.getByText("Still opening your next section")).toBeInTheDocument();
     expect(screen.getByText(/Keep this screen open/)).toBeInTheDocument();
     // The recovery path stays named. No button: entry is automatic, and only
@@ -399,7 +407,7 @@ describe("SatStudentSessionRoute between-sections window", () => {
     renderRoute(mathData(), { breakSeconds: 0, waitSeconds: 0 }, { phase: "break", isStarting: true });
 
     expect(screen.getByText("Starting your next section")).toBeInTheDocument();
-    expect(screen.getByRole("timer")).toHaveTextContent("0:00");
+    expect(screen.getByRole("timer")).toHaveTextContent("—");
   });
 });
 

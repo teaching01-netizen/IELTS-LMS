@@ -80,7 +80,7 @@ test.describe("Browser compatibility", () => {
     await expect(page.getByLabel("IELTS Course")).toHaveAttribute("aria-label", "IELTS Course");
   });
 
-  test("browser media preferences are observable by the active UI", async ({ page }) => {
+  test("OS dark preference does not switch the active UI away from light mode", async ({ page }) => {
     await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
     await openRegistration(page);
 
@@ -88,11 +88,13 @@ test.describe("Browser compatibility", () => {
       dark: window.matchMedia("(prefers-color-scheme: dark)").matches,
       reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
       devicePixelRatio: window.devicePixelRatio,
+      colorScheme: getComputedStyle(document.documentElement).colorScheme,
     }));
 
     expect(preferences.dark).toBe(true);
     expect(preferences.reducedMotion).toBe(true);
     expect(preferences.devicePixelRatio).toBeGreaterThan(0);
+    expect(preferences.colorScheme).toBe("light");
   });
 
   test("required browser primitives are available before check-in", async ({ page }) => {

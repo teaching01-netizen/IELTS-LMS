@@ -300,6 +300,19 @@ func loadStudentRuntimeContext(ctx context.Context, db *sql.DB, scheduleID strin
 	return out, nil
 }
 
+func loadStaffRuntimeContext(ctx context.Context, db *sql.DB, scheduleID string) (map[string]any, error) {
+	out, err := loadStudentRuntimeContext(ctx, db, scheduleID)
+	if err != nil || out == nil {
+		return out, err
+	}
+	plan, err := proctor.LoadExamPlanBySchedule(ctx, db, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	out["examPlan"] = plan
+	return out, nil
+}
+
 // resolveStudentAttemptIDForUser resolves the caller's attempt for the
 // cookie-session reads (v1SessionInner/v1LiveInner via
 // studentSessionContext). Fail-closed binding:

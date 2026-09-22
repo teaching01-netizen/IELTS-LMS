@@ -114,7 +114,7 @@ export function PublishAssessmentDialog({
 
         <div className="mt-4 flex items-start gap-2 rounded-2xl border border-border p-4">
           {blockerCount === 0 ? (
-            <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-green-800 dark:text-green-200" aria-hidden="true" />
+            <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-green-800" aria-hidden="true" />
           ) : (
             <AlertTriangle size={17} className="mt-0.5 shrink-0 text-destructive" aria-hidden="true" />
           )}
@@ -151,7 +151,7 @@ export function PublishAssessmentDialog({
           />
 
         {warningCount > 0 && blockerCount === 0 ? (
-          <p className="mt-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
+          <p className="mt-3 text-xs leading-5 text-amber-800">
             Recommendations do not block publishing; review them if they affect your intended
             delivery.
           </p>

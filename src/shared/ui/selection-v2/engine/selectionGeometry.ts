@@ -21,10 +21,12 @@
  */
 
 import type {
+  CaretGeometry,
   SelectionDirection,
   SelectionEdge,
   SelectionHandleGeometry,
   SelectionRect,
+  TextPoint,
 } from '../domain/selectionTypes';
 
 /** Two client rects whose tops differ by less than this belong to one rendered line. */
@@ -123,6 +125,128 @@ export function selectionHandleGeometry(
     start: handleGeometryFor('start', lines, direction),
     end: handleGeometryFor('end', lines, direction),
   };
+}
+
+/* ------------------------------------------------------------------ caret -- */
+
+/** The rects a range paints that a human could actually see ink in. */
+function inkRects(range: Range, requireWidth: boolean): SelectionRect[] {
+  if (typeof range.getClientRects !== 'function') return [];
+  let rects: ArrayLike<DOMRect>;
+  try {
+    rects = range.getClientRects();
+  } catch {
+    return [];
+  }
+  const usable: SelectionRect[] = [];
+  for (let index = 0; index < rects.length; index += 1) {
+    const rect = rects[index];
+    if (!rect) continue;
+    const { left, top, width, height } = rect;
+    if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(height)) continue;
+    // A caret is legitimately zero-WIDTH (that is what a caret is) but never
+    // zero-height; a glyph is neither.
+    if (height <= 0) continue;
+    if (requireWidth && width <= 0) continue;
+    usable.push({ left, top, width, height });
+  }
+  return usable;
+}
+
+/** The rects of ONE character of a text node — its actual glyph box(es). */
+function characterRects(node: Text, from: number, to: number): SelectionRect[] {
+  const doc = node.ownerDocument;
+  if (!doc) return [];
+  const range = doc.createRange();
+  try {
+    range.setStart(node, from);
+    range.setEnd(node, to);
+  } catch {
+    return [];
+  }
+  // A glyph split by bidi runs comes back as several rects; the caller takes
+  // the edge-bearing one, so they are merged by line first.
+  return mergeSelectionLines(inkRects(range, true));
+}
+
+function caretGeometry(x: number, box: SelectionRect): CaretGeometry {
+  const bottom = box.top + box.height;
+  return { x, y: box.top + box.height / 2, height: box.height, top: box.top, bottom };
+}
+
+/**
+ * WHERE THE CARET IS — measured from the text, never estimated.
+ *
+ * `caretPositionAtPoint` answers "which position in the text is this finger
+ * choosing"; this answers "where is that position, on screen". It is the
+ * snapped, discrete point the lens is pointed at and the tick indexes, and it
+ * is the whole reason a magnifier can say WHICH character rather than merely
+ * roughly where.
+ *
+ * It is measured, and only measured. `fontSize * characterIndex` is a lie
+ * within one word of any proportional font, and a different lie for Thai,
+ * punctuation, RTL, emoji, ligatures and mixed styling — the browser already
+ * knows where the boundary is, and a `Range` is how it is asked.
+ *
+ * THREE READINGS, IN ORDER:
+ *
+ *   1. a COLLAPSED range at the position, where the platform draws one (Safari
+ *      answers with a zero-width, full-height rect; Blink and Gecko answer with
+ *      nothing at all, which is why this reading alone is not enough);
+ *   2. the ADJACENT characters, whose real glyph edges bound the boundary —
+ *      the preceding character's far edge, or the following one's near edge
+ *      where the position begins a line: a soft wrap puts the boundary at the
+ *      start of the line the next glyph is on, not at the end of the line the
+ *      finger has just left;
+ *   3. null, where nothing measurable exists — a renderer with no layout
+ *      (jsdom), a node the document has let go of, a position with no ink on
+ *      either side of it. Callers fall back to the finger rather than painting
+ *      the lens at the origin.
+ *
+ * Reads `getComputedStyle` for direction, so it belongs in the same frame as
+ * every other geometry read this engine makes — never in an event handler.
+ */
+export function caretGeometryFromTextPoint(point: TextPoint | null | undefined): CaretGeometry | null {
+  if (!point) return null;
+  const node = point.node;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+  const doc = node.ownerDocument;
+  if (!doc || typeof doc.createRange !== 'function') return null;
+  const text = node.data ?? '';
+  if (typeof point.offset !== 'number' || !Number.isFinite(point.offset)) return null;
+  const offset = Math.max(0, Math.min(Math.trunc(point.offset), text.length));
+  const rtl = selectionDirection(node.parentElement) === 'rtl';
+
+  // 1. The caret itself, collapsed at the position.
+  const caret = doc.createRange();
+  try {
+    caret.setStart(node, offset);
+    caret.collapse(true);
+  } catch {
+    return null;
+  }
+  const drawn = inkRects(caret, false)[0];
+  if (drawn) {
+    return caretGeometry(rtl && drawn.width > 0 ? drawn.left + drawn.width : drawn.left, drawn);
+  }
+
+  // 2. The glyphs on either side of the boundary, and their real edges.
+  const before = offset > 0 ? characterRects(node, offset - 1, offset) : [];
+  const after = offset < text.length ? characterRects(node, offset, offset + 1) : [];
+  const previous = before.length > 0 ? before[before.length - 1] : null;
+  const next = after.length > 0 ? after[0] : null;
+
+  if (previous && next) {
+    if (Math.abs(previous.top - next.top) < LINE_TOLERANCE) {
+      // Same line: the boundary is the edge the two glyphs share.
+      return caretGeometry(rtl ? previous.left : previous.left + previous.width, next);
+    }
+    // A wrap: the position begins the line the FOLLOWING glyph sits on.
+    return caretGeometry(rtl ? next.left + next.width : next.left, next);
+  }
+  if (previous) return caretGeometry(rtl ? previous.left : previous.left + previous.width, previous);
+  if (next) return caretGeometry(rtl ? next.left + next.width : next.left, next);
+  return null;
 }
 
 /**

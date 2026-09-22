@@ -17,9 +17,9 @@ export const releaseDisabledButtonClass =
 export type ReadinessTone = "success" | "danger" | "warning" | "neutral";
 
 export const readinessToneClass: Record<ReadinessTone, string> = {
-  success: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
+  success: "bg-green-100 text-green-800",
   danger: "bg-destructive/10 text-destructive",
-  warning: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+  warning: "bg-amber-100 text-amber-800",
   neutral: "bg-muted text-foreground",
 };
 

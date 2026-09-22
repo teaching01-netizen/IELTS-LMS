@@ -37,14 +37,12 @@ interface UIState {
   removeToast: (id: string) => void;
   clearToasts: () => void;
 
-  // Theme
-  theme: 'light' | 'dark' | 'system';
-  setTheme: (theme: 'light' | 'dark' | 'system') => void;
-
   // Loading states
   globalLoading: boolean;
   setGlobalLoading: (loading: boolean) => void;
 }
+
+type PersistedUIState = Pick<UIState, 'sidebarCollapsed'>;
 
 /** Maximum toasts retained: the newest toast evicts the oldest (FIFO). */
 export const MAX_TOASTS = 5;
@@ -136,19 +134,21 @@ export const useUIStore = create<UIState>()(
         set({ toasts: [] });
       },
 
-      // Theme
-      theme: 'system',
-      setTheme: (theme) => set({ theme }),
-
       // Loading
       globalLoading: false,
       setGlobalLoading: (loading) => set({ globalLoading: loading }),
     }),
     {
       name: 'ui-storage',
+      version: 1,
+      migrate: (persistedState) => {
+        const state = persistedState as Partial<PersistedUIState> | null;
+        return {
+          sidebarCollapsed: state?.sidebarCollapsed ?? false,
+        };
+      },
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
-        theme: state.theme,
       }),
     }
   )

@@ -14,6 +14,10 @@ type Handlers = {
   longPressMs?: number;
   scrollContainer?: (root: HTMLElement) => HTMLElement | null;
   diagnostics?: { record: (stage: string, details?: Record<string, unknown>) => void; listener: (root: HTMLElement | null) => void };
+  /** The haptic seam, injected like every other platform boundary in here. */
+  vibrate?: (milliseconds: number) => boolean;
+  /** The clock beside it, so the throttle window is driven rather than spied. */
+  now?: () => number;
 };
 
 /** Frames the test drives by hand, so "one geometry pass per frame" is exact. */
@@ -86,6 +90,8 @@ function harness(handlers: Handlers = {}) {
       clearOnSelect: handlers.clearOnSelect,
       scrollContainer: handlers.scrollContainer,
       diagnostics: handlers.diagnostics,
+      vibrate: handlers.vibrate,
+      now: handlers.now,
       requestFrame: frames.requestFrame,
       cancelFrame: frames.cancelFrame,
     }),
@@ -743,5 +749,227 @@ describe('the exam boundary', () => {
       expect.arrayContaining(['pointerdown', 'start-caret', 'pointermove', 'claim', 'focus-caret', 'range', 'pointerup', 'onSelect']),
     );
     expect(diagnostics.record).toHaveBeenCalledWith('range', expect.objectContaining({ rangeText: 'alpha beta ', rangeCollapsed: false }));
+  });
+});
+
+/**
+ * The snap key: one tick per NEW caret position, on both channels.
+ *
+ * Two coordinates, two cadences. The FINGER travels every pixel; the CARET is
+ * at a character boundary or it is not. Everything downstream — the marker's
+ * spring, the grip's, the haptic — is driven by the one event `{node, offset}`
+ * changing, so these tests pin it from both sides: a finger travelling inside
+ * one glyph changes nothing at all (content byte-identical, no revision, no
+ * buzz), a crossing ticks EXACTLY once, and the visual and haptic channels
+ * differ in cadence but never in cause.
+ */
+describe('the snap key: one tick per new caret position', () => {
+  /**
+   * Glyph boxes jsdom cannot lay out: irregular widths, one line from x = 10.
+   *
+   * The spy answers exactly as a renderer would — a box per measured range,
+   * nothing for a collapsed one (Blink and Gecko's own answer for a caret,
+   * which is what forces the adjacent-glyph fallback), and nothing at all for
+   * ranges in other nodes.
+   */
+  function layoutGlyphs(node: Text, widths: number[]) {
+    return vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(function (this: Range) {
+      if (this.startContainer !== node || this.startOffset >= this.endOffset) {
+        return [] as unknown as DOMRectList;
+      }
+      let left = 10;
+      for (let index = 0; index < this.startOffset; index += 1) left += widths[index] ?? 8;
+      let width = 0;
+      for (let index = this.startOffset; index < this.endOffset; index += 1) width += widths[index] ?? 8;
+      return [
+        { left, top: 100, width, height: 20, right: left + width, bottom: 120, x: left, y: 100, toJSON: () => ({}) },
+      ] as unknown as DOMRectList;
+    });
+  }
+
+  const widths = [7, 5, 9, 4, 11, 6, 8, 3, 10, 5, 7, 12, 4, 6, 9, 5];
+  /** The document x of the boundary at `offset`: the right edge of its glyph. */
+  function boundaryX(offset: number) {
+    let x = 10;
+    for (let index = 0; index < offset; index += 1) x += widths[index] ?? 8;
+    return x;
+  }
+
+  it('leaves the content untouched while the finger travels inside one glyph', () => {
+    const vibrate = vi.fn(() => true);
+    const { prose, proseText, frames, view } = harness({ activation: 'drag', vibrate });
+    layoutGlyphs(proseText, widths);
+
+    touchDown(prose, 0);
+    touchMove(prose, 10);
+    frame(frames);
+    const resting = view.result.current.pointer;
+    expect(resting).not.toBeNull();
+    expect(resting!.caret).toMatchObject({ x: boundaryX(10), y: 110 });
+    vibrate.mockClear();
+
+    // 10.2 resolves to the same offset the resolver already had: the hand
+    // moved, the text did not. The lens's BOX follows the finger — and its
+    // CONTENT must not change by so much as a pixel: identical geometry (the
+    // picture has nothing to translate), no revision for the marker or grip to
+    // spring from, no haptic saying "new character" when there isn't one.
+    touchMove(prose, 10.2);
+    frame(frames);
+    const moved = view.result.current.pointer!;
+
+    expect(moved.finger.x).toBe(10.2);
+    expect(moved.caret).toEqual(resting!.caret);
+    expect(moved.snapRevision).toBe(resting!.snapRevision);
+    expect(vibrate).not.toHaveBeenCalled();
+  });
+
+  it('snaps exactly once when the finger crosses a character midpoint', () => {
+    const vibrate = vi.fn(() => true);
+    const { prose, proseText, frames, view } = harness({ activation: 'drag', vibrate });
+    layoutGlyphs(proseText, widths);
+
+    touchDown(prose, 0);
+    touchMove(prose, 10);
+    frame(frames);
+    const before = view.result.current.pointer!;
+    vibrate.mockClear();
+
+    // One crossing: one revision step, one buzz, and the caret is AT the new
+    // boundary — not part-way, because it was never anywhere in between. Two
+    // frames rather than one so the crossing is measured against a caret that
+    // already exists, which is the only state in which a change is a change.
+    touchMove(prose, 10.6);
+    frame(frames);
+    const after = view.result.current.pointer!;
+
+    expect(after.snapRevision).toBe(before.snapRevision + 1);
+    expect(after.caret!.x).not.toBe(before.caret!.x);
+    expect(after.caret).toMatchObject({ x: boundaryX(11), y: 110 });
+    expect(vibrate).toHaveBeenCalledTimes(1);
+    expect(vibrate).toHaveBeenCalledWith(8);
+  });
+
+  it('keeps snapping when the platform asks for reduced motion', () => {
+    // prefers-reduced-motion reaches the MOTION policy — the spring back is
+    // dropped there, asserted in selectionMotion.test — and must not reach the
+    // snap: the caret still resolves to the new boundary and the lens's content
+    // still jumps to it, which is information rather than decoration. The
+    // gesture reads no motion preference; a document answering "reduce" to
+    // everything changes nothing here, and if it ever did this would fail.
+    vi.spyOn(window, 'matchMedia').mockReturnValue({
+      matches: true,
+      media: '(prefers-reduced-motion: reduce)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList);
+    const { prose, proseText, frames, view } = harness({ activation: 'drag' });
+    layoutGlyphs(proseText, widths);
+
+    touchDown(prose, 0);
+    touchMove(prose, 10);
+    frame(frames);
+    const before = view.result.current.pointer!;
+
+    touchMove(prose, 10.6);
+    frame(frames);
+    const after = view.result.current.pointer!;
+
+    expect(after.snapRevision).toBe(before.snapRevision + 1);
+    expect(after.caret).toMatchObject({ x: boundaryX(11), y: 110 });
+  });
+
+  describe('the haptic channel', () => {
+    it('is feature-detected: with no platform vibrate a crossing still snaps, and costs nothing', () => {
+      // jsdom is iOS Safari here: `navigator.vibrate` simply does not exist,
+      // which is the ordinary case on the device most likely to be held. The
+      // absence must be free — no throw, no retry — and must not disable the
+      // snap, which is not the haptic's to disable.
+      Reflect.deleteProperty(navigator, 'vibrate');
+      const { prose, proseText, frames, view } = harness({ activation: 'drag' });
+      layoutGlyphs(proseText, widths);
+
+      touchDown(prose, 0);
+      touchMove(prose, 10);
+      frame(frames);
+      const before = view.result.current.pointer!;
+      touchMove(prose, 10.6);
+      frame(frames);
+
+      expect(view.result.current.pointer!.snapRevision).toBe(before.snapRevision + 1);
+      expect(view.result.current.pointer!.caret).toMatchObject({ x: boundaryX(11) });
+    });
+
+    it('reaches the platform’s own vibrate when one is present', () => {
+      const platform = vi.fn(() => true);
+      Object.defineProperty(navigator, 'vibrate', { configurable: true, value: platform });
+      try {
+        const { prose, proseText, frames } = harness({ activation: 'drag' });
+        layoutGlyphs(proseText, widths);
+
+        touchDown(prose, 0);
+        touchMove(prose, 10);
+        frame(frames);
+        touchMove(prose, 10.6);
+        frame(frames);
+
+        expect(platform).toHaveBeenCalledWith(8);
+      } finally {
+        Reflect.deleteProperty(navigator, 'vibrate');
+      }
+    });
+
+    it('is throttled to a tap per crossing window, and never continuous', () => {
+      const vibrate = vi.fn(() => true);
+      // The clock is the INJECTED one, starting at zero: each crossing below
+      // moves it by hand, so the window is asserted exactly — no spy on the
+      // machine's clock, and no timestamp chosen to clear production's
+      // `lastHapticAt = 0` sentinel (the first crossing at 60ms is past the
+      // floor on its own).
+      let now = 0;
+      const { prose, proseText, frames, view } = harness({ activation: 'drag', vibrate, now: () => now });
+      layoutGlyphs(proseText, widths);
+
+      touchDown(prose, 0);
+      touchMove(prose, 10);
+      frame(frames);
+      const baseline = view.result.current.pointer!.snapRevision;
+      vibrate.mockClear();
+
+      now = 60;
+      touchMove(prose, 10.6);
+      frame(frames);
+      expect(vibrate).toHaveBeenCalledTimes(1);
+      expect(vibrate).toHaveBeenCalledWith(8);
+
+      // A second crossing 20ms later: the VISUAL tick still advances — the
+      // student's eye is not throttled — but the finger is not buzzed twice
+      // inside one window, which is the difference between a tap and a hum.
+      now = 80;
+      touchMove(prose, 11.6);
+      frame(frames);
+      expect(vibrate).toHaveBeenCalledTimes(1);
+      expect(view.result.current.pointer!.snapRevision).toBe(baseline + 2);
+
+      // Past the floor: the next real crossing buzzes again.
+      now = 140;
+      touchMove(prose, 12.6);
+      frame(frames);
+      expect(vibrate).toHaveBeenCalledTimes(2);
+
+      // Inside one glyph, however many frames: no crossing, no buzz. Every
+      // call this gesture ever makes is the same 8ms tap — never a longer pulse,
+      // never a pattern, never one per pointermove.
+      for (const x of [13, 13.2, 13.4, 13.1]) {
+        touchMove(prose, x);
+        frame(frames);
+      }
+      expect(vibrate).toHaveBeenCalledTimes(2);
+      expect(vibrate.mock.calls.every(([milliseconds]) => milliseconds === 8)).toBe(true);
+      expect(view.result.current.pointer!.snapRevision).toBe(baseline + 3);
+    });
   });
 });

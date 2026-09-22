@@ -8,7 +8,8 @@ import {
   settlePicture,
   type LoupePicture,
 } from './loupePicture';
-import { useLoupeMotion } from './useSelectionMotion';
+import { useLoupeMotion, useCaretSnapMotion } from './useSelectionMotion';
+import { selectionMotion } from '@shared/motion';
 import '../styles/selection.css';
 
 /**
@@ -38,11 +39,23 @@ import '../styles/selection.css';
  * material and clips the picture — which is why the magnifier can grow without any
  * measured geometry moving on any frame, at rest or mid-entrance.
  *
- * THE COLUMN TICK. A 2px tick at the lens's centre marks the column the finger is
- * on, which is the question the lens exists to answer ("which character boundary is
- * this?"). It is drawn in the FRAME, not in the picture, so the magnification never
- * scales the mark itself, and it is the only part of the lens that is not the
- * document: a precision instrument needs an index, not a decoration.
+ * THE COLUMN TICK. A 2px tick at the lens's centre marks the character boundary
+ * the engine resolved, which is the question the lens exists to answer ("which
+ * character boundary is this?"). It is drawn in the FRAME, not in the picture, so
+ * the magnification never scales the mark itself, and it is the only part of the
+ * lens that is not the document: a precision instrument needs an index, not a
+ * decoration. When the engine resolves a DIFFERENT boundary, that index takes a
+ * tick — displaced to its peak on the frame the boundary changed and sprung back
+ * (see `useCaretSnapMotion`). The picture beneath it is what snaps; the mark says
+ * so, and nothing else in the lens moves at all.
+ *
+ * THE LENS HAS TWO POSITIONS AND THEY ARE NOT THE SAME ONE. `fingerPoint` places
+ * the lens — the instrument stays under the hand, continuously, because that is
+ * where the hand is. `caretPoint` points it — the picture is translated to put
+ * the resolved character boundary under the tick, so the words inside move only
+ * when the boundary does. A lens that used the finger for both was reporting
+ * where the finger was rather than what the engine chose, and its tick drifted
+ * through the space between two characters.
  */
 
 /** A phone's lens: big enough to read a character in, never a panel. */
@@ -70,8 +83,24 @@ function currentViewport(): { width: number; height: number } {
 
 export interface SelectionLoupeProps {
   open: boolean;
-  /** Where the finger is, in viewport coordinates. */
-  point: { x: number; y: number };
+  /** Where the finger is, in viewport coordinates: what the lens's box follows. */
+  fingerPoint: { x: number; y: number };
+  /**
+   * What the lens LOOKS AT: the caret the engine resolved, in viewport
+   * coordinates.
+   *
+   * Optional only because there is an honest absence — a renderer with no layout
+   * (a test environment), a resolver that found no text, a position with no ink
+   * on either side. Then the lens shows what is under the finger, which is the
+   * best available answer rather than the origin.
+   */
+  caretPoint?: { x: number; y: number } | null | undefined;
+  /**
+   * How many times the resolved caret has changed to a different text position.
+   * Drives the tick on the column mark; zero means it has never changed, which
+   * is also the state the lens opens in.
+   */
+  snapRevision?: number | undefined;
   /** The element whose rendered text is magnified. */
   sourceRef: RefObject<HTMLElement | null>;
   /** Override the responsive lens size, in CSS pixels. */
@@ -83,7 +112,9 @@ export interface SelectionLoupeProps {
 
 export function SelectionLoupe({
   open,
-  point,
+  fingerPoint,
+  caretPoint,
+  snapRevision = 0,
   sourceRef,
   diameter,
   magnification = 1.5,
@@ -94,6 +125,7 @@ export function SelectionLoupe({
   const [picture, setPicture] = useState<LoupePicture | null>(null);
   const [viewportDiameter, setViewportDiameter] = useState(() => resolveLoupeDiameter(currentViewport()));
   const loupe = useLoupeMotion();
+  const markerSnap = useCaretSnapMotion(snapRevision, selectionMotion.caretSnapMarkerScale, 'scaleY');
 
   /**
    * One picture per session: the clone, its type, and where the source sits.
@@ -182,8 +214,13 @@ export function SelectionLoupe({
   if (!open) return null;
 
   const lens = diameter ?? viewportDiameter;
-  const { left, top } = lensPlacement(point, lens, offset ?? lens / 2);
-  const content = picture ? pictureTranslation(picture, point, lens, magnification) : null;
+  // THE INSTRUMENT FOLLOWS THE HAND.
+  const { left, top } = lensPlacement(fingerPoint, lens, offset ?? lens / 2);
+  // WHAT IT IS LOOKING AT FOLLOWS THE TEXT: the resolved caret, so the picture
+  // holds still while the finger moves inside one character and snaps when it
+  // crosses the boundary into the next one.
+  const looking = caretPoint ?? fingerPoint;
+  const content = picture ? pictureTranslation(picture, looking, lens, magnification) : null;
 
   const { initial, animate, transition, ...witness } = loupe;
 
@@ -219,8 +256,22 @@ export function SelectionLoupe({
             pointerEvents: 'none',
           }}
         />
-        {/* The column the finger is on, unscaled and never part of the picture. */}
-        <span aria-hidden="true" data-selection-loupe-marker="true" className="selection-v2-loupe-marker" />
+        {/* The boundary the engine resolved, unscaled and never part of the
+            picture — and the one thing here that answers a caret CHANGE with a
+            tick of its own, on `transform`, which is why the mark is centred by
+            margin in the stylesheet rather than by a translate this would
+            overwrite. `data-snap-revision` is the WITNESS: the tick is driven by
+            an event, so a test (or a browser) proving that reduced motion keeps
+            the snap and drops only the bounce has to be able to see that the
+            event arrived — inferring it from an absence of movement is exactly
+            what a slow frame could also explain. */}
+        <motion.span
+          aria-hidden="true"
+          data-selection-loupe-marker="true"
+          data-snap-revision={snapRevision}
+          className="selection-v2-loupe-marker"
+          animate={markerSnap}
+        />
       </motion.div>
     </div>
   );

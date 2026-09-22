@@ -188,6 +188,7 @@ type BackendExamSessionRuntime = {
   currentSectionKey?: ModuleType | null | undefined;
   currentSectionRemainingSeconds: number;
   currentSectionDeadlineAt?: string | null | undefined;
+  nextSectionStartAt?: string | null | undefined;
   serverNow?: string | undefined;
   waitingForNextSection: boolean;
   isOverrun: boolean;
@@ -615,6 +616,10 @@ export function mapBackendRuntime(
     currentSectionKey: payload.currentSectionKey ?? null,
     currentSectionRemainingSeconds: payload.currentSectionRemainingSeconds,
     currentSectionDeadlineAt: payload.currentSectionDeadlineAt ?? null,
+    // Preserve undefined versus null: undefined means an older/partial
+    // projection omitted the field, while null is the authoritative signal
+    // that the between-sections window has ended.
+    nextSectionStartAt: payload.nextSectionStartAt,
     serverNow: payload.serverNow ?? payload.updatedAt,
     waitingForNextSection: payload.waitingForNextSection,
     isOverrun: payload.isOverrun,
@@ -651,7 +656,10 @@ export function mapBackendRuntime(
 function mapBackendExamPlan(
   plan: BackendExamPlanSection[] | null | undefined
 ): ExamPlanSection[] | null {
-  if (!Array.isArray(plan)) return null;
+  // Summary and WebSocket runtime DTOs serialize their detail-only plan as an
+  // empty array. Treat that as absent so a later summary cannot erase the plan
+  // already loaded by the proctor detail read.
+  if (!Array.isArray(plan) || plan.length === 0) return null;
   return plan.map((section) => ({
     sectionKey: section.sectionKey,
     label: section.label,

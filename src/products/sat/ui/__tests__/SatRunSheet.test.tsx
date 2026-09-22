@@ -55,12 +55,14 @@ describe('SatRunSheet', () => {
     expect(screen.getByText(/Thailand time · ICT \(UTC\+7\)/)).toBeInTheDocument();
     expect(screen.getByText('Section 1 · Reading & Writing')).toBeInTheDocument();
     expect(screen.getByText('Section 2 · Math')).toBeInTheDocument();
-    // Module rows carry their authored window; the Module 2 slot shows both
-    // branch lengths because only one of them is sat.
+    // Module rows carry their authored window; both Module 2 alternatives are
+    // visible with the same start because each student sits only one branch.
     expect(screen.getAllByText('Module 1')).toHaveLength(2);
-    expect(screen.getByText('Lower 32′ · Higher 32′')).toBeInTheDocument();
+    expect(screen.getAllByText('Module 2 · Lower')).toHaveLength(2);
+    expect(screen.getAllByText('Module 2 · Higher')).toHaveLength(2);
+    expect(screen.getAllByText('Alternative branch · 32′')).toHaveLength(2);
     expect(screen.getByText('09:00–09:32')).toBeInTheDocument();
-    expect(screen.getByText('09:32–10:04')).toBeInTheDocument();
+    expect(screen.getAllByText('09:32–10:04')).toHaveLength(2);
     expect(screen.getByText('Break · 10 min')).toBeInTheDocument();
     expect(screen.getByText('10:04–10:14')).toBeInTheDocument();
     expect(screen.getByText('10:14–11:24')).toBeInTheDocument();
@@ -108,10 +110,10 @@ describe('SatRunSheet', () => {
       />
     );
 
-    // Section + Module 1 are live; Module 2, the break, and every Math row
-    // (section, Module 1, Module 2) are still ahead.
+    // Section + Module 1 are live; both Module 2 alternatives, the break, and
+    // every Math row (section, Module 1, both Module 2 alternatives) are ahead.
     expect(screen.getAllByText('Live')).toHaveLength(2);
-    expect(screen.getAllByText('Upcoming')).toHaveLength(5);
+    expect(screen.getAllByText('Upcoming')).toHaveLength(7);
     expect(screen.queryByText('Planned')).not.toBeInTheDocument();
     expect(screen.getByText(/Anchored to the proctor's start at 09:00/)).toBeInTheDocument();
   });
@@ -155,7 +157,7 @@ describe('SatRunSheet', () => {
     // The real remaining Math time: the section and the module the cohort is
     // inside both end at 10:45.
     expect(screen.getByText('09:00–10:45')).toBeInTheDocument();
-    expect(screen.getByText('09:35–10:45')).toBeInTheDocument();
+    expect(screen.getAllByText('09:35–10:45')).toHaveLength(2);
     expect(screen.queryByText('09:00–10:10')).not.toBeInTheDocument();
 
     // No break at 10:10: it starts when Math actually ends.
@@ -227,9 +229,9 @@ describe('SatRunSheet', () => {
 
     expect(screen.getByText('09:00–09:20')).toBeInTheDocument();
     expect(screen.getByText('09:00–09:10')).toBeInTheDocument();
-    expect(screen.getByText('09:10–09:20')).toBeInTheDocument();
+    expect(screen.getAllByText('09:10–09:20')).toHaveLength(2);
     expect(screen.getByText('Clock 20 min · plan 64 min')).toBeInTheDocument();
-    expect(screen.getAllByText('Plan 32 min · 10 min on the clock')).toHaveLength(2);
+    expect(screen.getAllByText('Plan 32 min · 10 min on the clock')).toHaveLength(3);
   });
 
   // The column the reported bug was about: the sheet named every stage but only
@@ -280,12 +282,13 @@ describe('SatRunSheet', () => {
     expect(screen.getByText('44:00')).toBeInTheDocument();
     expect(screen.getByText('12:00')).toBeInTheDocument();
 
-    // Seven rows for this plan (four Reading & Writing, three Math), and only
+    // Nine rows for this plan (section + Module 1 + two Module 2 alternatives
+    // + break for Reading & Writing, then section + three modules for Math), and only
     // the two the room is inside have a running window: everything else reads as
     // no window at all rather than a 0:00 that would look live.
     const cells = Array.from(document.querySelectorAll('[data-sat-run-sheet-remaining]'));
-    expect(cells).toHaveLength(7);
-    expect(cells.filter((cell) => cell.textContent === '—')).toHaveLength(5);
+    expect(cells).toHaveLength(9);
+    expect(cells.filter((cell) => cell.textContent === '—')).toHaveLength(7);
   });
 
   // A paused room keeps the window the pause landed on: the candidates' own

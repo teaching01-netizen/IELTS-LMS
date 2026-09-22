@@ -95,4 +95,34 @@ export const selectionMotion = {
   gripHeldScale: 1.14,
   /** The magnifier's first painted frame, as a fraction of its settled size. */
   loupeEnterScale: 0.94,
+  /**
+   * THE TICK — the one moment here driven by an EVENT rather than by a frame.
+   *
+   * When the resolved caret crosses into a new character boundary, the
+   * precision indicators are displaced to their peak on that frame and spring
+   * back from it. Deliberately NOT a rise-and-fall over a duration: the caret
+   * did not ease into its new position (it is discrete), so its feedback must
+   * not either — an eased swell reads as a wobble the student's own finger
+   * appears to be causing.
+   *
+   * Overdamped on purpose. At mass 0.35 the critical damping is 35.5, so 60
+   * puts it well past the point of ever crossing its own resting size: what is
+   * left is a return, ~80% of the way home in 100ms, with no second bounce and
+   * no loop. That is the difference between Apple's tick and a jiggle.
+   */
+  caretSnap: {
+    type: 'spring',
+    stiffness: 900,
+    damping: 60,
+    mass: 0.35,
+  } satisfies Transition,
+  /** The lens's column tick at its peak: 1 → 1.08 → 1. */
+  caretSnapMarkerScale: 1.08,
+  /**
+   * A handle's grip at its peak, as a factor INSIDE the target rather than an
+   * absolute: the grip's own scale is whatever the settle says (1.14 held, 1
+   * resting), and the tick is nested around it, so 1.14 × 1.035 peaks at ~1.18
+   * — about 3.5% either way, and never on the 44px target itself.
+   */
+  caretSnapGripScale: 1.035,
 } as const;

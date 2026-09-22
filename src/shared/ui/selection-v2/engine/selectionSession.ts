@@ -134,6 +134,16 @@ export interface SelectionSession {
   paint(root?: Element | null): SelectionPaint;
   /** The range the paint was measured from, for committing and diagnostics. */
   range(): Range | null;
+  /**
+   * The endpoint the finger owns — the ONE position a caller may magnify.
+   *
+   * Read out of the owned span rather than out of the machine's candidate, so
+   * the visual caret can never disagree with the range the student can see:
+   * a boundary clamp confines the span, a handle crossover swaps which edge is
+   * moving, and a hold that claimed a word owns the WORD's far edge rather than
+   * the coordinate the press happened on. Null when nothing is owned.
+   */
+  movingEndpoint(): TextPoint | null;
   press(input: SelectionPressInput): SelectionEffect[];
   hold(): SelectionEffect[];
   move(input: SelectionMoveInput): SelectionEffect[];
@@ -241,6 +251,7 @@ export function createSelectionSession(options: {
     },
     paint,
     range: () => span.range,
+    movingEndpoint: () => span.moving ?? state.moving,
 
     press: (input) => {
       // The claim is bounded by the paragraph the finger started in, and the

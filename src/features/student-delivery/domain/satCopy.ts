@@ -155,9 +155,8 @@ export const SAT_COPY = {
   transitions: {
     waitingForBreak: "Waiting for the break to start",
     onBreak: "On break",
-    // Phase 4: the break countdown can legitimately read 0:00 while the server
-    // finishes the section advance, so the surface names the entry progress
-    // rather than freezing there with no explanation.
+    // Phase 4: an unavailable authoritative boundary is rendered as an
+    // explicit synchronizing state, never as a fabricated numeric 0:00.
     startingNextSection: "Starting your next section",
     startingNextSectionBody:
       "You do not need to do anything. This screen continues on its own.",

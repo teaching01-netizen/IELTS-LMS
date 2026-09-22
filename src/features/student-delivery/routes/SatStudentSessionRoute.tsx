@@ -366,14 +366,15 @@ export function SatStudentSessionRoute({
 
   if (state.phase === "break") {
     const waitingForScheduledBreak = exam.pendingSectionWaitSeconds > 0;
+    const breakSeconds = waitingForScheduledBreak
+      ? exam.pendingSectionWaitSeconds
+      : exam.pendingBreakSeconds;
     // Phase 03 bare-branch rule: a break screen is timer-only full-viewport
     // chrome — no hidden tool tree. Directions re-warms before module entry.
     return (
       <SatBreakScreen
         nextSectionKey={state.nextSectionKey}
-        remainingSeconds={
-          waitingForScheduledBreak ? exam.pendingSectionWaitSeconds : exam.pendingBreakSeconds
-        }
+        remainingSeconds={breakSeconds > 0 ? breakSeconds : null}
         mode={waitingForScheduledBreak ? "waiting" : "break"}
         entryProgress={breakEntryProgress}
       />

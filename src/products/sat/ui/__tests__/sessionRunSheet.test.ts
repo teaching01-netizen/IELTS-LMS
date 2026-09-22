@@ -100,11 +100,13 @@ describe("buildSatRunSheet", () => {
     expect(sheet.rows.map((row) => row.id)).toEqual([
       "reading-writing:section",
       "reading-writing:module:m1",
-      "reading-writing:module:m2",
+      "reading-writing:module:m2-lower_branch",
+      "reading-writing:module:m2-higher_branch",
       "reading-writing:break",
       "math:section",
       "math:module:m1",
-      "math:module:m2",
+      "math:module:m2-lower_branch",
+      "math:module:m2-higher_branch",
     ]);
     expect(sheet.rows.every((row) => row.status === "projected")).toBe(true);
 
@@ -116,11 +118,15 @@ describe("buildSatRunSheet", () => {
     expect(rwModule1.plannedDurationMinutes).toBe(32);
     expect(formatRunSheetWindow(rwModule1.plannedStartAt, rwModule1.plannedEndAt, ANCHOR)).toBe("09:00–09:32");
 
-    // The Module 2 slot is the branch the candidate sits: one row, both authored
-    // lengths, projected from the longer branch.
-    const rwModule2 = rowById(sheet.rows, "reading-writing:module:m2");
-    expect(rwModule2.detail).toBe("Lower 32′ · Higher 32′");
-    expect(formatRunSheetWindow(rwModule2.plannedStartAt, rwModule2.plannedEndAt, ANCHOR)).toBe("09:32–10:04");
+    // Both Module 2 branches are visible alternatives. They start together;
+    // only one branch is routed to each student.
+    const rwModule2Lower = rowById(sheet.rows, "reading-writing:module:m2-lower_branch");
+    const rwModule2Higher = rowById(sheet.rows, "reading-writing:module:m2-higher_branch");
+    expect(rwModule2Lower.detail).toBe("Alternative branch · 32′");
+    expect(rwModule2Higher.detail).toBe("Alternative branch · 32′");
+    expect(rwModule2Lower.plannedStartAt).toBe(rwModule2Higher.plannedStartAt);
+    expect(formatRunSheetWindow(rwModule2Lower.plannedStartAt, rwModule2Lower.plannedEndAt, ANCHOR)).toBe("09:32–10:04");
+    expect(formatRunSheetWindow(rwModule2Higher.plannedStartAt, rwModule2Higher.plannedEndAt, ANCHOR)).toBe("09:32–10:04");
 
     const rwBreak = rowById(sheet.rows, "reading-writing:break");
     expect(rwBreak.label).toBe("Break · 10 min");
@@ -147,7 +153,7 @@ describe("buildSatRunSheet", () => {
     const section = rowById(sheet.rows, "reading-writing:section");
     expect(section.status).toBe("live");
     expect(rowById(sheet.rows, "reading-writing:module:m1").status).toBe("live");
-    expect(rowById(sheet.rows, "reading-writing:module:m2").status).toBe("upcoming");
+    expect(rowById(sheet.rows, "reading-writing:module:m2-lower_branch").status).toBe("upcoming");
     expect(rowById(sheet.rows, "reading-writing:break").status).toBe("upcoming");
     expect(rowById(sheet.rows, "math:section").status).toBe("upcoming");
   });
@@ -174,6 +180,48 @@ describe("buildSatRunSheet", () => {
     const breakRow = rowById(sheet.rows, "reading-writing:break");
     expect(breakRow.status).toBe("live");
     expect(formatRunSheetWindow(breakRow.plannedStartAt, breakRow.plannedEndAt, ANCHOR)).toBe("10:04–10:14");
+  });
+
+  it("uses the longer adaptive branch for the shared boundary without summing branches", () => {
+    const unequalPlan: ExamPlanSection = {
+      ...readingWritingPlan,
+      durationMinutes: 11,
+      gapAfterMinutes: 5,
+      modules: [
+        { moduleKey: "m1", title: "Module 1", adaptiveRole: "base", durationMinutes: 5 },
+        { moduleKey: "easy", title: "Module 2 — Easy", adaptiveRole: "lower_branch", durationMinutes: 4 },
+        { moduleKey: "hard", title: "Module 2 — Hard", adaptiveRole: "higher_branch", durationMinutes: 6 },
+      ],
+    };
+    const sheet = buildSatRunSheet({
+      plan: [unequalPlan],
+      runtime: {
+        sections: [],
+        actualStartAt: null,
+        status: "not_started",
+        serverNow: SCHEDULED_START,
+      },
+      scheduledStartAt: SCHEDULED_START,
+      now: SCHEDULED_START,
+    });
+
+    const module1 = rowById(sheet.rows, "reading-writing:module:m1");
+    const easy = rowById(sheet.rows, "reading-writing:module:m2-lower_branch");
+    const hard = rowById(sheet.rows, "reading-writing:module:m2-higher_branch");
+    const breakRow = rowById(sheet.rows, "reading-writing:break");
+    expect(formatRunSheetWindow(module1.plannedStartAt, module1.plannedEndAt, ANCHOR)).toBe(
+      "09:00–09:05"
+    );
+    expect(formatRunSheetWindow(easy.plannedStartAt, easy.plannedEndAt, ANCHOR)).toBe(
+      "09:05–09:09"
+    );
+    expect(formatRunSheetWindow(hard.plannedStartAt, hard.plannedEndAt, ANCHOR)).toBe(
+      "09:05–09:11"
+    );
+    expect(easy.plannedStartAt).toBe(hard.plannedStartAt);
+    expect(formatRunSheetWindow(breakRow.plannedStartAt, breakRow.plannedEndAt, ANCHOR)).toBe(
+      "09:11–09:16"
+    );
   });
 
   it("marks a passed break done", () => {
@@ -292,7 +340,7 @@ describe("buildSatRunSheet", () => {
 
     // The module the cohort is inside ends with its section: no hole, and the
     // real remaining time to the end of Reading & Writing.
-    const module2 = rowById(sheet.rows, "reading-writing:module:m2");
+    const module2 = rowById(sheet.rows, "reading-writing:module:m2-lower_branch");
     expect(
       formatRunSheetWindow(module2.plannedStartAt, module2.plannedEndAt, ANCHOR)
     ).toBe("09:32–10:36");
@@ -341,7 +389,7 @@ describe("buildSatRunSheet", () => {
     expect(math.mismatchNote).toBe("Clock 105 min · plan 70 min");
     // Module 2 carries the same end, so the sheet reports the ~61 minutes the
     // room actually still has instead of the plan's 10:56 finish.
-    const module2 = rowById(sheet.rows, "math:module:m2");
+    const module2 = rowById(sheet.rows, "math:module:m2-lower_branch");
     expect(
       formatRunSheetWindow(module2.plannedStartAt, module2.plannedEndAt, ANCHOR)
     ).toBe("11:21–12:31");
@@ -374,7 +422,7 @@ describe("buildSatRunSheet", () => {
     ).toBe("09:00–10:09");
     expect(section.detail).toBe("5 min paused");
     const module1 = rowById(sheet.rows, "reading-writing:module:m1");
-    const module2 = rowById(sheet.rows, "reading-writing:module:m2");
+    const module2 = rowById(sheet.rows, "reading-writing:module:m2-lower_branch");
     const breakRow = rowById(sheet.rows, "reading-writing:break");
     // Contiguous: Module 1 → Module 2 → the break, with no unexplained gap
     // between the last module and the section it belongs to.
@@ -403,7 +451,7 @@ describe("buildSatRunSheet", () => {
 
     const section = rowById(sheet.rows, "reading-writing:section");
     const module1 = rowById(sheet.rows, "reading-writing:module:m1");
-    const module2 = rowById(sheet.rows, "reading-writing:module:m2");
+    const module2 = rowById(sheet.rows, "reading-writing:module:m2-lower_branch");
     expect(section.detail).toBe("+5 min added");
     expect(
       formatRunSheetWindow(section.plannedStartAt, section.plannedEndAt, ANCHOR)
@@ -446,7 +494,7 @@ describe("buildSatRunSheet", () => {
     expect(section.runtimeMismatch).toBe(true);
     expect(section.mismatchNote).toBe("Clock 70 min · plan 105 min");
     const module1 = rowById(sheet.rows, "math:module:m1");
-    const module2 = rowById(sheet.rows, "math:module:m2");
+    const module2 = rowById(sheet.rows, "math:module:m2-lower_branch");
     expect(module1.plannedEndAt).toBe(module2.plannedStartAt);
     expect(module2.plannedEndAt).toBe(section.plannedEndAt);
   });
@@ -578,7 +626,7 @@ describe("buildSatRunSheet", () => {
       SCHEDULED_START
     );
     // Module 2's own boundary is per-candidate and is not invented.
-    expect(rowById(sheet.rows, "reading-writing:module:m2").actualStartAt).toBeNull();
+    expect(rowById(sheet.rows, "reading-writing:module:m2-lower_branch").actualStartAt).toBeNull();
 
     const breakRow = rowById(sheet.rows, "reading-writing:break");
     expect(breakRow.status).toBe("done");
@@ -655,7 +703,7 @@ describe("module tiling invariants", () => {
     { label: "no now at all", now: null },
   ];
 
-  it("keeps every module window ordered, inside and contiguous for every plan-vs-clock combination", () => {
+  it("keeps every module window ordered, inside and boundary-aligned for every plan-vs-clock combination", () => {
     const violations: string[] = [];
     for (const shape of shapes) {
       const clocks = [
@@ -734,20 +782,54 @@ describe("module tiling invariants", () => {
                       `${tag}: module ${index} ends after its section (${row.plannedEndAt} > ${section.plannedEndAt})`
                     );
                   }
-                  if (index === 0 && start !== sectionStart) {
+                });
+
+                const moduleGroups: SatRunSheetRow[][] = [];
+                for (const row of modules) {
+                  const previous = moduleGroups[moduleGroups.length - 1];
+                  const isAlternative = row.label.startsWith("Module 2 · ");
+                  if (
+                    isAlternative &&
+                    previous &&
+                    previous[0]?.label.startsWith("Module 2 · ")
+                  ) {
+                    previous.push(row);
+                  } else {
+                    moduleGroups.push([row]);
+                  }
+                }
+
+                moduleGroups.forEach((group, groupIndex) => {
+                  const groupStartAt = group[0]?.plannedStartAt;
+                  if (groupStartAt === null || groupStartAt === undefined) return;
+                  const groupStart = Date.parse(groupStartAt);
+                  const groupEnds = group
+                    .map((row) => (row.plannedEndAt === null ? null : Date.parse(row.plannedEndAt)))
+                    .filter((end): end is number => end !== null && Number.isFinite(end));
+                  if (group.some((row) => row.plannedStartAt !== groupStartAt)) {
+                    violations.push(`${tag}: alternative branches do not share a start`);
+                  }
+                  const previousGroup = moduleGroups[groupIndex - 1];
+                  if (previousGroup) {
+                    const previousEnd = Math.max(
+                      ...previousGroup.map((row) => Date.parse(row.plannedEndAt!))
+                    );
+                    if (groupStart !== previousEnd) {
+                      violations.push(
+                        `${tag}: group ${groupIndex} starts at ${groupStartAt}, previous group ended at ${new Date(previousEnd).toISOString()}`
+                      );
+                    }
+                  } else if (groupStart !== sectionStart) {
                     violations.push(
-                      `${tag}: first module starts at ${row.plannedStartAt}, section at ${section.plannedStartAt}`
+                      `${tag}: first module group starts at ${groupStartAt}, section at ${section.plannedStartAt}`
                     );
                   }
-                  const previous = modules[index - 1];
-                  if (previous && previous.plannedEndAt !== row.plannedStartAt) {
+                  if (
+                    groupIndex === moduleGroups.length - 1 &&
+                    Math.max(...groupEnds) !== sectionEnd
+                  ) {
                     violations.push(
-                      `${tag}: module ${index} starts at ${row.plannedStartAt}, module ${index - 1} ended at ${previous.plannedEndAt}`
-                    );
-                  }
-                  if (index === modules.length - 1 && end !== sectionEnd) {
-                    violations.push(
-                      `${tag}: last module ends at ${row.plannedEndAt}, section at ${section.plannedEndAt}`
+                      `${tag}: last module group ends at ${new Date(Math.max(...groupEnds)).toISOString()}, section at ${section.plannedEndAt}`
                     );
                   }
                 });
@@ -843,7 +925,7 @@ describe("module tiling invariants", () => {
     const sheet = lockedTwentyAgainstSixtyFour();
     const section = rowById(sheet.rows, "reading-writing:section");
     const module1 = rowById(sheet.rows, "reading-writing:module:m1");
-    const module2 = rowById(sheet.rows, "reading-writing:module:m2");
+    const module2 = rowById(sheet.rows, "reading-writing:module:m2-lower_branch");
 
     expect(
       formatRunSheetWindow(section.plannedStartAt, section.plannedEndAt, ANCHOR)
@@ -916,7 +998,7 @@ describe("run sheet module clocks", () => {
     const sheet = liveReadingWriting();
     // Upcoming rows report nothing: their window and length are on the row, and
     // a clamped 0:00 would read as live.
-    expect(rowById(sheet.rows, "reading-writing:module:m2").remainingSeconds).toBeNull();
+    expect(rowById(sheet.rows, "reading-writing:module:m2-lower_branch").remainingSeconds).toBeNull();
     expect(rowById(sheet.rows, "reading-writing:break").remainingSeconds).toBeNull();
     expect(rowById(sheet.rows, "math:section").remainingSeconds).toBeNull();
 
@@ -956,10 +1038,10 @@ describe("run sheet module clocks", () => {
     // the section at 10:14. Neither row may claim time the other already owns.
     expect(rowById(sheet.rows, "reading-writing:section").remainingSeconds).toBe(3_240);
     expect(rowById(sheet.rows, "reading-writing:module:m1").remainingSeconds).toBe(1_320);
-    expect(rowById(sheet.rows, "reading-writing:module:m2").status).toBe("upcoming");
+    expect(rowById(sheet.rows, "reading-writing:module:m2-lower_branch").status).toBe("upcoming");
     // …and the two module rows still meet each other and the section end exactly.
     const module1 = rowById(sheet.rows, "reading-writing:module:m1");
-    const module2 = rowById(sheet.rows, "reading-writing:module:m2");
+    const module2 = rowById(sheet.rows, "reading-writing:module:m2-lower_branch");
     expect(module1.plannedEndAt).toBe(module2.plannedStartAt);
     expect(module2.plannedEndAt).toBe(rowById(sheet.rows, "reading-writing:section").plannedEndAt);
   });

@@ -3,7 +3,8 @@ import { SelectionFloatingLayer } from './SelectionFloatingLayer';
 import { SelectionHighlight } from './SelectionHighlight';
 import { SelectionHandle } from './SelectionHandle';
 import { SelectionLoupe } from './SelectionLoupe';
-import type { SelectionPresentation } from '../domain/selectionTypes';
+import type { SelectionPresentation, SelectionPointerState } from '../domain/selectionTypes';
+import { selectionMovesEndpoint } from '../domain/selectionTypes';
 import type { SelectionHandlePointerEvent } from './useStudentSelectionGesture';
 import '../styles/selection.css';
 
@@ -30,8 +31,12 @@ import '../styles/selection.css';
  */
 
 export interface SelectionOverlaySelection extends SelectionPresentation {
-  /** The finger's last known position, which is what the magnifier hangs under. */
-  pointer: { x: number; y: number } | null;
+  /**
+   * The two positions the pointer has. The lens's BOX follows `finger`; its
+   * CONTENT follows `caret`, which is the boundary the engine resolved — see
+   * `SelectionPointerState`.
+   */
+  pointer: SelectionPointerState | null;
   /** True while a handle is being dragged. */
   adjusting: boolean;
   beginHandleAdjustment: (edge: 'start' | 'end', event: SelectionHandlePointerEvent) => void;
@@ -55,11 +60,15 @@ export function SelectionOverlay({
   // The finger comes from the selection itself: it is the engine that follows it,
   // and a second place to pass a position would be a second thing to keep in step.
   const pointer = selection.pointer;
+  // How far the caret has travelled through text positions, for the two
+  // precision indicators that answer a change with a tick. Read off the pointer
+  // because the caret is: one owner, one fact.
+  const snapRevision = pointer?.snapRevision ?? 0;
   const loupeOpen = visible
     && loupe !== undefined
     && loupe.enabled !== false
     && pointer !== null
-    && (selection.adjusting || selection.phase === 'selecting' || selection.phase === 'extending');
+    && selectionMovesEndpoint(selection.phase);
 
   const dismissRef = useRef(selection.dismiss);
   dismissRef.current = selection.dismiss;
@@ -112,6 +121,7 @@ export function SelectionOverlay({
           // Only the endpoint actually under the finger is "held", so the other
           // one stays settled instead of swelling along with it.
           held={selection.adjusting && selection.phase === 'adjusting-start'}
+          snapRevision={snapRevision}
           onPointerDown={(event) => selection.beginHandleAdjustment('start', gripStyle(event))}
         />
       ) : null}
@@ -120,12 +130,19 @@ export function SelectionOverlay({
           handle={selection.endHandle}
           label={handleLabels.end}
           held={selection.adjusting && selection.phase === 'adjusting-end'}
+          snapRevision={snapRevision}
           onPointerDown={(event) => selection.beginHandleAdjustment('end', gripStyle(event))}
         />
       ) : null}
 
       {loupeOpen && loupe && pointer ? (
-        <SelectionLoupe open point={pointer} sourceRef={loupe.sourceRef} />
+        <SelectionLoupe
+          open
+          fingerPoint={pointer.finger}
+          caretPoint={pointer.caret}
+          snapRevision={snapRevision}
+          sourceRef={loupe.sourceRef}
+        />
       ) : null}
     </SelectionFloatingLayer>
   );

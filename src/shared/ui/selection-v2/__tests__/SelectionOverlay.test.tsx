@@ -20,7 +20,7 @@ function resting(overrides: Partial<SelectionOverlaySelection> = {}): SelectionO
     startHandle: { edge: 'start', x: 10, y: 100, direction: 'ltr', stem: 'up' },
     endHandle: { edge: 'end', x: 50, y: 144, direction: 'ltr', stem: 'down' },
     anchorRect: { left: 10, top: 100, width: 100, height: 44 },
-    pointer: { x: 30, y: 120 },
+    pointer: { finger: { x: 30, y: 120 }, caret: null, snapRevision: 0 },
     adjusting: false,
     beginHandleAdjustment: vi.fn(),
     dismiss: vi.fn(),

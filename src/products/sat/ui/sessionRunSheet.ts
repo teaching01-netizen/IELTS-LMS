@@ -26,15 +26,14 @@
  *
  * Per-module and per-break facts: the runtime records section-level instants
  * only. A module boundary is a per-candidate event (routing picks which Module 2
- * a candidate sits), so the sheet derives module windows inside the section
- * window — tiling it exactly, surplus included. When the clock is shorter than
- * the plan's modules (a version switched after Start, a repaired snapshot
- * against an older plan), the plan is scaled onto the clock and each compressed
- * row says what the module gets against the authored length: rendering the
- * authored lengths instead would claim time the section does not have. Actual
- * times are marked only where a section-level instant genuinely is the module's
- * or the break's own (Module 1 starts when its section starts; a break starts
- * when its section ends and ends when the next section starts).
+ * branch a candidate sits), so adaptive branches share the Module 2 start and
+ * are projected against the longer branch without being added together. When
+ * the clock is shorter than the plan's modules (a version switched after Start,
+ * a repaired snapshot against an older plan), the plan is scaled onto the clock
+ * and each compressed row says what the module gets against the authored length.
+ * Actual times are marked only where a section-level instant genuinely is the
+ * module's or the break's own (Module 1 starts when its section starts; a break
+ * starts when its section ends and ends when the next section starts).
  */
 
 import type {
@@ -382,11 +381,10 @@ function moduleStatus(
 }
 
 /**
- * The Module 1 / Module 2 slot the sheet shows for one section. The stable
- * `m1` / `m2` ids keep row identity steady while staff watch: the branch a
- * candidate sits is chosen by routing, and the slot is what the run sheet shows
- * either way. Legacy (non-adaptive) sections list their modules in authored
- * order instead.
+ * The Module 1 / Module 2 slots the sheet shows for one section. Module 2
+ * branch rows keep their adaptive role in the id so both alternatives can stay
+ * visible at the same boundary while staff watch. Legacy (non-adaptive)
+ * sections list their modules in authored order instead.
  */
 interface ModuleSlot {
   idSuffix: string;
@@ -397,6 +395,8 @@ interface ModuleSlot {
   detail: string | null;
   /** Authored minutes; the section window's surplus is added separately. */
   minutes: number;
+  /** Branch rows in one group are alternatives, not sequential modules. */
+  alternativeGroup?: string;
 }
 
 function moduleSlots(modules: AuthoredSection["modules"]): ModuleSlot[] {
@@ -439,20 +439,20 @@ function moduleSlots(modules: AuthoredSection["modules"]): ModuleSlot[] {
         minutes: onlyBranch.durationMinutes,
       });
     } else {
-      // Two branches exist but only one is sat: show the slot once, with both
-      // authored lengths, projected from the longer branch.
-      const longest = branchModules.reduce((current, candidate) =>
-        candidate.durationMinutes > current.durationMinutes ? candidate : current
-      );
-      slots.push({
-        idSuffix: "m2",
-        label: "Module 2",
-        title: longest.title || longest.moduleKey,
-        detail: branchModules
-          .map((module) => `${roleLabel(module.adaptiveRole)} ${module.durationMinutes}′`)
-          .join(" · "),
-        minutes: longest.durationMinutes,
-      });
+      // Both authored branches are visible for staff, but they start at the
+      // same Module 2 boundary. One branch is routed per student; the rows are
+      // alternatives and must never tile one after the other.
+      for (const module of branchModules) {
+        const branchName = module.adaptiveRole === "lower_branch" ? "Lower" : "Higher";
+        slots.push({
+          idSuffix: `m2-${module.adaptiveRole}`,
+          label: `Module 2 · ${branchName}`,
+          title: module.title || module.moduleKey,
+          detail: `Alternative branch · ${module.durationMinutes}′`,
+          minutes: module.durationMinutes,
+          alternativeGroup: "module-2",
+        });
+      }
     }
   } else if (baseModule) {
     slots.push({
@@ -477,6 +477,30 @@ function moduleSlots(modules: AuthoredSection["modules"]): ModuleSlot[] {
   return slots.map((slot) => (slot.title === slot.label ? { ...slot, title: null } : slot));
 }
 
+interface ModuleGroup {
+  slots: ModuleSlot[];
+  /** The group occupies the longest authored slot; alternatives overlap. */
+  minutes: number;
+}
+
+function moduleGroups(slots: ModuleSlot[]): ModuleGroup[] {
+  const groups: ModuleGroup[] = [];
+  for (const slot of slots) {
+    const previous = groups[groups.length - 1];
+    if (
+      previous &&
+      slot.alternativeGroup !== undefined &&
+      previous.slots[0]?.alternativeGroup === slot.alternativeGroup
+    ) {
+      previous.slots.push(slot);
+      previous.minutes = Math.max(previous.minutes, slot.minutes);
+      continue;
+    }
+    groups.push({ slots: [slot], minutes: slot.minutes });
+  }
+  return groups;
+}
+
 /**
  * Which module absorbs the section's surplus (extension, accumulated pause, or
  * a runtime clock longer than the plan). The runtime records no module
@@ -486,21 +510,21 @@ function moduleSlots(modules: AuthoredSection["modules"]): ModuleSlot[] {
  * module the room is inside, instead of leaving a hole between the last module
  * row and its section row.
  */
-function absorbIndex(
-  slots: ModuleSlot[],
+function absorbGroupIndex(
+  groups: ModuleGroup[],
   startMs: number,
   nowMs: number | null
 ): number {
   if (nowMs !== null && nowMs >= startMs) {
     let cursor = startMs;
-    for (let index = 0; index < slots.length; index += 1) {
-      const slot = slots[index];
-      if (!slot) break;
-      cursor += slot.minutes * MINUTE_MS;
+    for (let index = 0; index < groups.length; index += 1) {
+      const group = groups[index];
+      if (!group) break;
+      cursor += group.minutes * MINUTE_MS;
       if (nowMs < cursor) return index;
     }
   }
-  return slots.length - 1;
+  return groups.length - 1;
 }
 
 /**
@@ -595,80 +619,97 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
     if (startMs !== null && endMs !== null) {
       const slots = moduleSlots(stage.plan?.modules ?? []);
       if (slots.length > 0) {
-        const authoredMs = slots.reduce(
-          (total, slot) => total + slot.minutes * MINUTE_MS,
-          0
+        const groups = moduleGroups(slots);
+        const authoredMs = groups.reduce(
+          (total, group) => total + group.minutes * MINUTE_MS,
+          0,
         );
-        // The module rows tile this window exactly — contiguous, in order, and
-        // never claiming a millisecond outside the section.
+        // Sequential groups tile the section window. Adaptive alternatives
+        // overlap inside their group: Module 2 Lower and Higher start together
+        // and the shared section boundary is the end of the longer branch.
         const windowMs = Math.max(0, endMs - startMs);
         const tiledEndMs = startMs + windowMs;
         // Clock longer than (or equal to) the plan: every module keeps its
-        // authored length and the surplus lands on the module the cohort is
+        // authored length and the surplus lands on the group the cohort is
         // inside (or the last one while the run is still ahead of it).
         const absorbing =
-          windowMs > authoredMs ? absorbIndex(slots, startMs, positionMs) : -1;
-        let moduleCursorMs = startMs;
+          windowMs > authoredMs ? absorbGroupIndex(groups, startMs, positionMs) : -1;
+        let groupCursorMs = startMs;
         let prefixMs = 0;
-        slots.forEach((slot, slotIndex) => {
-          const authoredSlotMs = slot.minutes * MINUTE_MS;
-          prefixMs += authoredSlotMs;
-          let moduleEndMs: number;
-          if (absorbing >= 0 && slotIndex === absorbing) {
-            moduleEndMs =
-              moduleCursorMs + authoredSlotMs + (windowMs - authoredMs);
+        groups.forEach((group, groupIndex) => {
+          const authoredGroupMs = group.minutes * MINUTE_MS;
+          prefixMs += authoredGroupMs;
+          let groupEndMs: number;
+          if (absorbing === groupIndex) {
+            groupEndMs = groupCursorMs + authoredGroupMs + (windowMs - authoredMs);
           } else if (windowMs < authoredMs) {
-            // Clock shorter than the plan: the authored lengths cannot all be
-            // rendered — their tail would run past the section end, and
-            // clamping only the last row inverted it. Scale the plan's
-            // proportions onto the clock instead, rounding once per boundary so
-            // neighbours share the exact instant, and let each compressed row
-            // say what the module gets against what the plan listed.
-            moduleEndMs =
-              slotIndex === slots.length - 1
+            // Clock shorter than the plan: scale sequential group boundaries
+            // onto the room clock, rounding once per boundary so later rows
+            // still meet the exact section end.
+            groupEndMs =
+              groupIndex === groups.length - 1
                 ? tiledEndMs
                 : startMs + Math.round((windowMs * prefixMs) / authoredMs);
           } else {
-            moduleEndMs = moduleCursorMs + authoredSlotMs;
+            groupEndMs = groupCursorMs + authoredGroupMs;
           }
-          const allottedMs = moduleEndMs - moduleCursorMs;
-          const compressed = allottedMs < authoredSlotMs;
-          const moduleRowStatus = moduleStatus(
-            status,
-            moduleCursorMs,
-            moduleEndMs,
-            positionMs,
-            slotIndex === 0
-          );
-          rows.push({
-            id: `${stage.sectionKey}:module:${slot.idSuffix}`,
-            kind: "module",
-            label: slot.label,
-            title: slot.title,
-            remainingSeconds: rowRemainingSeconds({
+
+          group.slots.forEach((slot, slotIndex) => {
+            const authoredSlotMs = slot.minutes * MINUTE_MS;
+            const isAlternative = group.slots.length > 1;
+            const moduleEndMs =
+              isAlternative && windowMs < authoredMs
+                ? groupCursorMs +
+                  Math.round(
+                    ((groupEndMs - groupCursorMs) * slot.minutes) / group.minutes,
+                  )
+                : isAlternative && absorbing === groupIndex
+                  ? groupEndMs
+                  : isAlternative
+                    ? groupCursorMs + authoredSlotMs
+                    : groupEndMs;
+            const allottedMs = moduleEndMs - groupCursorMs;
+            const compressed = allottedMs < authoredSlotMs;
+            const moduleRowStatus = moduleStatus(
+              status,
+              groupCursorMs,
+              moduleEndMs,
+              positionMs,
+              groupIndex === 0,
+            );
+            rows.push({
+              id: `${stage.sectionKey}:module:${slot.idSuffix}`,
+              kind: "module",
+              label: slot.label,
+              title: slot.title,
+              remainingSeconds: rowRemainingSeconds({
+                status: moduleRowStatus,
+                endMs: moduleEndMs,
+                nowMs,
+                pausedAtMs: parseInstant(live?.pausedAt),
+              }),
+              detail: slot.detail,
+              plannedDurationMinutes: slot.minutes,
+              runtimeDurationMinutes: null,
+              runtimeMismatch: compressed,
+              mismatchNote: compressed
+                ? `Plan ${slot.minutes} min · ${Math.round(allottedMs / MINUTE_MS)} min on the clock`
+                : null,
               status: moduleRowStatus,
-              endMs: moduleEndMs,
-              nowMs,
-              pausedAtMs: parseInstant(live?.pausedAt),
-            }),
-            detail: slot.detail,
-            plannedDurationMinutes: slot.minutes,
-            runtimeDurationMinutes: null,
-            runtimeMismatch: compressed,
-            mismatchNote: compressed
-              ? `Plan ${slot.minutes} min · ${Math.round(allottedMs / MINUTE_MS)} min on the clock`
-              : null,
-            status: moduleRowStatus,
-            plannedStartAt: toIso(moduleCursorMs),
-            plannedEndAt: toIso(moduleEndMs),
-            // The section opens by serving Module 1, so its start IS Module 1's
-            // actual start. Later module boundaries are per-candidate events the
-            // cohort runtime does not record: left empty rather than invented.
-            actualStartAt:
-              slotIndex === 0 && started ? (live?.actualStartAt ?? null) : null,
-            actualEndAt: null,
+              plannedStartAt: toIso(groupCursorMs),
+              plannedEndAt: toIso(moduleEndMs),
+              // The section opens by serving Module 1, so its start IS Module
+              // 1's actual start. Later module boundaries are per-candidate
+              // events the cohort runtime does not record: left empty rather
+              // than invented.
+              actualStartAt:
+                groupIndex === 0 && slotIndex === 0 && started
+                  ? (live?.actualStartAt ?? null)
+                  : null,
+              actualEndAt: null,
+            });
           });
-          moduleCursorMs = moduleEndMs;
+          groupCursorMs = groupEndMs;
         });
       }
     }

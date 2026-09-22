@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { authoringMotion, selectionMotion } from '@shared/motion';
 import { SelectionHandle } from '../react/SelectionHandle';
 import { SelectionLoupe } from '../react/SelectionLoupe';
-import { resolveGripMotion, resolveLoupeMotion } from '../react/useSelectionMotion';
+import { resolveCaretTickMotion, resolveGripMotion, resolveLoupeMotion } from '../react/useSelectionMotion';
 
 /**
  * The overlay's motion, and its two non-negotiables.
@@ -108,7 +108,7 @@ describe('what the overlay animates, and what it must not', () => {
     const source = document.createElement('div');
     source.textContent = 'alpha beta';
     document.body.append(source);
-    render(<SelectionLoupe open point={{ x: 100, y: 300 }} sourceRef={{ current: source }} diameter={120} offset={60} />);
+    render(<SelectionLoupe open fingerPoint={{ x: 100, y: 300 }} sourceRef={{ current: source }} diameter={120} offset={60} />);
 
     const lens = document.querySelector('[data-selection-loupe]') as HTMLElement;
     expect(lens).toHaveStyle({ transform: 'translate3d(40px, 180px, 0)' });
@@ -121,4 +121,47 @@ describe('what the overlay animates, and what it must not', () => {
     expect(frame.style.transform).toContain(String(selectionMotion.loupeEnterScale));
   });
 
+});
+
+describe('the caret tick', () => {
+  it('takes its spring and its peaks from the shared vocabulary', () => {
+    // The spec's numbers asserted as an identity with the shared tokens rather
+    // than copied into a component: stiffness 900, damping 60, mass 0.35.
+    expect(selectionMotion.caretSnap).toMatchObject({
+      type: 'spring',
+      stiffness: 900,
+      damping: 60,
+      mass: 0.35,
+    });
+    // The lens's column marker swells 8%; the grip about 3.5% INSIDE whatever
+    // scale the settle already has (1.14 held × 1.035 ≈ 1.18), so neither peak
+    // ever lands on the 44px target or the measured lens.
+    expect(selectionMotion.caretSnapMarkerScale).toBe(1.08);
+    expect(selectionMotion.caretSnapGripScale).toBe(1.035);
+    expect(1.14 * selectionMotion.caretSnapGripScale).toBeCloseTo(1.18, 2);
+  });
+
+  it('displaces the indicator to its peak and back as absolute positions', () => {
+    // Peak first, then home — every entry is where the indicator IS, which is
+    // what bounds a tick to its token while the previous one is still travelling.
+    expect(resolveCaretTickMotion(false, 1, 'scaleY', selectionMotion.caretSnapMarkerScale)).toEqual({
+      scaleY: [1.08, 1],
+    });
+    expect(resolveCaretTickMotion(false, 2, 'scale', selectionMotion.caretSnapGripScale)).toEqual({
+      scale: [1.035, 1],
+    });
+  });
+
+  it('drops the bounce under prefers-reduced-motion, and nothing else', () => {
+    // Returning null starts no animation — and that is ALL it does. The lens's
+    // content still re-points at the new boundary and the gesture still advances
+    // its revision (asserted there, at a hook that reads no motion preference):
+    // the snap is information; only the spring back is decoration.
+    expect(resolveCaretTickMotion(true, 1, 'scaleY', selectionMotion.caretSnapMarkerScale)).toBeNull();
+    expect(resolveCaretTickMotion(true, 1, 'scale', selectionMotion.caretSnapGripScale)).toBeNull();
+  });
+
+  it('has nothing to tick while the caret has not moved', () => {
+    expect(resolveCaretTickMotion(false, 0, 'scale', selectionMotion.caretSnapGripScale)).toBeNull();
+  });
 });

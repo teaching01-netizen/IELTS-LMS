@@ -692,7 +692,9 @@ export function useSatExamController({
       // The between-sections window is authoritative on both projections;
       // fall back to the bootstrap values when the runtime snapshot omits them.
       nextSectionStartAt:
-        runtimeSnapshot.nextSectionStartAt ?? data.timing.nextSectionStartAt ?? null,
+        runtimeSnapshot.nextSectionStartAt !== undefined
+          ? runtimeSnapshot.nextSectionStartAt
+          : data.timing.nextSectionStartAt ?? null,
       waitingForNextSection:
         runtimeSnapshot.waitingForNextSection ?? data.timing.waitingForNextSection ?? false,
       runtimeRevision: runtimeSnapshot.revision ?? data.timing.runtimeRevision,

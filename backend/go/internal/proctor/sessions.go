@@ -892,6 +892,20 @@ func LoadSessionRuntimeBySchedule(ctx context.Context, db *sql.DB, scheduleID st
 	return loadSessionRuntime(ctx, db, schedule, time.Now().UTC())
 }
 
+// LoadExamPlanBySchedule returns the authored run sheet for the published
+// version pinned by one schedule. The live staff socket uses this alongside
+// the hydrated runtime so its initial snapshot has the same comparison data
+// as the proctor detail route.
+func LoadExamPlanBySchedule(ctx context.Context, db *sql.DB, scheduleID string) ([]SessionPlanSection, error) {
+	var versionID string
+	if err := db.QueryRowContext(ctx,
+		"SELECT published_version_id FROM exam_schedules WHERE id = ?", scheduleID,
+	).Scan(&versionID); err != nil {
+		return nil, err
+	}
+	return loadExamPlan(ctx, db, versionID)
+}
+
 // LoadSessionRuntimeByStatus hydrates the same projection when the caller
 // already probed the runtime header (round 144: delivery.loadTiming holds
 // the status row, so the header re-probe inside loadSessionRuntime is

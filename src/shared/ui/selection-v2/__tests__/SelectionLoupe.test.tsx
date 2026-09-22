@@ -86,7 +86,7 @@ const PROSE = `
 describe('SelectionLoupe', () => {
   it('does not become a second addressable surface', () => {
     const sourceRef = source(PROSE);
-    render(<SelectionLoupe open point={{ x: 40, y: 200 }} sourceRef={sourceRef} />);
+    render(<SelectionLoupe open fingerPoint={{ x: 40, y: 200 }} sourceRef={sourceRef} />);
 
     // One of each, in the whole document — the invariant the engine is built on:
     // one active selection, one addressable surface.
@@ -116,7 +116,7 @@ describe('SelectionLoupe', () => {
 
   it('magnifies a clone of the rendered content, taken once, with its ink intact', () => {
     const sourceRef = source(PROSE);
-    const { rerender } = render(<SelectionLoupe open point={{ x: 40, y: 200 }} sourceRef={sourceRef} />);
+    const { rerender } = render(<SelectionLoupe open fingerPoint={{ x: 40, y: 200 }} sourceRef={sourceRef} />);
 
     expect(document.querySelector('[data-selection-loupe]')).toBeInTheDocument();
     const clone = document.querySelector('[data-selection-loupe-source]')!;
@@ -130,7 +130,7 @@ describe('SelectionLoupe', () => {
     expect(ink).toHaveStyle({ backgroundColor: 'rgb(255, 235, 59)' });
     expect(ink).toHaveAttribute('tabindex', '-1');
 
-    rerender(<SelectionLoupe open point={{ x: 60, y: 220 }} sourceRef={sourceRef} />);
+    rerender(<SelectionLoupe open fingerPoint={{ x: 60, y: 220 }} sourceRef={sourceRef} />);
 
     // Moving the finger must not rebuild the clone: only its transform changes.
     expect(document.querySelector('[data-selection-loupe-source]')).toBe(clone);
@@ -139,7 +139,7 @@ describe('SelectionLoupe', () => {
   it('sits above the finger, and moves the picture with it at the configured scale', () => {
     const sourceRef = source(PROSE);
     const { rerender } = render(
-      <SelectionLoupe open point={{ x: 100, y: 300 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+      <SelectionLoupe open fingerPoint={{ x: 100, y: 300 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
     );
 
     const loupe = document.querySelector('[data-selection-loupe]') as HTMLElement;
@@ -154,7 +154,7 @@ describe('SelectionLoupe', () => {
     });
 
     rerender(
-      <SelectionLoupe open point={{ x: 110, y: 310 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+      <SelectionLoupe open fingerPoint={{ x: 110, y: 310 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
     );
 
     // Following the finger moves the picture by the finger's delta times the
@@ -165,12 +165,51 @@ describe('SelectionLoupe', () => {
     });
   });
 
+  it('takes the box from the finger and the picture from the caret, falling back only when there is no caret', () => {
+    const sourceRef = measuredSource(PROSE, { left: 30, top: 200, width: 340, height: 120 });
+    const lens = () => (document.querySelector('[data-selection-loupe]') as HTMLElement).style.transform;
+    const content = () => (document.querySelector('[data-selection-loupe-content]') as HTMLElement).style.transform;
+
+    // NO caret — the honest absence (a renderer with no layout, a resolver that
+    // found nothing): the content falls back to the finger, and this asserts
+    // that boundary as POLICY rather than leaving it as an accident of the
+    // optional prop. The box follows the finger in every case below.
+    const { rerender } = render(
+      <SelectionLoupe open fingerPoint={{ x: 50, y: 360 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+    );
+    expect(lens()).toBe('translate3d(-10px, 240px, 0)');
+    expect(content()).toBe('translate3d(30px, -180px, 0) scale(1.5)');
+
+    // A caret: the CONTENT moves to it — magnification × (caret − finger) away
+    // from the finger-based mapping — while the BOX does not move a pixel. Both
+    // positions, asserted against the same numbers in the same render.
+    rerender(
+      <SelectionLoupe open fingerPoint={{ x: 50, y: 360 }} caretPoint={{ x: 80, y: 300 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+    );
+    expect(lens()).toBe('translate3d(-10px, 240px, 0)');
+    expect(content()).toBe('translate3d(-15px, -90px, 0) scale(1.5)');
+
+    // The finger moves; the caret does not: byte-identical content — the new
+    // contract's core sentence — while only the instrument follows the hand.
+    rerender(
+      <SelectionLoupe open fingerPoint={{ x: 70, y: 380 }} caretPoint={{ x: 80, y: 300 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+    );
+    expect(lens()).toBe('translate3d(10px, 260px, 0)');
+    expect(content()).toBe('translate3d(-15px, -90px, 0) scale(1.5)');
+
+    // And the caret gone again: back to the fallback, for the same finger.
+    rerender(
+      <SelectionLoupe open fingerPoint={{ x: 70, y: 380 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+    );
+    expect(content()).toBe('translate3d(0px, -210px, 0) scale(1.5)');
+  });
+
   it('places the picture where the browser laid the clone out, not where the layer it was written into begins', () => {
     const sourceRef = measuredSource(PROSE, { left: 30, top: 200, width: 340, height: 120 });
     const bodyBefore = document.body.children.length;
     withLeadingMargin({ x: 3, y: 8 }, () => {
       render(
-        <SelectionLoupe open point={{ x: 50, y: 360 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+        <SelectionLoupe open fingerPoint={{ x: 50, y: 360 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
       );
     });
 
@@ -194,7 +233,7 @@ describe('SelectionLoupe', () => {
 
   it('renders nothing when it is closed', () => {
     const sourceRef = source(PROSE);
-    render(<SelectionLoupe open={false} point={{ x: 40, y: 200 }} sourceRef={sourceRef} />);
+    render(<SelectionLoupe open={false} fingerPoint={{ x: 40, y: 200 }} sourceRef={sourceRef} />);
 
     expect(document.querySelector('[data-selection-loupe]')).toBeNull();
     expect(document.querySelector('[data-selection-loupe-source]')).toBeNull();
@@ -205,7 +244,7 @@ describe('the picture is the document, magnified', () => {
   it('lays the picture out at the document\'s own width, so a page coordinate is the same coordinate in the lens', () => {
     const sourceRef = measuredSource(PROSE, { left: 30, top: 200, width: 340, height: 120 });
     render(
-      <SelectionLoupe open point={{ x: 50, y: 360 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+      <SelectionLoupe open fingerPoint={{ x: 50, y: 360 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
     );
 
     // The picture's box IS the source's box: same width, and its own padding and
@@ -225,7 +264,7 @@ describe('the picture is the document, magnified', () => {
     const box = { left: 30, top: 200, width: 340, height: 120 };
     const sourceRef = measuredSource(PROSE, box);
     const { rerender } = render(
-      <SelectionLoupe open point={{ x: 50, y: 360 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+      <SelectionLoupe open fingerPoint={{ x: 50, y: 360 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
     );
     const layer = () => document.querySelector('[data-selection-loupe-content]') as HTMLElement;
 
@@ -238,7 +277,7 @@ describe('the picture is the document, magnified', () => {
     // therefore not a value it may remember; the commit that paints reads it again.
     box.top = 260;
     rerender(
-      <SelectionLoupe open point={{ x: 50, y: 360 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
+      <SelectionLoupe open fingerPoint={{ x: 50, y: 360 }} sourceRef={sourceRef} diameter={120} magnification={1.5} offset={60} />,
     );
 
     expect(layer()).toHaveStyle({ transform: 'translate3d(30px, -90px, 0) scale(1.5)' });
@@ -254,7 +293,7 @@ describe('the picture is the document, magnified', () => {
     element.style.color = 'rgb(12, 34, 56)';
     document.body.append(element);
 
-    render(<SelectionLoupe open point={{ x: 40, y: 200 }} sourceRef={{ current: element }} />);
+    render(<SelectionLoupe open fingerPoint={{ x: 40, y: 200 }} sourceRef={{ current: element }} />);
 
     // The clone is mounted in a layer at `document.body`, so without this it would
     // inherit the LAYER's font: different metrics, different wrapping, different
@@ -275,7 +314,7 @@ describe('the picture is the document, magnified', () => {
     pane.append(element);
     document.body.append(pane);
 
-    render(<SelectionLoupe open point={{ x: 40, y: 200 }} sourceRef={{ current: element }} />);
+    render(<SelectionLoupe open fingerPoint={{ x: 40, y: 200 }} sourceRef={{ current: element }} />);
 
     // The prose declares no background of its own; the pane it sits in does, and
     // a lens with a white disc under light text is a lens that shows nothing.
@@ -286,7 +325,7 @@ describe('the picture is the document, magnified', () => {
 
   it('marks the column under the finger with a tick that the magnification does not scale', () => {
     const sourceRef = measuredSource(PROSE, { left: 30, top: 200, width: 340, height: 120 });
-    render(<SelectionLoupe open point={{ x: 50, y: 360 }} sourceRef={sourceRef} />);
+    render(<SelectionLoupe open fingerPoint={{ x: 50, y: 360 }} sourceRef={sourceRef} />);
 
     const marker = document.querySelector('[data-selection-loupe-marker]') as HTMLElement;
     // In the frame, never inside the picture: the mark indexes the column, so the
@@ -322,14 +361,14 @@ describe('the lens is sized for the device it is on', () => {
 
   it('uses the device\'s own lens when no size is passed, and the caller\'s when one is', () => {
     const sourceRef = source(PROSE);
-    const { rerender } = render(<SelectionLoupe open point={{ x: 40, y: 200 }} sourceRef={sourceRef} />);
+    const { rerender } = render(<SelectionLoupe open fingerPoint={{ x: 40, y: 200 }} sourceRef={sourceRef} />);
 
     const width = Number.parseFloat((document.querySelector('[data-selection-loupe]') as HTMLElement).style.width);
     expect(width).toBeGreaterThanOrEqual(120);
     expect(width).toBeLessThanOrEqual(150);
 
     // The override is what the geometry suite drives, so it has to win outright.
-    rerender(<SelectionLoupe open point={{ x: 40, y: 200 }} sourceRef={sourceRef} diameter={128} />);
+    rerender(<SelectionLoupe open fingerPoint={{ x: 40, y: 200 }} sourceRef={sourceRef} diameter={128} />);
     expect(document.querySelector('[data-selection-loupe]')).toHaveStyle({ width: '128px', height: '128px' });
   });
 });
