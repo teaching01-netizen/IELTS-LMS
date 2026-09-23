@@ -61,9 +61,7 @@ function coeditMysqlDsn(databaseUrl: string | undefined): string {
   return `mysql://${credentials}@${hostPort}/${encodeURIComponent(database)}`;
 }
 
-const coeditDatabaseUrl =
-  inheritedEnv["AUTHORING_COEDIT_MYSQL_DSN"] ??
-  coeditMysqlDsn(databaseUrl);
+const coeditDatabaseUrl = inheritedEnv["AUTHORING_COEDIT_MYSQL_DSN"] ?? coeditMysqlDsn(databaseUrl);
 const backendCookieEnv = {
   COOKIE_SECURE: process.env["COOKIE_SECURE"] ?? "false",
   SESSION_COOKIE_NAME: process.env["SESSION_COOKIE_NAME"] ?? "session",
