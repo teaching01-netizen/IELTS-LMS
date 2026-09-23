@@ -442,7 +442,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'Audit findings' })).toBeInTheDocument();
-    expect(screen.getByText('Integrity audit unavailable')).toBeInTheDocument();
+    expect(await screen.findByText('Integrity audit unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /mark review/i })).not.toBeInTheDocument();
   });
 
