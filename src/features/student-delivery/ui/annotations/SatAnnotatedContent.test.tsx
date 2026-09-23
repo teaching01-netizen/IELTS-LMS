@@ -520,12 +520,17 @@ describe('SAT owned touch selection', () => {
     fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
   }
 
-  it('owns only touch selection on a protected exam root and suppresses late native ranges', () => {
+  it('arms app ownership before contact and suppresses native ranges', () => {
     window.getSelection()?.removeAllRanges();
     const onSelectionCaptured = vi.fn();
     const { container } = renderContent({}, view({ onSelectionCaptured }), { ownedTouchSelection: true });
     const region = container.querySelector('[data-sat-annotation-region]') as HTMLElement;
     const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+
+    expect(region).toHaveAttribute('data-student-selection-owner', 'app');
+    const precontactSelectStart = new Event('selectstart', { bubbles: true, cancelable: true });
+    fireEvent(region, precontactSelectStart);
+    expect(precontactSelectStart.defaultPrevented).toBe(true);
 
     fireEvent.pointerDown(region, { pointerType: 'touch', pointerId: 8, clientX: 2, clientY: 10 });
     expect(region).toHaveAttribute('data-student-selection-owner', 'app');
@@ -543,20 +548,22 @@ describe('SAT owned touch selection', () => {
     expect(onSelectionCaptured).not.toHaveBeenCalled();
   });
 
-  it('leaves mouse and editor selections on the browser path', () => {
+  it('keeps mouse and pen on the app path while preserving editor selection', () => {
     window.getSelection()?.removeAllRanges();
     const { container } = renderContent({}, view(), { ownedTouchSelection: true });
     const region = container.querySelector('[data-sat-annotation-region]') as HTMLElement;
     const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
 
+    expect(region).toHaveAttribute('data-student-selection-owner', 'app');
     fireEvent.pointerDown(region, { pointerType: 'mouse', pointerId: 9, clientX: 2, clientY: 10 });
-    expect(region).not.toHaveAttribute('data-student-selection-owner');
+    fireEvent.pointerDown(region, { pointerType: 'pen', pointerId: 11, clientX: 2, clientY: 10 });
+    expect(region).toHaveAttribute('data-student-selection-owner', 'app');
     const range = document.createRange();
     range.setStart(leaf, 0);
     range.setEnd(leaf, 4);
     window.getSelection()?.addRange(range);
     fireEvent(document, new Event('selectionchange'));
-    expect(window.getSelection()?.toString()).toBe('A tr');
+    expect(window.getSelection()?.rangeCount).toBe(0);
 
     window.getSelection()?.removeAllRanges();
     const editor = document.createElement('div');
@@ -564,7 +571,7 @@ describe('SAT owned touch selection', () => {
     editor.textContent = 'edit me';
     region.append(editor);
     fireEvent.pointerDown(editor, { pointerType: 'touch', pointerId: 10, clientX: 2, clientY: 10 });
-    expect(region).not.toHaveAttribute('data-student-selection-owner');
+    expect(region).toHaveAttribute('data-student-selection-owner', 'app');
     const editorSelectStart = new Event('selectstart', { bubbles: true, cancelable: true });
     fireEvent(editor, editorSelectStart);
     expect(editorSelectStart.defaultPrevented).toBe(false);

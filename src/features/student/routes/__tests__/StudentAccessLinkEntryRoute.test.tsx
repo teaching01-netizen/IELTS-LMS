@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StudentAccessLinkEntryRoute } from '../StudentAccessLinkEntryRoute';
 import type { PublicStudentAccessLink } from '../../contracts/access-link/PublicStudentAccessLink';
-import { saveSatResumeLocator } from '../../../student-delivery/infrastructure/satResumeLocator';
+import { loadSatResumeLocator, saveSatResumeLocator } from '../../../student-delivery/infrastructure/satResumeLocator';
 
 const mocks = vi.hoisted(() => ({
   studentEntry: vi.fn(),
@@ -127,6 +127,42 @@ describe('StudentAccessLinkEntryRoute', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Full name')).toBeVisible());
     expect(mocks.resume).not.toHaveBeenCalled();
+  });
+
+  it.each(['upcoming', 'ended', 'paused', 'revoked'] as const)(
+    'clears the saved SAT locator when the Student Link is %s',
+    async (status) => {
+      saveSatResumeLocator({
+        scheduleId: 'schedule-link-1',
+        candidateId: 'W123456',
+        attemptId: 'attempt-1',
+        accessLinkId: 'link-public-1',
+      });
+      mocks.link = liveLink({ status });
+
+      renderRoute();
+
+      await waitFor(() => expect(loadSatResumeLocator()).toBeNull());
+      expect(mocks.resume).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText('Full name')).not.toBeInTheDocument();
+    },
+  );
+
+  it('clears the saved SAT locator when its Student Link has been deleted', async () => {
+    saveSatResumeLocator({
+      scheduleId: 'schedule-link-1',
+      candidateId: 'W123456',
+      attemptId: 'attempt-1',
+      accessLinkId: 'link-public-1',
+    });
+    mocks.link = null;
+    mocks.error = Object.assign(new Error('Student Link not found.'), { statusCode: 404 });
+
+    renderRoute();
+
+    await waitFor(() => expect(loadSatResumeLocator()).toBeNull());
+    expect(mocks.resume).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: "This Student Link isn't available" })).toBeInTheDocument();
   });
 
   it('uses the public link id only, omits student code for open links, and navigates with the server-issued handoff', async () => {

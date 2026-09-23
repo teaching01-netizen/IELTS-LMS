@@ -47,9 +47,11 @@ func resolveManyWithMockDB(t *testing.T, prepare func(mock sqlmock.Sqlmock), que
 }
 
 func bulkNormalizedRows() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key"}).
-		AddRow("q-0", "q-0-inner", "mod-a", "reading-writing", "active", "ielts").
-		AddRow("eq-1-other", "q-1", "mod-b", "math", "review", "ielts")
+	return sqlmock.NewRows([]string{
+		"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key",
+		"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
+	}).AddRow("q-0", "q-0-inner", "mod-a", "reading-writing", "active", "ielts", nil, nil, nil, nil).
+		AddRow("eq-1-other", "q-1", "mod-b", "math", "review", "ielts", nil, nil, nil, nil)
 }
 
 func bulkQuestionIDs() []string { return []string{"q-0", "q-1", "q-2", "q-3", "q-4", "q-5"} }
@@ -121,7 +123,10 @@ func TestV2ResolverResolveManySATGateSkipsSnapshot(t *testing.T) {
 		}
 		args = append(args, "att-1")
 		mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).WithArgs(args...).
-			WillReturnRows(sqlmock.NewRows([]string{"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key"}))
+			WillReturnRows(sqlmock.NewRows([]string{
+				"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key",
+				"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
+			}))
 		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts sa JOIN exam_schedules")).
 			WithArgs("att-1").
 			WillReturnRows(sqlmock.NewRows([]string{"provider_key"}).AddRow("sat"))

@@ -44,6 +44,27 @@ func TestStudentSessionCookiesExpireAtEarlierServerDeadline(t *testing.T) {
 	}
 }
 
+func TestStudentSessionCookiesExpireAtAbsoluteDeadlineWhenItIsEarlier(t *testing.T) {
+	cfg := config.Load()
+	cfg.Environment = "production"
+	cfg.CookieSecure = true
+	cfg.SessionCookieName = "__Host-session"
+	cfg.CsrfCookieName = "__Host-csrf"
+	app := &App{Config: cfg}
+
+	now := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(25 * time.Minute)
+	idleTimeoutAt := now.Add(12 * time.Hour)
+	response := httptest.NewRecorder()
+	setCreatedSessionCookies(response, app, auth.RoleStudent, "session-token", "csrf-token", expiresAt, idleTimeoutAt, now)
+
+	for _, cookie := range response.Result().Cookies() {
+		if !cookie.Expires.Equal(expiresAt) || cookie.MaxAge != 25*60 {
+			t.Fatalf("cookie expiry = %s (MaxAge %d), want absolute deadline %s", cookie.Expires, cookie.MaxAge, expiresAt)
+		}
+	}
+}
+
 func TestStaffSessionCookiesRemainSessionScoped(t *testing.T) {
 	cfg := config.Load()
 	app := &App{Config: cfg}

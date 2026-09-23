@@ -62,9 +62,10 @@ func NewService(runner *tx.Runner, clk clock.Clock, secret []byte) *Service {
 // QuestionOwner resolves question -> module/section ownership. Providers plug
 // IELTS/SAT/ACT validation behind this port; the core stays neutral (plan 15).
 type QuestionOwner struct {
-	ModuleID    string
-	SectionKey  string
-	ModuleState string // must be active|review for writes
+	ModuleID         string
+	SectionKey       string
+	ModuleState      string // must be active|review for writes
+	ModuleDeadlineAt *time.Time
 }
 
 // QuestionResolver maps question IDs to ownership within the attempt.
@@ -225,6 +226,9 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 		if replay {
 			if err := validateClaimLease(attempt, claims); err != nil {
 				return SaveResult{}, err
+			}
+			if attempt.ProviderKey == string(ProviderSAT) && attempt.DeadlineAt != nil && !s.clock.Now().Before(*attempt.DeadlineAt) {
+				telemetry.IncCounter(telemetry.MSATResponseReplayAfterTerminal)
 			}
 			return SaveResult{Acks: acks, ResponseRevision: rev, ServerTime: s.clock.Now(), Replayed: true}, nil
 		}
@@ -426,12 +430,12 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 func lockAttempt(ctx context.Context, q tx.Tx, id string) (AttemptState, error) {
 	var a AttemptState
 	var deadline, grace, submitted sql.NullTime
-	var finalSub sql.NullString
+	var finalSub, providerKey sql.NullString
 	// Round 166: fresh entry-minted attempts carry NULL organization_id
 	// (game-day: 5 submit-path 500s `converting NULL to string`). Scan
 	// nullable and default to "" so NULL orgs submit cleanly.
 	var org sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT id, schedule_id, user_id, organization_id, protocol_version, delivery_status, phase, lease_epoch, control_epoch, response_revision, deadline_at, closing_grace_until, submitted_at, final_submission, proctor_status FROM student_attempts WHERE id=? FOR UPDATE`, id).Scan(&a.ID, &a.ScheduleID, &a.UserID, &org, &a.ProtocolVersion, &a.DeliveryStatus, &a.Phase, &a.LeaseEpoch, &a.ControlEpoch, &a.ResponseRevision, &deadline, &grace, &submitted, &finalSub, &a.ProctorStatus)
+	err := q.QueryRowContext(ctx, `SELECT id, schedule_id, user_id, organization_id, protocol_version, delivery_status, phase, lease_epoch, control_epoch, response_revision, deadline_at, closing_grace_until, submitted_at, final_submission, proctor_status, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), '') FROM student_attempts WHERE id=? FOR UPDATE`, id).Scan(&a.ID, &a.ScheduleID, &a.UserID, &org, &a.ProtocolVersion, &a.DeliveryStatus, &a.Phase, &a.LeaseEpoch, &a.ControlEpoch, &a.ResponseRevision, &deadline, &grace, &submitted, &finalSub, &a.ProctorStatus, &providerKey)
 	if org.Valid {
 		a.OrganizationID = org.String
 	}
@@ -456,6 +460,9 @@ func lockAttempt(ctx context.Context, q tx.Tx, id string) (AttemptState, error) 
 	if finalSub.Valid {
 		s := finalSub.String
 		a.FinalSubmission = &s
+	}
+	if providerKey.Valid {
+		a.ProviderKey = providerKey.String
 	}
 	return a, nil
 }
@@ -575,6 +582,9 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	closingGraceActive := a.ClosingGraceUntil != nil && !now.After(*a.ClosingGraceUntil)
 	switch a.DeliveryStatus {
 	case "submitted", "terminated", "locked", "cancelled":
+		if a.ProviderKey == string(ProviderSAT) {
+			telemetry.IncCounter(telemetry.MSATResponseWriteAfterTerminal)
+		}
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Attempt is closed.", HTTPStatus: 422}
 	}
 	if a.DeliveryStatus == "paused" || a.Phase == "post-exam" || a.SubmittedAt != nil {
@@ -585,6 +595,14 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	}
 	if gate.Status != "" && gate.Status != "live" {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
+	}
+	// SAT writes must stop at the attempt's authoritative deadline. The
+	// closing-grace window remains available to legacy providers, but it must
+	// never admit a fresh SAT write while the timeout worker catches up.
+	// Exact write-id replays return above this gate and remain safe/idempotent.
+	if a.ProviderKey == string(ProviderSAT) && a.DeadlineAt != nil && !now.Before(*a.DeadlineAt) {
+		telemetry.IncCounter(telemetry.MSATResponseWriteAfterTerminal)
+		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
 	if gate.WaitingForNextSection && !closingGraceActive {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is waiting.", HTTPStatus: 422}
@@ -619,6 +637,14 @@ func ensureQuestionAdmitted(owner QuestionOwner, gate RuntimeGate, questionID st
 	}
 	if owner.ModuleState != "active" && owner.ModuleState != "review" {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Question module is not active.", HTTPStatus: 422}
+	}
+	// The attempt deadline covers the shared SAT section clock. Module 1 can
+	// have a shorter personal clock, so enforce the effective module boundary
+	// here too; otherwise a fresh V2 write could slip in before the timeout
+	// worker terminalizes the module.
+	if owner.ModuleDeadlineAt != nil && !gate.Now.Before(*owner.ModuleDeadlineAt) {
+		telemetry.IncCounter(telemetry.MSATResponseWriteAfterTerminal)
+		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
 	if gate.ActiveSectionKey != "*" && gate.ActiveSectionKey != "" && owner.SectionKey != gate.ActiveSectionKey {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Question is not in the active section.", HTTPStatus: 400}

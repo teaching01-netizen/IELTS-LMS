@@ -205,14 +205,13 @@ export function useSatExamController({
   }, [attemptId, candidateId, identityKey, scheduleId]);
 
   useEffect(() => {
-    // Preferred writer id comes from the attempt snapshot when the backend
-    // has bound one (recovery/integrity), so SAT heartbeat/refresh present
-    // the same identity the bearer was issued for — never a second id.
+    // Writer identity is browser-owned. A server attempt projection can carry
+    // the active writer's id, but using it as a fallback here would let a
+    // fresh device impersonate that writer before lease checks run.
     configureSatDeliveryAttempt(
       scheduleId,
       attemptId,
       candidateId,
-      attemptSnapshot?.recovery?.clientSessionId ?? attemptSnapshot?.integrity?.clientSessionId ?? null,
     );
   }, [attemptId, attemptSnapshot?.integrity?.clientSessionId, attemptSnapshot?.recovery?.clientSessionId, candidateId, scheduleId]);
 
@@ -231,6 +230,9 @@ export function useSatExamController({
   });
   const persistenceRef = useRef(persistence);
   persistenceRef.current = persistence;
+  const flushBeforeNavigation = useCallback(() => {
+    void persistenceRef.current.flush().catch(() => undefined);
+  }, []);
   const hydrateBootstrap = persistence.hydrateBootstrap;
 
   // Identity the pure route table needs for a result-carrying payload;
@@ -624,16 +626,17 @@ export function useSatExamController({
   );
 
   // Phase 04 commit-first / reconciler-second: the primary paths commit
-  // data+phase atomically, so this directions auto-route is a safety net for
-  // externally-driven data changes (e.g. a Phase-02 seed swap). Dedupe-keyed
+  // data+phase atomically, so this route reconciliation is a safety net for
+  // externally-driven data changes (e.g. a resumed page whose server module
+  // already started, or a break whose next module opened in another tab). Dedupe-keyed
   // so StrictMode double-invoke cannot double-dispatch; at most one action
   // per (versionId, runtimeRevision, phase, moduleKey).
   useEffect(() => {
-    if (!data || state.phase !== "directions") return;
+    if (!data || (state.phase !== "directions" && state.phase !== "break")) return;
     const activeAttempt = findActiveAttempt(data);
     const activeModule = moduleForAttempt(data, activeAttempt);
     if (!activeAttempt?.startedAt || !activeModule) return;
-    const key = `${data.versionId}:${data.timing.runtimeRevision}:directions:${activeModule.id}`;
+    const key = `${data.versionId}:${data.timing.runtimeRevision}:${state.phase}:${activeModule.id}`;
     if (safetyReconcileKeyRef.current === key) return;
     safetyReconcileKeyRef.current = key;
     startModuleFrom(data, activeModule);
@@ -1372,9 +1375,10 @@ export function useSatExamController({
 
   const returnToQuestion = useCallback((questionIndex: number) => {
     if (answerInteractionBlocked) return;
+    flushBeforeNavigation();
     dispatch({ type: "selectQuestion", questionIndex });
     dispatch({ type: "returnToModule" });
-  }, [answerInteractionBlocked]);
+  }, [answerInteractionBlocked, flushBeforeNavigation]);
 
   const blocked = Boolean(
     data && (data.proctorStatus === "paused" || data.scheduleRuntimeStatus === "paused")
@@ -1436,11 +1440,13 @@ export function useSatExamController({
       setAnnotations,
       selectQuestion: (questionIndex: number) => {
         if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
         dispatch({ type: "selectQuestion", questionIndex });
       },
       returnToQuestion,
       previousQuestion: () => {
         if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
         dispatch({
           type: "selectQuestion",
           questionIndex: state.phase === "module" ? state.questionIndex - 1 : 0,
@@ -1448,6 +1454,7 @@ export function useSatExamController({
       },
       nextQuestion: () => {
         if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
         dispatch({
           type: "selectQuestion",
           questionIndex: state.phase === "module" ? state.questionIndex + 1 : 0,
@@ -1455,10 +1462,12 @@ export function useSatExamController({
       },
       reviewModule: () => {
         if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
         dispatch({ type: "reviewModule" });
       },
       returnToModule: () => {
         if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
         dispatch({ type: "returnToModule" });
       },
       showDirections: () => dispatch({ type: "showDirections" }),

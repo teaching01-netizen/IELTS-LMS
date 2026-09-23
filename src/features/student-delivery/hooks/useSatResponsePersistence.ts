@@ -26,7 +26,7 @@ import {
 import type { SatDeliveryGateway } from '../application/ports/SatDeliveryGateway';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 import {
-  ensureClientSessionIdForAttempt,
+  ensureBrowserClientSessionIdForAttempt,
   restoreClientSessionIdForAttempt,
   rotateClientSessionIdForAttempt,
 } from '@student/api/studentAttemptGateway';
@@ -209,9 +209,11 @@ export function useSatResponsePersistence({
   }, [attemptId, scheduleId]);
 
   useEffect(() => {
+    const attempt = credentialAttemptRef.current ?? undefined;
     const transport = createResponseDurabilityV2Transport(
       scheduleId,
-      credentialAttemptRef.current ?? undefined
+      attempt,
+      attempt ? ensureBrowserClientSessionIdForAttempt(attempt) : undefined,
     );
     const initialLeaseEpoch =
       typeof leaseEpoch === 'number' && Number.isSafeInteger(leaseEpoch) && leaseEpoch > 0
@@ -350,7 +352,7 @@ export function useSatResponsePersistence({
   }, []);
 
   const save = useCallback(
-    (response: SatQuestionResponseDraft, _context?: SatResponseSaveContext) => {
+    (response: SatQuestionResponseDraft, context?: SatResponseSaveContext) => {
       const generation = identityGenerationRef.current;
       const saveV2 = async () => {
         if (!v2EngineRef.current) {
@@ -364,7 +366,9 @@ export function useSatResponsePersistence({
           !mountedRef.current
         )
           return;
-        await engine.acceptResponse(response.questionId, satDraftToDurablePayload(response));
+        await engine.acceptResponse(response.questionId, satDraftToDurablePayload(response), {
+          drainImmediately: context?.interactionType !== 'typing',
+        });
       };
       const acceptance = saveV2();
       v2PendingAcceptancesRef.current.add(acceptance);
@@ -568,7 +572,7 @@ export function useSatResponsePersistence({
       ) {
         throw new Error('Missing SAT attempt identity for lease takeover.');
       }
-      const previousClientSessionId = ensureClientSessionIdForAttempt(attempt);
+      const previousClientSessionId = ensureBrowserClientSessionIdForAttempt(attempt);
       const nextClientSessionId = rotateClientSessionIdForAttempt(attempt);
       let takeoverAccepted = false;
       setIsTakingOver(true);

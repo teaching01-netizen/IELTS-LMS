@@ -96,6 +96,8 @@ export interface StudentSelectionGestureOptions {
   activation?: SelectionActivation | undefined;
   /** The element the gesture must begin inside — a passage, a prose block. */
   rootRef: RefObject<HTMLElement | null>;
+  /** Identity of the question/surface that owns this transient range. */
+  scopeKey?: string | undefined;
   /**
    * Pointer coordinate → text position. The surface bounds hit testing so a
    * browser caret outside its unselectable prose cannot become an anchor.
@@ -118,6 +120,8 @@ export interface StudentSelectionGestureOptions {
   isExcludedTarget?: ((target: EventTarget | null) => boolean) | undefined;
   /** Whether this physical pointer belongs to the app-owned gesture. */
   isOwnedPointer?: ((event: PointerEvent) => boolean) | undefined;
+  /** Whether an outside press would start a product-owned native selection. */
+  wouldStartOwnedSelection?: ((event: Event) => boolean) | undefined;
   /** How long a touch must rest before it claims the text. */
   longPressMs?: number | undefined;
   /** How far a touch may travel during the hold before it is scrolling. */
@@ -165,6 +169,7 @@ export interface StudentSelectionGestureOptions {
 /** The slice of a React pointer event a handle needs, so a test can supply one. */
 export interface SelectionHandlePointerEvent {
   pointerId: number;
+  pointerType?: string | undefined;
   clientX: number;
   clientY: number;
   currentTarget: EventTarget | null;
@@ -210,10 +215,12 @@ export interface StudentSelectionGesture extends SelectionPresentation {
    *
    * `SelectionOverlay` asks it about an OUTSIDE press: having dismissed, it
    * must consume exactly the presses that would otherwise begin the next
-   * selection under this same pointerdown, while toolbars, inputs and every
+   * owned gesture under this same pointerdown, while toolbars, inputs and every
    * other control still receive theirs.
    */
   wouldBeginGesture: (event: Event) => boolean;
+  /** Whether an outside press would start the product's native selection path. */
+  wouldStartOwnedSelection: (event: Event) => boolean;
 }
 
 const EDITABLE_SELECTOR = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
@@ -253,6 +260,7 @@ interface PointerRecord {
   x: number;
   y: number;
   pointerId: number;
+  pointerType: string;
 }
 
 /** One haptic tick's length: a tap, not a buzz — short enough to count as feedback. */
@@ -297,11 +305,13 @@ export function useStudentSelectionGesture(
     enabled,
     activation = 'long-press',
     rootRef,
+    scopeKey = '',
     resolveCaretAtPoint,
     onSelect,
     boundaryFor,
     isExcludedTarget = defaultIsExcludedTarget,
     isOwnedPointer = defaultIsOwnedPointer,
+    wouldStartOwnedSelection = () => false,
     longPressMs = 350,
     moveTolerancePx = 8,
     clearOnSelect = false,
@@ -320,12 +330,12 @@ export function useStudentSelectionGesture(
   // arming or disarming during a drag must not lose it either.
   const live = useRef({
     enabled, activation, resolveCaretAtPoint, onSelect, boundaryFor, isExcludedTarget,
-    isOwnedPointer, longPressMs, moveTolerancePx, clearOnSelect, scrollContainer,
+    isOwnedPointer, wouldStartOwnedSelection, longPressMs, moveTolerancePx, clearOnSelect, scrollContainer,
     diagnostics, vibrate, now,
   });
   live.current = {
     enabled, activation, resolveCaretAtPoint, onSelect, boundaryFor, isExcludedTarget,
-    isOwnedPointer, longPressMs, moveTolerancePx, clearOnSelect, scrollContainer,
+    isOwnedPointer, wouldStartOwnedSelection, longPressMs, moveTolerancePx, clearOnSelect, scrollContainer,
     diagnostics, vibrate, now,
   };
 
@@ -338,7 +348,8 @@ export function useStudentSelectionGesture(
   // each of those a lookup rather than a rescan of the node.
   const graphemes = useMemo(() => defaultGraphemeSegmenter(), []);
   const session = useRef<SelectionSession | null>(null);
-  /** Touch owns SAT's protected native-selection surface until modality changes or selection ends. */
+  const scopeKeyRef = useRef(scopeKey);
+  /** Legacy highlightable surfaces keep touch ownership only while their range rests. */
   const satTouchOwnership = useRef(false);
 
   /**
@@ -612,7 +623,11 @@ export function useStudentSelectionGesture(
     handleTarget.current = null;
     satTouchOwnership.current = false;
     const root = rootRef.current;
-    if (root?.getAttribute('data-student-selection-owner') === 'app') {
+    const precontactSatOwner = !!root
+      && isSatSelectionRoot(root)
+      && live.current.enabled
+      && live.current.activation === 'drag';
+    if (!precontactSatOwner && root?.getAttribute('data-student-selection-owner') === 'app') {
       root.removeAttribute('data-student-selection-owner');
     }
   }, [clearHoldTimer, detachScrollSuppressor, ensureSession, releaseBinding, rootRef]);
@@ -620,6 +635,23 @@ export function useStudentSelectionGesture(
   const dismiss = useCallback(() => {
     currentEffects.current(ensureSession().dismiss());
   }, [ensureSession]);
+
+  // A Range belongs to the question whose text nodes created it. Reset at the
+  // session owner when that identity changes, before the replacement question
+  // can paint or receive another pointer event.
+  useLayoutEffect(() => {
+    if (scopeKeyRef.current === scopeKey) return;
+    scopeKeyRef.current = scopeKey;
+    detachAll();
+    setPresentation(IDLE_SELECTION);
+    live.current.diagnostics?.record('scope-reset', {
+      scopeReset: true,
+      claimed: false,
+      rangeText: '',
+      rangeCollapsed: null,
+      rangeRectCount: 0,
+    });
+  }, [detachAll, scopeKey]);
 
   /** Hand one pointer to the capture primitive, kept as the live follow. */
   const bindPointer = useCallback((pointerId: number, element: Element | null) => {
@@ -747,6 +779,11 @@ export function useStudentSelectionGesture(
     return true;
   }, [rootRef]);
 
+  const wouldStartOwnedSelectionOutside = useCallback((event: Event): boolean => {
+    const config = live.current;
+    return config.enabled && config.wouldStartOwnedSelection(event);
+  }, []);
+
   const handleDown = useCallback((event: PointerEvent) => {
     const config = live.current;
     config.diagnostics?.record('pointerdown', { pointerDownSeen: true, pointerType: event.pointerType, pointerId: event.pointerId, eventTarget: describeTouchSelectionNode(event.target instanceof Node ? event.target : null), targetInsideRoot: event.target instanceof Node && !!rootRef.current?.contains(event.target) });
@@ -780,7 +817,7 @@ export function useStudentSelectionGesture(
     // The session's options are the CURRENT ones: disarming or re-arming the tool
     // between gestures must change the next gesture, not the one that ended.
     active.adoptOptions(config.activation, config.moveTolerancePx);
-    lastPointer.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    lastPointer.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, pointerType: event.pointerType || 'unknown' };
     pointerIsText.current = true;
     handleTarget.current = root;
     currentEffects.current(
@@ -803,7 +840,7 @@ export function useStudentSelectionGesture(
 
     // The move is folded into the next frame, not resolved here: this handler must
     // not read layout, and a hundred of them in one frame must cost one.
-    lastPointer.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    lastPointer.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, pointerType: event.pointerType || 'unknown' };
     pointerIsText.current = true;
     const before = active.phase();
     const effects = active.move({ pointerId: event.pointerId, x: event.clientX, y: event.clientY });
@@ -928,7 +965,7 @@ export function useStudentSelectionGesture(
     // The handle is the capture target, so the drag keeps arriving after the
     // finger leaves the 12px dot it started on.
     handleTarget.current = event.currentTarget instanceof Element ? event.currentTarget : rootRef.current;
-    lastPointer.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    lastPointer.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, pointerType: event.pointerType ?? lastPointer.current?.pointerType ?? 'unknown' };
     pointerIsText.current = false;
     currentEffects.current(effects);
     ensureScheduler().schedule();
@@ -942,9 +979,23 @@ export function useStudentSelectionGesture(
     if (active.phase() !== 'selected') return false;
     const range = active.range();
     if (!range || range.collapsed) return false;
+    const root = rootRef.current;
+    const satTextBlockFor = (node: Node | null) => {
+      const element = node instanceof Element ? node : node?.parentElement;
+      return element?.closest('[data-content-text-node]') ?? null;
+    };
+    const startBlock = satTextBlockFor(range.startContainer);
+    const endBlock = satTextBlockFor(range.endContainer);
     config.diagnostics?.record('selection-activated', {
       rangeText: range.toString().slice(0, 200),
       rangeCollapsed: range.collapsed,
+      rangeStartConnected: range.startContainer.isConnected,
+      rangeEndConnected: range.endContainer.isConnected,
+      rangeStartInsideRoot: !!root?.contains(range.startContainer),
+      rangeEndInsideRoot: !!root?.contains(range.endContainer),
+      rangeWithinSingleSatTextBlock: startBlock !== null && startBlock === endBlock,
+      rangeStartSatBlockId: startBlock?.getAttribute('data-content-text-node') ?? null,
+      rangeEndSatBlockId: endBlock?.getAttribute('data-content-text-node') ?? null,
       onSelectCalled: true,
     });
     try {
@@ -955,13 +1006,22 @@ export function useStudentSelectionGesture(
     }
     if (config.clearOnSelect) currentEffects.current(active.dismiss());
     return true;
-  }, [ensureSession]);
+  }, [ensureSession, rootRef]);
 
   const onDocumentPointerDown = useCallback((event: PointerEvent) => {
     const root = rootRef.current;
     if (!root || !isAppOwnedSelectionRoot(root)) return;
     const config = live.current;
     const targetInsideRoot = event.target instanceof Node && root.contains(event.target);
+    if (isSatSelectionRoot(root) && config.enabled && config.activation === 'drag') {
+      config.diagnostics?.record('selection-owner', {
+        ownerMarkerPresent: root.getAttribute('data-student-selection-owner') === 'app',
+        pointerType: event.pointerType,
+        targetInsideRoot,
+        excludedTarget: config.isExcludedTarget(event.target),
+      });
+      return;
+    }
     if (
       config.enabled
       && config.isOwnedPointer(event)
@@ -1002,7 +1062,7 @@ export function useStudentSelectionGesture(
 
   const onSatSelectStart = useCallback((event: Event) => {
     const root = rootRef.current;
-    if (!root || !isSatSelectionRoot(root) || !satTouchOwnership.current) return;
+    if (!root || !isSatSelectionRoot(root) || root.getAttribute('data-student-selection-owner') !== 'app') return;
     if (!(event.target instanceof Node) || !root.contains(event.target)) return;
     if (live.current.isExcludedTarget(event.target)) return;
     if (event.cancelable) event.preventDefault();
@@ -1014,7 +1074,7 @@ export function useStudentSelectionGesture(
 
   const onSatSelectionChange = useCallback(() => {
     const root = rootRef.current;
-    if (!root || !isSatSelectionRoot(root) || !satTouchOwnership.current) return;
+    if (!root || !isSatSelectionRoot(root) || root.getAttribute('data-student-selection-owner') !== 'app') return;
     const nativeSelection = window.getSelection();
     if (!nativeSelection || !nativeSelectionIntersectsRoot(nativeSelection, root)) return;
     if (defaultIsExcludedTarget(nativeSelection.anchorNode) || defaultIsExcludedTarget(nativeSelection.focusNode)) return;
@@ -1023,15 +1083,34 @@ export function useStudentSelectionGesture(
       nativeSelectionCollapsed: nativeSelection.isCollapsed,
       anchorInsideSatRoot: nativeSelection.anchorNode !== null && root.contains(nativeSelection.anchorNode),
       focusInsideSatRoot: nativeSelection.focusNode !== null && root.contains(nativeSelection.focusNode),
+      nativeRangeTextLength: Array.from({ length: nativeSelection.rangeCount }, (_, index) => {
+        try {
+          return nativeSelection.getRangeAt(index).toString().length;
+        } catch {
+          return 0;
+        }
+      }).reduce((total, length) => total + length, 0),
+      customRangeTextLength: ensureSession().range()?.toString().length ?? 0,
+      ownerMarkerPresent: true,
+      pointerType: lastPointer.current?.pointerType ?? null,
+      userSelect: getComputedStyle(root).userSelect,
+      webkitUserSelect: getComputedStyle(root).getPropertyValue('-webkit-user-select'),
+      touchAction: getComputedStyle(root).touchAction,
+      visualViewport: typeof window.visualViewport === 'undefined' || !window.visualViewport
+        ? null
+        : { width: window.visualViewport.width, height: window.visualViewport.height, scale: window.visualViewport.scale },
+      visibilityState: document.visibilityState,
     };
+    live.current.diagnostics?.record('native-selection-leak', details);
     nativeSelection.removeAllRanges();
     live.current.diagnostics?.record('native-selection-suppressed', details);
-  }, [rootRef]);
+  }, [ensureSession, rootRef]);
 
   const onKeyboardSelectionStart = useCallback((event: KeyboardEvent) => {
     if (!event.shiftKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
     const root = rootRef.current;
     if (!root || !isAppOwnedSelectionRoot(root)) return;
+    if (isSatSelectionRoot(root) && live.current.enabled && live.current.activation === 'drag') return;
     satTouchOwnership.current = false;
     if (root.getAttribute('data-student-selection-owner') === 'app') {
       root.removeAttribute('data-student-selection-owner');
@@ -1068,11 +1147,13 @@ export function useStudentSelectionGesture(
   }, [detachAll, enabled, handleDown, onDocumentPointerDown, onKeyboardSelectionStart, onSatSelectStart, onSatSelectionChange, rootRef]);
 
   /**
-   * Tell the browser, before any finger lands, that this drag is the app's.
+   * Tell the browser, before any pointer lands, that armed SAT text belongs to
+   * the app. Pointer type changes presentation, never selection ownership.
    *
    * Set for exactly the contract where a drag means "this text": an armed tool.
-   * Pointer type decides which physical gesture the app owns; media queries do
-   * not. A layout effect keeps touch-action in place before the finger lands.
+   * A layout effect establishes both native-selection and touch ownership before
+   * contact. SAT's browser-selection guard stays active for the entire armed
+   * session, including mouse and pen input.
    *
    * The long-press contract is never marked: there a drag is a scroll, and taking
    * the gesture away from the browser would break the very reading motion the mode
@@ -1083,8 +1164,13 @@ export function useStudentSelectionGesture(
     if (!root || !enabled || activation !== 'drag') return;
 
     root.dataset['studentOwnedTouchSelection'] = 'true';
+    const isSatRoot = isSatSelectionRoot(root);
+    if (isSatRoot) root.dataset['studentSelectionOwner'] = 'app';
     return () => {
       delete root.dataset['studentOwnedTouchSelection'];
+      if (isSatRoot && root.getAttribute('data-student-selection-owner') === 'app') {
+        root.removeAttribute('data-student-selection-owner');
+      }
     };
   }, [activation, enabled, rootRef]);
 
@@ -1177,6 +1263,7 @@ export function useStudentSelectionGesture(
     // one render cannot keep a ghost lens on screen.
     pointer: ((session.current?.pointerId() ?? null) !== null) && lastPointer.current
       ? {
+          pointerType: lastPointer.current.pointerType,
           finger: { x: lastPointer.current.x, y: lastPointer.current.y },
           caret: resolvedCaret.current,
           snapRevision: snapRevision.current,
@@ -1187,5 +1274,6 @@ export function useStudentSelectionGesture(
     activateCurrentSelection,
     dismiss,
     wouldBeginGesture,
+    wouldStartOwnedSelection: wouldStartOwnedSelectionOutside,
   };
 }

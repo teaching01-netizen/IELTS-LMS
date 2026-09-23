@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SAT_COPY } from "../../domain/satCopy";
+import { SatControlBanner, SatLeaseConflictNotice } from "../feedback/SatControlFeedback";
 import { SatReviewPage } from "./SatReviewPage";
 import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
 
@@ -88,6 +89,28 @@ describe("SatReviewPage", () => {
     expect(screen.getByText("Answered")).toBeInTheDocument();
     expect(screen.getByText("Unanswered")).toBeInTheDocument();
     expect(screen.getByText("Flagged")).toBeInTheDocument();
+  });
+
+  it("places recovery notices in their own row above review content", () => {
+    const onTakeOver = vi.fn();
+    const { container } = renderReview({
+      notices: <>
+        <SatControlBanner tone="warning">Proctor message</SatControlBanner>
+        <SatLeaseConflictNotice error="Save ownership changed" isTakingOver={false} onTakeOver={onTakeOver} />
+      </>,
+    });
+    const page = container.querySelector(".sat-review-page")!;
+    const notices = screen.getByTestId("sat-review-notices");
+    const content = page.querySelector("main")!;
+    expect(notices).toContainElement(screen.getByRole("status"));
+    expect(notices).toContainElement(screen.getByRole("alert"));
+    expect(notices.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notices.className).not.toMatch(/fixed|absolute/);
+    for (const notice of [screen.getByRole("status"), screen.getByRole("alert")]) {
+      expect(notice.className).not.toMatch(/fixed|absolute/);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Take over" }));
+    expect(onTakeOver).toHaveBeenCalledOnce();
   });
 });
 

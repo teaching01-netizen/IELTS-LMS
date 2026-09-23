@@ -1149,6 +1149,31 @@ func (s *Service) SetLifecycle(ctx context.Context, linkID string, req SetLifecy
 	return s.Get(ctx, linkID)
 }
 
+// Delete permanently removes a Student Link and its member allowlist. The
+// backing schedule and all participation data belong to the exam session and
+// are intentionally preserved.
+func (s *Service) Delete(ctx context.Context, linkID string, revision int32) error {
+	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		current, err := lockLinkTx(ctx, q, linkID)
+		if err != nil {
+			return err
+		}
+		if current.revision != revision {
+			return conflict("Student Link changed while you were editing it. Refresh and try again.")
+		}
+		res, err := q.ExecContext(ctx,
+			"DELETE FROM assessment_access_links WHERE id = ? AND revision = ?",
+			linkID, revision)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return conflict("Student Link changed while you were editing it. Refresh and try again.")
+		}
+		return nil
+	})
+}
+
 // Duplicate mirrors duplicate(): locks the source (FOR UPDATE), fences on
 // revision, revalidates under the effective name/window, resolves the
 // release target (source pin vs current), and mints a fresh schedule, link,

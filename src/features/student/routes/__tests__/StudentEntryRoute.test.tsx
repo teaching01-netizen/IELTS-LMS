@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, UNSAFE_NavigationContext } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StudentEntryRoute } from "../StudentEntryRoute";
+import { loadSatResumeLocator, saveSatResumeLocator } from "../../../student-delivery/infrastructure/satResumeLocator";
 
 const navigateMock = vi.fn();
 const studentEntryMock = vi.fn();
@@ -217,6 +218,19 @@ describe("StudentEntryRoute", () => {
     expect(studentEntryMock).not.toHaveBeenCalled();
   });
 
+  it("does not probe resume for an anonymous student with a valid SAT locator", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440145";
+    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "sat" });
+    saveSatResumeLocator({ scheduleId, candidateId: "W250334", attemptId: "attempt-1" });
+
+    renderRoute(scheduleId);
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Exam Check-in" })).toBeInTheDocument());
+    expect(resumeSatStudentSessionMock).not.toHaveBeenCalled();
+    expect(loadSatResumeLocator()).toMatchObject({ scheduleId, candidateId: "W250334" });
+    expect(studentEntryMock).not.toHaveBeenCalled();
+  });
+
   it("resumes once for an authenticated SAT student under StrictMode", async () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440142";
     getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "sat" });
@@ -236,6 +250,60 @@ describe("StudentEntryRoute", () => {
     });
     expect(resumeSatStudentSessionMock).toHaveBeenCalledTimes(1);
     expect(studentEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("returns to check-in after the server confirms authentication failure", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440143";
+    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "sat" });
+    authSessionMock.status = "authenticated";
+    authSessionMock.session = { user: { role: "student" } };
+    saveSatResumeLocator({ scheduleId, candidateId: "W250334", attemptId: "attempt-1" });
+    resumeSatStudentSessionMock.mockResolvedValue({ kind: "unauthenticated" });
+
+    renderRoute(scheduleId);
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Exam Check-in" })).toBeInTheDocument());
+    expect(resumeSatStudentSessionMock).toHaveBeenCalledTimes(1);
+    expect(studentEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("retains the locator and makes one bounded resume probe when connectivity returns", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440144";
+    const originalOnlineDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "onLine");
+    const setOnline = (online: boolean) =>
+      Object.defineProperty(window.navigator, "onLine", { configurable: true, value: online });
+    const restoreOnline = () => {
+      if (originalOnlineDescriptor) Object.defineProperty(window.navigator, "onLine", originalOnlineDescriptor);
+      else Reflect.deleteProperty(window.navigator, "onLine");
+    };
+
+    try {
+      setOnline(false);
+      getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "sat" });
+      authSessionMock.status = "authenticated";
+      authSessionMock.session = { user: { role: "student" } };
+      authSessionMock.refresh.mockResolvedValue(undefined);
+      saveSatResumeLocator({ scheduleId, candidateId: "W250334", attemptId: "attempt-1" });
+      resumeSatStudentSessionMock.mockResolvedValue({ kind: "transient-error", reason: "network" });
+
+      renderRoute(scheduleId);
+
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "We couldn’t reconnect to your SAT" })).toBeInTheDocument(),
+      );
+      expect(resumeSatStudentSessionMock).not.toHaveBeenCalled();
+
+      setOnline(true);
+      await act(async () => {
+        window.dispatchEvent(new Event("online"));
+      });
+
+      await waitFor(() => expect(resumeSatStudentSessionMock).toHaveBeenCalledTimes(1));
+      expect(authSessionMock.refresh).toHaveBeenCalledTimes(1);
+      expect(loadSatResumeLocator()).toMatchObject({ scheduleId, candidateId: "W250334" });
+    } finally {
+      restoreOnline();
+    }
   });
 
   it("rejects emails that pass simple regex patterns but fail shared schema validation", async () => {

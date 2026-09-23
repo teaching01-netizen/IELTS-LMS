@@ -78,8 +78,8 @@ func attemptRows() *sqlmock.Rows {
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
 		"response_revision", "deadline_at", "closing_grace_until",
-		"submitted_at", "final_submission", "proctor_status",
-	}).AddRow("att-1", "sched-1", "u-1", "", 2, "running", "exam", 3, 7, 9, nil, nil, nil, nil, "active")
+		"submitted_at", "final_submission", "proctor_status", "provider_key",
+	}).AddRow("att-1", "sched-1", "u-1", "", 2, "running", "exam", 3, 7, 9, nil, nil, nil, nil, "active", "")
 }
 
 func sessionRows() *sqlmock.Rows {
@@ -262,8 +262,8 @@ func TestSubmitVsResponseOnPausedAttempt(t *testing.T) {
 			"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 			"delivery_status", "phase", "lease_epoch", "control_epoch",
 			"response_revision", "deadline_at", "closing_grace_until",
-			"submitted_at", "final_submission", "proctor_status",
-		}).AddRow("att-1", "sched-1", "u-1", "", 2, "paused", "exam", 3, 7, 9, nil, nil, nil, nil, "active"))
+			"submitted_at", "final_submission", "proctor_status", "provider_key",
+		}).AddRow("att-1", "sched-1", "u-1", "", 2, "paused", "exam", 3, 7, 9, nil, nil, nil, nil, "active", ""))
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnRows(sessionRows())
 	mock.ExpectQuery("FROM attempt_submissions_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT attempt_id FROM attempt_submissions_v2 WHERE submission_id").WillReturnError(sql.ErrNoRows)

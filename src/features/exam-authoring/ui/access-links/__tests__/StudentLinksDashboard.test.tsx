@@ -9,12 +9,28 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   lifecycle: vi.fn(),
   duplicate: vi.fn(),
+  remove: vi.fn(),
+  sharedSetValue: vi.fn(),
+  publishCommand: vi.fn(),
+  setPresence: vi.fn(),
+}));
+
+vi.mock("../../../realtime/coedit", () => ({
+  useSatAuthoringCollaboration: () => ({
+    workspaceSnapshot: { values: {}, ready: false, localReady: false },
+    setValue: mocks.sharedSetValue,
+    setValues: vi.fn(),
+    publishCommand: mocks.publishCommand,
+    setPresence: mocks.setPresence,
+    status: "disabled",
+  }),
 }));
 
 vi.mock('../../../api/assessmentAccessLinkQueries', () => ({
   useCreateAccessLink: () => ({ mutateAsync: mocks.create, isPending: false }),
   useUpdateAccessLink: () => ({ mutateAsync: mocks.update, isPending: false }),
   useSetAccessLinkLifecycle: () => ({ mutateAsync: mocks.lifecycle, isPending: false }),
+  useDeleteAccessLink: () => ({ mutateAsync: mocks.remove, isPending: false, variables: undefined }),
   useDuplicateAccessLink: () => ({ mutateAsync: mocks.duplicate, isPending: false }),
   useAccessLinkMembers: () => ({ data: [], isLoading: false }),
   useAccessLinkActivity: () => ({ data: [], isLoading: false }),
@@ -64,6 +80,10 @@ beforeEach(() => {
   mocks.update.mockReset();
   mocks.lifecycle.mockReset();
   mocks.duplicate.mockReset();
+  mocks.remove.mockReset();
+  mocks.sharedSetValue.mockReset();
+  mocks.publishCommand.mockReset();
+  mocks.setPresence.mockReset();
   mocks.lifecycle.mockResolvedValue(overview.links[0]);
   mocks.duplicate.mockResolvedValue({ ...overview.links[0], id: 'link-copy', name: 'Saturday Class Copy' });
 });
@@ -115,6 +135,50 @@ describe('StudentLinksDashboard', () => {
     await waitFor(() => expect(mocks.duplicate).toHaveBeenCalledWith({
       linkId: 'link-old', request: { revision: 3, name: 'Old Scholarship', releaseTarget: 'current' },
     }));
+  });
+
+  it("confirms permanent deletion, sends the displayed revision, and removes the link", async () => {
+    mocks.remove.mockResolvedValue({ ok: true });
+    const revisionZeroOverview = {
+      ...overview,
+      links: overview.links.map((item) => item.id === "link-current" ? { ...item, revision: 0 } : item),
+    };
+    render(<StudentLinksDashboard exam={exam} overview={revisionZeroOverview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
+
+    fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Delete this Student Link permanently?" });
+    expect(dialog).toHaveTextContent("URL will no longer let students enter");
+    expect(dialog).toHaveTextContent("Schedules, exam attempts, scores, and exam history will be preserved");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mocks.remove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith({
+      linkId: "link-current", request: { revision: 0 },
+    }));
+    expect(mocks.sharedSetValue).toHaveBeenCalledWith("access/link-current", undefined);
+    expect(mocks.publishCommand).toHaveBeenCalledWith("access.deleted", { linkId: "link-current" });
+    await waitFor(() => expect(screen.queryByText("Saturday Class")).not.toBeInTheDocument());
+    expect(screen.getAllByText("Monday Class").length).toBeGreaterThan(0);
+  });
+
+  it("keeps a link and offers refresh when deletion loses the revision race", async () => {
+    mocks.remove.mockRejectedValue(new Error("409 revision conflict: Student Link changed while you were editing it"));
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={onRefresh} onBackToRelease={vi.fn()} />);
+
+    fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Refresh the link list before trying again");
+    expect(screen.getAllByText("Saturday Class").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(onRefresh).toHaveBeenCalledOnce();
   });
 
   it('makes Student Access creation the primary empty-state action', () => {

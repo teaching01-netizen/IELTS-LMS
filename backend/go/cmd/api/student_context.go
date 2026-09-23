@@ -417,15 +417,16 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 	}
 	context["attempt"] = attempt
 	if includeCredential {
-		activeSession, _ := attempt["activeClientSessionId"].(string)
-		if strings.TrimSpace(clientSessionID) == "" {
-			clientSessionID = strings.TrimSpace(activeSession)
-		}
+		clientSessionID = strings.TrimSpace(clientSessionID)
 		if clientSessionID == "" {
 			clientSessionID = uuid.NewString()
 		}
 		context["clientSessionId"] = clientSessionID
-		lease := uint64(1)
+		leaseEpoch, ok := attempt["leaseEpoch"].(int64)
+		if !ok || leaseEpoch < 1 {
+			return nil, apperrors.New(apperrors.CodeInternal, "Attempt lease epoch is unavailable.")
+		}
+		lease := uint64(leaseEpoch)
 		token, expiresAt, err := auth.IssueAttemptToken(ctx, app.DB, app.Config, sess.UserID, scheduleID, attemptID, clientSessionID, nil, &lease, time.Now().UTC())
 		if err != nil {
 			return nil, err

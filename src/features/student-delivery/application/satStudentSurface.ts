@@ -123,8 +123,14 @@ export interface DeriveSatStudentStageInput {
   allModulesFinal: boolean;
   /** First module of the exam, still waiting for the proctor's start. */
   isInitialEntry: boolean;
-  /** The module the attempt is entering, with the fact of a section boundary. */
-  pendingModule: { id: string; title: string; sectionKey: SatSectionKey; startsNewSection: boolean } | null;
+  /** The module the attempt is entering and whether the server has started it. */
+  pendingModule: {
+    id: string;
+    title: string;
+    sectionKey: SatSectionKey;
+    startsNewSection: boolean;
+    started: boolean;
+  } | null;
   /** A retained exam frame exists (the last resolved module/review render). */
   hasExamFrame: boolean;
   /** That frame is inside the bounded skew window. */
@@ -190,6 +196,12 @@ export function deriveSatStudentStage({
   if (!hasData) {
     return { kind: "pre-start", key: `pre-start:${attemptKey}:loading`, reason: "loading" };
   }
+  // An explicit proctor termination remains visible even if termination also
+  // recorded a submission timestamp/result. A student-submitted completion
+  // has no proctor termination flag and keeps the normal completion surface.
+  if (terminated && terminatedByProctor) {
+    return { kind: "terminated", key: `terminated:${attemptKey}`, byProctor: true };
+  }
   if (hasResult || runnerPhase === "complete") {
     return { kind: "complete", key: `complete:${attemptKey}` };
   }
@@ -211,11 +223,13 @@ export function deriveSatStudentStage({
   }
 
   // The scheduled break is the ONE between-exam moment, and only at a real
-  // section boundary: the runner saying `break`, or the pending module being the
-  // first of a later section than the module just finished. A Module 1 → Module 2
-  // handoff inside one section never lands here (that was the bug: the pending
-  // section's display order made Math Module 2 look like a boundary).
-  if (runnerPhase === "break" || (pendingModule?.startsNewSection ?? false)) {
+  // section boundary before the next module starts. Once the server marks that
+  // module started, a resumed controller must return to its exam surface even
+  // if its local runner still says `break`. A Module 1 → Module 2 handoff inside
+  // one section never lands here.
+  const hasUnstartedSectionBoundary =
+    Boolean(pendingModule?.startsNewSection) && !pendingModule?.started;
+  if ((runnerPhase === "break" && !pendingModule?.started) || hasUnstartedSectionBoundary) {
     // A break always has a next section to name: an attempt whose modules are all
     // final took the finalizing branch above, so `math` is only the defensive
     // default for a payload that has not hydrated the next attempt yet.
@@ -241,7 +255,11 @@ export function deriveSatStudentStage({
     };
   }
 
-  if (runnerPhase === "module" || runnerPhase === "review") {
+  if (
+    runnerPhase === "module" ||
+    runnerPhase === "review" ||
+    (runnerPhase === "break" && pendingModule?.started)
+  ) {
     if (!moduleResolved) {
       // One-frame data/state skew: keep the last frame when it is still fresh,
       // otherwise say so — never swap valid exam UI for a spinner on a skew.

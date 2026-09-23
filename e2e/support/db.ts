@@ -1,6 +1,6 @@
 import path from 'node:path';
 import dotenv from 'dotenv';
-import mysql, { type PoolOptions } from 'mysql2/promise';
+import mysql, { type PoolConnection, type PoolOptions } from 'mysql2/promise';
 
 /**
  * Minimal MySQL query helper for e2e database verification.
@@ -95,6 +95,24 @@ export async function executeUpdate(sql: string, params: SqlParam[] = []): Promi
   const [result] = await getPool().execute(sql, params);
   const affected = (result as mysql.ResultSetHeader).affectedRows;
   return Number(affected);
+}
+
+/** Run a DB-backed E2E state transition under an explicit lock order. */
+export async function executeTransaction<T>(
+  action: (connection: PoolConnection) => Promise<T>,
+): Promise<T> {
+  const connection = await getPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const result = await action(connection);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 export async function closeDb(): Promise<void> {

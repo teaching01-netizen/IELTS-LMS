@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react';
 import { resolveEscapeAction } from '../domain/satInteractionEscape';
 import {
   resolveSatInteractionIntent,
@@ -95,7 +95,7 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
   const scopeKey = `${ctx.moduleKey}::${ctx.questionId}`;
   const scopeKeyRef = useRef(scopeKey);
   const moduleKeyRef = useRef(ctx.moduleKey);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (scopeKeyRef.current === scopeKey) return;
     const moduleChanged = moduleKeyRef.current !== ctx.moduleKey;
     scopeKeyRef.current = scopeKey;

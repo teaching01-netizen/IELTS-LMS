@@ -97,6 +97,44 @@ func TestLookupSessionCacheRevokeVisible(t *testing.T) {
 	}
 }
 
+func TestLookupSessionRejectsPersistentCookieAfterServerDeadline(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name          string
+		expiresAt     time.Time
+		idleTimeoutAt time.Time
+	}{
+		{name: "absolute expiry", expiresAt: now.Add(-time.Second), idleTimeoutAt: now.Add(time.Hour)},
+		{name: "idle expiry", expiresAt: now.Add(time.Hour), idleTimeoutAt: now.Add(-time.Second)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+
+			rows := sqlmock.NewRows([]string{
+				"id", "user_id", "role_snapshot", "csrf_token", "organization_id", "expires_at", "idle_timeout_at", "revoked_at",
+			}).AddRow("s1", "u1", "student", "csrf-1", nil, tc.expiresAt, tc.idleTimeoutAt, nil)
+			mock.ExpectQuery("SELECT s.id").WillReturnRows(rows)
+
+			got, err := LookupSession(context.Background(), db, testCfg(), "persistent-browser-cookie", now)
+			if err != nil {
+				t.Fatalf("expired database session lookup returned error: %v", err)
+			}
+			if got != nil {
+				t.Fatalf("persistent cookie must not authenticate after %s: %+v", tc.name, got)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 // A2 RED: N lookups inside the coalesce window produce at most 1 touch UPDATE.
 func TestLookupSessionTouchCoalesced(t *testing.T) {
 	db, mock, err := sqlmock.New()

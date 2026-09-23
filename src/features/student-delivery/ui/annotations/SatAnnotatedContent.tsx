@@ -19,11 +19,12 @@ import { isSatDragRelease } from './satSelectionDragGuard';
  * Selection capture lives in `useSatAnnotationSelection`; writes flow upward
  * through the shell's annotation view context.
  */
-export function SatAnnotatedContent({ content, annotations, region, enabled, enlarge, onLimitReached }: {
+export function SatAnnotatedContent({ content, annotations, region, enabled, selectionScopeKey, enlarge, onLimitReached }: {
   content: StructuredContent;
   annotations: SatQuestionAnnotations;
   region: SatAnnotationRegion;
   enabled: boolean;
+  selectionScopeKey?: string | undefined;
   enlarge?: StaticStructuredImageEnlargeApi | undefined;
   /** Announced + inline notice when the 200-annotation cap drops a gesture. */
   onLimitReached?: (() => void) | undefined;
@@ -34,6 +35,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
   const { selection: touchSelection, limitNotice } = useSatAnnotationSelection({
     rootRef: root,
     region,
+    selectionScopeKey,
     enabled,
     annotationCount: annotations.annotations.length,
     onLimitReached,
@@ -197,6 +199,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
       <div
         ref={root}
         data-sat-selection-protected="true"
+        data-sat-selection-scope={selectionScopeKey}
         data-sat-annotation-region={enabled ? region : undefined}
         data-sat-highlight-preview={enabled ? 'true' : undefined}
         className="relative rounded-[8px]"

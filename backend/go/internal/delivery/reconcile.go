@@ -159,6 +159,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			if err != nil {
 				return err
 			}
+			telemetry.IncCounter(telemetry.MSATTimeoutFinalize)
 			changed = true
 			didWork = true
 			if next == nil {

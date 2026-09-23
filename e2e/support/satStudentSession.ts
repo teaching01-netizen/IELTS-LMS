@@ -39,9 +39,22 @@ export async function createRunningSatSession(
   await expect(adminPage.getByRole('dialog', { name: 'Load sample SAT' })).toBeVisible();
   await adminPage.getByRole('button', { name: 'Load 147 questions' }).click();
   await expect(adminPage.getByText('147 of 147 authored')).toBeVisible({ timeout: 90_000 });
+  // The count is optimistic room state. Release reads the committed exam
+  // projection, so wait for this writer's co-edit acknowledgement before
+  // crossing the route durability barrier.
+  await expect(adminPage.getByText('Saved', { exact: true }).last()).toBeVisible({ timeout: 90_000 });
 
   await adminPage.getByRole('button', { name: 'Release' }).click();
-  await expect(adminPage).toHaveURL(/\/release$/);
+  try {
+    await expect(adminPage).toHaveURL(/\/release$/, { timeout: 15_000 });
+  } catch (error) {
+    const details = await adminPage.evaluate(() => ({
+      url: window.location.href,
+      alerts: [...document.querySelectorAll('[role="alert"]')].map((node) => node.textContent?.trim() ?? ''),
+      statuses: [...document.querySelectorAll('[role="status"]')].map((node) => node.textContent?.trim() ?? ''),
+    }));
+    throw new Error(`Could not open SAT release page after the room save barrier: ${JSON.stringify(details)}`, { cause: error });
+  }
   await adminPage.getByRole('button', { name: 'Publish' }).click();
   const publishDialog = adminPage.getByRole('dialog');
   await expect(publishDialog).toBeVisible();

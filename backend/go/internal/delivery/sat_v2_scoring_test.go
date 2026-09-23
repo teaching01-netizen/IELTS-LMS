@@ -11,6 +11,26 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 )
 
+func TestFinalizeModuleRejectsStudentCompletionReasonBeforeDatabaseWork(t *testing.T) {
+	var svc Service
+	for _, reason := range []string{"student_submit", "unknown_reason"} {
+		t.Run(reason, func(t *testing.T) {
+			_, err := svc.finalizeModuleTx(context.Background(), nil, "att-1", saveActiveModule{}, reason)
+			appErr, ok := apperrors.As(err)
+			if !ok || appErr.Code != apperrors.CodeAssessmentConflict || appErr.HTTPStatus != 409 {
+				t.Fatalf("expected typed 409 conflict for completion reason %q, got %v", reason, err)
+			}
+			wantReason := "INVALID_MODULE_COMPLETION_REASON"
+			if reason == "student_submit" {
+				wantReason = "STUDENT_MODULE_SUBMIT_DISABLED"
+			}
+			if appErr.Details["reason"] != wantReason {
+				t.Fatalf("expected reason %q, got %v", wantReason, appErr.Details["reason"])
+			}
+		})
+	}
+}
+
 // P0: a V2-saved correct answer scores despite zero legacy response rows.
 // finalizeModuleTx must read attempt_responses_v2, count the correct answer,
 // and route through the adaptive policy.
@@ -33,7 +53,7 @@ func TestFinalizeModuleScoresV2AnswersWithoutLegacyRows(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id"}).
 			AddRow("eq-1", false, singleChoice, nil, v2correct, "eq-1"))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = ?")).
-		WithArgs("submitted", false, "student_submit", 1, 1, "ma-base").
+		WithArgs("locked", true, "time_expired", 1, 1, "ma-base").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-base").
@@ -69,7 +89,7 @@ func TestFinalizeModuleScoresV2AnswersWithoutLegacyRows(t *testing.T) {
 		availableAt:              &started,
 		startedAt:                &started,
 		accumulatedPausedSeconds: 0,
-	}, "student_submit")
+	}, "time_expired")
 	if err != nil {
 		t.Fatalf("V2-scored finalize must succeed, got %v", err)
 	}
@@ -99,7 +119,7 @@ func TestFinalizeModuleLegacyFallbackWithoutV2Rows(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id"}).
 			AddRow("eq-1", false, singleChoice, `"B"`, nil, nil))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = ?")).
-		WithArgs("submitted", false, "student_submit", 1, 1, "ma-base").
+		WithArgs("locked", true, "time_expired", 1, 1, "ma-base").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-base").
@@ -135,7 +155,7 @@ func TestFinalizeModuleLegacyFallbackWithoutV2Rows(t *testing.T) {
 		availableAt:              &started,
 		startedAt:                &started,
 		accumulatedPausedSeconds: 0,
-	}, "student_submit")
+	}, "time_expired")
 	if err != nil {
 		t.Fatalf("legacy fallback finalize must succeed, got %v", err)
 	}
@@ -170,7 +190,7 @@ func TestFinalizeModuleDedupsDualV2IdentityRows(t *testing.T) {
 			AddRow("eq-1", false, singleChoice, nil, v2correct, "eq-1").
 			AddRow("eq-1", false, singleChoice, nil, v2correct, "q-stable-1"))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = ?")).
-		WithArgs("submitted", false, "student_submit", 1, 1, "ma-base").
+		WithArgs("locked", true, "time_expired", 1, 1, "ma-base").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-base").
@@ -206,7 +226,7 @@ func TestFinalizeModuleDedupsDualV2IdentityRows(t *testing.T) {
 		availableAt:              &started,
 		startedAt:                &started,
 		accumulatedPausedSeconds: 0,
-	}, "student_submit")
+	}, "time_expired")
 	if err != nil {
 		t.Fatalf("dedup finalize must succeed, got %v", err)
 	}
@@ -239,7 +259,7 @@ func TestFinalizeModuleZeroAnswerPassRoutesLower(t *testing.T) {
 			AddRow("eq-1", false, singleChoice, nil, nil, nil).
 			AddRow("eq-2", false, singleChoice, nil, nil, nil))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = ?")).
-		WithArgs("submitted", false, "student_submit", 0, 2, "ma-base").
+		WithArgs("locked", true, "time_expired", 0, 2, "ma-base").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-base").
@@ -275,7 +295,7 @@ func TestFinalizeModuleZeroAnswerPassRoutesLower(t *testing.T) {
 		availableAt:              &started,
 		startedAt:                &started,
 		accumulatedPausedSeconds: 0,
-	}, "student_submit")
+	}, "time_expired")
 	if err != nil {
 		t.Fatalf("zero-answer finalize must succeed, got %v", err)
 	}
@@ -286,5 +306,3 @@ func TestFinalizeModuleZeroAnswerPassRoutesLower(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-var _ = apperrors.CodeAssessmentConflict

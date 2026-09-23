@@ -52,13 +52,7 @@ export function StudentSessionRoute() {
   React.useEffect(() => {
     if (providerKey !== 'sat' || !scheduleId || !attemptSnapshot?.id || !attemptSnapshot.candidateId) return;
     const terminal = getVerifiedTerminalState({ attempt: attemptSnapshot, runtime: runtimeSnapshot });
-    if (
-      terminal !== 'not_terminal' ||
-      attemptSnapshot.phase === 'post-exam' ||
-      attemptSnapshot.phase === 'submitted' ||
-      runtimeSnapshot?.status === 'completed' ||
-      runtimeSnapshot?.status === 'cancelled'
-    ) {
+    if (terminal !== 'not_terminal') {
       clearSatResumeLocator();
       return;
     }

@@ -56,6 +56,10 @@ type accessLinkLifecycleBody struct {
 	State    accesslinks.LifecycleState `json:"state"`
 }
 
+type accessLinkDeleteBody struct {
+	Revision *int32 `json:"revision"`
+}
+
 // accessLinkDuplicateBody mirrors DuplicateAssessmentAccessLinkRequest
 // (camelCase; empty releaseTarget defaults to "source").
 type accessLinkDuplicateBody struct {
@@ -227,6 +231,33 @@ func linkLifecycle(app *App) http.HandlerFunc {
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+// linkDelete permanently removes a Student Link. Its member allowlist is
+// removed by the existing foreign key; the backing schedule and attempts stay.
+func linkDelete(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleBuilder) == nil {
+			return
+		}
+		if !requireAccessLinks(w, r, app) {
+			return
+		}
+		var body accessLinkDeleteBody
+		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &body); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if body.Revision == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "revision is required."))
+			return
+		}
+		if err := app.AccessLinks.Delete(r.Context(), chi.URLParam(r, "linkID"), *body.Revision); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
 

@@ -24,6 +24,7 @@ function isLocator(value: unknown): value is SatResumeLocatorV1 {
   if (typeof value !== 'object' || value === null) return false;
   const locator = value as Partial<SatResumeLocatorV1>;
   const updatedAt = typeof locator.updatedAt === 'string' ? Date.parse(locator.updatedAt) : Number.NaN;
+  const ageMs = Date.now() - updatedAt;
   return (
     locator.version === 1 &&
     locator.providerKey === 'sat' &&
@@ -32,7 +33,7 @@ function isLocator(value: unknown): value is SatResumeLocatorV1 {
     (locator.attemptId === undefined || typeof locator.attemptId === 'string') &&
     (locator.accessLinkId === undefined || typeof locator.accessLinkId === 'string') &&
     Number.isFinite(updatedAt) &&
-    Date.now() - updatedAt <= SAT_RESUME_LOCATOR_MAX_AGE_MS
+    ageMs >= 0 && ageMs <= SAT_RESUME_LOCATOR_MAX_AGE_MS
   );
 }
 

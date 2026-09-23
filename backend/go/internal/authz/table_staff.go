@@ -62,6 +62,7 @@ func init() {
 		"GET /links/{linkID}":            {MinRoles: readStaff},
 		"PATCH /links/{linkID}":          {MinRoles: writeStaff},
 		"POST /links/{linkID}/lifecycle": {MinRoles: writeStaff},
+		"DELETE /links/{linkID}":         {MinRoles: writeStaff},
 		"POST /links/{linkID}/duplicate": {MinRoles: writeStaff},
 		"GET /links/{linkID}/members":    {MinRoles: readStaff},
 		"GET /links/{linkID}/activity":   {MinRoles: readStaff},

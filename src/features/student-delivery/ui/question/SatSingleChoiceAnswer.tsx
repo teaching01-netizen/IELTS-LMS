@@ -12,6 +12,8 @@ export interface SatSingleChoiceAnswerProps {
   eliminationMode: boolean;
   disabled: boolean;
   onChange: (optionId: string) => void;
+  /** Flush the latest local answer draft when focus leaves the choices. */
+  onBlur?: (() => void) | undefined;
   onToggleElimination: (optionId: string) => void;
   /** Reuse the question's text surface while keeping radio controls outside it. */
   renderOptionContent?: ((option: ChoiceOption) => ReactNode) | undefined;
@@ -66,6 +68,7 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 // never on this visually hidden input, so arming from a
                 // pointerdown here would never happen.
                 onChange={() => { if (isSatSelectionGestureEcho()) return; props.onChange(option.id); }}
+                onBlur={props.onBlur}
                 aria-labelledby={`${optionLetterId} ${optionContentId}`}
                 aria-describedby={eliminated ? eliminatedStatusId : undefined}
                 className="sr-only"

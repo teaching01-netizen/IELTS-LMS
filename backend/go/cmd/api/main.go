@@ -547,6 +547,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/links/{linkID}", linkGet(app))
 			authzRoute(r, "PATCH", "/links/{linkID}", linkUpdate(app))
 			authzRoute(r, "POST", "/links/{linkID}/lifecycle", linkLifecycle(app))
+			authzRoute(r, "DELETE", "/links/{linkID}", linkDelete(app))
 			authzRoute(r, "POST", "/links/{linkID}/duplicate", linkDuplicate(app))
 			authzRoute(r, "GET", "/links/{linkID}/members", linkMembers(app))
 			authzRoute(r, "GET", "/links/{linkID}/activity", linkActivity(app))

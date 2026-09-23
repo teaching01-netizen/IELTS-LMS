@@ -29,6 +29,7 @@ export const SAT_WORKSPACE_COMMANDS = [
   "access.updated",
   "access.lifecycle_changed",
   "access.duplicated",
+  "access.deleted",
   "exam.published",
 ] as const;
 

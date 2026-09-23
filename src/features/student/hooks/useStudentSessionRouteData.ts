@@ -917,6 +917,25 @@ export function useStudentSessionRouteData(
         setAttemptSnapshot(reconciledAttempt);
         liveReceivedAtRef.current = Date.now();
       } else if (!live.attempt) {
+        // SAT admission is server-owned. A successful live read with no
+        // attempt means this authenticated identity is not admitted to this
+        // schedule; a local cache entry must never turn that response into an
+        // exam route (or create a replacement attempt here).
+        if (loadedStatic.providerKey === 'sat') {
+          setAttemptSnapshot(null);
+          liveReceivedAtRef.current = Date.now();
+          appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
+            appliedFreshnessRef.current,
+            incomingFreshness,
+            {
+              applyAttempt: false,
+              applyRuntime: applyDecision.applyRuntime,
+            },
+          );
+          applyLoadTransition(source, { type: 'succeeded' });
+          return;
+        }
+
         const cachedAttempt = await readCachedAttemptForCandidate();
         if (cachedAttempt) {
           setAttemptSnapshot(cachedAttempt);
@@ -944,10 +963,7 @@ export function useStudentSessionRouteData(
           examId: loadedStatic.scheduleEntity.examId,
           examTitle: loadedStatic.scheduleEntity.examTitle,
           ...createCandidateProfile(candidateId, storedCandidateProfile),
-          currentModule:
-            loadedStatic.providerKey === 'sat'
-              ? 'reading'
-              : mappedRuntime?.currentSectionKey ?? firstEnabledModule,
+          currentModule: mappedRuntime?.currentSectionKey ?? firstEnabledModule,
         });
         setAttemptSnapshot(createdAttempt);
         liveReceivedAtRef.current = Date.now();

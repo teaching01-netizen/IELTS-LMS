@@ -29,7 +29,7 @@ function resolveCandidateIdFromStudentKey(scheduleId: string, studentKey: string
 
 export interface StudentSessionTransport {
   readonly paths: {
-    session: (scheduleId: string, candidateId: string) => string;
+    session: (scheduleId: string, candidateId: string, clientSessionId?: string) => string;
     staticSession: (scheduleId: string, candidateId: string) => string;
     liveSession: (scheduleId: string, candidateId: string) => string;
     credentialRefresh: (
@@ -37,7 +37,7 @@ export interface StudentSessionTransport {
       candidateId: string,
       clientSessionId: string,
     ) => string;
-    resume: (scheduleId: string, clientSessionId?: string) => string;
+    resume: (scheduleId: string, clientSessionId: string) => string;
     precheck: (scheduleId: string) => string;
     bootstrap: (scheduleId: string) => string;
     heartbeat: (scheduleId: string, responseMode?: HeartbeatResponseMode) => string;
@@ -51,7 +51,11 @@ export interface StudentSessionTransport {
 
 export const studentSessionTransport: StudentSessionTransport = {
   paths: {
-    session: (scheduleId, candidateId) => withCandidateId(`/v1/student/sessions/${scheduleId}`, candidateId),
+    session: (scheduleId, candidateId, clientSessionId) => {
+      const query = new URLSearchParams({ candidateId });
+      if (clientSessionId) query.set('clientSessionId', clientSessionId);
+      return appendQuery(`/v1/student/sessions/${scheduleId}`, query);
+    },
     staticSession: (scheduleId, candidateId) =>
       withCandidateId(`/v1/student/sessions/${scheduleId}/static`, candidateId),
     liveSession: (scheduleId, candidateId) =>
@@ -67,7 +71,7 @@ export const studentSessionTransport: StudentSessionTransport = {
       ),
     resume: (scheduleId, clientSessionId) => {
       const params = new URLSearchParams({ refreshAttemptCredential: 'true' });
-      if (clientSessionId) params.set('clientSessionId', clientSessionId);
+      params.set('clientSessionId', clientSessionId);
       return appendQuery(`/v1/student/sessions/${scheduleId}`, params);
     },
     precheck: (scheduleId) => `/v1/student/sessions/${scheduleId}/precheck`,

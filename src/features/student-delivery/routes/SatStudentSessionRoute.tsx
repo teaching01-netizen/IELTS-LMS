@@ -311,6 +311,14 @@ export function SatStudentSessionRoute({
             // Structural, never ordinal: the module immediately before this one
             // in exam order decides whether the student is crossing a section.
             startsNewSection: moduleStartsNewSection(data, exam.pendingModule.id),
+            // A section boundary is only a break before the server starts this
+            // module. Reopening after another tab has started it must show the
+            // current module instead of a stale break surface.
+            started: Boolean(
+              data.attempt.moduleAttempts.find(
+                (moduleAttempt) => moduleAttempt.moduleId === exam.pendingModule?.id,
+              )?.startedAt,
+            ),
           }
         : null,
     hasExamFrame: heldFrame !== null,
@@ -424,29 +432,30 @@ export function SatStudentSessionRoute({
       onClose={() => commands.closeTool("calculator")}
     />
   ) : null;
-  // Single save surface (Phase 6f close-out): in module phase the shell's
-  // SatSaveStatus banner owns the superseded state (bottom, outside inert,
-  // with Take over inline) — the route notice would be a second competing
-  // surface for the same truth. Outside module phase (no shell mounted)
-  // the route notice stays the only surface.
+  // The question shell and review page each own a normal-flow notice row.
+  // Other phases place this notice before their content instead of floating it
+  // over the exam viewport.
   const inModulePhase = state.phase === "module";
+  const inReviewPhase = state.phase === "review";
+  const takeOverDurabilityLease = () => {
+    void exam.commands.takeOverDurabilityLease().catch((takeoverError: unknown) => {
+      exam.setError(
+        takeoverError instanceof Error
+          ? takeoverError.message
+          : "Unable to take over this attempt."
+      );
+    });
+  };
+  const leaseConflictNotice = persistence.failureKind === "superseded" ? (
+    <SatLeaseConflictNotice
+      error={persistence.failure}
+      isTakingOver={persistence.isTakingOver}
+      onTakeOver={takeOverDurabilityLease}
+    />
+  ) : null;
   const withCalculatorHost = (content: ReactNode) => (
     <>
-      {persistence.failureKind === "superseded" && !inModulePhase ? (
-        <SatLeaseConflictNotice
-          error={persistence.failure}
-          isTakingOver={persistence.isTakingOver}
-          onTakeOver={() => {
-            void exam.commands.takeOverDurabilityLease().catch((takeoverError: unknown) => {
-              exam.setError(
-                takeoverError instanceof Error
-                  ? takeoverError.message
-                  : "Unable to take over this attempt."
-              );
-            });
-          }}
-        />
-      ) : null}
+      {!inModulePhase && !inReviewPhase ? leaseConflictNotice : null}
       {content}
       {!inModulePhase ? calculatorHost : null}
     </>
@@ -672,10 +681,6 @@ export function SatStudentSessionRoute({
     // answer dispatch wins and the next resolved render replaces the cache).
     const reviewElement = withCalculatorHost(
       <>
-        {exam.warning ? (
-          <SatControlBanner tone="warning">Proctor message: {exam.warning}</SatControlBanner>
-        ) : null}
-        {error ? <SatControlBanner tone="error">{error}</SatControlBanner> : null}
         {exam.blocked ? <SatBlockingOverlay note={data.proctorNote} /> : null}
         {/* Integrity hold: acknowledges only — the review surface, module
             attempt, answers and timer stay exactly as they were. */}
@@ -703,6 +708,13 @@ export function SatStudentSessionRoute({
           saveFailure={persistence.failure}
           saveFailureKind={persistence.failureKind}
           currentQuestionIndex={state.questionIndex}
+          notices={
+            <>
+              {exam.warning ? <SatControlBanner tone="warning">Proctor message: {exam.warning}</SatControlBanner> : null}
+              {error ? <SatControlBanner tone="error">{error}</SatControlBanner> : null}
+              {leaseConflictNotice}
+            </>
+          }
           onSelectQuestion={commands.returnToQuestion}
           onBack={commands.returnToModule}
           onRetrySave={() => {
@@ -758,14 +770,7 @@ export function SatStudentSessionRoute({
   // nor leak past hold expiry).
   const moduleElement = withCalculatorHost(
     <>
-      {exam.warning ? (
-        <SatControlBanner tone="warning">Proctor message: {exam.warning}</SatControlBanner>
-      ) : null}
-      {error ? <SatControlBanner tone="error">{error}</SatControlBanner> : null}
       {exam.blocked ? <SatBlockingOverlay note={data.proctorNote} /> : null}
-      {exam.showAlmostUp && !exam.isSubmitting ? (
-        <SatControlBanner tone="warning">Time almost up — answers save automatically.</SatControlBanner>
-      ) : null}
       {exam.answerInteractionBlocked ? (
         <SatTimeoutOverlay
           saveFailureKind={persistence.failureKind}
@@ -799,6 +804,12 @@ export function SatStudentSessionRoute({
         blocked={interactionBlocked}
         saveState={saveState}
         saveFailure={persistence.failure}
+        notices={
+          <>
+            {exam.warning ? <SatControlBanner tone="warning">Proctor message: {exam.warning}</SatControlBanner> : null}
+            {error ? <SatControlBanner tone="error">{error}</SatControlBanner> : null}
+          </>
+        }
         questionNote={response.annotations.legacyQuestionNote}
         readingPreferences={reading.preferences}
         onReadingPreferencesChange={reading.setPreferences}
@@ -867,6 +878,7 @@ export function SatStudentSessionRoute({
         <SatQuestionRenderer
           sectionKey={state.sectionKey}
           questionNumber={state.questionIndex + 1}
+          selectionScopeKey={`${stateModule.id}::${questionId}`}
           question={question}
           response={response}
           eliminationMode={eliminationMode}
@@ -876,6 +888,7 @@ export function SatStudentSessionRoute({
             reading.setPreferences((current) => ({ ...current, splitRatio }))
           }
           onAnswerChange={(answer) => commands.setAnswer(questionId, answer)}
+          onAnswerBlur={flushAnnotations}
           onToggleReview={() => commands.toggleReview(questionId)}
           onToggleEliminationMode={() => setEliminationMode((enabled) => !enabled)}
           onToggleEliminatedOption={(optionId) =>

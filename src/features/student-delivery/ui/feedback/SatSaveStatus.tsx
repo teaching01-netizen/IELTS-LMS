@@ -1,5 +1,4 @@
 import { SAT_COPY } from "../../domain/satCopy";
-import { SatExamOverlayPortal } from "../zoom/SatExamZoomContext";
 
 export type SatSaveBannerState =
   | "idle"
@@ -32,8 +31,8 @@ export interface SatSaveStatusProps {
  * - `superseded` — the lease was lost, which merges the route-level Take-over
  *   notice here so the scariest state also ships its action inline.
  *
- * Placement: render OUTSIDE any `inert={blocked}` root so Retry / Take over
- * stay reachable while paused (WCAG 2.1.1 / 4.1.3).
+ * Placement: render in the shell's dedicated status row, outside any
+ * `inert={blocked}` root, so recovery stays reachable without covering content.
  */
 export function SatSaveStatus(props: SatSaveStatusProps): React.JSX.Element | null {
   const { state } = props;
@@ -41,9 +40,8 @@ export function SatSaveStatus(props: SatSaveStatusProps): React.JSX.Element | nu
 
   const isSuperseded = state === "superseded";
   return (
-    <SatExamOverlayPortal>
     <div
-      className="sat-surface-enter fixed bottom-[calc(96px+var(--student-safe-bottom))] left-1/2 z-[85] flex w-[min(680px,calc(var(--sat-exam-logical-width,100vw)-32px))] -translate-x-1/2 items-center justify-between gap-4 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 sat-type-control-secondary shadow-lg"
+      className="sat-surface-enter mx-auto flex w-full max-w-[680px] items-center justify-between gap-4 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 sat-type-control-secondary shadow-lg"
       role="alert"
       data-testid="sat-save-status"
       data-sat-save-state={state}
@@ -72,6 +70,5 @@ export function SatSaveStatus(props: SatSaveStatusProps): React.JSX.Element | nu
         </button>
       ) : null}
     </div>
-    </SatExamOverlayPortal>
   );
 }

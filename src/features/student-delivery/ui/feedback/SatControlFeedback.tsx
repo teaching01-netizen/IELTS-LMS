@@ -11,7 +11,7 @@ export function SatControlBanner({
   const warning = tone === "warning";
   return (
     <div
-      className={`sat-ui sat-surface-enter fixed left-1/2 top-[calc(100px+var(--student-safe-top))] z-[85] w-[min(92vw,680px)] -translate-x-1/2 border px-4 py-3 text-center text-[14px] font-medium shadow-lg ${warning ? "border-[var(--sat-warning)] bg-[var(--sat-warning-soft)] text-[var(--sat-warning)]" : "border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]"}`}
+      className={`sat-ui sat-surface-enter mx-auto my-1 w-full max-w-[680px] border px-4 py-2 text-center text-[14px] font-medium ${warning ? "border-[var(--sat-warning)] bg-[var(--sat-warning-soft)] text-[var(--sat-warning)]" : "border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]"}`}
       role={warning ? "status" : "alert"}
       aria-live={warning ? "polite" : undefined}
     >
@@ -31,7 +31,7 @@ export function SatLeaseConflictNotice({
 }) {
   return (
     <div
-      className="sat-ui fixed inset-x-4 top-[calc(100px+var(--student-safe-top))] z-[90] mx-auto flex max-w-2xl items-center justify-between gap-4 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 text-left shadow-lg"
+      className="sat-ui mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-3 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 text-left"
       role="alert"
       aria-live="assertive"
     >

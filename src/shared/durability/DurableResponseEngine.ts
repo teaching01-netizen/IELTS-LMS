@@ -50,6 +50,11 @@ export interface DurableResponseEngineOptions {
   onDurabilityEvent?: (name: string, fields?: Record<string, string | number | boolean | null | undefined>) => void;
 }
 
+export interface AcceptResponseOptions {
+  /** Bypass the normal typing debounce after the local durable checkpoint. */
+  drainImmediately?: boolean;
+}
+
 const CHECKPOINT_PREFIX = "response-checkpoint:v2:";
 const DURABLE_DRAFT_PREFIX = "v2_attempt_";
 const QUARANTINE_PREFIX = "v2_quarantine:";
@@ -569,7 +574,11 @@ export class DurableResponseEngine {
   /**
    * Accept user input for one question aggregate.
    */
-  public acceptResponse(questionId: string, payload: ResponsePayload): Promise<void> {
+  public acceptResponse(
+    questionId: string,
+    payload: ResponsePayload,
+    options: AcceptResponseOptions = {},
+  ): Promise<void> {
     if (this.isDestroyed) return Promise.resolve();
     if (!questionId.trim()) return Promise.reject(new Error("Question id cannot be empty."));
     if (this.terminalState) {
@@ -641,7 +650,7 @@ export class DurableResponseEngine {
     const previous = this.acceptanceChains.get(questionId) ?? Promise.resolve();
     const operation = previous
       .catch(() => undefined)
-      .then(() => this.persistAcceptedResponse(command, pendingState));
+      .then(() => this.persistAcceptedResponse(command, pendingState, options.drainImmediately === true));
     this.acceptanceChains.set(questionId, operation);
     void operation.then(
       () => {
@@ -666,7 +675,8 @@ export class DurableResponseEngine {
 
   private async persistAcceptedResponse(
     command: ResponseCommandV2,
-    pendingState: PendingResponseState
+    pendingState: PendingResponseState,
+    drainImmediately = false,
   ): Promise<void> {
     if (this.isDestroyed) return;
 
@@ -820,7 +830,7 @@ export class DurableResponseEngine {
         () => undefined
       );
     }
-    this.scheduleDrain();
+    this.scheduleDrain(drainImmediately);
   }
 
   /**
@@ -1553,10 +1563,10 @@ export class DurableResponseEngine {
     return commands;
   }
 
-  private scheduleDrain(): void {
+  private scheduleDrain(immediate = false): void {
     if (this.isDraining || this.isDestroyed || this.retryTimer) return;
     if (this.drainTimer) {
-      if (!this.drainDebounceMs) return;
+      if (!immediate && !this.drainDebounceMs) return;
       clearTimeout(this.drainTimer);
     }
     this.drainTimer = setTimeout(() => {
@@ -1564,7 +1574,7 @@ export class DurableResponseEngine {
       if (!this.isDraining && !this.isDestroyed && !this.submissionPromise) {
         this.drainPromise = this.drainOutbox();
       }
-    }, this.drainDebounceMs);
+    }, immediate ? 0 : this.drainDebounceMs);
   }
 
   private scheduleRetry(delayMs: number): void {
@@ -2978,14 +2988,18 @@ export class DurableResponseEngine {
 
   private setupLifecycleListeners(): void {
     if (typeof window === "undefined") return;
-    window.addEventListener("visibilitychange", this.lifecycleDrainHandler);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", this.lifecycleDrainHandler);
+    }
     window.addEventListener("pagehide", this.lifecycleDrainHandler);
     window.addEventListener("freeze", this.lifecycleDrainHandler);
   }
 
   private removeLifecycleListeners(): void {
     if (typeof window === "undefined") return;
-    window.removeEventListener("visibilitychange", this.lifecycleDrainHandler);
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.lifecycleDrainHandler);
+    }
     window.removeEventListener("pagehide", this.lifecycleDrainHandler);
     window.removeEventListener("freeze", this.lifecycleDrainHandler);
   }

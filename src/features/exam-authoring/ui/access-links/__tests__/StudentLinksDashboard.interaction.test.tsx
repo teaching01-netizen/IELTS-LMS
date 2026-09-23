@@ -22,10 +22,13 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   lifecycle: vi.fn(),
   duplicate: vi.fn(),
+  remove: vi.fn(),
   lifecyclePending: false,
   lifecycleVariables: undefined as unknown,
   duplicatePending: false,
   duplicateVariables: undefined as unknown,
+  deletePending: false,
+  deleteVariables: undefined as unknown,
 }));
 
 vi.mock("../../../api/assessmentAccessLinkQueries", () => ({
@@ -35,6 +38,11 @@ vi.mock("../../../api/assessmentAccessLinkQueries", () => ({
     mutateAsync: mocks.lifecycle,
     isPending: mocks.lifecyclePending,
     variables: mocks.lifecycleVariables,
+  }),
+  useDeleteAccessLink: () => ({
+    mutateAsync: mocks.remove,
+    isPending: mocks.deletePending,
+    variables: mocks.deleteVariables,
   }),
   useDuplicateAccessLink: () => ({
     mutateAsync: mocks.duplicate,
@@ -147,10 +155,13 @@ beforeEach(() => {
   mocks.update.mockReset();
   mocks.lifecycle.mockReset();
   mocks.duplicate.mockReset();
+  mocks.remove.mockReset();
   mocks.lifecyclePending = false;
   mocks.lifecycleVariables = undefined;
   mocks.duplicatePending = false;
   mocks.duplicateVariables = undefined;
+  mocks.deletePending = false;
+  mocks.deleteVariables = undefined;
   mocks.lifecycle.mockResolvedValue(overview.links[0]);
   mocks.duplicate.mockResolvedValue(overview.links[0]);
 });

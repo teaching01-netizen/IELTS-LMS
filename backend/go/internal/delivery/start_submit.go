@@ -63,8 +63,7 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 	if err := s.saveAttemptBinding(ctx, scheduleID, bearerAttemptID, examID); err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
-	if _, err := s.ReconcileAttemptTimeout(ctx, scheduleID, bearerAttemptID, now); err != nil {
+	if _, err := s.ReconcileAttemptTimeout(ctx, scheduleID, bearerAttemptID, time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	var hubEvents []liveupdates.Event
@@ -167,10 +166,6 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 	if err := s.saveAttemptBinding(ctx, scheduleID, bearerAttemptID, examID); err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
-	if _, err := s.ReconcileAttemptTimeout(ctx, scheduleID, bearerAttemptID, now); err != nil {
-		return nil, err
-	}
 	var hubEvents []liveupdates.Event
 	// B1: module CAS + writer fence are point writes (RC-safe).
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
@@ -185,11 +180,8 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 			return err
 		}
 		if active.state == "submitted" || active.state == "locked" {
-			rev, err := s.appendModuleEventsTx(ctx, t, scheduleID, bearerAttemptID, liveEventModuleSubmitted)
-			if err != nil {
-				return err
-			}
-			hubEvents = dualModuleEvents(scheduleID, bearerAttemptID, rev, liveEventModuleSubmitted)
+			// Compatibility retries are a read of authoritative state. Do not
+			// append a second module-submitted event or invoke timeout work here.
 			return nil
 		}
 		if active.state != "active" && active.state != "review" {
@@ -206,12 +198,7 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 				return err
 			}
 		}
-		conflict := assessmentConflict(
-			"STUDENT_MODULE_SUBMIT_DISABLED",
-			"SAT modules close automatically when the authoritative time ends.",
-		)
-		conflict.HTTPStatus = 409
-		return conflict
+		return studentModuleSubmitDisabled()
 	}); err != nil {
 		return nil, err
 	}
@@ -227,6 +214,16 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 // both cohort timing models are controlled by the shared runtime section
 // clock; individual module clocks remain legacy-only.
 func (g timingGate) usesPersonalDeadline() bool { return g == timingGateLegacy }
+
+func studentModuleSubmitDisabled() *apperrors.Error {
+	conflict := assessmentConflict(
+		"STUDENT_MODULE_SUBMIT_DISABLED",
+		"SAT modules close automatically when the authoritative time ends.",
+	)
+	conflict.HTTPStatus = 409
+	telemetry.IncCounter(telemetry.MSATStudentModuleSubmitRejected)
+	return conflict
+}
 
 // startScheduleBinding mirrors schedule_binding plus the published version id
 // (needed to assemble the bootstrap payload after the write commits). It
@@ -446,23 +443,28 @@ type nextModuleRow struct {
 
 // finalizeModuleTx mirrors finalize_module_tx (Rust
 // assessment_delivery.rs:2131-2217): score the module responses, flip the row
-// to submitted or locked with a not_started/active/review CAS, then route +
-// insert the follow-up module attempt. Historical student_submit reasons stay
-// readable; new student traffic cannot invoke this finalizer.
+// to locked with a not_started/active/review CAS, then route + insert the
+// follow-up module attempt. Historical student_submit rows stay readable, but
+// new finalizations accept only timeout or authorized proctor reasons.
 func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID string, active saveActiveModule, completionReason string) (*nextModuleRow, error) {
+	switch completionReason {
+	case "time_expired", "proctor_end", "proctor_terminate":
+	case "student_submit":
+		return nil, studentModuleSubmitDisabled()
+	default:
+		return nil, assessmentConflict(
+			"INVALID_MODULE_COMPLETION_REASON",
+			"SAT modules can only close when authoritative time ends or an authorized proctor acts.",
+		)
+	}
 	scoring, err := loadScoringRowsTx(ctx, t, active.id, active.moduleID)
 	if err != nil {
 		return nil, err
 	}
 	rawCorrect, operationalCount := scoreScoringRows(scoring)
-	lockModule := completionReason == "time_expired" || completionReason == "proctor_end" || completionReason == "proctor_terminate"
-	state := "submitted"
-	if lockModule {
-		state = "locked"
-	}
 	res, err := t.ExecContext(ctx,
 		"UPDATE assessment_module_attempts SET state = ?, submitted_at = CURRENT_TIMESTAMP(6), locked_at = CASE WHEN ? THEN CURRENT_TIMESTAMP(6) ELSE locked_at END, paused_at = NULL, completion_reason = ?, raw_correct = ?, operational_question_count = ?, revision = revision + 1 WHERE id = ? AND state IN ('not_started', 'active', 'review')",
-		state, lockModule, completionReason, rawCorrect, operationalCount, active.id)
+		"locked", true, completionReason, rawCorrect, operationalCount, active.id)
 	if err != nil {
 		return nil, err
 	}

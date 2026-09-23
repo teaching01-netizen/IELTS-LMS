@@ -495,6 +495,18 @@ describe("SatStudentSessionRoute module handoff", () => {
     });
   });
 
+  it("restores an already-started later section instead of showing its old break", () => {
+    const { rerender } = renderLiveModule();
+    seed(moduleState("math-m1", "math-m1-q1"), mathModuleOneLive(), {
+      pendingModuleId: "math-m1",
+    });
+    rerender(routeElement());
+
+    expect(screen.getByTestId("sat-exam-shell")).toBeInTheDocument();
+    expect(screen.getByText("Math Module 1 marker")).toBeInTheDocument();
+    expect(screen.queryByTestId("sat-scheduled-break")).toBeNull();
+  });
+
   it("replaces the stage at once when the route carries a different attempt", () => {
     const { rerender } = renderLiveModule();
 

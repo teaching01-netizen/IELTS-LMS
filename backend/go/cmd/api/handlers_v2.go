@@ -41,7 +41,8 @@ type v2Resolver struct{}
 var _ attempts.QuestionResolver = v2Resolver{}
 
 func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID string) (attempts.QuestionOwner, error) {
-	const sel = `SELECT m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key` +
+	const sel = `SELECT m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key,` +
+		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds` +
 		` FROM assessment_exam_questions eq` +
 		` JOIN assessment_modules m ON m.id = eq.module_id` +
 		` JOIN assessment_sections s ON s.id = m.section_id` +
@@ -54,7 +55,12 @@ func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID st
 	var owner attempts.QuestionOwner
 	var state string
 	var providerKey sql.NullString
-	err := q.QueryRowContext(ctx, sel, attemptID, questionID, questionID, attemptID, questionID).Scan(&owner.ModuleID, &owner.SectionKey, &state, &providerKey)
+	var startedAt sql.NullTime
+	var allocated, extension, accumulatedPaused sql.NullInt64
+	err := q.QueryRowContext(ctx, sel, attemptID, questionID, questionID, attemptID, questionID).Scan(
+		&owner.ModuleID, &owner.SectionKey, &state, &providerKey,
+		&startedAt, &allocated, &extension, &accumulatedPaused,
+	)
 	if err == sql.ErrNoRows {
 		owner, fallbackErr := resolveSnapshotQuestionForProvider(ctx, q, attemptID, questionID)
 		if fallbackErr != nil {
@@ -75,7 +81,25 @@ func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID st
 		return owner, nil
 	}
 	owner.ModuleState = state
+	owner.ModuleDeadlineAt = satModuleDeadline(providerKey, state, startedAt, allocated, extension, accumulatedPaused)
 	return owner, nil
+}
+
+func satModuleDeadline(providerKey sql.NullString, state string, startedAt sql.NullTime, allocated, extension, accumulatedPaused sql.NullInt64) *time.Time {
+	if !providerKey.Valid || providerKey.String != string(attempts.ProviderSAT) ||
+		(state != "active" && state != "review") || !startedAt.Valid {
+		return nil
+	}
+	allotted := allocated.Int64 + extension.Int64
+	if allotted < 0 {
+		allotted = 0
+	}
+	paused := accumulatedPaused.Int64
+	if paused < 0 {
+		paused = 0
+	}
+	deadline := startedAt.Time.UTC().Add(time.Duration(allotted+paused) * time.Second)
+	return &deadline
 }
 
 // resolveSnapshotQuestionForProvider keeps V2 response durability usable
@@ -213,7 +237,8 @@ func (v2Resolver) ResolveMany(ctx context.Context, q tx.Tx, attemptID string, qu
 // assessment_exam_questions.id first and by question_id second — the same
 // preference the per-question query expresses with ORDER BY + LIMIT 1.
 func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]attempts.QuestionOwner, error) {
-	query := `SELECT eq.id, eq.question_id, m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key` +
+	query := `SELECT eq.id, eq.question_id, m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key,` +
+		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds` +
 		` FROM assessment_exam_questions eq` +
 		` JOIN assessment_modules m ON m.id = eq.module_id` +
 		` JOIN assessment_sections s ON s.id = m.section_id` +
@@ -247,7 +272,12 @@ func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, qu
 	for rows.Next() {
 		var examQuestionID, questionID, moduleID, sectionKey, state string
 		var providerKey sql.NullString
-		if err := rows.Scan(&examQuestionID, &questionID, &moduleID, &sectionKey, &state, &providerKey); err != nil {
+		var startedAt sql.NullTime
+		var allocated, extension, accumulatedPaused sql.NullInt64
+		if err := rows.Scan(
+			&examQuestionID, &questionID, &moduleID, &sectionKey, &state, &providerKey,
+			&startedAt, &allocated, &extension, &accumulatedPaused,
+		); err != nil {
 			return nil, err
 		}
 		owner := attempts.QuestionOwner{ModuleID: moduleID, SectionKey: sectionKey}
@@ -259,6 +289,7 @@ func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, qu
 		} else {
 			owner.ModuleState = state
 		}
+		owner.ModuleDeadlineAt = satModuleDeadline(providerKey, state, startedAt, allocated, extension, accumulatedPaused)
 		all = append(all, candidate{examQuestionID: examQuestionID, questionID: questionID, owner: owner})
 	}
 	if err := rows.Err(); err != nil {

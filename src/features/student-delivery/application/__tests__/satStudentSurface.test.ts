@@ -36,8 +36,13 @@ function input(
   };
 }
 
-function pending(title: string, sectionKey: "reading-writing" | "math", startsNewSection = false) {
-  return { id: `module-${title}`, title, sectionKey, startsNewSection } as const;
+function pending(
+  title: string,
+  sectionKey: "reading-writing" | "math",
+  startsNewSection = false,
+  started = false,
+) {
+  return { id: `module-${title}`, title, sectionKey, startsNewSection, started } as const;
 }
 
 function derive(overrides: Partial<DeriveSatStudentStageInput> = {}): SatStudentStage {
@@ -57,6 +62,9 @@ describe("deriveSatStudentStage — terminal and finalizing surfaces", () => {
     expect(derive({ hasResult: true })).toEqual({ kind: "complete", key: `complete:${ATTEMPT_KEY}` });
     expect(
       derive({ runnerPhase: "submitting", terminated: true, terminatedByProctor: true }),
+    ).toMatchObject({ kind: "terminated", byProctor: true });
+    expect(
+      derive({ runnerPhase: "complete", hasResult: true, terminated: true, terminatedByProctor: true }),
     ).toMatchObject({ kind: "terminated", byProctor: true });
     expect(derive({ runnerPhase: "complete" })).toMatchObject({ kind: "complete" });
   });
@@ -134,6 +142,24 @@ describe("deriveSatStudentStage — the scheduled break is only a section bounda
       kind: "scheduled-break",
       phase: "on-break",
     });
+  });
+
+  it("returns to an already-started section module after resume", () => {
+    const activeModule = pending("Module 1", "math", true, true);
+    expect(
+      derive({
+        runnerPhase: "module",
+        pendingModule: activeModule,
+        moduleResolved: true,
+      }),
+    ).toMatchObject({ kind: "exam", content: "live" });
+    expect(
+      derive({
+        runnerPhase: "break",
+        pendingModule: activeModule,
+        moduleResolved: true,
+      }),
+    ).toMatchObject({ kind: "exam", content: "live" });
   });
 });
 

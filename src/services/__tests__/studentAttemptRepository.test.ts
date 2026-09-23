@@ -14,6 +14,7 @@ import type { ExamSchedule } from "../../types/domain";
 import type { StudentAttempt, StudentAttemptMutation } from "../../types/studentAttempt";
 import {
   compactSubmittedAttempt,
+  ensureBrowserClientSessionIdForAttempt,
   ensureClientSessionIdForAttempt,
   pruneStudentAttemptCache,
   resetStudentAttemptPendingMutationIndexedDbForTests,
@@ -531,6 +532,27 @@ describe("studentAttemptRepository", () => {
 
     expect(resolved).toBe("client-session-stable");
     expect(window.sessionStorage.getItem(storageKey)).toBe("client-session-stable");
+  });
+
+  it("does not adopt the server attempt writer id when this browser has no stored identity", () => {
+    const attempt = makeAttempt({
+      integrity: {
+        ...makeAttempt().integrity,
+        clientSessionId: "server-active-writer",
+      },
+      recovery: {
+        ...makeAttempt().recovery,
+        clientSessionId: "server-active-writer",
+      },
+    });
+    const storageKey = `ielts-student-client-session:v1:${attempt.scheduleId}:${attempt.studentKey}`;
+    window.localStorage.removeItem(storageKey);
+    window.sessionStorage.removeItem(storageKey);
+
+    const resolved = ensureBrowserClientSessionIdForAttempt(attempt);
+
+    expect(resolved).not.toBe("server-active-writer");
+    expect(window.localStorage.getItem(storageKey)).toBe(resolved);
   });
 
   it("compacts a submitted attempt to receipt metadata when no local queues remain", async () => {

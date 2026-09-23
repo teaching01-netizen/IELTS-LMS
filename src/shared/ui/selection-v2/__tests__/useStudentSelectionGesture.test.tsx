@@ -1,11 +1,13 @@
-import { act, fireEvent, renderHook } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RefObject } from 'react';
 import { useStudentSelectionGesture, type SelectionHandlePointerEvent } from '../react/useStudentSelectionGesture';
+import { SelectionOverlay } from '../react/SelectionOverlay';
 import type { TextPoint } from '../domain/selectionTypes';
 
 type Handlers = {
   enabled?: boolean;
+  scopeKey?: string;
   ownedPointer?: (event: PointerEvent) => boolean;
   activation?: 'long-press' | 'drag';
   boundaryFor?: (point: TextPoint) => Element | null;
@@ -74,11 +76,12 @@ function harness(handlers: Handlers = {}) {
 
   // Read through a mutable box so a test can disarm the surface between renders,
   // exactly as turning the highlight tool off does in the exam.
-  const state = { enabled: handlers.enabled ?? true };
+  const state = { enabled: handlers.enabled ?? true, scopeKey: handlers.scopeKey ?? '' };
   const rootRef = { current: prose } as RefObject<HTMLElement | null>;
   const view = renderHook(() =>
     useStudentSelectionGesture({
       enabled: state.enabled,
+      scopeKey: state.scopeKey,
       rootRef,
       resolveCaretAtPoint,
       onSelect,
@@ -107,6 +110,12 @@ function harness(handlers: Handlers = {}) {
     frames,
     setEnabled: (enabled: boolean) => {
       state.enabled = enabled;
+      act(() => {
+        view.rerender();
+      });
+    },
+    setScopeKey: (scopeKey: string) => {
+      state.scopeKey = scopeKey;
       act(() => {
         view.rerender();
       });
@@ -444,6 +453,86 @@ describe('the selection survives the finger', () => {
     touchUp(prose, 16);
 
     expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('alpha beta gamma');
+  });
+
+  it('keeps the exact Range endpoints and geometry when a closed toolbar selection is dragged on its body', () => {
+    const onSelect = vi.fn();
+    const { prose, frames, view } = harness({ activation: 'drag', onSelect, scopeKey: 'q1' });
+    mockMeasuredLines();
+
+    touchDown(prose, 0);
+    touchMove(prose, 11);
+    frame(frames);
+    touchUp(prose, 11);
+    frame(frames);
+    expect(view.result.current.phase).toBe('selected');
+    const firstRange = onSelect.mock.calls[0]![0] as Range;
+    const endpoints = (range: Range) => ({
+      startContainer: range.startContainer,
+      startOffset: range.startOffset,
+      endContainer: range.endContainer,
+      endOffset: range.endOffset,
+    });
+    const rangeBefore = endpoints(firstRange);
+    const paintBefore = {
+      text: view.result.current.selectionText,
+      rects: structuredClone(view.result.current.rects),
+      startHandle: structuredClone(view.result.current.startHandle),
+      endHandle: structuredClone(view.result.current.endHandle),
+    };
+    const overlay = render(<SelectionOverlay selection={view.result.current} />);
+
+    // The toolbar is closed: pressing the selected body reactivates the exact
+    // session range. A drag past pointerdown must not start a second session or
+    // reinterpret the paint as new endpoints.
+    const down = createEvent.pointerDown(document.body, {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 44,
+      pointerType: 'touch',
+      clientX: 30,
+      clientY: 110,
+    });
+    fireEvent(document.body, down);
+    fireEvent.pointerMove(document.body, { pointerId: 44, pointerType: 'touch', clientX: 44, clientY: 116 });
+    fireEvent.pointerUp(document.body, { pointerId: 44, pointerType: 'touch', clientX: 44, clientY: 116 });
+
+    expect(down.defaultPrevented).toBe(true);
+    expect(onSelect).toHaveBeenCalledTimes(2);
+    expect(endpoints(onSelect.mock.calls[1]![0] as Range)).toEqual(rangeBefore);
+    expect({
+      text: view.result.current.selectionText,
+      rects: view.result.current.rects,
+      startHandle: view.result.current.startHandle,
+      endHandle: view.result.current.endHandle,
+    }).toEqual(paintBefore);
+    overlay.unmount();
+  });
+
+  it('resets the Range at the owning boundary when question scope changes', () => {
+    const onSelect = vi.fn();
+    const { prose, frames, view, setScopeKey } = harness({ activation: 'drag', onSelect, scopeKey: 'q1' });
+
+    touchDown(prose, 0);
+    touchMove(prose, 11);
+    frame(frames);
+    touchUp(prose, 11);
+    frame(frames);
+    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.selectionText).toBeTruthy();
+
+    setScopeKey('q2');
+    expect(view.result.current.phase).toBe('idle');
+    expect(view.result.current.selectionText).toBe('');
+    expect(view.result.current.rects).toEqual([]);
+
+    touchDown(prose, 0);
+    touchMove(prose, 11);
+    frame(frames);
+    touchUp(prose, 11);
+    frame(frames);
+    expect(view.result.current.phase).toBe('selected');
+    expect(onSelect).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -20,7 +20,7 @@ function resting(overrides: Partial<SelectionOverlaySelection> = {}): SelectionO
     startHandle: { edge: 'start', x: 10, y: 100, direction: 'ltr', stem: 'up' },
     endHandle: { edge: 'end', x: 50, y: 144, direction: 'ltr', stem: 'down' },
     anchorRect: { left: 10, top: 100, width: 100, height: 44 },
-    pointer: { finger: { x: 30, y: 120 }, caret: null, snapRevision: 0 },
+    pointer: { pointerType: 'touch', finger: { x: 30, y: 120 }, caret: null, snapRevision: 0 },
     adjusting: false,
     beginHandleAdjustment: vi.fn(),
     activateCurrentSelection: vi.fn(),
@@ -29,6 +29,7 @@ function resting(overrides: Partial<SelectionOverlaySelection> = {}): SelectionO
     // gesture would NOT handle (a toolbar, an input): dismissed, delivered.
     // A test whose press stands in for the prose overrides this with true.
     wouldBeginGesture: vi.fn(() => false),
+    wouldStartOwnedSelection: vi.fn(() => false),
     ...overrides,
   };
 }
@@ -238,6 +239,71 @@ describe('a resting selection can be reactivated without changing its range', ()
       expect(outsideListener).not.toHaveBeenCalled();
     } finally {
       document.removeEventListener('pointerdown', outsideListener);
+    }
+  });
+
+  it('keeps the body range and paint unchanged when its consumed press is dragged', () => {
+    const selection = resting();
+    const before = {
+      text: selection.selectionText,
+      rects: structuredClone(selection.rects),
+      startHandle: structuredClone(selection.startHandle),
+      endHandle: structuredClone(selection.endHandle),
+    };
+    render(<SelectionOverlay selection={selection} />);
+
+    const down = createEvent.pointerDown(document.body, {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 14,
+      pointerType: 'touch',
+      clientX: 30,
+      clientY: 110,
+    });
+    fireEvent(document.body, down);
+    fireEvent.pointerMove(document.body, { pointerId: 14, pointerType: 'touch', clientX: 46, clientY: 116 });
+    fireEvent.pointerUp(document.body, { pointerId: 14, pointerType: 'touch', clientX: 46, clientY: 116 });
+
+    expect(selection.activateCurrentSelection).toHaveBeenCalledTimes(1);
+    expect(selection.beginHandleAdjustment).not.toHaveBeenCalled();
+    expect(selection.dismiss).not.toHaveBeenCalled();
+    expect({
+      text: selection.selectionText,
+      rects: selection.rects,
+      startHandle: selection.startHandle,
+      endHandle: selection.endHandle,
+    }).toEqual(before);
+  });
+});
+
+describe('outside dismissal with native text selection', () => {
+  it('consumes the first outside mouse drag that would begin another text selection', () => {
+    const selection = resting({ wouldStartOwnedSelection: vi.fn(() => true) });
+    const prose = document.createElement('p');
+    prose.textContent = 'new selectable prose';
+    document.body.append(prose);
+    const pagePointerDown = vi.fn();
+    document.addEventListener('pointerdown', pagePointerDown);
+    try {
+      render(<SelectionOverlay selection={selection} />);
+      const event = createEvent.pointerDown(prose, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 21,
+        pointerType: 'mouse',
+        button: 0,
+        clientX: 300,
+        clientY: 300,
+      });
+      fireEvent(prose, event);
+
+      expect(selection.dismiss).toHaveBeenCalledTimes(1);
+      expect(selection.wouldStartOwnedSelection).toHaveBeenCalledWith(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(pagePointerDown).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('pointerdown', pagePointerDown);
+      prose.remove();
     }
   });
 });

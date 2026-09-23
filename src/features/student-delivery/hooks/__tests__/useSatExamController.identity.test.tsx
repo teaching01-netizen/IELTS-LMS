@@ -138,6 +138,28 @@ describe("useSatExamController attempt identity", () => {
     expect(hook.result.current.data?.attempt.id).toBe("attempt-b");
   });
 
+  it("does not seed a fresh SAT browser writer from the server attempt projection", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(bootstrap("attempt-a"));
+
+    renderHook(() => useSatExamController({
+      scheduleId: "schedule",
+      attemptId: "attempt-a",
+      candidateId: "candidate",
+      attemptSnapshot: {
+        id: "attempt-a",
+        recovery: { clientSessionId: "server-active-writer" },
+        integrity: { clientSessionId: "server-active-writer" },
+      } as never,
+    }));
+
+    await waitFor(() => expect(gatewayMocks.configureSatDeliveryAttempt).toHaveBeenCalled());
+    expect(gatewayMocks.configureSatDeliveryAttempt).toHaveBeenCalledWith(
+      "schedule",
+      "attempt-a",
+      "candidate",
+    );
+  });
+
   it("fires bootstrap exactly once across StrictMode double-effect + parent re-renders with churning snapshots", async () => {
     const gate = deferred<AssessmentDeliveryBootstrap>();
     gatewayMocks.bootstrap.mockImplementation(() => gate.promise);

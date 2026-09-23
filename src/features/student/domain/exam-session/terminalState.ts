@@ -21,14 +21,10 @@ export function isRuntimeStructurallyCompleted(runtime: ExamSessionRuntime | nul
 
 export function getVerifiedTerminalState(input: {
   readonly attempt: StudentAttempt | null;
-  readonly runtime: ExamSessionRuntime | null;
+  readonly runtime: { readonly status: string } | null;
 }): VerifiedTerminalState {
   if (input.attempt?.proctorStatus === "terminated") {
     return "terminated";
-  }
-
-  if (input.attempt?.submittedAt || input.attempt?.deliveryStatus === "submitted") {
-    return "completed";
   }
 
   if (
@@ -36,6 +32,20 @@ export function getVerifiedTerminalState(input: {
     input.attempt?.deliveryStatus === "locked" ||
     input.attempt?.deliveryStatus === "cancelled"
   ) {
+    return "terminated";
+  }
+
+  if (
+    input.attempt?.submittedAt ||
+    input.attempt?.phase === "post-exam" ||
+    input.attempt?.phase === "submitted" ||
+    input.attempt?.deliveryStatus === "submitted" ||
+    input.runtime?.status === "completed"
+  ) {
+    return "completed";
+  }
+
+  if (input.runtime?.status === "cancelled") {
     return "terminated";
   }
 

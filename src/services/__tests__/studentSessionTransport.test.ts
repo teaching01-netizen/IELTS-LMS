@@ -12,6 +12,9 @@ describe('studentSessionTransport', () => {
     expect(studentSessionTransport.paths.liveSession('schedule-1', 'W001')).toBe(
       '/v1/student/sessions/schedule-1/live?candidateId=W001',
     );
+    expect(studentSessionTransport.paths.session('schedule-1', 'W001', 'session-abc')).toBe(
+      '/v1/student/sessions/schedule-1?candidateId=W001&clientSessionId=session-abc',
+    );
   });
 
   it('builds credential refresh endpoint with required query params', () => {
@@ -25,9 +28,6 @@ describe('studentSessionTransport', () => {
   it('builds the cookie-authenticated resume endpoint without a candidate id', () => {
     expect(studentSessionTransport.paths.resume('schedule-1', 'session-abc')).toBe(
       '/v1/student/sessions/schedule-1?refreshAttemptCredential=true&clientSessionId=session-abc',
-    );
-    expect(studentSessionTransport.paths.resume('schedule-1')).toBe(
-      '/v1/student/sessions/schedule-1?refreshAttemptCredential=true',
     );
   });
 

@@ -4,6 +4,7 @@ import { accessLinkKeys } from "./accessLinkKeys";
 import { authoringEffects } from "./authoringQueryEffects";
 import type {
   CreateAssessmentAccessLinkRequest,
+  DeleteAssessmentAccessLinkRequest,
   DuplicateAssessmentAccessLinkRequest,
   SetAccessLinkLifecycleRequest,
   UpdateAssessmentAccessLinkRequest,
@@ -82,6 +83,17 @@ export function useSetAccessLinkLifecycle(examId: string) {
     onSuccess: (link) => {
       queryClient.setQueryData(accessLinkKeys.link(link.id), link);
       authoringEffects.accessChanged(queryClient, examId);
+    },
+  });
+}
+
+export function useDeleteAccessLink(examId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ linkId, request }: { linkId: string; request: DeleteAssessmentAccessLinkRequest }) =>
+      assessmentAccessLinksApi.delete(linkId, request),
+    onSuccess: (_result, { linkId }) => {
+      void authoringEffects.accessDeleted(queryClient, examId, linkId);
     },
   });
 }

@@ -5,6 +5,7 @@ import {
   useAccessLinkActivity,
   useAccessLinkMembers,
   useCreateAccessLink,
+  useDeleteAccessLink,
   useDuplicateAccessLink,
   useSetAccessLinkLifecycle,
   useUpdateAccessLink,
@@ -107,7 +108,7 @@ function isSharedAccessLinkCandidate(value: Record<string, unknown>): value is R
 
 function isRevisionConflict(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  return /revision|stale|conflict|changed elsewhere|409/i.test(error.message);
+  return /revision|stale|conflict|changed (?:elsewhere|while)|409/i.test(error.message);
 }
 
 export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefresh, onBackToRelease }: StudentLinksDashboardProps) {
@@ -121,6 +122,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   );
   const sourceLinks = overview?.links ?? EMPTY_ACCESS_LINKS;
   const sharedValues = collaboration?.workspaceSnapshot.values;
+  const [deletedLinkIds, setDeletedLinkIds] = useState<Set<string>>(() => new Set());
   const links = useMemo(() => {
     const byId = new Map(sourceLinks.map((link) => [link.id, link]));
     for (const [path, raw] of Object.entries(sharedValues ?? {})) {
@@ -137,8 +139,9 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         byId.set(candidate.id, candidate as unknown as AssessmentAccessLink);
       }
     }
+    for (const linkId of deletedLinkIds) byId.delete(linkId);
     return [...byId.values()];
-  }, [exam.id, sharedValues, sourceLinks, version?.id]);
+  }, [deletedLinkIds, exam.id, sharedValues, sourceLinks, version?.id]);
 
   // Link rows are seeded through the room's arbiter like every other shared
   // value: the overview query only proposes the first copy, and the readiness
@@ -161,7 +164,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const [editingLink, setEditingLink] = useState<AssessmentAccessLink | null>(null);
   const [shareLink, setShareLink] = useState<AssessmentAccessLink | null>(null);
   const [presentLink, setPresentLink] = useState<AssessmentAccessLink | null>(null);
-  const [confirm, setConfirm] = useState<{ link: AssessmentAccessLink; action: "revoke" } | null>(null);
+  const [confirm, setConfirm] = useState<{ link: AssessmentAccessLink; action: "revoke" | "delete" } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [staleConflict, setStaleConflict] = useState(false);
   const notifySuccess = useNotificationStore((state) => state.addSuccess);
@@ -170,6 +173,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const createMutation = useCreateAccessLink(exam.id);
   const updateMutation = useUpdateAccessLink(exam.id);
   const lifecycleMutation = useSetAccessLinkLifecycle(exam.id);
+  const deleteMutation = useDeleteAccessLink(exam.id);
   const duplicateMutation = useDuplicateAccessLink(exam.id);
   const membersQuery = useAccessLinkMembers(editingLink?.id ?? null);
   const { value: confirmation, show: showConfirmation } = useTransientValue<Confirmation>(1600);
@@ -181,6 +185,9 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         label: lifecyclePendingLabel(lifecycleMutation.variables.request.state),
       };
     }
+    if (deleteMutation.isPending && deleteMutation.variables) {
+      return { linkId: deleteMutation.variables.linkId, label: "Deleting permanently…" };
+    }
     if (duplicateMutation.isPending && duplicateMutation.variables) {
       return { linkId: duplicateMutation.variables.linkId, label: "Duplicating…" };
     }
@@ -191,6 +198,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   }, [
     duplicateMutation.isPending,
     duplicateMutation.variables,
+    deleteMutation.isPending,
+    deleteMutation.variables,
     lifecycleMutation.isPending,
     lifecycleMutation.variables,
     updateMutation.isPending,
@@ -353,6 +362,30 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       return false;
     }
   };
+  const deleteLink = async (link: AssessmentAccessLink): Promise<boolean> => {
+    setActionError(null);
+    setStaleConflict(false);
+    try {
+      await deleteMutation.mutateAsync({ linkId: link.id, request: { revision: link.revision } });
+      setDeletedLinkIds((current) => new Set(current).add(link.id));
+      collaboration?.setValue(`access/${link.id}`, undefined);
+      announceWorkspaceCommand("access.deleted", { linkId: link.id });
+      setEditingLink((current) => current?.id === link.id ? null : current);
+      setShareLink((current) => current?.id === link.id ? null : current);
+      setPresentLink((current) => current?.id === link.id ? null : current);
+      showToast("Student Link deleted permanently");
+      return true;
+    } catch (err) {
+      reportActionError(
+        isRevisionConflict(err)
+          ? "This link changed elsewhere. Refresh the link list before trying again."
+          : "Student Link could not be deleted.",
+        { action: "delete", linkId: link.id },
+        err,
+      );
+      return false;
+    }
+  };
   const duplicate = async (link: AssessmentAccessLink, releaseTarget: "source" | "current" = "source") => {
     setActionError(null);
     setStaleConflict(false);
@@ -408,7 +441,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       ? [{ id: "pause", label: link.lifecycleState === "paused" ? "Resume Link" : "Pause Link", disabled: busy, onSelect: () => { void setLifecycle(link, link.lifecycleState === "paused" ? "active" : "paused"); } } as SatMenuItem]
       : []),
     { id: "revoke", label: "Revoke Link", onSelect: () => setConfirm({ link, action: "revoke" }), destructive: true, separatorBefore: true, disabled: busy || link.lifecycleState === "revoked" },
-  ], [copy, duplicate, openEditor, setLifecycle]);
+    { id: "delete", label: "Delete permanently", onSelect: () => setConfirm({ link, action: "delete" }), destructive: true, disabled: busy, separatorBefore: true },
+  ], [copy, deleteMutation.isPending, duplicate, openEditor, setLifecycle]);
 
   if (isLoading) {
     return (
@@ -571,17 +605,20 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       <AccessLinkPresentView open={Boolean(presentLink)} link={presentLink} onClose={() => setPresentLink(null)} />
       <AuthoringConfirmDialog
         open={Boolean(confirm)}
-        title="Revoke this Student Link?"
-        description="Students who have not entered yet will permanently lose access through this link. Existing exam attempts are not deleted. Revocation cannot be undone."
-        confirmLabel="Revoke Link"
+        title={confirm?.action === "delete" ? "Delete this Student Link permanently?" : "Revoke this Student Link?"}
+        description={confirm?.action === "delete"
+          ? "This URL will no longer let students enter. Schedules, exam attempts, scores, and exam history will be preserved. Deletion cannot be undone."
+          : "Students who have not entered yet will permanently lose access through this link. Existing exam attempts are not deleted. Revocation cannot be undone."}
+        confirmLabel={confirm?.action === "delete" ? "Delete permanently" : "Revoke Link"}
         destructive
-        busy={lifecycleMutation.isPending}
+        busy={confirm?.action === "delete" ? deleteMutation.isPending : lifecycleMutation.isPending}
         onCancel={() => setConfirm(null)}
         onConfirm={() => {
           const target = confirm?.link;
           if (!target) return;
-          void setLifecycle(target, "revoked").then((success) => {
+          void (confirm.action === "delete" ? deleteLink(target) : setLifecycle(target, "revoked")).then((success) => {
             if (success) setConfirm(null);
+            else if (confirm.action === "delete") setConfirm(null);
           });
         }}
       />

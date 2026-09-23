@@ -303,13 +303,6 @@ export const SAT_COPY = {
     enterFullScreen: "Enter full screen",
     exitFullScreen: "Exit full screen",
   },
-  timerWarning: {
-    // Wave C R-11: Title Case alert-title fragment, no period
-    // (alerts.md Content fragment rule; matches sibling alert titles).
-    title: "5 Minutes Remaining",
-    dismiss: "Dismiss timer warning",
-    body: "5 minutes remain in this module. Your hidden timer is shown again.",
-  },
 } as const;
 
 export type SatCopy = typeof SAT_COPY;

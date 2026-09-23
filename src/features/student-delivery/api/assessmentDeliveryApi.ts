@@ -46,6 +46,8 @@ export function configureAssessmentDeliveryAttempt(
   if (candidateId.trim()) attemptCandidates.set(attemptKey(scheduleId, attemptId), candidateId);
   if (typeof preferredClientSessionId === 'string' && preferredClientSessionId.trim()) {
     attemptPreferredSessions.set(attemptKey(scheduleId, attemptId), preferredClientSessionId.trim());
+  } else {
+    attemptPreferredSessions.delete(attemptKey(scheduleId, attemptId));
   }
 }
 

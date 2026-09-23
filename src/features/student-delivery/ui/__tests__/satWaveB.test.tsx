@@ -6,7 +6,6 @@ import { createSatReadingPreferences } from "../../domain/satReadingPreferences"
 import { SAT_OVERLAY_Z } from "../primitives/satOverlayZ";
 import { SatMoreMenu } from "../shell/SatMoreMenu";
 import { SatFloatingTool } from "../tools/SatFloatingTool";
-import { SatTimerWarning } from "../shell/SatTimerWarning";
 import { SatExamShell, type SatExamShellProps } from "../SatExamShell";
 
 const UI = __dirname + "/..";
@@ -71,31 +70,31 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Wave B R-07 save-failed paints above navigator/More", () => {
-  it("contract orders routeAlert above moreMenu above navigator", () => {
+describe("save-failed stays available without covering exam content", () => {
+  it("keeps the overlay contract for modal layers", () => {
     expect(SAT_OVERLAY_Z.routeAlert).toBeGreaterThan(SAT_OVERLAY_Z.moreMenu);
     expect(SAT_OVERLAY_Z.moreMenu).toBeGreaterThan(SAT_OVERLAY_Z.navigator);
     expect(SAT_OVERLAY_Z.routeAlert).toBeLessThanOrEqual(SAT_OVERLAY_Z.breakConfirm);
   });
 
-  it("the failure banner is the only save surface and rides routeAlert", () => {
+  it("renders the failure surface in normal flow without overlay positioning", () => {
     const source = read("feedback/SatSaveStatus.tsx");
-    expect(source).toContain("z-[85]");
-    expect(source).not.toContain("z-[75]");
+    expect(source).not.toMatch(/\bfixed\b|\babsolute\b|z-\[/);
     // The routine layers are gone with their branches (no saving hint, no
-    // offline dock): only a failure or a lost lease ever paints here.
+    // offline dock): only a failure or lost lease status renders in flow.
     expect(source).not.toContain("z-[55]");
     expect(source).not.toContain("z-[65]");
   });
 
-  it("navigator open + save-failed keeps banner + Retry visible and clickable above", async () => {
+  it("navigator open + save-failed keeps Retry accessible in the save row", async () => {
     const onRetrySave = vi.fn();
     render(<SatExamShell {...shellProps({ saveState: "failed", onRetrySave })} />);
     fireEvent.click(screen.getByRole("button", { name: /open question navigator/i }));
     expect(screen.getByRole("dialog", { name: /Questions/i })).toBeInTheDocument();
     const banner = screen.getByTestId("sat-save-status");
     expect(banner).toHaveAttribute("role", "alert");
-    expect(banner.className).toContain("z-[85]");
+    expect(banner.parentElement?.className).toContain("row-start-4");
+    expect(banner.className).not.toMatch(/fixed|absolute/);
     const retry = screen.getByRole("button", { name: "Retry" });
     expect(retry).toBeInTheDocument();
     fireEvent.click(retry);
@@ -195,7 +194,6 @@ describe("Wave B R-09 resize grip 44px + keyboard", () => {
 describe("Wave B R-10/R-17 token swap is size-preserving", () => {
   const scoped = [
     "feedback/SatSaveStatus.tsx",
-    "shell/SatTimerWarning.tsx",
     "shell/SatReadingPopover.tsx",
     "annotations/SatNotesColumn.tsx",
     "transitions/SatPreStartScreen.tsx",
@@ -234,40 +232,8 @@ describe("Wave B R-10/R-17 token swap is size-preserving", () => {
         expect(source, file + " " + literal).toContain("scale-exception");
       }
     }
-    // Spot pins: 22px warning clock and 12px display subtitle/output.
-    expect(read("shell/SatTimerWarning.tsx")).toContain("text-[22px]");
+    // Spot pin: 12px display subtitle/output.
     expect(read("shell/SatReadingPopover.tsx")).toContain("text-[12px]");
-  });
-});
-
-describe("Wave B R-16 warning Escape-to-dismiss (alertdialog kept)", () => {
-  it("keeps role=alertdialog with the same button label pair", () => {
-    render(<SatTimerWarning open remainingLabel="04:59" onDismiss={() => undefined} />);
-    expect(screen.getByRole("alertdialog", { name: "5 Minutes Remaining" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Dismiss timer warning" })).toBeInTheDocument();
-  });
-
-  it("Escape dismisses the standalone warning exactly once", () => {
-    const onDismiss = vi.fn();
-    render(<SatTimerWarning open remainingLabel="04:59" onDismiss={onDismiss} />);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(onDismiss).toHaveBeenCalledTimes(1);
-  });
-
-  it("shell: one Escape press dismisses the warning only, surface stays open", async () => {
-    const { rerender } = render(
-      <SatExamShell {...shellProps({ remainingLabel: "05:02", remainingSeconds: 302 })} />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: /open question navigator/i }));
-    expect(screen.getByRole("dialog", { name: /Questions/i })).toBeInTheDocument();
-    rerender(<SatExamShell {...shellProps({ remainingLabel: "05:00", remainingSeconds: 300 })} />);
-    expect(screen.getByTestId("sat-timer-warning")).toBeInTheDocument();
-    // Realistic path: Escape bubbles from inside the warning, so the
-    // warning's capture listener claims it before surface handlers run.
-    fireEvent.keyDown(screen.getByTestId("sat-timer-warning"), { key: "Escape" });
-    await waitFor(() => expect(screen.queryByTestId("sat-timer-warning")).not.toBeInTheDocument());
-    // One press = dismiss only: the navigator surface survives.
-    expect(screen.getByRole("dialog", { name: /Questions/i })).toBeInTheDocument();
   });
 });
 

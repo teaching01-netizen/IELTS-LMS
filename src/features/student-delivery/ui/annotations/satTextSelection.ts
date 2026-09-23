@@ -45,12 +45,10 @@ export function satAnnotationBlockForPoint(point: TextPoint): Element | null {
  * The anchor for a span of rendered text, where the span arrives as a `Range`.
  *
  * This is the core, and it takes a range rather than a `Selection` because the
- * exam now produces ranges two ways. On a mouse the browser makes the selection
- * and `captureSatTextSelection` passes its range through; on a touch device the
- * exam's own gesture makes the range (see `@shared/ui/touch-selection`), because
- * letting a browser selection exist is what raises the platform's Copy / Look Up
- * / Share menu over the passage. Neither path is privileged: an anchor is a
- * character span, and it does not matter who measured it.
+ * SAT uses a range rather than a live browser Selection so the armed annotation
+ * mode can keep one owner across touch, mouse, and pen. With the tool off, the
+ * browser keeps its ordinary selection behavior. The range is a character span,
+ * and it does not matter who measured it.
  */
 export function captureSatTextRange(root: HTMLElement, region: SatAnnotationRegion, range: Range, options: SatTextSelectionOptions = {}): SatTextAnchor | null {
   if (range.collapsed) return null;
@@ -81,9 +79,8 @@ export function captureSatTextRange(root: HTMLElement, region: SatAnnotationRegi
 }
 
 /**
- * The same, for a browser selection. The desktop adapter: it validates the
- * shape only the platform's own selection can have (exactly one live range) and
- * hands the span to the core.
+ * The same, for a browser Selection. It validates the shape only a platform
+ * selection can have (exactly one live range) and hands the span to the core.
  */
 export function captureSatTextSelection(root: HTMLElement, region: SatAnnotationRegion, selection: Selection | null, options: SatTextSelectionOptions = {}): SatTextAnchor | null {
   if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;

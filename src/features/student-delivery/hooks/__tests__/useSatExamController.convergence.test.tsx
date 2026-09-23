@@ -588,12 +588,15 @@ describe("useSatExamController convergence (Phase 04)", () => {
     await act(async () => {
       await hook.result.current.commands.startPendingModule();
     });
+    persistenceMock.flush.mockClear();
     act(() => {
       hook.result.current.commands.reviewModule();
     });
+    expect(persistenceMock.flush).toHaveBeenCalledTimes(1);
     act(() => {
       hook.result.current.commands.returnToModule();
     });
+    expect(persistenceMock.flush).toHaveBeenCalledTimes(2);
     expect(gatewayMocks.bootstrap.mock.calls.length).toBe(bootstrapCalls);
     hook.unmount();
     vi.useRealTimers();

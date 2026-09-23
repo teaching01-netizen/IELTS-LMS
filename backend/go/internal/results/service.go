@@ -19,6 +19,7 @@ import (
 	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 // Outcome statuses owned by assessment_results (see 0044 lineage).
@@ -592,6 +593,7 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 		}
 		questions, err := s.satQuestions(ctx, attemptID)
 		if err != nil {
+			telemetry.IncCounter(telemetry.MSATResultQuestionDetailFailure)
 			return nil, fmt.Errorf("load SAT question responses: %w", err)
 		}
 		return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: questions}, nil

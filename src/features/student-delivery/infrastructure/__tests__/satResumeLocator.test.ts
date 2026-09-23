@@ -41,6 +41,22 @@ describe('satResumeLocator', () => {
     }
   });
 
+  it('ignores locators older than 30 days and future-dated records', () => {
+    for (const updatedAt of [
+      new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString(),
+      new Date(Date.now() + 60_000).toISOString(),
+    ]) {
+      window.localStorage.setItem(KEY, JSON.stringify({
+        version: 1,
+        providerKey: 'sat',
+        scheduleId: 'schedule-1',
+        candidateId: 'W100001',
+        updatedAt,
+      }));
+      expect(loadSatResumeLocator()).toBeNull();
+    }
+  });
+
   it('does not throw when local storage reads or writes are denied', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
     expect(loadSatResumeLocator()).toBeNull();
@@ -58,6 +74,13 @@ describe('satResumeLocator', () => {
     expect(matchesSatResumeLocator(locator, { scheduleId: 'schedule-1', accessLinkId: 'link-2' })).toBe(false);
     clearSatResumeLocator();
     expect(loadSatResumeLocator()).toBeNull();
+  });
+
+  it('does not throw when local storage removal is denied', () => {
+    saveSatResumeLocator({ scheduleId: 'schedule-1', candidateId: 'W100001' });
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
+
+    expect(() => clearSatResumeLocator()).not.toThrow();
   });
 
   it('keeps a tampered attempt id advisory', () => {

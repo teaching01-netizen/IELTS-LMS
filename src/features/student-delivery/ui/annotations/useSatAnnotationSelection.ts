@@ -16,9 +16,30 @@ import { browserCaretResolver } from '@shared/ui/selection-v2/engine/selectionPo
 import { nearestScrollableAncestor } from '@shared/ui/selection-v2/engine/selectionAutoScroll';
 import { useStudentSelectionGesture } from '@shared/ui/selection-v2/react/useStudentSelectionGesture';
 
+const SAT_SELECTION_EXCLUDED_TARGETS = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), button, a, [role="button"], [role="math"]';
+
+function isSatSelectionExcludedTarget(target: EventTarget | null): boolean {
+  const element = target instanceof Element
+    ? target
+    : target instanceof Node
+      ? target.parentElement
+      : null;
+  // Interactive marks are still SAT prose: a drag through one makes a new
+  // range, while SelectionOverlay consumes a resting-range press before the
+  // mark's click handler opens its editor.
+  if (element?.closest('[data-sat-annotation-control="true"]')) return false;
+  return element?.closest(SAT_SELECTION_EXCLUDED_TARGETS) != null
+    || (target instanceof Node && isSatSelectionInsideAnnotationUi(target));
+}
+
+function isSatSelectionPointer(event: PointerEvent): boolean {
+  return event.pointerType === 'touch' || event.pointerType === 'mouse' || event.pointerType === 'pen';
+}
+
 interface UseSatAnnotationSelectionOptions {
   rootRef: RefObject<HTMLDivElement | null>;
   region: SatAnnotationRegion;
+  selectionScopeKey?: string | undefined;
   enabled: boolean;
   annotationCount: number;
   onLimitReached?: (() => void) | undefined;
@@ -28,6 +49,7 @@ interface UseSatAnnotationSelectionOptions {
 export function useSatAnnotationSelection({
   rootRef,
   region,
+  selectionScopeKey,
   enabled,
   annotationCount,
   onLimitReached,
@@ -131,13 +153,33 @@ export function useSatAnnotationSelection({
     const root = rootRef.current;
     if (!root) return;
     const anchor = captureSatTextRange(root, region, range, { allowAnnotationControls: true });
-    diagnostics?.record('captureSatTextRange', { captureSucceeded: !!anchor });
+    diagnostics?.record('captureSatTextRange', { captureSucceeded: !!anchor, anchor: anchor ?? null });
     if (!anchor) return;
     reportAnchor(anchor);
     diagnostics?.record('reportAnchor', {
       anchorReported: !!reportSelection.current && annotationCount < SAT_ANNOTATION_LIMIT,
     });
   }, [annotationCount, diagnostics, region, reportAnchor, rootRef]);
+
+  const wouldStartOwnedSelection = useCallback((event: Event): boolean => {
+    const pointer = event as PointerEvent;
+    if (!isSatSelectionPointer(pointer)) return false;
+    if (typeof pointer.button === 'number' && pointer.button !== 0) return false;
+    const target = event.target instanceof Element
+      ? event.target
+      : event.target instanceof Node
+        ? event.target.parentElement
+        : null;
+    if (!target || isSatSelectionExcludedTarget(target)) return false;
+    const block = target.closest('[data-content-text-node]');
+    const targetRoot = target.closest<HTMLElement>('[data-sat-selection-protected="true"]');
+    const currentScope = rootRef.current?.dataset['satSelectionScope'];
+    return block !== null
+      && targetRoot !== null
+      && targetRoot.contains(block)
+      && currentScope !== undefined
+      && targetRoot.dataset['satSelectionScope'] === currentScope;
+  }, [rootRef]);
 
   const resolveCaretAtPoint = useMemo(
     () => browserCaretResolver(document, diagnostics),
@@ -148,10 +190,14 @@ export function useSatAnnotationSelection({
     enabled: enabled && view.annotationModeEnabled && ownedTouchSelection,
     activation: 'drag',
     rootRef,
+    scopeKey: selectionScopeKey,
+    isOwnedPointer: isSatSelectionPointer,
+    isExcludedTarget: isSatSelectionExcludedTarget,
     diagnostics,
     resolveCaretAtPoint,
     onSelect: reportOwnedRange,
     boundaryFor: satAnnotationBlockForPoint,
+    wouldStartOwnedSelection,
     scrollContainer: nearestScrollableAncestor,
   });
 

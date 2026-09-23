@@ -885,29 +885,46 @@
     user-select: text;
   }
 
-  /* Suppress text callouts only on declared exam text roots. SAT marks each
-     stimulus, prompt, and answer-choice wording surface; the annotation mode
-     decides when the app owns a range, while this marker protects the text for
-     the whole locked exam. IELTS keeps its existing highlightable boundary. */
+  /* SAT roots retain ordinary browser selection until annotation mode arms.
+     IELTS keeps its existing callout guard on its highlightable boundary. */
   .student-exam-active [data-sat-selection-protected="true"],
   .student-exam-active [data-sat-selection-protected="true"] *,
   .student-exam-active [data-student-highlightable="true"],
   .student-exam-active [data-student-highlightable="true"] * {
-    -webkit-touch-callout: none;
     -webkit-user-select: text;
     user-select: text;
   }
 
-  /* Suppress native ranges only after the selection adapter sees a touch on an
-     armed exam surface. The explicit owner marker is removed for mouse and
-     keyboard selection, so a trackpad on a touch iPad still follows the native
-     desktop path. It remains while an app-owned touch range rests. */
+  .student-exam-active [data-student-highlightable="true"],
+  .student-exam-active [data-student-highlightable="true"] * {
+    -webkit-touch-callout: none;
+  }
+
+  /* Armed SAT annotation surfaces are owned before contact. This stable marker
+     suppresses native ranges for touch, mouse, and pen while Selection v2 owns
+     the same text for every pointer type. Editable controls opt back into text. */
   html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"],
   html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] *,
   html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"],
   html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] * {
+    -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+  }
+
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] input,
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] textarea,
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] select,
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] [contenteditable]:not([contenteditable="false"]),
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] [contenteditable]:not([contenteditable="false"]) *,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] input,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] textarea,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] select,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] [contenteditable]:not([contenteditable="false"]),
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] [contenteditable]:not([contenteditable="false"]) * {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
   }
 
   /* THE OTHER HALF OF THAT OWNERSHIP: the browser must be told not to PAN, and

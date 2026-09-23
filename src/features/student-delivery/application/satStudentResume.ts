@@ -3,12 +3,13 @@ import {
   mapBackendStudentAttempt,
   refreshAttemptCredentialForAttempt,
   ensureClientSessionIdForStudentKey,
-  restoreClientSessionIdForStudentKey,
+  createStudentClientSessionId,
   satWriterStudentKey,
 } from '@services/studentAttemptRepository';
 import { storeAttemptCredential } from '@services/attemptCredentialAdapter';
 import { studentSessionTransport } from '@services/studentSessionTransport';
 import type { StudentAttempt } from '../../../types/studentAttempt';
+import { getVerifiedTerminalState } from '../../student/domain/exam-session/terminalState';
 import {
   clearSatResumeLocator,
   matchesSatResumeLocator,
@@ -28,21 +29,6 @@ export type SatResumeResult =
   | { kind: 'no-attempt' }
   | { kind: 'unauthenticated' }
   | { kind: 'transient-error'; reason: 'network' | 'server_error' };
-
-function isAttemptTerminal(attempt: StudentAttempt, runtimeStatus?: string | null): boolean {
-  return Boolean(
-    attempt.submittedAt ||
-    attempt.phase === 'post-exam' ||
-    attempt.phase === 'submitted' ||
-    attempt.proctorStatus === 'terminated' ||
-    attempt.deliveryStatus === 'submitted' ||
-    attempt.deliveryStatus === 'terminated' ||
-    attempt.deliveryStatus === 'locked' ||
-    attempt.deliveryStatus === 'cancelled' ||
-    runtimeStatus === 'completed' ||
-    runtimeStatus === 'cancelled',
-  );
-}
 
 function statusCode(error: unknown): number | null {
   if (typeof error !== 'object' || error === null) return null;
@@ -73,9 +59,24 @@ export async function resumeSatStudentSession(input: {
   const startedAt = Date.now();
   emitResumeMetric('student_resume_probe_total', scheduleId, 'probe');
 
+  // The locator candidate is only a hint for finding this browser's existing
+  // writer identity. The server still resolves the attempt from the cookie.
+  // When there is no usable hint, send a fresh browser-owned id and bind it to
+  // the canonical candidate only after the server returns that identity.
+  const hintedCandidateId =
+    locator?.providerKey === 'sat' && locator.scheduleId === scheduleId
+      ? locator.candidateId
+      : null;
+  const requestedWriterId = hintedCandidateId
+    ? ensureClientSessionIdForStudentKey(
+        scheduleId,
+        satWriterStudentKey(scheduleId, hintedCandidateId),
+      )
+    : createStudentClientSessionId();
+
   try {
     const session = await backendGet<ResumeSessionResponse>(
-      studentSessionTransport.paths.resume(scheduleId),
+      studentSessionTransport.paths.resume(scheduleId, requestedWriterId),
       { retries: 0, timeout: 8_000 },
     );
     if (!session.attempt || typeof session.attempt !== 'object') {
@@ -85,17 +86,19 @@ export async function resumeSatStudentSession(input: {
     }
 
     const attempt = mapBackendStudentAttempt(session.attempt as Parameters<typeof mapBackendStudentAttempt>[0]);
-    const terminal = isAttemptTerminal(attempt, session.runtime?.status);
+    const terminal = getVerifiedTerminalState({
+      attempt,
+      runtime: session.runtime?.status ? { status: session.runtime.status } : null,
+    }) !== 'not_terminal';
     const writerKey = satWriterStudentKey(scheduleId, attempt.candidateId);
     const serverWriterId = session.clientSessionId?.trim();
-    const canonicalWriterId = serverWriterId
-      ? restoreClientSessionIdForStudentKey(scheduleId, writerKey, serverWriterId)
-      : ensureClientSessionIdForStudentKey(
-        scheduleId,
-        writerKey,
-        attempt.recovery.clientSessionId ?? attempt.integrity.clientSessionId ?? null,
-      );
-    const credentialBelongsToWriter = !serverWriterId || serverWriterId === canonicalWriterId;
+    const canReuseRequestedWriter = hintedCandidateId === attempt.candidateId || !hintedCandidateId;
+    const canonicalWriterId = ensureClientSessionIdForStudentKey(
+      scheduleId,
+      writerKey,
+      canReuseRequestedWriter ? requestedWriterId : null,
+    );
+    const credentialBelongsToWriter = serverWriterId === canonicalWriterId;
 
     if (!terminal && credentialBelongsToWriter && session.attemptCredential) {
       storeAttemptCredential(attempt, session.attemptCredential);
@@ -125,6 +128,7 @@ export async function resumeSatStudentSession(input: {
     };
   } catch (error) {
     if (hasBackendStatusCode(error, 401) || hasBackendStatusCode(error, 403)) {
+      if (matchesSatResumeLocator(locator, { scheduleId })) clearSatResumeLocator();
       emitResumeMetric('student_resume_failure_total', scheduleId, 'unauthenticated', undefined, Date.now() - startedAt);
       return { kind: 'unauthenticated' };
     }

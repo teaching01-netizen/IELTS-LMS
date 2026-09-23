@@ -1,4 +1,4 @@
-import { useId, type CSSProperties } from "react";
+import { useId, type CSSProperties, type ReactNode } from "react";
 import { Bookmark } from "lucide-react";
 import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
 import { SAT_COPY } from "../../domain/satCopy";
@@ -27,6 +27,7 @@ export interface SatReviewPageProps {
   onSelectQuestion: (index: number) => void;
   onBack: () => void;
   onRetrySave?: (() => void) | undefined;
+  notices?: ReactNode | undefined;
 }
 
 /** Review answers and return to a question; module completion stays server-owned. */
@@ -63,7 +64,7 @@ export function SatReviewPage(props: SatReviewPageProps) {
 
   return (
     <div
-      className="sat-ui sat-review-page grid h-[100dvh] min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-background)] text-[var(--sat-text)]"
+      className="sat-ui sat-review-page grid h-[100dvh] min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-background)] text-[var(--sat-text)]"
       data-sat-keyboard-open={props.keyboardOpen ? "true" : "false"}
       style={reviewStyle}
     >
@@ -101,6 +102,9 @@ export function SatReviewPage(props: SatReviewPageProps) {
           </div>
         </div>
       </header>
+      <div className="min-w-0 px-4 sm:px-6" data-testid="sat-review-notices">
+        {props.notices}
+      </div>
       <main className="min-h-0 overflow-y-auto px-5 py-7 sm:px-8">
         <div className="mx-auto max-w-[900px]">
           <h1 className="text-2xl font-semibold tracking-tight">{SAT_COPY.review.eyebrow}</h1>

@@ -37,8 +37,8 @@ import '../styles/selection.css';
  *   body        → the selected text is a no-drag zone: preserved and consumed,
  *                 never dismissed, never reaching the prose's own pointerdown
  *   outside     → dismissed in this same capture pass; consumed exactly when
- *                 the gesture's own pointerdown would otherwise see it — one
- *                 press, one intent, every other control keeps its press
+ *                 an owned gesture or product's native-selection path would
+ *                 otherwise start — one press, one intent; controls keep theirs
  *
  * Without the middle row, a short selection's two 44px endpoint boxes overlap
  * over the highlighted text and a press in the MIDDLE grabs an endpoint; without
@@ -88,9 +88,12 @@ export interface SelectionOverlaySelection extends SelectionPresentation {
    * guards, answered by the one place that owns them (`wouldBeginGesture` on
    * the hook's return). The outside branch asks it so one pointerdown can
    * dismiss the selection AND be consumed when it would otherwise begin the
-   * next one, while toolbars, inputs and every other control keep their press.
+   * next owned gesture. The separate owned-selection predicate covers another
+   * text root in the same product scope; controls keep their press in either case.
    */
   wouldBeginGesture: (event: Event) => boolean;
+  /** Whether this outside press would start owned selection in another root. */
+  wouldStartOwnedSelection: (event: Event) => boolean;
 }
 
 /**
@@ -109,6 +112,7 @@ function pressOn(event: Event, pressed: Element | null): SelectionHandlePointerE
   const pointer = event as PointerEvent;
   return {
     pointerId: pointer.pointerId,
+    pointerType: pointer.pointerType,
     clientX: pointer.clientX,
     clientY: pointer.clientY,
     currentTarget: pressed,
@@ -155,6 +159,7 @@ export function SelectionOverlay({
     && loupe !== undefined
     && loupe.enabled !== false
     && pointer !== null
+    && pointer.pointerType === 'touch'
     && selectionMovesEndpoint(selection.phase);
 
   const dismissRef = useRef(selection.dismiss);
@@ -270,7 +275,7 @@ export function SelectionOverlay({
       // break the rest of the page. Menu and handle presses resolved above.
       dismissRef.current();
       clearSelectionRef.current?.();
-      if (current.wouldBeginGesture(event)) consume(event);
+      if (current.wouldBeginGesture(event) || current.wouldStartOwnedSelection(event)) consume(event);
     };
 
     document.addEventListener('keydown', onKeyDown);

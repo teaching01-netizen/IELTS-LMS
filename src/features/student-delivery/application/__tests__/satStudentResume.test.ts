@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   storeAttemptCredential: vi.fn(),
   refreshAttemptCredentialForAttempt: vi.fn(),
   ensureClientSessionIdForStudentKey: vi.fn(),
-  restoreClientSessionIdForStudentKey: vi.fn(),
+  createStudentClientSessionId: vi.fn(),
   mapBackendStudentAttempt: vi.fn(),
 }));
 
@@ -19,7 +19,7 @@ vi.mock('@services/backendBridge', () => ({
 
 vi.mock('@services/studentAttemptRepository', () => ({
   ensureClientSessionIdForStudentKey: mocks.ensureClientSessionIdForStudentKey,
-  restoreClientSessionIdForStudentKey: mocks.restoreClientSessionIdForStudentKey,
+  createStudentClientSessionId: mocks.createStudentClientSessionId,
   satWriterStudentKey: (scheduleId: string, candidateId: string) => `student-${scheduleId}-${candidateId}`,
   mapBackendStudentAttempt: mocks.mapBackendStudentAttempt,
   refreshAttemptCredentialForAttempt: mocks.refreshAttemptCredentialForAttempt,
@@ -30,9 +30,8 @@ vi.mock('@services/attemptCredentialAdapter', () => ({
 }));
 
 vi.mock('@services/studentSessionTransport', () => ({
-  studentSessionTransport: { paths: { resume: (scheduleId: string, clientSessionId?: string) => {
-    const params = new URLSearchParams({ refreshAttemptCredential: 'true' });
-    if (clientSessionId) params.set('clientSessionId', clientSessionId);
+  studentSessionTransport: { paths: { resume: (scheduleId: string, clientSessionId: string) => {
+    const params = new URLSearchParams({ refreshAttemptCredential: 'true', clientSessionId });
     return `/v1/student/sessions/${scheduleId}?${params.toString()}`;
   } } },
 }));
@@ -56,8 +55,8 @@ describe('resumeSatStudentSession', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     window.localStorage.clear();
-    mocks.ensureClientSessionIdForStudentKey.mockImplementation((_schedule: string, key: string) => `writer:${key}`);
-    mocks.restoreClientSessionIdForStudentKey.mockImplementation((_schedule: string, _key: string, writerId: string) => writerId);
+    mocks.ensureClientSessionIdForStudentKey.mockImplementation((_schedule: string, key: string, preferred?: string | null) => preferred ?? `writer:${key}`);
+    mocks.createStudentClientSessionId.mockReturnValue('writer:ephemeral');
     mocks.mapBackendStudentAttempt.mockImplementation((attempt: unknown) => ({
       ...activeAttempt,
       ...(attempt as object),
@@ -89,10 +88,10 @@ describe('resumeSatStudentSession', () => {
     });
 
     expect(mocks.backendGet).toHaveBeenCalledWith(
-      '/v1/student/sessions/schedule-1?refreshAttemptCredential=true',
+      '/v1/student/sessions/schedule-1?refreshAttemptCredential=true&clientSessionId=writer%3Astudent-schedule-1-CANONICAL-CANDIDATE',
       { retries: 0, timeout: 8_000 },
     );
-    expect(mocks.restoreClientSessionIdForStudentKey).toHaveBeenCalledWith(
+    expect(mocks.ensureClientSessionIdForStudentKey).toHaveBeenCalledWith(
       'schedule-1',
       'student-schedule-1-CANONICAL-CANDIDATE',
       'writer:student-schedule-1-CANONICAL-CANDIDATE',
@@ -108,11 +107,11 @@ describe('resumeSatStudentSession', () => {
     });
   });
 
-  it('ignores a tampered stored candidate and restores the server writer identity', async () => {
+  it('ignores a tampered stored candidate and refreshes for the canonical browser writer', async () => {
     mocks.backendGet.mockResolvedValue({
       attempt: { ...activeAttempt },
       attemptCredential: { attemptToken: 'wrong-writer-token', expiresAt: '2026-10-01T00:00:00Z' },
-      clientSessionId: 'writer:student-schedule-1-CANONICAL-CANDIDATE',
+      clientSessionId: 'writer:student-schedule-1-wrong-candidate',
       runtime: { status: 'live' },
     });
 
@@ -127,16 +126,50 @@ describe('resumeSatStudentSession', () => {
       },
     });
 
-    expect(mocks.backendGet.mock.calls[0]?.[0]).not.toContain('candidateId');
-    expect(mocks.backendGet.mock.calls[0]?.[0]).not.toContain('clientSessionId');
+    expect(mocks.backendGet.mock.calls[0]?.[0]).toContain('clientSessionId=writer%3Astudent-schedule-1-wrong-candidate');
     expect(result).toMatchObject({ route: '/student/schedule-1/CANONICAL-CANDIDATE' });
-    expect(mocks.restoreClientSessionIdForStudentKey).toHaveBeenCalledWith(
+    expect(mocks.ensureClientSessionIdForStudentKey).toHaveBeenLastCalledWith(
       'schedule-1',
       'student-schedule-1-CANONICAL-CANDIDATE',
+      null,
+    );
+    expect(mocks.refreshAttemptCredentialForAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recovery: expect.objectContaining({ clientSessionId: 'writer:student-schedule-1-CANONICAL-CANDIDATE' }),
+        integrity: expect.objectContaining({ clientSessionId: 'writer:student-schedule-1-CANONICAL-CANDIDATE' }),
+      }),
       'writer:student-schedule-1-CANONICAL-CANDIDATE',
     );
-    expect(mocks.refreshAttemptCredentialForAttempt).not.toHaveBeenCalled();
-    expect(mocks.storeAttemptCredential).toHaveBeenCalled();
+    expect(mocks.storeAttemptCredential).not.toHaveBeenCalled();
+  });
+
+  it('creates a browser-owned writer id when no locator exists and does not adopt the server active writer', async () => {
+    mocks.backendGet.mockResolvedValue({
+      attempt: {
+        ...activeAttempt,
+        activeClientSessionId: 'writer:old-device',
+        recovery: { clientSessionId: 'writer:old-device' },
+        integrity: { clientSessionId: 'writer:old-device' },
+      },
+      attemptCredential: { attemptToken: 'new-device-token', expiresAt: '2026-10-01T00:00:00Z' },
+      clientSessionId: 'writer:ephemeral',
+      runtime: { status: 'live' },
+    });
+
+    await expect(resumeSatStudentSession({ scheduleId: 'schedule-1', locator: null }))
+      .resolves.toMatchObject({ kind: 'resumed', attempt: { id: 'attempt-canonical' } });
+
+    expect(mocks.createStudentClientSessionId).toHaveBeenCalledTimes(1);
+    expect(mocks.backendGet.mock.calls[0]?.[0]).toContain('clientSessionId=writer%3Aephemeral');
+    expect(mocks.ensureClientSessionIdForStudentKey).toHaveBeenCalledWith(
+      'schedule-1',
+      'student-schedule-1-CANONICAL-CANDIDATE',
+      'writer:ephemeral',
+    );
+    expect(mocks.storeAttemptCredential).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'attempt-canonical' }),
+      { attemptToken: 'new-device-token', expiresAt: '2026-10-01T00:00:00Z' },
+    );
   });
 
   it('clears a locator only after the authenticated server reports no attempt', async () => {
@@ -148,13 +181,20 @@ describe('resumeSatStudentSession', () => {
     expect(loadSatResumeLocator()).toBeNull();
   });
 
-  it('retains a locator after auth failure or transient network/server errors', async () => {
+  it('clears a locator after confirmed auth failure but retains it after transient errors', async () => {
     saveSatResumeLocator({ scheduleId: 'schedule-1', candidateId: 'W001', attemptId: 'a1' });
     mocks.backendGet.mockRejectedValueOnce({ status: 401 });
     await expect(resumeSatStudentSession({ scheduleId: 'schedule-1', locator: loadSatResumeLocator() }))
       .resolves.toEqual({ kind: 'unauthenticated' });
-    expect(loadSatResumeLocator()).not.toBeNull();
+    expect(loadSatResumeLocator()).toBeNull();
 
+    saveSatResumeLocator({ scheduleId: 'schedule-1', candidateId: 'W001', attemptId: 'a1' });
+    mocks.backendGet.mockRejectedValueOnce({ statusCode: 403 });
+    await expect(resumeSatStudentSession({ scheduleId: 'schedule-1', locator: loadSatResumeLocator() }))
+      .resolves.toEqual({ kind: 'unauthenticated' });
+    expect(loadSatResumeLocator()).toBeNull();
+
+    saveSatResumeLocator({ scheduleId: 'schedule-1', candidateId: 'W001', attemptId: 'a1' });
     mocks.backendGet.mockRejectedValueOnce({ status: 503 });
     await expect(resumeSatStudentSession({ scheduleId: 'schedule-1', locator: loadSatResumeLocator() }))
       .resolves.toEqual({ kind: 'transient-error', reason: 'server_error' });

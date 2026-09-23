@@ -78,10 +78,12 @@ func sectionRow(mock sqlmock.Sqlmock, status *string) {
 
 // writeGateResolver is the question resolver for the gate tests: it keeps the
 // test on the runtime gate instead of the question→module projection.
-type writeGateResolver struct{}
+type writeGateResolver struct {
+	moduleDeadlineAt *time.Time
+}
 
-func (writeGateResolver) Resolve(context.Context, tx.Tx, string, string) (attempts.QuestionOwner, error) {
-	return attempts.QuestionOwner{ModuleID: "mod-rw", SectionKey: "rw", ModuleState: "active"}, nil
+func (r writeGateResolver) Resolve(context.Context, tx.Tx, string, string) (attempts.QuestionOwner, error) {
+	return attempts.QuestionOwner{ModuleID: "mod-rw", SectionKey: "rw", ModuleState: "active", ModuleDeadlineAt: r.moduleDeadlineAt}, nil
 }
 
 // TestResponseWriteSectionLiveness is the matrix the audit asked for: a real
@@ -89,17 +91,20 @@ func (writeGateResolver) Resolve(context.Context, tx.Tx, string, string) (attemp
 func TestResponseWriteSectionLiveness(t *testing.T) {
 	live, paused, locked, completed := "live", "paused", "locked", "completed"
 	scenarios := []struct {
-		name          string
-		section       *string
-		wantMessage   string
-		wantWritable  bool
-		wantErrStatus int
+		name           string
+		section        *string
+		moduleDeadline *time.Time
+		wantMessage    string
+		wantWritable   bool
+		wantErrStatus  int
+		wantErrCode    apperrors.Code
 	}{
-		{"live section admits the write", &live, "", true, 0},
-		{"paused section refuses", &paused, "Exam section is paused.", false, 422},
-		{"planned but not opened section refuses", &locked, "Exam section has not started.", false, 422},
-		{"completed section refuses", &completed, "Exam section is not live.", false, 422},
-		{"missing section row refuses", nil, "Exam section has not started.", false, 422},
+		{name: "live section admits the write", section: &live, wantWritable: true},
+		{name: "paused section refuses", section: &paused, wantMessage: "Exam section is paused.", wantErrStatus: 422, wantErrCode: apperrors.CodeAttemptNotWritable},
+		{name: "planned but not opened section refuses", section: &locked, wantMessage: "Exam section has not started.", wantErrStatus: 422, wantErrCode: apperrors.CodeAttemptNotWritable},
+		{name: "completed section refuses", section: &completed, wantMessage: "Exam section is not live.", wantErrStatus: 422, wantErrCode: apperrors.CodeAttemptNotWritable},
+		{name: "missing section row refuses", section: nil, wantMessage: "Exam section has not started.", wantErrStatus: 422, wantErrCode: apperrors.CodeAttemptNotWritable},
+		{name: "expired SAT personal module clock refuses before worker reconciliation", section: &live, moduleDeadline: func() *time.Time { deadline := time.Now().UTC().Add(-time.Second); return &deadline }(), wantMessage: "Response deadline has passed.", wantErrStatus: 422, wantErrCode: apperrors.CodeDeadlineExpired},
 	}
 	for _, mode := range sectionGateModes() {
 		for _, sc := range scenarios {
@@ -147,7 +152,7 @@ func TestResponseWriteSectionLiveness(t *testing.T) {
 
 				cmd := attempts.SaveResponsesCommand{AttemptID: "att-1", LeaseEpoch: 3, ControlEpoch: 7,
 					Commands: []attempts.ResponseCommand{{WriteID: "w-gate", QuestionID: "q-1", ClientVersion: 10, Response: attempts.ResponsePayload{Answer: "A"}}}}
-				res, err := svc.SaveResponses(context.Background(), writeBearer(t), cmd, writeGateResolver{}, mode.locker)
+				res, err := svc.SaveResponses(context.Background(), writeBearer(t), cmd, writeGateResolver{moduleDeadlineAt: sc.moduleDeadline}, mode.locker)
 				if sc.wantWritable {
 					if err != nil {
 						t.Fatalf("in-section write must succeed, got %v", err)
@@ -160,8 +165,8 @@ func TestResponseWriteSectionLiveness(t *testing.T) {
 					if !ok {
 						t.Fatalf("write must be refused with a typed error, got %v", err)
 					}
-					if appErr.Code != apperrors.CodeAttemptNotWritable || appErr.HTTPStatus != sc.wantErrStatus {
-						t.Fatalf("want NOT_WRITABLE/%d, got %s/%d", sc.wantErrStatus, appErr.Code, appErr.HTTPStatus)
+					if appErr.Code != sc.wantErrCode || appErr.HTTPStatus != sc.wantErrStatus {
+						t.Fatalf("want %s/%d, got %s/%d", sc.wantErrCode, sc.wantErrStatus, appErr.Code, appErr.HTTPStatus)
 					}
 					if appErr.Message != sc.wantMessage {
 						t.Fatalf("want message %q, got %q", sc.wantMessage, appErr.Message)
