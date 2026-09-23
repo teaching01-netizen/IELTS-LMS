@@ -26,6 +26,7 @@ export function useSatAnnotationSurface(
     autoFocusKey: string;
     /** Coarse pointer: reserve the native selection menu's lane and widen the budget. */
     touch?: boolean | undefined;
+    visualScale?: number | undefined;
     /**
      * Close the surface because the student pressed outside it. Required on
      * purpose: a popover with no way out except Escape is a modal, and neither
@@ -39,8 +40,12 @@ export function useSatAnnotationSurface(
   /** The surface's own node: measured for placement, scoped for the caret and for dismissal. */
   containerRef: React.RefObject<HTMLDivElement | null>;
 } {
-  const { placement, containerRef } = useSatAnnotationPlacement(anchor, { touch: options.touch });
+  const visualScale = options.visualScale ?? 1;
+  const { placement, containerRef } = useSatAnnotationPlacement(anchor, {
+    touch: options.touch,
+    visualScale,
+  });
   useSatAnnotationAutofocus(placement, options.autoFocusKey, containerRef);
   useSatAnnotationDismiss(containerRef, options.onDismiss);
-  return { placement, chrome: satAnnotationSurfaceChrome(placement), containerRef };
+  return { placement, chrome: satAnnotationSurfaceChrome(placement, visualScale), containerRef };
 }

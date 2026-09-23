@@ -71,32 +71,33 @@ const nilUUID = "00000000-0000-0000-0000-000000000000"
 // session reads. It mirrors the Rust ExamSchedule camelCase wire shape
 // (all fields always present; unsets render null like Rust Options).
 type SessionSchedule struct {
-	ID                     string     `json:"id"`
-	ExamID                 string     `json:"examId"`
-	ProviderKey            string     `json:"providerKey"`
-	OrganizationID         *string    `json:"organizationId"`
-	ExamTitle              string     `json:"examTitle"`
-	ProctorDisplayName     string     `json:"proctorDisplayName"`
-	GradingDisplayName     string     `json:"gradingDisplayName"`
-	PublishedVersionID     string     `json:"publishedVersionId"`
-	CohortName             string     `json:"cohortName"`
-	Institution            *string    `json:"institution"`
-	StartTime              time.Time  `json:"startTime"`
-	EndTime                time.Time  `json:"endTime"`
-	PlannedDurationMinutes int        `json:"plannedDurationMinutes"`
-	DeliveryMode           string     `json:"deliveryMode"`
-	RecurrenceType         string     `json:"recurrenceType"`
-	RecurrenceInterval     int        `json:"recurrenceInterval"`
-	RecurrenceEndDate      *time.Time `json:"recurrenceEndDate"`
-	BufferBeforeMinutes    *int       `json:"bufferBeforeMinutes"`
-	BufferAfterMinutes     *int       `json:"bufferAfterMinutes"`
-	AutoStart              bool       `json:"autoStart"`
-	AutoStop               bool       `json:"autoStop"`
-	Status                 string     `json:"status"`
-	CreatedAt              time.Time  `json:"createdAt"`
-	CreatedBy              string     `json:"createdBy"`
-	UpdatedAt              time.Time  `json:"updatedAt"`
-	Revision               int64      `json:"revision"`
+	ID                     string                     `json:"id"`
+	ExamID                 string                     `json:"examId"`
+	ProviderKey            string                     `json:"providerKey"`
+	OrganizationID         *string                    `json:"organizationId"`
+	ExamTitle              string                     `json:"examTitle"`
+	ProctorDisplayName     string                     `json:"proctorDisplayName"`
+	GradingDisplayName     string                     `json:"gradingDisplayName"`
+	PublishedVersionID     string                     `json:"publishedVersionId"`
+	PublishScope           examdomain.SATPublishScope `json:"publishScope"`
+	CohortName             string                     `json:"cohortName"`
+	Institution            *string                    `json:"institution"`
+	StartTime              time.Time                  `json:"startTime"`
+	EndTime                time.Time                  `json:"endTime"`
+	PlannedDurationMinutes int                        `json:"plannedDurationMinutes"`
+	DeliveryMode           string                     `json:"deliveryMode"`
+	RecurrenceType         string                     `json:"recurrenceType"`
+	RecurrenceInterval     int                        `json:"recurrenceInterval"`
+	RecurrenceEndDate      *time.Time                 `json:"recurrenceEndDate"`
+	BufferBeforeMinutes    *int                       `json:"bufferBeforeMinutes"`
+	BufferAfterMinutes     *int                       `json:"bufferAfterMinutes"`
+	AutoStart              bool                       `json:"autoStart"`
+	AutoStop               bool                       `json:"autoStop"`
+	Status                 string                     `json:"status"`
+	CreatedAt              time.Time                  `json:"createdAt"`
+	CreatedBy              string                     `json:"createdBy"`
+	UpdatedAt              time.Time                  `json:"updatedAt"`
+	Revision               int64                      `json:"revision"`
 }
 
 // SessionPlanEntry mirrors Rust ScheduleSectionPlanEntry (camelCase).
@@ -347,7 +348,7 @@ func requireSessionReader(actor Actor) error {
 
 // sessionScheduleColumns is the explicit exam_schedules projection (never
 // SELECT *), mirroring the Rust ExamSchedule field set.
-const sessionScheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, status, created_at, created_by, updated_at, revision"
+const sessionScheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, status, created_at, created_by, updated_at, revision, (SELECT sat_publish_scope FROM exam_versions WHERE id = exam_schedules.published_version_id)"
 
 func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSchedule, error) {
 	var s SessionSchedule
@@ -356,12 +357,13 @@ func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSched
 	var bufBefore, bufAfter sql.NullInt64
 	var autoStart, autoStop sql.NullBool
 	var planned, recInterval, revision int64
+	var publishScope sql.NullString
 	if err := row.Scan(
 		&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle,
 		&s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName,
 		&institution, &s.StartTime, &s.EndTime, &planned, &s.DeliveryMode,
 		&s.RecurrenceType, &recInterval, &recEnd, &bufBefore, &bufAfter,
-		&autoStart, &autoStop, &s.Status, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &revision,
+		&autoStart, &autoStop, &s.Status, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &revision, &publishScope,
 	); err != nil {
 		return SessionSchedule{}, err
 	}
@@ -375,6 +377,10 @@ func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSched
 	s.AutoStart = autoStart.Valid && autoStart.Bool
 	s.AutoStop = autoStop.Valid && autoStop.Bool
 	s.Revision = revision
+	s.PublishScope = examdomain.SATPublishScope(publishScope.String)
+	if s.PublishScope != examdomain.SATPublishScopeFull && s.PublishScope != examdomain.SATPublishScopeReadingWriting && s.PublishScope != examdomain.SATPublishScopeMath {
+		s.PublishScope = examdomain.SATPublishScopeFull
+	}
 	return s, nil
 }
 
@@ -877,6 +883,50 @@ func loadExamPlan(ctx context.Context, q sessionQuerier, versionID string) ([]Se
 	return plan, nil
 }
 
+// loadScopedExamPlan projects the published plan through both immutable release
+// scope and any Student Access link scope. The run sheet must describe the
+// sections this schedule can actually deliver, including before runtime rows
+// have been created.
+func loadScopedExamPlan(ctx context.Context, q sessionQuerier, scheduleID, versionID string, publishScope examdomain.SATPublishScope) ([]SessionPlanSection, error) {
+	plan, err := loadExamPlan(ctx, q, versionID)
+	if err != nil || strings.TrimSpace(versionID) == "" {
+		return plan, err
+	}
+	var raw sql.NullString
+	err = q.QueryRowContext(ctx,
+		"SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ? LIMIT 1",
+		scheduleID,
+	).Scan(&raw)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	linkScope := map[string]bool(nil)
+	if err == nil {
+		linkScope = examdomain.ParseStoredSectionScope(raw.String)
+	}
+	effectiveScope := examdomain.IntersectSectionScopes(
+		examdomain.ParseSATPublishScope(string(publishScope)),
+		linkScope,
+	)
+	return filterSessionPlanScope(plan, effectiveScope), nil
+}
+
+func filterSessionPlanScope(plan []SessionPlanSection, scope map[string]bool) []SessionPlanSection {
+	if scope == nil {
+		return plan
+	}
+	filtered := make([]SessionPlanSection, 0, len(plan))
+	for _, section := range plan {
+		if examdomain.AllowsSection(scope, section.SectionKey) {
+			filtered = append(filtered, section)
+		}
+	}
+	if len(filtered) > 0 {
+		filtered[len(filtered)-1].GapAfterMinutes = 0
+	}
+	return filtered
+}
+
 // LoadSessionRuntimeBySchedule returns the same hydrated runtime projection
 // used by the proctor dashboard for a schedule-backed student session.  The
 // student API used to duplicate this read and consequently exposed the
@@ -898,12 +948,16 @@ func LoadSessionRuntimeBySchedule(ctx context.Context, db *sql.DB, scheduleID st
 // as the proctor detail route.
 func LoadExamPlanBySchedule(ctx context.Context, db *sql.DB, scheduleID string) ([]SessionPlanSection, error) {
 	var versionID string
-	if err := db.QueryRowContext(ctx,
-		"SELECT published_version_id FROM exam_schedules WHERE id = ?", scheduleID,
-	).Scan(&versionID); err != nil {
+	var publishScope sql.NullString
+	if err := db.QueryRowContext(ctx, `
+		SELECT s.published_version_id, v.sat_publish_scope
+		FROM exam_schedules s
+		LEFT JOIN exam_versions v ON v.id = s.published_version_id
+		WHERE s.id = ?`, scheduleID,
+	).Scan(&versionID, &publishScope); err != nil {
 		return nil, err
 	}
-	return loadExamPlan(ctx, db, versionID)
+	return loadScopedExamPlan(ctx, db, scheduleID, versionID, examdomain.SATPublishScope(publishScope.String))
 }
 
 // LoadSessionRuntimeByStatus hydrates the same projection when the caller
@@ -1686,7 +1740,7 @@ func (s *Service) GetSessionDetail(ctx context.Context, actor Actor, scheduleID 
 	// Staff run sheet: the authored section/module windows of the version this
 	// schedule runs, attached to the detail runtime only (the summary and
 	// student reads keep ExamPlan null).
-	plan, err := loadExamPlan(ctx, q, schedule.PublishedVersionID)
+	plan, err := loadScopedExamPlan(ctx, q, schedule.ID, schedule.PublishedVersionID, schedule.PublishScope)
 	if err != nil {
 		return ProctorSessionDetail{}, err
 	}

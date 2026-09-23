@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   canAttemptEntry,
   settleEntry,
@@ -13,6 +13,8 @@ export interface SatModuleEntrySurface {
    * recovery from this state — never the required path.
    */
   recoverable: boolean;
+  /** Re-arm the current entry target immediately after the student retries. */
+  retry: () => void;
 }
 
 export interface UseSatModuleEntryOptions {
@@ -47,6 +49,7 @@ export function useSatModuleEntry({
 }: UseSatModuleEntryOptions): SatModuleEntrySurface {
   const attemptRef = useRef<SatEntryAttempt | null>(null);
   const [recoverable, setRecoverable] = useState(false);
+  const [retrySequence, setRetrySequence] = useState(0);
 
   // Identity rotation invalidates the whole attempt record: a new identity must
   // never inherit the previous one's retry or recovery state.
@@ -75,7 +78,14 @@ export function useSatModuleEntry({
       attemptRef.current = settleEntry(record, outcome, Date.now());
       setRecoverable(outcome !== "opened");
     });
-  }, [enabled, entryKey, now, startModule]);
+  }, [enabled, entryKey, now, retrySequence, startModule]);
 
-  return { recoverable };
+  const retry = useCallback(() => {
+    if (attemptRef.current?.inFlight) return;
+    attemptRef.current = null;
+    setRecoverable(false);
+    setRetrySequence((sequence) => sequence + 1);
+  }, []);
+
+  return { recoverable, retry };
 }

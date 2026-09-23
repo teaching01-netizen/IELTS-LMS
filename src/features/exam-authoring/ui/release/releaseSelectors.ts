@@ -2,6 +2,7 @@ import type {
   AssessmentAuthoringShell,
   AssessmentValidationIssue,
   AssessmentValidationReport,
+  SatPublishScope,
 } from "../../contracts/assessment";
 import type {
   AssessmentReleaseLifecycleState,
@@ -17,6 +18,20 @@ export type ReleaseHeroState =
   | "preparing";
 
 export const MAX_PUBLISH_NOTES_LENGTH = 1000;
+
+export const SAT_PUBLISH_SCOPE_OPTIONS: Array<{ value: SatPublishScope; label: string }> = [
+  { value: "full", label: "Full SAT" },
+  { value: "reading-writing", label: "Reading & Writing" },
+  { value: "math", label: "Math" },
+];
+
+export function satPublishScopeLabel(scope: SatPublishScope): string {
+  return SAT_PUBLISH_SCOPE_OPTIONS.find((option) => option.value === scope)?.label ?? "Full SAT";
+}
+
+export function satPublishScopeCopy(scope: SatPublishScope): string {
+  return scope === "full" ? satPublishScopeLabel(scope) : `${satPublishScopeLabel(scope)} only`;
+}
 
 export const SAT_PUBLISH_READINESS_FAMILIES = [
   { id: "question-text", label: "Question text", codes: ["question.prompt.required"] },
@@ -59,19 +74,25 @@ export function getSATPublishBlockers(
 export function isSATPublishReadinessValid(
   readiness: AssessmentValidationReport | null | undefined,
   fresh: boolean,
+  publishScope: SatPublishScope = "full",
 ): boolean {
-  return Boolean(readiness && fresh && getSATPublishBlockers(readiness, fresh).length === 0);
+  return Boolean(
+    readiness && fresh && readiness.publishScope === publishScope &&
+    getSATPublishBlockers(readiness, fresh).length === 0,
+  );
 }
 
 /** True only when the report was computed for the exact visible draft. */
 export function isReadinessFresh(
   readiness: AssessmentValidationReport | null | undefined,
   shell: Pick<AssessmentAuthoringShell, "versionId" | "versionRevision"> | null | undefined,
+  publishScope: SatPublishScope = "full",
 ): boolean {
   if (!readiness || !shell) return false;
   return (
     readiness.versionId === shell.versionId &&
-    readiness.versionRevision === shell.versionRevision
+    readiness.versionRevision === shell.versionRevision &&
+    readiness.publishScope === publishScope
   );
 }
 
@@ -332,6 +353,7 @@ export function formatDuration(totalSeconds: number): string {
  * the longest real sitting.
  */
 export function candidateSecondsForSection(section: {
+  sectionKey?: string;
   breakAfterSeconds: number;
   modules: Array<{ adaptiveRole: string; durationSeconds: number }>;
 }): number {
@@ -347,8 +369,14 @@ export function candidateSecondsForSection(section: {
 
 export function candidateSecondsForShell(shell: {
   sections: Array<Parameters<typeof candidateSecondsForSection>[0]>;
-}): number {
-  return shell.sections.reduce((sum, section) => sum + candidateSecondsForSection(section), 0);
+}, publishScope: SatPublishScope = "full"): number {
+  const included = shell.sections.filter((section) =>
+    publishScope === "full" || section.sectionKey === publishScope,
+  );
+  return included.reduce((sum, section, index) => sum + candidateSecondsForSection({
+    ...section,
+    breakAfterSeconds: index === included.length - 1 ? 0 : section.breakAfterSeconds,
+  }), 0);
 }
 
 export function secondsToMinutes(seconds: number): number {
@@ -447,9 +475,16 @@ export function toUserFacingPublishError(error: unknown): string {
 export function summarizeStaleReadiness(
   readiness: AssessmentValidationReport | null | undefined,
   shell: Pick<AssessmentAuthoringShell, "versionId" | "versionRevision"> | null | undefined,
+  publishScope: SatPublishScope = "full",
 ): { fresh: boolean; checkedLabel: string | null } {
-  const fresh = isReadinessFresh(readiness, shell);
+  const fresh = isReadinessFresh(readiness, shell, publishScope);
   if (fresh || !readiness) return { fresh, checkedLabel: null };
+  if (readiness.publishScope !== publishScope) {
+    return {
+      fresh,
+      checkedLabel: `Checks are for ${satPublishScopeLabel(readiness.publishScope)}; run checks for ${satPublishScopeLabel(publishScope)} before publishing.`,
+    };
+  }
   return {
     fresh,
     checkedLabel: `Checks are for revision ${readiness.versionRevision}; the draft is now revision ${shell?.versionRevision ?? "\u2014"}. Run checks again.`,

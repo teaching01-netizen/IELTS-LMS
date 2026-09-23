@@ -53,6 +53,7 @@ vi.mock("../../api/assessmentQueries", () => ({
       examId: "exam-sat-1",
       versionId: "draft-v5",
       versionRevision: 42,
+      publishScope: "full",
       valid: true,
       errors: [],
       warnings: [],
@@ -93,7 +94,7 @@ vi.mock("../../ui/SatDeliveryReleasePage", () => ({
     onBackToBuilder,
   }: {
     onIssueClick: (issue: AssessmentValidationIssue) => void;
-    onPublish: (notes?: string) => Promise<void>;
+    onPublish: (scope: "full" | "reading-writing" | "math", notes?: string) => Promise<void>;
     onOpenStudentAccess: () => void;
     onBackToBuilder: () => void;
   }) => (
@@ -130,7 +131,7 @@ vi.mock("../../ui/SatDeliveryReleasePage", () => ({
       <button type="button" onClick={onOpenStudentAccess}>
         Student Access
       </button>
-      <button type="button" onClick={() => void onPublish("Release notes")}>
+      <button type="button" onClick={() => void onPublish("full", "Release notes")}>
         Publish
       </button>
     </div>
@@ -215,6 +216,7 @@ beforeEach(() => {
     isDraft: false,
     isPublished: true,
     publishNotes: "Release notes",
+    publishScope: "full",
     createdAt: "2026-08-28T08:00:00.000Z",
   });
 });
@@ -229,6 +231,7 @@ describe("SatDeliveryReleaseRoute", () => {
         revision: 9,
         expectedDraftVersionId: "draft-v5",
         expectedDraftRevision: 42,
+        publishScope: "full",
         publishNotes: "Release notes",
         operationKey: expect.any(String),
       })

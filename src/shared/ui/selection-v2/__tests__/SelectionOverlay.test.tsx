@@ -76,6 +76,27 @@ describe('handles', () => {
     expect(start).toHaveAttribute('data-student-selection-handle', 'start');
   });
 
+  it('scales the visible grip without shrinking the 44px handle target', () => {
+    render(<SelectionOverlay selection={resting()} visualScale={0.5} />);
+
+    const start = screen.getByRole('button', { name: 'Adjust selection start' });
+    expect(start).toHaveClass('selection-v2-handle');
+    expect(start.style.width).toBe('');
+    expect(start.style.height).toBe('');
+    expect(start.style.transform).toBe('translate3d(10px, 100px, 0) translate(-50%, -50%)');
+    expect(start.querySelector('.selection-v2-grip-visual')).toHaveStyle({ transform: 'scale(0.5)' });
+  });
+
+  it('uses a product-owned physical viewport portal root when supplied', () => {
+    const viewportRoot = document.createElement('div');
+    document.body.append(viewportRoot);
+    const view = render(<SelectionOverlay selection={resting()} portalContainer={viewportRoot} />);
+
+    expect(viewportRoot.querySelector('[data-selection-floating-layer]')).toBeInTheDocument();
+    view.unmount();
+    viewportRoot.remove();
+  });
+
   it('starts adjusting the edge that was grabbed, with the pointer it was grabbed by', () => {
     const selection = resting();
     render(<SelectionOverlay selection={selection} />);

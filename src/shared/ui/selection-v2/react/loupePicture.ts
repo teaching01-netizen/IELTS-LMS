@@ -50,7 +50,10 @@
 export interface PictureBox {
   left: number;
   top: number;
+  /** Untransformed source width in logical CSS pixels. */
   width: number;
+  /** Ancestor scale between source CSS pixels and viewport coordinates. */
+  visualScale: number;
 }
 
 /** The clone's own border box, measured from the LENS'S box, in unmagnified units. */
@@ -211,6 +214,7 @@ export function pictureOrigin(
   copy: HTMLElement,
   frame: HTMLElement | null,
   width: number,
+  visualScale = 1,
 ): PictureOrigin {
   // The lens's own answer whenever it has one to give. It does not in the commit
   // that first paints the layer — a popover that has not been opened has no box at
@@ -221,8 +225,8 @@ export function pictureOrigin(
     : measureLeadingMargin(host, copy, width);
   const hairline = frame ? getComputedStyle(frame) : null;
   return {
-    x: (Number.parseFloat(hairline?.borderLeftWidth ?? '') || 0) + displacement.x,
-    y: (Number.parseFloat(hairline?.borderTopWidth ?? '') || 0) + displacement.y,
+    x: (Number.parseFloat(hairline?.borderLeftWidth ?? '') || 0) / visualScale + displacement.x,
+    y: (Number.parseFloat(hairline?.borderTopWidth ?? '') || 0) / visualScale + displacement.y,
   };
 }
 
@@ -249,7 +253,12 @@ function dressPicture(copy: HTMLElement): void {
  * caller mounts its host first, so this is synchronous work on the commit that
  * paints.
  */
-export function buildPicture(source: HTMLElement, host: HTMLElement, frame: HTMLElement | null): LoupePicture {
+export function buildPicture(
+  source: HTMLElement,
+  host: HTMLElement,
+  frame: HTMLElement | null,
+  visualScale = 1,
+): LoupePicture {
   const copy = source.cloneNode(true) as HTMLElement;
   dressPicture(copy);
 
@@ -268,21 +277,25 @@ export function buildPicture(source: HTMLElement, host: HTMLElement, frame: HTML
   // systems are the same one. Border-box is set rather than mirrored: the host is
   // as wide as the source's border box, and this makes padding and borders eat into
   // that width instead of adding to it.
+  const safeScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
+  const renderedSourceBox = source.getBoundingClientRect();
+  const sourceWidth = source.offsetWidth > 0 ? source.offsetWidth : renderedSourceBox.width / safeScale;
+  host.style.width = `${sourceWidth}px`;
   copy.style.boxSizing = 'border-box';
   copy.style.margin = '0';
   copy.style.width = '100%';
   copy.style.maxWidth = 'none';
   host.append(copy);
 
-  const box = source.getBoundingClientRect();
   return {
-    left: box.left,
-    top: box.top,
-    width: box.width,
+    left: renderedSourceBox.left,
+    top: renderedSourceBox.top,
+    width: sourceWidth,
+    visualScale: safeScale,
     backdrop: pictureBackdrop(source),
     // Where the picture's own border box begins, measured from the LENS'S box,
     // which is the box the finger is mapped onto. See `pictureOrigin`.
-    origin: pictureOrigin(host, copy, frame, box.width),
+    origin: pictureOrigin(host, copy, frame, sourceWidth, safeScale),
   };
 }
 
@@ -305,10 +318,12 @@ export function buildPicture(source: HTMLElement, host: HTMLElement, frame: HTML
  * there), and the transform this feeds is composited, so the read forces no reflow
  * of its own.
  */
-export function readPictureBox(source: HTMLElement | null): PictureBox | null {
+export function readPictureBox(source: HTMLElement | null, visualScale = 1): PictureBox | null {
   if (!source || typeof source.getBoundingClientRect !== 'function') return null;
+  const safeScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
   const box = source.getBoundingClientRect();
-  return { left: box.left, top: box.top, width: box.width };
+  const width = source.offsetWidth > 0 ? source.offsetWidth : box.width / safeScale;
+  return { left: box.left, top: box.top, width, visualScale: safeScale };
 }
 
 /**
@@ -319,7 +334,8 @@ export function settlePicture(picture: LoupePicture, box: PictureBox): LoupePict
   const settled =
     Math.abs(picture.left - box.left) < 0.5 &&
     Math.abs(picture.top - box.top) < 0.5 &&
-    Math.abs(picture.width - box.width) < 0.5;
+    Math.abs(picture.width - box.width) < 0.5 &&
+    picture.visualScale === box.visualScale;
   return settled ? picture : { ...picture, ...box };
 }
 
@@ -348,8 +364,8 @@ export function pictureTranslation(
   magnification: number,
 ): { left: number; top: number } {
   return {
-    left: lens / 2 - magnification * (picture.origin.x + point.x - picture.left),
-    top: lens / 2 - magnification * (picture.origin.y + point.y - picture.top),
+    left: lens / 2 - magnification * (picture.visualScale * picture.origin.x + point.x - picture.left),
+    top: lens / 2 - magnification * (picture.visualScale * picture.origin.y + point.y - picture.top),
   };
 }
 

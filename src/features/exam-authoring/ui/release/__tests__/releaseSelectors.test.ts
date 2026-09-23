@@ -65,6 +65,7 @@ const freshReport: AssessmentValidationReport = {
   examId: "exam-1",
   versionId: "version-1",
   versionRevision: 12,
+  publishScope: "full",
   valid: true,
   errors: [],
   warnings: [],
@@ -88,6 +89,7 @@ function releaseState(state: AssessmentReleaseState["state"]): AssessmentRelease
             versionNumber: 4,
             revision: 1,
             publishNotes: null,
+            publishScope: "full",
             publishedAt: "2026-08-29T03:26:24.000Z",
           },
     workingDraft: { id: "version-1", parentVersionId: null, versionNumber: 1, revision: 12 },
@@ -99,6 +101,8 @@ function releaseState(state: AssessmentReleaseState["state"]): AssessmentRelease
 describe("isReadinessFresh", () => {
   it("matches exact version id and revision", () => {
     expect(isReadinessFresh(freshReport, shell)).toBe(true);
+    expect(isReadinessFresh(freshReport, shell, "reading-writing")).toBe(false);
+    expect(isReadinessFresh({ ...freshReport, publishScope: "reading-writing" }, shell, "reading-writing")).toBe(true);
     expect(isReadinessFresh(staleReport, shell)).toBe(false);
     expect(isReadinessFresh({ ...freshReport, versionId: "other" }, shell)).toBe(false);
     expect(isReadinessFresh(null, shell)).toBe(false);
@@ -145,6 +149,12 @@ describe("SAT publish readiness contract", () => {
     expect(isSATPublishReadinessValid({ ...freshReport, valid: false, errors: [legacy] }, true)).toBe(true);
     expect(isSATPublishReadinessValid(report, true)).toBe(false);
     expect(isSATPublishReadinessValid(report, false)).toBe(false);
+  });
+
+  it("never reuses a fresh report across publish scopes", () => {
+    const rwReport = { ...freshReport, publishScope: "reading-writing" as const };
+    expect(isSATPublishReadinessValid(rwReport, true, "reading-writing")).toBe(true);
+    expect(isSATPublishReadinessValid(rwReport, true, "full")).toBe(false);
   });
 });
 
@@ -316,7 +326,14 @@ describe("candidate duration", () => {
     // 1920 + max(1920, 2100) + 600 = 4620. Summing all three modules
     // (1920*2 + 2100 + 600 = 6540) would overstate the longest sitting.
     expect(candidateSecondsForSection(section)).toBe(4620);
-    expect(candidateSecondsForShell({ sections: [section, section] })).toBe(9240);
+    // The final section's break is not part of the candidate-facing sitting.
+    expect(candidateSecondsForShell({ sections: [section, section] })).toBe(8640);
+  });
+  it("counts only the selected section and drops its final inter-section break", () => {
+    const rw = { ...section, sectionKey: "reading-writing" };
+    const math = { ...section, sectionKey: "math" };
+    expect(candidateSecondsForShell({ sections: [rw, math] }, "reading-writing")).toBe(4020);
+    expect(candidateSecondsForShell({ sections: [rw, math] }, "math")).toBe(4020);
   });
   it("survives a missing base without NaN", () => {
     expect(

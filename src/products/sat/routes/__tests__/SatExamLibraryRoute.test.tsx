@@ -62,6 +62,19 @@ describe('SatExamLibraryRoute', () => {
     expect(screen.queryByText('IELTS Academic 01')).not.toBeInTheDocument();
   });
 
+  it('shows the published version scope in the library row', () => {
+    const published = {
+      ...satExam,
+      status: 'published',
+      currentDraftVersionId: null,
+      currentPublishedVersionId: 'published-v2',
+      currentPublishedScope: 'math',
+    };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [published], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute();
+    expect(screen.getByText(/Math only · 0 questions/)).toBeInTheDocument();
+  });
+
   it('creates a SAT directly without exposing a provider selector', async () => {
     createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
     renderRoute();

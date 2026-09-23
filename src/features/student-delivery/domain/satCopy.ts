@@ -134,24 +134,6 @@ export const SAT_COPY = {
     finalizingResponses: "Finalizing SAT responses" + "\u2026",
     almostUp: "Time almost up \u2014 answers save automatically.",
   },
-  directions: {
-    beginModule: "Begin module",
-    // Phase 4 (kill the silent 0:00): auto-entry owns the primary path, so the
-    // screen says the module is opening and the button is recovery-only.
-    startingModule: "Starting your module" + "…",
-    autoEntryNotice:
-      "Your module opens automatically. If it does not, this button becomes available.",
-    timerBegins: "The timer begins when you start.",
-    leaveExam: "Leave exam",
-    starting: "Starting" + "\u2026",
-    calculatorCleared: "Calculator cleared between modules.",
-    leaveConfirmTitle: "Leave this exam?",
-    // Wave C R-16c: destuttered — same two facts (saved = safe;
-    // in-flight = at risk), no new term; title + buttons unchanged.
-    leaveConfirmBody: "Answers you have already saved stay saved. Anything you are typing right now may not.",
-    stayAndContinue: "Stay and continue",
-    leaveForSure: "Leave without saving more",
-  },
   transitions: {
     waitingForBreak: "Waiting for the break to start",
     onBreak: "On break",

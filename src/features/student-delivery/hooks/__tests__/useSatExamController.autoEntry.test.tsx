@@ -240,7 +240,7 @@ function timedOutBranchBootstrap(
   };
 }
 
-/** Module 1 submitted early; the routed Module 2 waits for the student. */
+/** Module 1 submitted early; the server-routed Module 2 remains unstarted. */
 function earlySubmitBranchBootstrap(revision = 3): AssessmentDeliveryBootstrap {
   const base = liveFirstModuleBootstrap(revision);
   return {
@@ -856,25 +856,23 @@ describe("useSatExamController auto-entry", () => {
     },
   );
 
-  // AT-03: a deliberate early submit is not a timeout. The module is still the
-  // student's to open, and the screen must say so with a working button rather
-  // than waiting for an automatic entry that will never come.
-  it("leaves Module 2 to the student when Module 1 was submitted early", async () => {
-    gatewayMocks.bootstrap.mockResolvedValue(earlySubmitBranchBootstrap());
+  // AT-02: the server-selected adaptive module auto-opens after either a
+  // timeout or an early Module 1 submit.
+  it("opens the routed Module 2 automatically when Module 1 was submitted early", async () => {
+    const routed = earlySubmitBranchBootstrap();
+    gatewayMocks.bootstrap.mockResolvedValue(routed);
+    gatewayMocks.startModule.mockResolvedValue(openedModule(routed, MODULE_RW_M2, 4));
 
     const hook = renderController();
 
-    await waitFor(() =>
-      expect(hook.result.current.data?.attempt.moduleAttempts.length).toBe(2),
-    );
-    await act(async () => {
-      await sleep(600);
+    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
+    expect(gatewayMocks.startModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {
+      moduleId: MODULE_RW_M2,
     });
-
-    expect(gatewayMocks.startModule).not.toHaveBeenCalled();
-    expect(hook.result.current.state.phase).toBe("directions");
-    expect(hook.result.current.entryAutoStartPending).toBe(false);
-    expect(hook.result.current.autoEntryRecoverable).toBe(false);
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(
+      hook.result.current.state.phase === "module" && hook.result.current.state.moduleKey,
+    ).toBe(MODULE_RW_M2);
   });
 
   // AT-06/AT-09: Module 2's own clock runs out, the route moves to the next

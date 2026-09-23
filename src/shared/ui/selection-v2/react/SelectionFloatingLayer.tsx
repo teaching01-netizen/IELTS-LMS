@@ -14,18 +14,20 @@ import '../styles/selection.css';
  *
  * It is not available everywhere yet, and a product must not depend on which one
  * it got, so this adapter prefers the popover and falls back to a portal at the
- * document body. Callers see `<SelectionFloatingLayer>` either way; the mode is
- * exposed as a data attribute so a test (and a released trace) can say which one
- * ran.
+ * caller's viewport container or the document body. Callers see
+ * `<SelectionFloatingLayer>` either way; the mode is exposed as a data attribute
+ * so a test (and a released trace) can say which one ran.
  */
 export interface SelectionFloatingLayerProps {
   open: boolean;
   children: ReactNode;
   /** Accessible name for the layer's content region. */
   label?: string | undefined;
+  /** Optional physical-viewport portal root; defaults to document.body. */
+  portalContainer?: HTMLElement | null | undefined;
 }
 
-export function SelectionFloatingLayer({ open, children, label }: SelectionFloatingLayerProps) {
+export function SelectionFloatingLayer({ open, children, label, portalContainer }: SelectionFloatingLayerProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const supportsPopover = typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.showPopover === 'function';
 
@@ -58,6 +60,6 @@ export function SelectionFloatingLayer({ open, children, label }: SelectionFloat
     >
       {children}
     </div>,
-    document.body,
+    portalContainer ?? document.body,
   );
 }

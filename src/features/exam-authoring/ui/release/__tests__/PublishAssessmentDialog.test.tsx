@@ -19,6 +19,7 @@ function renderDialog() {
       open
       examTitle="Practice Test 06"
       shell={shell}
+      publishScope="full"
       blockerCount={0}
       warningCount={1}
       candidateSeconds={7200}
@@ -45,6 +46,6 @@ describe("PublishAssessmentDialog", () => {
   it("blocks confirm while publishing or blocked, and focuses the safe choice", () => {
     renderDialog();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish Full SAT" })).toBeEnabled();
   });
 });

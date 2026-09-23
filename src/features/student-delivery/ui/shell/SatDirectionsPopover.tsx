@@ -29,13 +29,13 @@ export function SatDirectionsPopover(props: SatDirectionsPopoverProps) {
       triggerRef={props.triggerRef}
       onClose={props.onClose}
       closeLabel="Close directions"
-      anchoredClassName="sat-ui sat-popover-anchored fixed left-[calc(1rem+var(--student-safe-left))] top-[calc(var(--student-safe-top)+98px)] z-[62] w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-[8px] border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
-      compactClassName="sat-ui flex max-h-[calc(100dvh-32px-var(--student-safe-top)-var(--student-safe-bottom))] w-full max-w-[680px] flex-col overflow-hidden rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
+      anchoredClassName="sat-ui sat-popover-anchored fixed left-[calc(1rem+var(--student-safe-left))] top-[calc(var(--student-safe-top)+98px)] z-[62] w-[min(440px,calc(var(--sat-exam-logical-width,100vw)-32px))] overflow-hidden rounded-[8px] border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
+      compactClassName="sat-ui flex max-h-[calc(var(--sat-exam-logical-height,100dvh)-32px-var(--student-safe-top)-var(--student-safe-bottom))] w-full max-w-[680px] flex-col overflow-hidden rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
       backdropClassName="sat-dialog-backdrop fixed inset-0 z-[79] grid place-items-center bg-black/20"
     >
       {/* The public id lives on the dialog root (panelId), not here: a trigger
           aria-controls must resolve to the role=dialog element itself. */}
-      <div className="min-h-0 max-h-[56dvh] overflow-y-auto px-5 py-4 text-[15px] leading-7 text-[var(--sat-text)]">
+      <div className="min-h-0 max-h-[var(--sat-exam-logical-height-56,56dvh)] overflow-y-auto px-5 py-4 text-[15px] leading-7 text-[var(--sat-text)]">
         {props.instructions ? (
           <StructuredContentRenderer content={props.instructions} />
         ) : (

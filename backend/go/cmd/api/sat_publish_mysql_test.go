@@ -134,6 +134,7 @@ func (f *satPublishFixture) publishRequest() exams.PublishRequest {
 
 type satPublishPersistedState struct {
 	draftID, publishedID sql.NullString
+	publishScope         sql.NullString
 	status               string
 	examRevision         int
 	isDraft, isPublished bool
@@ -153,9 +154,9 @@ func (f *satPublishFixture) persistedState(t *testing.T) satPublishPersistedStat
 		t.Fatal(err)
 	}
 	if err := f.h.db.QueryRowContext(ctx, `
-		SELECT is_draft, is_published, revision
+		SELECT is_draft, is_published, revision, sat_publish_scope
 		FROM exam_versions WHERE id = ?`, f.draftID).Scan(
-		&state.isDraft, &state.isPublished, &state.draftRevision,
+		&state.isDraft, &state.isPublished, &state.draftRevision, &state.publishScope,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -189,10 +190,14 @@ func (f *satPublishFixture) setQuestion(t *testing.T, examQuestionID, questionTy
 	}
 }
 
-func assertSATPublishRejected(t *testing.T, f *satPublishFixture, wantCode, wantPath string) {
+func assertSATPublishRejected(t *testing.T, f *satPublishFixture, wantCode, wantPath string, scope ...exams.SATPublishScope) {
 	t.Helper()
 	before := f.persistedState(t)
-	_, err := f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, f.publishRequest())
+	req := f.publishRequest()
+	if len(scope) > 0 {
+		req.PublishScope = scope[0]
+	}
+	_, err := f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, req)
 	if err == nil {
 		t.Fatal("expected SAT publish to be rejected")
 	}
@@ -233,6 +238,9 @@ func TestSATPublishUsesConfiguredQuestionCountsMySQL(t *testing.T) {
 	if published.ID != f.draftID || !published.IsPublished || published.IsDraft {
 		t.Fatalf("unexpected published version: %+v", published)
 	}
+	if published.PublishScope == nil || *published.PublishScope != exams.SATPublishScopeFull {
+		t.Fatalf("an omitted scope must publish Full SAT, got %+v", published.PublishScope)
+	}
 	state := f.persistedState(t)
 	if state.draftID.Valid || !state.publishedID.Valid || state.publishedID.String != f.draftID {
 		t.Fatalf("published pointers are incorrect: %+v", state)
@@ -240,8 +248,119 @@ func TestSATPublishUsesConfiguredQuestionCountsMySQL(t *testing.T) {
 	if state.isDraft || !state.isPublished || state.publishedEvents != 1 {
 		t.Fatalf("publish state was not sealed atomically: %+v", state)
 	}
+	if !state.publishScope.Valid || state.publishScope.String != string(exams.SATPublishScopeFull) {
+		t.Fatalf("the immutable version must store Full SAT, got %+v", state.publishScope)
+	}
 	if state.status != exams.StatusPublished || state.examRevision != f.examRevision+1 || state.draftRevision != f.draftRevision+1 {
 		t.Fatalf("publish revisions or status were not advanced: %+v", state)
+	}
+}
+
+func TestSATPublishScopeIgnoresExcludedIssuesAndPersistsScopeMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	ctx := context.Background()
+	var brokenMath *satPublishModuleFixture
+	for index := range f.modules {
+		if f.modules[index].sectionKey == "math" {
+			brokenMath = &f.modules[index]
+			break
+		}
+	}
+	if brokenMath == nil {
+		t.Fatal("fixture must include a Math module")
+	}
+	if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 2 WHERE id = ?", brokenMath.id); err != nil {
+		t.Fatal(err)
+	}
+	assertSATPublishRejected(t, f, "sat.module.incomplete", brokenMath.sectionKey+"."+brokenMath.moduleKey)
+
+	full, err := f.h.authors.ValidateExamForScope(ctx, f.h.examID, exams.SATPublishScopeFull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.Valid {
+		t.Fatal("Full SAT readiness must include the broken Math module")
+	}
+	rw, err := f.h.authors.ValidateExamForScope(ctx, f.h.examID, exams.SATPublishScopeReadingWriting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rw.Valid || rw.PublishScope != exams.SATPublishScopeReadingWriting {
+		t.Fatalf("Reading & Writing checks should ignore Math issues: %+v", rw)
+	}
+
+	req := f.publishRequest()
+	req.PublishScope = exams.SATPublishScopeReadingWriting
+	published, err := f.h.exams.Publish(ctx, f.h.examID, f.h.actor, req)
+	if err != nil {
+		t.Fatalf("Reading & Writing publish should ignore Math issues: %v", err)
+	}
+	if published.PublishScope == nil || *published.PublishScope != exams.SATPublishScopeReadingWriting {
+		t.Fatalf("published version did not return its scoped release: %+v", published.PublishScope)
+	}
+	state := f.persistedState(t)
+	if !state.publishScope.Valid || state.publishScope.String != string(exams.SATPublishScopeReadingWriting) {
+		t.Fatalf("scope was not persisted with the immutable version: %+v", state.publishScope)
+	}
+}
+
+func TestSATPublishMathScopeIgnoresExcludedIssuesAndPersistsScopeMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	ctx := context.Background()
+	var brokenRW *satPublishModuleFixture
+	for index := range f.modules {
+		if f.modules[index].sectionKey == "reading-writing" {
+			brokenRW = &f.modules[index]
+			break
+		}
+	}
+	if brokenRW == nil {
+		t.Fatal("fixture must include a Reading & Writing module")
+	}
+	if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 2 WHERE id = ?", brokenRW.id); err != nil {
+		t.Fatal(err)
+	}
+	assertSATPublishRejected(t, f, "sat.module.incomplete", brokenRW.sectionKey+"."+brokenRW.moduleKey, exams.SATPublishScopeReadingWriting)
+
+	rw, err := f.h.authors.ValidateExamForScope(ctx, f.h.examID, exams.SATPublishScopeReadingWriting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	math, err := f.h.authors.ValidateExamForScope(ctx, f.h.examID, exams.SATPublishScopeMath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rw.Valid || !math.Valid || math.PublishScope != exams.SATPublishScopeMath {
+		t.Fatalf("scoped readiness did not isolate Math from Reading & Writing issues: RW=%+v Math=%+v", rw, math)
+	}
+
+	req := f.publishRequest()
+	req.PublishScope = exams.SATPublishScopeMath
+	published, err := f.h.exams.Publish(ctx, f.h.examID, f.h.actor, req)
+	if err != nil {
+		t.Fatalf("Math publish should ignore Reading & Writing issues: %v", err)
+	}
+	if published.PublishScope == nil || *published.PublishScope != exams.SATPublishScopeMath {
+		t.Fatalf("published version did not return the Math scope: %+v", published.PublishScope)
+	}
+	state := f.persistedState(t)
+	if !state.publishScope.Valid || state.publishScope.String != string(exams.SATPublishScopeMath) {
+		t.Fatalf("Math scope was not persisted with the immutable version: %+v", state.publishScope)
+	}
+}
+
+func TestSATPublishRejectsUnknownScopeMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	before := f.persistedState(t)
+	req := f.publishRequest()
+	req.PublishScope = "verbal"
+	_, err := f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, req)
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.Code != apperrors.CodeValidation {
+		t.Fatalf("unknown scope should be rejected as validation, got %v", err)
+	}
+	if after := f.persistedState(t); !reflect.DeepEqual(after, before) {
+		t.Fatalf("unknown scope changed persisted state:\nbefore: %+v\nafter:  %+v", before, after)
 	}
 }
 
@@ -446,11 +565,18 @@ func TestSATPublishOperationKeyReplaysOneReleaseMySQL(t *testing.T) {
 	if replayed.ID != first.ID || replayed.VersionNumber != first.VersionNumber {
 		t.Fatalf("retry returned a different release: first=%+v replayed=%+v", first, replayed)
 	}
+	req.PublishScope = exams.SATPublishScopeMath
+	_, err = f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, req)
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.Code != apperrors.CodeConflict {
+		t.Fatalf("reusing operation key with a different scope should conflict, got %v", err)
+	}
 
 	differentNotes := "different payload"
 	req.PublishNotes = &differentNotes
+	req.PublishScope = exams.SATPublishScopeFull
 	_, err = f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, req)
-	appErr, ok := apperrors.As(err)
+	appErr, ok = apperrors.As(err)
 	if !ok || appErr.Code != apperrors.CodeConflict {
 		t.Fatalf("reusing operation key with a different payload should conflict, got %v", err)
 	}

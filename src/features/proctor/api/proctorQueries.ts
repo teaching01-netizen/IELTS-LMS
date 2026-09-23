@@ -49,6 +49,8 @@ export type ProctorSessionDetailPayload = {
     runtimeDeadlineAt?: string | null | undefined;
     runtimeServerNow?: string | null | undefined;
     runtimeModuleRole?: StudentSession['runtimeModuleRole'] | null | undefined;
+    /** The server's name for `runtimeModuleRole` (SAT adaptive slot). */
+    runtimeCurrentModuleRole?: StudentSession['runtimeModuleRole'] | null | undefined;
     runtimeModuleDeadlineAt?: string | null | undefined;
     runtimeModuleRemainingSeconds?: number | null | undefined;
     runtimeSectionStatus?: StudentSession['runtimeSectionStatus'] | null | undefined;

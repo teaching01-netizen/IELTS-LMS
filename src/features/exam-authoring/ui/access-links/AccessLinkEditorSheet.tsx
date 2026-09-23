@@ -3,8 +3,11 @@ import { Clock3, Link2, LockKeyhole, Users, X } from "lucide-react";
 import {
   ACCESS_LINK_SECTION_KEYS,
   ACCESS_LINK_SECTION_LABELS,
+  availableAccessLinkSections,
   accessLinkSectionRequest,
   accessLinkSectionsChanged,
+  editableAccessLinkSections,
+  effectiveAccessLinkSections,
   selectedAccessLinkSections,
   type AccessLinkAudienceType,
   type AccessLinkAvailabilityType,
@@ -15,6 +18,7 @@ import {
   type CreateAssessmentAccessLinkRequest,
   type UpdateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
+import type { SatPublishScope } from "../../contracts/assessment";
 import { copyText, localDateTimeToIso, parseAccessLinkMembers, serializeAccessLinkMembers, toLocalDateTimeInput } from "./accessLinkUi";
 import { describeRosterResult, rosterTemplate, validateRosterSource } from "./rosterValidation";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "../../../../components/ui/sheet";
@@ -29,6 +33,8 @@ interface AccessLinkEditorSheetProps {
    * providerKey). The section toggles are SAT-only.
    */
   providerKey?: string | null;
+  /** Current published scope for a new link; existing links carry their pin. */
+  publishScope?: SatPublishScope;
   members: readonly AccessLinkMemberInput[];
   isSaving: boolean;
   onClose: () => void;
@@ -93,6 +99,8 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   // sections are built at proctor start, so a later edit either does nothing to
   // that run or silently changes the sitting a registered student expected.
   const isSat = (props.link?.providerKey ?? props.providerKey) === "sat";
+  const pinnedPublishScope = props.link?.publishScope ?? props.publishScope ?? "full";
+  const releaseSections = availableAccessLinkSections(pinnedPublishScope);
   const sectionsLocked = Boolean(props.link?.hasParticipation);
 
   const updateShared = (patch: Record<string, unknown>) => {
@@ -120,16 +128,15 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     // safely: anything that is not a string array falls back to "both".
     const sharedSections = value["enabledSections"];
     if (sharedSections === null || Array.isArray(sharedSections)) {
-      setSections(
-        selectedAccessLinkSections(
-          Array.isArray(sharedSections)
-            ? sharedSections.filter((entry): entry is string => typeof entry === "string")
-            : null,
-        ),
-      );
+      const sharedScope = selectedAccessLinkSections(
+        Array.isArray(sharedSections)
+          ? sharedSections.filter((entry): entry is string => typeof entry === "string")
+          : null,
+      ).filter((key) => releaseSections.includes(key));
+      setSections(sharedScope.length > 0 ? sharedScope : releaseSections);
     }
     if (typeof value["membersSource"] === "string") setMembersSource(value["membersSource"]);
-  }, [defaults.closesAt, defaults.opensAt, props.link, props.open, selfId, sharedLink, sharedLinkSignature]);
+  }, [defaults.closesAt, defaults.opensAt, props.link, props.open, selfId, sharedLink, sharedLinkSignature, pinnedPublishScope]);
 
   useEffect(() => {
     if (!props.open) {
@@ -145,7 +152,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     const nextAvailabilityType = link?.availabilityType ?? "anytime";
     const nextOpensAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.opensAt) : defaults.opensAt;
     const nextClosesAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.closesAt) : defaults.closesAt;
-    const nextSections = selectedAccessLinkSections(link?.enabledSections);
+    const nextSections = editableAccessLinkSections(link?.enabledSections, link?.publishScope ?? props.publishScope ?? "full");
     const nextMembersSource = serializeAccessLinkMembers(props.members);
     setName(nextName);
     setAudienceType(nextAudienceType);
@@ -175,7 +182,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     );
     hydratingRef.current = true;
     setIsDirty(false);
-  }, [defaults.closesAt, defaults.opensAt, props.link, props.members, props.open]);
+  }, [defaults.closesAt, defaults.opensAt, props.link, props.members, props.open, props.publishScope]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -231,10 +238,10 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     return null;
   };
   const toggleSection = (key: AccessLinkSectionKey) => {
-    if (sectionsLocked) return;
+    if (sectionsLocked || !releaseSections.includes(key)) return;
     const next = sections.includes(key)
       ? sections.filter((entry) => entry !== key)
-      : ACCESS_LINK_SECTION_KEYS.filter((entry) => entry === key || sections.includes(entry));
+      : releaseSections.filter((entry) => entry === key || sections.includes(entry));
     setSections(next);
     updateShared({ enabledSections: accessLinkSectionRequest(next) ?? [] });
     setSectionsError(validateSections(next));
@@ -439,7 +446,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
         className="sat-product authoring-mobile-sheet au-elevation-sheet flex h-full w-full max-w-[520px] flex-col gap-0 border-l border-au-separator bg-au-fill p-0 sm:max-w-[520px]"
       >
             <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4 authoring-glass">
-              <div className="min-w-0 flex-1"><p className="text-[11px] font-medium text-slate-400">Digital SAT · Current release</p><SheetTitle className="mt-0.5 text-lg font-semibold tracking-[-0.02em] text-slate-950">{props.link ? "Edit Student Link" : "Create Student Link"}</SheetTitle>
+              <div className="min-w-0 flex-1"><p className="text-[11px] font-medium text-slate-400">Digital SAT · Version {props.link?.versionNumber ?? "being published"}</p><SheetTitle className="mt-0.5 text-lg font-semibold tracking-[-0.02em] text-slate-950">{props.link ? "Edit Student Link" : "Create Student Link"}</SheetTitle>
                 <SheetDescription className="sr-only">Configure who can use this Student Link, how they identify themselves, and when it is available.</SheetDescription></div>
               <button type="button" onClick={requestClose} disabled={props.isSaving} aria-label="Close Student Link editor" className="authoring-icon-button"><X size={16} aria-hidden="true"/></button>
             </header>
@@ -460,7 +467,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
                   </div>
                 </Field>
-                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this Student Link. Duplicate it to change the scope." : "Choose which sections students take through this link. The exam ends after the last one."} error={sectionsError} errorId="access-link-sections-error"><div className="grid grid-cols-2 gap-2">{ACCESS_LINK_SECTION_KEYS.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div><p className="mt-2 text-[11px] leading-4 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
+                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this Student Link. Duplicate it to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-800">{sectionsLocked ? "This Student Link has no available sections and is fixed because a student has joined. Create a new link with an available section." : "This link’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[11px] leading-4 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
                 {audienceType === "selected_students" ? <Field label="Selected students" description="One student per line: code, name, email. Name and email are optional; code is required." error={rosterError} errorId="access-link-roster-error"><div className="mb-2 flex flex-wrap items-center gap-2"><button type="button" onClick={() => { const next = membersSource ? `${membersSource.trimEnd()}\nW123456, Jane Doe, jane@example.com` : rosterTemplate(); setMembersSource(next); updateShared({ membersSource: next }); setRosterError(null); }} className="sat-press sat-press-fill flex min-h-9 items-center rounded-lg bg-au-fill px-3 text-[11px] font-semibold text-slate-600 hover:bg-au-fill-strong">Insert template</button><button type="button" onClick={() => { void copyRosterFormat(); }} className="sat-press sat-press-fill flex min-h-9 items-center rounded-lg px-3 text-[11px] font-semibold text-slate-500 hover:bg-au-fill">Copy format</button><span role="status" aria-live="polite" className="text-[11px] font-medium text-slate-500">{rosterSummary}</span></div><textarea aria-label="Selected students" value={membersSource} onChange={(event) => { setMembersSource(event.target.value); updateShared({ membersSource: event.target.value }); if (rosterError) setRosterError(validateRoster(event.target.value)); }} onBlur={() => setRosterError(validateRoster(membersSource))} aria-invalid={rosterError ? true : undefined} aria-describedby={rosterError ? "access-link-roster-error access-link-roster-hint" : "access-link-roster-hint"} spellCheck={false} className="min-h-36 w-full resize-y rounded-xl border border-au-separator bg-au-surface px-3 py-2.5 font-mono text-[12px] leading-5 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10" placeholder={'W123456, Jane Doe, jane@example.com\nW123457, John Doe, john@example.com'} /><p id="access-link-roster-hint" className="mt-1.5 text-[11px] leading-4 text-slate-500">Codes must be unique. Email is optional but must look like name@example.com.</p>{rosterRowErrors.length ? <ul className="mt-2 space-y-1" aria-label="Roster issues">{rosterRowErrors.map((issue) => <li key={issue.row} className="text-[11px] font-medium text-au-danger-text">Row {issue.row}: {issue.message.replace(/^Row \d+[:\s]*/, "")}</li>)}{rosterResult.errors.length > rosterRowErrors.length ? <li className="text-[11px] text-slate-500">+{rosterResult.errors.length - rosterRowErrors.length} more — fix these first, then review the rest.</li> : null}</ul> : null}</Field> : null}
                 <Field label="When can students enter?">
                   <div className="grid grid-cols-2 gap-2">

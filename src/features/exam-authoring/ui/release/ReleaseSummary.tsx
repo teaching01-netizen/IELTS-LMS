@@ -1,6 +1,6 @@
 import { AlertTriangle, Link2, LoaderCircle, Rocket } from "lucide-react";
 import type { AssessmentReleaseState } from "../../contracts/release";
-import { formatDuration, formatPublishedDate } from "./releaseSelectors";
+import { formatDuration, formatPublishedDate, satPublishScopeCopy } from "./releaseSelectors";
 import { releaseDisabledButtonClass, releaseSurfaceClass } from "./releaseUi";
 
 interface ReleaseSummaryProps {
@@ -57,7 +57,7 @@ export function ReleaseSummary({
             <SummaryRow
               label="Current release"
               value={`Version ${published.versionNumber}`}
-              detail={publishedCurrent ? `Published ${formatPublishedDate(published.publishedAt)}` : "Unchanged until you publish"}
+              detail={`${satPublishScopeCopy(published.publishScope)} · ${publishedCurrent ? `Published ${formatPublishedDate(published.publishedAt)}` : "Unchanged until you publish"}`}
             />
           ) : null}
           <SummaryRow label="Candidate time" value={formatDuration(summary.candidateDurationSeconds)} />

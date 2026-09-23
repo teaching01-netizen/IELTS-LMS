@@ -115,12 +115,36 @@ func modulePath(module Module) string {
 // exam publish transaction, which prevents a stale client from bypassing the
 // content gate.
 func ValidateDraft(ctx context.Context, q Queryer, versionID string) ([]Issue, error) {
-	rows, err := q.QueryContext(ctx, `
+	return ValidateDraftForScope(ctx, q, versionID, ScopeFull)
+}
+
+// ValidateDraftForScope applies the four-rule publish contract only to the
+// sections selected for this immutable SAT release.
+func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, scope Scope) ([]Issue, error) {
+	normalizedScope, err := NormalizeScope(scope)
+	if err != nil {
+		return nil, err
+	}
+	query := `
 		SELECT s.section_key, m.module_key, m.title, m.target_question_count, m.id
 		FROM assessment_modules m
 		JOIN assessment_sections s ON s.id = m.section_id
-		WHERE s.exam_version_id = ?
-		ORDER BY s.display_order ASC, m.display_order ASC, m.id ASC`, versionID)
+		WHERE s.exam_version_id = ?`
+	args := []any{versionID}
+	if normalizedScope != ScopeFull {
+		sectionKeys, err := normalizedScope.SectionKeys()
+		if err != nil {
+			return nil, err
+		}
+		plural := strings.Repeat("?,", len(sectionKeys))
+		plural = strings.TrimSuffix(plural, ",")
+		query += " AND s.section_key IN (" + plural + ")"
+		for _, key := range sectionKeys {
+			args = append(args, key)
+		}
+	}
+	query += " ORDER BY s.display_order ASC, m.display_order ASC, m.id ASC"
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

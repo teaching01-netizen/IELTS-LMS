@@ -21,7 +21,7 @@ vi.mock('../../../../features/auth/authSession', () => ({
 }));
 
 const satExam = {
-  id: 'sat-1', title: 'SAT Published', providerKey: 'sat', currentPublishedVersionId: 'v-sat',
+  id: 'sat-1', title: 'SAT Published', providerKey: 'sat', currentPublishedVersionId: 'v-sat', currentPublishedScope: 'reading-writing',
 };
 const ieltsExam = {
   id: 'ielts-1', title: 'IELTS Published', providerKey: 'ielts', currentPublishedVersionId: 'v-ielts',
@@ -29,7 +29,7 @@ const ieltsExam = {
 const summary = {
   schedule: {
     id: 'sched-1', examId: 'sat-1', providerKey: 'sat', examTitle: 'SAT Published', proctorDisplayName: 'SAT Published',
-    gradingDisplayName: 'SAT Published', publishedVersionId: 'v-sat', cohortName: 'Morning', startTime: '2026-09-01T02:00:00Z',
+    gradingDisplayName: 'SAT Published', publishedVersionId: 'v-sat', publishScope: 'reading-writing', cohortName: 'Morning', startTime: '2026-09-01T02:00:00Z',
     endTime: '2026-09-01T06:00:00Z', plannedDurationMinutes: 180, deliveryMode: 'proctor_start', autoStart: false, autoStop: false,
     status: 'scheduled', createdAt: '2026-08-30T00:00:00Z', createdBy: 'Admin', updatedAt: '2026-08-30T00:00:00Z',
   },
@@ -67,6 +67,7 @@ describe('SatSessionsRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
     expect(screen.getByRole('option', { name: 'SAT Published' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'IELTS Published' })).not.toBeInTheDocument();
+    expect(screen.getByText('Students will receive Reading & Writing only in this session.')).toBeInTheDocument();
   });
 
   it('renders header plus skeleton while loading, without blanking the page', () => {

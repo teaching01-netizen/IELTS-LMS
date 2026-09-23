@@ -1375,7 +1375,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   color: #fff;
 }
 
-[data-sat-content-zoom] .sat-reading-surface {
+[data-sat-screen-zoom] .sat-reading-surface {
   overflow-wrap: anywhere;
 }
 
@@ -1774,6 +1774,24 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   width: 100%;
   height: var(--student-exam-height, 100dvh);
   max-height: var(--student-exam-height, 100dvh);
+}
+
+.sat-exam-overlay-root {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.sat-exam-overlay-root > * {
+  pointer-events: auto;
+}
+
+.sat-viewport-overlay-root {
+  position: fixed;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
 }
 
 .sat-ui.sat-review-page {

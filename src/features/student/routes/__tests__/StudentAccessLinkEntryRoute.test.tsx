@@ -29,6 +29,7 @@ function liveLink(overrides: Partial<PublicStudentAccessLink> = {}): PublicStude
     examTitle: 'Digital SAT',
     providerKey: 'sat',
     versionNumber: 4,
+    publishScope: 'full',
     name: 'Saturday Class',
     enabledSections: null,
     audienceType: 'anyone',
@@ -307,5 +308,21 @@ describe('StudentAccessLinkEntryRoute', () => {
     renderRoute();
 
     expect(screen.queryByText(/The exam ends after that section/)).not.toBeInTheDocument();
+  });
+
+  it('states the pinned release scope for an otherwise unscoped link', () => {
+    mocks.link = liveLink({ publishScope: 'reading-writing', enabledSections: null });
+    renderRoute();
+
+    expect(screen.getByText(/You'll take Reading & Writing only\. The exam ends after that section\./)).toBeInTheDocument();
+  });
+
+  it('does not admit a link whose saved scope has no intersection with its release', () => {
+    mocks.link = liveLink({ publishScope: 'reading-writing', enabledSections: ['math'] });
+    renderRoute();
+
+    expect(screen.getByRole('heading', { name: 'This exam isn’t available' })).toBeInTheDocument();
+    expect(screen.getByText(/no sections in this student link are enabled in its published release/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Continue/i })).not.toBeInTheDocument();
   });
 });

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { TriangleAlert } from "lucide-react";
 import { SAT_COPY } from "../../domain/satCopy";
 import { satOverlayZClass } from "../primitives/satOverlayZ";
+import { SatExamOverlayPortal } from "../zoom/SatExamZoomContext";
 
 export interface SatTimerWarningProps {
   open: boolean;
@@ -36,12 +37,13 @@ export function SatTimerWarning(props: SatTimerWarningProps) {
   }, [open, onDismiss]);
   if (!open) return null;
   return (
+    <SatExamOverlayPortal>
     <div
       role="alertdialog"
       aria-modal="false"
       aria-label={SAT_COPY.timerWarning.title}
       data-testid="sat-timer-warning"
-      className={"sat-ui fixed left-1/2 top-16 " + satOverlayZClass("timerWarning") + " w-[min(360px,calc(100vw-32px))] -translate-x-1/2 rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-5 py-4 text-center text-[var(--sat-text)] shadow-[var(--sat-shadow-modal)]"}
+      className={"sat-ui fixed left-1/2 top-16 " + satOverlayZClass("timerWarning") + " w-[min(360px,calc(var(--sat-exam-logical-width,100vw)-32px))] -translate-x-1/2 rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-5 py-4 text-center text-[var(--sat-text)] shadow-[var(--sat-shadow-modal)]"}
     >
       <p className="flex items-center justify-center gap-2 sat-type-control-primary font-semibold">
         <TriangleAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
@@ -64,5 +66,6 @@ export function SatTimerWarning(props: SatTimerWarningProps) {
         {SAT_COPY.help.closeButton}
       </button>
     </div>
+    </SatExamOverlayPortal>
   );
 }

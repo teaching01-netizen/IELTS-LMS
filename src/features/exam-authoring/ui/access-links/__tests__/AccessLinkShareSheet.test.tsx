@@ -10,6 +10,7 @@ const link: AssessmentAccessLink = {
   providerKey: "sat",
   publishedVersionId: "version-5",
   versionNumber: 5,
+  publishScope: "full",
   scheduleId: "schedule-1",
   name: "Saturday Class",
   enabledSections: null,
@@ -43,7 +44,7 @@ describe("AccessLinkShareSheet", () => {
         onPresent={vi.fn()}
       />,
     );
-    expect(screen.getByText(/Verbal only/)).toBeInTheDocument();
+    expect(screen.getByText(/Reading & Writing only/)).toBeInTheDocument();
     expect(screen.getByText(/You'll take Reading & Writing only/)).toBeInTheDocument();
   });
 
@@ -63,5 +64,33 @@ describe("AccessLinkShareSheet", () => {
       <AccessLinkShareSheet open link={link} onClose={vi.fn()} onPresent={vi.fn()} />,
     );
     expect(screen.queryByText(/only/)).not.toBeInTheDocument();
+  });
+
+  it("uses the pinned release scope even when the link itself is unscoped", () => {
+    render(
+      <AccessLinkShareSheet
+        open
+        link={{ ...link, publishScope: "reading-writing" }}
+        onClose={vi.fn()}
+        onPresent={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/You'll take Reading & Writing only/)).toBeInTheDocument();
+    expect(screen.getByText(/Version 5/)).toBeInTheDocument();
+  });
+
+  it("does not present a QR code or join action for an empty effective scope", () => {
+    render(
+      <AccessLinkShareSheet
+        open
+        link={{ ...link, publishScope: "reading-writing", enabledSections: ["math"] }}
+        onClose={vi.fn()}
+        onPresent={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/no sections.*enabled in its published release/i);
+    expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Open student link/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /QR code/ })).not.toBeInTheDocument();
   });
 });

@@ -10,6 +10,7 @@ import {
 } from './SatAnnotationControls';
 import { SatAnnotationCaret, SatAnnotationSurfaceBody, SAT_ANNOTATION_ROW, SAT_ANNOTATION_ROW_DIVIDED } from './SatAnnotationSurfaceFrame';
 import { useSatAnnotationSurface } from './useSatAnnotationSurface';
+import { useSatExamZoom } from '../zoom/SatExamZoomContext';
 
 /**
  * Edit controls for an annotation that already exists.
@@ -58,12 +59,14 @@ export function SatAnnotationEditControls({
   /** Dismiss the controls; the mark and its note stay. */
   onClose: () => void;
 }) {
+  const visualScale = useSatExamZoom().scale;
   // Opening a mark's editor moves the caret into it: a tap and Enter/Space on
   // the mark must both leave the student able to change the mark without
   // hunting for the controls.
   const { placement, chrome, containerRef } = useSatAnnotationSurface(annotation.anchor, {
     autoFocusKey: annotation.id,
     touch,
+    visualScale,
     onDismiss: onClose,
   });
   const isHighlight = annotation.kind === 'highlight';
@@ -82,7 +85,7 @@ export function SatAnnotationEditControls({
       className={chrome.className}
       style={chrome.style}
     >
-      <SatAnnotationCaret placement={placement} />
+      <SatAnnotationCaret placement={placement} visualScale={visualScale} />
       <SatAnnotationSurfaceBody maxHeight={chrome.bodyMaxHeight}>
         <SatAnnotationHeading />
         <div className={SAT_ANNOTATION_ROW}>

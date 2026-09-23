@@ -79,7 +79,7 @@ export const AccessLinkRow = memo(function AccessLinkRow({
   const tone = accessLinkStatusTone(link.status);
   // Nobody should share a verbal-only link with a math class by accident, so a
   // scoped link is labelled in the list itself.
-  const sectionBadge = accessLinkSectionBadge(link.enabledSections);
+  const sectionBadge = accessLinkSectionBadge(link.enabledSections, link.publishScope);
   const metaText = pendingLabel ?? `${audienceShort(link)} · ${availabilityShort(link)}`;
   return (
     <div className="relative mb-1.5">

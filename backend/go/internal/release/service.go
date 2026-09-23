@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // LifecycleState is the release lifecycle wire value (snake_case, mirrors
@@ -30,11 +31,12 @@ const (
 
 // ReleasePublishedVersion mirrors ReleasePublishedVersion (camelCase wire shape).
 type ReleasePublishedVersion struct {
-	ID            string    `json:"id"`
-	VersionNumber int       `json:"versionNumber"`
-	Revision      int       `json:"revision"`
-	PublishNotes  *string   `json:"publishNotes"`
-	PublishedAt   time.Time `json:"publishedAt"`
+	ID            string           `json:"id"`
+	VersionNumber int              `json:"versionNumber"`
+	Revision      int              `json:"revision"`
+	PublishNotes  *string          `json:"publishNotes"`
+	PublishScope  satpublish.Scope `json:"publishScope"`
+	PublishedAt   time.Time        `json:"publishedAt"`
 }
 
 // ReleaseWorkingDraft mirrors ReleaseWorkingDraft (camelCase wire shape).
@@ -89,6 +91,7 @@ type releaseRow struct {
 	publishedVersion     sql.NullInt64
 	publishedRevision    sql.NullInt64
 	publishedNotes       sql.NullString
+	publishedScope       sql.NullString
 	publishedCreatedAt   sql.NullTime
 	publishedIsPublished sql.NullBool
 	draftID              sql.NullString
@@ -167,6 +170,7 @@ func (s *Service) loadReleaseRow(ctx context.Context, examID string) (releaseRow
 		"SELECT e.id AS exam_id, e.provider_key, "+
 			"pv.id AS published_id, pv.version_number AS published_version_number, "+
 			"pv.revision AS published_revision, pv.publish_notes AS published_notes, "+
+			"pv.sat_publish_scope AS published_scope, "+
 			"pv.created_at AS published_created_at, "+
 			"pv.is_published AS published_is_published, "+
 			"dv.id AS draft_id, dv.parent_version_id AS draft_parent_version_id, "+
@@ -180,6 +184,7 @@ func (s *Service) loadReleaseRow(ctx context.Context, examID string) (releaseRow
 		&row.examID, &row.providerKey,
 		&row.publishedID, &row.publishedVersion,
 		&row.publishedRevision, &row.publishedNotes,
+		&row.publishedScope,
 		&row.publishedCreatedAt,
 		&row.publishedIsPublished,
 		&row.draftID, &row.draftParentVersionID,
@@ -197,25 +202,51 @@ func (s *Service) loadReleaseRow(ctx context.Context, examID string) (releaseRow
 // three authored modules would overstate the longest real sitting.
 func (s *Service) contentSummary(ctx context.Context, versionID string) (ReleaseContentSummary, error) {
 	var out ReleaseContentSummary
+	var rawScope sql.NullString
 	if err := s.db.QueryRowContext(ctx,
-		"SELECT CAST(COALESCE(SUM(section_plan.candidate_seconds), 0) AS SIGNED) FROM ("+
-			"SELECT s.id, "+
-			"MAX(CASE WHEN m.adaptive_role = 'base' THEN m.duration_seconds ELSE 0 END) + "+
-			"GREATEST(MAX(CASE WHEN m.adaptive_role = 'lower_branch' THEN m.duration_seconds ELSE 0 END), "+
-			"MAX(CASE WHEN m.adaptive_role = 'higher_branch' THEN m.duration_seconds ELSE 0 END)) + "+
-			"s.break_after_seconds AS candidate_seconds "+
-			"FROM assessment_sections s "+
-			"LEFT JOIN assessment_modules m ON m.section_id = s.id "+
-			"WHERE s.exam_version_id = ? GROUP BY s.id, s.break_after_seconds) section_plan",
-		versionID).Scan(&out.CandidateDurationSeconds); err != nil {
+		"SELECT sat_publish_scope FROM exam_versions WHERE id = ?", versionID).Scan(&rawScope); err != nil {
 		return ReleaseContentSummary{}, err
+	}
+	sectionFilter, filterArgs := sectionScopeSQL(rawScope.String)
+	sectionRows, err := s.db.QueryContext(ctx,
+		"SELECT COALESCE(MAX(CASE WHEN m.adaptive_role = 'base' THEN m.duration_seconds ELSE 0 END), 0) + "+
+			"GREATEST(COALESCE(MAX(CASE WHEN m.adaptive_role = 'lower_branch' THEN m.duration_seconds ELSE 0 END), 0), "+
+			"COALESCE(MAX(CASE WHEN m.adaptive_role = 'higher_branch' THEN m.duration_seconds ELSE 0 END), 0)), "+
+			"s.break_after_seconds FROM assessment_sections s "+
+			"LEFT JOIN assessment_modules m ON m.section_id = s.id "+
+			"WHERE s.exam_version_id = ?"+sectionFilter+
+			" GROUP BY s.id, s.display_order, s.break_after_seconds ORDER BY s.display_order, s.id",
+		append([]any{versionID}, filterArgs...)...)
+	if err != nil {
+		return ReleaseContentSummary{}, err
+	}
+	type sectionTime struct{ candidate, gap int64 }
+	times := make([]sectionTime, 0)
+	for sectionRows.Next() {
+		var item sectionTime
+		if err := sectionRows.Scan(&item.candidate, &item.gap); err != nil {
+			sectionRows.Close()
+			return ReleaseContentSummary{}, err
+		}
+		times = append(times, item)
+	}
+	if err := sectionRows.Err(); err != nil {
+		sectionRows.Close()
+		return ReleaseContentSummary{}, err
+	}
+	sectionRows.Close()
+	for index, item := range times {
+		out.CandidateDurationSeconds += item.candidate
+		if index < len(times)-1 {
+			out.CandidateDurationSeconds += item.gap
+		}
 	}
 	if err := s.db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM assessment_exam_questions q "+
 			"JOIN assessment_modules m ON m.id = q.module_id "+
 			"JOIN assessment_sections s ON s.id = m.section_id "+
-			"WHERE s.exam_version_id = ?",
-		versionID).Scan(&out.AuthoredQuestionCount); err != nil {
+			"WHERE s.exam_version_id = ?"+sectionFilter,
+		append([]any{versionID}, filterArgs...)...).Scan(&out.AuthoredQuestionCount); err != nil {
 		return ReleaseContentSummary{}, err
 	}
 	if err := s.db.QueryRowContext(ctx,
@@ -225,11 +256,24 @@ func (s *Service) contentSummary(ctx context.Context, versionID string) (Release
 			"MAX(CASE WHEN m.adaptive_role IN ('lower_branch', 'higher_branch') THEN m.target_question_count ELSE 0 END) AS branch_target "+
 			"FROM assessment_sections s "+
 			"LEFT JOIN assessment_modules m ON m.section_id = s.id "+
-			"WHERE s.exam_version_id = ? GROUP BY s.id) section_plan",
-		versionID).Scan(&out.DeliveredQuestionCount); err != nil {
+			"WHERE s.exam_version_id = ?"+sectionFilter+" GROUP BY s.id) section_plan",
+		append([]any{versionID}, filterArgs...)...).Scan(&out.DeliveredQuestionCount); err != nil {
 		return ReleaseContentSummary{}, err
 	}
 	return out, nil
+}
+
+func sectionScopeSQL(raw string) (string, []any) {
+	switch raw {
+	case "", string(satpublish.ScopeFull):
+		return "", nil
+	case string(satpublish.ScopeReadingWriting):
+		return " AND s.section_key = ?", []any{"reading-writing"}
+	case string(satpublish.ScopeMath):
+		return " AND s.section_key = ?", []any{"math"}
+	default:
+		return " AND 1 = 0", nil
+	}
 }
 
 // accessSummary mirrors access_summary_tx: link totals over
@@ -307,6 +351,10 @@ func publishedVersionFromRow(row *releaseRow) (*ReleasePublishedVersion, error) 
 		VersionNumber: int(row.publishedVersion.Int64),
 		Revision:      int(row.publishedRevision.Int64),
 		PublishedAt:   row.publishedCreatedAt.Time.UTC(),
+		PublishScope:  satpublish.Scope(row.publishedScope.String),
+	}
+	if out.PublishScope == "" {
+		out.PublishScope = satpublish.ScopeFull
 	}
 	if row.publishedNotes.Valid {
 		notes := row.publishedNotes.String

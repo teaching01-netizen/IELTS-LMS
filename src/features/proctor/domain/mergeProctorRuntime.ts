@@ -7,6 +7,17 @@ import type { ExamSessionRuntime, ProctorPresence } from "../../../types/domain"
  * detail projections carry it. Runtime revisions decide which live clock wins;
  * the plan and presence are static/enrichment fields and must survive a newer
  * projection that does not carry them.
+ *
+ * Revision alone cannot decide a same-revision read: a live section sits on one
+ * revision for as long as it runs, so "revision did not change" means "this is
+ * another read of the same state", not "this read is stale". Gating the whole
+ * object on a strictly greater revision froze the room's clock — `serverNow`,
+ * `currentSectionDeadlineAt` and the section rows — at the first payload of the
+ * revision, while the per-student rows (rebuilt on every poll) kept advancing,
+ * so the header and the roster showed different times for the same clock. Equal
+ * revisions are therefore resolved by the read's own stamp (`serverNow`, then
+ * `updatedAt`): a newer read wins, an older one still loses, and a tie keeps
+ * what is already held.
  */
 export function mergeProctorRuntime(
   existing: ExamSessionRuntime | undefined,
@@ -23,7 +34,7 @@ export function mergeProctorRuntime(
   const existingRevision = existing.revision ?? -1;
   const incomingRevision = incoming.revision ?? -1;
   const incomingIsNewer = incomingRevision > existingRevision;
-  const current = incomingRevision > existingRevision ? incoming : existing;
+  const current = runtimeProjectionSupersedes(existing, incoming) ? incoming : existing;
 
   return {
     ...current,
@@ -45,6 +56,41 @@ export function mergeProctorRuntime(
       additionalPresence,
     ),
   };
+}
+
+/**
+ * Whether an incoming projection owns the live clock: the newer revision, or —
+ * at the same revision — the newer read. `serverNow` is the instant the read was
+ * stamped, so it orders two reads of one revision; `updatedAt` is the fallback
+ * for a projection that omits it. A tie, or an incoming read with no stamp at
+ * all, keeps the projection already held rather than trading one unknown for
+ * another.
+ *
+ * Exported because every ingest path needs the same answer: a WebSocket frame is
+ * a read of the same revision too, and gating it on the revision alone dropped
+ * the fresher clock while letting the frozen one stand.
+ */
+export function runtimeProjectionSupersedes(
+  existing: ExamSessionRuntime,
+  incoming: ExamSessionRuntime,
+): boolean {
+  const existingRevision = existing.revision ?? -1;
+  const incomingRevision = incoming.revision ?? -1;
+  if (incomingRevision > existingRevision) return true;
+  if (incomingRevision < existingRevision) return false;
+
+  const incomingStamp = readProjectionStamp(incoming);
+  if (incomingStamp === null) return false;
+  const existingStamp = readProjectionStamp(existing);
+  if (existingStamp === null) return true;
+  return incomingStamp > existingStamp;
+}
+
+function readProjectionStamp(runtime: ExamSessionRuntime): number | null {
+  const serverNowMs = runtime.serverNow ? Date.parse(runtime.serverNow) : Number.NaN;
+  if (Number.isFinite(serverNowMs)) return serverNowMs;
+  const updatedAtMs = runtime.updatedAt ? Date.parse(runtime.updatedAt) : Number.NaN;
+  return Number.isFinite(updatedAtMs) ? updatedAtMs : null;
 }
 
 function mergeOptionalBoundary(

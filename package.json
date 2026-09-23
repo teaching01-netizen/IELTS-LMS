@@ -29,6 +29,8 @@
     "e2e:sat-a11y": "playwright test --config playwright.sat-a11y.config.ts",
     "e2e:sat-annotations": "playwright test --config playwright.sat-annotations.config.ts",
     "e2e:sat-auto-fit": "playwright test --config playwright.sat-auto-fit.config.ts",
+    "e2e:sat-screen-zoom": "playwright test --config playwright.sat-screen-zoom.config.ts",
+    "e2e:sat-transition": "playwright test --config playwright.sat-transition.config.ts",
     "e2e:prod-smoke": "playwright test --config playwright.prod-smoke.config.ts",
     "e2e:prod-load": "playwright test --config playwright.prod-load.config.ts",
     "e2e:live-runner": "tsx e2e/prod-load/live-multi-user-runner.ts",

@@ -25,6 +25,15 @@ describe("assessmentAuthoringApi question contracts", () => {
     expect(backendPost).toHaveBeenCalledWith("/v1/assessment-authoring/modules/mod-1/questions");
   });
 
+  it("validates the selected immutable SAT scope", async () => {
+    backendPost.mockResolvedValue({ publishScope: "reading-writing", valid: true, errors: [], warnings: [] });
+    await assessmentAuthoringApi.validateExam("exam-1", "reading-writing");
+    expect(backendPost).toHaveBeenCalledWith(
+      "/v1/assessment-authoring/exams/exam-1/validate",
+      { publishScope: "reading-writing" },
+    );
+  });
+
   it("sends batch drafts under `questions` (the key the backend reads)", async () => {
     backendPost.mockResolvedValue({ createdQuestionIds: ["eq-1"], questions: [] });
     const draft: any = {

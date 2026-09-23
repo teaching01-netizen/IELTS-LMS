@@ -3,6 +3,7 @@ import {
   COARSE_CLOCK_MS,
   URGENT_THRESHOLD_SECONDS,
   resolveAuthoritativeRemainingSeconds,
+  resolveServerClockOffsetMs,
 } from "../useAuthoritativeDeadlineClock";
 
 const NOW = Date.parse("2026-09-10T08:00:00.000Z");
@@ -41,6 +42,29 @@ describe("resolveAuthoritativeRemainingSeconds", () => {
 
   it("applies the server clock offset instead of trusting the device clock", () => {
     expect(remaining(90_000, { clockOffsetMs: 30_000 })).toBe(60);
+  });
+
+  it("pairs a snapshot's serverNow with its own receipt instant", () => {
+    // A response that took six seconds to arrive must not read as "the server is
+    // six seconds behind": the correction is the same six seconds either way, so
+    // the countdown lands on the server's instant instead of drifting by the
+    // difference between two reads.
+    const slowResponse = {
+      serverNow: new Date(NOW).toISOString(),
+      receivedAt: NOW + 6_000,
+    };
+    expect(resolveServerClockOffsetMs(slowResponse, NOW)).toBe(-6_000);
+
+    const correction = resolveServerClockOffsetMs(slowResponse, NOW);
+    // nowMs is the local tick; the corrected instant must be the server's.
+    expect(NOW + 6_000 + correction).toBe(NOW);
+  });
+
+  it("contributes no correction for an unstamped or unparseable snapshot", () => {
+    expect(resolveServerClockOffsetMs(null, NOW)).toBe(0);
+    expect(resolveServerClockOffsetMs({ serverNow: null, receivedAt: NOW }, NOW)).toBe(0);
+    expect(resolveServerClockOffsetMs({ serverNow: "not-a-date", receivedAt: NOW }, NOW)).toBe(0);
+    expect(resolveServerClockOffsetMs({ serverNow: new Date(NOW).toISOString(), receivedAt: 0 }, NOW)).toBe(0);
   });
 
   it("keeps the coarse band honest: 15s tick only matters far from deadline", () => {

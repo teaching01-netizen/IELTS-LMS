@@ -1,6 +1,6 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { ADMIN_STORAGE_STATE_PATH } from './support/backendE2e';
-import { stubScreenDetails } from './support/studentUi';
+import { createRunningSatSession } from './support/satStudentSession';
 
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
@@ -48,76 +48,6 @@ async function waitForSatSaved(page: Page) {
   );
 }
 
-async function createLiveSatSession(page: Page, browser: Browser) {
-  const stamp = Date.now().toString(36);
-  const examTitle = `SAT durability recovery ${stamp}`;
-  const linkName = `SAT durability link ${stamp}`;
-  const studentName = `SAT durability candidate ${stamp}`;
-  const studentEmail = `sat-durability-${stamp}@example.com`;
-
-  await page.goto('/sat/exams');
-  await expect(page.getByRole('heading', { name: 'Exam Library' })).toBeVisible();
-  await page.getByRole('button', { name: 'New SAT' }).first().click();
-  await page.getByLabel('SAT exam name').fill(examTitle);
-  await page.getByRole('button', { name: 'Create' }).click();
-  await expect(page).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i, { timeout: 30_000 });
-
-  await page.getByRole('button', { name: 'More authoring actions' }).click();
-  await page.getByRole('menuitem', { name: /Load sample exam/ }).click();
-  await expect(page.getByRole('dialog', { name: 'Load sample SAT' })).toBeVisible();
-  await page.getByRole('button', { name: 'Load 147 questions' }).click();
-  await expect(page.getByText('147 of 147 questions authored')).toBeVisible({ timeout: 90_000 });
-
-  await page.getByRole('button', { name: 'Release' }).click();
-  await expect(page).toHaveURL(/\/release$/);
-  await page.getByRole('button', { name: 'Publish' }).click();
-  const publishDialog = page.getByRole('dialog');
-  await expect(publishDialog).toBeVisible();
-  await publishDialog.getByRole('button', { name: 'Publish' }).click();
-
-  await expect(page).toHaveURL(/\/access$/);
-  await page.getByRole('button', { name: 'New Link' }).click();
-  await page.getByLabel('Student Link name').fill(linkName);
-  await page.getByRole('button', { name: /Name \+ email only/i }).click();
-  await page.getByRole('button', { name: /Anytime/i }).click();
-  await page.getByRole('button', { name: 'Create Link' }).click();
-  await expect(page.getByText(linkName).first()).toBeVisible({ timeout: 20_000 });
-  const joinHref = await page.getByRole('link', { name: 'Open student page' }).getAttribute('href');
-  if (!joinHref) throw new Error('SAT student join URL was not created.');
-
-  const studentContext = await browser.newContext();
-  await stubScreenDetails(studentContext);
-  const studentPage = await studentContext.newPage();
-  await studentPage.goto(joinHref);
-  await expect(studentPage.getByRole('heading', { name: linkName })).toBeVisible();
-  await studentPage.getByLabel('Full name').fill(studentName);
-  await studentPage.getByLabel('Email').fill(studentEmail);
-  await studentPage.getByRole('button', { name: /Continue/i }).click();
-  await expect(studentPage).toHaveURL(/\/student\/[0-9a-f-]+\/[^/]+$/i, { timeout: 30_000 });
-
-  const scheduleId = new URL(studentPage.url()).pathname.split('/').filter(Boolean)[1];
-  if (!scheduleId) throw new Error('SAT student route did not include a schedule id.');
-
-  await page.goto('/sat/sessions');
-  await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
-  const sessionRow = page
-    .locator('button')
-    .filter({ hasText: examTitle })
-    .filter({ hasText: linkName })
-    .first();
-  await expect(sessionRow).toBeVisible({ timeout: 30_000 });
-  await sessionRow.click();
-  await expect(page).toHaveURL(new RegExp(`/sat/sessions/${scheduleId}$`));
-  await page.getByRole('button', { name: 'Start' }).click();
-  await expect(page.getByText('Session started.')).toBeVisible({ timeout: 20_000 });
-
-  await studentPage.reload({ waitUntil: 'domcontentloaded' });
-  await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
-  await expect(studentPage.locator('input[type="radio"]').first()).toBeVisible({ timeout: 30_000 });
-
-  return { studentContext, studentPage };
-}
-
 test.describe('SAT answer durability recovery', () => {
   test.describe.configure({ timeout: 240_000 });
 
@@ -125,7 +55,7 @@ test.describe('SAT answer durability recovery', () => {
     page,
     browser,
   }) => {
-    const { studentContext, studentPage } = await createLiveSatSession(page, browser);
+    const { studentContext, studentPage } = await createRunningSatSession(browser, page, { label: 'durability' });
     try {
       const radios = studentPage.locator('input[type="radio"]');
       await radios.first().check();

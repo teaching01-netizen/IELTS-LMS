@@ -94,6 +94,7 @@ describe("AccessLinkEditorSheet interaction contract", () => {
         providerKey: "sat",
         publishedVersionId: "version-5",
         versionNumber: 5,
+        publishScope: "full",
         scheduleId: "schedule-1",
         name: "Revoked Link",
         enabledSections: null,

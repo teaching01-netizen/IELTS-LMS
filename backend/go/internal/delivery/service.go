@@ -324,10 +324,10 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
-	// Student Access scope: a narrowed link must not ship the sections it
-	// dropped to the browser, and the seeded first module must belong to the
-	// first section the run actually includes.
-	scope, err := s.linkSectionScope(ctx, scheduleID)
+	// Intersect the immutable release scope with any Student Access narrowing.
+	// This read is repeated independently of schedules.runtimePlanIn so even a
+	// malformed schedule cannot expose excluded release content.
+	scope, err := s.effectiveSectionScope(ctx, scheduleID, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -339,10 +339,12 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
+	moduleAttempts = filterModuleAttemptsForSections(moduleAttempts, sections)
 	responses, err := s.loadResponses(ctx, attemptID)
 	if err != nil {
 		return nil, err
 	}
+	responses = filterResponsesForModuleAttempts(responses, moduleAttempts)
 	control, err := s.loadAttemptControl(ctx, attemptID, attemptControl{})
 	if err != nil {
 		return nil, err
@@ -596,7 +598,7 @@ func (s *Service) EnsureBaseModuleAttemptForSchedule(ctx context.Context, attemp
 	if err != nil {
 		return err
 	}
-	scope, err := s.linkSectionScope(ctx, scheduleID)
+	scope, err := s.effectiveSectionScope(ctx, scheduleID, versionID)
 	if err != nil {
 		return err
 	}
@@ -623,6 +625,23 @@ func (s *Service) linkSectionScope(ctx context.Context, scheduleID string) (map[
 	return examdomain.ParseStoredSectionScope(raw.String), nil
 }
 
+func (s *Service) effectiveSectionScope(ctx context.Context, scheduleID, versionID string) (map[string]bool, error) {
+	var raw sql.NullString
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT sat_publish_scope FROM exam_versions WHERE id = ?", versionID).Scan(&raw); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, apperrors.New(apperrors.CodeNotFound, "Published exam version not found.")
+		}
+		return nil, err
+	}
+	releaseScope := examdomain.ParseSATPublishScope(raw.String)
+	linkScope, err := s.linkSectionScope(ctx, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	return examdomain.IntersectSectionScopes(releaseScope, linkScope), nil
+}
+
 // deliverySectionsForScope narrows a loaded version tree to the sections the
 // run includes. The returned slice is a fresh copy: the version cache's tree is
 // shared across schedules and must never be mutated in place.
@@ -639,21 +658,55 @@ func deliverySectionsForScope(sections []DeliverySection, scope map[string]bool)
 	return filtered
 }
 
-// attemptSectionScopeTx resolves the section scope of the Student Access link
-// backing the attempt's schedule, inside the caller's transaction (read-only; no
-// lock, so it never joins a lock-order cycle). Nil means "no narrowing".
+func filterModuleAttemptsForSections(attempts []ModuleAttempt, sections []DeliverySection) []ModuleAttempt {
+	allowed := make(map[string]bool)
+	for _, section := range sections {
+		for _, module := range section.Modules {
+			allowed[module.ID] = true
+		}
+	}
+	filtered := make([]ModuleAttempt, 0, len(attempts))
+	for _, attempt := range attempts {
+		if allowed[attempt.ModuleID] {
+			filtered = append(filtered, attempt)
+		}
+	}
+	return filtered
+}
+
+func filterResponsesForModuleAttempts(responses []ResponseSnapshot, attempts []ModuleAttempt) []ResponseSnapshot {
+	allowed := make(map[string]bool, len(attempts))
+	for _, attempt := range attempts {
+		allowed[attempt.ID] = true
+	}
+	filtered := make([]ResponseSnapshot, 0, len(responses))
+	for _, response := range responses {
+		if allowed[response.ModuleAttemptID] {
+			filtered = append(filtered, response)
+		}
+	}
+	return filtered
+}
+
+// attemptSectionScopeTx resolves the published release and Student Access
+// scopes backing the attempt's schedule, inside the caller's transaction
+// (read-only; no lock, so it never joins a lock-order cycle). Nil means "no
+// narrowing".
 func attemptSectionScopeTx(ctx context.Context, t tx.Tx, attemptID string) (map[string]bool, error) {
-	var raw sql.NullString
+	var rawLink, rawRelease sql.NullString
 	err := t.QueryRowContext(ctx,
-		"SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a ON a.schedule_id = l.schedule_id WHERE a.id = ?",
-		attemptID).Scan(&raw)
+		"SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions v ON v.id = a.published_version_id LEFT JOIN assessment_access_links l ON l.schedule_id = a.schedule_id WHERE a.id = ?",
+		attemptID).Scan(&rawLink, &rawRelease)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return examdomain.ParseStoredSectionScope(raw.String), nil
+	return examdomain.IntersectSectionScopes(
+		examdomain.ParseSATPublishScope(rawRelease.String),
+		examdomain.ParseStoredSectionScope(rawLink.String),
+	), nil
 }
 
 // sqlPlaceholders renders "?, ?, ?" for n bound arguments.

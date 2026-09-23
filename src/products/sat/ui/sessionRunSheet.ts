@@ -103,14 +103,25 @@ export interface SatRunSheet {
   plannedEndAt: string | null;
 }
 
+export type SatRunSheetRuntime = Pick<
+  ExamSessionRuntime,
+  "sections" | "actualStartAt" | "actualEndAt" | "status" | "serverNow"
+> & {
+  /**
+   * `currentSectionDeadlineAt` is the server's own end for the section the room
+   * is inside, published by the same arithmetic every candidate's countdown
+   * runs on. The keys beside it say which section it belongs to.
+   */
+  currentSectionKey?: string | null | undefined;
+  activeSectionKey?: string | null | undefined;
+  currentSectionDeadlineAt?: string | null | undefined;
+};
+
 export interface SatRunSheetInput {
   /** Authored plan; null on reads that do not carry it (summary/student). */
   plan?: ExamPlanSection[] | null | undefined;
   /** Live runtime sections: the authoritative clock, actuals, pauses, status. */
-  runtime?: Pick<
-    ExamSessionRuntime,
-    "sections" | "actualStartAt" | "actualEndAt" | "status" | "serverNow"
-  > | null | undefined;
+  runtime?: SatRunSheetRuntime | null | undefined;
   /** Session start from the schedule; used only before the proctor starts. */
   scheduledStartAt?: string | null | undefined;
   /** Server-clock "now" as an ISO instant; the only clock rows are read against. */
@@ -352,6 +363,15 @@ function buildStages(input: SatRunSheetInput): RunSheetStage[] {
     );
 }
 
+/**
+ * Whether this stage is the section the runtime is currently inside (or was
+ * last inside), and so the one the published section deadline describes.
+ */
+function stageIsActiveSection(input: SatRunSheetInput, sectionKey: string): boolean {
+  const activeKey = input.runtime?.activeSectionKey ?? input.runtime?.currentSectionKey ?? null;
+  return activeKey !== null && activeKey === sectionKey;
+}
+
 function resolveAnchor(input: SatRunSheetInput): {
   anchor: SatRunSheetAnchor;
   anchorAt: number | null;
@@ -582,13 +602,25 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
     const derivedEndMs =
       startMs === null || clockMs === null ? null : startMs + clockMs;
     const actualEndMs = parseInstant(live?.actualEndAt);
+    // The server's own end for the live section outranks the sheet's
+    // reconstruction: `computeSectionRemaining` publishes the same instant the
+    // hero clock and every candidate count down to, so reading it is what keeps
+    // the sheet, the header, the roster and the inspector on one number. The
+    // arithmetic below stays as the fallback for a section the runtime has no
+    // deadline for (a paused section, a row still ahead of the run, a read from
+    // before the field existed).
+    const publishedEndMs = stageIsActiveSection(input, stage.sectionKey)
+      ? parseInstant(input.runtime?.currentSectionDeadlineAt)
+      : null;
     // A section can never close EARLIER than the clock its candidates are on:
     // the derivation above is the same arithmetic as the server's
     // computeSectionRemaining, so a stored projection is only allowed to extend
     // it. Ratcheting up is the safe direction — an under-reported end is the
     // exact failure this sheet exists to expose.
     const endMs =
-      actualEndMs ?? laterOf(derivedEndMs, parseInstant(live?.projectedEndAt));
+      actualEndMs ??
+      publishedEndMs ??
+      laterOf(derivedEndMs, parseInstant(live?.projectedEndAt));
     const status = sectionStatus(live);
     // A paused room's clock stopped where the pause landed: which module the
     // room is inside is read at THAT instant, not at the wall clock that kept

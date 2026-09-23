@@ -77,13 +77,20 @@ function measurementKey(
 export function measureSatAnnotation(
   container: HTMLElement | null,
   anchor: SatTextAnchor | null,
+  visualScale = 1,
 ): SatAnnotationMeasurement {
   const bounds = satAnnotationBoundsRect(container);
   const viewport = satAnnotationViewportRect();
-  const size =
-    container && container.offsetWidth > 0 && container.offsetHeight > 0
-      ? { width: container.offsetWidth, height: container.offsetHeight }
-      : null;
+  const rect = container?.getBoundingClientRect();
+  const size = rect && rect.width > 0 && rect.height > 0
+    ? { width: rect.width, height: rect.height }
+    : null;
   const geometry = anchor ? satAnnotationAnchorGeometryFor(anchor) : null;
-  return { bounds, viewport, size, anchor: geometry, key: measurementKey(geometry, bounds, viewport) };
+  return {
+    bounds,
+    viewport,
+    size,
+    anchor: geometry,
+    key: `${measurementKey(geometry, bounds, viewport)}:${visualScale}`,
+  };
 }

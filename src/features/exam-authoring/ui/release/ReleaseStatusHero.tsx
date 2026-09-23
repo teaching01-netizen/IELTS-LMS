@@ -1,7 +1,7 @@
 import { CheckCircle2, LoaderCircle, ShieldCheck } from "lucide-react";
 import type { AssessmentValidationReport } from "../../contracts/assessment";
 import type { AssessmentReleaseState } from "../../contracts/release";
-import { getHeroCopy, getHeroState, getHeroTone } from "./releaseSelectors";
+import { getHeroCopy, getHeroState, getHeroTone, satPublishScopeCopy } from "./releaseSelectors";
 import { releaseSurfaceClass } from "./releaseUi";
 import { formatPublishedDate } from "./releaseSelectors";
 
@@ -71,6 +71,9 @@ export function ReleaseStatusHero({
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Published {formatPublishedDate(publishedVersion.publishedAt)}
+          </p>
+          <p className="mt-0.5 text-xs font-medium text-muted-foreground">
+            {satPublishScopeCopy(publishedVersion.publishScope)}
           </p>
         </div>
       ) : null}

@@ -25,6 +25,7 @@ import {
   type SatResizeEdge,
 } from "./satToolPointer";
 import { SatToolDiscoveryHint } from "./SatToolDiscoveryHint";
+import { useSatExamZoom } from "../zoom/SatExamZoomContext";
 
 export interface SatFloatingToolProps {
   title: string;
@@ -168,8 +169,9 @@ function defaultMaxSizeForViewport(viewport: { w: number; h: number }): { w: num
   };
 }
 
-function viewportSize(): { w: number; h: number } {
-  return { w: window.innerWidth, h: window.innerHeight };
+function viewportSize(logicalSize: (physical: { width: number; height: number }) => { width: number; height: number }): { w: number; h: number } {
+  const size = logicalSize({ width: window.innerWidth, height: window.innerHeight });
+  return { w: size.width, h: size.height };
 }
 
 function pointerIdMismatch(sessionId: number, event: React.PointerEvent): boolean {
@@ -254,6 +256,8 @@ const SAT_RESIZE_EDGES: readonly SatResizeEdge[] = ["n", "s", "e", "w", "ne", "n
  * optional; Escape cancels an active drag and restores the pre-drag rect.
  */
 export function SatFloatingTool(props: SatFloatingToolProps) {
+  const { logicalSize, viewportToLogicalLength } = useSatExamZoom();
+  const { minSize: toolMinSize, maxSize: toolMaxSize, title: toolTitle, onManualResize } = props;
   const compact = useSatMediaQuery("(max-width: 639px), (max-height: 560px)");
   // Wave A R-02 option (ii): the compact tool sheet is an explicitly
   // non-modal bottom sheet like the desktop panel — no aria-modal, no Tab
@@ -337,14 +341,11 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   }, []);
 
   useEffect(() => {
-    if (!props.geometryKey) return;
-    const saved = loadSatToolGeometry(props.geometryKey);
-    if (saved) {
-      const next = clampSatToolGeometry(saved, viewportSize());
-      lastCommittedRef.current = next;
-      setGeometry(next);
-    }
-  }, [props.geometryKey]);
+    const saved = props.geometryKey ? loadSatToolGeometry(props.geometryKey) : null;
+    const next = clampSatToolGeometry(saved ?? lastCommittedRef.current, viewportSize(logicalSize));
+    lastCommittedRef.current = next;
+    setGeometry(next);
+  }, [logicalSize, props.geometryKey]);
 
   // Re-arm the open motion every time the window opens (including the
   // keepAlive closed -> open flip). The class clears on animationend; where
@@ -395,7 +396,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   }, []);
 
   const measureCollapsedH = useCallback((): number => {
-    const measured = headerRef.current?.getBoundingClientRect().height;
+    const measured = headerRef.current?.offsetHeight;
     if (typeof measured === "number" && Number.isFinite(measured) && measured > 0) {
       collapsedHRef.current = measured;
       return measured;
@@ -469,15 +470,15 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     // Keyboard steps are already exact and never snap.
     if (!session.live || compact || props.resizable !== true) return;
     const committed = lastCommittedRef.current;
-    const snapped = alignToSafeArea(committed, satToolSafeArea(viewportSize()));
+    const snapped = alignToSafeArea(committed, satToolSafeArea(viewportSize(logicalSize)));
     if (snapped.x !== committed.x || snapped.y !== committed.y) {
       setAligning(true);
       persist(snapped);
     }
-  }, [compact, persist, props.resizable, requestToggleCollapse]);
+  }, [compact, logicalSize, persist, props.resizable, requestToggleCollapse]);
 
   const commitResizePoint = useCallback((session: ResizeSession, point: { x: number; y: number }) => {
-    const viewport = viewportSize();
+    const viewport = viewportSize(logicalSize);
     // R-03 collapsed retarget (reference only): north/south deltas adjust the
     // retained open geometry underneath; the rendered strip stays header
     // height until expand. Persisted geometry keeps the true open rect.
@@ -485,13 +486,20 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     const baseOrigin = collapsedRetarget
       ? (openGeometryRef.current as SatToolGeometry)
       : session.origin;
-    const min = props.minSize ?? defaultMinSizeForTitle(props.title);
-    const max = props.maxSize ?? defaultMaxSizeForViewport(viewport);
-    const next = resizeGeometry(baseOrigin, session.edge, point.x - session.startX, point.y - session.startY, min, max);
+    const min = toolMinSize ?? defaultMinSizeForTitle(toolTitle);
+    const max = toolMaxSize ?? defaultMaxSizeForViewport(viewport);
+    const next = resizeGeometry(
+      baseOrigin,
+      session.edge,
+      viewportToLogicalLength(point.x - session.startX),
+      viewportToLogicalLength(point.y - session.startY),
+      min,
+      max,
+    );
     if (!session.committed) {
       session.committed = true;
       markHintSeen();
-      props.onManualResize?.();
+      onManualResize?.();
     }
     // Thread the same min/max into the committed rect: resizeGeometry pins
     // the content minimum (e.g. 400) but the legacy 2-arg clamp only floors
@@ -546,7 +554,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
         else applyAnchor();
       }
     }
-  }, [isReference, markHintSeen, persist, props.maxSize, props.minSize, props.title, scrollNodeForReference]);
+  }, [isReference, logicalSize, markHintSeen, onManualResize, persist, scrollNodeForReference, toolMaxSize, toolMinSize, toolTitle, viewportToLogicalLength]);
 
   const flushResizeFrame = useCallback(() => {
     const session = resizeRef.current;
@@ -623,10 +631,10 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     persist(clampSatToolGeometry(
       {
         ...origin,
-        x: origin.x + (event.clientX - session.startX),
-        y: origin.y + (event.clientY - session.startY),
+        x: origin.x + viewportToLogicalLength(event.clientX - session.startX),
+        y: origin.y + viewportToLogicalLength(event.clientY - session.startY),
       },
-      viewportSize(),
+      viewportSize(logicalSize),
     ));
   };
   const handleEndDrag = (event?: React.PointerEvent) => {
@@ -643,7 +651,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     const current = lastCommittedRef.current;
     persist(clampSatToolGeometry(
       { ...current, x: current.x + dx, y: current.y + dy },
-      viewportSize(),
+      viewportSize(logicalSize),
     ));
     props.onManualMove?.();
   };
@@ -658,7 +666,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
 
   const resizeByKeyboard = (dw: number, dh: number) => {
     if (compact || !interactive || !props.resizable) return;
-    const viewport = viewportSize();
+    const viewport = viewportSize(logicalSize);
     const min = props.minSize ?? defaultMinSizeForTitle(props.title);
     const max = props.maxSize ?? defaultMaxSizeForViewport(viewport);
     const current = lastCommittedRef.current;
@@ -809,7 +817,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           data-sat-tool-window={props.title}
           data-sat-tool-presentation="compact-sheet"
           data-sat-tool-interaction-disabled={props.disabled ? "true" : undefined}
-          className="sat-ui flex max-h-[85dvh] w-full max-w-[520px] flex-col overflow-hidden rounded-t-[14px] border border-b-0 border-[var(--sat-divider)] bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-[0_-18px_60px_rgba(0,0,0,0.22)]"
+          className="sat-ui flex max-h-[85%] w-full max-w-[520px] flex-col overflow-hidden rounded-t-[14px] border border-b-0 border-[var(--sat-divider)] bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-[0_-18px_60px_rgba(0,0,0,0.22)]"
         >
           <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-[var(--sat-divider-soft)] px-4">
             <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">{props.title}</span>
@@ -847,7 +855,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   const resizeMin = props.minSize ?? defaultMinSizeForTitle(props.title);
   const resizeMax =
     props.maxSize ??
-    defaultMaxSizeForViewport(typeof window === "undefined" ? { w: 0, h: 0 } : viewportSize());
+    defaultMaxSizeForViewport(typeof window === "undefined" ? { w: 0, h: 0 } : viewportSize(logicalSize));
   const collapseClass = !isReference || compact
     ? ""
     : collapsing

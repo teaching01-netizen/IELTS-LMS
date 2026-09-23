@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import type { ExamEntity } from "../../../types/domain";
 import {
@@ -9,7 +9,7 @@ import {
 import { useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
 import { requestAuthoringDraftOnEntry } from "../application/authoringEntryIntent";
 import { useAccessDistributionOverview } from "../api/assessmentAccessLinkQueries";
-import type { AssessmentValidationIssue } from "../contracts/assessment";
+import type { AssessmentValidationIssue, SatPublishScope } from "../contracts/assessment";
 import { isSATPublishReadinessValid, parseIssueLink } from "../ui/release/releaseSelectors";
 import { SatDeliveryReleasePage } from "../ui/SatDeliveryReleasePage";
 import { CollaborationHeaderCluster } from "../ui/collaboration/CollaborationHeaderCluster";
@@ -31,6 +31,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
   const [searchParams, setSearchParams] = useSearchParams();
   const inSatWorkspace = location.pathname.startsWith("/sat/");
   const shellLifecycle = useAuthoringShellLifecycle(exam.id);
+  const [publishScope, setPublishScope] = useState<SatPublishScope>("full");
   const publishMutation = usePublishAssessment(exam.id);
   const releaseQuery = useAssessmentReleaseState(exam.id);
   const distributionQuery = useAccessDistributionOverview(exam.id);
@@ -52,6 +53,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
     exam.id,
     shell?.versionId,
     shell?.versionRevision,
+    publishScope,
     shouldCheckReadiness
   );
   const view = searchParams.get("view");
@@ -72,7 +74,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
     setSearchParams(next, { replace: true });
   };
 
-  const handlePublish = async (publishNotes?: string) => {
+  const handlePublish = async (scope: SatPublishScope, publishNotes?: string) => {
     if (!shell) throw new Error("The SAT draft is not loaded.");
     if (typeof exam.revision !== "number" || !Number.isInteger(exam.revision)) {
       throw new Error(
@@ -80,12 +82,13 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       );
     }
     const readiness = readinessQuery.data;
-    if (!readiness || !isSATPublishReadinessValid(readiness, true)) {
+    if (!readiness || !isSATPublishReadinessValid(readiness, true, scope)) {
       throw new Error("Run publish checks and resolve all blocking issues first.");
     }
     if (
       readiness.versionId !== shell.versionId ||
-      readiness.versionRevision !== shell.versionRevision
+      readiness.versionRevision !== shell.versionRevision ||
+      readiness.publishScope !== scope
     ) {
       await readinessQuery.refetch();
       throw new Error("The SAT draft changed. Publish checks were refreshed; review them again.");
@@ -98,6 +101,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       revision: exam.revision,
       expectedDraftVersionId: shell.versionId,
       expectedDraftRevision: shell.versionRevision,
+      publishScope: scope,
       ...(trimmedNotes ? { publishNotes: trimmedNotes.slice(0, 1000) } : {}),
       operationKey: crypto.randomUUID(),
     });
@@ -188,6 +192,8 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       readiness={readinessQuery.data ?? null}
       isChecking={readinessQuery.isFetching}
       readinessError={readinessQuery.error instanceof Error ? readinessQuery.error.message : null}
+      publishScope={publishScope}
+      onPublishScopeChange={setPublishScope}
       onOpenStudentAccess={openStudentAccess}
       isPublishing={publishMutation.isPending}
       publishError={publishMutation.error instanceof Error ? publishMutation.error.message : null}

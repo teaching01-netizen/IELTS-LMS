@@ -40,6 +40,7 @@ export function SelectionHandle({
   label,
   held = false,
   snapRevision = 0,
+  visualScale = 1,
 }: {
   handle: SelectionHandleGeometry;
   label: string;
@@ -53,6 +54,8 @@ export function SelectionHandle({
    * settle animation are both left out of it).
    */
   snapRevision?: number | undefined;
+  /** Scales the visible grip while keeping the 44px acquisition target physical. */
+  visualScale?: number | undefined;
 }) {
   const { initial, animate, transition, ...witness } = useGripMotion(held);
   const snap = useCaretSnapMotion(snapRevision, selectionMotion.caretSnapGripScale);
@@ -69,16 +72,18 @@ export function SelectionHandle({
       {/* The tick lives HERE, around the grip: swelling this scales the grip and
           its stem and dot with it, while the measured target above and the grip's
           own settle below stay exactly as they were. */}
-      <motion.span className="selection-v2-grip-tick" animate={snap}>
-        <motion.span
-          aria-hidden="true"
-          className="selection-v2-grip"
-          initial={initial}
-          animate={animate}
-          transition={transition}
-          {...witness}
-        />
-      </motion.span>
+      <span className="selection-v2-grip-visual" style={{ transform: `scale(${visualScale})` }}>
+        <motion.span className="selection-v2-grip-tick" animate={snap}>
+          <motion.span
+            aria-hidden="true"
+            className="selection-v2-grip"
+            initial={initial}
+            animate={animate}
+            transition={transition}
+            {...witness}
+          />
+        </motion.span>
+      </span>
     </button>
   );
 }

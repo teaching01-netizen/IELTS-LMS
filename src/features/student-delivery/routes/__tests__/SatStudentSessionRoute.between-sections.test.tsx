@@ -6,7 +6,7 @@ import { SatStudentSessionRoute } from "../SatStudentSessionRoute";
 
 // Route-level between-sections coverage. The break screen and the controller's
 // break arithmetic each have unit tests; what was untested is the wiring in
-// between — that the server's authored window reaches `SatBreakScreen` with the
+// between — that the server's authored window reaches the scheduled break with the
 // break mode and the countdown to the *next* section, not the finished
 // section's frozen 0:00.
 
@@ -280,13 +280,10 @@ function routeProps() {
 }
 
 interface EntryOptions {
-  /** "break" renders the live break branch instead of the directions branch. */
+  /** "break" renders the scheduled break while its timer runs out. */
   phase?: "directions" | "break";
   isStarting?: boolean;
   autoEntryRecoverable?: boolean;
-  /** False when nothing will auto-start the pending module (a branch module
-   * waiting for the student); absent reads as true like the screen does. */
-  entryAutoStartPending?: boolean;
 }
 
 function seed(
@@ -308,7 +305,8 @@ function seed(
     isSubmitting: false,
     isStarting: entry.isStarting ?? false,
     autoEntryRecoverable: entry.autoEntryRecoverable ?? false,
-    entryAutoStartPending: entry.entryAutoStartPending ?? true,
+    entryReason: "next-module-entry",
+    retryModuleEntry: vi.fn(),
     pendingModule: module,
     pendingBreakSeconds: pending.breakSeconds,
     pendingSectionWaitSeconds: pending.waitSeconds,
@@ -361,16 +359,16 @@ describe("SatStudentSessionRoute between-sections window", () => {
   it("renders the authored break counting down to the next section", () => {
     renderRoute(mathData(), { breakSeconds: 640, waitSeconds: 0 });
 
-    expect(screen.getByText("On break")).toBeInTheDocument();
+    expect(screen.getByText("Scheduled break")).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent("10:40");
-    expect(screen.getByRole("heading", { name: "Math is next" })).toBeInTheDocument();
-    expect(screen.queryByText("Waiting for the break to start")).not.toBeInTheDocument();
+    expect(screen.getByText("Math is next")).toBeInTheDocument();
+    expect(screen.queryByText("Section complete")).not.toBeInTheDocument();
   });
 
   it("shows a configured two-minute break as 2:00 when the break starts", () => {
     renderRoute(mathData(), { breakSeconds: 120, waitSeconds: 0 });
 
-    expect(screen.getByText("On break")).toBeInTheDocument();
+    expect(screen.getByText("Scheduled break")).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent("2:00");
     expect(screen.queryByText("0:00")).not.toBeInTheDocument();
   });
@@ -378,9 +376,9 @@ describe("SatStudentSessionRoute between-sections window", () => {
   it("renders the early-finish wait instead of a break until the section clock runs out", () => {
     renderRoute(mathData(), { breakSeconds: 0, waitSeconds: 300 });
 
-    expect(screen.getByText("Waiting for the break to start")).toBeInTheDocument();
+    expect(screen.getByText("Section complete")).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent("5:00");
-    expect(screen.queryByText("On break")).not.toBeInTheDocument();
+    expect(screen.queryByText("Scheduled break")).not.toBeInTheDocument();
   });
 
   // Phase 4 (kill the silent 0:00): the countdown reaches zero while the server
@@ -393,27 +391,38 @@ describe("SatStudentSessionRoute between-sections window", () => {
       { phase: "break", autoEntryRecoverable: true },
     );
 
-    expect(screen.getByRole("timer")).toHaveTextContent("—");
-    expect(screen.getByText("Still opening your next section")).toBeInTheDocument();
-    expect(screen.getByText(/Keep this screen open/)).toBeInTheDocument();
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Still opening Math/ })).toBeInTheDocument();
+    expect(screen.getByText(/saved answers are safe/)).toBeInTheDocument();
     // The recovery path stays named. No button: entry is automatic, and only
     // the preview route passes an advance handler.
-    expect(screen.getByText(/wait 30 seconds then reload/)).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    expect(screen.queryByText("On break")).not.toBeInTheDocument();
+    expect(screen.queryByText("Scheduled break")).not.toBeInTheDocument();
   });
 
   it("announces the entry attempt while it is still in flight", () => {
     renderRoute(mathData(), { breakSeconds: 0, waitSeconds: 0 }, { phase: "break", isStarting: true });
 
-    expect(screen.getByText("Starting your next section")).toBeInTheDocument();
-    expect(screen.getByRole("timer")).toHaveTextContent("—");
+    expect(screen.getByRole("heading", { name: "Opening Math…" })).toBeInTheDocument();
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+  });
+
+  it("keeps one scheduled-break surface mounted through waiting, break, and opening", () => {
+    const data = mathData();
+    const view = renderRoute(data, { breakSeconds: 0, waitSeconds: 300 });
+    const surface = screen.getByTestId("sat-scheduled-break");
+
+    seed(data, { breakSeconds: 120, waitSeconds: 0 });
+    view.rerender(<SatStudentSessionRoute {...(routeProps() as never)} />);
+    expect(screen.getByTestId("sat-scheduled-break")).toBe(surface);
+
+    seed(data, { breakSeconds: 0, waitSeconds: 0 }, { phase: "break" });
+    view.rerender(<SatStudentSessionRoute {...(routeProps() as never)} />);
+    expect(screen.getByTestId("sat-scheduled-break")).toBe(surface);
   });
 });
 
-// Module-advance wiring: the decision's `autoStartPending` has to reach the
-// screen, because that is what decides whether the Start button is recovery-only
-// or the student's only way into Module 2.
+// The server-selected Module 2 appears without the old directions surface.
 describe("SatStudentSessionRoute module advance", () => {
   beforeEach(() => {
     cleanup();
@@ -424,29 +433,14 @@ describe("SatStudentSessionRoute module advance", () => {
     matchMediaMock();
   });
 
-  it("offers a working Start on Module 2 when no automatic path owns it", () => {
+  it.each([false, true])("does not show directions for the routed Module 2 (timeout=%s)", (timedOut) => {
     renderRoute(
-      branchPendingData(false),
+      branchPendingData(timedOut),
       { breakSeconds: 0, waitSeconds: 0 },
-      { entryAutoStartPending: false },
     );
 
-    expect(
-      screen.getByRole("button", { name: /Begin module \u2014 Module 2/ }),
-    ).toBeEnabled();
-    expect(screen.queryByText(/opens automatically/)).not.toBeInTheDocument();
-  });
-
-  it("shows Module 2 opening by itself while the timeout hand-off owns it", () => {
-    renderRoute(
-      branchPendingData(true),
-      { breakSeconds: 0, waitSeconds: 0 },
-      { entryAutoStartPending: true },
-    );
-
-    expect(
-      screen.getByRole("button", { name: /Begin module \u2014 Module 2/ }),
-    ).toBeDisabled();
-    expect(screen.getByText(/opens automatically/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Preparing your exam" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Begin module/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Module directions/i)).not.toBeInTheDocument();
   });
 });

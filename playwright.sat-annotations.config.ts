@@ -11,6 +11,7 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: "sat-annotation-placement.spec.ts",
   fullyParallel: false,
+  workers: 1,
   retries: 0,
   reporter: "list",
   use: {
@@ -20,6 +21,7 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "touch-chromium", use: { ...devices["Pixel 5"] } },
+    { name: "webkit-ipad", use: { ...devices["iPad (gen 7) landscape"] } },
   ],
   webServer: {
     command: "bun run dev -- --host 127.0.0.1",

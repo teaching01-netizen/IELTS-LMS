@@ -301,39 +301,64 @@ func cleanup(ctx context.Context, db *sql.DB) error {
 	}
 	defer func() { _ = txn.Rollback() }()
 
-	// Terminalizations intentionally use NO ACTION FKs so a schedule cannot be
-	// removed while its durable finalization record is still present.
+	// A terminalization is an immutable receipt. Keep its schedule, published
+	// exam version, and exam; only clear mutable fixture rows from prior runs.
+	// Retained schedules are renamed so the next seed remains the only active
+	// fixture with the canonical cohort label.
 	if _, err := txn.ExecContext(ctx, `
-		DELETE FROM attempt_terminalizations
-		WHERE schedule_id IN (
-			SELECT id FROM exam_schedules WHERE exam_id IN (
+		UPDATE exam_schedules s
+		JOIN attempt_terminalizations t ON t.schedule_id = s.id
+		SET s.cohort_name = CONCAT('Prior E2E · ', s.cohort_name)
+		WHERE s.exam_id IN (
 			SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?)
-			)
-		)`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		)
+		AND s.cohort_name NOT LIKE 'Prior E2E · %'`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		return err
+	}
+	if _, err := txn.ExecContext(ctx, `
+		UPDATE assessment_access_links l
+		JOIN exam_schedules s ON s.id = l.schedule_id
+		JOIN attempt_terminalizations t ON t.schedule_id = s.id
+		SET l.name = CONCAT('Prior E2E · ', l.name)
+		WHERE s.exam_id IN (
+			SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?)
+		)
+		AND l.name NOT LIKE 'Prior E2E · %'`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
 	if _, err := txn.ExecContext(ctx, `
 		DELETE FROM exam_schedules
-		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))
+		AND NOT EXISTS (
+			SELECT 1 FROM attempt_terminalizations t WHERE t.schedule_id = exam_schedules.id
+		)`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
+	deletableExamIDs := `
+		SELECT e.id FROM exam_entities e
+		WHERE e.slug IN (?, ?, ?, ?)
+		AND NOT EXISTS (
+			SELECT 1 FROM exam_schedules s
+			JOIN attempt_terminalizations t ON t.schedule_id = s.id
+			WHERE s.exam_id = e.id
+		)`
 	// Exam-level rows whose exam_versions FKs are NO ACTION (no ON DELETE
 	// clause) and therefore survive the schedule cascade as version pins.
 	// The seed never creates these; the deletes are defensive and idempotent.
 	if _, err := txn.ExecContext(ctx, `
 		DELETE FROM sat_workbook_imports
-		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		WHERE exam_id IN (`+deletableExamIDs+`)`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
 	if _, err := txn.ExecContext(ctx, `
 		DELETE FROM assessment_access_links
-		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		WHERE exam_id IN (`+deletableExamIDs+`)`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
 	// exam_events.version_id is NO ACTION (0003), so events must go before versions.
 	if _, err := txn.ExecContext(ctx, `
 		DELETE FROM exam_events
-		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		WHERE exam_id IN (`+deletableExamIDs+`)`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
 	// exam_versions.parent_version_id is a self-FK with NO ACTION (0003 line 73,
@@ -341,51 +366,79 @@ func cleanup(ctx context.Context, db *sql.DB) error {
 	// path (internal/exams/service.go line 722) — then delete the versions.
 	if _, err := txn.ExecContext(ctx, `
 		UPDATE exam_versions SET parent_version_id = NULL
-		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		WHERE exam_id IN (`+deletableExamIDs+`)`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
 	if _, err := txn.ExecContext(ctx, `
 		DELETE FROM exam_versions
-		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		WHERE exam_id IN (`+deletableExamIDs+`)`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
-	if _, err := txn.ExecContext(ctx, "DELETE FROM exam_entities WHERE slug IN (?, ?, ?, ?)", builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+	if _, err := txn.ExecContext(ctx, `
+		DELETE e FROM exam_entities e
+		WHERE e.slug IN (?, ?, ?, ?)
+		AND NOT EXISTS (
+			SELECT 1 FROM exam_schedules s
+			JOIN attempt_terminalizations t ON t.schedule_id = s.id
+			WHERE s.exam_id = e.id
+		)`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
 	if _, err := txn.ExecContext(ctx, `
 		DELETE FROM users
-		WHERE email IN (?, ?, ?, ?, ?)`, builderEmail, studentEmail, unregisteredEmail, adminOperatorEmail, lifecycleAdminEmail); err != nil {
+		WHERE email IN (?, ?, ?, ?, ?)
+		AND NOT EXISTS (
+			SELECT 1 FROM student_attempts a
+			WHERE a.user_id = users.id OR LOWER(a.candidate_email) = LOWER(users.email)
+		)`, builderEmail, studentEmail, unregisteredEmail, adminOperatorEmail, lifecycleAdminEmail); err != nil {
 		return err
 	}
 	return txn.Commit()
 }
 
 func createUser(ctx context.Context, db *sql.DB, cfg config.Config, role, email, displayName, studentID string, withSession bool) (authFixture, error) {
-	id := uuid.NewString()
+	userEmail := strings.ToLower(email)
+	var id string
+	err := db.QueryRowContext(ctx, "SELECT id FROM users WHERE email = ?", userEmail).Scan(&id)
+	if err != nil && err != sql.ErrNoRows {
+		return authFixture{}, fmt.Errorf("find %s user: %w", email, err)
+	}
 	now := time.Now().UTC()
 	hash, err := auth.HashPassword(activationPassword)
 	if err != nil {
 		return authFixture{}, err
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO users (id, email, display_name, role, state, organization_id, failed_login_count, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 'active', 'e2e-org', 0, ?, ?)`, id, strings.ToLower(email), displayName, role, now, now); err != nil {
-		return authFixture{}, fmt.Errorf("insert %s user: %w", email, err)
+	if id == "" {
+		id = uuid.NewString()
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO users (id, email, display_name, role, state, organization_id, failed_login_count, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'active', 'e2e-org', 0, ?, ?)`, id, userEmail, displayName, role, now, now); err != nil {
+			return authFixture{}, fmt.Errorf("insert %s user: %w", email, err)
+		}
+	} else if _, err := db.ExecContext(ctx, `
+		UPDATE users
+		SET email = ?, display_name = ?, role = ?, state = 'active', organization_id = 'e2e-org',
+		    failed_login_count = 0, locked_until = NULL, updated_at = ?
+		WHERE id = ?`, userEmail, displayName, role, now, id); err != nil {
+		return authFixture{}, fmt.Errorf("reset %s user: %w", email, err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO user_password_credentials (user_id, password_hash, updated_at) VALUES (?, ?, ?)`, id, hash, now); err != nil {
-		return authFixture{}, err
+		INSERT INTO user_password_credentials (user_id, password_hash, updated_at) VALUES (?, ?, ?)
+		ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), updated_at = VALUES(updated_at)`, id, hash, now); err != nil {
+		return authFixture{}, fmt.Errorf("reset %s credentials: %w", email, err)
 	}
 	if role == auth.RoleStudent {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO student_profiles (user_id, student_id, full_name, email, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)`, id, studentID, displayName, strings.ToLower(email), now, now); err != nil {
-			return authFixture{}, err
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON DUPLICATE KEY UPDATE student_id = VALUES(student_id), full_name = VALUES(full_name), email = VALUES(email), updated_at = VALUES(updated_at)`, id, studentID, displayName, userEmail, now, now); err != nil {
+			return authFixture{}, fmt.Errorf("reset %s profile: %w", email, err)
 		}
 	} else if _, err := db.ExecContext(ctx, `
 		INSERT INTO staff_profiles (user_id, full_name, email, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)`, id, displayName, strings.ToLower(email), now, now); err != nil {
-		return authFixture{}, err
+		VALUES (?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), email = VALUES(email), updated_at = VALUES(updated_at)`, id, displayName, userEmail, now, now); err != nil {
+		return authFixture{}, fmt.Errorf("reset %s profile: %w", email, err)
 	}
 	fixture := authFixture{userID: id}
 	if withSession {
@@ -511,33 +564,64 @@ type studentFixture struct {
 	examID, publishedVersionID, liveScheduleID, precheckScheduleID, proctorWorkflowScheduleID, flushScheduleID, submissionScheduleID, lifecycleScheduleID, selfPacedScheduleID string
 }
 
+type publishedFixtureExam struct {
+	id, title, versionID string
+}
+
+func findPublishedFixtureExam(ctx context.Context, db *sql.DB, slug string) (publishedFixtureExam, bool, error) {
+	var exam publishedFixtureExam
+	var versionID sql.NullString
+	err := db.QueryRowContext(ctx, `
+		SELECT id, title, current_published_version_id
+		FROM exam_entities WHERE slug = ?`, slug).Scan(&exam.id, &exam.title, &versionID)
+	if err == sql.ErrNoRows {
+		return publishedFixtureExam{}, false, nil
+	}
+	if err != nil {
+		return publishedFixtureExam{}, false, fmt.Errorf("find seeded exam %s: %w", slug, err)
+	}
+	if !versionID.Valid || versionID.String == "" {
+		return publishedFixtureExam{}, true, fmt.Errorf("seeded exam %s exists without a published version", slug)
+	}
+	exam.versionID = versionID.String
+	return exam, true, nil
+}
+
 func seedStudent(ctx context.Context, db *sql.DB, examService *exams.Service, scheduleService *schedules.Service, ownerID, studentID, proctorID string) (studentFixture, error) {
-	exam, err := examService.Create(ctx, exams.CreateRequest{
-		Slug: studentSlug, Title: "Student Backend E2E Delivery", ExamType: exams.ExamTypeAcademic,
-		Visibility: exams.VisibilityOrganization, OrganizationID: stringPtr("e2e-org"), OwnerID: ownerID,
-	})
+	existing, found, err := findPublishedFixtureExam(ctx, db, studentSlug)
 	if err != nil {
 		return studentFixture{}, err
 	}
-	if _, err := examService.SaveDraft(ctx, exam.ID, ownerID, exams.SaveDraftRequest{
-		Content: mustJSON(minimalExamContent("Student Backend E2E Delivery", "student-passage-1", readingQuestionID, "Write the missing word from the passage.", expectedAnswer)),
-		Config:  mustJSON(minimalConfig("Student Backend E2E Delivery")), Revision: exam.Revision,
-	}); err != nil {
-		return studentFixture{}, err
-	}
-	updated, err := examService.Get(ctx, exam.ID)
-	if err != nil {
-		return studentFixture{}, err
-	}
-	published, err := examService.Publish(ctx, exam.ID, ownerID, exams.PublishRequest{PublishNotes: stringPtr("published for Go backend E2E"), Revision: updated.Revision})
-	if err != nil {
-		return studentFixture{}, err
+	examID, examTitle, publishedVersionID := existing.id, existing.title, existing.versionID
+	if !found {
+		exam, createErr := examService.Create(ctx, exams.CreateRequest{
+			Slug: studentSlug, Title: "Student Backend E2E Delivery", ExamType: exams.ExamTypeAcademic,
+			Visibility: exams.VisibilityOrganization, OrganizationID: stringPtr("e2e-org"), OwnerID: ownerID,
+		})
+		if createErr != nil {
+			return studentFixture{}, createErr
+		}
+		if _, err := examService.SaveDraft(ctx, exam.ID, ownerID, exams.SaveDraftRequest{
+			Content: mustJSON(minimalExamContent("Student Backend E2E Delivery", "student-passage-1", readingQuestionID, "Write the missing word from the passage.", expectedAnswer)),
+			Config:  mustJSON(minimalConfig("Student Backend E2E Delivery")), Revision: exam.Revision,
+		}); err != nil {
+			return studentFixture{}, err
+		}
+		updated, getErr := examService.Get(ctx, exam.ID)
+		if getErr != nil {
+			return studentFixture{}, getErr
+		}
+		published, publishErr := examService.Publish(ctx, exam.ID, ownerID, exams.PublishRequest{PublishNotes: stringPtr("published for Go backend E2E"), Revision: updated.Revision})
+		if publishErr != nil {
+			return studentFixture{}, publishErr
+		}
+		examID, examTitle, publishedVersionID = exam.ID, exam.Title, published.ID
 	}
 	start := time.Now().UTC().Add(-5 * time.Minute)
 	end := start.Add(3 * time.Hour)
 	common := schedules.CreateRequest{
-		ExamID: exam.ID, PublishedVersionID: published.ID, CohortName: "Backend E2E Cohort",
-		ProctorDisplayName: exam.Title, GradingDisplayName: exam.Title, Institution: stringPtr("Codex IELTS Lab"),
+		ExamID: examID, PublishedVersionID: publishedVersionID, CohortName: "Backend E2E Cohort",
+		ProctorDisplayName: examTitle, GradingDisplayName: examTitle, Institution: stringPtr("Codex IELTS Lab"),
 		StartTime: start, EndTime: end, CreatedBy: ownerID,
 	}
 	createAssignedSchedule := func(cohortName string, startRuntime bool) (schedules.Schedule, error) {
@@ -547,7 +631,7 @@ func seedStudent(ctx context.Context, db *sql.DB, examService *exams.Service, sc
 		if createErr != nil {
 			return schedules.Schedule{}, createErr
 		}
-		if err := mintOpenLink(ctx, db, exam.ID, published.ID, created.ID, "E2E open entry - "+cohortName, ownerID); err != nil {
+		if err := mintOpenLink(ctx, db, examID, publishedVersionID, created.ID, "E2E open entry - "+cohortName, ownerID); err != nil {
 			return schedules.Schedule{}, err
 		}
 		if _, assignErr := db.ExecContext(ctx, `
@@ -604,11 +688,11 @@ func seedStudent(ctx context.Context, db *sql.DB, examService *exams.Service, sc
 	if err != nil {
 		return studentFixture{}, err
 	}
-	if err := mintOpenLink(ctx, db, exam.ID, published.ID, selfPaced.ID, "E2E open entry - Backend E2E Self-paced", ownerID); err != nil {
+	if err := mintOpenLink(ctx, db, examID, publishedVersionID, selfPaced.ID, "E2E open entry - Backend E2E Self-paced", ownerID); err != nil {
 		return studentFixture{}, err
 	}
 	return studentFixture{
-		examID: exam.ID, publishedVersionID: published.ID, liveScheduleID: live.ID,
+		examID: examID, publishedVersionID: publishedVersionID, liveScheduleID: live.ID,
 		precheckScheduleID:        precheck.ID,
 		proctorWorkflowScheduleID: proctorWorkflow.ID,
 		flushScheduleID:           flush.ID, submissionScheduleID: submission.ID,
@@ -621,40 +705,48 @@ type actFixture struct {
 }
 
 func seedACT(ctx context.Context, db *sql.DB, examService *exams.Service, scheduleService *schedules.Service, ownerID, studentID, proctorID string) (actFixture, error) {
-	exam, err := examService.Create(ctx, exams.CreateRequest{
-		Slug: actStudentSlug, Title: "ACT Science Backend E2E", ExamType: exams.ExamTypeACT,
-		Visibility: exams.VisibilityOrganization, OrganizationID: stringPtr("e2e-org"), OwnerID: ownerID,
-		ProviderKey: stringPtr(exams.ProviderACT), ProviderExamType: stringPtr("ACT"),
-	})
+	existing, found, err := findPublishedFixtureExam(ctx, db, actStudentSlug)
 	if err != nil {
 		return actFixture{}, err
 	}
-	if _, err := examService.SaveDraft(ctx, exam.ID, ownerID, exams.SaveDraftRequest{
-		Content: mustJSON(minimalACTExamContent("ACT Science Backend E2E", actQuestionID)),
-		Config:  mustJSON(minimalACTConfig("ACT Science Backend E2E")), Revision: exam.Revision,
-	}); err != nil {
-		return actFixture{}, err
-	}
-	draft, err := examService.Get(ctx, exam.ID)
-	if err != nil {
-		return actFixture{}, err
-	}
-	published, err := examService.Publish(ctx, exam.ID, ownerID, exams.PublishRequest{
-		PublishNotes: stringPtr("published for ACT Go backend E2E"), Revision: draft.Revision,
-	})
-	if err != nil {
-		return actFixture{}, err
+	examID, examTitle, publishedVersionID := existing.id, existing.title, existing.versionID
+	if !found {
+		exam, createErr := examService.Create(ctx, exams.CreateRequest{
+			Slug: actStudentSlug, Title: "ACT Science Backend E2E", ExamType: exams.ExamTypeACT,
+			Visibility: exams.VisibilityOrganization, OrganizationID: stringPtr("e2e-org"), OwnerID: ownerID,
+			ProviderKey: stringPtr(exams.ProviderACT), ProviderExamType: stringPtr("ACT"),
+		})
+		if createErr != nil {
+			return actFixture{}, createErr
+		}
+		if _, err := examService.SaveDraft(ctx, exam.ID, ownerID, exams.SaveDraftRequest{
+			Content: mustJSON(minimalACTExamContent("ACT Science Backend E2E", actQuestionID)),
+			Config:  mustJSON(minimalACTConfig("ACT Science Backend E2E")), Revision: exam.Revision,
+		}); err != nil {
+			return actFixture{}, err
+		}
+		draft, getErr := examService.Get(ctx, exam.ID)
+		if getErr != nil {
+			return actFixture{}, getErr
+		}
+		published, publishErr := examService.Publish(ctx, exam.ID, ownerID, exams.PublishRequest{
+			PublishNotes: stringPtr("published for ACT Go backend E2E"), Revision: draft.Revision,
+		})
+		if publishErr != nil {
+			return actFixture{}, publishErr
+		}
+		examID, examTitle, publishedVersionID = exam.ID, exam.Title, published.ID
 	}
 	start := time.Now().UTC().Add(-5 * time.Minute)
 	schedule, err := scheduleService.Create(ctx, schedules.CreateRequest{
-		ExamID: exam.ID, PublishedVersionID: published.ID, CohortName: "ACT Science Backend E2E",
-		ProctorDisplayName: exam.Title, GradingDisplayName: exam.Title, Institution: stringPtr("Codex IELTS Lab"),
+		ExamID: examID, PublishedVersionID: publishedVersionID, CohortName: "ACT Science Backend E2E",
+		ProctorDisplayName: examTitle, GradingDisplayName: examTitle, Institution: stringPtr("Codex IELTS Lab"),
 		StartTime: start, EndTime: start.Add(3 * time.Hour), CreatedBy: ownerID,
 	})
 	if err != nil {
 		return actFixture{}, err
 	}
-	if err := mintOpenLink(ctx, db, exam.ID, published.ID, schedule.ID, "E2E open entry - ACT Science Backend E2E", ownerID); err != nil {
+	if err := mintOpenLink(ctx, db, examID, publishedVersionID, schedule.ID, "E2E open entry - ACT Science Backend E2E", ownerID); err != nil {
 		return actFixture{}, err
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -674,7 +766,7 @@ func seedACT(ctx context.Context, db *sql.DB, examService *exams.Service, schedu
 	}); err != nil {
 		return actFixture{}, err
 	}
-	return actFixture{examID: exam.ID, publishedVersionID: published.ID, scheduleID: schedule.ID}, nil
+	return actFixture{examID: examID, publishedVersionID: publishedVersionID, scheduleID: schedule.ID}, nil
 }
 
 type storageState struct {

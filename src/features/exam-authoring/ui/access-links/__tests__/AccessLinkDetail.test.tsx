@@ -10,6 +10,7 @@ const link: AssessmentAccessLink = {
   providerKey: "sat",
   publishedVersionId: "version-4",
   versionNumber: 4,
+  publishScope: "full",
   scheduleId: "schedule-1",
   name: "Old Scholarship",
   audienceType: "cohort",

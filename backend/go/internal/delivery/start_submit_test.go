@@ -103,23 +103,34 @@ func deliveryBusInsert(mock sqlmock.Sqlmock, kind, target, name string, rev int6
 // deliveryUnscopedLink stages the Student Access scope read as "no link" — the
 // schedule-scoped read used by Bootstrap/assembleBootstrap.
 func deliveryUnscopedLink(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_publish_scope FROM exam_versions WHERE id = ?")).
+		WithArgs("pv-1").
+		WillReturnRows(sqlmock.NewRows([]string{"sat_publish_scope"}).AddRow(nil))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ?")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
 }
 
-// deliveryUnscopedAttemptLink stages the attempt-scoped scope read as "no
-// link" — the read nextModuleTx uses to skip sections a narrowed link dropped.
+// deliveryUnscopedAttemptLink stages a full release with no Student Access
+// scope for the attempt-scoped section advance read.
 func deliveryUnscopedAttemptLink(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions v")).
 		WithArgs("att-1").
-		WillReturnError(sql.ErrNoRows)
+		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(nil, nil))
 }
 
 func deliveryBootstrapLoads(mock sqlmock.Sqlmock, at time.Time) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id")).
 		WithArgs("pv-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions"}).
+			AddRow("sec-1", "reading-writing", "Reading & Writing", 0, 3600, 0, nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules WHERE section_id = ? ORDER BY display_order")).
+		WithArgs("sec-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
+			AddRow("mod-1", "m1", "Module 1", 0, 3600, 27, "base", nil, nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN")).
+		WithArgs("mod-1").
+		WillReturnRows(sqlmock.NewRows([]string{"exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}))
 	deliveryUnscopedLink(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_module_attempts WHERE attempt_id = ?")).
 		WithArgs("att-1").

@@ -24,10 +24,14 @@ import (
 )
 
 // planVersionRows stages the pinned-version read (config snapshot + exam type).
-func planVersionRows(mock sqlmock.Sqlmock, config, examType string) {
+func planVersionRows(mock sqlmock.Sqlmock, config, examType string, publishScope ...any) {
+	var scope any
+	if len(publishScope) > 0 {
+		scope = publishScope[0]
+	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions v JOIN exam_entities e")).
 		WithArgs("pv-1").
-		WillReturnRows(sqlmock.NewRows([]string{"config_snapshot", "exam_type"}).AddRow(config, examType))
+		WillReturnRows(sqlmock.NewRows([]string{"config_snapshot", "exam_type", "sat_publish_scope"}).AddRow(config, examType, scope))
 }
 
 // planLinkScopeRows stages the link scope read. A NULL value is an unscoped link.
@@ -156,6 +160,48 @@ func TestRuntimePlanInUnscopedLinkKeepsEverySection(t *testing.T) {
 		t.Fatalf("runtimePlanIn must succeed: %v", err)
 	}
 	assertPlanKeys(t, plan, "reading-writing", "math")
+}
+
+func TestRuntimePlanInAppliesPublishedReadingWritingScopeAndRemovesFinalBreak(t *testing.T) {
+	db, mock := testPlanQuerier(t)
+	planVersionRows(mock, "{}", "Academic", "reading-writing")
+	mock.ExpectQuery(regexp.QuoteMeta("enabled_sections FROM assessment_access_links WHERE schedule_id")).
+		WithArgs("sched-1").
+		WillReturnError(sql.ErrNoRows)
+	planModuleRows(mock)
+	planSectionRows(mock,
+		[]driver.Value{"reading-writing", "Reading and Writing", 0, 3840, 600},
+		[]driver.Value{"math", "Math", 1, 4200, 0})
+
+	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
+	if err != nil {
+		t.Fatalf("runtimePlanIn must succeed: %v", err)
+	}
+	assertPlanKeys(t, plan, "reading-writing")
+	if plan[0].GapAfterMinutes != 0 {
+		t.Fatalf("the last included SAT section must not keep an inter-section break, got %d", plan[0].GapAfterMinutes)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimePlanInCannotWidenPublishedScopeWithStudentLink(t *testing.T) {
+	db, mock := testPlanQuerier(t)
+	planVersionRows(mock, "{}", "Academic", "reading-writing")
+	planLinkScopeRows(mock, "sched-1", `["math"]`)
+	planModuleRows(mock)
+	planSectionRows(mock,
+		[]driver.Value{"reading-writing", "Reading and Writing", 0, 3840, 600},
+		[]driver.Value{"math", "Math", 1, 4200, 0})
+
+	plan, _, err := runtimePlanIn(context.Background(), db, satPlanSchedule())
+	if err != nil {
+		t.Fatalf("runtimePlanIn must succeed: %v", err)
+	}
+	if len(plan) != 0 {
+		t.Fatalf("a Math link cannot widen a Reading & Writing release, got %+v", plan)
+	}
 }
 
 // A schedule with no link at all keeps every section too — admin-created

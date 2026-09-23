@@ -81,6 +81,11 @@
   display: block;
 }
 
+.selection-v2-grip-visual {
+  display: block;
+  transform-origin: 50% 50%;
+}
+
 .selection-v2-grip::before {
   /* The stem, pointing back at the text it belongs to. */
   content: '';

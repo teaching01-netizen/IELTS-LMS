@@ -31,6 +31,7 @@ import { SatAnnotationEditControls } from './annotations/SatAnnotationEditContro
 import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext';
 import { SatNotesSurfaceHost } from './annotations/SatNotesSurfaceHost';
 import { SatSelectionActionsPanel } from './annotations/SatSelectionActionsPanel';
+import { SatExamViewportOverlay, SatExamZoomPlane } from './zoom/SatExamZoomContext';
 
 export interface SatExamShellProps {
   moduleIdentity?: string;
@@ -58,6 +59,8 @@ export interface SatExamShellProps {
   questionNote: string;
   readingPreferences: SatReadingPreferences;
   children: ReactNode;
+  /** Route-owned floating tools that share the exam's visual zoom space. */
+  floatingToolChildren?: ReactNode | undefined;
   /**
    * Highlights & Notes: the shell owns annotation mutation so the contextual
    * toolbar and the note card can both write the same response. The content
@@ -428,13 +431,21 @@ export function SatExamShell(props: SatExamShellProps) {
   // machine-readable answer (durability diagnostics and the e2e legs wait on it).
   return (
     <SatContrastContext.Provider value={props.readingPreferences.contrastMode ?? 'default'}>
+    <SatExamZoomPlane
+      scale={screenZoom}
+      height={props.examHeight}
+      contrastMode={props.readingPreferences.contrastMode ?? 'default'}
+      viewportClassName="relative h-[var(--student-exam-height,100dvh)] min-h-0 w-full max-h-[var(--student-exam-height,100dvh)] overflow-hidden"
+      viewportStyle={shellStyle}
+      planeClassName="sat-exam-zoom-plane"
+    >
     <div
-      className="sat-ui sat-exam-shell grid h-[100dvh] min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-shell-bg)] text-[var(--sat-text)]"
+      className="sat-ui sat-exam-shell grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-shell-bg)] text-[var(--sat-text)]"
       data-testid="sat-exam-shell"
       data-sat-contrast={props.readingPreferences.contrastMode ?? 'default'}
       data-sat-keyboard-open={props.keyboardOpen ? "true" : "false"}
       data-sat-save-state={props.saveState}
-      style={shellStyle}
+      style={{ height: '100%', maxHeight: '100%' }}
     >
     {/* Blocking inert covers the whole exam grid (Phase 0.6, corrected Phase 1
         review): while a proctor pause is active NOTHING exam-interactive —
@@ -504,8 +515,8 @@ export function SatExamShell(props: SatExamShellProps) {
       />
 
       {/* Bluebook document: the exam body stays white inside pale-blue chrome.
-          Annotation overlays are positioned against THIS box (not the zoomed
-          content): the exam zoom transform must never scale a toolbar. */}
+          Annotation geometry starts in viewport space and converts back into
+          this shared plane for rendering. */}
       <main
         className="relative min-h-0 min-w-0 overflow-hidden bg-[var(--sat-body-bg)]"
         id="sat-question-content"
@@ -561,20 +572,14 @@ export function SatExamShell(props: SatExamShellProps) {
             onFlush={props.onFlushAnnotations}
             onClose={surface.closeNotes}
           >
-            {/* The content box is `zoom`-scaled and deliberately NOT resized:
-                percentage lengths are exempt from `zoom`, so width/height stay
-                the full pane region and only what is laid out inside shrinks.
-                That is what makes zooming out reveal more of the question
-                instead of drawing a smaller exam with bands of empty paper at
-                the pane's edge — so do not "compensate" it with
-                calc(100% / zoom): it is already unscaled, and the larger box
-                would be clipped by the shell. */}
+            {/* The shared zoom plane owns scale and logical viewport dimensions.
+                Question content only reports the fit probe root. */}
             <div
               ref={contentRef}
+              data-sat-fit-root="true"
               className="h-full min-w-0"
-              data-sat-content-zoom={screenZoom}
               data-sat-fit-probing={fit.probing ? "true" : "false"}
-              style={{ zoom: screenZoom, width: '100%', height: '100%' }}>
+              style={{ width: '100%', height: '100%' }}>
               {props.children}
             </div>
           </SatNotesSurfaceHost>
@@ -706,14 +711,6 @@ export function SatExamShell(props: SatExamShellProps) {
           returnFocusSelector='[data-sat-focus="topbar-more"]'
         />
       ) : null}
-      {props.breakVeilOpen !== undefined && props.onReturnFromBreak ? (
-        <SatUnscheduledBreakVeil
-          open={props.breakVeilOpen}
-          remainingLabel={props.remainingLabel}
-          remainingSeconds={props.remainingSeconds}
-          onReturn={props.onReturnFromBreak}
-        />
-      ) : null}
       {/* Bluebook 5-minute warning (Phase 7): one-shot per module, live
           remaining time. Hidden while blocked (pause veil owns attention).
           Display-only: dismissing never touches timer or answers. */}
@@ -723,6 +720,8 @@ export function SatExamShell(props: SatExamShellProps) {
         onDismiss={() => setTimerWarningVisible(false)}
       />
     </div>
+    </div>
+      {props.floatingToolChildren}
       <SatSaveStatus
         state={props.saveState}
         saveFailure={props.saveFailure}
@@ -730,7 +729,17 @@ export function SatExamShell(props: SatExamShellProps) {
         onTakeOver={props.onTakeOver}
         isTakingOver={props.isTakingOver}
       />
-    </div>
+      <SatExamViewportOverlay>
+        {props.breakVeilOpen !== undefined && props.onReturnFromBreak ? (
+          <SatUnscheduledBreakVeil
+            open={props.breakVeilOpen}
+            remainingLabel={props.remainingLabel}
+            remainingSeconds={props.remainingSeconds}
+            onReturn={props.onReturnFromBreak}
+          />
+        ) : null}
+      </SatExamViewportOverlay>
+    </SatExamZoomPlane>
     </SatContrastContext.Provider>
   );
 }

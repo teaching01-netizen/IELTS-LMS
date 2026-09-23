@@ -71,11 +71,11 @@ describe('SatRunSheet', () => {
     expect(screen.queryByText('Live')).not.toBeInTheDocument();
     expect(screen.getAllByText('Module 2 · Adaptive')).toHaveLength(2);
     expect(screen.getAllByText('One branch per student')).toHaveLength(2);
-    expect(screen.getByText('Scheduled start')).toBeInTheDocument();
-    expect(screen.getByText('Planned finish')).toBeInTheDocument();
+    expect(screen.queryByText('Scheduled start')).not.toBeInTheDocument();
+    expect(screen.queryByText('Planned finish')).not.toBeInTheDocument();
   });
 
-  it('shows an expected finish after extensions while preserving the original plan end', () => {
+  it('keeps extension context while the run sheet presents stage rows', () => {
     render(
       <SatRunSheet
         plan={[plan[0]]}
@@ -98,10 +98,61 @@ describe('SatRunSheet', () => {
       />
     );
 
-    const summary = document.querySelector('.sat-run-sheet__summary');
-    expect(summary).toHaveTextContent('Started09:00');
-    expect(summary).toHaveTextContent('Expected finish10:19');
-    expect(screen.getByText(/Original plan 10:14 · \+5 min extension/)).toBeInTheDocument();
+    expect(document.querySelector('.sat-run-sheet__anchor')).toHaveTextContent('Anchored to the proctor');
+    expect(screen.getByText(/Original finish 10:14 · \+5 min extension/)).toBeInTheDocument();
+  });
+
+  it('derives the original finish from the same runtime rows and separates extension and pause time', () => {
+    render(
+      <SatRunSheet
+        plan={[plan[0]]}
+        runtime={runtimeWith([{
+          sectionKey: 'reading-writing' as ExamSessionRuntime['sections'][number]['sectionKey'],
+          label: 'Reading & Writing',
+          order: 0,
+          plannedDurationMinutes: 70,
+          gapAfterMinutes: 10,
+          status: 'paused',
+          availableAt: null,
+          actualStartAt: START,
+          actualEndAt: null,
+          pausedAt: '2026-09-20T02:20:00.000Z',
+          accumulatedPausedSeconds: 90,
+          extensionMinutes: 5,
+        }])}
+        scheduledStartAt={START}
+        now="2026-09-20T02:20:00.000Z"
+      />
+    );
+
+    expect(screen.getByText(/Original finish 10:20 · \+5 min extension · 1 min 30 sec paused/)).toBeInTheDocument();
+    expect(document.querySelector('[data-sat-run-sheet-row="section"]')).toHaveAttribute('data-runtime-mismatch', 'true');
+  });
+
+  it('uses runtime rows for the original finish when the authored plan is unavailable', () => {
+    render(
+      <SatRunSheet
+        plan={null}
+        runtime={runtimeWith([{
+          sectionKey: 'reading-writing' as ExamSessionRuntime['sections'][number]['sectionKey'],
+          label: 'Reading & Writing',
+          order: 0,
+          plannedDurationMinutes: 64,
+          gapAfterMinutes: 10,
+          status: 'live',
+          availableAt: null,
+          actualStartAt: START,
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 5,
+        }])}
+        scheduledStartAt={START}
+        now="2026-09-20T02:20:00.000Z"
+      />
+    );
+
+    expect(screen.getByText(/Original finish 10:14 · \+5 min extension/)).toBeInTheDocument();
   });
 
   it('marks the live stage and the module the cohort is inside', () => {
@@ -194,14 +245,14 @@ describe('SatRunSheet', () => {
     expect(screen.queryByText('09:00–10:10')).not.toBeInTheDocument();
 
     // No break at 10:10: it starts when Math actually ends.
-    const breakRow = screen.getByText('Break · 10 min').closest('tr');
+    const breakRow = screen.getByText('Break · 10 min').closest('[data-sat-run-sheet-row]');
     expect(breakRow).toHaveTextContent('10:45–10:55');
     expect(breakRow).toHaveTextContent('Upcoming');
     expect(screen.queryByText('10:10–10:20')).not.toBeInTheDocument();
 
     // The divergence is on the row, not silent.
     const mismatchNote = screen.getByText('Clock 105 min · plan 70 min');
-    expect(mismatchNote.closest('tr')).toHaveAttribute('data-runtime-mismatch', 'true');
+    expect(mismatchNote.closest('[data-sat-run-sheet-row]')).toHaveAttribute('data-runtime-mismatch', 'true');
 
     // …and a session whose runtime clock agrees with the plan carries no note.
     cleanup();
@@ -310,7 +361,7 @@ describe('SatRunSheet', () => {
       />
     );
 
-    expect(screen.getByText('Remaining')).toBeInTheDocument();
+    expect(screen.getAllByText('Remaining')).toHaveLength(2);
     // Section 09:00–10:04 has 44 minutes left at 09:20; Module 1 09:00–09:32 has 12.
     expect(screen.getByText('44:00')).toBeInTheDocument();
     expect(screen.getByText('12:00')).toBeInTheDocument();

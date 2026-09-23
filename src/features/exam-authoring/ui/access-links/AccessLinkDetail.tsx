@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import {
   accessLinkSectionBadge,
-  selectedAccessLinkSections,
+  effectiveAccessLinkSections,
   ACCESS_LINK_SECTION_LABELS,
   type AccessLinkActivity,
   type AssessmentAccessLink,
@@ -84,7 +84,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
     onEscapeToRow,
   } = props;
   const [activeTab, setActiveTab] = useState<DetailTab>(defaultTab ?? "overview");
-  const sectionBadge = accessLinkSectionBadge(link.enabledSections);
+  const sectionBadge = accessLinkSectionBadge(link.enabledSections, link.publishScope);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -446,9 +446,10 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
 
 /** Settings copy for the section scope; the badge is the short form. */
 function sectionsText(link: AssessmentAccessLink): string {
-  const selected = selectedAccessLinkSections(link.enabledSections);
+  const selected = effectiveAccessLinkSections(link.enabledSections, link.publishScope);
+  if (selected.length === 0) return "No available sections · update link scope before sharing";
   const labels = selected.map((key) => ACCESS_LINK_SECTION_LABELS[key]).join(" + ");
-  return accessLinkSectionBadge(link.enabledSections) ? `${labels} only · no total score` : `Both sections · ${labels}`;
+  return selected.length === 2 && link.publishScope === "full" ? `Both sections · ${labels}` : `${labels} only · no total score`;
 }
 
 function audienceText(link: AssessmentAccessLink): string {

@@ -17,6 +17,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // Section keys a Student Access link may be scoped to. SAT-only by decision:
@@ -25,7 +27,13 @@ import (
 const (
 	LinkSectionReadingWriting = "reading-writing"
 	LinkSectionMath           = "math"
+
+	SATPublishScopeFull           = satpublish.ScopeFull
+	SATPublishScopeReadingWriting = satpublish.ScopeReadingWriting
+	SATPublishScopeMath           = satpublish.ScopeMath
 )
+
+type SATPublishScope = satpublish.Scope
 
 // linkSectionOrder is the canonical storage/render order, so a link's scope is
 // stable regardless of the order the client sent its toggles in.
@@ -129,4 +137,39 @@ func SectionScopeKeys(allowed map[string]bool) []string {
 		return nil
 	}
 	return keys
+}
+
+// ParseSATPublishScope turns the immutable version scope into a section
+// membership set. NULL/empty legacy values mean full SAT; corrupt non-empty
+// values fail closed to an empty set.
+func ParseSATPublishScope(raw string) map[string]bool {
+	if strings.TrimSpace(raw) == "" || strings.TrimSpace(raw) == string(SATPublishScopeFull) {
+		return nil
+	}
+	switch strings.TrimSpace(raw) {
+	case string(SATPublishScopeReadingWriting):
+		return map[string]bool{LinkSectionReadingWriting: true}
+	case string(SATPublishScopeMath):
+		return map[string]bool{LinkSectionMath: true}
+	default:
+		return map[string]bool{}
+	}
+}
+
+// IntersectSectionScopes applies release and link scopes. nil means full;
+// an empty non-nil result is a real intersection with no deliverable section.
+func IntersectSectionScopes(a, b map[string]bool) map[string]bool {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	out := make(map[string]bool)
+	for _, key := range linkSectionOrder {
+		if a[key] && b[key] {
+			out[key] = true
+		}
+	}
+	return out
 }

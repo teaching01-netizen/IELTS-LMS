@@ -38,6 +38,7 @@ function satLink(overrides: Partial<AssessmentAccessLink> = {}): AssessmentAcces
     providerKey: "sat",
     publishedVersionId: "version-5",
     versionNumber: 5,
+    publishScope: "full",
     scheduleId: "schedule-1",
     name: "Saturday Class",
     enabledSections: null,
@@ -95,6 +96,53 @@ describe("AccessLinkEditorSheet", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /Reading & Writing/ })).not.toBeInTheDocument();
+  });
+
+  it("limits a new link to the sections in its pinned release", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AccessLinkEditorSheet
+        open
+        link={null}
+        providerKey="sat"
+        publishScope="reading-writing"
+        members={[]}
+        isSaving={false}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onUpdate={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Student Link name" }), {
+      target: { value: "Reading & Writing Link" },
+    });
+    expect(screen.getByRole("button", { name: /Reading & Writing/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /Math/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Link" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ enabledSections: ["reading-writing"] });
+  });
+
+  it("preselects the available section when repairing an older empty link", async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AccessLinkEditorSheet
+        open
+        link={satLink({ publishScope: "reading-writing", enabledSections: ["math"] })}
+        members={[]}
+        isSaving={false}
+        onClose={vi.fn()}
+        onCreate={vi.fn().mockResolvedValue(undefined)}
+        onUpdate={onUpdate}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/not available in its published version/);
+    expect(screen.getByRole("button", { name: /Reading & Writing/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /Math/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledOnce());
+    expect(onUpdate.mock.calls[0]![1]).toMatchObject({ enabledSections: ["reading-writing"] });
   });
 
   it("refuses to save a link with no section selected", async () => {

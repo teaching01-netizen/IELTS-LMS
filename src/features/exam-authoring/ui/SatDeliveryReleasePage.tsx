@@ -4,6 +4,7 @@ import type {
   AssessmentAuthoringShell,
   AssessmentValidationIssue,
   AssessmentValidationReport,
+  SatPublishScope,
 } from "../contracts/assessment";
 import type { AssessmentReleaseState } from "../contracts/release";
 import { AuthoringConfirmDialog } from "./authoringPrimitives";
@@ -37,12 +38,14 @@ export interface SatDeliveryReleasePageProps {
   readiness: AssessmentValidationReport | null;
   isChecking: boolean;
   readinessError: string | null;
+  publishScope: SatPublishScope;
   isPublishing: boolean;
   publishError: string | null;
   onBackToBuilder: () => void;
   onBackToExams: () => void;
   onRefreshReadiness: () => Promise<unknown>;
-  onPublish: (publishNotes?: string) => Promise<void>;
+  onPublishScopeChange: (scope: SatPublishScope) => void;
+  onPublish: (scope: SatPublishScope, publishNotes?: string) => Promise<void>;
   onIssueClick: (issue: AssessmentValidationIssue) => void;
   onOpenStudentAccess: () => void;
   presenceSlot?: ReactNode;
@@ -60,11 +63,13 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     readiness,
     isChecking,
     readinessError,
+    publishScope,
     isPublishing,
     publishError,
     onBackToBuilder,
     onBackToExams,
     onRefreshReadiness,
+    onPublishScopeChange,
     onPublish,
     onIssueClick,
     onOpenStudentAccess,
@@ -139,6 +144,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
       readiness={readiness}
       isChecking={isChecking}
       readinessError={readinessError}
+      publishScope={publishScope}
       isPublishing={isPublishing}
       publishError={publishError}
       dirtySections={dirtySections}
@@ -147,6 +153,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
       online={online}
       onBackToBuilder={onBackToBuilder}
       onRefreshReadiness={onRefreshReadiness}
+      onPublishScopeChange={onPublishScopeChange}
       onPublish={onPublish}
       onIssueClick={onIssueClick}
       onOpenStudentAccess={onOpenStudentAccess}
@@ -170,6 +177,7 @@ function ReleasePageBody(props: {
   readiness: AssessmentValidationReport | null;
   isChecking: boolean;
   readinessError: string | null;
+  publishScope: SatPublishScope;
   isPublishing: boolean;
   publishError: string | null;
   dirtySections: Set<string>;
@@ -178,7 +186,8 @@ function ReleasePageBody(props: {
   online: boolean;
   onBackToBuilder: () => void;
   onRefreshReadiness: () => Promise<unknown>;
-  onPublish: (publishNotes?: string) => Promise<void>;
+  onPublishScopeChange: (scope: SatPublishScope) => void;
+  onPublish: (scope: SatPublishScope, publishNotes?: string) => Promise<void>;
   onIssueClick: (issue: AssessmentValidationIssue) => void;
   onOpenStudentAccess: () => void;
   onDirtyChange: (sectionId: string, dirty: boolean) => void;
@@ -198,6 +207,7 @@ function ReleasePageBody(props: {
     readiness,
     isChecking,
     readinessError,
+    publishScope,
     isPublishing,
     publishError,
     dirtySections,
@@ -206,6 +216,7 @@ function ReleasePageBody(props: {
     online,
     onBackToBuilder,
     onRefreshReadiness,
+    onPublishScopeChange,
     onPublish,
     onIssueClick,
     onOpenStudentAccess,
@@ -219,15 +230,15 @@ function ReleasePageBody(props: {
     collaborationSlot,
   } = props;
 
-  const readinessFresh = isReadinessFresh(readiness, shell);
+  const readinessFresh = isReadinessFresh(readiness, shell, publishScope);
   const blockers = getSATPublishBlockers(readiness, readinessFresh);
   const warnings = getFreshWarnings(readiness, readinessFresh).filter(isSATPublishReadinessIssue);
-  const readinessValid = isSATPublishReadinessValid(readiness, readinessFresh);
-  const stale = summarizeStaleReadiness(readiness, shell);
+  const readinessValid = isSATPublishReadinessValid(readiness, readinessFresh, publishScope);
+  const stale = summarizeStaleReadiness(readiness, shell, publishScope);
   // Candidate time = base M1 + the longer M2 branch + break per section.
   // section.durationSeconds sums every authored module, which overstates the
   // longest real sitting (see candidateSecondsForShell).
-  const totalCandidateSeconds = candidateSecondsForShell(shell);
+  const totalCandidateSeconds = candidateSecondsForShell(shell, publishScope);
   // Single source of truth shared with ReleaseGateCard: the page no longer
   // computes canPublish inline. Authz comes from the exam capabilities; the
   // offline guard is appended (connectivity is not a selector concern).
@@ -272,6 +283,44 @@ function ReleasePageBody(props: {
           <div className="space-y-6">
             <section className={`${releaseSurfaceClass} p-5 sm:p-6`}>
               <SectionHeading
+                eyebrow="Content to publish"
+                title="Choose release scope"
+                description="The selected scope controls publish checks and the sections students can receive."
+              />
+              <fieldset className="mt-4">
+                <legend className="sr-only">Content to publish</legend>
+                <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Content to publish">
+                  {[
+                    { value: "full", label: "Full SAT" },
+                    { value: "reading-writing", label: "Reading & Writing" },
+                    { value: "math", label: "Math" },
+                  ].map((option) => (
+                    <label
+                      key={option.value}
+                      className={`flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-semibold transition-colors ${publishScope === option.value ? "border-primary bg-primary/5 text-foreground" : "border-border text-muted-foreground hover:bg-muted/70"}`}
+                    >
+                      <input
+                        type="radio"
+                        name="sat-publish-scope"
+                        value={option.value}
+                        checked={publishScope === option.value}
+                        onChange={() => onPublishScopeChange(option.value as SatPublishScope)}
+                        className="accent-primary"
+                      />
+                      {option.label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              {publishScope !== "full" ? (
+                <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                  Only {publishScope === "math" ? "Math" : "Reading & Writing"} will be included. The other section and its publish issues will be ignored for this release.
+                </p>
+              ) : null}
+            </section>
+
+            <section className={`${releaseSurfaceClass} p-5 sm:p-6`}>
+              <SectionHeading
                 eyebrow="Delivery plan"
                 title="Timing & adaptive routing"
                 description="Configure the server-authoritative path a candidate can take. Each section saves independently with optimistic concurrency protection. The runtime routes each candidate to the base module plus exactly one branch — any branch preview here is a staff inspection tool, not the live adaptive decision."
@@ -297,6 +346,7 @@ function ReleasePageBody(props: {
                 staleBanner={null}
                 readOnlyPassedLabel={`Release checks passed for Version ${releaseState.currentPublishedVersion?.versionNumber ?? "—"}. Edit delivery settings to start a new draft.`}
                 onRefresh={onRefreshReadiness}
+                publishScope={publishScope}
                 onIssueClick={onIssueClick}
               />
             ) : (
@@ -306,6 +356,7 @@ function ReleasePageBody(props: {
                 error={readinessError}
                 staleBanner={stale.fresh ? null : stale.checkedLabel}
                 onRefresh={onRefreshReadiness}
+                publishScope={publishScope}
                 onIssueClick={onIssueClick}
               />
             )}
@@ -337,6 +388,7 @@ function ReleasePageBody(props: {
         blockerCount={blockers.length}
         warningCount={warnings.length}
         candidateSeconds={totalCandidateSeconds}
+        publishScope={publishScope}
         candidateEstimateStale={dirtySections.size > 0}
         isPublishing={isPublishing}
         isUpdate={releaseState.state === "unpublished_changes"}

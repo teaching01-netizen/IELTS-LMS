@@ -107,9 +107,9 @@ func TestNextModuleTxSkipsSectionDroppedByLinkScope(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-rw").
 		WillReturnRows(nextModuleSectionRows([]driver.Value{"sec-rw", "reading-writing", 0, "lower_branch", "pv-1"}))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions v")).
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections"}).AddRow(`["reading-writing"]`))
+		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(`["reading-writing"]`, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_sections WHERE exam_version_id = ? AND display_order > ? AND section_key IN (?) ORDER BY display_order LIMIT 1")).
 		WithArgs("pv-1", 0, "reading-writing").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
@@ -143,9 +143,9 @@ func TestNextModuleTxWithoutLinkScopeKeepsOriginalQuery(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-rw").
 		WillReturnRows(nextModuleSectionRows([]driver.Value{"sec-rw", "reading-writing", 0, "lower_branch", "pv-1"}))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions v")).
 		WithArgs("att-1").
-		WillReturnError(sql.ErrNoRows)
+		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(nil, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_sections WHERE exam_version_id = ? AND display_order > ? ORDER BY display_order LIMIT 1")).
 		WithArgs("pv-1", 0).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("sec-math"))
@@ -160,6 +160,75 @@ func TestNextModuleTxWithoutLinkScopeKeepsOriginalQuery(t *testing.T) {
 	}
 	if next == nil || next.id != "mod-math" {
 		t.Fatalf("an unscoped run must still advance to math, got %+v", next)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A schedule with no Student Access link still cannot advance beyond the
+// section pinned into a partial SAT release.
+func TestNextModuleTxHonorsPublishedScopeWithoutLink(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := deliverySvc(db)
+	mock.ExpectBegin()
+	txn, txerr := db.BeginTx(context.Background(), nil)
+	if txerr != nil {
+		t.Fatal(txerr)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
+		WithArgs("mod-rw").
+		WillReturnRows(nextModuleSectionRows([]driver.Value{"sec-rw", "reading-writing", 0, "lower_branch", "pv-1"}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions v")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(nil, "reading-writing"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_sections WHERE exam_version_id = ? AND display_order > ? AND section_key IN (?) ORDER BY display_order LIMIT 1")).
+		WithArgs("pv-1", 0, "reading-writing").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27)
+	if err != nil {
+		t.Fatalf("nextModuleTx must succeed: %v", err)
+	}
+	if next != nil {
+		t.Fatalf("a partial release must end after its published section, got %+v", next)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An empty release/link intersection is an empty run. It must not omit the
+// section predicate and accidentally become an unrestricted lookup.
+func TestNextModuleTxStopsForEmptyScopeIntersection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := deliverySvc(db)
+	mock.ExpectBegin()
+	txn, txerr := db.BeginTx(context.Background(), nil)
+	if txerr != nil {
+		t.Fatal(txerr)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
+		WithArgs("mod-rw").
+		WillReturnRows(nextModuleSectionRows([]driver.Value{"sec-rw", "reading-writing", 0, "lower_branch", "pv-1"}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions v")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(`["math"]`, "reading-writing"))
+
+	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27)
+	if err != nil {
+		t.Fatalf("nextModuleTx must succeed: %v", err)
+	}
+	if next != nil {
+		t.Fatalf("an empty scope intersection must not advance, got %+v", next)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

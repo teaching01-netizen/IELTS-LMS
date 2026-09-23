@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import type { SelectionMenuMode, SelectionMenuPlacement } from '@shared/ui/selection-v2/engine/selectionPlacement';
+import { createSatExamZoomGeometry } from '../zoom/satExamZoomGeometry';
 
 /**
  * The chrome of the annotation surface, in one place for every surface that has
@@ -57,7 +58,11 @@ export interface SatAnnotationSurfaceChrome {
   style: CSSProperties;
 }
 
-export function satAnnotationSurfaceChrome(placement: SelectionMenuPlacement | null): SatAnnotationSurfaceChrome {
+export function satAnnotationSurfaceChrome(
+  placement: SelectionMenuPlacement | null,
+  visualScale = 1,
+): SatAnnotationSurfaceChrome {
+  const geometry = createSatExamZoomGeometry(visualScale);
   const mode = placement?.mode ?? null;
   const floating = mode === 'floating';
   const hidden = mode === null || mode === 'hidden';
@@ -65,7 +70,9 @@ export function satAnnotationSurfaceChrome(placement: SelectionMenuPlacement | n
     mode,
     floating,
     hidden,
-    bodyMaxHeight: placement && placement.maxHeight > 0 ? placement.maxHeight : null,
+    bodyMaxHeight: placement && placement.maxHeight > 0
+      ? geometry.viewportToLogicalLength(placement.maxHeight)
+      : null,
     className:
       SURFACE_BASE
       + SURFACE_FLOATING
@@ -73,8 +80,8 @@ export function satAnnotationSurfaceChrome(placement: SelectionMenuPlacement | n
       // the surface never chases a selection handle.
       + (floating && placement?.animated ? ' sat-annotation-settle' : ''),
     style: {
-      left: placement?.left ?? SAT_ANNOTATION_SURFACE_INSET,
-      top: placement?.top ?? SAT_ANNOTATION_SURFACE_INSET,
+      left: placement ? geometry.viewportToLogicalPoint({ x: placement.left, y: 0 }).x : SAT_ANNOTATION_SURFACE_INSET,
+      top: placement ? geometry.viewportToLogicalPoint({ x: 0, y: placement.top }).y : SAT_ANNOTATION_SURFACE_INSET,
       // The engine owns the shape once it has measured one: it is the only thing
       // that knows how much of the visible region the surface may have. Until
       // then the natural width is the token maximum, and NEVER zero — a hidden
@@ -82,14 +89,16 @@ export function satAnnotationSurfaceChrome(placement: SelectionMenuPlacement | n
       // back on the next pass, and the surface would stay 30px wide (padding and
       // border) for the rest of the selection's life.
       width: placement && placement.width > 0
-        ? placement.width
+        ? geometry.viewportToLogicalLength(placement.width)
         : 'min(var(--sat-annotation-surface-max), 100%)',
       // The bound the rows scroll inside. Deliberately NOT `overflow` on this
       // node: the caret is drawn just outside the border box, and a scroll
       // container clips whatever overflows it — on both axes, because a single
       // `auto` axis forces the other one too. So the box stays visible and the
       // body below it does the scrolling.
-      maxHeight: placement && placement.maxHeight > 0 ? placement.maxHeight : undefined,
+      maxHeight: placement && placement.maxHeight > 0
+        ? geometry.viewportToLogicalLength(placement.maxHeight)
+        : undefined,
       visibility: hidden ? 'hidden' : 'visible',
     },
   };
@@ -145,14 +154,21 @@ export function SatAnnotationSurfaceBody({
  * engine's border-box coordinates and the browser's padding-box positioning
  * agree.
  */
-export function SatAnnotationCaret({ placement }: { placement: SelectionMenuPlacement | null }) {
+export function SatAnnotationCaret({
+  placement,
+  visualScale = 1,
+}: {
+  placement: SelectionMenuPlacement | null;
+  visualScale?: number | undefined;
+}) {
   if (!placement || placement.mode !== 'floating' || placement.clamped) return null;
+  const geometry = createSatExamZoomGeometry(visualScale);
   return (
     <span aria-hidden="true" className="sat-annotation-caret-layer">
       <span
         data-sat-annotation-caret={placement.side === 'above' ? 'down' : 'up'}
         className="sat-annotation-caret"
-        style={{ left: placement.arrowX }}
+        style={{ left: geometry.viewportToLogicalLength(placement.arrowX) }}
       />
     </span>
   );

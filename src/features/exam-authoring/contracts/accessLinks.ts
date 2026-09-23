@@ -1,3 +1,5 @@
+import type { SatPublishScope } from "./assessment";
+
 export type AccessLinkAudienceType = "anyone" | "cohort" | "selected_students";
 export type AccessLinkMode = "student_code" | "open";
 export type AccessLinkAvailabilityType = "scheduled" | "anytime";
@@ -33,6 +35,34 @@ export function selectedAccessLinkSections(scope: AccessLinkSectionScope | undef
   return ACCESS_LINK_SECTION_KEYS.filter((key) => stored.includes(key));
 }
 
+/** SAT sections enabled by the immutable release pinned to a link. */
+export function availableAccessLinkSections(publishScope: SatPublishScope = "full"): AccessLinkSectionKey[] {
+  return publishScope === "full" ? [...ACCESS_LINK_SECTION_KEYS] : [publishScope];
+}
+
+/** Sections students actually receive after applying the release and link scopes. */
+export function effectiveAccessLinkSections(
+  scope: AccessLinkSectionScope | undefined,
+  publishScope: SatPublishScope = "full",
+): AccessLinkSectionKey[] {
+  const releaseSections = availableAccessLinkSections(publishScope);
+  const stored = (scope ?? []).filter(isAccessLinkSectionKey);
+  return releaseSections.filter((key) => stored.length === 0 || stored.includes(key));
+}
+
+/**
+ * Sections the editor should select when it opens. If an older link has an
+ * empty release/link intersection, select the release's available sections so
+ * the operator can repair the link without first understanding storage rules.
+ */
+export function editableAccessLinkSections(
+  scope: AccessLinkSectionScope | undefined,
+  publishScope: SatPublishScope = "full",
+): AccessLinkSectionKey[] {
+  const effective = effectiveAccessLinkSections(scope, publishScope);
+  return effective.length > 0 ? effective : availableAccessLinkSections(publishScope);
+}
+
 /**
  * The stored shape for a toggle state: null means "all sections", which the
  * backend persists as a NULL column. Callers writing the request send `[]` for
@@ -57,21 +87,28 @@ export function accessLinkSectionsChanged(
 }
 
 /**
- * "Verbal only" / "Math only" / null, for the admin badges. A link scoped to
- * every section gets no badge: nothing about it differs from an unscoped link.
+ * The effective section label for admin badges. A full-release link which
+ * includes both sections gets no badge; a partial release is always explicit.
  */
-export function accessLinkSectionBadge(scope: AccessLinkSectionScope | undefined): string | null {
-  const stored = (scope ?? []).filter(isAccessLinkSectionKey);
-  if (stored.length === 0 || stored.length === ACCESS_LINK_SECTION_KEYS.length) return null;
-  if (stored.includes("reading-writing")) return "Verbal only";
-  return "Math only";
+export function accessLinkSectionBadge(
+  scope: AccessLinkSectionScope | undefined,
+  publishScope: SatPublishScope = "full",
+): string | null {
+  const effective = effectiveAccessLinkSections(scope, publishScope);
+  if (effective.length === 0) return "No sections available";
+  if (effective.length === ACCESS_LINK_SECTION_KEYS.length) return null;
+  return `${effective.map((key) => ACCESS_LINK_SECTION_LABELS[key]).join(" and ")} only`;
 }
 
 /** The student-facing copy for a scoped link, or null when it is unscoped. */
-export function accessLinkSectionStudentCopy(scope: AccessLinkSectionScope | undefined): string | null {
-  const stored = (scope ?? []).filter(isAccessLinkSectionKey);
-  if (stored.length === 0 || stored.length === ACCESS_LINK_SECTION_KEYS.length) return null;
-  const labels = ACCESS_LINK_SECTION_KEYS.filter((key) => stored.includes(key)).map(
+export function accessLinkSectionStudentCopy(
+  scope: AccessLinkSectionScope | undefined,
+  publishScope: SatPublishScope = "full",
+): string | null {
+  const effective = effectiveAccessLinkSections(scope, publishScope);
+  if (effective.length === 0) return "No sections in this Student Link are enabled in its published release.";
+  if (effective.length === ACCESS_LINK_SECTION_KEYS.length && publishScope === "full") return null;
+  const labels = ACCESS_LINK_SECTION_KEYS.filter((key) => effective.includes(key)).map(
     (key) => ACCESS_LINK_SECTION_LABELS[key],
   );
   return `You'll take ${labels.join(" and ")} only. The exam ends after that section.`;
@@ -88,6 +125,7 @@ export interface PublishedAccessVersionSummary {
   versionNumber: number;
   revision: number;
   publishNotes: string | null;
+  publishScope: SatPublishScope;
   createdAt: string;
 }
 
@@ -98,6 +136,7 @@ export interface AssessmentAccessLink {
   providerKey: string;
   publishedVersionId: string;
   versionNumber: number;
+  publishScope: SatPublishScope;
   scheduleId: string;
   name: string;
   /** null = every section the published version enables. */
@@ -189,6 +228,7 @@ export interface PublicAssessmentAccessLink {
   examTitle: string;
   providerKey: string;
   versionNumber: number;
+  publishScope: SatPublishScope;
   name: string;
   enabledSections: string[] | null;
   audienceType: AccessLinkAudienceType;

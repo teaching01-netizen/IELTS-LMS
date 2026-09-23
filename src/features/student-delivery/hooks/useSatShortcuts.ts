@@ -37,6 +37,10 @@ export function useSatShortcuts(
     if (!enabled) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      // A retained exam frame is inert during the automatic hand-off. Its
+      // global shortcuts must be inert as well because document listeners do
+      // not inherit the DOM's inert attribute.
+      if (document.querySelector("[data-sat-transition-hold]")) return;
       if (isSatShortcutEditableTarget(event.target)) return;
       // Zoom shortcuts: Ctrl/Cmd + plus/minus/0 (no Alt). Never hijack when
       // Alt or Shift modify (browser menus), and never inside Desmos iframe

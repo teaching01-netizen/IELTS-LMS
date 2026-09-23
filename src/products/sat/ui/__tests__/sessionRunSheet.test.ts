@@ -9,6 +9,7 @@ import {
   satModuleSlotLabel,
   satRunSheetCurrentRows,
   type SatRunSheetRow,
+  type SatRunSheetRuntime,
 } from "../sessionRunSheet";
 
 // Every instant below is written in UTC; the assertions are all in Bangkok
@@ -68,7 +69,7 @@ function runtimeSection(
 function runtime(
   sections: SectionRuntimeState[],
   overrides: Partial<ExamSessionRuntime> = {}
-): Pick<ExamSessionRuntime, "sections" | "actualStartAt" | "status" | "serverNow"> {
+): SatRunSheetRuntime {
   return {
     sections,
     actualStartAt: SCHEDULED_START,
@@ -136,6 +137,73 @@ describe("buildSatRunSheet", () => {
     expect(formatRunSheetWindow(mathSection.plannedStartAt, mathSection.plannedEndAt, ANCHOR)).toBe("10:14–11:24");
     // Math's authored break is zero: no break row, and Math starts immediately.
     expect(sheet.rows.some((row) => row.id === "math:break")).toBe(false);
+  });
+
+  // The sheet must read the server's own end for the section the room is inside:
+  // it is the instant the hero clock and every candidate's countdown are computed
+  // from, so a reconstruction that drifts from it is exactly the "the timers are
+  // not in sync" report — the sheet said 44:00 while every clock said 44:06.
+  it("takes the published section deadline for the live section over its own derivation", () => {
+    const publishedDeadline = "2026-09-20T03:04:06.000Z"; // 10:04:06 ICT: six seconds past the plan's 10:04
+    const sheet = buildSatRunSheet({
+      plan: [readingWritingPlan, mathPlan],
+      runtime: runtime(
+        [runtimeSection("reading-writing", 0, { status: "live", actualStartAt: SCHEDULED_START })],
+        {
+          activeSectionKey: "reading-writing",
+          currentSectionKey: "reading-writing",
+          currentSectionDeadlineAt: publishedDeadline,
+        },
+      ),
+      scheduledStartAt: SCHEDULED_START,
+      now: "2026-09-20T02:20:00.000Z", // 09:20 ICT
+    });
+
+    const section = rowById(sheet.rows, "reading-writing:section");
+    expect(section.plannedEndAt).toBe(publishedDeadline);
+    expect(formatRunSheetRemaining(section.remainingSeconds)).toBe("44:06");
+    // The module rows tile onto the same boundary the server published.
+    expect(rowById(sheet.rows, "reading-writing:module:m2-higher_branch").plannedEndAt).toBe(publishedDeadline);
+
+    // A read that publishes no deadline keeps the derivation (the plan's 10:04).
+    const derived = buildSatRunSheet({
+      plan: [readingWritingPlan, mathPlan],
+      runtime: runtime([
+        runtimeSection("reading-writing", 0, { status: "live", actualStartAt: SCHEDULED_START }),
+      ]),
+      scheduledStartAt: SCHEDULED_START,
+      now: "2026-09-20T02:20:00.000Z",
+    });
+    const derivedSection = rowById(derived.rows, "reading-writing:section");
+    expect(formatRunSheetWindow(derivedSection.plannedStartAt, derivedSection.plannedEndAt, ANCHOR)).toBe("09:00–10:04");
+    expect(formatRunSheetRemaining(derivedSection.remainingSeconds)).toBe("44:00");
+  });
+
+  it("applies the published deadline only to the section it belongs to", () => {
+    const publishedDeadline = "2026-09-20T03:04:06.000Z";
+    const sheet = buildSatRunSheet({
+      plan: [readingWritingPlan, mathPlan],
+      runtime: runtime(
+        [
+          runtimeSection("reading-writing", 0, { status: "live", actualStartAt: SCHEDULED_START }),
+          runtimeSection("math", 1),
+        ],
+        {
+          activeSectionKey: "reading-writing",
+          currentSectionKey: "reading-writing",
+          currentSectionDeadlineAt: publishedDeadline,
+        },
+      ),
+      scheduledStartAt: SCHEDULED_START,
+      now: "2026-09-20T02:20:00.000Z",
+    });
+
+    expect(rowById(sheet.rows, "reading-writing:section").plannedEndAt).toBe(publishedDeadline);
+    // Math is still ahead: its window is projected from the plan (10:04's break,
+    // then 70 minutes), never from the section the room is inside right now.
+    const mathSection = rowById(sheet.rows, "math:section");
+    expect(mathSection.plannedEndAt).not.toBe(publishedDeadline);
+    expect(formatRunSheetWindow(mathSection.plannedStartAt, mathSection.plannedEndAt, ANCHOR)).toBe("10:14–11:24");
   });
 
   it("marks the live section and the module the cohort is inside", () => {

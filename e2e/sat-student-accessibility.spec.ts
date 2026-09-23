@@ -296,7 +296,7 @@ test.describe("SAT student accessibility and layout", () => {
     for (let step = 0; step < 4; step += 1) await page.getByRole('button', { name: 'Increase screen zoom' }).click();
     await page.getByRole('button', { name: 'High contrast', exact: true }).click();
     await page.getByRole('button', { name: 'Close display settings' }).click();
-    await expect(page.locator('[data-sat-content-zoom]')).toHaveAttribute('data-sat-content-zoom', '2');
+    await expect(page.locator('[data-sat-screen-zoom]')).toHaveAttribute('data-sat-screen-zoom', '2');
     await expect(page.getByTestId('sat-exam-shell')).toHaveCSS('color', 'rgb(0, 0, 0)');
     const passage = page.locator('[data-sat-passage-scroll]');
     const geometry = await passage.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
@@ -309,7 +309,7 @@ test.describe("SAT student accessibility and layout", () => {
     const questionGeometry = await question.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
     expect(questionGeometry.scroll).toBeLessThanOrEqual(questionGeometry.width + 1);
     await page.reload();
-    await expect(page.locator('[data-sat-content-zoom]')).toHaveAttribute('data-sat-content-zoom', '2');
+    await expect(page.locator('[data-sat-screen-zoom]')).toHaveAttribute('data-sat-screen-zoom', '2');
     await expect(page.getByTestId('sat-exam-shell')).toHaveAttribute('data-sat-contrast', 'high-contrast');
   });
   test('mobile reading keeps both panes available without layout mode controls', async ({ page }) => {

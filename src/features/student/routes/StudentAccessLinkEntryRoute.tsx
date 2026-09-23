@@ -3,12 +3,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, ArrowRight, CheckCircle2, Clock3, Link2, LoaderCircle, LockKeyhole } from 'lucide-react';
 import { useAuthSession, type StudentQueuedAdmission } from '../../auth/api/authSession';
 import { useStudentAccessLink } from '../api/access-link/studentAccessLinkQueries';
-import type { PublicStudentAccessLink } from '../contracts/access-link/PublicStudentAccessLink';
-
-const SECTION_LABELS: Record<string, string> = {
-  'reading-writing': 'Reading & Writing',
-  math: 'Math',
-};
+import {
+  effectiveStudentAccessLinkSections,
+  studentAccessLinkSectionCopy,
+  type PublicStudentAccessLink,
+} from '../contracts/access-link/PublicStudentAccessLink';
 
 /**
  * The scope copy for a narrowed link, or null when the link admits every
@@ -16,12 +15,10 @@ const SECTION_LABELS: Record<string, string> = {
  * section BEFORE they commit, instead of discovering it mid-sitting.
  */
 export function accessLinkScopeCopy(link: PublicStudentAccessLink): string | null {
-  const sections = (link.enabledSections ?? []).filter((key) => key in SECTION_LABELS);
-  if (sections.length === 0 || sections.length >= Object.keys(SECTION_LABELS).length) return null;
-  const labels = Object.keys(SECTION_LABELS)
-    .filter((key) => sections.includes(key))
-    .map((key) => SECTION_LABELS[key]);
-  return `You'll take ${labels.join(' and ')} only. The exam ends after that section.`;
+  const sections = effectiveStudentAccessLinkSections(link.enabledSections, link.publishScope);
+  const copy = studentAccessLinkSectionCopy(link.enabledSections, link.publishScope);
+  if (sections.length === 0) return `${copy} Ask your teacher for a corrected Student Link.`;
+  return copy;
 }
 
 interface AccessForm {
@@ -336,6 +333,9 @@ export function StudentAccessLinkEntryRoute() {
   if (!canEnter) return <EntryShell><LinkAvailabilityState link={link}/></EntryShell>;
 
   const scopeCopy = accessLinkScopeCopy(link);
+  if (effectiveStudentAccessLinkSections(link.enabledSections, link.publishScope).length === 0) {
+    return <EntryShell><UnavailableState icon={<AlertCircle size={24}/>} title="This exam isn’t available" description={scopeCopy ?? 'Ask your teacher for a corrected Student Link.'} eyebrow={`${link.examTitle} · Version ${link.versionNumber}`}/></EntryShell>;
+  }
 
   return (
     <EntryShell>

@@ -382,7 +382,7 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
-	scope, err := s.linkSectionScope(ctx, scheduleID)
+	scope, err := s.effectiveSectionScope(ctx, scheduleID, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -394,10 +394,12 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
+	moduleAttempts = filterModuleAttemptsForSections(moduleAttempts, sections)
 	responses, err := s.loadResponses(ctx, attemptID)
 	if err != nil {
 		return nil, err
 	}
+	responses = filterResponsesForModuleAttempts(responses, moduleAttempts)
 	control, err := s.loadAttemptControl(ctx, attemptID, attemptControl{})
 	if err != nil {
 		return nil, err
@@ -722,7 +724,11 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 	}
 	nextSectionQuery := "SELECT id FROM assessment_sections WHERE exam_version_id = ? AND display_order > ?"
 	nextSectionArgs := []any{versionID, sectionOrder}
-	if keys := examdomain.SectionScopeKeys(scope); len(keys) > 0 {
+	keys := examdomain.SectionScopeKeys(scope)
+	if scope != nil && len(keys) == 0 {
+		return nil, nil
+	}
+	if len(keys) > 0 {
 		nextSectionQuery += " AND section_key IN (" + sqlPlaceholders(len(keys)) + ")"
 		for _, key := range keys {
 			nextSectionArgs = append(nextSectionArgs, key)

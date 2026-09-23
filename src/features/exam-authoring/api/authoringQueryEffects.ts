@@ -55,6 +55,7 @@ import type {
   AssessmentAuthoringShellResult,
   AssessmentQuestionDetail,
   QuestionRevision,
+  SatPublishScope,
 } from "../contracts/assessment";
 import type { AssessmentReleaseState } from "../contracts/release";
 import type { SatWorkspaceCommand } from "../realtime/coedit/workspaceCommands";
@@ -63,8 +64,8 @@ export const assessmentKeys = {
   shell: (examId: string) => ["assessment", examId, "shell"] as const,
   release: (examId: string) => ["assessment", examId, "release"] as const,
   readinessRoot: (examId: string) => ["assessment", examId, "readiness"] as const,
-  readiness: (examId: string, versionId: string, versionRevision: number) =>
-    ["assessment", examId, "readiness", versionId, versionRevision] as const,
+  readiness: (examId: string, versionId: string, versionRevision: number, publishScope: SatPublishScope = "full") =>
+    ["assessment", examId, "readiness", versionId, versionRevision, publishScope] as const,
   question: (examQuestionId: string) => ["assessment-question", examQuestionId] as const,
 };
 

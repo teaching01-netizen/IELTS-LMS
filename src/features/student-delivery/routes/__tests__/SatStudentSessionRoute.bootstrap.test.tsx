@@ -41,7 +41,7 @@ describe("SatStudentSessionRoute bootstrap handoff", () => {
     controllerArgsMock.seen = [];
   });
 
-  it("renders exactly one SAT-skinned loader with zero admin-skeleton DOM while bootstrap is pending", () => {
+  it("renders the SAT pre-start surface with zero admin-skeleton DOM while bootstrap is pending", () => {
     const { container } = render(
       <SatStudentSessionRoute
         scheduleId="sched-1"
@@ -55,13 +55,14 @@ describe("SatStudentSessionRoute bootstrap handoff", () => {
       />,
     );
 
-    // Exactly one live-region loader in the window …
+    // Exactly one polite status in the window …
     expect(screen.getAllByRole("status")).toHaveLength(1);
-    // … in the SAT skin (kind probe), with the bootstrap label …
-    const loader = screen.getByRole("status");
-    expect(loader.getAttribute("data-sat-loading-kind")).toBe("initial");
-    expect(loader.classList.contains("sat-ui")).toBe(true);
-    expect(screen.getByText("Loading Digital SAT…")).toBeInTheDocument();
+    // … in the SAT skin, with pre-start copy instead of a loading page …
+    expect(screen.getByRole("status")).toHaveTextContent("Your session is loading");
+    expect(container.querySelector(".sat-ui")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Preparing your SAT session" })).toBeInTheDocument();
+    expect(screen.queryByText("Loading Digital SAT…")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-sat-loading-kind]")).toBeNull();
     // … and zero admin-skeleton DOM (grey shell + admin copy).
     expect(container.querySelector(".bg-gray-50")).toBeNull();
     expect(screen.queryByText("Loading Exam…")).not.toBeInTheDocument();

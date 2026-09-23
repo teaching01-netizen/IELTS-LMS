@@ -1,14 +1,7 @@
-/*
- * SAT session room — operational workspace for a live Digital SAT sitting.
- *
- * The desktop shell keeps the roster and session summary available while the
- * timeline and selected-student panes scroll independently. Status always
- * reads as dot + label, never color alone.
- */
-
+/* SAT session room: roster, authoritative run sheet, and selected-student inspector. */
 .sat-room {
-  --room-rail: 300px;
-  --room-inspector: 264px;
+  --room-rail: 280px;
+  --room-inspector: 350px;
   display: flex;
   min-height: 100dvh;
   flex-direction: column;
@@ -16,25 +9,15 @@
   color: var(--sat-staff-text-primary, #17191d);
 }
 
-@media (min-width: 1024px) {
-  .sat-room {
-    height: 100dvh;
-    min-height: 0;
-    overflow: hidden;
-  }
-}
-
 .sat-room__header {
   position: sticky;
   top: 0;
   z-index: 40;
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
   background: var(--sat-staff-glass-room, rgba(255, 255, 255, 0.9));
   backdrop-filter: saturate(140%) blur(16px);
-  /* Light from above, same as the authoring header: a lit top edge and a
-   * downward-only shadow, so both screens share one physical model. */
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 8px rgba(20, 27, 36, 0.025);
-  flex: 0 0 auto;
 }
 
 .sat-room__header-inner {
@@ -53,42 +36,139 @@
 .sat-room__title h1 {
   margin: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--sat-staff-text-primary, #18181b);
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.012em;
-  color: var(--sat-staff-text-primary, #18181b);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sat-room__cohort {
   margin: 2px 0 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
   font-size: 12px;
   font-weight: 500;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Responsive layout: session summary, roster, and a two-pane workspace. */
+.sat-room__context {
+  display: flex;
+  min-height: 54px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 22px;
+  border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+  padding: 10px 20px;
+  background: var(--sat-staff-surface, #fff);
+  font-size: 12px;
+}
+
+.sat-room__context-timing,
+.sat-room__context-counts,
+.sat-room__context-health {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.sat-room__context-timing p {
+  margin: 0;
+  color: var(--sat-staff-text-primary, #18181b);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-room__context-counts,
+.sat-room__context-health {
+  color: var(--sat-staff-text-secondary, #515154);
+  font-weight: 550;
+}
+
+.sat-room__context-counts > span + span::before,
+.sat-room__context-counts > button::before,
+.sat-room__context-health > span + span::before {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  margin-right: 14px;
+  border-radius: 50%;
+  background: var(--sat-staff-border-strong, rgba(0, 0, 0, 0.2));
+  vertical-align: middle;
+  content: "";
+}
+
+.sat-room__context-counts button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--sat-staff-warning-text, #92400e);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.sat-room__context-counts button:hover,
+.sat-room__context-counts button:focus-visible {
+  text-decoration-color: currentColor;
+}
+
+.sat-room__context-counts button:focus-visible,
+.sat-room__inspector-close:focus-visible {
+  outline: 2px solid var(--sat-staff-accent-ring, rgba(0, 113, 227, 0.4));
+  outline-offset: 2px;
+}
+
+.sat-room__context-health > span:first-child {
+  color: var(--sat-staff-success-text, #067647);
+}
+
+.sat-room__context-health > span:first-child::before {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--sat-staff-success-dot, #059669);
+  content: "";
+}
+
+.sat-room__context-health > span:first-child.is-stale {
+  color: var(--sat-staff-warning-text, #92400e);
+}
+
+.sat-room__context-health > span:first-child.is-stale::before {
+  background: var(--sat-staff-warning-dot, #d97706);
+}
+
+.sat-room__context-overrun {
+  border: 1px solid var(--sat-staff-warning-dot, #d97706);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
+  color: var(--sat-staff-warning-text, #92400e);
+  font-size: 11px;
+  font-weight: 650;
+}
+
 .sat-room__body {
   display: grid;
-  flex: 0 0 auto;
-  min-height: auto;
+  min-width: 0;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
-    "summary"
     "roster"
-    "workspace";
-}
-
-.sat-room__inspector {
-  grid-area: summary;
-  min-width: 0;
-  padding: 16px;
-  border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  background: linear-gradient(180deg, var(--sat-staff-surface, #ffffff) 0%, #fcfdfe 100%);
+    "workspace"
+    "inspector";
 }
 
 .sat-room__roster {
@@ -97,7 +177,7 @@
   min-width: 0;
   flex-direction: column;
   border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 48%, #f8fafc 100%);
+  background: linear-gradient(180deg, #fff 0%, #fbfcfd 48%, #f8fafc 100%);
 }
 
 .sat-room__roster-head {
@@ -108,11 +188,6 @@
 .sat-room__workspace {
   grid-area: workspace;
   min-width: 0;
-  background: var(--sat-staff-canvas, #f5f7fa);
-}
-
-.sat-room__timeline-pane {
-  min-width: 0;
   padding: 24px 16px;
   background:
     radial-gradient(900px 520px at 50% -40px, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.6) 38%, rgba(255, 255, 255, 0) 72%),
@@ -120,178 +195,55 @@
     linear-gradient(180deg, #f8fafc 0%, #f4f7fa 52%, #f1f4f8 100%);
 }
 
-.sat-room__student-pane {
+.sat-room__inspector {
+  grid-area: inspector;
   min-width: 0;
   padding: 20px 16px 32px;
   border-top: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.94);
 }
 
-@media (max-width: 1023px) {
-  .sat-room__body {
-    align-items: start;
-  }
-
-  .sat-room__header-inner {
-    flex-wrap: wrap;
-    gap: 6px 8px;
-    padding: 8px 12px;
-  }
-
-  .sat-room__title {
-    flex-basis: 150px;
-  }
-
-  .sat-room__inspector {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
-    gap: 12px 18px;
-    padding: 14px 16px;
-  }
-
-  .sat-room__inspector .sat-inspector__section + .sat-inspector__section {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: 0;
-  }
-
-  .sat-room__roster {
-    height: auto;
-    overflow: visible;
-  }
-
-  .sat-room__roster [role="listbox"] {
-    max-height: none;
-    flex: 0 0 auto;
-    overflow: visible;
-  }
-
-  .sat-room__workspace {
-    display: block;
-    overflow: visible;
-  }
-
-  .sat-room__timeline-pane,
-  .sat-room__student-pane {
-    height: auto;
-    min-height: 0;
-    overflow: visible;
-    overscroll-behavior: auto;
-    scrollbar-gutter: auto;
-  }
+.sat-room__inspector-panel {
+  min-width: 0;
 }
 
-@media (min-width: 1024px) {
-  .sat-room {
-    height: 100dvh;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .sat-room__body {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: hidden;
-    grid-template-columns: var(--room-rail) minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    grid-template-areas:
-      "roster summary"
-      "roster workspace";
-  }
-
-  .sat-room__inspector {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  }
-
-  .sat-room__roster {
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-    border-right: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-    border-bottom: 0;
-  }
-
-  .sat-room__workspace {
-    display: grid;
-    height: 100%;
-    min-height: 0;
-    grid-template-rows: minmax(0, 1.15fr) minmax(0, 0.85fr);
-    overflow: hidden;
-  }
-
-  .sat-room__timeline-pane {
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
-    padding: 24px;
-  }
-
-  .sat-room__student-pane {
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
-    padding: 16px 24px 24px;
-    border-top: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  }
+.sat-room__inspector-dialog-overlay {
+  position: fixed;
+  z-index: 90;
+  inset: 0;
+  background: rgba(20, 27, 36, 0.22);
+  animation: sat-inspector-overlay-enter 150ms ease-out both;
 }
 
-@media (min-width: 1024px) and (max-width: 1439px) {
-  .sat-room__inspector {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    align-items: start;
-    gap: 12px;
-  }
-
-  .sat-room__inspector .sat-inspector__section + .sat-inspector__section {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: 0;
-  }
-
-  .sat-room__inspector .sat-inspector__label {
-    margin-bottom: 6px;
-  }
+.sat-room__inspector-dialog {
+  position: fixed;
+  z-index: 91;
+  inset-block: 0;
+  right: 0;
+  width: min(370px, calc(100vw - 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 22px 20px;
+  background: var(--sat-staff-surface, #fff);
+  box-shadow: -10px 0 28px rgba(20, 27, 36, 0.12);
+  animation: sat-inspector-enter 150ms ease-out both;
 }
 
-@media (min-width: 1280px) {
-  .sat-room__timeline-pane {
-    padding: 28px 32px;
-  }
-
-  .sat-room__student-pane {
-    padding-inline: 32px;
-  }
+.sat-room__inspector-dialog.sat-product {
+  background: var(--sat-staff-surface, #fff);
 }
 
-@media (min-width: 1440px) {
-  .sat-room__body {
-    grid-template-columns: var(--room-rail) minmax(0, 1fr) var(--room-inspector);
-    grid-template-rows: minmax(0, 1fr);
-    grid-template-areas: "roster workspace summary";
-  }
-
-  .sat-room__inspector {
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    border-right: 0;
-    border-bottom: 0;
-    border-left: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-    padding: 20px;
-  }
+.sat-room__inspector-close {
+  display: none;
 }
 
 .sat-room__eyebrow {
   margin: 0;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
 }
 
 .sat-room__attention-filter {
@@ -309,7 +261,7 @@ button.sat-room__attention-filter:hover {
 
 .sat-room__attention-filter.is-active {
   background: #20252c;
-  color: white;
+  color: #fff;
 }
 
 .sat-room__attention-filter.is-empty {
@@ -332,100 +284,85 @@ button.sat-room__attention-filter:hover {
   color: #fff;
 }
 
-/* Inspector: grouped facts, dividers instead of a summary card. */
-.sat-inspector__section + .sat-inspector__section {
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-}
-
-.sat-inspector__label {
-  margin: 0 0 10px;
-}
-
-.sat-inspector__row {
-  display: flex;
-  min-height: 30px;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.sat-inspector__row dt {
-  font-size: 13px;
-  color: var(--sat-staff-text-secondary, #515154);
-}
-
-.sat-inspector__row dd {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--sat-staff-text-primary, #18181b);
-}
-
-.sat-inspector__action {
-  min-width: 24px;
-  min-height: 24px;
-  border-radius: 999px;
-  padding-inline: 7px;
-  background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
-  color: var(--sat-staff-warning-text, #92400e);
-  font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.sat-inspector__action:hover {
-  filter: brightness(0.96);
-}
-
-.sat-inspector__action:focus-visible {
-  outline: 2px solid var(--sat-staff-accent-ring, rgba(0, 113, 227, 0.4));
-  outline-offset: 2px;
-}
-
-.sat-inspector__healthy,
-.sat-inspector__warning {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sat-inspector__healthy::before,
-.sat-inspector__warning::before {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  content: "";
-}
-
-.sat-inspector__healthy::before {
-  background: var(--sat-staff-success-dot, #059669);
-}
-
-.sat-inspector__warning {
-  color: var(--sat-staff-warning-text, #92400e) !important;
-}
-
-.sat-inspector__warning::before {
-  background: var(--sat-staff-warning-dot, #d97706);
-}
-
-.sat-inspector__overrun {
-  margin-top: 12px;
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
-  color: var(--sat-staff-warning-text, #92400e);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-/* Stage: the clock only earns its scale once the session is running. */
 .sat-room__stage {
   padding-bottom: 20px;
   border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+}
+
+.sat-room__stage h2 {
+  margin: 0;
+  color: var(--sat-staff-text-primary, #18181b);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.sat-room__stage--review {
+  padding-bottom: 14px;
+}
+
+.sat-room__stage--review h2 {
+  font-size: 17px;
+}
+
+.sat-room__stage-slot {
+  margin: 6px 0 0;
+  color: var(--sat-staff-text-secondary, #515154);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-room__stage-note {
+  max-width: 52ch;
+  margin: 6px 0 0;
+  color: var(--sat-staff-text-secondary, #515154);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.sat-room__stage-clock-caption {
+  margin: 6px 0 0;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sat-room__clock {
+  margin: 0;
+  color: var(--sat-staff-text-primary, #18181b);
+  font-size: 32px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-room__next-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin: 10px 0 0;
+  color: var(--sat-staff-text-secondary, #515154);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sat-room__next-stage span:first-child {
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sat-room__next-stage span:last-child {
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .sat-room__sticky-context {
@@ -438,11 +375,10 @@ button.sat-room__attention-filter:hover {
   justify-content: space-between;
   gap: 16px;
   height: 44px;
-  flex: 0 0 44px;
-  margin: -24px -24px -44px;
+  margin: -24px -16px -44px;
   border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-  padding: 0 32px;
-  background: rgba(255, 255, 255, 0.92);
+  padding: 0 16px;
+  background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
   color: var(--sat-staff-text-secondary, #515154);
   font-size: 12px;
@@ -460,374 +396,280 @@ button.sat-room__attention-filter:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.sat-room__sticky-health {
-  display: none;
-  align-items: center;
-  gap: 12px;
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.sat-room__sticky-health span:first-child::before,
-.sat-room__sticky-health span:last-child::before {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 5px;
-  border-radius: 50%;
-  background: var(--sat-staff-success-dot, #059669);
-  content: "";
-}
-
-.sat-room__sticky-health span:first-child[data-tone="paused"]::before,
-.sat-room__sticky-health span:first-child[data-tone="info"]::before {
-  background: var(--sat-staff-warning-dot, #d97706);
-}
-
-.sat-room__sticky-health span:first-child[data-tone="cancelled"]::before {
-  background: var(--sat-staff-neutral-dot, #6e6e73);
-}
-
-.sat-room__sticky-health span:nth-child(2) {
-  color: var(--sat-staff-warning-text, #92400e);
-}
-
-.sat-room__sticky-health span:last-child {
-  color: var(--sat-staff-text-secondary, #515154);
-}
-
-.sat-room__sticky-health span:last-child.is-stale {
-  color: var(--sat-staff-warning-text, #92400e);
-}
-
-@media (min-width: 1024px) {
-  .sat-room__sticky-context {
-    display: flex;
-  }
-
-  .sat-room__sticky-context.is-visible {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
-  }
-}
-
-@media (min-width: 1024px) and (max-width: 1439px) {
-  .sat-room__sticky-health {
-    display: flex;
-  }
-}
-
-@media (min-width: 1280px) {
-  .sat-room__sticky-context {
-    margin: -28px -32px -44px;
-  }
-}
-
-.sat-room__stage h2 {
-  margin: 0;
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--sat-staff-text-primary, #18181b);
-}
-
-/* The room's current stage in the run sheet's own words: `Section 1 ·
-   Module 2 — Lower · module clock 12:34`. The module half is the slot the
-   cohort's clock has reached and the module clock is that row's own countdown,
-   so the header answers "section and module" without a trip to the table. */
-.sat-room__stage-slot {
-  margin: 6px 0 0;
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--sat-staff-text-secondary, #515154);
-}
-
-.sat-room__stage-note {
-  margin: 6px 0 0;
-  max-width: 46ch;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--sat-staff-text-secondary, #515154);
-}
-
-/* Names the hero figure, which stays the room's SHARED section clock while the
-   module clock sits in the stage line above it. */
-.sat-room__stage-clock-caption {
-  margin: 6px 0 0;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-}
-
-.sat-room__stage-state {
-  align-self: flex-start;
-  border: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-  border-radius: 999px;
-  padding: 6px 10px;
-  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
-  color: var(--sat-staff-text-secondary, #515154);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.sat-room__next-stage {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 10px;
-  margin: 10px 0 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--sat-staff-text-secondary, #515154);
-}
-
-.sat-room__next-stage span:first-child {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-}
-
-.sat-room__next-stage span:last-child {
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-}
-
-.sat-room__selected-student-link {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  border: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-  border-radius: 9px;
-  padding: 0 10px;
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 12px;
-  font-weight: 600;
-  transition: background-color 120ms ease-out, border-color 120ms ease-out;
-}
-
-.sat-room__selected-student-link > span {
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-weight: 500;
-}
-
-.sat-room__selected-student-link:hover {
-  border-color: var(--sat-staff-border-strong, rgba(0, 0, 0, 0.09));
-  background: var(--sat-staff-surface, #fff);
-}
-
-.sat-room__selected-student-link:focus-visible {
-  outline: 2px solid var(--sat-staff-accent-ring, rgba(0, 113, 227, 0.4));
-  outline-offset: 2px;
-}
-
-.sat-room__clock {
-  margin: 0;
-  font-size: 32px;
-  font-weight: 650;
-  line-height: 1;
-  letter-spacing: -0.035em;
-  font-variant-numeric: tabular-nums;
-  color: var(--sat-staff-text-primary, #18181b);
-}
-
-.sat-room__clock--idle {
-  color: var(--sat-staff-text-tertiary, #6e6e73);
+.sat-room__sticky-context.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 
 .sat-run-sheet {
   padding: 18px;
 }
 
-@media (min-width: 1280px) {
-  .sat-run-sheet {
-    padding: 22px;
-  }
-}
-
-.sat-run-sheet__summary {
+.sat-run-sheet__heading {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 28px;
-  margin-top: 16px;
-  border-block: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-  padding: 12px 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
 }
 
-.sat-run-sheet__summary > div {
-  display: grid;
-  gap: 4px;
-  min-width: 100px;
+.sat-run-sheet__heading p,
+.sat-run-sheet__anchor {
+  margin: 4px 0 0;
+  color: var(--sat-staff-text-secondary, #515154);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
-.sat-run-sheet__summary span {
+.sat-run-sheet__anchor {
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.sat-run-sheet__summary strong {
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 13px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
 }
 
 .sat-run-sheet__delta {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--sat-staff-warning-text, #92400e);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.sat-run-sheet__table-scroll {
-  max-width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-gutter: stable;
-}
-
-.sat-run-sheet__table-scroll:focus-visible {
-  outline: 2px solid var(--sat-staff-accent-ring, rgba(0, 113, 227, 0.4));
-  outline-offset: 3px;
-}
-
-.sat-run-sheet__table-scroll table {
-  min-width: 610px;
-}
-
-.sat-run-sheet__col-stage {
-  width: 42%;
-}
-
-.sat-run-sheet__col-window {
-  width: 27%;
-}
-
-.sat-run-sheet__col-remaining {
-  width: 16%;
-}
-
-.sat-run-sheet__col-status {
-  width: 15%;
+.sat-run-sheet__rows {
+  margin-top: 16px;
 }
 
 .sat-run-sheet__row {
+  position: relative;
   border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+  padding: 12px 8px;
+  color: var(--sat-staff-text-secondary, #515154);
 }
 
 .sat-run-sheet__row:last-child {
   border-bottom: 0;
 }
 
-.sat-run-sheet__row--section {
-  background: rgba(0, 0, 0, 0.025);
+.sat-run-sheet__row-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label clock"
+    "window status";
+  align-items: baseline;
+  gap: 6px 12px;
 }
 
-.sat-run-sheet__row--section td:first-child span:first-child {
+.sat-run-sheet__row-label {
+  display: grid;
+  min-width: 0;
+  grid-area: label;
+  gap: 2px;
+}
+
+.sat-run-sheet__row-label strong {
+  color: var(--sat-staff-text-primary, #18181b);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.sat-run-sheet__row-label > span,
+.sat-run-sheet__row-window > span + span {
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.sat-run-sheet__row-window {
+  display: grid;
+  min-width: 0;
+  grid-area: window;
+  gap: 2px;
+  color: var(--sat-staff-text-primary, #25282d);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-run-sheet__row-clock {
+  display: inline-flex;
+  grid-area: clock;
+  align-items: baseline;
+  justify-self: end;
+  gap: 6px;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sat-run-sheet__row-clock .is-active {
+  color: var(--sat-staff-text-primary, #18181b);
+  font-size: 14px;
   font-weight: 700;
 }
 
-.sat-run-sheet__row--module td:first-child {
-  position: relative;
+.sat-run-sheet__remaining-label {
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+  font-size: 10px;
+  font-variant-numeric: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.sat-run-sheet__row--module td:first-child::before {
+.sat-run-sheet__status {
+  grid-area: status;
+  justify-self: end;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sat-run-sheet__row--section {
+  padding-top: 15px;
+}
+
+.sat-run-sheet__row--section .sat-run-sheet__row-label strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sat-run-sheet__row--module {
+  margin-left: 14px;
+  padding-left: 14px;
+}
+
+.sat-run-sheet__row--module::before {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 9px;
+  inset-block: 0;
+  left: 0;
   width: 1px;
-  background: var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+  background: var(--sat-staff-border-strong, rgba(0, 0, 0, 0.12));
   content: "";
 }
 
 .sat-run-sheet__row--break {
-  background: rgba(40, 53, 68, 0.035);
+  margin-top: 4px;
+  padding-left: 8px;
 }
 
-.sat-run-sheet__row--break td:first-child span:first-child {
+.sat-run-sheet__row--break .sat-run-sheet__row-label strong {
   font-weight: 650;
 }
 
-.sat-run-sheet__row.is-done td {
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-}
-
-.sat-run-sheet__row.is-done td:first-child span:first-child {
+.sat-run-sheet__row.is-done .sat-run-sheet__row-label strong,
+.sat-run-sheet__row.is-done .sat-run-sheet__row-window,
+.sat-run-sheet__row.is-done .sat-run-sheet__status {
   color: var(--sat-staff-text-tertiary, #6e6e73);
   font-weight: 500;
 }
 
-.sat-run-sheet__row.is-current td {
-  background: var(--sat-staff-success-tint, rgba(5, 150, 105, 0.06));
-}
-
-.sat-run-sheet__row.is-current td:first-child {
+.sat-run-sheet__row.is-current {
+  border-radius: 6px;
   box-shadow: inset 2px 0 0 var(--sat-staff-success-dot, #059669);
 }
 
-.sat-run-sheet__row.is-current[data-sat-run-sheet-row="section"] td {
-  background: rgba(5, 150, 105, 0.025);
-}
-
-.sat-run-sheet__row.is-current[data-sat-run-sheet-row="section"] td:first-child {
-  box-shadow: inset 1px 0 0 var(--sat-staff-success-dot, #059669);
-}
-
-.sat-run-sheet__row.is-current[data-sat-run-sheet-status="paused"] td {
+.sat-run-sheet__row.is-current[data-sat-run-sheet-status="paused"] {
   background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
-}
-
-.sat-run-sheet__row.is-current[data-sat-run-sheet-status="paused"] td:first-child {
   box-shadow: inset 2px 0 0 var(--sat-staff-warning-dot, #d97706);
 }
 
-.sat-run-sheet__row.is-current[data-sat-run-sheet-row="module"] td:first-child span:first-child,
-.sat-run-sheet__row.is-current[data-sat-run-sheet-row="break"] td:first-child span:first-child {
-  color: var(--sat-staff-text-primary, #18181b);
-  font-weight: 700;
+.sat-run-sheet__row[data-runtime-mismatch="true"] .sat-run-sheet__mismatch {
+  color: var(--sat-staff-warning-text, #92400e);
+  font-weight: 650;
 }
 
-.sat-run-sheet__adaptive-group th {
-  padding: 12px 8px 5px;
+.sat-run-sheet__adaptive-group {
+  margin: 10px 0 2px 14px;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-align: left;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.sat-run-sheet__adaptive-group th span {
-  margin-left: 8px;
+.sat-run-sheet__adaptive-group span {
+  margin-left: 6px;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
 }
 
-/* Empty state: the product waiting to become active, not a blank canvas. */
+.sat-room__inspector-panel .sat-room__student-detail,
+.sat-room__inspector-dialog .sat-room__student-detail {
+  min-width: 0;
+}
+
+.sat-room__student-state,
+.sat-room__student-attention {
+  margin-top: 20px;
+  border-top: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+  padding-top: 16px;
+}
+
+.sat-room__student-state-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 12px;
+  margin: 14px 0 0;
+}
+
+.sat-room__student-state-grid > div {
+  min-width: 0;
+}
+
+.sat-room__student-state-grid dt {
+  margin-bottom: 5px;
+}
+
+.sat-room__student-state-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--sat-staff-text-primary, #18181b);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.sat-room__student-state-grid dd.is-clock {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+}
+
+.sat-room__student-attention-healthy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--sat-staff-text-secondary, #515154);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sat-room__student-attention-healthy span {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--sat-staff-success-dot, #059669);
+}
+
+.sat-room__student-attention-event {
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
+  color: var(--sat-staff-warning-text, #92400e);
+  font-size: 12px;
+}
+
+.sat-room__student-attention-event p {
+  margin: 0;
+}
+
 .sat-room__empty {
   display: grid;
-  min-height: 420px;
+  min-height: 240px;
   place-items: center;
-  padding: 40px 24px;
+  padding: 32px 18px;
   text-align: center;
 }
 
@@ -839,50 +681,41 @@ button.sat-room__attention-filter:hover {
   place-items: center;
   border-radius: 12px;
   background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
-  /* A tiny top-edge highlight so the idle state reads as a surface rather than
-   * a hole in the page. */
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
   color: var(--sat-staff-text-secondary, #515154);
 }
 
 .sat-room__empty-title {
   margin: 0 0 6px;
+  color: var(--sat-staff-text-primary, #18181b);
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.012em;
-  color: var(--sat-staff-text-primary, #18181b);
 }
 
 .sat-room__empty-text {
-  margin: 0 auto;
   max-width: 34ch;
+  margin: 0 auto;
+  color: var(--sat-staff-text-secondary, #515154);
   font-size: 13px;
   line-height: 1.55;
-  color: var(--sat-staff-text-secondary, #515154);
 }
 
 .sat-room__empty-hint {
   margin: 14px 0 0;
-  font-size: 12px;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-}
-
-@keyframes sat-student-detail-enter {
-  from {
-    opacity: 0.72;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  font-size: 12px;
 }
 
 .sat-room__student-detail {
   animation: sat-student-detail-enter 150ms ease-out both;
 }
 
-/* Student rows: state lives on a leading dot and an edge, not on a card. */
+@keyframes sat-student-detail-enter {
+  from { opacity: 0.72; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .sat-room__row {
   position: relative;
   display: grid;
@@ -893,8 +726,8 @@ button.sat-room__attention-filter:hover {
   gap: 12px;
   border-radius: 8px;
   padding: 8px 12px;
-  text-align: left;
   color: var(--sat-staff-text-secondary, #515154);
+  text-align: left;
   transition: background-color 120ms ease-out, color 120ms ease-out;
 }
 
@@ -903,73 +736,325 @@ button.sat-room__attention-filter:hover {
 }
 
 .sat-room__row[aria-selected="true"] {
-  /* Selection is lit from the leading edge and falls away with the reading
-   * direction, exactly like a selected module in the authoring rail. */
-  background:
-    radial-gradient(280px 60px at 0% 0%, rgba(68, 148, 255, 0.1), transparent 70%),
-    linear-gradient(90deg, rgba(236, 245, 255, 0.95), rgba(249, 252, 255, 0.8));
+  background: linear-gradient(90deg, rgba(236, 245, 255, 0.95), rgba(249, 252, 255, 0.8));
   color: var(--sat-staff-text-primary, #17191d);
 }
 
-
 .sat-room__row[aria-selected="true"]::before {
-  content: "";
   position: absolute;
   inset-block: 10px;
   inset-inline-start: 3px;
   width: 2px;
   border-radius: 999px;
-  background: linear-gradient(180deg, #4da1ff, #006ee0);
-  box-shadow: 0 0 8px rgba(0, 113, 227, 0.2);
+  background: #006ee0;
+  content: "";
 }
 
 .sat-room__row-name {
   margin: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--sat-staff-text-primary, #18181b);
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.01em;
-  color: var(--sat-staff-text-primary, #18181b);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sat-room__row-meta {
+  display: block;
   margin: 2px 0 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
   font-size: 12px;
   font-weight: 500;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sat-room__row-time {
+  color: var(--sat-staff-text-secondary, #515154);
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--sat-staff-text-secondary, #515154);
 }
 
-/* The room's shared section clock under the row's own module clock, so a
-   proctor can tell "this candidate's module ends in 4 minutes" apart from
-   "the section has 26 minutes left" at a glance. */
 .sat-room__row-sub {
+  display: block;
   margin: 2px 0 0;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
   font-size: 11px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+
+@media (max-width: 1023px) {
+  .sat-room__header-inner {
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    padding: 8px 12px;
+  }
+
+  .sat-room__title {
+    flex-basis: 150px;
+  }
+
+  .sat-room__context {
+    align-items: flex-start;
+    padding: 12px 16px;
+  }
+
+  .sat-room__context-timing {
+    width: 100%;
+  }
+
+  .sat-room__context-counts,
+  .sat-room__context-health {
+    gap: 6px 10px;
+  }
+
+  .sat-room__context-counts > span + span::before,
+  .sat-room__context-counts > button::before,
+  .sat-room__context-health > span + span::before {
+    margin-right: 10px;
+  }
+
+  .sat-room__body {
+    align-items: start;
+  }
+
+  .sat-room__roster,
+  .sat-room__workspace {
+    overflow: visible;
+  }
+
+  .sat-room__roster [role="listbox"] {
+    max-height: none;
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .sat-room__inspector {
+    position: static;
+    display: block;
+    padding: 18px 16px 28px;
+    border-top: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
+  }
+
+  .sat-room__inspector-close {
+    display: none;
+  }
+
+  .sat-room__workspace {
+    padding: 24px 16px;
+  }
+
+  .sat-room__sticky-context {
+    display: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  .sat-room {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sat-room__body {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-columns: minmax(260px, 290px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "roster workspace";
+  }
+
+  .sat-room__roster {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
+    border-bottom: 0;
+  }
+
+  .sat-room__roster [role="listbox"] {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .sat-room__workspace {
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding: 24px;
+  }
+
+  .sat-room__sticky-context {
+    display: flex;
+    margin: -24px -24px -44px;
+    padding-inline: 24px;
+  }
+
+  .sat-room__inspector {
+    position: absolute;
+    z-index: 35;
+    inset: 0;
+    display: none;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .sat-room__inspector[data-inspector-open="true"] {
+    display: block;
+  }
+
+  .sat-room__inspector-close {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    margin: -8px -8px 12px auto;
+    place-items: center;
+    border: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.08));
+    border-radius: 9px;
+    background: var(--sat-staff-surface, #fff);
+    color: var(--sat-staff-text-secondary, #515154);
+  }
+}
+
+@media (min-width: 1280px) {
+  .sat-room__workspace {
+    padding: 28px 32px;
+  }
+
+  .sat-run-sheet {
+    padding: 22px;
+  }
+
+  .sat-room__sticky-context {
+    margin: -28px -32px -44px;
+    padding-inline: 32px;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1439px) {
+  .sat-room__inspector-panel {
+    padding: 22px 20px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .sat-room__body {
+    grid-template-columns: minmax(260px, 290px) minmax(0, 1fr) minmax(320px, 370px);
+    grid-template-areas: "roster workspace inspector";
+  }
+
+  .sat-room__inspector {
+    position: static;
+    z-index: auto;
+    display: block;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    border-left: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
+    background: linear-gradient(180deg, #fff 0%, #fcfdfe 100%);
+  }
+
+  .sat-room__inspector-panel {
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding: 20px 16px 32px;
+  }
+
+  .sat-room__inspector-close {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .sat-run-sheet__row-main {
+    grid-template-columns: minmax(0, 1fr) minmax(140px, auto) minmax(88px, auto) auto;
+    grid-template-areas: "label window clock status";
+    align-items: center;
+    gap: 12px;
+  }
+
+  .sat-run-sheet__row-window {
+    justify-self: end;
+    text-align: right;
+  }
+
+  .sat-run-sheet__row-status,
+  .sat-run-sheet__status {
+    justify-self: end;
+  }
+}
+
+@keyframes sat-inspector-enter {
+  from { transform: translateX(8px); }
+  to { transform: translateX(0); }
+}
+
+@keyframes sat-inspector-overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sat-room *,
   .sat-room *::before,
   .sat-room *::after {
-    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0s !important;
   }
 
-  .sat-room__student-detail {
-    animation-duration: 0.01ms !important;
+  .sat-room__student-detail,
+  .sat-room__inspector-panel,
+  .sat-room__inspector-dialog,
+  .sat-room__inspector-dialog-overlay {
+    animation: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .sat-room__row[aria-selected="true"] {
+    border: 2px solid Highlight;
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  .sat-room__row[aria-selected="true"]::before,
+  .sat-room__student-attention-healthy span {
+    background: Highlight;
+  }
+
+  .sat-room__row svg,
+  .sat-room__context-health > span:first-child::before {
+    forced-color-adjust: auto;
+  }
+
+  .sat-run-sheet__row.is-current {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .sat-run-sheet__row.is-current[data-sat-run-sheet-status="paused"],
+  .sat-run-sheet__row[data-runtime-mismatch="true"] {
+    border: 2px solid Mark;
+  }
+
+  .sat-room__student-attention-event {
+    border: 1px solid Mark;
+    background: Canvas;
+    color: CanvasText;
   }
 }

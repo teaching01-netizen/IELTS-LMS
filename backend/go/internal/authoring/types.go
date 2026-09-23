@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // Shell is the editable-draft projection (exam + sections + modules +
@@ -128,6 +129,7 @@ type ValidationReport struct {
 	ExamID          string            `json:"examId"`
 	VersionID       string            `json:"versionId"`
 	VersionRevision int               `json:"versionRevision"`
+	PublishScope    satpublish.Scope  `json:"publishScope"`
 	Valid           bool              `json:"valid"`
 	Errors          []ValidationIssue `json:"errors"`
 	Warnings        []ValidationIssue `json:"warnings"`

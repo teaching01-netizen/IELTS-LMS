@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SatTextAnchor } from '../../../domain/satResponses';
 import { SatSelectionActionsPanel } from '../SatSelectionActionsPanel';
 import { useSatAnnotationPlacement } from '../useSatAnnotationPlacement';
+import { satAnnotationSurfaceChrome } from '../SatAnnotationSurfaceFrame';
+import { SAT_EXAM_ZOOM_MAX, SAT_EXAM_ZOOM_MIN, SAT_EXAM_ZOOM_STEP } from '../../../domain/satReadingPreferences';
 
 /**
  * The runtime half of annotation placement: the pure engine is tested on its
@@ -53,8 +55,18 @@ function anchorRect(top: number, bottom: number, left = 200, right = 600): DOMRe
 
 /** Give the surface a measured size (jsdom reports none). */
 function stubSurfaceSize(width = SURFACE.width, height = SURFACE.height): void {
-  override(HTMLElement.prototype, 'offsetWidth', width);
-  override(HTMLElement.prototype, 'offsetHeight', height);
+  override(HTMLElement.prototype, 'getBoundingClientRect', function (this: HTMLElement) {
+    if (this.dataset['testid'] === 'surface' || this.getAttribute('role') === 'toolbar') {
+      return {
+        x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height,
+        toJSON: () => ({}),
+      } as DOMRect;
+    }
+    return {
+      x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0,
+      toJSON: () => ({}),
+    } as DOMRect;
+  });
 }
 
 /** Give the anchored span a measured box at the given band of the viewport. */
@@ -124,8 +136,53 @@ function remeasure(): void {
 }
 
 const settled = (mode: string) => waitFor(() => expect(surface().dataset['mode']).toBe(mode));
+const zoomValues = Array.from(
+  { length: Math.round((SAT_EXAM_ZOOM_MAX - SAT_EXAM_ZOOM_MIN) / SAT_EXAM_ZOOM_STEP) + 1 },
+  (_, index) => SAT_EXAM_ZOOM_MIN + index * SAT_EXAM_ZOOM_STEP,
+);
 
 describe('useSatAnnotationPlacement', () => {
+  it('converts viewport placement and rendered size back to the exam plane at 50%', () => {
+    const chrome = satAnnotationSurfaceChrome({
+      mode: 'floating',
+      left: 120,
+      top: 80,
+      width: 288,
+      maxHeight: 400,
+      side: 'above',
+      arrowX: 32,
+      animated: false,
+      clamped: false,
+    }, 0.5);
+
+    expect(chrome.style.left).toBe(240);
+    expect(chrome.style.top).toBe(160);
+    expect(chrome.style.width).toBe(576);
+    expect(chrome.style.maxHeight).toBe(800);
+    expect(chrome.bodyMaxHeight).toBe(800);
+  });
+
+  it.each(zoomValues)('uses the shared geometry conversion at %s zoom', (scale) => {
+    const placement = {
+      mode: 'floating' as const,
+      left: 120,
+      top: 80,
+      width: 288,
+      maxHeight: 400,
+      side: 'above' as const,
+      arrowX: 32,
+      animated: false,
+      clamped: false,
+    };
+    const chrome = satAnnotationSurfaceChrome(placement, scale);
+
+    expect(chrome.style.left).toBeCloseTo(placement.left / scale, 8);
+    expect(chrome.style.top).toBeCloseTo(placement.top / scale, 8);
+    expect(chrome.style.width).toBeCloseTo(placement.width / scale, 8);
+    expect(chrome.style.maxHeight).toBeCloseTo(placement.maxHeight / scale, 8);
+    expect(chrome.bodyMaxHeight).toBeCloseTo(placement.maxHeight / scale, 8);
+  });
+
   it('waits for the selection to settle before it surfaces', () => {
     vi.useFakeTimers();
     stubSurfaceSize();

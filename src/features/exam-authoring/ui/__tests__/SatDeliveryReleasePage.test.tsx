@@ -95,6 +95,7 @@ const readyReport: AssessmentValidationReport = {
   examId: exam.id,
   versionId: shell.versionId,
   versionRevision: shell.versionRevision,
+  publishScope: "full",
   valid: true,
   errors: [],
   warnings: [],
@@ -118,6 +119,7 @@ const publishedCurrentRelease: AssessmentReleaseState = {
     versionNumber: 4,
     revision: 1,
     publishNotes: null,
+    publishScope: "full",
     publishedAt: "2026-08-29T03:26:24.000Z",
   },
   workingDraft: { id: shell.versionId, parentVersionId: "published-v4", versionNumber: 5, revision: 0 },
@@ -142,6 +144,7 @@ function pageProps(overrides: Partial<ComponentProps<typeof SatDeliveryReleasePa
     exam,
     shell,
     releaseState: neverPublishedRelease,
+    publishScope: "full",
     isLoading: false,
     loadError: null,
     readiness: readyReport,
@@ -152,6 +155,7 @@ function pageProps(overrides: Partial<ComponentProps<typeof SatDeliveryReleasePa
     onBackToBuilder: vi.fn(),
     onBackToExams: vi.fn(),
     onRefreshReadiness: vi.fn().mockResolvedValue(undefined),
+    onPublishScopeChange: vi.fn(),
     onPublish: vi.fn().mockResolvedValue(undefined),
     onIssueClick: vi.fn(),
     onOpenStudentAccess: vi.fn(),
@@ -184,6 +188,13 @@ describe("SatDeliveryReleasePage", () => {
 
     expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
     expect(screen.getByText("Ready to publish")).toBeInTheDocument();
+  });
+
+  it("shows the selected scope and explains which SAT section is excluded", () => {
+    render(<SatDeliveryReleasePage {...pageProps({ publishScope: "reading-writing" })} />);
+
+    expect(screen.getByRole("radio", { name: "Reading & Writing" })).toBeChecked();
+    expect(screen.getByText(/Only Reading & Writing will be included/)).toBeInTheDocument();
   });
 
   it("blocks publishing as soon as delivery settings become dirty", () => {
@@ -278,10 +289,9 @@ describe("SatDeliveryReleasePage", () => {
     fireEvent.change(screen.getByPlaceholderText("What changed in this release?"), {
       target: { value: "Delivery thresholds reviewed" },
     });
-    const publishButtons = screen.getAllByRole("button", { name: "Publish" });
-    fireEvent.click(publishButtons[publishButtons.length - 1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Publish Full SAT" }));
 
-    await waitFor(() => expect(onPublish).toHaveBeenCalledWith("Delivery thresholds reviewed"));
+    await waitFor(() => expect(onPublish).toHaveBeenCalledWith("full", "Delivery thresholds reviewed"));
   });
   it("treats an untouched continuation draft as already published", () => {
     const onOpenStudentAccess = vi.fn();
@@ -424,8 +434,7 @@ describe("SatDeliveryReleasePage", () => {
     render(<SatDeliveryReleasePage {...pageProps({ onPublish })} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
-    const publishButtons = screen.getAllByRole("button", { name: "Publish" });
-    const dialogButton = publishButtons[publishButtons.length - 1]!;
+    const dialogButton = screen.getByRole("button", { name: "Publish Full SAT" });
     fireEvent.click(dialogButton);
     fireEvent.click(dialogButton);
 
@@ -439,8 +448,7 @@ describe("SatDeliveryReleasePage", () => {
     render(<SatDeliveryReleasePage {...pageProps({ onPublish })} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
-    const publishButtons = screen.getAllByRole("button", { name: "Publish" });
-    fireEvent.click(publishButtons[publishButtons.length - 1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Publish Full SAT" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /could not be published/i,

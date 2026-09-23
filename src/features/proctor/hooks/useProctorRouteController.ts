@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useLiveUpdates, type LiveUpdateEvent } from "@shared/hooks/useLiveUpdates";
+import type { ServerClockSnapshot } from "@shared/hooks/useAuthoritativeDeadlineClock";
 import {
   fetchProctorSessionDetail,
   liveQueryPolicy,
@@ -20,7 +21,7 @@ import type {
 import type { ExamSchedule, ExamSessionRuntime } from "../../../types/domain";
 import type { ProctorPresence } from "../../../types/domain";
 import type { ProctorScheduleMetrics } from "../contracts";
-import { mergeProctorRuntime } from "../domain/mergeProctorRuntime";
+import { mergeProctorRuntime, runtimeProjectionSupersedes } from "../domain/mergeProctorRuntime";
 
 function mapBackendSessionSummary(payload: {
   attemptId: string;
@@ -37,6 +38,7 @@ function mapBackendSessionSummary(payload: {
   runtimeDeadlineAt?: string | null | undefined;
   runtimeServerNow?: string | null | undefined;
   runtimeModuleRole?: StudentSession["runtimeModuleRole"] | null | undefined;
+  runtimeCurrentModuleRole?: StudentSession["runtimeModuleRole"] | null | undefined;
   runtimeModuleDeadlineAt?: string | null | undefined;
   runtimeModuleRemainingSeconds?: number | null | undefined;
   runtimeSectionStatus?: StudentSession["runtimeSectionStatus"] | null | undefined;
@@ -63,7 +65,10 @@ function mapBackendSessionSummary(payload: {
     runtimeTimeRemainingSeconds: payload.runtimeTimeRemainingSeconds,
     runtimeDeadlineAt: payload.runtimeDeadlineAt ?? null,
     runtimeServerNow: payload.runtimeServerNow ?? null,
-    runtimeModuleRole: payload.runtimeModuleRole ?? null,
+    // The server names this field `runtimeCurrentModuleRole`; accept the older
+    // client-side name too, so the adaptive module slot is not lost to a key
+    // that only ever existed on one side of the wire.
+    runtimeModuleRole: payload.runtimeModuleRole ?? payload.runtimeCurrentModuleRole ?? null,
     runtimeModuleDeadlineAt: payload.runtimeModuleDeadlineAt ?? null,
     runtimeModuleRemainingSeconds: payload.runtimeModuleRemainingSeconds ?? null,
     runtimeSectionStatus: payload.runtimeSectionStatus ?? undefined,
@@ -189,6 +194,25 @@ function sortAlertsByTimestamp(left: ProctorAlert, right: ProctorAlert) {
   return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
 }
 
+/**
+ * The newest server instant among the payloads one refresh carried. Every read
+ * stamps its own `serverNow`, so the freshest one is the room's clock for this
+ * refresh; taking it here keeps the room and the per-student rows on the same
+ * instant instead of each correcting itself.
+ */
+function newestServerNow(candidates: Array<string | null | undefined>): string | null {
+  let best: string | null = null;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const parsed = Date.parse(candidate);
+    if (!Number.isFinite(parsed) || parsed <= bestMs) continue;
+    best = candidate;
+    bestMs = parsed;
+  }
+  return best;
+}
+
 function getLiveUpdateScheduleId(event: LiveUpdateEvent): string | null {
   if (event.scheduleId) {
     return event.scheduleId;
@@ -219,6 +243,7 @@ export interface ProctorRouteController {
   wsConnected: boolean | null;
   notes: SessionNote[];
   runtimeSnapshots: ExamSessionRuntime[];
+  roomClock: ServerClockSnapshot;
   schedules: ExamSchedule[];
   scheduleMetrics: Record<string, ProctorScheduleMetrics>;
   sessions: StudentSession[];
@@ -250,6 +275,10 @@ export function useProctorRouteController(
   const queryClient = useQueryClient();
   const [schedules, setSchedules] = useState<ExamSchedule[]>([]);
   const [runtimeSnapshots, setRuntimeSnapshots] = useState<ExamSessionRuntime[]>([]);
+  // One accepted server instant for the whole room: the stamp of the freshest
+  // payload plus the local instant it arrived. See mergeProctorRuntime for why
+  // the runtime projection alone cannot be trusted to be the freshest read.
+  const [roomClock, setRoomClock] = useState<ServerClockSnapshot>({ serverNow: null, receivedAt: 0 });
   const [sessions, setSessions] = useState<StudentSession[]>([]);
   const [alerts, setAlerts] = useState<ProctorAlert[]>([]);
   const [auditLogs, setAuditLogs] = useState<SessionAuditLog[]>([]);
@@ -322,6 +351,14 @@ export function useProctorRouteController(
     }),
   });
 
+  const acceptRoomClock = useCallback((candidates: Array<string | null | undefined>) => {
+    const serverNow = newestServerNow(candidates);
+    if (!serverNow) return;
+    setRoomClock((current) =>
+      current.serverNow === serverNow ? current : { serverNow, receivedAt: Date.now() }
+    );
+  }, []);
+
   const applyMonitoringState = useCallback(
     (nextSummaries: typeof summaries, details: ProctorSessionDetailPayload[]) => {
       const filteredSummaries = nextSummaries.filter(
@@ -335,6 +372,7 @@ export function useProctorRouteController(
         scheduleStudentIdsRef.current.clear();
         setSchedules([]);
         setRuntimeSnapshots([]);
+        setRoomClock({ serverNow: null, receivedAt: 0 });
         setScheduleMetrics({});
         setSessions([]);
         setAlerts([]);
@@ -345,6 +383,14 @@ export function useProctorRouteController(
         setDetailPollIntervalMs(15_000);
         return;
       }
+
+      acceptRoomClock([
+        ...filteredSummaries.map((summary) => summary.runtime?.serverNow ?? null),
+        ...filteredDetails.flatMap((detail) => [
+          detail.runtime?.serverNow ?? null,
+          ...detail.sessions.map((session) => session.runtimeServerNow ?? null),
+        ]),
+      ]);
 
       const metrics: Record<string, ProctorScheduleMetrics> = {};
       for (const summary of filteredSummaries) {
@@ -480,7 +526,7 @@ export function useProctorRouteController(
         )
       );
     },
-    []
+    [acceptRoomClock]
   );
 
   useEffect(() => {
@@ -562,11 +608,13 @@ export function useProctorRouteController(
           payload.runtime as Parameters<typeof proctorFacade.mapRuntime>[0],
           schedule
         );
+        acceptRoomClock([mapped.serverNow]);
         setRuntimeSnapshots((current) => {
           const existing = current.find((runtime) => runtime.scheduleId === scheduleId);
-          const incomingRevision = mapped.revision ?? -1;
-          const existingRevision = existing?.revision ?? -1;
-          if (existing && incomingRevision <= existingRevision) return current;
+          // A frame is a read like any other: the same-revision tie-break applies,
+          // so a live section keeps receiving its fresher clock over the socket
+          // while a late or duplicated frame still cannot move it backwards.
+          if (existing && !runtimeProjectionSupersedes(existing, mapped)) return current;
           return [
             ...current.filter((runtime) => runtime.scheduleId !== scheduleId),
             mergeProctorRuntime(existing, mapped),
@@ -576,7 +624,7 @@ export function useProctorRouteController(
         // Pull-based refresh remains the recovery path for malformed frames.
       }
     },
-    [schedules, selectedScheduleId]
+    [acceptRoomClock, schedules, selectedScheduleId]
   );
 
   // Staff sockets stay (plan C1 retires student sockets only).
@@ -875,6 +923,7 @@ export function useProctorRouteController(
     wsConnected,
     notes,
     runtimeSnapshots,
+    roomClock,
     schedules,
     scheduleMetrics,
     sessions,

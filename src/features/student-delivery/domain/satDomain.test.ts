@@ -245,23 +245,14 @@ describe('SAT delivery domain', () => {
     expect(entry({ data: { ...data, proctorStatus: 'idle' } })).toMatchObject({
       shouldStart: false, reason: 'proctor-blocked',
     });
-    // Module 2 inside the first section. Nothing owns it unless Module 1's own
-    // clock ran out, and then the hand-off opens it automatically — the branch
-    // used to be vetoed outright, which left the student on a directions screen
-    // whose button stays recovery-only while nothing ever tries.
+    // Module 2 is selected by the server. Once its unstarted attempt exists,
+    // it opens automatically regardless of how Module 1 ended.
     expect(entry({ module: { ...module, adaptiveRole: 'higher_branch' } })).toMatchObject({
-      shouldStart: false, reason: 'awaiting-student', autoStartPending: false,
-    });
-    expect(entry({
-      module: { ...module, adaptiveRole: 'higher_branch' },
-      previousModuleTimedOut: true,
-    })).toMatchObject({
       shouldStart: true, reason: 'next-module-entry', autoStartPending: true,
     });
     // The hand-off needs a module to enter: an already-started row is not it.
     expect(entry({
       module: { ...module, adaptiveRole: 'higher_branch' },
-      previousModuleTimedOut: true,
       data: {
         ...data,
         attempt: { ...data.attempt, moduleAttempts: [{ ...pendingAttempt, startedAt: '2026-08-30T03:00:00Z', state: 'active' }] },
@@ -317,12 +308,6 @@ describe('SAT delivery domain', () => {
       shouldStart: false, reason: 'proctor-blocked',
     });
     expect(entry({ module: { ...module, adaptiveRole: 'higher_branch' } })).toMatchObject({
-      shouldStart: false, reason: 'awaiting-student', autoStartPending: false,
-    });
-    expect(entry({
-      module: { ...module, adaptiveRole: 'higher_branch' },
-      previousModuleTimedOut: true,
-    })).toMatchObject({
       shouldStart: true, reason: 'next-module-entry', autoStartPending: true,
     });
     expect(entry({ sectionDisplayOrder: null })).toMatchObject({

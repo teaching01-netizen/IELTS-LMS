@@ -1,5 +1,7 @@
 export type QuestionKind = "single_choice" | "student_produced_response";
 
+export type SatPublishScope = "full" | "reading-writing" | "math";
+
 export interface RichTextDocument {
   type: "doc";
   content?: RichTextNode[] | undefined;
@@ -446,6 +448,7 @@ export interface AssessmentValidationReport {
   examId: string;
   versionId: string;
   versionRevision: number;
+  publishScope: SatPublishScope;
   valid: boolean;
   errors: AssessmentValidationIssue[];
   warnings: AssessmentValidationIssue[];
@@ -455,6 +458,7 @@ export interface PublishAssessmentRequest {
   revision: number;
   expectedDraftVersionId: string;
   expectedDraftRevision: number;
+  publishScope: SatPublishScope;
   publishNotes?: string;
   /** Retry-safety key: same key + identical content replays; reuse with different content is a 409. */
   operationKey?: string;
@@ -467,6 +471,7 @@ export interface PublishedAssessmentVersion {
   revision: number;
   isDraft: boolean;
   isPublished: boolean;
+  publishScope?: SatPublishScope;
   publishNotes?: string | null;
   createdAt: string;
 }

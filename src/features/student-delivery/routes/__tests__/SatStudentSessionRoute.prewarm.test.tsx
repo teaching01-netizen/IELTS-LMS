@@ -381,21 +381,23 @@ describe("SatStudentSessionRoute prewarm gating", () => {
     expectBare(document.body);
   });
 
-  it("C3 directions, pending R+W no calc (B5c): bare directions", () => {
+  it("C3 first-module entry stays on the pre-start surface", () => {
     const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: null });
     setup({ phase: "directions", stateModuleId: null, pendingModuleId: "rw-m1", data });
-    expect(screen.getByRole("heading", { name: /Reading and Writing/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your exam is ready" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Begin module/i })).toBeNull();
     expect(screen.queryByTitle(/Desmos/)).toBeNull();
     expectBare(document.body);
   });
 
-  it("C4 directions, pending math with calc (B5c): hidden warm tree mounts", () => {
+  it("C4 between-section entry uses the break surface without a hidden calculator tree", () => {
     const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: null });
     setup({ phase: "directions", stateModuleId: null, pendingModuleId: "math-m1", data });
-    expect(screen.getByTitle(SCI_TITLE)).toBeInTheDocument();
-    expect(screen.getByTitle(GRAPH_TITLE)).toBeInTheDocument();
-    // Closed = hidden tree: no visible calculator dialog.
+    expect(screen.getByTestId("sat-scheduled-break")).toBeInTheDocument();
+    expect(screen.queryByTitle(SCI_TITLE)).toBeNull();
+    expect(screen.queryByTitle(GRAPH_TITLE)).toBeNull();
     expect(screen.queryByRole("dialog", { name: "Calculator" })).toBeNull();
+    expectBare(document.body);
   });
 
   it("C5 module, calculator closed (B12): hidden tree, open reveals dialog", () => {
@@ -446,10 +448,11 @@ describe("SatStudentSessionRoute prewarm gating", () => {
     expectBare(document.body);
   });
 
-  it("C7 break (B6): timer-only screen, no host", () => {
+  it("C7 break (B6): opening status has no timer or hidden calculator host", () => {
     const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: "math-m1" });
     setup({ phase: "break", stateModuleId: null, pendingModuleId: null, data });
-    expect(screen.getByRole("timer")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Opening Math…" })).toBeInTheDocument();
+    expect(screen.queryByRole("timer")).toBeNull();
     expect(screen.queryByTitle(/Desmos/)).toBeNull();
     expectBare(document.body);
   });

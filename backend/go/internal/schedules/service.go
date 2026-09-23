@@ -554,8 +554,9 @@ type planQuerier interface {
 // and config_snapshot.sections[key].enabled are ANDed, not merged.
 func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examruntime.PlanEntry, string, error) {
 	var configRaw sql.NullString
+	var publishedScopeRaw sql.NullString
 	var examType string
-	if err := q.QueryRowContext(ctx, "SELECT CAST(v.config_snapshot AS CHAR), e.exam_type FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.id = ?", sch.PublishedVersionID).Scan(&configRaw, &examType); err != nil {
+	if err := q.QueryRowContext(ctx, "SELECT CAST(v.config_snapshot AS CHAR), e.exam_type, v.sat_publish_scope FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.id = ?", sch.PublishedVersionID).Scan(&configRaw, &examType, &publishedScopeRaw); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, "", notFoundError("Published exam version not found.")
 		}
@@ -568,6 +569,8 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 	if err != nil {
 		return nil, "", err
 	}
+	releaseSections := examdomain.ParseSATPublishScope(publishedScopeRaw.String)
+	effectiveSections := examdomain.IntersectSectionScopes(releaseSections, linkSections)
 	enabled := configuredRuntimeSections(configRaw.String)
 	// A candidate sits Module 1 plus exactly ONE adaptive branch, so an adaptive
 	// section's clock is base + the LONGER branch — never the sum of every
@@ -594,7 +597,7 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 		if err := rows.Scan(&key, &label, &order, &durationSeconds, &gapSeconds); err != nil {
 			return nil, "", err
 		}
-		if !examdomain.ValidSectionKey(effectiveProvider, key) || (enabled != nil && !enabled[key]) || !linkAllowsSection(linkSections, key) {
+		if !examdomain.ValidSectionKey(effectiveProvider, key) || (enabled != nil && !enabled[key]) || !examdomain.AllowsSection(effectiveSections, key) {
 			continue
 		}
 		if candidate, ok := candidateSeconds[key]; ok {
@@ -614,10 +617,14 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 	// The fallbacks are filtered too: an unusable config must not silently
 	// hand a narrowed link back its dropped section.
 	if len(plan) == 0 {
-		plan = filterPlanBySections(configuredRuntimePlan(configRaw.String, effectiveProvider), linkSections)
+		plan = filterPlanBySections(configuredRuntimePlan(configRaw.String, effectiveProvider), effectiveSections)
 	}
 	if len(plan) == 0 {
-		plan = filterPlanBySections(fallbackRuntimePlan(effectiveProvider, sch.PlannedDurationMinutes), linkSections)
+		plan = filterPlanBySections(fallbackRuntimePlan(effectiveProvider, sch.PlannedDurationMinutes), effectiveSections)
+	}
+	if len(plan) > 0 && effectiveProvider == examdomain.ProviderSAT {
+		// The final delivered section has no cross-section break after it.
+		plan[len(plan)-1].GapAfterMinutes = 0
 	}
 	timingModel := examruntime.TimingModelLegacy
 	if strings.EqualFold(sch.ProviderKey, examdomain.ProviderSAT) {
@@ -698,11 +705,6 @@ func linkEnabledSections(ctx context.Context, q planQuerier, scheduleID string) 
 		return nil, err
 	}
 	return examdomain.ParseStoredSectionScope(raw.String), nil
-}
-
-// linkAllowsSection reports whether a link scope admits a section.
-func linkAllowsSection(allowed map[string]bool, sectionKey string) bool {
-	return examdomain.AllowsSection(allowed, sectionKey)
 }
 
 // filterPlanBySections narrows an already-built plan to a link scope, keeping

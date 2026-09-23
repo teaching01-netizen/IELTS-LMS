@@ -1,4 +1,5 @@
 import { SAT_COPY } from "../../domain/satCopy";
+import { SatExamOverlayPortal } from "../zoom/SatExamZoomContext";
 
 export type SatSaveBannerState =
   | "idle"
@@ -40,8 +41,9 @@ export function SatSaveStatus(props: SatSaveStatusProps): React.JSX.Element | nu
 
   const isSuperseded = state === "superseded";
   return (
+    <SatExamOverlayPortal>
     <div
-      className="sat-surface-enter fixed bottom-[calc(96px+var(--student-safe-bottom))] left-1/2 z-[85] flex w-[min(680px,calc(100vw-32px))] -translate-x-1/2 items-center justify-between gap-4 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 sat-type-control-secondary shadow-lg"
+      className="sat-surface-enter fixed bottom-[calc(96px+var(--student-safe-bottom))] left-1/2 z-[85] flex w-[min(680px,calc(var(--sat-exam-logical-width,100vw)-32px))] -translate-x-1/2 items-center justify-between gap-4 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 sat-type-control-secondary shadow-lg"
       role="alert"
       data-testid="sat-save-status"
       data-sat-save-state={state}
@@ -70,5 +72,6 @@ export function SatSaveStatus(props: SatSaveStatusProps): React.JSX.Element | nu
         </button>
       ) : null}
     </div>
+    </SatExamOverlayPortal>
   );
 }

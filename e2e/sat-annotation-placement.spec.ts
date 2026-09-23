@@ -284,6 +284,34 @@ test.describe('annotation surface placement', () => {
     });
   }
 
+  test('keeps the toolbar aligned to its viewport anchor at 50%', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openHarness(page);
+    await page.getByRole('button', { name: 'Display', exact: true }).click();
+    await page.getByRole('button', { name: 'Decrease screen zoom' }).click();
+    await page.getByRole('button', { name: 'Decrease screen zoom' }).click();
+    await expect(page.locator('[data-sat-zoom-plane]')).toHaveAttribute('data-sat-screen-zoom', '0.5');
+    await page.getByRole('button', { name: 'Close display settings' }).click();
+    await selectStimulusText(page, PHRASE);
+    await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
+
+    const geometry = await readPlacement(page, PHRASE);
+    expectContained(geometry);
+    expectDoesNotCoverSelection(geometry);
+    expect(geometry.caret, 'caret remains attached to the selected text').not.toBeNull();
+    const scaling = await page.locator(SURFACE_SELECTOR).evaluate((surface) => {
+      const rect = surface.getBoundingClientRect();
+      return {
+        renderedWidth: rect.width,
+        renderedHeight: rect.height,
+        logicalWidth: surface.clientWidth,
+        logicalHeight: surface.clientHeight,
+      };
+    });
+    expect(Math.abs(scaling.renderedWidth - scaling.logicalWidth * 0.5)).toBeLessThanOrEqual(2);
+    expect(Math.abs(scaling.renderedHeight - scaling.logicalHeight * 0.5)).toBeLessThanOrEqual(2);
+  });
+
   test('keeps the toolbar inside a viewport too short for it', async ({ page, isMobile }) => {
     // Phone: a short viewport is what a software keyboard leaves behind. Desktop:
     // a window too short for a toolbar is the same problem with a mouse. The
@@ -355,23 +383,21 @@ test.describe('annotation surface placement', () => {
     // The device turns. For a few frames the browser reports the old and the new
     // axes together, so the surface must not be placed from transitional
     // geometry: it goes quiet, and only then is it placed again.
-    const duringRotation = await page.evaluate(async (selector) => {
-      const surface = document.querySelector(selector);
-      if (!surface) throw new Error('the selection surface is not in the document');
+    await page.evaluate(() => {
       window.dispatchEvent(new Event('orientationchange'));
-      // One frame: React commits the hold in a microtask, so by the next frame it
-      // has landed — and it lasts far longer than a frame.
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    const hiddenState = await page.waitForFunction(() => {
+      const menu = document.querySelector('[data-selection-action-menu]');
+      if (!menu || getComputedStyle(menu).visibility !== 'hidden') return false;
       return {
-        visibility: getComputedStyle(surface).visibility,
-        claimsInteraction: document.querySelector(selector) !== null,
+        visibility: getComputedStyle(menu).visibility,
+        claimsInteraction: document.querySelector('[data-sat-selection-toolbar="true"]') !== null,
       };
-    }, SURFACE_SELECTOR);
-    expect(duringRotation.visibility).toBe('hidden');
+    }, null, { polling: 'raf', timeout: 1_000 });
     // A mounted-but-hidden surface claims no interaction: the Highlights
     // shortcut focuses the first control it finds, and it must not find one
     // nobody can see.
-    expect(duringRotation.claimsInteraction).toBe(false);
+    expect(await hiddenState.jsonValue()).toEqual({ visibility: 'hidden', claimsInteraction: false });
 
     // The viewport settles in the new orientation, and the surface comes back —
     // placed for the geometry it now has, not for the one it had.
