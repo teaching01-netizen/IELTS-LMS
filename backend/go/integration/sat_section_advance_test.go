@@ -182,8 +182,19 @@ func newSATAdvanceFixture(t *testing.T) *satAdvanceFixture {
 		t.Fatalf("authoring shell: %v", err)
 	}
 	authors := authoring.NewService(db, runner)
-	if _, err := authors.CreateQuestion(ctx, shell.Sections[0].Modules[0].ID, actor, authoring.QuestionDraft{}); err != nil {
-		t.Fatalf("create question: %v", err)
+	// Publishing now enforces the SAT blueprint's target question counts. The
+	// runtime-clock assertions below do not depend on question content, so fill
+	// every module with the smallest valid question shape before publishing.
+	for _, section := range shell.Sections {
+		for _, module := range section.Modules {
+			drafts := make([]authoring.QuestionDraft, module.TargetQuestionCount)
+			for index := range drafts {
+				drafts[index] = satAdvanceQuestionDraft(index)
+			}
+			if _, err := authors.BatchCreateQuestions(ctx, module.ID, actor, drafts); err != nil {
+				t.Fatalf("create questions for %s.%s: %v", section.SectionKey, module.ModuleKey, err)
+			}
+		}
 	}
 	current, err := authors.Shell(ctx, exam.ID)
 	if err != nil {
@@ -200,6 +211,21 @@ func newSATAdvanceFixture(t *testing.T) *satAdvanceFixture {
 	f.versionID = published.ID
 	t.Cleanup(f.cleanup)
 	return f
+}
+
+func satAdvanceQuestionDraft(index int) authoring.QuestionDraft {
+	return authoring.QuestionDraft{
+		QuestionType: "single_choice",
+		Prompt: json.RawMessage(fmt.Sprintf(
+			`{"version":1,"nodes":[{"type":"paragraph","text":"Clock verification question %d."}]}`,
+			index+1,
+		)),
+		Answer: json.RawMessage(`{"kind":"single_choice","options":[` +
+			`{"id":"A","content":{"version":1,"nodes":[{"type":"paragraph","text":"Choice A"}]}},` +
+			`{"id":"B","content":{"version":1,"nodes":[{"type":"paragraph","text":"Choice B"}]}},` +
+			`{"id":"C","content":{"version":1,"nodes":[{"type":"paragraph","text":"Choice C"}]}},` +
+			`{"id":"D","content":{"version":1,"nodes":[{"type":"paragraph","text":"Choice D"}]}}],"correctOptionId":"A"}`),
+	}
 }
 
 func (f *satAdvanceFixture) cleanup() {
