@@ -37,6 +37,34 @@ func TestValidateSATQuestionFlagsIncompleteAndInvalidSeparately(t *testing.T) {
 	}
 }
 
+func TestValidateSATPublishQuestionIgnoresOptionalAuthoringFields(t *testing.T) {
+	issues := validateSATPublishQuestion(questionValidationRow{
+		examQuestionID: "eq-1",
+		sectionKey:     SectionReadingWriting,
+		questionType:   "single_choice",
+		prompt:         validPrompt(),
+		answer:         validChoiceAnswer(),
+		stimulus:       emptyContent(),
+		rationale:      emptyContent(),
+		metadata:       `{}`,
+	})
+	if len(issues) != 0 {
+		t.Fatalf("optional metadata/content must not block SAT publishing: %+v", issues)
+	}
+}
+
+func TestValidateSATPublishQuestionAllowsLooseSPRResponses(t *testing.T) {
+	issues := validateSATPublishQuestion(questionValidationRow{
+		questionType: "student_produced_response",
+		prompt:       validPrompt(),
+		answer:       `{"kind":"student_produced_response","acceptedResponses":["any non-empty accepted response"]}`,
+		metadata:     `{}`,
+	})
+	if len(issues) != 0 {
+		t.Fatalf("SPR publish validation should only require a non-empty response: %+v", issues)
+	}
+}
+
 func containsIssueCode(issues []ValidationIssue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {

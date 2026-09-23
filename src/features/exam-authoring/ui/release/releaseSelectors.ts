@@ -1,5 +1,6 @@
 import type {
   AssessmentAuthoringShell,
+  AssessmentValidationIssue,
   AssessmentValidationReport,
 } from "../../contracts/assessment";
 import type {
@@ -16,6 +17,51 @@ export type ReleaseHeroState =
   | "preparing";
 
 export const MAX_PUBLISH_NOTES_LENGTH = 1000;
+
+export const SAT_PUBLISH_READINESS_FAMILIES = [
+  { id: "question-text", label: "Question text", codes: ["question.prompt.required"] },
+  {
+    id: "answer-choices",
+    label: "Answer choices",
+    codes: ["sat.choice.count", "sat.choice.content.required"],
+  },
+  { id: "module-question-count", label: "Module question count", codes: ["sat.module.incomplete"] },
+  {
+    id: "correct-answers",
+    label: "Correct answers",
+    codes: ["sat.correct_answer.required", "sat.correct_answer.invalid", "sat.spr.answer.required"],
+  },
+] as const;
+
+const SAT_PUBLISH_READINESS_CODES = new Set<string>(
+  SAT_PUBLISH_READINESS_FAMILIES.flatMap((family) => family.codes),
+);
+
+/** Release only renders findings owned by the four-rule SAT publish contract. */
+export function isSATPublishReadinessIssue(issue: AssessmentValidationIssue): boolean {
+  return SAT_PUBLISH_READINESS_CODES.has(issue.code);
+}
+
+export function readinessFamilyForIssue(issue: AssessmentValidationIssue) {
+  return SAT_PUBLISH_READINESS_FAMILIES.find((family) =>
+    (family.codes as readonly string[]).includes(issue.code),
+  );
+}
+
+export function getSATPublishBlockers(
+  readiness: AssessmentValidationReport | null | undefined,
+  fresh: boolean,
+): AssessmentValidationReport["errors"] {
+  return getFreshBlockers(readiness, fresh).filter(isSATPublishReadinessIssue);
+}
+
+/** Legacy optional findings never participate in the SAT publish gate. */
+export function isSATPublishReadinessValid(
+  readiness: AssessmentValidationReport | null | undefined,
+  fresh: boolean,
+): boolean {
+  return Boolean(readiness && fresh && getSATPublishBlockers(readiness, fresh).length === 0);
+}
 
 /** True only when the report was computed for the exact visible draft. */
 export function isReadinessFresh(

@@ -1,4 +1,3 @@
-import React from 'react';
 import { motion } from 'motion/react';
 import type { SelectionHandleGeometry } from '../domain/selectionTypes';
 import { useCaretSnapMotion, useGripMotion } from './useSelectionMotion';
@@ -27,13 +26,20 @@ import '../styles/selection.css';
  * new character). Nesting is what lets the second exist without the first having
  * to learn about it, and without either of them ever reaching the 44×44 target —
  * which is item one of this file's contract and is never tweened.
+ *
+ * IT READS NO PRESS ITSELF. A press on a handle is dispatched by the overlay's
+ * capture pass, which runs before anything at this depth, and the endpoint it
+ * grabs is the session's decision — so a handler here could only be a second
+ * entry to the same question, reachable exactly when the first one has already
+ * answered it. What this button owes the gesture is its 44×44 box and its
+ * `data-student-selection-handle` edge, which is what the press is hit-tested
+ * against and what the drag holds on to.
  */
 export function SelectionHandle({
   handle,
   label,
   held = false,
   snapRevision = 0,
-  onPointerDown,
 }: {
   handle: SelectionHandleGeometry;
   label: string;
@@ -47,7 +53,6 @@ export function SelectionHandle({
    * settle animation are both left out of it).
    */
   snapRevision?: number | undefined;
-  onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
   const { initial, animate, transition, ...witness } = useGripMotion(held);
   const snap = useCaretSnapMotion(snapRevision, selectionMotion.caretSnapGripScale);
@@ -60,7 +65,6 @@ export function SelectionHandle({
       aria-label={label}
       className="selection-v2 selection-v2-handle"
       style={{ transform: `translate3d(${handle.x}px, ${handle.y}px, 0) translate(-50%, -50%)`, pointerEvents: 'auto' }}
-      onPointerDown={onPointerDown}
     >
       {/* The tick lives HERE, around the grip: swelling this scales the grip and
           its stem and dot with it, while the measured target above and the grip's

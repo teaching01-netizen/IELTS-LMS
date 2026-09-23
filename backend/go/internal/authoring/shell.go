@@ -83,10 +83,9 @@ func (s *Service) ShellLifecycle(ctx context.Context, examID string) (ShellResul
 	return s.bulkShell(ctx, examID)
 }
 
-// ValidateExam runs the SAT adaptive gate when the exam provider is sat
-// (base + lower/higher branches, routing match, threshold range, non-empty
-// base) and a light structural gate otherwise. A mid-check draft revision
-// move is a CONFLICT (mirrors validate()).
+// ValidateExam runs the SAT four-rule publish-content gate when the exam
+// provider is sat and a light structural gate otherwise. A mid-check draft
+// revision move is a CONFLICT (mirrors validate()).
 func (s *Service) ValidateExam(ctx context.Context, examID string) (ValidationReport, error) {
 	shell, err := s.Shell(ctx, examID)
 	if err != nil {

@@ -10,7 +10,7 @@ import { useAuthoringShellLifecycle } from "../application/authoringShellLifecyc
 import { requestAuthoringDraftOnEntry } from "../application/authoringEntryIntent";
 import { useAccessDistributionOverview } from "../api/assessmentAccessLinkQueries";
 import type { AssessmentValidationIssue } from "../contracts/assessment";
-import { parseIssueLink } from "../ui/release/releaseSelectors";
+import { isSATPublishReadinessValid, parseIssueLink } from "../ui/release/releaseSelectors";
 import { SatDeliveryReleasePage } from "../ui/SatDeliveryReleasePage";
 import { CollaborationHeaderCluster } from "../ui/collaboration/CollaborationHeaderCluster";
 
@@ -80,7 +80,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       );
     }
     const readiness = readinessQuery.data;
-    if (!readiness || !readiness.valid) {
+    if (!readiness || !isSATPublishReadinessValid(readiness, true)) {
       throw new Error("Run publish checks and resolve all blocking issues first.");
     }
     if (

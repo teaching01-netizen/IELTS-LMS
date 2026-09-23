@@ -309,7 +309,7 @@ async function startSatAttempt(
   await expect(page.getByText("Digital SAT").first()).toBeVisible();
   await expect(page.getByText("IELTS", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "New SAT" }).first().click();
+  await page.getByRole("button", { name: "Create SAT", exact: true }).first().click();
   await page.getByLabel("SAT exam name").fill(examTitle);
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i, { timeout: 30_000 });
@@ -321,19 +321,19 @@ async function startSatAttempt(
   await page.getByRole("menuitem", { name: /Load sample exam/ }).click();
   await expect(page.getByRole("dialog", { name: "Load sample SAT" })).toBeVisible();
   await page.getByRole("button", { name: "Load 147 questions" }).click();
-  await expect(page.getByText("147 of 147 questions authored")).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText("147 of 147 authored")).toBeVisible({ timeout: 90_000 });
 
   await page.getByRole("button", { name: "Release" }).click();
   await expect(page).toHaveURL(`/sat/exams/${examId}/release`);
-  await expect(page.getByText("Ready to publish")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Ready to publish" })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Publish" }).click();
   const publishDialog = page.getByRole("dialog");
   await expect(publishDialog).toBeVisible();
-  await publishDialog.getByRole("button", { name: "Publish" }).click();
+  await publishDialog.getByRole("button", { name: "Publish", exact: true }).click();
 
   await expect(page).toHaveURL(`/sat/exams/${examId}/access`, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Student Access", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "New Link" }).click();
+  await page.getByRole("button", { name: "New Student Link", exact: true }).first().click();
   await page.getByLabel("Student Link name").fill(linkName);
   await page.getByRole("button", { name: /Name \+ email only/i }).click();
   await page.getByRole("button", { name: /Anytime/i }).click();
@@ -426,6 +426,129 @@ async function startSatAttempt(
 }
 
 test.describe("Digital SAT product workspace", () => {
+  test("keeps the SAT run sheet, roster, and student inspection inside their desktop scroll regions", async ({
+    page,
+    browser,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium", "The room geometry matrix runs in Chromium desktop only.");
+    test.setTimeout(180_000);
+    const harness = await startSatAttempt(page, browser, {
+      titlePrefix: "SAT Room Layout",
+      linkPrefix: "SAT Room Layout Link",
+      studentPrefix: "SAT Room Layout Student",
+    });
+    const { studentContext, scheduleId, studentName } = harness;
+    try {
+      for (const viewport of [
+        { width: 1600, height: 900 },
+        { width: 1440, height: 900 },
+        { width: 1280, height: 800 },
+        { width: 1024, height: 768 },
+        { width: 768, height: 1024 },
+        { width: 390, height: 844 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await page.goto(`/sat/sessions/${scheduleId}`);
+        await expect(page.getByRole("heading", { name: "Waiting to begin" })).toHaveCount(0);
+        await expect(page.getByRole("heading", { name: studentName })).toBeVisible({ timeout: 30_000 });
+        await expect(page.getByText("Run sheet", { exact: true })).toBeVisible();
+
+        const metrics = await page.evaluate(() => {
+          const workspace = document.querySelector<HTMLElement>(".sat-room__workspace");
+          const timeline = document.querySelector<HTMLElement>(".sat-room__timeline-pane");
+          const studentPane = document.querySelector<HTMLElement>(".sat-room__student-pane");
+          const room = document.querySelector<HTMLElement>(".sat-room");
+          const inspector = room?.querySelector<HTMLElement>(".sat-room__inspector");
+          if (!workspace || !timeline || !studentPane || !room || !inspector) throw new Error("SAT session room did not render");
+          return {
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            documentHeight: document.documentElement.scrollHeight,
+            workspaceTop: workspace.getBoundingClientRect().top,
+            workspaceRight: workspace.getBoundingClientRect().right,
+            timelineClientHeight: timeline.clientHeight,
+            timelineScrollHeight: timeline.scrollHeight,
+            timelineOverflowY: getComputedStyle(timeline).overflowY,
+            studentClientHeight: studentPane.clientHeight,
+            studentScrollHeight: studentPane.scrollHeight,
+            studentOverflowY: getComputedStyle(studentPane).overflowY,
+            workspaceOverflowY: getComputedStyle(workspace).overflowY,
+            rowCount: workspace.querySelectorAll("[data-sat-run-sheet-row]").length,
+            inspectorDisplay: getComputedStyle(inspector).display,
+            inspectorTop: inspector.getBoundingClientRect().top,
+            inspectorBottom: inspector.getBoundingClientRect().bottom,
+            inspectorLeft: inspector.getBoundingClientRect().left,
+          };
+        });
+        expect(metrics.rowCount).toBeGreaterThan(5);
+
+        if (viewport.width >= 1024) {
+          expect(metrics.documentHeight).toBeLessThanOrEqual(viewport.height + 1);
+          expect(metrics.timelineScrollHeight).toBeGreaterThan(metrics.timelineClientHeight);
+          expect(metrics.timelineOverflowY).toBe("auto");
+          expect(metrics.studentScrollHeight).toBeGreaterThan(metrics.studentClientHeight);
+          expect(metrics.studentOverflowY).toBe("auto");
+          expect(metrics.workspaceOverflowY).toBe("hidden");
+          if (viewport.width >= 1440) {
+            await expect(page.locator(".sat-room__inspector")).toBeVisible();
+            expect(metrics.inspectorLeft).toBeGreaterThanOrEqual(metrics.workspaceRight - 1);
+          } else {
+            await expect(page.locator(".sat-room__inspector")).toBeVisible();
+            expect(metrics.inspectorDisplay).not.toBe("none");
+            expect(metrics.inspectorBottom).toBeLessThanOrEqual(metrics.workspaceTop + 1);
+          }
+
+          await page.locator(".sat-room__timeline-pane").evaluate((timeline) => {
+            timeline.scrollTop = timeline.scrollHeight;
+          });
+          await expect(page.locator(".sat-room__sticky-context")).toHaveClass(/is-visible/);
+          await expect(page.locator(".sat-room__header")).toBeVisible();
+          await expect(page.locator(".sat-room__roster-head")).toBeVisible();
+          if (viewport.width < 1440) {
+            await expect(page.locator(".sat-room__sticky-health")).toBeVisible();
+          } else {
+            await expect(page.locator(".sat-room__inspector")).toContainText("Online");
+          }
+          const timelinePosition = await page.locator(".sat-room__timeline-pane").evaluate((timeline) => timeline.scrollTop);
+          await page.locator(".sat-room__student-pane").evaluate((studentPane) => {
+            studentPane.scrollTop = studentPane.scrollHeight;
+          });
+          const independentPositions = await page.locator(".sat-room__student-pane").evaluate((studentPane) => ({
+            studentTop: studentPane.scrollTop,
+            timelineTop: document.querySelector<HTMLElement>(".sat-room__timeline-pane")?.scrollTop ?? -1,
+          }));
+          expect(independentPositions.studentTop).toBeGreaterThan(0);
+          expect(independentPositions.timelineTop).toBe(timelinePosition);
+          await expect(page.locator("[data-sat-room-student-detail]")).toBeVisible();
+          const studentBounds = await page.locator("[data-sat-room-student-detail]").evaluate((detail) => {
+            const detailRect = detail.getBoundingClientRect();
+            const paneRect = detail.closest(".sat-room__student-pane")!.getBoundingClientRect();
+            return { detailBottom: detailRect.bottom, paneTop: paneRect.top, paneBottom: paneRect.bottom };
+          });
+          expect(studentBounds.detailBottom).toBeLessThanOrEqual(studentBounds.paneBottom + 1);
+          expect(studentBounds.detailBottom).toBeGreaterThan(studentBounds.paneTop);
+        } else {
+          expect(metrics.workspaceOverflowY).toBe("visible");
+          expect(metrics.documentHeight).toBeGreaterThan(viewport.height);
+          const landmarks = await page.evaluate(() => {
+            const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+            return {
+              inspectorTop: rect(".sat-room__inspector").top,
+              rosterTop: rect(".sat-room__roster").top,
+              workspaceTop: rect(".sat-room__workspace").top,
+            };
+          });
+          expect(landmarks.inspectorTop).toBeLessThan(landmarks.rosterTop);
+          expect(landmarks.rosterTop).toBeLessThan(landmarks.workspaceTop);
+          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+          await expect(page.locator("[data-sat-room-student-detail]")).toBeVisible();
+        }
+      }
+    } finally {
+      await studentContext.close();
+    }
+  });
+
   test("creates, publishes, joins, proctors, submits, and surfaces a SAT result without IELTS leakage", async ({
     page,
     browser,

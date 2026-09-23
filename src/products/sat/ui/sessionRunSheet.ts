@@ -201,6 +201,20 @@ export function formatRunSheetClock(value: string | null | undefined): string {
   return clockFormatter.format(new Date(ms));
 }
 
+/** Elapsed session duration; null when either instant is absent or invalid. */
+export function formatRunSheetDuration(
+  startAt: string | null | undefined,
+  endAt: string | null | undefined
+): string | null {
+  const startMs = parseInstant(startAt);
+  const endMs = parseInstant(endAt);
+  if (startMs === null || endMs === null || endMs < startMs) return null;
+
+  const minutes = Math.floor((endMs - startMs) / 60_000);
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `${hours} hr ${minutes % 60} min` : `${minutes} min`;
+}
+
 /**
  * A planned/actual window in Thailand time: `09:00–10:04`, or
  * `Sun 21 Sep 09:00 – 10:04` when the window does not sit on `referenceAt`'s

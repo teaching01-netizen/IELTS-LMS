@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatSessionRoomRoute } from '../SatSessionRoomRoute';
@@ -65,9 +65,10 @@ describe('SatSessionRoomRoute', () => {
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     expect(controllerMock).toHaveBeenCalledWith({ providerKey: 'sat', initialScheduleId: 'sched-1' });
     // The runtime section label is what the room shows as the current stage.
-    expect(screen.getAllByText('Reading & Writing')).toHaveLength(2);
-    expect(screen.getByText('Server-authoritative session clock')).toBeInTheDocument();
-    expect(screen.getAllByText('Ananda S.')).toHaveLength(2);
+    expect(screen.getAllByText('Reading & Writing')).toHaveLength(1);
+    expect(screen.getByText('Section remaining')).toBeInTheDocument();
+    expect(screen.getByText('Module 2 · Adaptive branches')).toBeInTheDocument();
+    expect(screen.getAllByText('Ananda S.')).toHaveLength(3);
     // Staff run sheet: every stage with its Thailand-time window, anchored to
     // the proctor's start.
     expect(screen.getByText('Run sheet')).toBeInTheDocument();
@@ -105,9 +106,9 @@ describe('SatSessionRoomRoute', () => {
     // has reached, with that module's own countdown.
     const slot = document.querySelector('[data-sat-room-stage-slot]');
     expect(slot?.textContent).toContain('Section 1 · Module 1');
-    expect(slot?.textContent).toMatch(/module clock \d{1,2}:\d{2}$/);
+    expect(document.querySelector('.sat-room__stage-note')?.textContent).toMatch(/Module ends \d{2}:\d{2} ICT · section ends \d{2}:\d{2} ICT/);
     // The hero figure stays the room's shared clock, and says so.
-    expect(document.querySelector('.sat-room__stage-clock-caption')?.textContent).toBe('Section clock');
+    expect(document.querySelector('.sat-room__stage-clock-caption')?.textContent).toBe('Section remaining');
 
     // The roster row: section label, module slot, then the candidate's module
     // clock beside the room's shared section clock.
@@ -119,17 +120,18 @@ describe('SatSessionRoomRoute', () => {
     // The detail panel separates the two, and names the module slot rather than
     // repeating the section key in the module field.
     const detailValue = (label: string) =>
-      Array.from(document.querySelectorAll('.sat-room__workspace dl dt')).find((node) => node.textContent === label)?.parentElement?.querySelector('dd')?.textContent ?? null;
+      Array.from(document.querySelectorAll('.sat-room__student-pane dl dt')).find((node) => node.textContent === label)?.parentElement?.querySelector('dd')?.textContent ?? null;
     expect(detailValue('Current section')).toBe('Reading & Writing');
     expect(detailValue('Current module')).toBe('Module 1');
     expect(detailValue('Module clock')).toMatch(/^\d{1,2}:\d{2}$/);
     expect(detailValue('Section clock')).toBe('25:00');
 
-    // The inspector carries the room-level module too, beside the section.
+    // The inspector is reserved for status and room health rather than
+    // repeating the current-stage hero.
     const inspector = (label: string) =>
       Array.from(document.querySelectorAll('.sat-room__inspector .sat-inspector__row dt')).find((node) => node.textContent === label)?.parentElement?.querySelector('dd')?.textContent ?? null;
-    expect(inspector('Current stage')).toBe('Reading & Writing');
-    expect(inspector('Current module')).toBe('Module 1');
+    expect(inspector('Status')).toBe('Live');
+    expect(inspector('Connection')).toBe('Online');
   });
 
   // The projection's module clock is absent until a module is started, and the
@@ -213,11 +215,88 @@ describe('SatSessionRoomRoute', () => {
   });
 
   it('filters the roster to students needing attention', () => {
+    const flagged = { ...student, warnings: 1 };
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [flagged], alerts: [], error: null, isLoading: false,
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    const chip = screen.getByRole('button', { name: 'Needs attention' });
+    const chip = screen.getByRole('button', { name: /Filter roster to students needing attention/ });
     expect(chip).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(chip);
     expect(chip).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('uses the finished-session summary without removing the run sheet or student detail', () => {
+    const finishedAt = '2026-08-30T03:00:00Z';
+    const finishedRuntime = {
+      ...runtime,
+      status: 'completed',
+      actualEndAt: finishedAt,
+      currentSectionKey: null,
+      sections: [{ ...runtime.sections[0], status: 'completed' as const, actualEndAt: finishedAt }],
+    };
+    controllerMock.mockReset();
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [finishedRuntime], sessions: [student], alerts: [], error: null, isLoading: false,
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+
+    expect(screen.getByRole('heading', { name: 'Session finished' })).toBeInTheDocument();
+    expect(screen.getByTestId('sat-room-finished-summary')).toHaveTextContent('Started 09:00 ICT · Finished 10:00 ICT · 1 hr 0 min');
+    const inspector = document.querySelector<HTMLElement>('.sat-room__inspector');
+    expect(inspector).not.toBeNull();
+    if (!inspector) throw new Error('session summary did not render');
+    const summaryValue = (label: string) =>
+      Array.from(inspector.querySelectorAll('dt')).find((node) => node.textContent === label)?.parentElement?.querySelector('dd')?.textContent ?? null;
+    expect(summaryValue('Started')).toBe('09:00 ICT');
+    expect(summaryValue('Finished')).toBe('10:00 ICT');
+    expect(summaryValue('Duration')).toBe('1 hr 0 min');
+    expect(screen.queryByRole('heading', { name: 'Waiting to begin' })).not.toBeInTheDocument();
+    expect(screen.getByText('Run sheet')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Ananda S.' })).toBeInTheDocument();
+  });
+
+  it('filters from the right-rail attention count and keeps the selected detail in place', () => {
+    const flagged = { ...student, warnings: 1 };
+    const clean = { ...student, id: 'attempt-2', studentId: 'W2502', name: 'Budi T.', email: 'b@example.com', warnings: 0, violations: [] as typeof student.violations };
+    controllerMock.mockReset();
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [flagged, clean], alerts: [], error: null, isLoading: false,
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+
+    const timelinePane = document.querySelector<HTMLElement>('.sat-room__timeline-pane');
+    const studentPane = document.querySelector<HTMLElement>('.sat-room__student-pane');
+    expect(timelinePane).not.toBeNull();
+    expect(studentPane).not.toBeNull();
+    if (!timelinePane || !studentPane) throw new Error('independent session panes did not render');
+    fireEvent.click(screen.getByRole('option', { name: 'Open Budi T.' }));
+    expect(screen.getByRole('heading', { name: 'Budi T.' })).toBeInTheDocument();
+    timelinePane.scrollTop = 420;
+    studentPane.scrollTop = 180;
+    const inspector = document.querySelector<HTMLElement>('.sat-room__inspector');
+    expect(inspector).not.toBeNull();
+    if (!inspector) throw new Error('session inspector did not render');
+    fireEvent.click(within(inspector).getByRole('button', { name: 'Needs attention 1' }));
+    expect(screen.getByRole('option', { name: 'Open Ananda S.' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Open Budi T.' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Budi T.' })).toBeInTheDocument();
+    expect(timelinePane.scrollTop).toBe(420);
+    expect(studentPane.scrollTop).toBe(180);
+  });
+
+  it('does not present a zero-count attention filter as an action', () => {
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.getByText('0', { selector: '.sat-room__attention-count' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Filter roster to students needing attention/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Needs attention 0' })).not.toBeInTheDocument();
   });
 
   it('binds the terminate confirm to the student captured at open, even if selection moves', async () => {
@@ -294,7 +373,7 @@ describe('SatSessionRoomRoute', () => {
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    expect(screen.getByText('Reconnecting')).toBeInTheDocument();
+    expect(within(screen.getByRole('banner')).getByText('Reconnecting')).toBeInTheDocument();
   });
 
   it('keeps timers on tabular-nums so 1s ticks do not shift layout', () => {
@@ -314,7 +393,7 @@ describe('SatSessionRoomRoute', () => {
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Needs attention' }));
+    fireEvent.click(screen.getByRole('button', { name: /Filter roster to students needing attention/ }));
     expect(screen.getByRole('option', { name: 'Open Ananda S.' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Open Budi T.' })).not.toBeInTheDocument();
   });
@@ -355,11 +434,10 @@ describe('SatSessionRoomRoute', () => {
       room();
       const row = screen.getByRole('option', { name: 'Open Ananda S.' });
       // Left cell holds name + single merged section-status line; the timer
-      // stays a separate tabular p on the right per the Step 5 structure.
+      // stays in its own tabular group on the right.
       expect(row.querySelector('.sat-room__row-name')).not.toBeNull();
       // The left cell owns exactly one name line and one merged status line.
-      const name = row.querySelector('.sat-room__row-name');
-      expect(name?.parentElement?.querySelectorAll('p')).toHaveLength(1);
+      expect(row.querySelectorAll('.sat-room__row-name, .sat-room__row-meta')).toHaveLength(2);
       expect(row.querySelector('.sat-room__row-meta')).not.toBeNull();
       expect(row).toHaveTextContent(/reading/);
       expect(row).toHaveTextContent(/active/);

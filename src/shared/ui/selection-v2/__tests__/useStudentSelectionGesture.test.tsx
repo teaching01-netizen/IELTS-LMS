@@ -143,6 +143,36 @@ function handleEvent(edge: { current: Element | null }, x: number, y: number, po
   return { pointerId, clientX: x, clientY: y, currentTarget: edge.current };
 }
 
+/**
+ * jsdom measures nothing, and a grab may only begin from the paint's OWN handle
+ * geometry (the acquisition gate reads it) — so any test that grabs a handle
+ * gives the range real measurements, exactly as a browser would. The two lines
+ * land the handles at (10, 100) and (50, 144): every acquisition coordinate
+ * below presses there.
+ */
+function mockMeasuredLines() {
+  const rects = [
+    { left: 10, top: 100, width: 100, height: 20 } as DOMRect,
+    { left: 10, top: 124, width: 40, height: 20 } as DOMRect,
+  ];
+  vi.spyOn(Range.prototype, 'getClientRects').mockReturnValue(rects as unknown as DOMRectList);
+}
+
+/**
+ * The paint that makes the two endpoint controls fight over one coordinate: a
+ * 20px word on a 21px line.
+ *
+ * Its handles land at (10, 100) and (30, 121) — 21px apart, less than the height
+ * of either 44px control — so the END handle's box is centred on the line's
+ * bottom edge and reaches 1px ABOVE the line's top, over the whole of the START
+ * handle's outward zone. A press at (20, 101) therefore belongs to the START
+ * while a real browser delivers it to the END control.
+ */
+function mockShortWordLine() {
+  const rects = [{ left: 10, top: 100, width: 20, height: 21 } as DOMRect];
+  vi.spyOn(Range.prototype, 'getClientRects').mockReturnValue(rects as unknown as DOMRectList);
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
@@ -179,20 +209,49 @@ describe('claiming text', () => {
     expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('beta');
   });
 
-  it('extends the selection as the finger travels', () => {
+  it('extends the selection by whole words as the finger travels', () => {
     const { prose, onSelect, frames, view } = harness();
 
+    // The hold claims `alpha`; offset 11 is inside `gamma`, so the run is every
+    // whole word between them — the raw-caret version stopped at `alpha beta `.
     touchDown(prose, 0);
     hold(frames);
     touchMove(prose, 11);
     frame(frames);
 
-    expect(view.result.current.selectionText).toBe('alpha beta ');
+    expect(view.result.current.selectionText).toBe('alpha beta gamma');
     expect(view.result.current.phase).toBe('extending');
 
     touchUp(prose, 11);
     frame(frames);
-    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('alpha beta ');
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('alpha beta gamma');
+  });
+
+  it('keeps a mid-word claim whole, and takes whole words on either side of it', () => {
+    const { prose, onSelect, frames, view } = harness();
+
+    // The spec's own example, through the gesture: a hold in the MIDDLE of
+    // `beta`. Every string the raw-caret version produced here (`e`, `b`,
+    // `pha b`, `eta g`) is a partial word, and none of them may appear.
+    touchDown(prose, 7);
+    hold(frames);
+    expect(view.result.current.selectionText).toBe('beta');
+
+    touchMove(prose, 8);
+    frame(frames);
+    expect(view.result.current.selectionText).toBe('beta');
+
+    touchMove(prose, 2);
+    frame(frames);
+    expect(view.result.current.selectionText).toBe('alpha beta');
+
+    touchMove(prose, 12);
+    frame(frames);
+    expect(view.result.current.selectionText).toBe('beta gamma');
+
+    touchUp(prose, 12);
+    frame(frames);
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('beta gamma');
   });
 
   it('orders a right-to-left drag into a forward range', () => {
@@ -281,7 +340,7 @@ describe('claiming text', () => {
     hold(frames);
     touchMove(prose, 11);
     frame(frames);
-    expect(view.result.current.selectionText).toBe('alpha beta ');
+    expect(view.result.current.selectionText).toBe('alpha beta gamma');
 
     setEnabled(false);
 
@@ -310,7 +369,10 @@ describe('the selection survives the finger', () => {
 
     expect(view.result.current.phase).toBe('selected');
     expect(view.result.current.selected).toBe(true);
-    expect(view.result.current.selectionText).toBe('alpha beta ');
+    // Word-granular, and still whole words AFTER the release: the run is
+    // re-derived from the claim's anchor, not from the last caret the finger
+    // happened to be over.
+    expect(view.result.current.selectionText).toBe('alpha beta gamma');
     expect(view.result.current.rects).toEqual([
       { left: 10, top: 100, width: 100, height: 20 },
       { left: 10, top: 124, width: 40, height: 20 },
@@ -436,20 +498,34 @@ describe('pointer capture, not a document-wide drag listener', () => {
 });
 
 /**
- * A selection the finger has already made and let go of: offsets 0–11 of the
- * prose, resting in `selected`, with two real handle elements to grab.
+ * A selection the finger has already made and let go of: the word `beta`,
+ * narrowed by its END HANDLE to offsets 6–12 (`beta g`), resting in `selected`
+ * with two real handle elements to grab.
+ *
+ * The partial span is built the way the spec says only precision can build one
+ * (`docs/selectionui.md`): a body gesture can no longer leave a selection ending
+ * in the middle of a word, so the helper claims the word and then drags one
+ * endpoint — which is also what keeps every case below about a span that a
+ * crossover, a release and an auto-scroll can actually move.
  */
 function restingSelection(handlers: Handlers = {}) {
   const harnessed = harness(handlers);
   const end = document.createElement('button');
   const start = document.createElement('button');
   document.body.append(start, end);
-  touchDown(harnessed.prose, 0);
+  mockMeasuredLines();
+  touchDown(harnessed.prose, 7);
   hold(harnessed.frames);
-  touchMove(harnessed.prose, 11);
+  touchUp(harnessed.prose, 7);
   frame(harnessed.frames);
-  touchUp(harnessed.prose, 11);
+  act(() => {
+    harnessed.view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
+  });
+  touchMove(end, 12, 10, 7);
   frame(harnessed.frames);
+  touchUp(end, 12, 10, 7);
+  frame(harnessed.frames);
+  expect(harnessed.view.result.current.selectionText).toBe('beta g');
   harnessed.onSelect.mockClear();
   return { ...harnessed, start, end };
 }
@@ -468,6 +544,7 @@ describe('handle adjustment', () => {
    */
   it('adjusts the edge the student grabbed on a word a hold claimed, from either end', () => {
     const { prose, frames, view } = harness();
+    mockMeasuredLines();
     const start = document.createElement('button');
     const end = document.createElement('button');
     document.body.append(start, end);
@@ -483,7 +560,7 @@ describe('handle adjustment', () => {
 
     claimWord();
     act(() => {
-      view.result.current.beginHandleAdjustment('start', handleEvent({ current: start }, 6, 10, 7));
+      view.result.current.beginHandleAdjustment(handleEvent({ current: start }, 10, 100, 7));
     });
     touchMove(start, 3, 10, 7);
     frame(frames);
@@ -500,7 +577,7 @@ describe('handle adjustment', () => {
     frame(frames);
     claimWord();
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 10, 10, 8));
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 8));
     });
     touchMove(end, 13, 10, 8);
     frame(frames);
@@ -512,29 +589,29 @@ describe('handle adjustment', () => {
     const { prose, frames, view, end } = restingSelection();
 
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 10, 7));
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
     });
     frame(frames);
     expect(view.result.current.adjusting).toBe(true);
     // Grabbing a handle must not move the endpoint: the handle sits on the line
     // edge, not on the character the student aimed at.
-    expect(view.result.current.selectionText).toBe('alpha beta ');
+    expect(view.result.current.selectionText).toBe('beta g');
 
     touchMove(end, 16, 10, 7);
     frame(frames);
 
-    expect(view.result.current.selectionText).toBe('alpha beta gamma');
+    expect(view.result.current.selectionText).toBe('beta gamma');
     expect(view.result.current.phase).toBe('adjusting-end');
   });
 
   it('keeps the finger on the same endpoint when it drags across the other one', () => {
     const { frames, view, start } = restingSelection();
 
-    // The selection rests as offsets 0–11. Dragging the START handle past the
-    // fixed end must leave the finger owning the endpoint it grabbed, with the
-    // range still forward and the handle relabelled.
+    // The selection rests as offsets 6–12, so the fixed end is 12. Dragging the
+    // START handle past it must leave the finger owning the endpoint it grabbed,
+    // with the range still forward and the handle relabelled.
     act(() => {
-      view.result.current.beginHandleAdjustment('start', handleEvent({ current: start }, 0, 10, 7));
+      view.result.current.beginHandleAdjustment(handleEvent({ current: start }, 10, 100, 7));
     });
     frame(frames);
     expect(view.result.current.phase).toBe('adjusting-start');
@@ -543,7 +620,7 @@ describe('handle adjustment', () => {
     frame(frames);
 
     expect(view.result.current.phase).toBe('adjusting-end');
-    expect(view.result.current.selectionText).toBe('gamma');
+    expect(view.result.current.selectionText).toBe('amma');
   });
 
   it('captures the pointer on the handle, so the drag survives leaving the dot', () => {
@@ -552,7 +629,7 @@ describe('handle adjustment', () => {
     const { frames, view, end } = restingSelection();
 
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 10, 7));
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
     });
 
     expect(capture).toHaveBeenCalledWith(7);
@@ -562,7 +639,7 @@ describe('handle adjustment', () => {
     const { frames, view, end, onSelect } = restingSelection();
 
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 10, 7));
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
     });
     touchMove(end, 16, 10, 7);
     frame(frames);
@@ -572,19 +649,69 @@ describe('handle adjustment', () => {
     expect(view.result.current.phase).toBe('selected');
     expect(view.result.current.adjusting).toBe(false);
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('alpha beta gamma');
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('beta gamma');
   });
 
   it('ignores a grab while a finger is still down', () => {
     const { prose, frames, view, end } = harness();
+    mockMeasuredLines();
 
     touchDown(prose, 0);
     hold(frames);
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 10, 7));
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
     });
 
+    // The acquisition passes — the press is on the outward zone — and it is
+    // the MACHINE that refuses, so this asserts the second gate, not the first.
     expect(view.result.current.phase).toBe('selecting');
+  });
+
+  it('moves the endpoint whose zone the press is in, not the control it landed on', () => {
+    const { prose, frames, view } = harness();
+    mockShortWordLine();
+    const start = document.createElement('button');
+    const end = document.createElement('button');
+    document.body.append(start, end);
+
+    touchDown(prose, 7);
+    hold(frames);
+    touchUp(prose, 7);
+    frame(frames);
+    expect(view.result.current.selectionText).toBe('beta');
+
+    // The press is in the START's outward zone, handed to the END control —
+    // which is exactly what the browser does on this paint, because the end
+    // control is the one on top there. Asking only that control refuses the
+    // press and the handle the student aimed at never moves.
+    act(() => {
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 20, 101, 7));
+    });
+    frame(frames);
+
+    expect(view.result.current.phase).toBe('adjusting-start');
+    touchMove(end, 2, 10, 7);
+    frame(frames);
+
+    // The START is the endpoint under the finger: the word's end stays at offset
+    // 9 and the span grows to its left.
+    expect(view.result.current.selectionText).toBe('pha beta');
+  });
+
+  it('refuses a grab that does not acquire, even called directly on the gesture', () => {
+    const { frames, view, end } = restingSelection();
+
+    // Inside the end handle's 44px box but above its own line's bottom edge:
+    // the press the overlay consumes. The entry gate refuses it too, so no
+    // caller can bypass the directional rule (docs/selectionui.md #1).
+    act(() => {
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 60, 130, 7));
+    });
+    frame(frames);
+
+    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.adjusting).toBe(false);
+    expect(view.result.current.selectionText).toBe('beta g');
   });
 });
 
@@ -698,9 +825,16 @@ describe('edge auto-scroll while adjusting', () => {
     document.body.append(container);
 
     const { frames, view, end } = restingSelection({ scrollContainer: () => container });
+    // Building the resting selection ends with a handle drag of its own, whose
+    // finger sits above the box — so it has already asked for one scroll step.
+    // Cleared here because the delta below is the claim: the MOVE in this test
+    // is what puts a finger in the edge band.
+    scrollBy.mockClear();
 
+    // The grab must satisfy the acquisition rule (on the handle, at the paint);
+    // it is the MOVE below that puts the finger in the edge band.
     act(() => {
-      view.result.current.beginHandleAdjustment('end', handleEvent({ current: end }, 11, 690, 7));
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
     });
     touchMove(end, 11, 690, 7);
     act(() => {
@@ -748,7 +882,7 @@ describe('the exam boundary', () => {
     expect(stages).toEqual(
       expect.arrayContaining(['pointerdown', 'start-caret', 'pointermove', 'claim', 'focus-caret', 'range', 'pointerup', 'onSelect']),
     );
-    expect(diagnostics.record).toHaveBeenCalledWith('range', expect.objectContaining({ rangeText: 'alpha beta ', rangeCollapsed: false }));
+    expect(diagnostics.record).toHaveBeenCalledWith('range', expect.objectContaining({ rangeText: 'alpha beta gamma', rangeCollapsed: false }));
   });
 });
 
@@ -971,5 +1105,90 @@ describe('the snap key: one tick per new caret position', () => {
       expect(vibrate.mock.calls.every(([milliseconds]) => milliseconds === 8)).toBe(true);
       expect(view.result.current.pointer!.snapRevision).toBe(baseline + 3);
     });
+  });
+});
+
+/**
+ * Every terminal signal ends the gesture — and after any of them the loupe's
+ * precondition (a pointer the session OWNS) is gone before the next painted
+ * frame.
+ *
+ * The Safari failure these pin: capture reports held, so no listener was ever
+ * installed on the document, and the terminal event arrives there instead —
+ * the machine then stays in `adjusting-*` with the loupe open forever. The
+ * fix keeps a document backup for the terminal events, reads a lost capture as
+ * a cancel, and clears the presentation refs in ONE place so a stale
+ * `lastPointer` can never stand in for contact that ended.
+ */
+describe('a gesture ends on every terminal signal', () => {
+  it('releases exactly once when capture claims to hold but the pointerup arrives at the document', () => {
+    vi.spyOn(Element.prototype, 'hasPointerCapture').mockReturnValue(true);
+    const { frames, view, end, onSelect } = restingSelection();
+
+    act(() => {
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
+    });
+    frame(frames);
+    expect(view.result.current.phase).toBe('adjusting-end');
+
+    act(() => {
+      fireEvent.pointerUp(document, { pointerId: 7 });
+    });
+    frame(frames);
+
+    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.adjusting).toBe(false);
+    expect(view.result.current.pointer).toBeNull();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+
+    // A duplicate delivery — the same physical release reaching a backup
+    // listener twice — must not report the selection a second time.
+    act(() => {
+      fireEvent.pointerUp(document, { pointerId: 7 });
+    });
+    frame(frames);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(view.result.current.phase).toBe('selected');
+  });
+
+  it('leaves the adjusting phase when the browser loses the pointer capture', () => {
+    vi.spyOn(Element.prototype, 'hasPointerCapture').mockReturnValue(true);
+    const { frames, view, end } = restingSelection();
+
+    act(() => {
+      view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
+    });
+    frame(frames);
+    expect(view.result.current.phase).toBe('adjusting-end');
+
+    act(() => {
+      const lost = new Event('lostpointercapture', { bubbles: true });
+      Object.defineProperty(lost, 'pointerId', { value: 7 });
+      end.dispatchEvent(lost);
+    });
+    frame(frames);
+
+    // The cancel policy (nothing reported, the platform takes the gesture
+    // back) with the same presentation cleanup: no adjusting phase, and no
+    // pointer for a loupe to be gated on.
+    expect(view.result.current.phase).toBe('idle');
+    expect(view.result.current.adjusting).toBe(false);
+    expect(view.result.current.selectionText).toBe('');
+    expect(view.result.current.pointer).toBeNull();
+  });
+
+  it('exposes no pointer the moment the finger lifts, before any frame runs', () => {
+    const { prose, frames, view } = harness();
+
+    touchDown(prose, 0);
+    hold(frames);
+    touchMove(prose, 11);
+    frame(frames);
+    expect(view.result.current.pointer).not.toBeNull();
+
+    touchUp(prose, 11);
+
+    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.pointer).toBeNull();
   });
 });

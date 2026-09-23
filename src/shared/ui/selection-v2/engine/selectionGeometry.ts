@@ -127,6 +127,189 @@ export function selectionHandleGeometry(
   };
 }
 
+/**
+ * The accessible size of one handle control — `--selection-target` in
+ * `styles/selection.css`, the full 44×44 a finger actually needs.
+ *
+ * The DOM control keeps this box for accessibility; the POINTER acquisition
+ * rule below is directional instead. The two are deliberately different sizes
+ * of claim: a 44px accessibility target is not a 44px unconditional drag
+ * acquisition (see `canAcquireSelectionHandle`).
+ */
+const SELECTION_HANDLE_TARGET_PX = 44;
+
+/**
+ * How far an acquisition zone may reach past its line's outward edge.
+ *
+ * The handle's optical anchor sits exactly ON the line edge, and a hit test
+ * against a rendered box arrives with sub-pixel — often sub-device-pixel —
+ * rounding, so a strict comparison would reject a press on the very anchor it
+ * is meant to accept. Two pixels cover that rounding while staying far inside
+ * the line's body, which is the part that must never acquire.
+ */
+const HANDLE_ANCHOR_EPSILON_PX = 2;
+
+/**
+ * The paint the acquisition rule READS — the lines and the two endpoint anchors,
+ * and nothing else.
+ *
+ * Narrower than a `SelectionPresentation` on purpose. The rule's one production
+ * caller is the session, which measures its own paint from the span it owns
+ * (`SelectionPaint`), and the layer above it reports presses rather than
+ * geometry; a parameter that demanded a presentation would force the session to
+ * invent React's shape, and a component to keep supplying one. A `SelectionPaint`
+ * and a presentation are both assignable to this.
+ */
+export interface HandleAcquisitionPaint {
+  rects: readonly SelectionRect[];
+  startHandle: SelectionHandleGeometry | null;
+  endHandle: SelectionHandleGeometry | null;
+}
+
+/**
+ * The pair `canAcquireSelectionHandle` judges: this edge's endpoint and the
+ * line it belongs to — the selection's FIRST line for `start`, its LAST for
+ * `end` — read straight off the paint.
+ *
+ * One owner because two questions must never disagree about "which line is this
+ * handle's": the zone a press may begin a drag in, and the nearest-anchor rule
+ * that breaks a tie between the two zones. A second copy of that mapping in
+ * each rule is an answer waiting to drift.
+ */
+export function handleAcquisitionFor(
+  paint: HandleAcquisitionPaint,
+  edge: SelectionEdge,
+): { handle: SelectionHandleGeometry | null; line: SelectionRect | null } {
+  const handle = edge === 'start' ? paint.startHandle : paint.endHandle;
+  const line = edge === 'start'
+    ? paint.rects[0] ?? null
+    : paint.rects[paint.rects.length - 1] ?? null;
+  return { handle, line };
+}
+
+/**
+ * Whether a press may BEGIN a drag on this handle.
+ *
+ * Acquisition is strict so that tracking can be permissive: a resting
+ * selection may only be resized from the outward side of one of its two VISIBLE
+ * endpoints, and once acquired the finger may travel anywhere — including over
+ * the selected text and past the other endpoint.
+ *
+ * This is the short-selection fix. Two 44×44 boxes on a two-word selection
+ * geometrically overlap above and below the highlighted line, so treating the
+ * whole box as draggable made the MIDDLE of the selection grab an endpoint.
+ * The rule therefore has two gates: the press must be inside the accessible
+ * box centred on the endpoint, AND on the handle's own side of its own line —
+ * `stem: 'up'` accepts only at/above the line's top edge, `stem: 'down'` only
+ * at/below its bottom. A coordinate inside the body of the selected line can
+ * satisfy neither, no matter which handle box physically covers it.
+ *
+ * Pure geometry — endpoint, its first/last line, and a client coordinate — so
+ * the arbitration the SESSION runs on a press is testable without a browser, and
+ * the 44px DOM button never has to decide anything by itself.
+ */
+export function canAcquireSelectionHandle(
+  handle: SelectionHandleGeometry,
+  line: SelectionRect | null,
+  x: number,
+  y: number,
+): boolean {
+  if (!line || line.width <= 0 || line.height <= 0) return false;
+  const half = SELECTION_HANDLE_TARGET_PX / 2;
+  if (x < handle.x - half || x > handle.x + half) return false;
+  if (y < handle.y - half || y > handle.y + half) return false;
+  if (handle.stem === 'up') return y <= line.top + HANDLE_ANCHOR_EPSILON_PX;
+  return y >= line.top + line.height - HANDLE_ANCHOR_EPSILON_PX;
+}
+
+/**
+ * Two anchors closer than this to the finger are the SAME distance.
+ *
+ * A finger cannot tell a pixel apart, and the anchors are written as fractional
+ * device pixels, so "nearest" is only claimed when one endpoint is actually
+ * nearer; below this the answer comes from the deterministic rule instead of
+ * from whatever the last sub-pixel measurement rounded to.
+ */
+const HANDLE_TIE_TOLERANCE_PX = 1;
+
+/**
+ * WHICH ENDPOINT A PRESS GRABS — resolved over BOTH endpoints, never over which
+ * control the paint order happened to put under the finger.
+ *
+ * Two 44×44 accessible boxes on a selection narrower than 44px overlap (and a
+ * line box short enough leaves one covering the other's entire outward zone), so
+ * asking only the control that was hit gets the answer wrong twice over: a press
+ * in the START's zone can be delivered to the END control, and the END's refusal
+ * then throws away a press the START was entitled to. It does not stop at the
+ * press being ignored, either — the same press falls through as a selection
+ * body press or an outside tap, and the student sees their own handle do nothing
+ * while something else happens.
+ *
+ * Both zones are therefore evaluated independently (`canAcquireSelectionHandle`)
+ * and the answer is a fact about the paint:
+ *
+ *   none accept   → null: the selected text's own no-drag zone (or outside it)
+ *   one accepts   → that one, whatever the press landed on
+ *   both accept   → the nearer OPTICAL anchor, and where neither is nearer, the
+ *                   pointer's own side of the span in reading order, so a press
+ *                   exactly on the midpoint is the earlier endpoint's (the
+ *                   start's) — the same answer in every paint and every render
+ *
+ * Pure: it is handed the paint and a coordinate and reads nothing else. That is
+ * what makes "DOM stacking order must never choose the endpoint" a property of
+ * the geometry rather than a promise about the DOM — and what lets the ONE
+ * caller be the owner of the selection (the session) rather than whichever layer
+ * happened to receive the press.
+ */
+export function resolveHandleAcquisition(
+  paint: HandleAcquisitionPaint,
+  x: number,
+  y: number,
+): SelectionEdge | null {
+  const accepting: Array<{ edge: SelectionEdge; handle: SelectionHandleGeometry; distance: number }> = [];
+  for (const edge of ['start', 'end'] as const) {
+    const { handle, line } = handleAcquisitionFor(paint, edge);
+    if (!handle || !canAcquireSelectionHandle(handle, line, x, y)) continue;
+    accepting.push({ edge, handle, distance: Math.hypot(handle.x - x, handle.y - y) });
+  }
+  const first = accepting[0];
+  if (!first) return null;
+  const second = accepting[1];
+  if (!second) return first.edge;
+
+  if (Math.abs(first.distance - second.distance) >= HANDLE_TIE_TOLERANCE_PX) {
+    return first.distance < second.distance ? first.edge : second.edge;
+  }
+  const start = paint.startHandle;
+  const end = paint.endHandle;
+  if (!start || !end) return first.edge;
+  // Before the midpoint is the START in a left-to-right run, and the END in a
+  // right-to-left one, where the reading-order start is the right-hand edge.
+  const beforeMidpoint = x <= (start.x + end.x) / 2;
+  return beforeMidpoint === (first.handle.direction === 'ltr') ? 'start' : 'end';
+}
+
+/**
+ * Whether a viewport coordinate is inside the painted body of the selection.
+ *
+ * The selected text is an explicit NO-DRAG zone: a press here preserves the
+ * selection and consumes the gesture rather than dismissing it or letting the
+ * same pointerdown start another selection (see `SelectionOverlay`).
+ */
+export function selectionContainsPoint(
+  rects: readonly SelectionRect[],
+  x: number,
+  y: number,
+): boolean {
+  for (const rect of rects) {
+    if (
+      x >= rect.left && x <= rect.left + rect.width
+      && y >= rect.top && y <= rect.top + rect.height
+    ) return true;
+  }
+  return false;
+}
+
 /* ------------------------------------------------------------------ caret -- */
 
 /** The rects a range paints that a human could actually see ink in. */

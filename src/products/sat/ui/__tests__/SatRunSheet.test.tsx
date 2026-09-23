@@ -69,6 +69,39 @@ describe('SatRunSheet', () => {
     // A projected run says so out loud.
     expect(screen.getByText(/Projected from the scheduled start at 09:00/)).toBeInTheDocument();
     expect(screen.queryByText('Live')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Module 2 · Adaptive')).toHaveLength(2);
+    expect(screen.getAllByText('One branch per student')).toHaveLength(2);
+    expect(screen.getByText('Scheduled start')).toBeInTheDocument();
+    expect(screen.getByText('Planned finish')).toBeInTheDocument();
+  });
+
+  it('shows an expected finish after extensions while preserving the original plan end', () => {
+    render(
+      <SatRunSheet
+        plan={[plan[0]]}
+        runtime={runtimeWith([{
+          sectionKey: 'reading-writing' as ExamSessionRuntime['sections'][number]['sectionKey'],
+          label: 'Reading & Writing',
+          order: 0,
+          plannedDurationMinutes: 64,
+          gapAfterMinutes: 10,
+          status: 'live',
+          availableAt: null,
+          actualStartAt: START,
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 5,
+        }])}
+        scheduledStartAt={START}
+        now="2026-09-20T02:20:00.000Z"
+      />
+    );
+
+    const summary = document.querySelector('.sat-run-sheet__summary');
+    expect(summary).toHaveTextContent('Started09:00');
+    expect(summary).toHaveTextContent('Expected finish10:19');
+    expect(screen.getByText(/Original plan 10:14 · \+5 min extension/)).toBeInTheDocument();
   });
 
   it('marks the live stage and the module the cohort is inside', () => {

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // The Rust authoring provider validates questions at the provider boundary,
@@ -49,62 +51,9 @@ func satBlueprintModule(sectionKey, moduleKey string) (satBlueprintModuleSpec, b
 	}
 }
 
-func satBlueprintBreak(sectionKey string) (int, bool) {
-	switch sectionKey {
-	case SectionReadingWriting:
-		return 10 * 60, true
-	case SectionMath:
-		return 0, true
-	default:
-		return 0, false
-	}
-}
-
-func satToolPolicyMatches(raw json.RawMessage, expected []string) bool {
-	var value any
-	if json.Unmarshal(raw, &value) != nil {
-		return false
-	}
-	expectedSet := make(map[string]bool, len(expected))
-	for _, item := range expected {
-		expectedSet[item] = true
-	}
-	actualSet := map[string]bool{}
-	switch typed := value.(type) {
-	case []any:
-		for _, item := range typed {
-			name, ok := item.(string)
-			if !ok {
-				return false
-			}
-			actualSet[name] = true
-		}
-	case map[string]any:
-		for name, item := range typed {
-			if item == nil {
-				continue
-			}
-			if disabled, ok := item.(bool); ok && !disabled {
-				continue
-			}
-			actualSet[name] = true
-		}
-	default:
-		return false
-	}
-	if len(actualSet) != len(expectedSet) {
-		return false
-	}
-	for name := range expectedSet {
-		if !actualSet[name] {
-			return false
-		}
-	}
-	return true
-}
-
-// loadQuestionValidationRows returns the raw revision payload needed for both
-// question-list readiness and the exam-wide publish gate.
+// loadQuestionValidationRows returns the raw revision payload needed for
+// question-list readiness and editor projections. SAT publish validation reads
+// the same normalized tables through satpublish.ValidateDraft.
 func loadQuestionValidationRows(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, moduleID string) ([]questionValidationRow, error) {
@@ -678,122 +627,42 @@ func validateSATQuestion(section, questionType, stimulus, prompt, answer, ration
 	return issues
 }
 
-func (s *Service) validateSATExam(ctx context.Context, shell Shell, rep ValidationReport) (ValidationReport, error) {
-	for _, section := range shell.Sections {
-		standardBreak, knownSection := satBlueprintBreak(section.SectionKey)
-		if !knownSection {
-			rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey, Message: "Section is not part of the SAT provider blueprint.", Blocking: true})
-			continue
-		}
-		if section.BreakAfterSecs < 0 {
-			rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + ".break", Message: "Section break duration cannot be negative.", Blocking: true})
-		} else if section.BreakAfterSecs%60 != 0 {
-			rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + ".break", Message: "SAT break duration must be a whole number of minutes; delivery never rounds assessment time.", Blocking: true})
-		} else if section.BreakAfterSecs != standardBreak {
-			rep.Warnings = append(rep.Warnings, ValidationIssue{Code: "sat.delivery.nonstandard_break", Path: section.SectionKey + ".break", Message: fmt.Sprintf("%s uses a %d minute break instead of the standard %d minutes.", section.Title, section.BreakAfterSecs/60, standardBreak/60), Blocking: false})
-		}
-
-		var base, lower, higher *Module
-		for index := range section.Modules {
-			module := &section.Modules[index]
-			switch module.AdaptiveRole {
-			case RoleBase:
-				if base == nil {
-					base = module
-				}
-			case RoleLowerBranch:
-				if lower == nil {
-					lower = module
-				}
-			case RoleHigherBranch:
-				if higher == nil {
-					higher = module
-				}
-			default:
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + "." + module.ModuleKey, Message: "Unknown adaptive role.", Blocking: true})
-			}
-
-			blueprint, knownModule := satBlueprintModule(section.SectionKey, module.ModuleKey)
-			if !knownModule {
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + "." + module.ModuleKey, Message: "Module is not part of the SAT provider blueprint.", Blocking: true})
-				continue
-			}
-			if !satToolPolicyMatches(module.ToolPolicy, blueprint.tools) {
-				message := "Math modules require both the calculator and reference sheet tools."
-				if len(blueprint.tools) == 0 {
-					message = "Reading and Writing modules do not permit Math calculator or reference tools."
-				}
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + "." + module.ModuleKey + ".tools", Message: message, Blocking: true})
-			}
-			if module.DurationSeconds <= 0 {
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + "." + module.ModuleKey + ".duration", Message: "SAT module duration must be greater than zero.", Blocking: true})
-			} else if module.DurationSeconds%60 != 0 {
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + "." + module.ModuleKey + ".duration", Message: "SAT module duration must be a whole number of minutes; delivery never rounds assessment time.", Blocking: true})
-			} else if module.DurationSeconds != blueprint.durationSeconds {
-				rep.Warnings = append(rep.Warnings, ValidationIssue{Code: "sat.delivery.nonstandard_timing", Path: section.SectionKey + "." + module.ModuleKey + ".duration", Message: fmt.Sprintf("%s uses %d minutes instead of the standard %d minutes.", module.Title, module.DurationSeconds/60, blueprint.durationSeconds/60), Blocking: false})
-			}
-			if module.TargetQuestionCount != blueprint.questionCount {
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + "." + module.ModuleKey + ".target", Message: "Module target count does not match the SAT provider blueprint.", Blocking: true})
-			}
-			if len(module.Questions) != module.TargetQuestionCount {
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + "." + module.ModuleKey, Message: "Module question count does not match its blueprint target.", Blocking: true})
-			}
-			pretestCount := 0
-			for _, question := range module.Questions {
-				if question.IsPretest {
-					pretestCount++
-				}
-			}
-			if pretestCount != blueprint.pretestCount {
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + "." + module.ModuleKey + ".pretest", Message: fmt.Sprintf("%s requires exactly %d pretest items.", module.Title, blueprint.pretestCount), Blocking: true})
-			}
-			questions, err := loadQuestionValidationRows(ctx, s.db, module.ID)
-			if err != nil {
-				return ValidationReport{}, err
-			}
-			for _, question := range questions {
-				for _, issue := range validateSATQuestion(section.SectionKey, question.questionType, question.stimulus, question.prompt, question.answer, question.rationale, question.metadata) {
-					issue.Path = "examQuestion:" + question.examQuestionID + ":" + issue.Path
-					if issue.Blocking {
-						rep.Errors = append(rep.Errors, issue)
-					} else {
-						rep.Warnings = append(rep.Warnings, issue)
-					}
-				}
-			}
-		}
-
-		if base == nil {
-			rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: "base_module", Message: "Each section needs a base module.", Blocking: true})
-		} else if len(base.Questions) == 0 {
-			rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + "." + base.ModuleKey, Message: "The base module must contain questions.", Blocking: true})
-		}
-		if lower == nil || higher == nil {
-			rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + ".routing", Message: "Each section needs lower and higher adaptive branches.", Blocking: true})
-		}
-		if section.RoutingPolicy == nil {
-			rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + ".routing", Message: "Adaptive routing policy is missing.", Blocking: true})
-		} else if base != nil && lower != nil && higher != nil {
-			policy := section.RoutingPolicy
-			if policy.BaseModuleID != base.ID || policy.LowerModuleID != lower.ID || policy.HigherModuleID != higher.ID {
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + ".routing", Message: "Adaptive routing policy does not match the section module roles.", Blocking: true})
-			}
-			blueprint, _ := satBlueprintModule(section.SectionKey, base.ModuleKey)
-			operational := blueprint.questionCount - blueprint.pretestCount
-			if operational < 1 {
-				operational = 1
-			}
-			if policy.MinimumCorrectForHigher < 1 || policy.MinimumCorrectForHigher > operational {
-				rep.Errors = append(rep.Errors, ValidationIssue{Code: "sat.structure.invalid", Path: section.SectionKey + ".routing.threshold", Message: fmt.Sprintf("Higher-route threshold must be between 1 and %d.", operational), Blocking: true})
-			}
-		}
+// validateSATPublishQuestion is deliberately narrower than validateSATQuestion.
+// Editor diagnostics can require metadata, rich-content shape, accessibility,
+// and provider-specific formatting; the publish contract only owns the four
+// content families represented by satpublish.ValidateQuestion.
+func validateSATPublishQuestion(row questionValidationRow) []ValidationIssue {
+	issues := satpublish.ValidateQuestion(satpublish.Question{
+		ExamQuestionID: row.examQuestionID,
+		QuestionType:   row.questionType,
+		Prompt:         row.prompt,
+		Answer:         row.answer,
+	})
+	out := make([]ValidationIssue, 0, len(issues))
+	for _, issue := range issues {
+		out = append(out, ValidationIssue{
+			Code:     issue.Code,
+			Path:     issue.Path,
+			Message:  issue.Message,
+			Blocking: issue.Blocking,
+		})
 	}
+	return out
+}
 
-	// Audit finding 5: the loop above validates every section it is HANDED, but
-	// nothing proved the set was complete. Malformed imported or legacy data
-	// missing a section (or carrying two of the same key) satisfied every
-	// per-section check and published anyway; this fails it closed instead.
-	rep.Errors = append(rep.Errors, validateSATSectionCompleteness(shell.Sections)...)
+func (s *Service) validateSATExam(ctx context.Context, shell Shell, rep ValidationReport) (ValidationReport, error) {
+	issues, err := satpublish.ValidateDraft(ctx, s.db, shell.VersionID)
+	if err != nil {
+		return ValidationReport{}, err
+	}
+	for _, issue := range issues {
+		rep.Errors = append(rep.Errors, ValidationIssue{
+			Code:     issue.Code,
+			Path:     issue.Path,
+			Message:  issue.Message,
+			Blocking: issue.Blocking,
+		})
+	}
 
 	var endingRevision int
 	if err := s.db.QueryRowContext(ctx, "SELECT revision FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE", shell.VersionID, shell.ExamID).Scan(&endingRevision); err == nil && endingRevision != shell.VersionRevision {
@@ -801,43 +670,6 @@ func (s *Service) validateSATExam(ctx context.Context, shell Shell, rep Validati
 	}
 	rep.Valid = len(rep.Errors) == 0
 	return rep, nil
-}
-
-// validateSATSectionCompleteness is the set-level counterpart to the per-section
-// loop: it proves the SAT topology is exactly one Reading & Writing section plus
-// exactly one Math section, with no duplicate section key. Kept pure so the
-// invariant is unit-tested without a database.
-func validateSATSectionCompleteness(sections []Section) []ValidationIssue {
-	counts := make(map[string]int, len(sections))
-	for _, section := range sections {
-		counts[section.SectionKey]++
-	}
-	var issues []ValidationIssue
-	for _, required := range []struct{ key, label string }{
-		{SectionReadingWriting, "Reading & Writing"},
-		{SectionMath, "Math"},
-	} {
-		switch count := counts[required.key]; count {
-		case 1:
-		case 0:
-			issues = append(issues, ValidationIssue{Code: "sat.structure.incomplete", Path: required.key, Message: fmt.Sprintf("SAT exams require exactly one %s section; none was found.", required.label), Blocking: true})
-		default:
-			issues = append(issues, ValidationIssue{Code: "sat.structure.incomplete", Path: required.key, Message: fmt.Sprintf("SAT exams allow exactly one %s section; %d were found.", required.label, count), Blocking: true})
-		}
-	}
-	// Any other key is a duplicate/foreign section. The per-section loop already
-	// reports unknown keys as sat.structure.invalid, so this only adds the
-	// repeated-key case it cannot see.
-	for key, count := range counts {
-		if count < 2 {
-			continue
-		}
-		if key == SectionReadingWriting || key == SectionMath {
-			continue
-		}
-		issues = append(issues, ValidationIssue{Code: "sat.structure.incomplete", Path: key, Message: fmt.Sprintf("SAT exams allow one section per blueprint key; %q appears %d times.", key, count), Blocking: true})
-	}
-	return issues
 }
 
 func validateChoiceAnswer(answer map[string]any, issues *[]ValidationIssue) {

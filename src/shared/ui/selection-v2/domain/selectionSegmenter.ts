@@ -23,6 +23,18 @@ export interface WordSegment {
 }
 
 /**
+ * A word, together with the text node it was found in.
+ *
+ * One node's boundary pair is not enough to describe what a body gesture owns:
+ * a passage splits its words across inline elements (an annotated `<mark>`, an
+ * `<em>`), and a drag can reach the next paragraph. A word is therefore always
+ * carried with its node, and the node is what decides document order.
+ */
+export interface NodeWordSegment extends WordSegment {
+  node: Text;
+}
+
+/**
  * The slice of `Intl.Segmenter` this module needs, narrowed so a test — or a
  * runtime without ICU data — can supply its own implementation.
  */
@@ -210,6 +222,90 @@ export function expandToWordAt(
     if (segment.start >= offset && segment.end > offset) return { start: segment.start, end: segment.end };
   }
   return null;
+}
+
+/**
+ * The nearest GRAPHEME boundary to a position — the only place a finger's
+ * endpoint may stop.
+ *
+ * A handle is the precision instrument, and precision is about characters the
+ * student can SEE. An emoji, a flag, a combining accent or a Thai cluster is
+ * several UTF-16 code units and one thing on screen, so an endpoint that moved by
+ * code unit would cut a character in half and anchor an annotation to a fragment
+ * of it. The offset is therefore moved to the nearer edge of the cluster it falls
+ * inside; a tie goes to the earlier edge, so the answer never depends on which
+ * direction the finger arrived from.
+ *
+ * Null means the runtime has no `Intl.Segmenter`: offsets are then all the
+ * platform has, which is the behaviour that shipped before this existed.
+ */
+export function snapToGraphemeBoundary(
+  point: TextPoint,
+  segmenter: WordSegmenter | null,
+  cache: WordSegmentCache,
+): TextPoint {
+  if (!segmenter) return point;
+  const text = point.node.data;
+  if (text.length === 0) return point;
+  const offset = Math.max(0, Math.min(text.length, point.offset));
+  // The clamped position: an offset outside the node is brought back to it, and
+  // an offset already inside it is handed back as the very same point.
+  const bounded = offset === point.offset ? point : { node: point.node, offset };
+
+  for (const segment of cache.segmentsOf(point.node, segmenter)) {
+    // Every cluster before the position: not a candidate.
+    if (segment.end < offset) continue;
+    // Already exactly on a boundary — or at the start of one, which is the same
+    // offset seen from the other side.
+    if (segment.end === offset || segment.start >= offset) return bounded;
+    const snapped = offset - segment.start <= segment.end - offset ? segment.start : segment.end;
+    return snapped === point.offset ? point : { node: point.node, offset: snapped };
+  }
+  // At the end of the node, which is a boundary already.
+  return bounded;
+}
+
+/**
+ * Which side of the claimed word a body-touch drag has reached.
+ *
+ * `unchanged` is not "no progress": it is the finger still inside the word the
+ * hold claimed, which on a phone is most of the first inch of travel — and the
+ * reason a press that drifts inside `beta` keeps showing `beta`.
+ */
+export type WordDragSide = 'unchanged' | 'before' | 'after';
+
+/** The whole-word run a body-touch drag means, as offsets in the claimed node. */
+export interface WordDragSpan {
+  span: WordSegment;
+  side: WordDragSide;
+}
+
+/**
+ * The whole-word run a BODY-TOUCH drag means, from the word it claimed and the
+ * word under the finger now.
+ *
+ * A finger is not a precision instrument, so the body gesture is spelled in
+ * words: the claimed word is the anchor and only the far side of the run may
+ * move. Inside the claim NOTHING moves — the visible word stands, which is the
+ * iPhone behaviour and the reason a long press cannot grow `b[eta ga]mma` by
+ * drifting. Before the claim the fixed side is the claim's END and the run starts
+ * at the target's start; after it the fixed side is the claim's START and the run
+ * ends at the target's end. Both runs stay in reading order, and offsets are
+ * logical, so RTL needs no case of its own. Precision does not disappear — it
+ * moves to the handles, which never pass through here.
+ *
+ * `target` is the word `expandToWordAt` found for the finger, which is null only
+ * where no word precedes or follows the position at all; the claim then stands,
+ * because "no word there" is not a reason to resize what the student can see.
+ */
+export function resolveWordDragSpan(origin: WordSegment, target: WordSegment | null): WordDragSpan {
+  if (!target || (target.start >= origin.start && target.end <= origin.end)) {
+    return { span: origin, side: 'unchanged' };
+  }
+  if (target.end <= origin.start) return { span: { start: target.start, end: origin.end }, side: 'before' };
+  if (target.start >= origin.end) return { span: { start: origin.start, end: target.end }, side: 'after' };
+  // Words do not overlap, so this is the same word again: the claim stands.
+  return { span: origin, side: 'unchanged' };
 }
 
 const defaultWordCache = createWordSegmentCache();

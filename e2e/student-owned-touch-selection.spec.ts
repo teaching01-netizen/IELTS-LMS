@@ -2,6 +2,94 @@ import { expect, test, type Page, type Locator } from '@playwright/test';
 
 const fixture = '/e2e/fixtures/touch-selection/index.html';
 const passage = '.student-reading-passage-pane [data-student-highlightable="true"]';
+/**
+ * The harness's cluster question (`?clusters=1`) and the ASCII word its stimulus
+ * starts with, which is how the cluster cases find their text. See
+ * `src/app/router/dev/SatAccessibilityDebugRoute.tsx` for the stimulus itself.
+ */
+const clustersQuestion = '?product=sat&clusters=1';
+const clusterLeadIn = 'Several';
+const satSurface = 'SAT stimulus';
+const ieltsSurface = 'IELTS reading:passage:passage-1';
+
+/**
+ * The fixture's two non-Latin paragraphs, duplicated from the fixture's own
+ * literals: a page bundle cannot import a Playwright file. Both are rendered
+ * through the same passage path as the rest.
+ */
+const thaiLead = 'ภาษาไทย';
+const rtlLead = 'هذا';
+/**
+ * The fixture's paragraph whose words are split by a real inline element, and the
+ * paragraph after it.
+ *
+ * `*researchers*` renders as `<em>researchers</em>`, so the paragraph is three
+ * text nodes and a drag out of the emphasized run leaves the node it was claimed
+ * in without leaving the paragraph. Duplicated from
+ * `e2e/fixtures/touch-selection/main.tsx`, which owns these paragraphs.
+ */
+const inlineWord = 'researchers';
+const inlineLeadWord = 'Several';
+const inlineNextWord = 'examined';
+const crossWord = 'measurements';
+const inlineSpoken = 'Several researchers examined how canopy density changes surface temperature near paved ground.';
+const crossSpoken = 'Their follow-up measurements suggest the relationship holds in cooler climates as well.';
+/**
+ * What a range's `toString()` says for the run that spans both paragraphs.
+ *
+ * It starts at the CLAIM's word, not at the paragraph's first word: reaching
+ * forward fixes the claim's start and moves the far edge to the word the finger
+ * reached. The text nodes of two paragraphs concatenate in a range with nothing
+ * between them, which is why `ground.` runs straight into `Their`.
+ */
+const crossRunText = `${inlineSpoken.slice(inlineSpoken.indexOf(inlineWord))}Their follow-up ${crossWord}`;
+
+/**
+ * The engine's selection, mapped onto the CLUSTERS of the stimulus it came from.
+ *
+ * The offsets are recovered from the range text the engine is painting, and the
+ * cluster boundaries come from the platform's own `Intl.Segmenter` — the same
+ * authority production snaps to. `midIsBoundary` is the CONTROL: the second code
+ * unit of a cluster, which must never be a boundary the engine could stop on;
+ * without it the boundary check would also pass on a paragraph whose characters
+ * were all one code unit long.
+ */
+async function clusterSelection(page: Page, surfaceName: string) {
+  return page.evaluate(({ name, lead }) => {
+    const record = window.__studentTouchSelectionDebug?.snapshot().surfaces.find((item) => item['surface'] === name);
+    const selected = typeof record?.['rangeText'] === 'string' ? record['rangeText'] : '';
+    const paragraph = [...document.querySelectorAll('p')].find((element) => (element.textContent ?? '').startsWith(lead));
+    if (!paragraph) throw new Error('cluster paragraph not found');
+    // The paragraph's text as the ENGINE sees it: every text node under it, in
+    // document order, which is what the text of a range inside it is a slice of.
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+    let rendered = '';
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) rendered += node.data;
+
+    const segments = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(rendered)]
+      .map((part) => ({ start: part.index, end: part.index + part.segment.length, text: part.segment }));
+    const boundaries = new Set<number>([0, rendered.length, ...segments.map((segment) => segment.end)]);
+    // Every cluster the stimulus contains that is MORE than one code unit — the
+    // part of the text that gives the boundary question teeth. Each one's interior
+    // is a position the engine must never stop on.
+    const controls = segments.filter((segment) => segment.end - segment.start > 1)
+      .map((segment) => ({ ...segment, midIsBoundary: boundaries.has(segment.start + 1) }));
+    const start = selected ? rendered.indexOf(selected) : -1;
+    const flag = rendered.indexOf('\u{1F1F9}\u{1F1ED}');
+    return {
+      selected,
+      start,
+      end: start + selected.length,
+      startOnBoundary: start >= 0 && boundaries.has(start),
+      endOnBoundary: start >= 0 && boundaries.has(start + selected.length),
+      controls,
+      flagStart: flag,
+    };
+  }, { name: surfaceName, lead: clusterLeadIn });
+}
+
+type ClusterReading = Awaited<ReturnType<typeof clusterSelection>>;
 
 async function coordinates(surface: Locator, phrase: string) {
   return surface.evaluate((root, text) => {
@@ -182,6 +270,678 @@ async function ownedSelectionGeometry(page: Page) {
  * the text they point at, which is what keeps them honest when a drag is
  * auto-scrolling the passage underneath them.
  */
+/**
+ * The body gesture is word-granular, and a press in the MIDDLE of a word is what
+ * decides it.
+ *
+ * The version this replaces anchored on the exact character under the finger, so
+ * a few pixels of travel produced `esearchers` / `rch`, and moving into a
+ * neighbour produced `rch examined`. Every string below is asserted WHILE the
+ * finger is down — the engine's own trace of what it is painting — and then again
+ * through the mark the student's own tap commits, so a partial word cannot hide
+ * behind a green draw path.
+ */
+test('a mid-word touch drag takes whole words, in both directions', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const region = page.locator('[data-sat-annotation-region="stimulus"]');
+
+  // MID-WORD by measurement rather than by hope: the widest glyph inside a word
+  // is a point the finger is provably inside that word at.
+  const middle = (glyph: { x: number; y: number; width: number; height: number }) => ({
+    x: glyph.x + glyph.width / 2,
+    y: glyph.y + glyph.height / 2,
+  });
+  const claimed = middle(await widestGlyph(region, 'researchers'));
+  const previous = middle(await widestGlyph(region, 'Several'));
+  const following = middle(await widestGlyph(region, 'examined'));
+
+  const finger = await press(page, region, browserName);
+  await finger.down(claimed);
+  // Claim, then nudge INSIDE the same word: nothing may change — no
+  // character-level endpoint may appear, and the opposite edge may not move.
+  await finger.move({ x: claimed.x + 3, y: claimed.y });
+  await nextFrames(page);
+  expect(await liveSelectionText(page), 'a nudge inside the claimed word').toBe('researchers');
+
+  // Into the previous word: the whole of it, and none of the gap between them.
+  await finger.move(previous);
+  await nextFrames(page);
+  expect(await liveSelectionText(page), 'reaching the word before the claim').toBe('Several researchers');
+
+  // Across the claim into the next word: the run follows the finger forward in
+  // reading order, so the origin stays `researchers`.
+  await finger.move(following);
+  await nextFrames(page);
+  expect(await liveSelectionText(page), 'crossing the claim to the word after it').toBe('researchers examined');
+
+  await finger.release();
+  await nextFrames(page);
+
+  const snapshot = await page.evaluate(() => window.__studentTouchSelectionDebug?.snapshot());
+  await info.attach('selection-trace', { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+  if (browserName === 'chromium') {
+    const record = snapshot!.surfaces.find((item) => item['surface'] === 'SAT stimulus')!;
+    expect(record, 'the release keeps the whole-word run, not the last caret').toMatchObject({
+      rangeText: 'researchers examined',
+      onSelectCalled: true,
+    });
+  }
+
+  // And the student's own next action proves what was committed: the mark covers
+  // the whole-word run rather than a fragment of it.
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  await page.locator('[data-sat-selection-toolbar="true"]').getByRole('button', { name: /yellow/i }).click();
+  await expect(region.locator('[data-sat-highlight="true"]')).toHaveText('researchers examined');
+});
+
+/**
+ * Leaving the node a word was claimed in is NOT a different gesture.
+ *
+ * A passage splits its words across inline elements — this fixture's
+ * `*researchers*` renders as `<em>researchers</em>`, so the claim's node has a
+ * sibling on each side — and the paragraph after it is a separate block. Both are
+ * the same gesture to a student, and the version this replaces dropped the word
+ * anchor at either boundary and read the raw offsets instead, so the run came
+ * back partial at BOTH edges. Every step is observed WHILE the finger is down,
+ * through the engine's own published range text, and then again through what the
+ * release committed.
+ */
+test('a drag out of an inline element and into the next paragraph keeps whole words', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(fixture);
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+  const surface = page.locator(passage);
+
+  // The premise, read off the page: the claim really is inside an INLINE element
+  // whose siblings are separate text nodes, and the paragraph the drag ends in is
+  // a separate BLOCK. Without these the flow would be the single-node case that
+  // already passes.
+  const premise = await page.evaluate(() => {
+    const paragraphs = [...document.querySelectorAll('p')];
+    const inlineBox = paragraphs.find((box) => (box.textContent ?? '').includes('canopy density'));
+    const crossBox = paragraphs.find((box) => (box.textContent ?? '').includes('cooler climates'));
+    const emphasized = inlineBox?.querySelector('em') ?? null;
+    let textNodes = 0;
+    if (inlineBox) {
+      const walker = document.createTreeWalker(inlineBox, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) textNodes += 1;
+    }
+    return {
+      emphasizedText: emphasized?.textContent ?? null,
+      emphasizedHasOwnTextNode: emphasized?.firstChild?.nodeType === Node.TEXT_NODE,
+      emphasizedFollowsASiblingNode: emphasized?.previousSibling?.nodeType === Node.TEXT_NODE,
+      inlineTextNodes: textNodes,
+      differentBlocks: Boolean(inlineBox && crossBox && inlineBox !== crossBox),
+    };
+  });
+  expect(premise).toEqual({
+    emphasizedText: inlineWord,
+    emphasizedHasOwnTextNode: true,
+    emphasizedFollowsASiblingNode: true,
+    inlineTextNodes: 3,
+    differentBlocks: true,
+  });
+
+  await page.locator('p').filter({ hasText: 'canopy density' }).evaluate((element) => {
+    element.scrollIntoView({ block: 'center', behavior: 'instant' });
+  });
+
+  // MID-WORD by measurement, as the single-node flow does: the widest glyph inside
+  // a word is a point the finger is provably inside that word at.
+  const middle = (glyph: { x: number; y: number; width: number; height: number }) => ({
+    x: glyph.x + glyph.width / 2,
+    y: glyph.y + glyph.height / 2,
+  });
+  const claimed = middle(await widestGlyph(surface, inlineWord));
+  const beforeTheElement = middle(await widestGlyph(surface, inlineLeadWord));
+  const afterTheElement = middle(await widestGlyph(surface, inlineNextWord));
+  const nextParagraph = middle(await widestGlyph(surface, crossWord));
+
+  const finger = await press(page, surface, browserName);
+  const spans: Record<string, string | null> = {};
+  const live = async (key: string) => {
+    spans[key] = await liveSelectionText(page, ieltsSurface);
+    return spans[key];
+  };
+
+  await finger.down(claimed);
+  await finger.move({ x: claimed.x + 3, y: claimed.y });
+  await nextFrames(page);
+  expect(await live('claim inside the <em>'), 'the whole word under the press, inside the inline element').toBe(inlineWord);
+
+  // A sibling text node on the BEFORE side of the claim's node: from the claim's
+  // start through the whole word the finger reached.
+  await finger.move(beforeTheElement);
+  await nextFrames(page);
+  expect(await live('across the inline boundary backwards'), 'whole words across an inline boundary').toBe(`${inlineLeadWord} ${inlineWord}`);
+
+  // The sibling on the AFTER side, still one paragraph.
+  await finger.move(afterTheElement);
+  await nextFrames(page);
+  expect(await live('across the inline boundary forwards'), 'whole words across an inline boundary').toBe(`${inlineWord} ${inlineNextWord}`);
+
+  // And into the NEXT BLOCK: the run spans the rest of this paragraph's words and
+  // the whole word the finger reached in the one after it.
+  await finger.move(nextParagraph);
+  await nextFrames(page);
+  expect(await live('into the next paragraph'), 'whole words across a paragraph boundary').toBe(crossRunText);
+
+  await finger.release();
+  await nextFrames(page);
+
+  // The PRODUCT's own commit, with the marker tool armed: what was selected is
+  // what gets painted, so a run the engine only reported would still fail here.
+  const committed = await surface.locator('mark').allTextContents();
+  spans['committed marks'] = committed.join(' | ');
+  expect(committed.join('') , 'the marker covers the same run the engine painted').toContain('researchers examined how canopy density');
+  expect(committed.join(''), 'and reaches the whole word in the next paragraph').toContain(crossWord);
+
+  const snapshot = await page.evaluate(() => window.__studentTouchSelectionDebug?.snapshot());
+  // Printed as well as asserted: what the run PROVED is the sequence of spans, and
+  // a failure message only ever shows the step that broke.
+  console.log(`[word-run] ${JSON.stringify(spans)}`);
+  await info.attach('word-run-spans', { body: JSON.stringify(spans, null, 2), contentType: 'application/json' });
+  await info.attach('selection-trace', { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+  if (browserName === 'chromium') {
+    const record = snapshot!.surfaces.find((item) => item['surface'] === ieltsSurface)!;
+    expect(record, 'the release commits the whole run, not the last caret').toMatchObject({
+      rangeText: crossRunText,
+      onSelectCalled: true,
+    });
+    // The commit's own anchor proves which nodes it spans, rather than a string
+    // that could have been assembled from one node's text.
+    expect(crossSpoken.startsWith('Their follow-up measurements')).toBe(true);
+  }
+});
+
+/**
+ * Thai: several words inside ONE run of letters, so word granularity has to come
+ * from the platform's dictionary rather than from whitespace.
+ *
+ * This is the case an ASCII flow cannot speak to — `ภาษา` and `ไทย` are adjacent
+ * characters with no gap between them, and a rule that split on spaces would call
+ * the pair one word (or every character its own) and still pass every flow above.
+ * The words the flow presses and asserts are the platform's own `Intl.Segmenter`
+ * words, read off the page in the same evaluate, so the expectation and the engine
+ * are asking the same authority where a word begins.
+ */
+test('a body drag through Thai stays on whole words', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(fixture);
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+  const surface = page.locator(passage);
+  await page.locator('p').filter({ hasText: thaiLead }).evaluate((element) => {
+    element.scrollIntoView({ block: 'center', behavior: 'instant' });
+  });
+  await nextFrames(page);
+
+  const paragraph = await paragraphWords(surface, thaiLead);
+  // The premise, read off the page: real Thai — words ICU finds INSIDE one run of
+  // letters, with no space to split on — and the word this flow claims is half of
+  // such a pair. Without the first assertion the flow would be an ASCII one
+  // wearing Thai text.
+  const joinedPairs = paragraph.words
+    .map((word, index) => (word.joinedToNext ? `${word.text}|${paragraph.words[index + 1]?.text ?? ''}` : null))
+    .filter((pair): pair is string => pair !== null);
+  const claimIndex = 1;
+  expect(joinedPairs, 'words ICU finds inside one uninterrupted run of Thai letters').toContain('ภาษา|ไทย');
+  expect(paragraph.words.length, 'enough words to drag across').toBeGreaterThan(5);
+  expect(
+    paragraph.words[claimIndex]!.joinedToNext || paragraph.words[claimIndex - 1]!.joinedToNext,
+    'the claimed word is one half of a space-free pair',
+  ).toBe(true);
+
+  const { spans, fingerAt } = await walkWordDrag(page, browserName, {
+    surface,
+    diagnosticsSurface: ieltsSurface,
+    lead: thaiLead,
+    claim: claimIndex,
+    // Forward across a space to the next words, then BACKWARD across the space-free
+    // boundary between `ไทย` and `ภาษา` — the direction a whitespace splitter gets
+    // wrong first.
+    steps: [2, 3, 0],
+    label: 'thai-run',
+  });
+
+  // The released run is what the product paints: a whole-word span, not the last
+  // caret the finger passed over.
+  await nextFrames(page);
+  const marks = await surface.locator('mark').allTextContents();
+  spans['committed marks'] = marks.join('|');
+  expect(marks.join(''), 'the marker covers the same whole-word run the engine painted')
+    .toContain(paragraph.text.slice(paragraph.words[0]!.start, paragraph.words[claimIndex]!.end));
+
+  await info.attach('thai-run-spans', { body: JSON.stringify({ words: paragraph.words, spans, fingerAt }, null, 2), contentType: 'application/json' });
+});
+
+/**
+ * A right-to-left run: reading order and screen order disagree, and the body drag
+ * has to follow READING order.
+ *
+ * The direction is not assumed — the paragraph's own computed `direction` and the
+ * measured positions of the words it presses are what the flow asserts before it
+ * moves anything, and the spans it then expects are the reading-order slices. An
+ * engine that moved the endpoint toward the finger's own side of the screen would
+ * fail on the very first step.
+ */
+test('a body drag through a right-to-left run stays on whole words', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(fixture);
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+  const surface = page.locator(passage);
+  await nextFrames(page);
+
+  const paragraph = await paragraphWords(surface, rtlLead);
+  const claimIndex = 3;
+  // The premise, read off the page: the text is a right-to-left SCRIPT (so the run
+  // is ordered right to left), and the renderer really did lay reading order out
+  // leftward — which is what makes "the next word" and "the next thing to the
+  // right" different words. The block's own computed `direction` is NOT asserted:
+  // this paragraph carries no `dir`, so it computes to `ltr` while its script,
+  // its measured layout and the engine's answer are all right-to-left (reported
+  // as an observation — a product that ships RTL prose without `dir` gets handle
+  // stems chosen as if the run were left-to-right).
+  expect(paragraph.text, 'a right-to-left script, and nothing else').toMatch(/^[\p{Script=Arabic}\s]+$/u);
+  expect(
+    paragraph.words[claimIndex + 1]!.point.x,
+    'the next word in reading order is to the LEFT of the claim',
+  ).toBeLessThan(paragraph.words[claimIndex]!.point.x);
+  expect(
+    paragraph.words[claimIndex - 1]!.point.x,
+    'and the previous word is to the RIGHT of it',
+  ).toBeGreaterThan(paragraph.words[claimIndex]!.point.x);
+
+  const { spans, fingerAt } = await walkWordDrag(page, browserName, {
+    surface,
+    diagnosticsSurface: ieltsSurface,
+    lead: rtlLead,
+    claim: claimIndex,
+    // Forward in reading order is leftward on screen: two words that way, then back
+    // across the claim to the right.
+    steps: [4, 5, 2, 1],
+    label: 'rtl-run',
+  });
+
+  // Printed as well as attached: the block's computed direction is an OBSERVATION,
+  // not an expectation — this paragraph carries no `dir`, so it computes to `ltr`
+  // while its script, its measured layout and every span above are right to left.
+  // The engine's word run is ordered by document order and is unaffected; the
+  // direction it is handed does decide which line edge each handle sits on and how
+  // an acquisition tie breaks, so the line is worth having in the run's output.
+  console.log(`[rtl-run] block direction ${paragraph.direction}, script-only ${/^[\p{Script=Arabic}\s]+$/u.test(paragraph.text)}`);
+  await info.attach('rtl-run-spans', {
+    body: JSON.stringify({ direction: paragraph.direction, words: paragraph.words, spans, fingerAt }, null, 2),
+    contentType: 'application/json',
+  });
+});
+
+/**
+ * A wrapped line: the finger crosses a VISUAL break without crossing anything the
+ * text itself knows about.
+ *
+ * The words before and after a wrap are neighbours in one text node, so a run that
+ * spans them is still one whole-word slice — and the flow proves the break is real
+ * by measuring the glyph boxes: the claim and the word it reaches sit on different
+ * visual lines of the same paragraph, a whole line height apart. A flow that
+ * dragged to a word the renderer had kept on the same line would prove nothing,
+ * so the premise is asserted before the gesture starts.
+ */
+test('a body drag across a wrapped line stays on whole words', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const surface = page.locator('[data-sat-annotation-region="stimulus"]');
+  await nextFrames(page);
+
+  const paragraph = await paragraphWords(surface, 'Several');
+  /** The words the renderer put on each visual line, in document order. */
+  const lines: number[][] = [];
+  paragraph.words.forEach((word, index) => {
+    const line = lines[lines.length - 1];
+    if (line && Math.abs(paragraph.words[line[0]!]!.point.top - word.point.top) <= 2) line.push(index);
+    else lines.push([index]);
+  });
+  expect(lines.length, 'the stimulus wraps at this viewport').toBeGreaterThan(1);
+  expect(paragraph.textNodes, 'one block: the break between the lines is a WRAP, not a paragraph').toBe(1);
+
+  const claimIndex = lines[0]!.at(-1)!;
+  const nextLine = lines[1]!;
+  const lineGap = Math.abs(paragraph.words[nextLine[0]!]!.point.y - paragraph.words[claimIndex]!.point.y);
+  expect(lineGap, 'the word the finger reaches is a line below the claim').toBeGreaterThan(4);
+
+  const { spans, fingerAt } = await walkWordDrag(page, browserName, {
+    surface,
+    diagnosticsSurface: satSurface,
+    lead: 'Several',
+    claim: claimIndex,
+    // Across the wrap (the last word of the first line, then the first two of the
+    // second), then back UP a line to the first word of the paragraph.
+    steps: [nextLine[0]!, nextLine[1]!, lines[0]![0]!],
+    label: 'wrap-run',
+  });
+
+  await info.attach('wrap-run-spans', {
+    body: JSON.stringify({ lines, words: paragraph.words, spans, fingerAt, lineGap }, null, 2),
+    contentType: 'application/json',
+  });
+});
+
+/**
+ * A handle is the PRECISION instrument, and precision is measured in characters a
+ * student can SEE.
+ *
+ * The harness's cluster question exists for this: a ZWJ family emoji, a flag, a
+ * Thai syllable with a tone mark and a decomposed `café` — each one character on
+ * screen and several UTF-16 code units long. An endpoint that moved by offset
+ * would stop inside one of them and anchor an annotation to a fragment of a
+ * character. Every observation below recovers the selection's own offsets from the
+ * page and asks the platform's own segmenter whether they are cluster boundaries —
+ * with a control that proves the question has teeth.
+ *
+ * SAT rather than IELTS on purpose: a reading-pane selection is committed and
+ * cleared on the release, so the handles these cases need only exist on the exam
+ * surface a resting selection keeps them on.
+ */
+test('dragging the END handle across clusters stops only on grapheme boundaries', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}${clustersQuestion}`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const surface = page.locator('[data-sat-annotation-region="stimulus"]');
+  // The opt-in really is on screen: without the clusters below, every boundary
+  // check here would pass on ASCII and prove nothing.
+  await expect(surface).toContainText('\u0E01\u0E48\u0E2D\u0E19');
+
+  // Claim the word the stimulus starts with: the selection begins on a word
+  // boundary, so every move after it is the handle's own doing.
+  await drag(page, surface, clusterLeadIn, browserName, isMobile);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+  await nextFrames(page, 4);
+
+  const trail: Array<{ dx: number; reading: ClusterReading }> = [];
+  const end = await grabHandle(page, browserName, 'end');
+  for (let step = 1; step <= 12; step += 1) {
+    const dx = step * 6;
+    await end.move(end.origin.x + dx, end.origin.y);
+    await nextFrames(page);
+    const reading = await clusterSelection(page, satSurface);
+    trail.push({ dx, reading });
+    expect(reading.selected, `nothing selected at +${dx}px`).not.toBe('');
+    expect(reading.startOnBoundary, `the start left its boundary at +${dx}px: ${JSON.stringify(reading)}`).toBe(true);
+    expect(reading.endOnBoundary, `the end stopped inside a cluster at +${dx}px: ${JSON.stringify(reading)}`).toBe(true);
+  }
+  await info.attach('end-handle-trail', { body: JSON.stringify(trail, null, 2), contentType: 'application/json' });
+
+  // The control, then the substance: the stimulus must really contain multi-unit
+  // clusters, no interior offset of one may be a boundary, and the endpoint must
+  // actually have CROSSED one — a boundary check that passed by never reaching the
+  // emoji, the flag or the tone mark would prove nothing.
+  const { controls } = trail[0]!.reading;
+  expect(controls.length, 'the cluster stimulus must contain multi-unit clusters').toBeGreaterThan(1);
+  for (const control of controls) {
+    expect(control.midIsBoundary, `offset ${control.start + 1} inside ${JSON.stringify(control.text)}`).toBe(false);
+  }
+  expect(
+    trail.some(({ reading }) => reading.end >= controls[0]!.end),
+    'the endpoint never crossed a whole multi-unit cluster',
+  ).toBe(true);
+
+  // And the finger lifting hands the product exactly the span the student narrowed
+  // to — a cluster boundary at both ends, or a committed annotation would later
+  // show a fragment of a character.
+  const committed = trail[trail.length - 1]!.reading.selected;
+  await end.release();
+  const afterRelease = await clusterSelection(page, satSurface);
+  expect(afterRelease.selected, 'the release kept the span the finger narrowed to').toBe(committed);
+  expect(
+    afterRelease.startOnBoundary && afterRelease.endOnBoundary,
+    `the resting span is not on cluster boundaries: ${JSON.stringify(afterRelease)}`,
+  ).toBe(true);
+});
+
+test('dragging the START handle back across clusters stops only on grapheme boundaries', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}${clustersQuestion}`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const surface = page.locator('[data-sat-annotation-region="stimulus"]');
+
+  // Claim the Thai word — a multi-cluster word of its own — then walk the START
+  // endpoint back through the flag and the family emoji. The other endpoint, the
+  // other direction, and a claim that is not ASCII text.
+  await drag(page, surface, '\u0E01\u0E48\u0E2D\u0E19', browserName, isMobile);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+  await nextFrames(page, 4);
+
+  const trail: Array<{ dx: number; reading: ClusterReading }> = [];
+  const start = await grabHandle(page, browserName, 'start');
+  for (let step = 1; step <= 14; step += 1) {
+    const dx = step * -6;
+    await start.move(start.origin.x + dx, start.origin.y);
+    await nextFrames(page);
+    const reading = await clusterSelection(page, satSurface);
+    trail.push({ dx, reading });
+    expect(reading.selected, `nothing selected at ${dx}px`).not.toBe('');
+    expect(reading.startOnBoundary, `the start stopped inside a cluster at ${dx}px: ${JSON.stringify(reading)}`).toBe(true);
+    expect(reading.endOnBoundary, `the end left its boundary at ${dx}px: ${JSON.stringify(reading)}`).toBe(true);
+  }
+  await info.attach('start-handle-trail', { body: JSON.stringify(trail, null, 2), contentType: 'application/json' });
+
+  const { controls, flagStart } = trail[0]!.reading;
+  for (const control of controls) {
+    expect(control.midIsBoundary, `offset ${control.start + 1} inside ${JSON.stringify(control.text)}`).toBe(false);
+  }
+  expect(flagStart, 'the cluster stimulus must contain the flag').toBeGreaterThan(0);
+  expect(
+    trail.some(({ reading }) => reading.start <= flagStart),
+    'the start endpoint never crossed the flag on its way back',
+  ).toBe(true);
+
+  const committed = trail[trail.length - 1]!.reading.selected;
+  await start.release();
+  const afterRelease = await clusterSelection(page, satSurface);
+  expect(afterRelease.selected, 'the release kept the span the finger narrowed to').toBe(committed);
+  expect(
+    afterRelease.startOnBoundary && afterRelease.endOnBoundary,
+    `the resting span is not on cluster boundaries: ${JSON.stringify(afterRelease)}`,
+  ).toBe(true);
+});
+
+/**
+ * CROSSOVER: a handle dragged PAST the other endpoint.
+ *
+ * The spec's browser list names it, and no flow has ever crossed one: the
+ * arbitration case stops short on purpose (its own comment says so) and the
+ * reachability case drags each handle away from the other. The rule has therefore
+ * only ever been asserted at unit level, while what it means on a real paint is
+ * exactly the thing a unit test cannot see.
+ *
+ * What crossing must do is stated by the machine: the finger keeps the edge it
+ * grabbed, the run stays forward in reading order, and the endpoint the finger
+ * crossed is left precisely where it was — so the span MIRRORS instead of
+ * inverting, losing an edge or collapsing. What it must never do is hand the drag
+ * to the other endpoint, drop the anchor or fall back to a body gesture: the
+ * finger crossed a character, not a gesture boundary.
+ *
+ * Every observation is taken WHILE the finger is down, from the engine's published
+ * span and from the page: the span must be exactly the slice between the caret the
+ * engine resolved for the finger and the endpoint the finger did not move, the
+ * control at the anchor's edge must not have shifted a pixel, the magnifier —
+ * pointed at the session's own moving endpoint — must stay inside the run it
+ * paints, no second press may join the gesture, and the swollen grip
+ * (`gripHeldScale`) must be the control on the finger's side. Both handles are
+ * crossed, in both directions.
+ */
+test('a handle dragged past the opposite endpoint keeps the finger on its edge, in both directions', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const surface = page.locator('[data-sat-annotation-region="stimulus"]');
+  await nextFrames(page);
+
+  const paragraph = await paragraphWords(surface, 'Several');
+  const words = paragraph.words;
+  const sameLine = (one: number, other: number) => Math.abs(words[one]!.point.y - words[other]!.point.y) <= 2;
+
+  // WHICH WORDS, FROM THE MEASURED LAYOUT. Crossing a word's start puts the finger
+  // on the word before it, so that neighbour — and the one before that, for the
+  // deepest step — has to be on the claim's own line: a case whose finger left the
+  // line its endpoint is on would be about a wrap, not about crossing. The two
+  // claims are kept apart so the second gesture starts outside the first one's
+  // resting run, which is a no-drag zone.
+  const claimAfter = (from: number, neighbour: (index: number) => boolean) => {
+    for (let index = Math.max(2, from); index < words.length - 2; index += 1) {
+      if (neighbour(index) && words[index]!.end - words[index]!.start >= 5) return index;
+    }
+    throw new Error('the stimulus has no word this flow can cross from');
+  };
+  const endHandleClaim = claimAfter(2, (index) => sameLine(index, index - 1) && sameLine(index, index - 2));
+  const startHandleClaim = claimAfter(
+    endHandleClaim + 2,
+    (index) => sameLine(index, index + 1) && sameLine(index, index + 2),
+  );
+
+  const trail: Array<Record<string, unknown>> = [];
+  for (const gesture of [
+    { edge: 'end' as const, claim: words[endHandleClaim]!, direction: -1 },
+    { edge: 'start' as const, claim: words[startHandleClaim]!, direction: 1 },
+  ]) {
+    // A FRESH PAGE PER GESTURE. The previous gesture's release raises the product's
+    // toolbar over the words that follow its run, and a press that landed there
+    // would be a command rather than a claim — so each crossing is its own gesture,
+    // on the same page and viewport the words were measured in.
+    await page.goto(`${fixture}?product=sat`);
+    await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+    await nextFrames(page);
+    await drag(page, surface, gesture.claim.text, browserName, isMobile);
+    await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+    await nextFrames(page, 4);
+    expect(await liveSelectionText(page), 'the claim this gesture drags is the word it pressed on')
+      .toBe(gesture.claim.text);
+
+    const before = await handlePaint(page);
+    // The endpoint the finger will NOT move, and where it is painted: every step
+    // below must leave this one exactly where it is, whichever control carries it.
+    const anchor = gesture.edge === 'end' ? gesture.claim.start : gesture.claim.end;
+    const anchorX = (gesture.edge === 'end' ? before.start : before.end)!.x;
+    const width = before.end!.x - before.start!.x;
+    expect(width, 'the claimed word has a width to cross').toBeGreaterThan(10);
+
+    const finger = await grabHandle(page, browserName, gesture.edge);
+    // The finger is grabbed at the control's centre — that is where the 44px target
+    // is — but it MOVES along the run's own line. The control's centre sits half a
+    // target below the line, and a caret resolved from there is whatever the
+    // engine's own fallback makes of a point under no glyph: Chromium picks the
+    // nearest character, WebKit the line's end, and neither is what a student
+    // dragging the dot is aiming at.
+    const runY = Math.round((before.start!.y + before.end!.y) / 2);
+    const pressesBefore = (await crossoverStep(page)).presses;
+    // Out past the endpoint and back across it. 1.0 is the anchor itself, so the
+    // finger crosses at 1.3 on the way out and at 0.75 on the way back, and every
+    // step stays clear of 1.0 — where the two endpoints coincide and the machine
+    // deliberately keeps the last non-collapsed run instead of a fresh slice.
+    for (const fraction of [0.4, 0.75, 1.3, 1.5, 1.3, 0.75, 0.4]) {
+      const dx = gesture.direction * Math.round(width * fraction);
+      const fingerX = finger.origin.x + dx;
+      await finger.move(fingerX, runY);
+      await nextFrames(page);
+      const step = await crossoverStep(page);
+      const caret = step.caret;
+      // THE LENS IS POINTED AT THE ENDPOINT THIS FINGER OWNS, AND THAT ENDPOINT IS
+      // INSIDE THE RUN — measured the way the lens cases measure it, because the
+      // lens's own box centre is NOT the caret's position in the document: the box
+      // travels with the finger while the picture is translated so the caret lands
+      // on the box's centre, so the mapping has to be read from the picture. A
+      // caret resolved independently from the finger is the oracle, checked against
+      // the lens and then against the lines the run paints.
+      const caretPoint = await resolvedCaretAt(page, surface, finger.at());
+      const pointed = await lensMisalignment(page, caretPoint);
+      const caretInRun = step.lines.some((line) =>
+        caretPoint.x >= line.left - 4 && caretPoint.x <= line.right + 4
+        && caretPoint.y >= line.top - 6 && caretPoint.y <= line.bottom + 6);
+      trail.push({ gesture: gesture.edge, word: gesture.claim.text, dx, fraction, anchor, fingerX, caretPoint, pointed, caretInRun, ...step });
+
+      expect(caret, `the engine resolved no caret at dx ${dx}`).not.toBeNull();
+      // A TEXT node, so the offset below is a character offset and not an element's
+      // child index: the prose is what the gesture is measured against.
+      expect(step.caretNode, 'the caret the engine resolved is in the prose').toContain('#text in');
+      expect(caret, `the finger sat exactly on the endpoint it crossed at dx ${dx}`).not.toBe(anchor);
+      // THE ASSERTION THIS FLOW EXISTS FOR: the run is exactly the slice between
+      // the caret the engine resolved for the finger and the endpoint the finger
+      // did not move — on EITHER side of it, so the span mirrors rather than
+      // inverting, dropping an edge or collapsing.
+      expect(step.span, `the run at dx ${dx} (caret ${caret}, anchor ${anchor})`)
+        .toBe(paragraph.text.slice(Math.min(caret!, anchor), Math.max(caret!, anchor)));
+
+      // Which control is which follows the direction the run is READ in: once the
+      // finger is past the anchor, the anchor is the run's FAR edge.
+      const anchorEdge: 'start' | 'end' = caret! < anchor ? 'end' : 'start';
+      const fingerEdge: 'start' | 'end' = anchorEdge === 'end' ? 'start' : 'end';
+      const atAnchor = step[anchorEdge];
+      const atFinger = step[fingerEdge];
+      expect(step.lines.length, `the run is not one line at dx ${dx}`).toBe(1);
+      expect(step.handles, 'the selection is still there, with both endpoints').toBe(2);
+      expect(step.open, 'the drag is still running: the lens only exists while a pointer is owned').toBe(true);
+      expect(step.presses, 'no second press joined the gesture').toBe(pressesBefore);
+      expect(atAnchor, `no ${anchorEdge} control to read at dx ${dx}`).not.toBeNull();
+      expect(
+        Math.abs(atAnchor!.x - anchorX),
+        `the endpoint the finger crossed moved at dx ${dx}: ${JSON.stringify({ atAnchor, anchorX })}`,
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(atFinger!.x - fingerX),
+        `the finger's own endpoint is not on the finger at dx ${dx}: ${JSON.stringify({ atFinger, fingerX })}`,
+      ).toBeLessThanOrEqual(12);
+      // The lens's own centring is asserted where the cloned picture is faithful.
+      // Its 1.5px bar belongs to a finger held mid-glyph; this finger sits ON a
+      // handle at the line's own edge, and WebKit's clone drifts there by a few
+      // pixels that vary run to run — the clone-fidelity gap the RTL lens case
+      // already owns as its own bug. What is asserted everywhere is the claim this
+      // flow is about: WHEREVER the lens points, the endpoint it magnifies is the
+      // one inside the run the student can see.
+      if (browserName === 'chromium') {
+        expect(pointed, `the lens has no picture to measure at dx ${dx}`).not.toBeNull();
+        expect(
+          Math.max(pointed!.x, pointed!.y),
+          `the lens is not centred on the caret the engine resolved at dx ${dx}: ${JSON.stringify(pointed)}`,
+        ).toBeLessThan(2);
+      }
+      expect(
+        caretInRun,
+        `the loupe endpoint is outside the run at dx ${dx}: ${JSON.stringify({ caretPoint, lines: step.lines })}`,
+      ).toBe(true);
+    }
+
+    // THE OWNERSHIP WITNESS, with the animation given time to catch up: exactly one
+    // grip is swollen and it belongs to the control on the finger's side — the
+    // endpoint the machine says this finger owns, on both sides of the crossing.
+    await nextFrames(page, 12);
+    const settled = await crossoverStep(page);
+    const heldEdge: 'start' | 'end' = settled.caret! < anchor ? 'start' : 'end';
+    const crossedEdge: 'start' | 'end' = heldEdge === 'start' ? 'end' : 'start';
+    trail.push({ gesture: gesture.edge, word: gesture.claim.text, settled: true, ...settled });
+    expect(
+      settled.grip[heldEdge] ?? 0,
+      `the finger's own grip is not the swollen one: ${JSON.stringify(settled.grip)}`,
+    ).toBeGreaterThan(1.06);
+    expect(
+      settled.grip[crossedEdge] ?? 0,
+      `the endpoint the finger crossed is still swollen: ${JSON.stringify(settled.grip)}`,
+    ).toBeLessThan(1.06);
+
+    await finger.release();
+    await nextFrames(page, 2);
+    const resting = await crossoverStep(page);
+    trail.push({ gesture: gesture.edge, word: gesture.claim.text, released: true, ...resting });
+    expect(resting.span, 'the release kept the run the finger left').toBe(settled.span);
+    expect(resting.handles, 'both endpoints are still there to grab').toBe(2);
+    expect(resting.open, 'the lens goes with the finger').toBe(false);
+  }
+
+  console.log(`[crossover] ${JSON.stringify(trail.map(({ lines: _lines, ...rest }) => rest))}`);
+  await info.attach('crossover-trail', { body: JSON.stringify(trail, null, 2), contentType: 'application/json' });
+});
+
 test('SAT: scrolling the passage away keeps the selection and its handles, and hides the tools', async ({ page, browserName, isMobile }, info) => {
   test.skip(!isMobile, 'The exam owns touch selection only on a coarse pointer.');
   // A viewport short enough that the passage is longer than its pane — on a pad
@@ -611,20 +1371,36 @@ test('reduced motion greets the magnifier already settled, on every frame', asyn
 });
 
 /**
- * Where the two handles are, in the coordinates the overlay positions them at.
- *
- * Read from the inline transform rather than a rect, because a rect is exactly
- * what the reachability case below must not trust on its own.
+ * The raw paint both endpoint reads below derive from, parsed ONCE: each
+ * handle's `translate3d` (rounded to integer pixels, as the overlay wrote it)
+ * and the painted first line's origin — in one round-trip, so a frame cannot
+ * land between the transforms and the line they are judged against.
  */
-async function endpoints(page: Page) {
+async function handlePaint(page: Page) {
   return page.evaluate(() => {
     const read = (edge: string) => {
       const transform = document.querySelector(`[data-student-selection-handle="${edge}"]`)?.style.transform ?? '';
       const match = /translate3d\((-?[\d.]+)px, (-?[\d.]+)px/.exec(transform);
       return match ? { x: Math.round(Number(match[1])), y: Math.round(Number(match[2])) } : null;
     };
-    return { start: read('start'), end: read('end') };
+    const line = document.querySelector('[data-student-selection-line]')?.getBoundingClientRect();
+    return {
+      start: read('start'),
+      end: read('end'),
+      origin: line ? { x: Math.round(line.left), y: Math.round(line.top) } : null,
+    };
   });
+}
+
+/**
+ * Where the two handles are, in the coordinates the overlay positions them at.
+ *
+ * Read from the inline transform rather than a rect, because a rect is exactly
+ * what the reachability case below must not trust on its own.
+ */
+async function endpoints(page: Page) {
+  const { start, end } = await handlePaint(page);
+  return { start, end };
 }
 
 /**
@@ -678,6 +1454,60 @@ async function dragHandle(page: Page, browserName: string, edge: 'start' | 'end'
   await drag.release();
 }
 
+/**
+ * One frame of a handle drag, read from the page WHILE the finger is down.
+ *
+ * Everything here is a fact the surface publishes or paints, and nothing is a
+ * claim about what it should have done: the span the engine is painting
+ * (`rangeText`), the caret offset it resolved for the finger (`focusOffset`), how
+ * many presses have reached the gesture since the last one inside the root, the
+ * two endpoint controls' coordinates, the SCALE of each grip (which is the
+ * machine's own witness of the endpoint the finger owns — `gripHeldScale` while
+ * held, settled at 1 otherwise), the magnifier's centre (which is pointed at the
+ * session's own moving endpoint) and the lines the run paints.
+ *
+ * The grip scale and the lens centre are read from layout rather than from a
+ * component's report, for the same reason the rest of this file is: a value a
+ * component says about itself cannot falsify the component.
+ */
+async function crossoverStep(page: Page) {
+  return page.evaluate((surfaceName) => {
+    const record = window.__studentTouchSelectionDebug?.snapshot().surfaces
+      .find((item) => item['surface'] === surfaceName);
+    const events = (record?.['events'] ?? []) as Array<Record<string, unknown>>;
+    const focus = [...events].reverse().find((event) => event['stage'] === 'focus-caret');
+    const at = (edge: string) => {
+      const transform = document.querySelector(`[data-student-selection-handle="${edge}"]`)?.style.transform ?? '';
+      const match = /translate3d\((-?[\d.]+)px, (-?[\d.]+)px/.exec(transform);
+      return match ? { x: Math.round(Number(match[1])), y: Math.round(Number(match[2])) } : null;
+    };
+    const grip = (edge: string) => {
+      const element = document.querySelector(`[data-student-selection-handle="${edge}"] .selection-v2-grip`);
+      if (!element) return null;
+      const transform = getComputedStyle(element).transform;
+      return !transform || transform === 'none' ? 1 : new DOMMatrixReadOnly(transform).a;
+    };
+    const lens = document.querySelector('[data-selection-loupe]');
+    const box = lens ? lens.getBoundingClientRect() : null;
+    return {
+      span: typeof record?.['rangeText'] === 'string' ? record['rangeText'] : null,
+      caret: typeof focus?.['focusOffset'] === 'number' ? focus['focusOffset'] : null,
+      caretNode: typeof focus?.['focusNode'] === 'string' ? focus['focusNode'] : null,
+      presses: events.filter((event) => event['stage'] === 'pointerdown' && event['pointerDownSeen'] === true).length,
+      handles: document.querySelectorAll('[data-student-selection-handle]').length,
+      open: !!lens,
+      start: at('start'),
+      end: at('end'),
+      grip: { start: grip('start'), end: grip('end') },
+      tick: box ? { x: box.left + box.width / 2, y: box.top + box.height / 2 } : null,
+      lines: [...document.querySelectorAll('[data-student-selection-line]')].map((line) => {
+        const rect = line.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+      }),
+    };
+  }, 'SAT stimulus');
+}
+
 /** Let the page run frames, so the render a gesture's move asked for has happened. */
 async function nextFrames(page: Page, frames = 2) {
   await page.evaluate(async (count) => {
@@ -716,18 +1546,41 @@ async function press(page: Page, surface: Locator, browserName: string) {
     };
   }
   let at = { x: 0, y: 0 };
+  /**
+   * A synthetic pointer delivered to the element the COORDINATE is over.
+   *
+   * Not to the pane's prose: a real finger is hit-tested by the browser, and the
+   * coordinates a selection's own controls cover resolve to those controls. A
+   * harness that always delivered to the prose would be unable to reproduce the
+   * very arbitration cases this suite now turns on — and would report a press the
+   * browser gives to a handle as a press on the text.
+   */
+  const send = (type: string, point: { x: number; y: number }) => page.evaluate((event) => {
+    const target = document.elementFromPoint(event.point.x, event.point.y) ?? document.body;
+    target.dispatchEvent(new PointerEvent(event.type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      pointerId: 1,
+      pointerType: 'touch',
+      isPrimary: true,
+      buttons: event.type === 'pointerup' ? 0 : 1,
+      clientX: event.point.x,
+      clientY: event.point.y,
+    }));
+  }, { type, point });
   return {
     down: async (point: { x: number; y: number }) => {
       at = point;
-      await surface.dispatchEvent('pointerdown', { pointerId: 1, pointerType: 'touch', clientX: point.x, clientY: point.y });
+      await send('pointerdown', point);
     },
     move: async (point: { x: number; y: number }) => {
       at = point;
-      await surface.dispatchEvent('pointermove', { pointerId: 1, pointerType: 'touch', clientX: point.x, clientY: point.y });
+      await send('pointermove', point);
     },
     at: () => at,
     release: async () => {
-      await surface.dispatchEvent('pointerup', { pointerId: 1, pointerType: 'touch', clientX: at.x, clientY: at.y });
+      await send('pointerup', at);
     },
   };
 }
@@ -757,6 +1610,157 @@ async function widestGlyph(surface: Locator, phrase: string) {
     }
     throw new Error(`Missing text: ${text}`);
   }, phrase);
+}
+
+/**
+ * The range the engine is painting RIGHT NOW, read from its own trace.
+ *
+ * `rangeText` is recorded by every published frame, so it is the selection a
+ * student would see mid-gesture — which is the only way to observe the body
+ * gesture's granularity before the release commits it.
+ */
+async function liveSelectionText(page: Page, surface = 'SAT stimulus') {
+  return page.evaluate((name) => {
+    const record = window.__studentTouchSelectionDebug?.snapshot().surfaces.find((item) => item['surface'] === name);
+    const text = record?.['rangeText'];
+    return typeof text === 'string' ? text : null;
+  }, surface);
+}
+
+/**
+ * One paragraph's WORDS, the point that presses each one, and the lines they fall
+ * on — all read off the page.
+ *
+ * The words come from the platform's own `Intl.Segmenter` in `word` granularity,
+ * which is the authority the engine itself claims text with: Thai puts several
+ * words inside one run of letters and Arabic orders them right to left, so a flow
+ * that guessed where a word begins would be testing its own guess. The press point
+ * is measured from the rendered glyph of a character INSIDE the word, and the
+ * lines come from those glyph boxes, because how the renderer broke the paragraph
+ * is a fact only the page has.
+ */
+async function paragraphWords(surface: Locator, lead: string) {
+  return surface.evaluate((root, startsWith) => {
+    const paragraph = [...root.querySelectorAll('p')].find((box) => (box.textContent ?? '').startsWith(startsWith));
+    if (!paragraph) throw new Error(`Missing paragraph starting with: ${startsWith}`);
+    // The paragraph's text as a RANGE sees it: every text node under it, in
+    // document order, which is the string the engine's own spans are cut from.
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+    const nodes: Array<{ node: Text; start: number }> = [];
+    let text = '';
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) {
+      nodes.push({ node, start: text.length });
+      text += node.data;
+    }
+    const locate = (index: number) => {
+      for (let position = nodes.length - 1; position >= 0; position -= 1) {
+        const entry = nodes[position]!;
+        if (index >= entry.start) return { node: entry.node, offset: index - entry.start };
+      }
+      throw new Error('offset outside the paragraph');
+    };
+    /** The centre of the glyph at one character index, in viewport coordinates. */
+    const pointOf = (index: number) => {
+      const { node: target, offset } = locate(index);
+      const range = document.createRange();
+      range.setStart(target, offset);
+      range.setEnd(target, Math.min(offset + 1, target.data.length));
+      const box = range.getBoundingClientRect();
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2, top: box.top, height: box.height };
+    };
+    const words = [
+      ...new Intl.Segmenter(undefined, { granularity: 'word' }).segment(text),
+    ]
+      .filter((part) => part.isWordLike)
+      .map((part) => ({
+        start: part.index,
+        end: part.index + part.segment.length,
+        text: part.segment,
+        point: pointOf(part.index + Math.floor(part.segment.length / 2)),
+        // Whether the NEXT word butts against this one with no whitespace: the
+        // difference between `alpha beta` and Thai's several words in one run of
+        // letters, which is what makes the Thai case say something an ASCII one
+        // cannot.
+        joinedToNext: /\S/.test(text[part.index + part.segment.length] ?? ''),
+      }));
+    return {
+      text,
+      direction: getComputedStyle(paragraph).direction,
+      textNodes: nodes.length,
+      words,
+    };
+  }, lead);
+}
+
+type ParagraphWords = Awaited<ReturnType<typeof paragraphWords>>;
+
+/**
+ * The whole-word run the spec asks for, derived the way the engine derives it: the
+ * claimed word is the anchor and only its far side may move, the word the finger
+ * reached supplies that edge, and the slice stays in reading order — which for
+ * Arabic is leftward on screen.
+ */
+function expectedRun(paragraph: ParagraphWords, claim: number, target: number): string {
+  const words = paragraph.words;
+  return target > claim
+    ? paragraph.text.slice(words[claim]!.start, words[target]!.end)
+    : paragraph.text.slice(words[target]!.start, words[claim]!.end);
+}
+
+/**
+ * A body drag walked WORD BY WORD through one paragraph, with the engine's own
+ * published range text read after every step.
+ *
+ * `rangeText` is what the engine is painting at that instant — not what a release
+ * later committed — so a partial word would be observed at the step that produced
+ * it rather than at the end of the gesture. The claim is taken the same way the
+ * ASCII flow takes it (press, then a nudge INSIDE the claimed word), and every
+ * step's span is both asserted and kept, so what the run PROVED is printed and
+ * attached as a sequence rather than inferred from a green tick.
+ */
+async function walkWordDrag(
+  page: Page,
+  browserName: string,
+  options: {
+    surface: Locator;
+    diagnosticsSurface: string;
+    lead: string;
+    claim: number;
+    steps: number[];
+    label: string;
+  },
+) {
+  const { surface, diagnosticsSurface, lead, claim, steps, label } = options;
+  const paragraph = await paragraphWords(surface, lead);
+  const at = (index: number) => paragraph.words[index]!.point;
+  const spans: Record<string, string | null> = {};
+  const fingerAt: Record<string, { x: number; y: number }> = {};
+  const live = async (key: string, finger: { x: number; y: number }) => {
+    spans[key] = await liveSelectionText(page, diagnosticsSurface);
+    fingerAt[key] = { x: Math.round(finger.x), y: Math.round(finger.y) };
+    return spans[key];
+  };
+
+  const finger = await press(page, surface, browserName);
+  await finger.down(at(claim));
+  await finger.move({ x: at(claim).x + 3, y: at(claim).y });
+  await nextFrames(page);
+  expect(await live(`claim ${paragraph.words[claim]!.text}`, finger.at()), 'the whole word under the press')
+    .toBe(paragraph.words[claim]!.text);
+
+  for (const index of steps) {
+    const word = paragraph.words[index]!;
+    await finger.move(at(index));
+    await nextFrames(page);
+    expect(await live(`→ ${word.text} @${word.start}`, finger.at()), `reaching ${JSON.stringify(word.text)}`)
+      .toBe(expectedRun(paragraph, claim, index));
+  }
+  await finger.release();
+  await nextFrames(page);
+
+  console.log(`[${label}] spans ${JSON.stringify(spans)} finger ${JSON.stringify(fingerAt)}`);
+  return { spans, fingerAt };
 }
 
 /**
@@ -1198,6 +2202,336 @@ test('the handles are painted and hittable, and dragging one moves only that end
   expect(afterStart.end, 'the other end stayed where it was left').toEqual(afterEnd.end);
   expect(afterStart.start!.x).toBeGreaterThan(afterEnd.start!.x + 10);
   expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('');
+});
+
+/**
+ * How many presses actually reached the gesture — one intent, counted once.
+ *
+ * The diagnostics WIPE this buffer on every pointerdown whose target is inside
+ * the root, so a count is "since the last in-root press": comparing across a
+ * press that lands outside the root (on the highlight paint, the toolbar) is
+ * exact, and after an in-root press the answer is what THAT press produced.
+ */
+async function pointerDownIntents(page: Page) {
+  return page.evaluate(() => {
+    const surface = window.__studentTouchSelectionDebug?.snapshot().surfaces
+      .find((item) => item['surface'] === 'SAT stimulus');
+    const events = (surface?.['events'] ?? []) as { stage: string; pointerDownSeen?: boolean }[];
+    // The hook's own record, not the diagnostics module's raw capture listener
+    // (which sees every pointerdown whether or not the overlay consumed it).
+    return events.filter((event) => event.stage === 'pointerdown' && event.pointerDownSeen === true).length;
+  });
+}
+
+/**
+ * Each endpoint's position RELATIVE to the painted line it belongs to.
+ *
+ * Read relative rather than as raw viewport transforms: the shell settles its
+ * toolbar around a selection and the passage can shift under it, and a uniform
+ * shift of the whole paint is NOT an endpoint moving. What an inert press must
+ * leave identical is each endpoint's place ON the selection.
+ */
+async function endpointGeometry(page: Page) {
+  const { start, end, origin } = await handlePaint(page);
+  if (!origin || !start || !end) return { start, end, origin };
+  return {
+    start: { x: start.x - origin.x, y: start.y - origin.y },
+    end: { x: end.x - origin.x, y: end.y - origin.y },
+  };
+}
+
+/**
+ * WHICH ENDPOINT A PRESS GRABS IS A FACT ABOUT THE PAINT (docs/selectionui.md #8).
+ *
+ * A selection narrower than the 44px controls that adjust it puts both of their
+ * boxes over the same coordinates, and the one the browser delivers a press to is
+ * decided by render order. On a short enough line the END control's box reaches
+ * above the line's top edge, over the whole of the START handle's outward zone:
+ * a press there belongs to the START and is delivered to the END. An overlay that
+ * asks only the control it was handed refuses it, consumes it as the selection's
+ * body, and the handle the student aimed at never moves.
+ *
+ * The coordinate below is derived from the paint and asserted to be delivered to
+ * the END control FIRST — with the same in-page measurement a student's finger
+ * goes through — so the case cannot quietly become a test of something else.
+ */
+test('a short selection grabs the endpoint the press belongs to, not the one on top', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const region = page.locator('[data-sat-annotation-region="stimulus"]');
+  // A word in the middle of a line, so the START endpoint has room to be dragged
+  // outward (left) as well as in: at a line's first word the pane's own edge is
+  // 20px away and an outward drag has nowhere to go.
+  await drag(page, region, 'temperature', browserName, isMobile);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+  // The shell raises and settles its toolbar after the release; measure only once
+  // that is done, so a settle cannot be mistaken for an endpoint moving.
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  await nextFrames(page, 4);
+
+  // Narrow it from the END until the two controls fight over one line — measured
+  // from the paint rather than guessed, so the premise below is about this page.
+  const width = await page.evaluate(() => {
+    const centre = (edge: string) => {
+      const rect = document.querySelector(`[data-student-selection-handle="${edge}"]`)!.getBoundingClientRect();
+      return rect.left + rect.width / 2;
+    };
+    return { start: centre('start'), end: centre('end') };
+  });
+  await dragHandle(page, browserName, 'end', width.start + 18 - width.end);
+  await nextFrames(page, 4);
+
+  const geometry = await page.evaluate(() => {
+    const box = (edge: string) => document.querySelector(`[data-student-selection-handle="${edge}"]`)!.getBoundingClientRect();
+    const centre = (rect: DOMRect) => ({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    const start = box('start');
+    const end = box('end');
+    const line = document.querySelector('[data-student-selection-line]')!.getBoundingClientRect();
+    // 8px right of the start anchor and 1px below the line's top edge: inside the
+    // start control's box and inside its outward zone (the zone reaches 2px past
+    // the line's top, the same rounding allowance the engine uses).
+    const probe = { x: centre(start).x + 8, y: line.top + 1 };
+    const hit = document.elementFromPoint(probe.x, probe.y);
+    const pane = document.querySelector('[data-sat-passage-scroll], [data-sat-annotation-region="stimulus"]')!.getBoundingClientRect();
+    return {
+      lineHeight: line.height,
+      start: centre(start),
+      end: centre(end),
+      lineTop: line.top,
+      paneLeft: pane.left,
+      probe,
+      deliveredTo: hit?.closest?.('[data-student-selection-handle]')?.getAttribute('data-student-selection-handle') ?? null,
+    };
+  });
+
+
+  await info.attach('arbitration-geometry', { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+
+  // The premises that make this case mean anything, each read off the page: the
+  // selection is narrower than the controls that adjust it; the line is short
+  // enough for the END control's box to reach past the line's top edge, over the
+  // START handle's outward zone; there is room to drag the endpoint outward; and
+  // the coordinate below really is delivered to the END control.
+  expect(geometry.end.x - geometry.start.x, 'the two controls must fight over the line').toBeLessThan(44);
+  expect(geometry.lineHeight, 'a 44px control must reach the other endpoint’s zone').toBeLessThan(24);
+  expect(geometry.start.x - geometry.paneLeft, 'room to drag the start endpoint outward').toBeGreaterThan(60);
+  expect(geometry.deliveredTo, 'the premise is a press the END control receives').toBe('end');
+  expect(geometry.probe.x).toBeGreaterThan(geometry.start.x);
+  expect(geometry.probe.y, 'inside the start handle’s outward zone').toBeLessThanOrEqual(geometry.lineTop + 2);
+
+  const claim = await liveSelectionText(page);
+  // ABSOLUTE positions, not positions relative to the painted line: this press
+  // takes the START endpoint, and the line's own left edge travels with it — a
+  // relative reading would show the endpoint it belongs to standing still.
+  const before = await endpoints(page);
+  expect(before.start).not.toBeNull();
+  expect(before.end).not.toBeNull();
+  const intentsBefore = await pointerDownIntents(page);
+
+  // 1. OUTWARD: the finger takes the press the END control was handed and drags
+  // it left, away from the selection it belongs to.
+  const finger = await press(page, region, browserName);
+  await finger.down(geometry.probe);
+  await finger.move({ x: geometry.probe.x - 60, y: geometry.probe.y });
+  await nextFrames(page);
+  await expect(page.locator('[data-selection-loupe]'), 'a handle drag began, not a body press').toBeVisible();
+
+  const outward = await endpoints(page);
+  expect(outward.end, 'the endpoint the finger did NOT take did not move').toEqual(before.end);
+  expect(outward.start!.x, 'the grabbed endpoint followed the finger outward').toBeLessThan(before.start!.x - 40);
+  const grown = await liveSelectionText(page);
+  expect(grown, 'the span grew on the grabbed side only').not.toBe(claim);
+  expect(grown!.endsWith(claim!), `${JSON.stringify({ claim, grown })}: the far endpoint stayed put`).toBe(true);
+  expect(
+    await pointerDownIntents(page),
+    'the press was a handle grab; it did not also reach the gesture as a body press',
+  ).toBe(intentsBefore);
+
+  // 2. INWARD: the same finger, still down, comes back the other way. The
+  // acquired endpoint follows it in both directions; the other one still does not.
+  // It stops 20px short of where it started, deliberately: an endpoint moved all
+  // the way onto the fixed one is the crossover case, not this one.
+  await finger.move({ x: geometry.probe.x - 20, y: geometry.probe.y });
+  await nextFrames(page);
+  const inward = await endpoints(page);
+  expect(inward.end, 'still the other endpoint').toEqual(before.end);
+  expect(inward.start!.x, 'the grabbed endpoint came back with the finger').toBeGreaterThan(outward.start!.x);
+  await finger.release();
+  await nextFrames(page);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+
+  // 3. And the other endpoint, the ordinary way: outward then inward, with the
+  // one the student did NOT take holding still through both.
+  const beforeEnd = await endpoints(page);
+  const end = await grabHandle(page, browserName, 'end');
+  await end.move(end.origin.x + 40, end.origin.y);
+  await nextFrames(page);
+  const out = await endpoints(page);
+  expect(out.start, 'the untouched endpoint did not move').toEqual(beforeEnd.start);
+  expect(out.end!.x, 'the grabbed endpoint followed the finger outward').toBeGreaterThan(beforeEnd.end!.x + 20);
+
+  // Back in, but not past the other endpoint: a finger that crosses it hands the
+  // drag to the opposite edge (the crossover rule), which is a different case.
+  await end.move(end.origin.x + 10, end.origin.y);
+  await nextFrames(page);
+  const back = await endpoints(page);
+  expect(back.start, 'still untouched').toEqual(beforeEnd.start);
+  expect(back.end!.x, 'and it followed the finger inward as well').toBeLessThan(out.end!.x);
+  await end.release();
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+});
+
+/**
+ * Where a resting selection may be moved FROM — on a selection short enough
+ * that the two endpoint controls physically overlap (docs/selectionui.md).
+ *
+ * The rule: a resting selection can only be RESIZED by acquiring one of its
+ * two visible endpoint handles. A press inside the selected text must never
+ * move either endpoint, never open the magnifier, and never begin a new
+ * selection — one physical pointerdown holds exactly one intent. The fixture
+ * word is deliberately two glyphs wide (`of`), so both 44×44 accessible boxes
+ * cover the highlighted midpoint: before the fix, a press there landed on the
+ * end handle's invisible target and dragged it.
+ */
+test("a short selection's middle belongs to neither handle, and one press holds one intent", async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const region = page.locator('[data-sat-annotation-region="stimulus"]');
+  await drag(page, region, 'of', browserName, isMobile);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+  // The shell raises its toolbar after the release and settles it over the next
+  // frames; sample geometry only once that is done, so a settle mid-gesture
+  // cannot be mistaken for an endpoint moving.
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  await nextFrames(page, 4);
+
+  // The premise, measured rather than assumed: the two accessible boxes really
+  // do overlap over the text — without this the case below would silently be
+  // testing a wide selection instead.
+  const overlap = await page.evaluate(() => {
+    const start = document.querySelector('[data-student-selection-handle="start"]')!.getBoundingClientRect();
+    const end = document.querySelector('[data-student-selection-handle="end"]')!.getBoundingClientRect();
+    return start.right > end.left;
+  });
+  expect(overlap, 'the two 44px targets must overlap for this case to mean anything').toBe(true);
+
+  const before = await endpointGeometry(page);
+  expect(before.start).not.toBeNull();
+  expect(before.end).not.toBeNull();
+  const line = await page.locator('[data-student-selection-line]').first().boundingBox();
+  const midpoint = { x: line!.x + line!.width / 2, y: line!.y + line!.height / 2 };
+  // The midpoint must be the selection itself: if the shell's toolbar covered
+  // it, the press below would be a command on the menu rather than a press on
+  // the selected text, and the case would prove nothing.
+  const onToolbar = await page.evaluate((point) => {
+    const hit = document.elementFromPoint(point.x, point.y);
+    return !!hit?.closest('[data-sat-selection-toolbar], [data-selection-action-menu]');
+  }, midpoint);
+  expect(onToolbar, 'the midpoint must resolve to the selection, not the toolbar').toBe(false);
+
+  const intentsBefore = await pointerDownIntents(page);
+
+  // 1. The middle: pressed, travelled 40px each way, released. Nothing may
+  // move, no loupe may open, and the press may not also begin a new gesture.
+  const finger = await press(page, region, browserName);
+  await finger.down(midpoint);
+  await finger.move({ x: midpoint.x - 40, y: midpoint.y });
+  await finger.move({ x: midpoint.x + 40, y: midpoint.y });
+  await expect(page.locator('[data-selection-loupe]')).toBeHidden();
+  await finger.release();
+  await nextFrames(page);
+
+  expect(await endpointGeometry(page), 'the pressed midpoint moved neither endpoint').toEqual(before);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+  await expect(page.locator('[data-selection-loupe]')).toBeHidden();
+  expect(await pointerDownIntents(page), 'that press ended at the midpoint; it did not also begin a new gesture').toBe(intentsBefore);
+
+  // 2. The visible end handle DOES acquire — and once acquired, the finger may
+  // travel through the very midpoint that refused it.
+  const handle = await grabHandle(page, browserName, 'end');
+  await handle.move(midpoint.x, midpoint.y);
+  await nextFrames(page);
+  const dragged = await endpointGeometry(page);
+  expect(dragged!.start, 'only the acquired endpoint moved').toEqual(before.start);
+  expect(dragged!.end!.x, 'the acquired endpoint followed the finger').toBeLessThan(before.end!.x);
+  await expect(page.locator('[data-selection-loupe]')).toBeVisible();
+
+  // 3. Release over the prose (the finger is AT the midpoint), not over the
+  // handle it started on: the loupe is gone within the next frame.
+  await handle.release();
+  await nextFrames(page, 1);
+  expect(await page.locator('[data-selection-loupe]').count(), 'gone within one frame of the release').toBe(0);
+});
+
+/**
+ * A mark inside the prose is OUTSIDE the selection (docs/selectionui.md): the
+ * tap is dismissed AND consumed in the overlay's capture pass, so the same
+ * pointerdown can never begin the next selection — while the mark's own
+ * command, its editor, still opens. One press, one intent per layer: the
+ * selection layer reads dismissal, the product reads its click.
+ */
+
+test("a tap on a mark while a selection rests dismisses the selection and still opens that mark's editor", async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const region = page.locator('[data-sat-annotation-region="stimulus"]');
+
+  // 1. A mark exists: select the opening words and press a colour.
+  await drag(page, region, 'Several researchers', browserName, isMobile);
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  await page.locator('[data-sat-selection-toolbar="true"]').getByRole('button', { name: /yellow/i }).click();
+  const mark = region.locator('[data-sat-annotation-control="true"]');
+  await expect(mark).toHaveText('Several researchers');
+
+  // 2. The first span still rests after the colour was applied — its handles
+  // stay painted. The doc's grammar, in order: a press on the prose OUTSIDE it
+  // dismisses that selection and ends there (a prose drag would be consumed
+  // the same way, which is why this is a plain tap),
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+  const prose = await coordinates(region, 'built environment');
+  const finger = await press(page, region, browserName);
+  await finger.down(prose.from);
+  await finger.release();
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(0);
+
+  // — and only the NEXT gesture creates the selection that will rest here.
+  await drag(page, region, 'built environment', browserName, isMobile);
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(2);
+
+  // The mark must really be what is under the finger — if the resting
+  // selection's toolbar covered it, the tap would be a command on the menu and
+  // would prove nothing about a mark.
+  const box = (await mark.boundingBox())!;
+  const coveredBy = await page.evaluate(({ x, y }) => {
+    const hit = document.elementFromPoint(x, y);
+    const markElement = document.querySelector('[data-sat-annotation-control="true"]')!;
+    return markElement === hit || markElement.contains(hit)
+      ? null
+      : `${hit?.tagName ?? 'nothing'}${hit?.closest('[data-sat-selection-toolbar="true"]') ? ' (toolbar)' : ''}`;
+  }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  expect(coveredBy, 'the mark must be hittable, not behind the toolbar').toBeNull();
+
+  // A real tap: real touch events, so the browser decides whether a click
+  // follows the pointerdown the overlay is about to consume.
+  await mark.tap();
+
+  // The doc's half: dismissed in capture AND the pointerdown consumed — the
+  // gesture's own handler never saw this press, so no hidden new selection
+  // began under it (docs/selectionui.md, outside → dismiss + consume).
+  await expect(page.locator('[data-student-selection-handle]')).toHaveCount(0);
+  await expect(page.locator('[data-selection-loupe]')).toHaveCount(0);
+  // The diagnostics wipe their buffer on every press INSIDE the root (this tap
+  // included), so what remains is exactly what the tap itself produced: no
+  // flagged `pointerdown` record means the gesture's own handler never ran.
+  expect(await pointerDownIntents(page), 'the consumed press reached no gesture').toBe(0);
+
+  // The product's half: the mark's own command survives the consumed press —
+  // its editor opens, exactly as it does with no selection on screen.
+  await expect(mark).toHaveAttribute('data-sat-annotation-active', 'true');
+  await expect(page.locator('[data-sat-annotation-edit-controls="true"]')).toBeVisible();
 });
 
 test('preview keeps native selection and diagnostics are opt-in', async ({ page }) => {

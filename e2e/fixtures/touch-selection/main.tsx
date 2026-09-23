@@ -26,13 +26,26 @@ const phrase = 'Alpha beta gamma delta. The student selects this passage.';
 // none, so source and clone agree exactly where these carets resolve. Closing
 // that gap for later paragraphs needs a product fix in buildPicture (preserve
 // layout-affecting descendant styles), out of scope for this test-only change.
+//
+// The cluster text the handle-precision cases need is NOT here: a reading-pane
+// selection is committed and cleared on the release, so those cases run on the
+// SAT surface, whose stimulus carries the clusters (`?clusters=1` in the debug
+// route).
 const rtlPhrase = 'هذا نص عربي بسيط عن الطقس والمدينة والحدائق والشوارع';
 const thaiPhrase = 'ภาษาไทย คนในประเทศไทย พูดภาษาไทย ทุกวัน';
+// A paragraph whose words are split across a REAL inline element — `*researchers*`
+// renders as `<em>researchers</em>`, so the paragraph is three text nodes and a
+// drag out of the emphasized run crosses a node boundary without leaving the
+// paragraph — followed by the paragraph after it, for the block boundary. Both
+// go LAST: the loupe-clone alignment cases above depend on the paragraphs before
+// them, and nothing here measures the clone.
+const inlinePhrase = 'Several *researchers* examined how canopy density changes surface temperature near paved ground.';
+const crossPhrase = 'Their follow-up measurements suggest the relationship holds in cooler climates as well.';
 const state: ExamState = {
   title: 'Touch selection fixture', type: 'Academic', activeModule: 'reading',
   activePassageId: 'passage-1', activeListeningPartId: null,
   config: createDefaultConfig('Academic', 'Academic'),
-  reading: { passages: [{ id: 'passage-1', title: 'Passage 1', content: [rtlPhrase, thaiPhrase, phrase, ...Array(15).fill(phrase)].join('\n\n'), images: [], blocks: [] }] },
+  reading: { passages: [{ id: 'passage-1', title: 'Passage 1', content: [rtlPhrase, thaiPhrase, phrase, ...Array(15).fill(phrase), inlinePhrase, crossPhrase].join('\n\n'), images: [], blocks: [] }] },
   listening: { parts: [] }, writing: { task1Prompt: '', task2Prompt: '' },
   speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
 } as ExamState;

@@ -3,13 +3,16 @@ import { createSelectionSession, type SelectionSession } from '../engine/selecti
 import { followPointer, type PointerFollow } from '../engine/pointerCapture';
 import { createFrameScheduler, type FrameScheduler } from '../engine/selectionScheduler';
 import { createAutoScrollRunner, type AutoScrollRunner } from '../engine/selectionAutoScroll';
-import { createWordSegmentCache, defaultWordSegmenter } from '../domain/selectionSegmenter';
+import {
+  createWordSegmentCache,
+  defaultGraphemeSegmenter,
+  defaultWordSegmenter,
+} from '../domain/selectionSegmenter';
 import type { SelectionActivation, SelectionEffect } from '../domain/selectionMachine';
 import {
   IDLE_SELECTION,
   selectionMovesEndpoint,
   type CaretGeometry,
-  type SelectionEdge,
   type SelectionPointerState,
   type SelectionPresentation,
   type SelectionRect,
@@ -180,10 +183,35 @@ export interface StudentSelectionGesture extends SelectionPresentation {
   pointer: SelectionPointerState | null;
   /** True while the finger is moving an endpoint of a resting selection. */
   adjusting: boolean;
-  /** Wire a handle's pointerdown to this to start adjusting that edge. */
-  beginHandleAdjustment: (edge: SelectionEdge, event: SelectionHandlePointerEvent) => void;
+  /**
+   * Report a press on a resting selection, and answer with what became of it.
+   *
+   * The press is reported as a coordinate and the element the finger landed on —
+   * nothing else. The endpoint it adjusts is the SESSION's decision, taken once,
+   * by measured geometry over both endpoints against the paint the session owns
+   * (`resolveHandleAcquisition`, called from `grab`) — not by the caller naming an
+   * edge, and not by which control the paint order happened to put under the
+   * finger.
+   *
+   * True when a drag BEGAN — the caller has authoritative knowledge that this
+   * press is the handle's, and no part of the page may also act on it. False when
+   * it acquired neither endpoint (the selection's own body, or outside it) and
+   * when the machine refused it: nothing started, and nothing was consumed.
+   */
+  beginHandleAdjustment: (event: SelectionHandlePointerEvent) => boolean;
   /** Dismiss the selection: a tap outside, Escape, or a completed action. */
   dismiss: () => void;
+  /**
+   * Whether this pointerdown would reach the gesture's own handler — the
+   * guards before the ownership check, answered in one place because two
+   * copies of those guards would be two answers (see the hook).
+   *
+   * `SelectionOverlay` asks it about an OUTSIDE press: having dismissed, it
+   * must consume exactly the presses that would otherwise begin the next
+   * selection under this same pointerdown, while toolbars, inputs and every
+   * other control still receive theirs.
+   */
+  wouldBeginGesture: (event: Event) => boolean;
 }
 
 const EDITABLE_SELECTOR = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
@@ -283,6 +311,10 @@ export function useStudentSelectionGesture(
   // drag republishes many times a second.
   const wordCache = useMemo(() => createWordSegmentCache(), []);
   const segmenter = useMemo(() => defaultWordSegmenter(), []);
+  // Built once beside the word segmenter, and for the same reason: a handle drag
+  // republishes many times a second, and the session's own memo is what makes
+  // each of those a lookup rather than a rescan of the node.
+  const graphemes = useMemo(() => defaultGraphemeSegmenter(), []);
   const session = useRef<SelectionSession | null>(null);
 
   /**
@@ -297,7 +329,7 @@ export function useStudentSelectionGesture(
    * The options it is created with are only the starting ones — every press
    * adopts the current activation and tolerance before it claims anything.
    */
-  const initialOptions = useRef({ activation, moveTolerancePx, segmenter, words: wordCache });
+  const initialOptions = useRef({ activation, moveTolerancePx, segmenter, words: wordCache, graphemes });
   const ensureSession = useCallback((): SelectionSession => {
     if (!session.current) {
       const first = initialOptions.current;
@@ -306,6 +338,7 @@ export function useStudentSelectionGesture(
         moveTolerancePx: first.moveTolerancePx,
         segmenter: first.segmenter,
         words: first.words,
+        graphemes: first.graphemes,
       });
     }
     return session.current;
@@ -397,6 +430,11 @@ export function useStudentSelectionGesture(
       rangeText: range?.toString().slice(0, 200) ?? '',
       rangeCollapsed: range?.collapsed ?? null,
       rangeRectCount: paint.rects.length,
+      // The granularity the span is spelled in travels with every published
+      // frame, beside the span itself: it is the session's state, and a trace that
+      // records what was selected without recording which of the two models
+      // produced it cannot answer the one question the distinction exists for.
+      granularity: active.granularity(),
     });
 
     anchor.current = paint.anchorRect;
@@ -640,24 +678,50 @@ export function useStudentSelectionGesture(
    * Gesture input.
    * ------------------------------------------------------------------ */
 
+  /**
+   * Would this press reach the gesture's own pointerdown? — every guard BEFORE
+   * the ownership check, in one place.
+   *
+   * Two callers ask the same question: this handler, and `SelectionOverlay`,
+   * which must CONSUME an outside press that would otherwise arrive here and —
+   * with the selection already dismissed — begin a new one under the same
+   * physical press (the hidden `selected → idle → pending` transition). Two
+   * copies of these guards would be two answers, which is exactly how they
+   * drift; the overlay consults this function rather than reimplementing it.
+   */
+  const wouldBeginGesture = useCallback((event: Event): boolean => {
+    const config = live.current;
+    const pointer = event as PointerEvent;
+    if (!config.enabled) return false;
+    if (!config.isCoarsePointer()) return false;
+    if (typeof pointer.button === 'number' && pointer.button > 0) return false;
+    const root = rootRef.current;
+    if (!root) return false;
+    if (event.target instanceof Node && !root.contains(event.target)) return false;
+    if (config.isExcludedTarget(event.target)) return false;
+    return true;
+  }, [rootRef]);
+
   const handleDown = useCallback((event: PointerEvent) => {
     const config = live.current;
     config.diagnostics?.record('pointerdown', { pointerDownSeen: true, pointerType: event.pointerType, pointerId: event.pointerId, eventTarget: describeTouchSelectionNode(event.target instanceof Node ? event.target : null), targetInsideRoot: event.target instanceof Node && !!rootRef.current?.contains(event.target) });
-    if (!config.enabled) return;
-    if (!config.isCoarsePointer()) return;
-    if (typeof event.button === 'number' && event.button > 0) return;
+    if (!wouldBeginGesture(event)) return;
 
     const root = rootRef.current;
     if (!root) return;
-    if (event.target instanceof Node && !root.contains(event.target)) return;
-    if (config.isExcludedTarget(event.target)) return;
 
     const active = ensureSession();
 
-    // A press that arrives while something is already owned is a SECOND finger:
-    // two-finger scrolling and pinch-zoom are how a student reads a passage, and
-    // the machine hands the whole gesture back — including a resting selection —
-    // so the page scrolls exactly as it would without this engine.
+    // A press that arrives while something is already owned ENDS that gesture
+    // and starts nothing — one physical pointerdown holds exactly one intent
+    // (docs/selectionui.md). It is either a second finger — two-finger scrolling
+    // and pinch-zoom are how a student reads a passage, and the machine hands
+    // the whole gesture back (the same effects a dismissal produces) so the
+    // page scrolls as it would without this engine — or a press arriving
+    // before the claim has painted anything for an overlay to arbitrate. While
+    // a selection IS painted, `SelectionOverlay` dismisses and consumes these
+    // in its capture pass, so they never get here; this is the same rule for
+    // the presses it does not see.
     if (active.phase() !== 'idle') {
       config.diagnostics?.record('abandon', { reason: 'second-pointer' });
       dismiss();
@@ -684,7 +748,7 @@ export function useStudentSelectionGesture(
         boundaryFor: config.boundaryFor,
       }),
     );
-  }, [dismiss, ensureSession, rootRef]);
+  }, [dismiss, ensureSession, rootRef, wouldBeginGesture]);
 
   const handleMove = useCallback((event: PointerEvent) => {
     const config = live.current;
@@ -710,47 +774,111 @@ export function useStudentSelectionGesture(
     ensureScheduler().schedule();
   }, [ensureSession, ensureScheduler, updateAutoScroll]);
 
-  const handleUp = useCallback((event: PointerEvent) => {
-    live.current.diagnostics?.record('pointerup', { pointerUpSeen: true });
+  /**
+   * The ONE way a pointer's gesture ends.
+   *
+   * Every terminal signal funnels through here — a release (from the captured
+   * element or from the document backup), a `pointercancel`, a lost capture, a
+   * backgrounded app — because cleanup spread across callers is exactly how a
+   * loupe stays open: each path forgot a different ref, and the machine sat in
+   * `adjusting-*` under a lens nobody could close. The order is the invariant:
+   *
+   *   1. a normal release FLUSHES the final scheduled geometry first (the exam
+   *      is handed the range the student was looking at, not the frame before
+   *      it); a cancel reports nothing — a gesture the platform took is not one
+   *      the student meant;
+   *   2. the machine takes its transition — `selected` for a release, idle for
+   *      a cancel — and runs its effects (capture released, auto-scroll stopped,
+   *      the range committed);
+   *   3. the presentation refs are cleared, so `pointer` is null before the next
+   *      painted frame even if a phase were to linger in one render;
+   *   4. the resting state is published immediately.
+   *
+   * A duplicate terminal signal (an event reaching both the element and the
+   * document backup) is rejected by the pointer-id guard in step 0 — one
+   * physical release, exactly one end.
+   */
+  const finishPointer = useCallback((pointerId: number, reason: 'release' | 'cancel') => {
+    live.current.diagnostics?.record(reason === 'release' ? 'pointerup' : 'pointercancel', {
+      [reason === 'release' ? 'pointerUpSeen' : 'pointerCancelSeen']: true,
+    });
     const active = ensureSession();
-    if (active.pointerId() === null || event.pointerId !== active.pointerId()) return;
+    if (active.pointerId() === null || pointerId !== active.pointerId()) return;
 
+    if (reason === 'release') {
+      // THE frame that must not wait — see the scheduler: a release that let
+      // the last move draw itself would commit one frame of stale geometry.
+      ensureScheduler().flush();
+      currentEffects.current(active.release(pointerId));
+    } else {
+      currentEffects.current(active.cancel(pointerId));
+    }
+
+    // Presentation cleanup, in ONE place (the invariant above).
+    lastPointer.current = null;
+    pointerIsText.current = false;
+    resolvedCaret.current = null;
+    handleTarget.current = null;
+    // Publish NOW — the resting state is what the next paint must show — and
+    // queue ONE more frame for a release. The commit that follows this handler
+    // (the product raising its toolbar, a mark being applied) can move the
+    // passage, and a paint measured BEFORE that commit is a handle sitting over
+    // the wrong words until something unrelated re-measures it: a finger that
+    // then aims at the drawn handle finds prose instead. The extra frame is the
+    // same self-healing re-measure the release path always had; a cancel needs
+    // none, because it ends in `clear` with everything re-measured from idle.
+    publish();
+    if (reason === 'release') ensureScheduler().schedule();
+  }, [ensureScheduler, ensureSession, publish]);
+
+  const handleUp = useCallback((event: PointerEvent) => {
     // The release position is deliberately NOT adopted: it carries no new
     // information about where the text ends. A finger that travelled sent a
     // pointermove first, and a release that arrives without one — a synthetic
     // event, a browser that reports zeroes for a lifted pointer — would otherwise
     // yank the selection back to the coordinate (0, 0) at the exact moment it is
     // committed.
-    //
-    // THE frame that must not wait: the range reported to the exam has to be the
-    // one the student was looking at when they let go, not the frame before it.
-    ensureScheduler().flush();
-    currentEffects.current(active.release(event.pointerId));
-    ensureScheduler().schedule();
-  }, [ensureScheduler, ensureSession]);
+    finishPointer(event.pointerId, 'release');
+  }, [finishPointer]);
 
   const handleCancel = useCallback((event: PointerEvent) => {
-    live.current.diagnostics?.record('pointercancel', { pointerCancelSeen: true });
-    const active = ensureSession();
-    if (active.pointerId() === null || event.pointerId !== active.pointerId()) return;
-
-    currentEffects.current(active.cancel(event.pointerId));
-  }, [ensureSession]);
+    finishPointer(event.pointerId, 'cancel');
+  }, [finishPointer]);
 
   currentHandlers.current = { move: handleMove, up: handleUp, cancel: handleCancel };
 
-  const beginHandleAdjustment = useCallback((edge: SelectionEdge, event: SelectionHandlePointerEvent) => {
-    if (!live.current.enabled) return;
+  /**
+   * The gesture's ONE entry for a press on a resting selection
+   * (docs/selectionui.md #8).
+   *
+   * It reports the press to the session and performs what the session's answer
+   * implies — that is the whole of it. The endpoint used to be resolved HERE, over
+   * a `presentation` snapshot of a frame that had already been painted, and again
+   * in `SelectionOverlay` over the same snapshot before deciding what to consume:
+   * one press arbitrated twice, in two layers, each free to keep its own copy of
+   * the answer in step. The session now decides once, from the paint IT measures —
+   * the very span the handles were drawn around — because the two 44px controls
+   * overlap on any selection narrower than they are: the control a press was
+   * delivered to is not the endpoint it belongs to, and arbitration that starts
+   * from that control throws away a press the other endpoint was entitled to.
+   *
+   * A refusal is reported as `false` rather than performed here: the layer that
+   * received the press is the one that knows what a refusal MEANS for it — the
+   * selection's own body, or a press outside it — and it consumes accordingly
+   * instead of treating the press as a dismissal.
+   */
+  const beginHandleAdjustment = useCallback((event: SelectionHandlePointerEvent): boolean => {
+    if (!live.current.enabled) return false;
     // The session decides, and it decides from the span the last frame painted:
     // the handles were drawn around the range the student can see, so that is the
     // range the grab has to mean. It refuses anything but a resting selection.
     const effects = ensureSession().grab({
-      edge,
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
+      root: rootRef.current,
     });
-    if (!effects) return;
+    if (!effects) return false;
     event.preventDefault?.();
     // The handle is the capture target, so the drag keeps arriving after the
     // finger leaves the 12px dot it started on.
@@ -759,6 +887,7 @@ export function useStudentSelectionGesture(
     pointerIsText.current = false;
     currentEffects.current(effects);
     ensureScheduler().schedule();
+    return true;
   }, [ensureScheduler, ensureSession, rootRef]);
 
   /* ------------------------------------------------------------------ *
@@ -887,7 +1016,12 @@ export function useStudentSelectionGesture(
   return {
     ...presentation,
     anchorRect: anchor.current,
-    pointer: lastPointer.current
+    // Gated on PHYSICAL ownership, not merely on a remembered coordinate: the
+    // loupe may only exist while the session holds a live pointer (see
+    // `SelectionPointerState`), so a stale `lastPointer` can never stand in for
+    // contact that ended, and even a phase that lingered as `adjusting-*` for
+    // one render cannot keep a ghost lens on screen.
+    pointer: ((session.current?.pointerId() ?? null) !== null) && lastPointer.current
       ? {
           finger: { x: lastPointer.current.x, y: lastPointer.current.y },
           caret: resolvedCaret.current,
@@ -897,5 +1031,6 @@ export function useStudentSelectionGesture(
     adjusting: presentation.phase === 'adjusting-start' || presentation.phase === 'adjusting-end',
     beginHandleAdjustment,
     dismiss,
+    wouldBeginGesture,
   };
 }

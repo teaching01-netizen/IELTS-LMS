@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
-import type { ExamPlanSection, ExamSessionRuntime } from '../../../types/domain';
+import { Fragment, useMemo } from 'react';
+import type { ExamPlanSection, ExamSessionRuntime, SectionRuntimeState } from '../../../types/domain';
 import { SatEyebrow, SatSectionCard } from './SatPage';
 import {
   buildSatRunSheet,
   formatRunSheetClock,
+  formatRunSheetDuration,
   formatRunSheetRemaining,
   formatRunSheetWindow,
   SAT_RUN_SHEET_TIME_ZONE_LABEL,
@@ -80,11 +81,24 @@ export function SatRunSheet({
     sheet.anchor === 'runtime'
       ? `Anchored to the proctor's start at ${formatRunSheetClock(sheet.anchorAt)} ${SAT_RUN_SHEET_TIME_ZONE_LABEL}`
       : sheet.anchor === 'scheduled'
-        ? `Projected from the scheduled start at ${formatRunSheetClock(sheet.anchorAt)} — times shift if the proctor starts late`
-        : 'Times appear once this session is scheduled or started';
+      ? `Projected from the scheduled start at ${formatRunSheetClock(sheet.anchorAt)} — times shift if the proctor starts late`
+      : 'Times appear once this session is scheduled or started';
+  const extensionMinutes = (runtime?.sections ?? []).reduce((total, section) => total + Math.max(0, section.extensionMinutes), 0);
+  const pausedSeconds = (runtime?.sections ?? []).reduce((total, section) => total + Math.max(0, section.accumulatedPausedSeconds), 0);
+  const originalPlannedEndAt = originalRunEndAt(plan ?? [], runtime?.sections ?? [], sheet.anchorAt);
+  const startedAt = runtime?.actualStartAt ?? null;
+  const finishedAt = runtime?.actualEndAt ?? null;
+  const finishedDuration = formatRunSheetDuration(startedAt, finishedAt) ?? '—';
+  const finished = runtime?.status === 'completed';
+  const timingStartLabel = startedAt ? formatRunSheetClock(startedAt) : formatRunSheetClock(sheet.anchorAt);
+  const timingEndLabel = finished
+    ? formatRunSheetClock(finishedAt)
+    : formatRunSheetClock(sheet.plannedEndAt);
+  const timingStartTitle = startedAt ? 'Started' : 'Scheduled start';
+  const timingEndTitle = finished ? 'Finished' : runtime?.status === 'not_started' ? 'Planned finish' : 'Expected finish';
 
   return (
-    <SatSectionCard className="mt-4" labelledBy="sat-run-sheet-heading">
+    <SatSectionCard className="sat-run-sheet mt-4" labelledBy="sat-run-sheet-heading">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div className="min-w-0">
           <SatEyebrow id="sat-run-sheet-heading">Run sheet</SatEyebrow>
@@ -92,19 +106,31 @@ export function SatRunSheet({
             Thailand time · {SAT_RUN_SHEET_TIME_ZONE_LABEL}
           </p>
         </div>
-        {sheet.plannedEndAt ? (
-          <p className="text-[11px] font-medium tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">
-            Planned end {formatRunSheetClock(sheet.plannedEndAt)}
-          </p>
-        ) : null}
       </div>
-      <p className="mt-2 text-[11px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{anchorNote}</p>
+      <div className="sat-run-sheet__summary" role="group" aria-label="Session timing">
+        <div><span>{timingStartTitle}</span><strong>{timingStartLabel}</strong></div>
+        <div><span>{timingEndTitle}</span><strong>{timingEndLabel}</strong></div>
+        {finished ? <div><span>Duration</span><strong>{finishedDuration}</strong></div> : null}
+        <div><span>Time zone</span><strong>{SAT_RUN_SHEET_TIME_ZONE_LABEL}</strong></div>
+      </div>
+      {extensionMinutes > 0 || pausedSeconds > 0 ? (
+        <p className="sat-run-sheet__delta">
+          Original plan {formatRunSheetClock(originalPlannedEndAt)}
+          {extensionMinutes > 0 ? ` · +${extensionMinutes} min extension` : ''}
+          {pausedSeconds > 0 ? ` · ${formatPausedDuration(pausedSeconds)} paused` : ''}
+        </p>
+      ) : <p className="mt-2 text-[11px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{anchorNote}</p>}
 
+      {/* The inner scroll region is keyboard focusable so narrow layouts can
+          review the full operational table without scrolling the page sideways. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- keyboard scrolling for the named table region */}
+      <div className="sat-run-sheet__table-scroll" role="region" aria-label="Run sheet timeline" tabIndex={0}>
       <table className="mt-4 w-full border-collapse text-left">
         <caption className="sr-only">
           Planned SAT run sheet in Thailand time: every section, module and break with its window,
           its remaining clock and its status
         </caption>
+        <colgroup><col className="sat-run-sheet__col-stage" /><col className="sat-run-sheet__col-window" /><col className="sat-run-sheet__col-remaining" /><col className="sat-run-sheet__col-status" /></colgroup>
         <thead>
           <tr className="border-b border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))]">
             <th scope="col" className="pb-2 pr-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">
@@ -122,13 +148,48 @@ export function SatRunSheet({
           </tr>
         </thead>
         <tbody>
-          {sheet.rows.map((row) => (
-            <RunSheetRow key={row.id} row={row} anchorAt={sheet.anchorAt} />
-          ))}
+          {sheet.rows.map((row, index) => {
+            const adaptiveBranch = row.kind === 'module' && row.label.startsWith('Module 2 ·') && row.detail?.startsWith('Alternative branch');
+            const previous = sheet.rows[index - 1];
+            const adaptiveGroupStart = adaptiveBranch && !(previous?.kind === 'module' && previous.label.startsWith('Module 2 ·') && previous.detail?.startsWith('Alternative branch'));
+            return <Fragment key={row.id}>
+              {adaptiveGroupStart ? <tr className="sat-run-sheet__adaptive-group"><th colSpan={4} scope="colgroup">Module 2 · Adaptive <span>One branch per student</span></th></tr> : null}
+              <RunSheetRow row={row} anchorAt={sheet.anchorAt} />
+            </Fragment>;
+          })}
         </tbody>
       </table>
+      </div>
     </SatSectionCard>
   );
+}
+
+function originalRunEndAt(
+  plan: ExamPlanSection[],
+  runtime: SectionRuntimeState[],
+  anchorAt: string | null,
+): string | null {
+  const anchorMs = anchorAt ? Date.parse(anchorAt) : Number.NaN;
+  if (!Number.isFinite(anchorMs)) return null;
+  const runtimeByKey = new Map<string, SectionRuntimeState>(runtime.map((section) => [section.sectionKey, section]));
+  const sections = plan.length ? plan : runtime.map((section) => ({
+    sectionKey: section.sectionKey,
+    durationMinutes: section.plannedDurationMinutes,
+    gapAfterMinutes: section.gapAfterMinutes,
+  }));
+  const durationMinutes = sections.reduce((total, section) => {
+    const live = runtimeByKey.get(section.sectionKey);
+    return total + Math.max(0, live?.plannedDurationMinutes ?? section.durationMinutes)
+      + Math.max(0, live?.gapAfterMinutes ?? section.gapAfterMinutes);
+  }, 0);
+  return new Date(anchorMs + durationMinutes * 60_000).toISOString();
+}
+
+function formatPausedDuration(seconds: number): string {
+  const wholeMinutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (wholeMinutes === 0) return `${remainingSeconds} sec`;
+  return remainingSeconds > 0 ? `${wholeMinutes} min ${remainingSeconds} sec` : `${wholeMinutes} min`;
 }
 
 function RunSheetRow({ row, anchorAt }: { row: SatRunSheetRow; anchorAt: string | null }) {
@@ -136,17 +197,16 @@ function RunSheetRow({ row, anchorAt }: { row: SatRunSheetRow; anchorAt: string 
   const isBreak = row.kind === 'break';
   const planned = formatRunSheetWindow(row.plannedStartAt, row.plannedEndAt, anchorAt);
   const actual = row.actualStartAt ? formatRunSheetWindow(row.actualStartAt, row.actualEndAt, anchorAt) : null;
+  const current = row.status === 'live' || row.status === 'paused';
   return (
     <tr
       data-runtime-mismatch={row.runtimeMismatch ? 'true' : undefined}
       data-sat-run-sheet-row={row.kind}
       data-sat-run-sheet-status={row.status}
-      className={
-        'border-b border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] last:border-b-0 ' +
-        (row.status === 'live' ? 'bg-[var(--sat-staff-success-tint,rgba(5,150,105,0.06))]' : '')
-      }
+      aria-current={current ? 'true' : undefined}
+      className={`sat-run-sheet__row sat-run-sheet__row--${row.kind}${current ? ' is-current' : ''}${row.status === 'done' ? ' is-done' : ''}`}
     >
-      <td className={'py-2 pr-3 align-top text-[12px] ' + (isModule ? 'pl-4' : '')}>
+      <td className={'py-2 pr-3 align-top text-[12px] ' + (isModule ? 'pl-5' : '')}>
         <span
           className={
             isModule || isBreak

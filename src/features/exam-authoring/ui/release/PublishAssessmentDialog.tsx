@@ -31,7 +31,6 @@ export function PublishAssessmentDialog({
   examTitle,
   shell,
   blockerCount,
-  warningCount,
   candidateSeconds,
   candidateEstimateStale,
   isPublishing,
@@ -125,7 +124,9 @@ export function PublishAssessmentDialog({
                 : `${blockerCount} blocking issue${blockerCount === 1 ? "" : "s"}`}
             </p>
             <p>
-              {warningCount} recommendation{warningCount === 1 ? "" : "s"} remain.
+              {blockerCount === 0
+                ? "Question text, answer choices, module count, and correct answers are complete."
+                : "Resolve the required publish checks before publishing."}
             </p>
           </div>
         </div>
@@ -150,12 +151,6 @@ export function PublishAssessmentDialog({
             className="mt-1.5 w-full resize-y rounded-xl border border-border px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/15"
           />
 
-        {warningCount > 0 && blockerCount === 0 ? (
-          <p className="mt-3 text-xs leading-5 text-amber-800">
-            Recommendations do not block publishing; review them if they affect your intended
-            delivery.
-          </p>
-        ) : null}
         {localError ? (
           <p role="alert" className="mt-3 rounded-xl bg-destructive/10 p-3 text-xs leading-5 text-destructive">
             {localError}

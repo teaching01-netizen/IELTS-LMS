@@ -19,8 +19,10 @@ import {
   getHeroCopy,
   getHeroState,
   getHeroTone,
+  getSATPublishBlockers,
   getPublishBlockers,
   isReadinessFresh,
+  isSATPublishReadinessValid,
   normalizePublishNotes,
   parseIssueLink,
   secondsToMinutes,
@@ -120,6 +122,29 @@ describe("getFreshBlockers / getFreshWarnings", () => {
     expect(getFreshWarnings(report, false)).toEqual([]);
     expect(getFreshBlockers(null, true)).toEqual([]);
     expect(getFreshWarnings(undefined, true)).toEqual([]);
+  });
+});
+
+describe("SAT publish readiness contract", () => {
+  it("filters release gating to the four publish rule families", () => {
+    const legacy: AssessmentValidationIssue = {
+      code: "sat.metadata.domain.required",
+      path: "examQuestion:q-1:metadata.domain",
+      message: "Choose a domain.",
+      blocking: true,
+    };
+    const prompt: AssessmentValidationIssue = {
+      code: "question.prompt.required",
+      path: "examQuestion:q-2:prompt",
+      message: "Question text is required.",
+      blocking: true,
+    };
+    const report = { ...freshReport, valid: false, errors: [legacy, prompt] };
+
+    expect(getSATPublishBlockers(report, true)).toEqual([prompt]);
+    expect(isSATPublishReadinessValid({ ...freshReport, valid: false, errors: [legacy] }, true)).toBe(true);
+    expect(isSATPublishReadinessValid(report, true)).toBe(false);
+    expect(isSATPublishReadinessValid(report, false)).toBe(false);
   });
 });
 
