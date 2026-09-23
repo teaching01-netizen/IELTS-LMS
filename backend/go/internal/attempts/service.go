@@ -25,6 +25,11 @@ import (
 // ClosingGrace is the 30s post-deadline acceptance window (plan 26).
 const ClosingGrace = 30 * time.Second
 
+// SATSaveGrace is a save-only window after the visible clock reaches zero.
+// The delivery reconciler waits for the same window before scoring a module.
+// offcut: the server bounds arrival time; it cannot prove when an offline browser edit was typed.
+const SATSaveGrace = 3 * time.Second
+
 // Service owns response mutation (plan 4.1).
 type Service struct {
 	tx     *tx.Runner
@@ -308,7 +313,7 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 		if err != nil {
 			return SaveResult{}, err
 		}
-		if err := ensureQuestionAdmitted(owner, gate, c.QuestionID); err != nil {
+		if err := ensureQuestionAdmittedForProvider(owner, gate, c.QuestionID, attempt.ProviderKey); err != nil {
 			return SaveResult{}, err
 		}
 		// Version-collision probe.
@@ -575,11 +580,12 @@ func exactReplay(ctx context.Context, q tx.Tx, io saveIO, cmd SaveResponsesComma
 
 // ensureWritable enforces terminal/pause/deadline/grace/proctor gates.
 func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
-	// The runtime publishes the shared break at the section deadline, while an
-	// already-open response writer keeps the existing 30-second durability
-	// window. This keeps the student clock and the response-save guarantee from
-	// being coupled to the reconciler's polling cadence.
+	// The student clock freezes at the SAT deadline. The runtime waits for the
+	// short save window before advancing, while other providers retain their
+	// existing closing grace.
 	closingGraceActive := a.ClosingGraceUntil != nil && !now.After(*a.ClosingGraceUntil)
+	satClosing := a.ProviderKey == string(ProviderSAT) && a.DeadlineAt != nil &&
+		!now.Before(*a.DeadlineAt) && now.Before(a.DeadlineAt.Add(SATSaveGrace)) && closingGraceActive
 	switch a.DeliveryStatus {
 	case "submitted", "terminated", "locked", "cancelled":
 		if a.ProviderKey == string(ProviderSAT) {
@@ -593,18 +599,16 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	if a.ProctorStatus == "terminated" || a.ProctorStatus == "paused" {
 		return &apperrors.Error{Code: apperrors.CodeAttemptProctorBlocked, Message: "Attempt is blocked by proctor state.", HTTPStatus: 403}
 	}
-	if gate.Status != "" && gate.Status != "live" {
+	if gate.Status != "" && gate.Status != "live" && !(satClosing && gate.Status == "completed") {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
 	}
-	// SAT writes must stop at the attempt's authoritative deadline. The
-	// closing-grace window remains available to legacy providers, but it must
-	// never admit a fresh SAT write while the timeout worker catches up.
-	// Exact write-id replays return above this gate and remain safe/idempotent.
-	if a.ProviderKey == string(ProviderSAT) && a.DeadlineAt != nil && !now.Before(*a.DeadlineAt) {
+	// SAT may drain already-visible responses briefly after the display clock
+	// ends. The module gate below applies the same cap to shorter module clocks.
+	if a.ProviderKey == string(ProviderSAT) && a.DeadlineAt != nil && !now.Before(*a.DeadlineAt) && !satClosing {
 		telemetry.IncCounter(telemetry.MSATResponseWriteAfterTerminal)
 		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
-	if gate.WaitingForNextSection && !closingGraceActive {
+	if gate.WaitingForNextSection && !closingGraceActive && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is waiting.", HTTPStatus: 422}
 	}
 	// Section liveness (audit finding 3). These flags used to be computed by both
@@ -612,13 +616,13 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	// snapshot pre-gate (and not at all with RUNTIME_SNAPSHOT off, where the
 	// FOR UPDATE path's SectionPaused had no consumer). The rule is enforced here
 	// — on the write's own transaction — so both modes reject the same writes.
-	if !gate.SectionStarted {
+	if !gate.SectionStarted && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section has not started.", HTTPStatus: 422}
 	}
 	if gate.SectionPaused {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is paused.", HTTPStatus: 422}
 	}
-	if !gate.SectionLive && !closingGraceActive {
+	if !gate.SectionLive && !closingGraceActive && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is not live.", HTTPStatus: 422}
 	}
 	if a.ClosingGraceUntil != nil && now.After(*a.ClosingGraceUntil) {
@@ -632,21 +636,30 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 // distinct message so adaptive-branch bypass attempts are distinguishable
 // from ordinary inactive-module writes; section mismatch stays BAD_REQUEST.
 func ensureQuestionAdmitted(owner QuestionOwner, gate RuntimeGate, questionID string) error {
+	return ensureQuestionAdmittedForProvider(owner, gate, questionID, "")
+}
+
+func ensureQuestionAdmittedForProvider(owner QuestionOwner, gate RuntimeGate, questionID, provider string) error {
 	if owner.ModuleState == "unassigned" {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Question is not in an assigned module for this attempt.", HTTPStatus: 422, Details: map[string]any{"questionId": questionID}}
 	}
 	if owner.ModuleState != "active" && owner.ModuleState != "review" {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Question module is not active.", HTTPStatus: 422}
 	}
+	if provider == string(ProviderSAT) && owner.ModuleDeadlineAt == nil {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT module deadline is unavailable.", HTTPStatus: 422}
+	}
 	// The attempt deadline covers the shared SAT section clock. Module 1 can
 	// have a shorter personal clock, so enforce the effective module boundary
 	// here too; otherwise a fresh V2 write could slip in before the timeout
 	// worker terminalizes the module.
-	if owner.ModuleDeadlineAt != nil && !gate.Now.Before(*owner.ModuleDeadlineAt) {
+	satClosing := provider == string(ProviderSAT) && owner.ModuleDeadlineAt != nil &&
+		!gate.Now.Before(*owner.ModuleDeadlineAt) && gate.Now.Before(owner.ModuleDeadlineAt.Add(SATSaveGrace))
+	if owner.ModuleDeadlineAt != nil && !gate.Now.Before(*owner.ModuleDeadlineAt) && !satClosing {
 		telemetry.IncCounter(telemetry.MSATResponseWriteAfterTerminal)
 		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
-	if gate.ActiveSectionKey != "*" && gate.ActiveSectionKey != "" && owner.SectionKey != gate.ActiveSectionKey {
+	if gate.ActiveSectionKey != "*" && gate.ActiveSectionKey != "" && owner.SectionKey != gate.ActiveSectionKey && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Question is not in the active section.", HTTPStatus: 400}
 	}
 	return nil

@@ -206,14 +206,17 @@ function mathModuleOneRouted(): AssessmentDeliveryBootstrap {
   ]);
 }
 
-function moduleState(moduleKey: string, questionId: string) {
+function moduleState(moduleId: string, questionId: string) {
   return {
     phase: "module" as const,
     scheduleId: "schedule-1",
     candidateId: "candidate-1",
     assessmentId: "exam-1",
     sectionKey: "math",
-    moduleKey,
+    // The mock carries the authoritative id exactly like the production
+    // runner state (SatWorkingState.moduleId); see findStateModule below.
+    moduleId,
+    moduleKey: moduleId,
     questionIds: [questionId],
     questionIndex: 0,
     responses: {
@@ -265,8 +268,14 @@ interface SeedOptions {
   isStarting?: boolean;
 }
 
-function findModule(data: AssessmentDeliveryBootstrap, moduleKey: string) {
-  return data.sections.flatMap((section) => section.modules).find((module) => module.moduleKey === moduleKey) ?? null;
+/**
+ * Test scaffolding that mirrors the production lookup direction
+ * (useSatExamController: candidate.id === state.moduleId). Resolving by
+ * moduleKey here would reintroduce the exact ambiguity the adaptive
+ * runtime eliminated: two branches may share one business key.
+ */
+function findStateModule(data: AssessmentDeliveryBootstrap, moduleId: string) {
+  return data.sections.flatMap((section) => section.modules).find((module) => module.id === moduleId) ?? null;
 }
 
 function findSection(data: AssessmentDeliveryBootstrap, moduleId: string) {
@@ -279,8 +288,8 @@ function seed(
   options: SeedOptions = {},
 ) {
   const commands = baseCommands();
-  const moduleKey = typeof state.moduleKey === "string" ? state.moduleKey : null;
-  const stateModule = moduleKey ? findModule(data, moduleKey) : null;
+  const moduleId = typeof state.moduleId === "string" ? state.moduleId : null;
+  const stateModule = moduleId ? findStateModule(data, moduleId) : null;
   const stateModuleAttempt = stateModule
     ? data.attempt.moduleAttempts.find((attempt) => attempt.moduleId === stateModule.id)
     : undefined;

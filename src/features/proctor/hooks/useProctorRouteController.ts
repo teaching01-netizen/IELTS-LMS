@@ -24,7 +24,11 @@ import type {
 import type { ExamSchedule, ExamSessionRuntime } from "../../../types/domain";
 import type { ProctorPresence } from "../../../types/domain";
 import type { ProctorScheduleMetrics } from "../contracts";
-import { mergeProctorRuntime, runtimeProjectionSupersedes } from "../domain/mergeProctorRuntime";
+import {
+  mergeProctorRuntime,
+  mergeSessionProjection,
+  runtimeProjectionSupersedes,
+} from "../domain/mergeProctorRuntime";
 
 function mapBackendSessionSummary(payload: {
   attemptId: string;
@@ -45,6 +49,10 @@ function mapBackendSessionSummary(payload: {
   runtimeModuleDeadlineAt?: string | null | undefined;
   runtimeModuleRemainingSeconds?: number | null | undefined;
   runtimeSectionStatus?: StudentSession["runtimeSectionStatus"] | null | undefined;
+  attemptRevision?: number | null | undefined;
+  runtimeCurrentModuleId?: string | null | undefined;
+  runtimeModuleAttemptId?: string | null | undefined;
+  runtimeModuleAttemptRevision?: number | null | undefined;
   runtimeWaiting: boolean;
   violations: StudentSession["violations"];
   warnings: number;
@@ -74,6 +82,13 @@ function mapBackendSessionSummary(payload: {
     runtimeModuleRole: payload.runtimeModuleRole ?? payload.runtimeCurrentModuleRole ?? null,
     runtimeModuleDeadlineAt: payload.runtimeModuleDeadlineAt ?? null,
     runtimeModuleRemainingSeconds: payload.runtimeModuleRemainingSeconds ?? null,
+    // Runtime identity fence: the module the candidate is actually sitting is
+    // carried by these three fields (attempt revision + active module attempt),
+    // not by the presence heartbeat.
+    attemptRevision: payload.attemptRevision ?? null,
+    runtimeCurrentModuleId: payload.runtimeCurrentModuleId ?? null,
+    runtimeModuleAttemptId: payload.runtimeModuleAttemptId ?? null,
+    runtimeModuleAttemptRevision: payload.runtimeModuleAttemptRevision ?? null,
     runtimeSectionStatus: payload.runtimeSectionStatus ?? undefined,
     runtimeWaiting: payload.runtimeWaiting,
     violations: payload.violations ?? [],
@@ -496,10 +511,13 @@ export function useProctorRouteController(
         return [...bySchedule.values()];
       });
 
-      // Revision-guarded session merge: a WS runtime_snapshot arriving
-      // between poll and apply must not be clobbered by older poll data.
-      // Merge by id, keeping the entry with the newer lastActivity; the WS
-      // path only ever advances revisions (see handleRuntimeSnapshot).
+      // Identity- and revision-guarded session merge: a WS runtime_snapshot
+      // arriving between poll and apply must not be clobbered by older poll
+      // data, and an older poll response must never regress the adaptive module
+      // the newer one reported. Precedence is attempt revision -> active module
+      // attempt revision -> read stamp (see sessionProjectionSupersedes);
+      // `lastActivity` decides nothing here — two projections of one candidate
+      // can share a heartbeat instant and still describe different modules.
       setSessions((current) => {
         const incoming = filteredDetails
           .flatMap((detail) => detail.sessions)
@@ -515,7 +533,7 @@ export function useProctorRouteController(
             return existing;
           }
           incomingById.delete(existing.id);
-          return next.lastActivity >= existing.lastActivity ? next : existing;
+          return mergeSessionProjection(existing, next);
         });
         return [...merged, ...incomingById.values()].sort(sortSessionsByLastActivity);
       });

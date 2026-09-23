@@ -218,8 +218,35 @@ describe('SAT V2 response persistence integration', () => {
     act(() => hook.result.current.save({ ...draft, answer: '12.5' }, { ...context, interactionType: 'typing' }));
     await waitFor(() => expect(acceptResponse).toHaveBeenCalledTimes(2));
     expect(acceptResponse.mock.calls[1]?.[2]).toEqual({ drainImmediately: false });
+    act(() => hook.result.current.save({ ...draft, answer: '12.50' }, { ...context, remainingSeconds: 5, interactionType: 'typing' }));
+    await waitFor(() => expect(acceptResponse).toHaveBeenCalledTimes(3));
+    expect(acceptResponse.mock.calls[2]?.[2]).toEqual({ drainImmediately: true });
     hook.unmount();
     acceptResponse.mockRestore();
+  });
+
+  it('identifies an answer refused after the SAT save window', async () => {
+    mocks.transport.fetchSnapshot.mockReset().mockResolvedValue([]);
+    mocks.transport.sendBatch.mockReset().mockRejectedValue({ code: 'DEADLINE_EXPIRED' });
+    const hook = renderHook(() => useSatResponsePersistence({
+      scheduleId: 'schedule', attemptId: 'attempt-expired', gateway: gateway(), onSavedRevision: vi.fn(),
+    }));
+    await waitFor(() => expect(mocks.transport.fetchSnapshot).toHaveBeenCalled());
+    act(() => hook.result.current.save({
+      questionId: 'q1', answer: 'final answer', markedForReview: false,
+      eliminatedOptionIds: [], annotations: { version: 2, annotations: [], legacyQuestionNote: '' },
+    }));
+    await waitFor(() => expect(hook.result.current.failureKind).toBe('expired'));
+    expect(hook.result.current.failure).toMatch(/contact your proctor/i);
+    await waitFor(() => expect(hook.result.current.tombstoneCount).toBeGreaterThan(0));
+    expect(window.localStorage.getItem('response-checkpoint:v2:attempt-expired:q1')).toContain('final answer');
+    hook.unmount();
+
+    const reopened = renderHook(() => useSatResponsePersistence({
+      scheduleId: 'schedule', attemptId: 'attempt-expired', gateway: gateway(), onSavedRevision: vi.fn(),
+    }));
+    await waitFor(() => expect(reopened.result.current.tombstoneCount).toBeGreaterThan(0));
+    reopened.unmount();
   });
 
   it('surfaces blocked drafts as visible + retryable exam-stress-safe failure and gates submit', async () => {

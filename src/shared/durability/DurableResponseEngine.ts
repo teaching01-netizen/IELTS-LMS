@@ -2610,6 +2610,7 @@ export class DurableResponseEngine {
       code === "VERSION_COLLISION" ||
       code === "IDEMPOTENCY_KEY_REUSED" ||
       code === "ATTEMPT_NOT_WRITABLE" ||
+      code === "DEADLINE_EXPIRED" ||
       code === "QUESTION_NOT_IN_ATTEMPT" ||
       code === "INVALID_RESPONSE" ||
       code === "PROTOCOL_VERSION_UNSUPPORTED" ||

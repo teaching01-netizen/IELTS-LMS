@@ -40,10 +40,12 @@ func TestReconcileCompleterFailureEmitsAndRetries(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM student_attempts WHERE id").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", "completed", "legacy_section_v1", nil))
+	mock.ExpectQuery("SELECT UTC_TIMESTAMP").
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	// One active expired module (runtime completed expires everything).
 	mock.ExpectQuery("FROM assessment_module_attempts WHERE attempt_id = ").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}).

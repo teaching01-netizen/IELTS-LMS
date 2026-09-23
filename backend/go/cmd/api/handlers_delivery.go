@@ -44,18 +44,24 @@ func deliveryBootstrapInner(app *App, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		urlScheduleID := chi.URLParam(r, "scheduleID")
-		// Plan D1: conditional read — 2 indexed probes before assembly.
-		if _, _, etag, terr := app.Delivery.VersionTag(r.Context(), urlScheduleID); terr == nil {
-			if writeETagOrNotModified(w, r, etag) {
-				return
-			}
-		}
+		// NO conditional read here. The bootstrap payload is a LIVE attempt
+		// projection — module attempts, the adaptive Higher/Lower route,
+		// responses, timers, proctor state, result — while the only cache
+		// validator available is the published exam version
+		// (W/"v{versionId}-{revision}"). Routing a candidate from Module 1 into
+		// Module 2 Higher does not touch the published version, so a
+		// version-scoped 304 kept answering "nothing changed" and the client
+		// rehydrated the pre-routing module. Exam-version caching belongs to the
+		// genuinely immutable static content tree (loadSections / authored plan),
+		// never to attempt state: the assembly below always runs so the response
+		// can never be older than the routing decision it must report.
 		out, err := app.Delivery.Bootstrap(r.Context(), claims.ScheduleID, claims.AttemptID, urlScheduleID)
 		if err != nil {
 			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
-		w.Header().Set("ETag", delivery.VersionETag(out.VersionID, out.VersionRevision))
+		// Attempt-state read: safe to re-send, never safe to reuse.
+		w.Header().Set("Cache-Control", "no-store")
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
 }

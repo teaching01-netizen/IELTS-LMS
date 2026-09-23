@@ -121,3 +121,35 @@ MAX_CONCURRENT_USERS=20 \\
 LIVE_MODE=balanced \\
 bun run e2e:live-runner
 ```
+
+## Live SAT Runner (Access-Link + continuous answering)
+
+Same monitor grid (`live-dashboard-server.ts`), SAT-shaped entry + answering.
+Bots join via the SAT Student Link (`/join/:accessLinkId`), wait for the
+proctor to start, then keep answering (radios cycle, SPR textbox fill, Next
+question loop) across module handoffs and the scheduled break until
+`SAT Complete`.
+
+```bash
+SAT_JOIN_URL="https://your-host/join/<accessLinkId>" \\
+USERS_FILE="e2e/prod-load/live-users.sat.example.csv" \\
+USER_COUNT=3 \\
+DASHBOARD_PORT=3333 \\
+MAX_CONCURRENT_USERS=10 \\
+HEADLESS=true \\
+HEADED_USERS=0 \\
+EXAM_TIMEOUT_MS=9000000 \\
+bun run e2e:live-sat-runner
+```
+
+Open dashboard:
+
+```txt
+http://localhost:3333
+```
+
+Required envs:
+- `SAT_JOIN_URL` (`REGISTER_URL` accepted as fallback)
+- `USERS_FILE` (`userId,email,password,candidateId` — `candidateId` is the student code on `student_code` links)
+
+Optional envs: same as IELTS runner, plus `EXAM_TIMEOUT_MS` (default `9000000` = 150 min for a full SAT).

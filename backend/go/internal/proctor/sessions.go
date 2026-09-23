@@ -216,15 +216,29 @@ type StudentSessionSummary struct {
 	// publish a deadline for the client to tick from; a paused module publishes
 	// its frozen remainder and no deadline, and a module that never started
 	// publishes neither.
-	RuntimeModuleDeadlineAt       *time.Time      `json:"runtimeModuleDeadlineAt"`
-	RuntimeModuleRemainingSeconds *int            `json:"runtimeModuleRemainingSeconds"`
-	RuntimeSectionStatus          *string         `json:"runtimeSectionStatus"`
-	RuntimeWaiting                bool            `json:"runtimeWaiting"`
-	Violations                    json.RawMessage `json:"violations"`
-	Warnings                      int             `json:"warnings"`
-	LastActivity                  time.Time       `json:"lastActivity"`
-	ExamID                        string          `json:"examId"`
-	ExamName                      string          `json:"examName"`
+	RuntimeModuleDeadlineAt       *time.Time `json:"runtimeModuleDeadlineAt"`
+	RuntimeModuleRemainingSeconds *int       `json:"runtimeModuleRemainingSeconds"`
+	// Runtime identity fence (SAT adaptive routing). Heartbeat/`lastActivity`
+	// orders presence, not exam state: two projections of one candidate can
+	// share a heartbeat instant while describing different adaptive modules, so
+	// the roster needs the authoritative attempt + module-attempt identities and
+	// their revisions to decide which projection wins. `AttemptRevision` is
+	// student_attempts.revision (monotonic per attempt); the module fields are
+	// the active assessment_module_attempts row (id, module id, revision,
+	// adaptive role) — the same row the delivery service and the final result
+	// read, so staff, student and result cannot disagree about which Module 2
+	// the candidate is sitting.
+	RuntimeAttemptRevision       *int64          `json:"attemptRevision"`
+	RuntimeCurrentModuleID       *string         `json:"runtimeCurrentModuleId"`
+	RuntimeModuleAttemptID       *string         `json:"runtimeModuleAttemptId"`
+	RuntimeModuleAttemptRevision *int            `json:"runtimeModuleAttemptRevision"`
+	RuntimeSectionStatus         *string         `json:"runtimeSectionStatus"`
+	RuntimeWaiting               bool            `json:"runtimeWaiting"`
+	Violations                   json.RawMessage `json:"violations"`
+	Warnings                     int             `json:"warnings"`
+	LastActivity                 time.Time       `json:"lastActivity"`
+	ExamID                       string          `json:"examId"`
+	ExamName                     string          `json:"examName"`
 }
 
 // ProctorAlert mirrors Rust ProctorAlert (camelCase; "type" is the JSON key).
@@ -1020,6 +1034,9 @@ type studentSessionRow struct {
 	satModuleTitle, satModuleKey, satModuleRole                sql.NullString
 	satStartedAt, satPausedAt                                  sql.NullTime
 	satAllocated, satExtension, satAccum                       sql.NullInt64
+	attemptRevision                                            int64
+	satModuleAttemptID, satModuleID                            sql.NullString
+	satModuleAttemptRevision                                   sql.NullInt64
 }
 
 // studentSessionColumns mirrors Rust load_student_sessions (explicit list).
@@ -1031,7 +1048,8 @@ const studentSessionColumns = "sa.id, sa.candidate_id, sa.candidate_name, sa.can
 	"e.provider_key, " +
 	"sat_module.title, sat_module.module_key, sat_module.adaptive_role, " +
 	"sat_attempt.started_at, sat_attempt.paused_at, " +
-	"sat_attempt.allocated_seconds, sat_attempt.extension_seconds, sat_attempt.accumulated_paused_seconds"
+	"sat_attempt.allocated_seconds, sat_attempt.extension_seconds, sat_attempt.accumulated_paused_seconds, " +
+	"sa.revision, sat_attempt.id, sat_attempt.module_id, sat_attempt.revision"
 
 const studentSessionFrom = "FROM student_attempts sa " +
 	"JOIN exam_entities e ON e.id = sa.exam_id " +
@@ -1055,6 +1073,7 @@ func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSes
 		&r.satModuleTitle, &r.satModuleKey, &r.satModuleRole,
 		&r.satStartedAt, &r.satPausedAt,
 		&r.satAllocated, &r.satExtension, &r.satAccum,
+		&r.attemptRevision, &r.satModuleAttemptID, &r.satModuleID, &r.satModuleAttemptRevision,
 	); err != nil {
 		return studentSessionRow{}, err
 	}
@@ -1237,6 +1256,12 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 	var moduleDeadline *time.Time
 	var moduleRemaining *int
 	var moduleRole *string
+	// Runtime identities ride the same sat_attempt join the role does: the
+	// module ATTEMPT id, the module ID the adaptive route selected, and the
+	// attempt/module-attempt revisions the client orders projections by.
+	var runtimeCurrentModuleID *string
+	var runtimeModuleAttemptID *string
+	var runtimeModuleAttemptRevision *int
 	if isSAT {
 		alloc, ext, acc := satModuleInts(row)
 		moduleDeadline, moduleRemaining = satModuleClock(
@@ -1244,6 +1269,18 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		if row.satModuleRole.Valid && strings.TrimSpace(row.satModuleRole.String) != "" {
 			role := strings.TrimSpace(row.satModuleRole.String)
 			moduleRole = &role
+		}
+		if row.satModuleAttemptID.Valid && strings.TrimSpace(row.satModuleAttemptID.String) != "" {
+			id := strings.TrimSpace(row.satModuleAttemptID.String)
+			runtimeModuleAttemptID = &id
+		}
+		if row.satModuleID.Valid && strings.TrimSpace(row.satModuleID.String) != "" {
+			id := strings.TrimSpace(row.satModuleID.String)
+			runtimeCurrentModuleID = &id
+		}
+		if row.satModuleAttemptRevision.Valid {
+			rev := int(row.satModuleAttemptRevision.Int64)
+			runtimeModuleAttemptRevision = &rev
 		}
 		if !cohortTimedSAT {
 			timeRemaining = satAttemptRemaining(nullTimePtr(row.satStartedAt), nullTimePtr(row.satPausedAt), alloc, ext, acc, runtime.ServerNow)
@@ -1299,6 +1336,7 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		violations = json.RawMessage(row.violations.String)
 	}
 	serverNow := runtime.ServerNow
+	attemptRevision := row.attemptRevision
 	return StudentSessionSummary{
 		AttemptID:                     row.id,
 		StudentID:                     row.candidateID,
@@ -1316,6 +1354,10 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		RuntimeCurrentModuleRole:      moduleRole,
 		RuntimeModuleDeadlineAt:       moduleDeadline,
 		RuntimeModuleRemainingSeconds: moduleRemaining,
+		RuntimeAttemptRevision:        &attemptRevision,
+		RuntimeCurrentModuleID:        runtimeCurrentModuleID,
+		RuntimeModuleAttemptID:        runtimeModuleAttemptID,
+		RuntimeModuleAttemptRevision:  runtimeModuleAttemptRevision,
 		RuntimeSectionStatus:          sectionStatus,
 		RuntimeWaiting:                runtimeWaiting,
 		Violations:                    violations,

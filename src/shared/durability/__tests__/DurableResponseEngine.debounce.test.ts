@@ -58,6 +58,27 @@ it('lets discrete response changes preempt the typing debounce', async () => {
   }
 });
 
+it('keeps a refused final answer visible instead of retrying past the SAT deadline', async () => {
+  const transport: TransportClient = {
+    fetchSnapshot: vi.fn().mockResolvedValue([]),
+    submit: vi.fn(),
+    sendBatch: vi.fn().mockRejectedValue({ code: 'DEADLINE_EXPIRED' }),
+  };
+  const engine = new DurableResponseEngine({
+    scheduleId: 'deadline', attemptId: 'deadline', leaseEpoch: 1, controlEpoch: 1, transport,
+  });
+  try {
+    await engine.acceptResponse('q', { answer: 'last edit', markedForReview: false, eliminatedOptions: [], annotations: [] });
+    await engine.flush();
+    expect(engine.getStatus()).toBe('conflict_terminal');
+    expect(engine.getQuarantined()).toHaveLength(1);
+    expect(engine.getStates().get('q')?.pending?.payload.answer).toBe('last edit');
+    expect(transport.sendBatch).toHaveBeenCalledTimes(1);
+  } finally {
+    engine.destroy();
+  }
+});
+
 it('listens for visibilitychange on document and removes the listener on destroy', async () => {
   const transport: TransportClient = {
     fetchSnapshot: vi.fn().mockResolvedValue([]), submit: vi.fn(), sendBatch: vi.fn(),

@@ -44,6 +44,42 @@ function selectionIntersects(root: HTMLElement, selection: Selection | null): bo
     || (selection.focusNode !== null && root.contains(selection.focusNode));
 }
 
+function selectionEndpointOrigin(node: Node | null | undefined, root: HTMLElement | null): string {
+  if (!node) return 'null';
+  const element = node instanceof Element ? node : node.parentElement;
+  if (!element) return 'other';
+  if (element.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return 'editable';
+  if (element.closest('[data-selection-loupe-source]')) return 'loupe-clone';
+  if (element.closest('[data-student-selection-handle]')) return 'handle';
+  if (element.closest('[data-selection-action-menu]')) return 'toolbar';
+  if (element.closest('[data-selection-floating-layer], [data-selection-loupe], [data-selection-loupe-content]')) return 'floating-layer';
+  if (root && root.contains(node)) return 'source-root';
+  if (element === document.body) return 'body';
+  return 'other';
+}
+
+function selectionIntersectsV2Layer(selection: Selection | null): boolean {
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+  const inside = (node: Node | null): boolean => {
+    const element = node instanceof Element ? node : node?.parentElement;
+    return element?.closest(
+      '[data-selection-floating-layer], [data-selection-loupe-source], [data-selection-loupe-content], [data-selection-loupe], [data-student-selection-handle]',
+    ) != null;
+  };
+  if (inside(selection.anchorNode) || inside(selection.focusNode)) return true;
+  const layers = document.querySelectorAll('[data-selection-floating-layer], [data-selection-loupe-source]');
+  for (const layer of layers) {
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      try {
+        if (selection.getRangeAt(index).intersectsNode(layer)) return true;
+      } catch {
+        // Detached ranges are not relevant to this surface.
+      }
+    }
+  }
+  return false;
+}
+
 function selectionRootForEvent(event: Event): HTMLElement | null {
   const target = event.target instanceof Element
     ? event.target
@@ -148,7 +184,13 @@ export function useStudentTouchSelectionDiagnostics(
         } else if (event.type === 'selectionchange') {
           const root = rootRef.current;
           if (!root || root.getAttribute('data-sat-selection-protected') !== 'true') return false;
-          if (!selectionIntersects(root, window.getSelection()) && pointerId === null && root.getAttribute('data-student-selection-owner') !== 'app') return false;
+          // Loupe-originated selections must NOT be filtered out: the clone lives
+          // outside the SAT root, so `selectionIntersects(root)` is false for
+          // exactly the leak this diagnostics exists to catch.
+          const selection = window.getSelection();
+          const inRoot = selectionIntersects(root, selection);
+          const inLayer = selectionIntersectsV2Layer(selection);
+          if (!inRoot && !inLayer && pointerId === null && root.getAttribute('data-student-selection-owner') !== 'app') return false;
         } else if (pointerEvent && (pointerId === null || pointerIdForEvent !== pointerId)) return false;
         else if (!pointerEvent) return false;
         const root = rootRef.current;
@@ -181,6 +223,16 @@ export function useStudentTouchSelectionDiagnostics(
           nativeSelectionCollapsed: nativeSelection?.isCollapsed ?? null,
           nativeAnchorInsideSatRoot: !!root && root.getAttribute('data-sat-selection-protected') === 'true' && nodeInside(root, nativeSelection?.anchorNode),
           nativeFocusInsideSatRoot: !!root && root.getAttribute('data-sat-selection-protected') === 'true' && nodeInside(root, nativeSelection?.focusNode),
+          nativeAnchorOrigin: selectionEndpointOrigin(nativeSelection?.anchorNode, rootRef.current),
+          nativeFocusOrigin: selectionEndpointOrigin(nativeSelection?.focusNode, rootRef.current),
+          nativeIntersectsSelectionV2Layer: selectionIntersectsV2Layer(nativeSelection),
+          nativeRangeTextLength: Array.from({ length: nativeSelection?.rangeCount ?? 0 }, (_, index) => {
+            try {
+              return nativeSelection?.getRangeAt(index).toString().length ?? 0;
+            } catch {
+              return 0;
+            }
+          }).reduce((total, length) => total + length, 0),
         });
         if (event.type === 'pointerup' || event.type === 'pointercancel') pointerId = null;
         return true;
@@ -236,6 +288,9 @@ export function StudentTouchSelectionDiagnosticsProvider({ children, enabled }: 
         nativeFocusInsideSatRoot: !!surfaceRoot && surfaceRoot.getAttribute('data-sat-selection-protected') === 'true' && nodeInside(surfaceRoot, selection?.focusNode),
         nativeAnchorInsideSelectionRoot: !!surfaceRoot && nodeInside(surfaceRoot, selection?.anchorNode),
         nativeFocusInsideSelectionRoot: !!surfaceRoot && nodeInside(surfaceRoot, selection?.focusNode),
+        nativeAnchorOrigin: selectionEndpointOrigin(selection?.anchorNode, surfaceRoot),
+        nativeFocusOrigin: selectionEndpointOrigin(selection?.focusNode, surfaceRoot),
+        nativeIntersectsSelectionV2Layer: selectionIntersectsV2Layer(selection),
       });
       if (store.documentEvents.length > 120) store.documentEvents.splice(40, 1);
       for (const [id, trace] of store.surfaces) {

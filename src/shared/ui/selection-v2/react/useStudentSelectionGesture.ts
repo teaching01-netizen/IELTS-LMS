@@ -256,6 +256,83 @@ function nativeSelectionIntersectsRoot(selection: Selection, root: HTMLElement):
     || (selection.focusNode !== null && root.contains(selection.focusNode));
 }
 
+type NativeEndpointOrigin =
+  | 'source-root'
+  | 'loupe-clone'
+  | 'floating-layer'
+  | 'handle'
+  | 'toolbar'
+  | 'editable'
+  | 'body'
+  | 'other'
+  | 'null';
+
+function elementForNativeNode(node: Node | null): Element | null {
+  if (!node) return null;
+  if (node instanceof Element) return node;
+  return node.parentElement;
+}
+
+/**
+ * Where a native selection endpoint actually lives.
+ *
+ * The old breaker only asked "inside the SAT root?", so a Range anchored in
+ * the loupe's DOM clone — real text, outside the root, inside the top layer —
+ * was ignored and the iOS menu survived. Classification order matters:
+ * editable first (preserved), then the synthetic presentation markers, then
+ * the source root, so one exported trace answers `anchorOrigin = loupe`.
+ */
+function classifyNativeEndpoint(node: Node | null, root: HTMLElement): NativeEndpointOrigin {
+  if (!node) return 'null';
+  const element = elementForNativeNode(node);
+  if (!element) return 'other';
+  if (element.closest(EDITABLE_SELECTOR)) return 'editable';
+  if (element.closest('[data-selection-loupe-source]')) return 'loupe-clone';
+  if (element.closest('[data-student-selection-handle]')) return 'handle';
+  if (element.closest('[data-selection-action-menu]')) return 'toolbar';
+  if (element.closest('[data-selection-floating-layer], [data-selection-loupe], [data-selection-loupe-content]')) {
+    return 'floating-layer';
+  }
+  if (root.contains(node)) return 'source-root';
+  if (element === document.body || element.closest('body') === null) return 'body';
+  if (node === document.body || elementForNativeNode(node.parentElement) === null) return 'body';
+  return 'other';
+}
+
+/**
+ * Whether a native selection touches Selection-v2's own synthetic DOM.
+ *
+ * Covers the floating layer, loupe chrome, loupe clone, and handles — the
+ * second text surface that is no longer under the source root's protection
+ * once its `data-*` identity is stripped. Endpoint containment is the primary
+ * signal (a loupe-anchored Range has both endpoints there); `intersectsNode`
+ * covers a Range that merely spans the layer.
+ */
+function nativeSelectionIntersectsSelectionV2Layer(selection: Selection): boolean {
+  if (selection.isCollapsed || selection.rangeCount === 0) return false;
+  const endpointInside = (node: Node | null): boolean => {
+    const element = elementForNativeNode(node);
+    return element?.closest(
+      '[data-selection-floating-layer], [data-selection-loupe-source], [data-selection-loupe-content], [data-selection-loupe], [data-student-selection-handle]',
+    ) != null;
+  };
+  if (endpointInside(selection.anchorNode) || endpointInside(selection.focusNode)) return true;
+  if (typeof document === 'undefined') return false;
+  const layers = document.querySelectorAll(
+    '[data-selection-floating-layer], [data-selection-loupe-source]',
+  );
+  for (const layer of layers) {
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      try {
+        if (selection.getRangeAt(index).intersectsNode(layer)) return true;
+      } catch {
+        // A stale range is not evidence of a leak.
+      }
+    }
+  }
+  return false;
+}
+
 interface PointerRecord {
   x: number;
   y: number;
@@ -1076,13 +1153,35 @@ export function useStudentSelectionGesture(
     const root = rootRef.current;
     if (!root || !isSatSelectionRoot(root) || root.getAttribute('data-student-selection-owner') !== 'app') return;
     const nativeSelection = window.getSelection();
-    if (!nativeSelection || !nativeSelectionIntersectsRoot(nativeSelection, root)) return;
+    if (!nativeSelection || nativeSelection.isCollapsed || nativeSelection.rangeCount === 0) return;
+    // Legitimate native selection in answer fields and note editors is never killed.
     if (defaultIsExcludedTarget(nativeSelection.anchorNode) || defaultIsExcludedTarget(nativeSelection.focusNode)) return;
+    const anchorOrigin = classifyNativeEndpoint(nativeSelection.anchorNode, root);
+    const focusOrigin = classifyNativeEndpoint(nativeSelection.focusNode, root);
+    // Editable endpoints were already returned above; a second check keeps the
+    // classifier's answer authoritative if exclusion rules ever diverge.
+    if (anchorOrigin === 'editable' || focusOrigin === 'editable') return;
+    const intersectsRoot = nativeSelectionIntersectsRoot(nativeSelection, root);
+    const intersectsLayer = nativeSelectionIntersectsSelectionV2Layer(nativeSelection);
+    if (!intersectsRoot && !intersectsLayer) return;
+    const customRange = ensureSession().range();
+    const anchorElement = elementForNativeNode(nativeSelection.anchorNode);
+    const anchorStyle = anchorElement && typeof getComputedStyle === 'function'
+      ? getComputedStyle(anchorElement)
+      : null;
     const details = {
       nativeRangeCount: nativeSelection.rangeCount,
       nativeSelectionCollapsed: nativeSelection.isCollapsed,
       anchorInsideSatRoot: nativeSelection.anchorNode !== null && root.contains(nativeSelection.anchorNode),
       focusInsideSatRoot: nativeSelection.focusNode !== null && root.contains(nativeSelection.focusNode),
+      anchorOrigin,
+      focusOrigin,
+      intersectsProtectedRoot: intersectsRoot,
+      intersectsSelectionV2Layer: intersectsLayer,
+      phase: ensureSession().phase(),
+      customRangeExists: !!customRange && !customRange.collapsed,
+      customRangeTextLength: customRange?.toString().length ?? 0,
+      loupeOpen: typeof document !== 'undefined' && document.querySelector('[data-selection-loupe-source]') !== null,
       nativeRangeTextLength: Array.from({ length: nativeSelection.rangeCount }, (_, index) => {
         try {
           return nativeSelection.getRangeAt(index).toString().length;
@@ -1090,12 +1189,13 @@ export function useStudentSelectionGesture(
           return 0;
         }
       }).reduce((total, length) => total + length, 0),
-      customRangeTextLength: ensureSession().range()?.toString().length ?? 0,
       ownerMarkerPresent: true,
       pointerType: lastPointer.current?.pointerType ?? null,
       userSelect: getComputedStyle(root).userSelect,
       webkitUserSelect: getComputedStyle(root).getPropertyValue('-webkit-user-select'),
       touchAction: getComputedStyle(root).touchAction,
+      anchorComputedUserSelect: anchorStyle?.getPropertyValue('user-select') ?? null,
+      anchorComputedWebkitUserSelect: anchorStyle?.getPropertyValue('-webkit-user-select') ?? null,
       visualViewport: typeof window.visualViewport === 'undefined' || !window.visualViewport
         ? null
         : { width: window.visualViewport.width, height: window.visualViewport.height, scale: window.visualViewport.scale },
@@ -1117,6 +1217,30 @@ export function useStudentSelectionGesture(
     }
   }, [rootRef]);
 
+  /**
+   * iOS-specific event-level defense, scoped to owned SAT prose only.
+   *
+   * Pointer Events alone do not stop Safari's long-press selection recognizer;
+   * `touchstart` with `preventDefault()` does, but only when it runs in capture
+   * on the armed root and only for touches that begin on real selectable prose.
+   * Never on `document`, never for scrolling candidates outside
+   * `[data-content-text-node]`, never inside excluded/editable UI.
+   */
+  const preventNativeOwnedSelection = useCallback((event: Event) => {
+    const root = rootRef.current;
+    if (!root || !isSatSelectionRoot(root) || root.getAttribute('data-student-selection-owner') !== 'app') return;
+    if (!live.current.enabled || live.current.activation !== 'drag') return;
+    if (!(event.target instanceof Node) || !root.contains(event.target)) return;
+    if (live.current.isExcludedTarget(event.target)) return;
+    const element = event.target instanceof Element ? event.target : event.target.parentElement;
+    if (!element?.closest('[data-content-text-node]')) return;
+    if (event.cancelable) event.preventDefault();
+    live.current.diagnostics?.record('touchstart-suppressed', {
+      ownerMarkerPresent: true,
+      defaultPrevented: event.defaultPrevented,
+    });
+  }, [rootRef]);
+
   /* ------------------------------------------------------------------ *
    * Wiring.
    * ------------------------------------------------------------------ */
@@ -1131,6 +1255,7 @@ export function useStudentSelectionGesture(
     root?.addEventListener('pointerdown', handleDown);
     document.addEventListener('pointerdown', onDocumentPointerDown, true);
     root?.addEventListener('selectstart', onSatSelectStart, true);
+    root?.addEventListener('touchstart', preventNativeOwnedSelection, { capture: true, passive: false });
     document.addEventListener('selectionchange', onSatSelectionChange);
     document.addEventListener('keydown', onKeyboardSelectionStart, true);
 
@@ -1139,12 +1264,13 @@ export function useStudentSelectionGesture(
       root?.removeEventListener('pointerdown', handleDown);
       document.removeEventListener('pointerdown', onDocumentPointerDown, true);
       root?.removeEventListener('selectstart', onSatSelectStart, true);
+      root?.removeEventListener('touchstart', preventNativeOwnedSelection, { capture: true });
       document.removeEventListener('selectionchange', onSatSelectionChange);
       document.removeEventListener('keydown', onKeyboardSelectionStart, true);
       detachAll();
       setPresentation(IDLE_SELECTION);
     };
-  }, [detachAll, enabled, handleDown, onDocumentPointerDown, onKeyboardSelectionStart, onSatSelectStart, onSatSelectionChange, rootRef]);
+  }, [detachAll, enabled, handleDown, onDocumentPointerDown, onKeyboardSelectionStart, onSatSelectStart, onSatSelectionChange, preventNativeOwnedSelection, rootRef]);
 
   /**
    * Tell the browser, before any pointer lands, that armed SAT text belongs to

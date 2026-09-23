@@ -66,12 +66,16 @@ func runtimeSectionRows(seeds []sectionSeed) *sqlmock.Rows {
 
 // expectCandidateScan programmes the out-of-band candidate transaction: one
 // schedule with the given auto-submit posture.
-func expectCandidateScan(mock sqlmock.Sqlmock, asOf time.Time, scheduleID string, autoSubmit bool, limit int64) {
+func expectCandidateScan(mock sqlmock.Sqlmock, asOf time.Time, scheduleID string, autoSubmit bool, limit int64, providerKey ...string) {
+	provider := "act"
+	if len(providerKey) > 0 {
+		provider = providerKey[0]
+	}
 	mock.ExpectBegin()
 	mock.ExpectExec(setTimeZone).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(candidateQuery).
 		WithArgs(asOf, asOf, asOf, limit).
-		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "auto_submit"}).AddRow(scheduleID, autoSubmit))
+		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "auto_submit", "provider_key"}).AddRow(scheduleID, autoSubmit, provider))
 	mock.ExpectCommit()
 }
 
@@ -95,6 +99,28 @@ func expectScheduleTxOpen(mock sqlmock.Sqlmock, scheduleID, runtimeID, status, a
 	mock.ExpectQuery(sectionsLock).
 		WithArgs(runtimeID).
 		WillReturnRows(runtimeSectionRows(seeds))
+}
+
+func TestReconcileExpiredSATSectionWaitsForFinalSaves(t *testing.T) {
+	svc, mock, _ := newMockService(t)
+	base := time.Date(2026, 9, 14, 9, 0, 0, 0, time.UTC)
+	deadline := base.Add(64 * time.Minute)
+	asOf := deadline.Add(time.Second)
+	expectCandidateScan(mock, asOf, "sched-1", true, 10, "sat")
+	expectScheduleTxOpen(mock, "sched-1", "rt-1", "live", "reading-writing", false, false, 7, []sectionSeed{
+		{key: "reading-writing", order: 1, planned: 64, status: "live", startedAt: &base},
+		{key: "math", order: 2, planned: 35, status: "locked"},
+	})
+	mock.ExpectQuery("SELECT UTC_TIMESTAMP").
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(asOf))
+	mock.ExpectCommit()
+	outcomes, err := svc.ReconcileExpiredSections(context.Background(), asOf, 10, "test")
+	if err != nil || len(outcomes) != 0 {
+		t.Fatalf("SAT runtime must wait for final saves, outcomes=%+v err=%v", outcomes, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Gap N -> N+1 not yet elapsed: the section completes, the runtime enters the

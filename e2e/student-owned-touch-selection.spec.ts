@@ -1639,6 +1639,8 @@ test('the magnifier is a picture of the prose, not a second exam surface', async
     const passage = source.getBoundingClientRect();
     return {
       scale,
+      nativeSelectionPolicy: [source, document.querySelector<HTMLElement>('[data-selection-floating-layer]'), clone, ...clone.querySelectorAll<HTMLElement>('*')]
+        .map((element) => element ? getComputedStyle(element).getPropertyValue('-webkit-user-select') : null),
       // The centre of the lens: what the PICTURE is pointed at (a character
       // boundary the engine resolved) and where the column tick is painted. Read
       // from the lens's own box rather than from anything the component believes.
@@ -1721,6 +1723,8 @@ test('the magnifier is a picture of the prose, not a second exam surface', async
   // And there is prose inside the lens, not merely around it: the assertion that
   // fails loudly for a magnifier showing the student nothing at all.
   expect(geometry.textInLens).toBe(true);
+  expect(geometry.nativeSelectionPolicy.length).toBeGreaterThan(3);
+  expect(geometry.nativeSelectionPolicy.every((value) => value === 'none')).toBe(true);
 
   await gesture.finish();
   await expect(page.locator('[data-selection-loupe]')).toBeHidden();

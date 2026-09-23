@@ -19,7 +19,7 @@ export interface SatReviewPageProps {
   answeredCount: number;
   pendingSaveCount: number;
   saveFailure: string | null;
-  saveFailureKind: "offline" | "retryable" | "terminal" | "superseded" | null;
+  saveFailureKind: "offline" | "retryable" | "terminal" | "expired" | "superseded" | null;
   /** Current question index (0-based) for the "Back to question N" exit. */
   currentQuestionIndex?: number | undefined;
   timerVisible?: boolean | undefined;
@@ -49,7 +49,7 @@ export function SatReviewPage(props: SatReviewPageProps) {
   const saveMessage =
     props.saveFailureKind === "offline"
       ? SAT_COPY.review.saveOffline
-      : props.saveFailureKind === "retryable" || props.saveFailureKind === "terminal"
+      : props.saveFailureKind === "retryable" || props.saveFailureKind === "terminal" || props.saveFailureKind === "expired"
         ? props.saveFailure || SAT_COPY.review.saveFailed
         : props.saveFailureKind === "superseded"
           ? SAT_COPY.review.saveSuperseded

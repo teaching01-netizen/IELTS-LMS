@@ -362,7 +362,15 @@ export function SatStudentSessionRoute({
     lastValidFrameRef.current = null;
     return stageHost(
       stage,
-      <SatCompleteScreen result={data.result ?? result} onExit={onExit} />,
+      <SatCompleteScreen
+        result={data.result ?? result}
+        onExit={onExit}
+        saveIssue={
+          persistence.failureKind || persistence.pendingCount > 0 || persistence.tombstoneCount > 0
+            ? "Some answers on this device were not confirmed by the server before the result was produced. Please contact your proctor."
+            : null
+        }
+      />,
     );
   }
   if (stage.kind === "terminated") {
@@ -418,7 +426,7 @@ export function SatStudentSessionRoute({
           ? `prewarm:${prewarmEligibleModule.id}`
           : null));
   const persistenceInteractionBlocked =
-    persistence.failureKind === "superseded" || persistence.failureKind === "terminal";
+    persistence.failureKind === "superseded" || persistence.failureKind === "terminal" || persistence.failureKind === "expired";
   const calculatorDisabled = exam.blocked || exam.isSubmitting || persistenceInteractionBlocked;
   const calculatorHost = calculatorModuleAttemptId ? (
     <SatCalculatorPanel

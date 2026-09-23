@@ -23,6 +23,9 @@ var metricHelpText = map[string]string{
 	MSATResultQuestionDetailFailure: "Total SAT result question-detail reads that failed instead of returning an empty list.",
 	MSATTimeoutFinalize:             "Total SAT modules finalized by authoritative timeout reconciliation.",
 	MSATResponseReplayAfterTerminal: "Total exact SAT response replays served at or after the authoritative deadline.",
+	MSATAdaptiveIntegrityViolation:  "Total SAT adaptive-routing integrity violations where the recorded route decision and the administered module disagreed.",
+	MSATAdaptiveRouteTotal:          "Total SAT adaptive-routing decisions by section and selected route (higher vs lower).",
+	MSATAdaptiveModuleOpenTotal:     "Total SAT adaptive follow-up modules opened by adaptive role (higher_branch vs lower_branch).",
 	MV1MutationTotal:                "Total v1 mutation requests by outcome.",
 	MV1SubmitTotal:                  "Total v1 submit requests by outcome.",
 	MLeaseFencedTotal:               "Total v2 responses rejected by lease fencing.",
@@ -118,12 +121,26 @@ const (
 	MSATResultQuestionDetailFailure = "sat_result_question_detail_failure_total"
 	MSATTimeoutFinalize             = "sat_timeout_finalize_total"
 	MSATResponseReplayAfterTerminal = "sat_response_replay_after_terminal_total"
-	MV1MutationTotal                = "v1_mutation_requests_total"
-	MV1SubmitTotal                  = "v1_submit_requests_total"
-	MLeaseFencedTotal               = "v2_lease_fenced_total"
-	MControlStaleTotal              = "v2_control_epoch_stale_total"
-	MVersionCollTotal               = "v2_version_collision_total"
-	MSubmitReplayTotal              = "v2_submit_replay_total"
+	// MSATAdaptiveIntegrityViolation is the last-line fence counter for the SAT
+	// adaptive identity chain: assessment_route_decisions.selected_module_id must
+	// equal the administered branch module's id, and its selected_route must
+	// match that module's adaptive_role (higher <-> higher_branch, lower <->
+	// lower_branch). Expected production value: 0 — a non-zero sample means the
+	// authored tree and the recorded decision disagree, which no scoring, UI or
+	// cache fix can make safe. Label is the reason vocabulary only.
+	MSATAdaptiveIntegrityViolation = "sat_adaptive_integrity_violation_total"
+	// MSATAdaptiveRouteTotal counts every recorded adaptive-routing decision.
+	// Labels are the closed section/route vocabulary only (section, route).
+	MSATAdaptiveRouteTotal = "sat_adaptive_route_total"
+	// MSATAdaptiveModuleOpenTotal counts every adaptive follow-up module the
+	// router opens. Label is the authored adaptive role only (role).
+	MSATAdaptiveModuleOpenTotal = "sat_adaptive_module_open_total"
+	MV1MutationTotal            = "v1_mutation_requests_total"
+	MV1SubmitTotal              = "v1_submit_requests_total"
+	MLeaseFencedTotal           = "v2_lease_fenced_total"
+	MControlStaleTotal          = "v2_control_epoch_stale_total"
+	MVersionCollTotal           = "v2_version_collision_total"
+	MSubmitReplayTotal          = "v2_submit_replay_total"
 
 	MTerminalCreated  = "terminalization_created_total"
 	MTerminalReplay   = "terminalization_replay_total"
@@ -337,6 +354,9 @@ func Names() []string {
 		MSATResultQuestionDetailFailure,
 		MSATTimeoutFinalize,
 		MSATResponseReplayAfterTerminal,
+		MSATAdaptiveIntegrityViolation,
+		MSATAdaptiveRouteTotal,
+		MSATAdaptiveModuleOpenTotal,
 		MV1MutationTotal,
 		MV1SubmitTotal,
 		MLeaseFencedTotal,

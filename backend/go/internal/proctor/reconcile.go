@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"time"
 
+	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
-// sectionClosingGrace is the response-durability window that remains available
-// to writes already in flight when the shared section boundary is published.
-// The runtime itself advances at the authored deadline; this grace is no longer
-// used to delay the student break.
+// sectionClosingGrace is the existing overrun threshold when auto-advance is
+// disabled. SAT auto-advance separately waits SATSaveGrace before leaving the
+// active section, so its final response writes keep the same runtime epoch.
 const sectionClosingGrace = 30 * time.Second
 
 // autoSubmitExpr is the authored auto-submit flag. It is written once and
@@ -59,8 +59,9 @@ type reconcileRuntime struct {
 
 // sectionReconcileCandidate is one schedule selected by the candidate scan.
 type sectionReconcileCandidate struct {
-	scheduleID string
-	autoSubmit bool
+	scheduleID  string
+	autoSubmit  bool
+	providerKey string
 }
 
 // ReconcileExpiredSections advances live runtime sections at their database-clock
@@ -83,7 +84,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 	candidates := make([]sectionReconcileCandidate, 0)
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		rows, err := q.QueryContext(ctx, `
-			SELECT r.schedule_id, `+autoSubmitExpr+` = 'true'
+		SELECT r.schedule_id, `+autoSubmitExpr+` = 'true', COALESCE(r.provider_key, '')
 			FROM exam_session_runtimes r
 			JOIN exam_session_runtime_sections rs
 			  ON rs.runtime_id = r.id
@@ -93,8 +94,8 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 			WHERE r.status = 'live'
 			  AND r.active_section_key IS NOT NULL
 			  AND (
-					-- A live section at its deadline: advance immediately so the
-					-- authored break starts at the shared boundary.
+					-- The planner applies SATSaveGrace before advancing SAT; this
+					-- candidate scan may revisit it during the short save window.
 					(
 					  rs.status = 'live'
 					  AND rs.actual_start_at IS NOT NULL
@@ -131,7 +132,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 		defer rows.Close()
 		for rows.Next() {
 			var candidate sectionReconcileCandidate
-			if err := rows.Scan(&candidate.scheduleID, &candidate.autoSubmit); err != nil {
+			if err := rows.Scan(&candidate.scheduleID, &candidate.autoSubmit, &candidate.providerKey); err != nil {
 				return err
 			}
 			candidates = append(candidates, candidate)
@@ -144,7 +145,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 
 	outcomes := make([]AutoAdvanceOutcome, 0, len(candidates))
 	for _, candidate := range candidates {
-		revision, err := s.reconcileExpiredSchedule(ctx, candidate.scheduleID, candidate.autoSubmit, asOf, origin)
+		revision, err := s.reconcileExpiredSchedule(ctx, candidate.scheduleID, candidate.autoSubmit, candidate.providerKey, asOf, origin)
 		if err != nil {
 			return outcomes, err
 		}
@@ -155,7 +156,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 	return outcomes, nil
 }
 
-func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID string, autoSubmit bool, asOf time.Time, origin string) (*int64, error) {
+func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID string, autoSubmit bool, providerKey string, asOf time.Time, origin string) (*int64, error) {
 	var runtimeRevision *int64
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		// Global lock order: schedule -> attempts -> runtime -> sections. The
@@ -188,7 +189,15 @@ func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID strin
 		if err != nil {
 			return err
 		}
-		plan := planSectionAdvance(*runtime, sections, autoSubmit, asOf)
+		var saveGrace time.Duration
+		decisionAt := asOf
+		if providerKey == "sat" {
+			saveGrace = attempts.SATSaveGrace
+			if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&decisionAt); err != nil {
+				return err
+			}
+		}
+		plan := planSectionAdvance(*runtime, sections, autoSubmit, decisionAt, saveGrace)
 		if plan.activeSectionMissing {
 			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Active section row is missing.", HTTPStatus: 409}
 		}
@@ -263,7 +272,11 @@ type advancePlan struct {
 // The runtime keeps pointing at the completed section during the window so the
 // "section not live" write gate stays closed; `waiting` is the explicit second
 // signal for the student and proctor projections.
-func planSectionAdvance(runtime reconcileRuntime, locked []runtimeSection, autoSubmit bool, asOf time.Time) advancePlan {
+func planSectionAdvance(runtime reconcileRuntime, locked []runtimeSection, autoSubmit bool, asOf time.Time, saveGrace ...time.Duration) advancePlan {
+	var closingDelay time.Duration
+	if len(saveGrace) > 0 {
+		closingDelay = saveGrace[0]
+	}
 	var plan advancePlan
 	if runtime.activeSectionKey == nil || *runtime.activeSectionKey == "" {
 		return plan
@@ -312,10 +325,10 @@ func planSectionAdvance(runtime reconcileRuntime, locked []runtimeSection, autoS
 				}
 				return plan
 			}
-			if asOf.Before(deadline) {
+			if asOf.Before(deadline.Add(closingDelay)) {
 				return plan
 			}
-			effectiveAt := deadline
+			effectiveAt := deadline.Add(closingDelay)
 			plan.steps = append(plan.steps, advanceStep{
 				kind: stepCompleteSection, sectionKey: activeKey, effectiveAt: effectiveAt,
 			})

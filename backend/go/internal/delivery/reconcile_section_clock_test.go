@@ -27,7 +27,7 @@ const (
 
 // cohortSectionModuleExpired runs the cohort_section_v3 expiry branch against a
 // programmed runtime + section clock row.
-func cohortSectionModuleExpired(t *testing.T, mod *reconcileRow, runtimeStatus, stageStatus string, stageStart *time.Time, stagePausedAt *time.Time, planned int64, asOf time.Time) bool {
+func cohortSectionModuleExpired(t *testing.T, mod *reconcileRow, runtimeStatus, stageStatus string, stageStart *time.Time, stagePausedAt *time.Time, planned int64, asOf time.Time, satClosing ...bool) bool {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -47,7 +47,7 @@ func cohortSectionModuleExpired(t *testing.T, mod *reconcileRow, runtimeStatus, 
 
 	order := 1
 	expired, err := reconcileModuleExpiredTx(context.Background(), db, "rt-1", runtimeStatus, "cohort_section_v3",
-		sql.NullString{String: "reading-writing", Valid: true}, &order, mod, asOf.UTC())
+		sql.NullString{String: "reading-writing", Valid: true}, &order, mod, asOf.UTC(), satClosing...)
 	if err != nil {
 		t.Fatalf("expiry branch: %v", err)
 	}
@@ -111,6 +111,32 @@ func TestCohortSectionModuleExpiresOnCompletedSection(t *testing.T) {
 	}
 	if !cohortSectionModuleExpired(t, mod, "live", "completed", &stageStart, nil, 64, now) {
 		t.Fatal("a completed section must finalize its remaining modules")
+	}
+}
+
+func TestSATCompletedSectionWaitsForSaveOnlyGrace(t *testing.T) {
+	deadline := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	stageStart := deadline.Add(-time.Minute)
+	startedAt := deadline.Add(-30 * time.Second)
+	mod := &reconcileRow{id: "ma-1", moduleID: "mod-1", state: "active", allocatedSeconds: 120, startedAt: &startedAt}
+	// The reconciler passes the authoritative time minus SATSaveGrace. A
+	// completed section must keep its module open until that shifted instant
+	// reaches the section deadline, then score it exactly once.
+	if cohortSectionModuleExpired(t, mod, "live", "completed", &stageStart, nil, 1, deadline.Add(-time.Second), true) {
+		t.Fatal("SAT section must remain open during its save-only window")
+	}
+	if !cohortSectionModuleExpired(t, mod, "live", "completed", &stageStart, nil, 1, deadline, true) {
+		t.Fatal("SAT section must finalize after its save-only window")
+	}
+}
+
+func TestSATEarlyProctorSectionEndDoesNotWaitForScheduledDeadline(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	stageStart := now.Add(-10 * time.Minute)
+	startedAt := now.Add(-5 * time.Minute)
+	mod := &reconcileRow{id: "ma-1", moduleID: "mod-1", state: "active", allocatedSeconds: 30 * 60, startedAt: &startedAt}
+	if !cohortSectionModuleExpired(t, mod, "live", "completed", &stageStart, nil, 64, now.Add(-3*time.Second), true) {
+		t.Fatal("an authorized early section end must finalize without waiting for its scheduled clock")
 	}
 }
 

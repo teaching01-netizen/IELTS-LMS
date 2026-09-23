@@ -6,6 +6,7 @@ import {
 } from '../domain/satResponses';
 import type { SatActiveTool, SatToolCapabilities, SatToolId } from '../domain/satTools';
 import { EMPTY_SAT_ACTIVE_TOOLS, emptySatToolCapabilities, satActiveToolsFromLegacy, satActiveToolsToLegacy, toggleSatActiveTool, type SatActiveTools } from '../domain/satTools';
+import { resolveLegacyModuleIdentity, type LegacyMigrationCandidate } from './satRuntimeSelectors';
 
 export type SatSectionKey = 'reading-writing' | 'math';
 
@@ -14,6 +15,15 @@ type SatWorkingState = {
   candidateId: string;
   assessmentId: string;
   sectionKey: SatSectionKey;
+  /**
+   * Authoritative runtime identity: the module id the server selected
+   * (assessment_route_decisions.selected_module_id -> module attempt.module_id).
+   * Every runtime lookup — active module, response ownership, timer ownership —
+   * resolves through this id. Empty only for a recovered snapshot written
+   * before this field existed, which fails closed instead of guessing.
+   */
+  moduleId: string;
+  /** Display/authoring metadata only. Never an identity for routing. */
   moduleKey: string;
   questionIds: string[];
   questionIndex: number;
@@ -41,7 +51,7 @@ type SatWorkingRunnerState =
 
 export type SatRunnerAction =
   | { type: 'bootstrapLoaded'; assessmentId: string }
-  | { type: 'moduleStarted'; sectionKey: SatSectionKey; moduleKey: string; questionIds: string[]; startedAt: string; endsAt: string; toolCapabilities?: SatToolCapabilities }
+  | { type: 'moduleStarted'; sectionKey: SatSectionKey; moduleId: string; moduleKey: string; questionIds: string[]; startedAt: string; endsAt: string; toolCapabilities?: SatToolCapabilities }
   | { type: 'setAnswer'; questionId: string; value: string }
   | { type: 'hydrateResponse'; response: SatQuestionResponseDraft; revision: number }
   // Audit finding 3: the controller computes the next draft with the domain
@@ -58,12 +68,12 @@ export type SatRunnerAction =
   | { type: 'selectQuestion'; questionIndex: number }
   | { type: 'reviewModule' }
   | { type: 'returnToModule' }
-  | { type: 'routeToModule'; sectionKey: SatSectionKey; moduleKey: string; questionIds: string[]; startedAt: string; endsAt: string; toolCapabilities?: SatToolCapabilities }
+  | { type: 'routeToModule'; sectionKey: SatSectionKey; moduleId: string; moduleKey: string; questionIds: string[]; startedAt: string; endsAt: string; toolCapabilities?: SatToolCapabilities }
   | { type: 'startBreak'; nextSectionKey: SatSectionKey; resumeAt: string }
   | { type: 'showDirections' }
   | { type: 'submit' }
   | { type: 'completed'; resultId: string }
-  | { type: 'recover'; state: SatRunnerState };
+  | { type: 'recover'; state: SatRunnerState; candidates?: LegacyMigrationCandidate[] };
 
 // Phase 04 identity note: candidateId is the route candidate prop, never the
 // attempt id — see useSatExamController call sites. newWorkingState carries it
@@ -178,6 +188,7 @@ function newWorkingState(
     candidateId: state.candidateId,
     assessmentId: state.assessmentId,
     sectionKey: action.sectionKey,
+    moduleId: action.moduleId,
     moduleKey: action.moduleKey,
     questionIds: action.questionIds,
     questionIndex: 0,
@@ -198,9 +209,29 @@ export function satRunnerReducer(state: SatRunnerState, action: SatRunnerAction)
     const snapshot = action.state;
     if (snapshot.phase === 'module' || snapshot.phase === 'review') {
       const maybeTools = (snapshot as { activeTools?: SatActiveTools }).activeTools;
-      if (!maybeTools) {
-        return { ...snapshot, activeTools: satActiveToolsFromLegacy(snapshot.activeTool) };
+      // Adaptive identity migration (fail closed): a snapshot written before
+      // moduleId existed has no authoritative module identity in it. It is NOT
+      // resolved from moduleKey alone — a business key can be duplicated or
+      // stale, and the first matching module may be the branch the server did
+      // not select. With migration candidates (P6) an unambiguous single
+      // match on key + exact question set migrates to its id; anything else
+      // (no candidates, zero or several matches) stays unknown: the renderer
+      // resolves nothing and the runner re-derives its module from the next
+      // authoritative bootstrap instead of sitting the wrong Module 2.
+      const recovered = !maybeTools
+        ? { ...snapshot, activeTools: satActiveToolsFromLegacy(snapshot.activeTool) }
+        : snapshot;
+      const maybeModuleId = (snapshot as { moduleId?: string }).moduleId;
+      if (typeof maybeModuleId === 'string' && maybeModuleId !== '') {
+        return recovered;
       }
+      const migrated = action.candidates
+        ? resolveLegacyModuleIdentity(
+            { moduleKey: snapshot.moduleKey, questionIds: snapshot.questionIds },
+            action.candidates,
+          )
+        : null;
+      return { ...recovered, moduleId: migrated ?? '' };
     }
     return snapshot;
   }

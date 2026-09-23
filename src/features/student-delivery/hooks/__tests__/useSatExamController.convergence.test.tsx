@@ -498,7 +498,12 @@ describe("useSatExamController convergence (Phase 04)", () => {
     });
   });
 
-  it("T5b: 304 rejection surfaces null with no error when surfaceError=false", async () => {
+  it("T5b: no bootstrap read is conditional, so a 304-shaped failure is a visible contract break", async () => {
+    // The runner used to send a version-scoped If-None-Match and treat a 304 as
+    // "nothing changed". That silently rehydrated the pre-routing module after
+    // the server had already selected Module 2 Higher, so the conditional read
+    // is gone: bootstrap is always an unconditional attempt-state read, and the
+    // mock asserts the call shape rather than swallowing a 304.
     gatewayMocks.bootstrap.mockRejectedValueOnce(
       Object.assign(new Error("not modified"), { statusCode: 304 }),
     );
@@ -513,7 +518,8 @@ describe("useSatExamController convergence (Phase 04)", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(hook.result.current.error).toBeNull();
+    expect(gatewayMocks.bootstrap).toHaveBeenCalledWith("schedule", "attempt-a");
+    expect(hook.result.current.error).not.toBeNull();
     expect(hook.result.current.data).toBeNull();
   });
 

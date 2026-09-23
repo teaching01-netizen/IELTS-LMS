@@ -78,4 +78,9 @@ describe("SatCompleteScreen", () => {
     expect(screen.getByText(SAT_COPY.transitions.completeSubtitle)).toBeInTheDocument();
     expect(screen.queryByText(/score/i)).not.toBeInTheDocument();
   });
+
+  it("warns when a final answer was not confirmed before scoring", () => {
+    render(<SatCompleteScreen result={result()} onExit={vi.fn()} saveIssue="A final answer was not confirmed. Contact your proctor." />);
+    expect(screen.getByRole("alert")).toHaveTextContent("A final answer was not confirmed. Contact your proctor.");
+  });
 });

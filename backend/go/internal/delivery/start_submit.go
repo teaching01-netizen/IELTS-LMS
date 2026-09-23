@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -503,6 +504,7 @@ func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID strin
 	if err := insertModuleAttemptTx(ctx, t, attemptID, next, availableAt); err != nil {
 		return nil, err
 	}
+	telemetry.IncCounter(telemetry.MSATAdaptiveModuleOpenTotal, "role", next.adaptiveRole)
 	return next, nil
 }
 
@@ -732,7 +734,15 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 			uuid.NewString(), attemptID, policySectionID, baseModuleAttemptID, baseModuleID, selectedModuleID, routeName, rawCorrect, operationalCount, policyKey, policyRevision, policyConfig); err != nil {
 			return nil, err
 		}
-		return scanNextModuleRowTx(ctx, t, selectedModuleID)
+		next, err := scanNextModuleRowTx(ctx, t, selectedModuleID)
+		if err != nil {
+			return nil, err
+		}
+		if err := assertAdaptiveRouteIntegrity(ctx, attemptID, policySectionID, routeName, selectedModuleID, next); err != nil {
+			return nil, err
+		}
+		telemetry.IncCounter(telemetry.MSATAdaptiveRouteTotal, "section", sectionKey, "route", routeName)
+		return next, nil
 	}
 	// Student Access scope: a narrowed run must not advance into a section it
 	// never scheduled. Without this, a verbal-only student would be handed the
@@ -782,6 +792,65 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 		moduleKey: rowModuleKey, durationSeconds: rowDuration,
 		adaptiveRole: rowAdaptiveRole, toolPolicy: rowToolPolicy,
 	}, nil
+}
+
+// assertAdaptiveRouteIntegrity is the fail-closed fence between the routing
+// decision and the module that decision opens: the row just recorded
+// (selected_route, selected_module_id) must be the module attempt this call is
+// about to insert, and its authored adaptive slot must be the branch that route
+// names (higher <-> higher_branch, lower <-> lower_branch). If they disagree the
+// authored tree and the decision row describe different Module 2s, so the
+// student would sit — and the result would score — a branch the decision never
+// selected; refusing here keeps the identity chain
+// route decision -> module attempt -> bootstrap -> runner -> proctor -> result
+// from being forked at its first link. Logged with identities only (attempt,
+// section, module ids and roles) — never a candidate answer.
+func assertAdaptiveRouteIntegrity(ctx context.Context, attemptID, sectionID, routeName, selectedModuleID string, module *nextModuleRow) error {
+	if module != nil && module.id == selectedModuleID && adaptiveRoleMatchesRoute(module.adaptiveRole, routeName) {
+		return nil
+	}
+	actualModuleID, actualRole, actualKey := "<missing>", "<missing>", ""
+	if module != nil {
+		actualModuleID, actualRole, actualKey = module.id, module.adaptiveRole, module.moduleKey
+	}
+	telemetry.IncCounter(telemetry.MSATAdaptiveIntegrityViolation, "reason", "route_module_mismatch")
+	slog.ErrorContext(ctx, "SAT adaptive route integrity violation",
+		slog.String("code", "SAT_ADAPTIVE_ROUTE_INTEGRITY"),
+		slog.String("attempt_id", attemptID),
+		slog.String("section_id", sectionID),
+		slog.String("selected_route", routeName),
+		slog.String("selected_module_id", selectedModuleID),
+		slog.String("actual_module_id", actualModuleID),
+		slog.String("actual_adaptive_role", actualRole),
+		slog.String("actual_module_key", actualKey))
+	conflict := assessmentConflict(
+		"SAT_ADAPTIVE_ROUTE_INTEGRITY",
+		"The recorded adaptive route does not match the module it selected.",
+	)
+	conflict.Details = map[string]any{
+		"reason":             "SAT_ADAPTIVE_ROUTE_INTEGRITY",
+		"attemptId":          attemptID,
+		"sectionId":          sectionID,
+		"selectedRoute":      routeName,
+		"selectedModuleId":   selectedModuleID,
+		"actualModuleId":     actualModuleID,
+		"actualAdaptiveRole": actualRole,
+	}
+	return conflict
+}
+
+// adaptiveRoleMatchesRoute maps a routing decision name onto the authored
+// adaptive slot that must implement it. Unknown names never match: a decision
+// the tree cannot represent is itself the integrity violation.
+func adaptiveRoleMatchesRoute(adaptiveRole, routeName string) bool {
+	switch routeName {
+	case "higher":
+		return adaptiveRole == "higher_branch"
+	case "lower":
+		return adaptiveRole == "lower_branch"
+	default:
+		return false
+	}
 }
 
 // scanNextModuleRowTx loads one module row for the routed follow-up module;

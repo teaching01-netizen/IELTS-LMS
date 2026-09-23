@@ -152,10 +152,12 @@ func seedSATResponseFixture(t *testing.T, db *sql.DB, fixture satResponseFixture
 		fixture.versionID, fixture.examID, fixture.ownerID)
 	exec(`UPDATE exam_entities SET current_published_version_id = ? WHERE id = ?`, fixture.versionID, fixture.examID)
 	exec(`INSERT INTO exam_schedules (
-		id, exam_id, organization_id, exam_title, published_version_id,
+		id, exam_id, provider_key, organization_id, exam_title, proctor_display_name,
+		grading_display_name, published_version_id,
 		cohort_name, institution, start_time, end_time, planned_duration_minutes,
 		delivery_mode, status, created_by
-	) VALUES (?, ?, ?, 'SAT durability integration', ?, 'integration', 'Codex', ?, ?, 60,
+	) VALUES (?, ?, 'sat', ?, 'SAT durability integration', 'SAT durability integration',
+		'SAT durability integration', ?, 'integration', 'Codex', ?, ?, 60,
 		'proctor_start', 'live', ?)`,
 		fixture.scheduleID, fixture.examID, fixture.organizationID, fixture.versionID,
 		now.Add(-time.Minute), now.Add(time.Hour), fixture.ownerID)

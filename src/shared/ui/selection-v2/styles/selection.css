@@ -231,6 +231,25 @@
 }
 
 /*
+ * The whole presentation layer is sterile: paint only, never a selection
+ * anchor. The loupe carries a real DOM clone of protected SAT prose whose
+ * `data-*` identity was stripped (see `loupePicture`), so it no longer sits
+ * under the source's `[data-sat-selection-protected][data-student-selection-owner]`
+ * rule — without this block that clone is natively selectable inside the top
+ * layer. Scoped to Selection-v2's own synthetic DOM; never global, never exam.
+ */
+.selection-v2-layer,
+.selection-v2-layer *,
+.selection-v2-loupe,
+.selection-v2-loupe *,
+[data-selection-loupe-source],
+[data-selection-loupe-source] * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/*
  * There is deliberately no menu material here. The contextual menu's surface
  * belongs to the product that raises it — SAT's toolbar is dressed by
  * `--sat-*` tokens and its own classes — and this file styles only what the

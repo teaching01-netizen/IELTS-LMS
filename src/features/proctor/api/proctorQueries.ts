@@ -54,6 +54,17 @@ export type ProctorSessionDetailPayload = {
     runtimeModuleDeadlineAt?: string | null | undefined;
     runtimeModuleRemainingSeconds?: number | null | undefined;
     runtimeSectionStatus?: StudentSession['runtimeSectionStatus'] | null | undefined;
+    /**
+     * Runtime identity fence (SAT adaptive routing): the attempt revision and
+     * the active module attempt's id/module id/revision. They order two
+     * projections of the same candidate — heartbeat freshness (`lastActivity`)
+     * only says when the student was last heard from and cannot say which
+     * Module 2 the server routed them into.
+     */
+    attemptRevision?: number | null | undefined;
+    runtimeCurrentModuleId?: string | null | undefined;
+    runtimeModuleAttemptId?: string | null | undefined;
+    runtimeModuleAttemptRevision?: number | null | undefined;
     runtimeWaiting: boolean;
     violations: StudentSession['violations'];
     warnings: number;

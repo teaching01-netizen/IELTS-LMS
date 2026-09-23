@@ -290,7 +290,7 @@ func TestDurabilityContractSATExactReplaySurvivesDeadline(t *testing.T) {
 	}
 }
 
-func TestDurabilityContractSATFreshWriteRejectedInsideClosingGrace(t *testing.T) {
+func TestDurabilityContractSATFreshWriteRejectedAfterSaveGrace(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -301,7 +301,7 @@ func TestDurabilityContractSATFreshWriteRejectedInsideClosingGrace(t *testing.T)
 	bearer := mintToken(t, secret, baseClaims())
 
 	now := time.Now().UTC()
-	durabilityFenceStubs(mock, durabilitySATAttemptRows(now.Add(-time.Second), now.Add(29*time.Second)))
+	durabilityFenceStubs(mock, durabilitySATAttemptRows(now.Add(-4*time.Second), now.Add(26*time.Second)))
 	// The unseen id misses the replay probe, then lease/session fencing passes.
 	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-new").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT active_client_session_id").WithArgs("att-1").
@@ -316,7 +316,7 @@ func TestDurabilityContractSATFreshWriteRejectedInsideClosingGrace(t *testing.T)
 	_, err = svc.SaveResponses(context.Background(), bearer, cmd, qr, rl)
 	e := durabilityErr(t, err)
 	if e.Code != apperrors.CodeDeadlineExpired || e.HTTPStatus != 422 {
-		t.Fatalf("fresh SAT write during closing grace must be rejected as expired, got %s/%d", e.Code, e.HTTPStatus)
+		t.Fatalf("fresh SAT write after save-only grace must be rejected as expired, got %s/%d", e.Code, e.HTTPStatus)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

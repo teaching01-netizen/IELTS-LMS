@@ -44,6 +44,40 @@ export function matchesFinalModuleState(state: string): boolean {
   return state === 'submitted' || state === 'locked';
 }
 
+export interface LegacyModuleSnapshot {
+  moduleKey: string;
+  questionIds: string[];
+}
+
+export type LegacyMigrationCandidate = Pick<AssessmentDeliveryModule, 'id' | 'moduleKey' | 'questions'>;
+
+/**
+ * Compatibility resolver for runner snapshots written before `moduleId`
+ * existed (P6 migration only — never a runtime lookup).
+ *
+ * Safe order, fail closed:
+ *  1. candidates that match BOTH the business key AND the exact question
+ *     set (order-independent) are the only migration sources — a key alone
+ *     can be duplicated across adaptive branches;
+ *  2. exactly one match migrates to its id;
+ *  3. zero or multiple matches return null: the caller must fall back to
+ *     the authoritative bootstrap/directions recovery instead of guessing.
+ *     Wrong-module delivery is worse than one extra bootstrap.
+ */
+export function resolveLegacyModuleIdentity(
+  snapshot: LegacyModuleSnapshot,
+  candidates: LegacyMigrationCandidate[],
+): string | null {
+  const wanted = new Set(snapshot.questionIds);
+  const matches = candidates.filter((candidate) => {
+    if (candidate.moduleKey !== snapshot.moduleKey) return false;
+    if (candidate.questions.length !== wanted.size) return false;
+    return candidate.questions.every((question) => wanted.has(question.examQuestionId));
+  });
+  if (matches.length !== 1) return null;
+  return matches[0]?.id ?? null;
+}
+
 /**
  * Every module of the exam in the order a candidate meets them: sections by
  * display order, then modules by display order inside a section.

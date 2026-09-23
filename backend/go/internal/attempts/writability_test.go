@@ -166,7 +166,7 @@ func TestEnsureWritableAllowsOnlyClosingGraceAfterBreakIsPublished(t *testing.T)
 	}
 }
 
-func TestEnsureWritableRejectsFreshSATWriteAtDeadlineEvenDuringClosingGrace(t *testing.T) {
+func TestEnsureWritableSATSaveOnlyGrace(t *testing.T) {
 	now := time.Now().UTC()
 	deadline := now.Add(-time.Second)
 	graceUntil := now.Add(29 * time.Second)
@@ -177,10 +177,32 @@ func TestEnsureWritableRejectsFreshSATWriteAtDeadlineEvenDuringClosingGrace(t *t
 	g.WaitingForNextSection = true
 	g.SectionLive = false
 
-	err := ensureWritable(a, g, now)
+	if err := ensureWritable(a, g, now); err != nil {
+		t.Fatalf("SAT response inside save-only grace must remain writable: %v", err)
+	}
+	err := ensureWritable(a, g, deadline.Add(SATSaveGrace))
 	appErr, ok := apperrors.As(err)
 	if !ok || appErr.Code != apperrors.CodeDeadlineExpired || appErr.HTTPStatus != 422 {
-		t.Fatalf("fresh SAT write inside the closing grace must be expired, got %v", err)
+		t.Fatalf("fresh SAT write after save-only grace must expire, got %v", err)
+	}
+}
+
+func TestEnsureQuestionAdmittedSATSaveOnlyGrace(t *testing.T) {
+	now := time.Now().UTC()
+	deadline := now.Add(-time.Second)
+	owner := QuestionOwner{ModuleState: "active", SectionKey: "reading-writing", ModuleDeadlineAt: &deadline}
+	gate := liveGate(now)
+	gate.ActiveSectionKey = "math"
+	if err := ensureQuestionAdmittedForProvider(owner, gate, "q-1", string(ProviderSAT)); err != nil {
+		t.Fatalf("closing SAT module must accept its queued answer: %v", err)
+	}
+	gate.Now = deadline.Add(SATSaveGrace)
+	if err := ensureQuestionAdmittedForProvider(owner, gate, "q-1", string(ProviderSAT)); err == nil {
+		t.Fatal("SAT module must reject a fresh answer after save-only grace")
+	}
+	gate.Now = now
+	if err := ensureQuestionAdmittedForProvider(owner, gate, "q-1", string(ProviderACT)); err == nil {
+		t.Fatal("ACT must not inherit the SAT closing window")
 	}
 }
 

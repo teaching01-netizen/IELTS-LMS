@@ -1,0 +1,4 @@
+userId,email,password,candidateId
+sat-bot-001,sat-bot-001@test.local,password123,W250001
+sat-bot-002,sat-bot-002@test.local,password123,W250002
+sat-bot-003,sat-bot-003@test.local,password123,W250003

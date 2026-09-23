@@ -16,7 +16,7 @@ import (
 )
 
 func satModules(rows ...[]driver.Value) *sqlmock.Rows {
-	out := sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"})
+	out := sqlmock.NewRows([]string{"module_id", "section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"})
 	for _, row := range rows {
 		out.AddRow(row...)
 	}
@@ -39,8 +39,8 @@ func TestScoringRejectsMathOnlyTopology(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satModules(
-		[]driver.Value{"math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)},
-		[]driver.Value{"math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)},
+		[]driver.Value{"mod-math-m1", "math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)},
+		[]driver.Value{"mod-math-m2-lower", "math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)},
 	))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
@@ -72,9 +72,9 @@ func TestScoringRejectsSectionWithoutARecordedRoute(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satModules(
-		[]driver.Value{"reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)},
-		[]driver.Value{"math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)},
-		[]driver.Value{"math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)},
+		[]driver.Value{"mod-rw-m1", "reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)},
+		[]driver.Value{"mod-math-m1", "math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)},
+		[]driver.Value{"mod-math-m2-lower", "math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)},
 	))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
@@ -108,6 +108,7 @@ func TestScoringAcceptsCompleteTopology(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectCanonicalRouteDecisions(mock)
 	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildSatBootstrapSeed,
-  getCachedDeliveryEtag,
-  seedMatchesIdentity,
-} from "../satBootstrapSeed";
+import { buildSatBootstrapSeed, seedMatchesIdentity } from "../satBootstrapSeed";
 
 function attempt(revision?: number | null) {
   return {
@@ -47,7 +43,6 @@ describe("seedMatchesIdentity", () => {
     runtimeSnapshot: runtime(7),
     liveSnapshotReceivedAt: 123,
     staticVersionId: "ver-1",
-    deliveryEtag: '"e1"',
     seedGeneration: 2,
   });
 
@@ -119,16 +114,18 @@ describe("buildSatBootstrapSeed", () => {
       runtimeSnapshot: runtime(7),
       liveSnapshotReceivedAt: 456,
       staticVersionId: "ver-9",
-      deliveryEtag: '"e9"',
       seedGeneration: 4,
     });
     expect(full.attemptRevision).toBe(3);
     expect(full.runtimeRevision).toBe(7);
     expect(full.liveSnapshotReceivedAt).toBe(456);
     expect(full.staticVersionId).toBe("ver-9");
-    expect(full.deliveryEtag).toBe('"e9"');
     expect(full.seedGeneration).toBe(4);
     expect(full.attemptSnapshot?.id).toBe("attempt-1");
+    // The seed must never carry a delivery ETag again: a validator derived from
+    // the published exam version cannot speak for live attempt state, so the
+    // child's bootstrap has to be an unconditional read.
+    expect(full).not.toHaveProperty("deliveryEtag");
 
     const empty = buildSatBootstrapSeed({
       scheduleId: "sched-1",
@@ -138,36 +135,11 @@ describe("buildSatBootstrapSeed", () => {
       runtimeSnapshot: null,
       liveSnapshotReceivedAt: null,
       staticVersionId: null,
-      deliveryEtag: null,
       seedGeneration: 1,
     });
     expect(empty.attemptRevision).toBeNull();
     expect(empty.runtimeRevision).toBeNull();
     expect(empty.liveSnapshotReceivedAt).toBeNull();
     expect(empty.staticVersionId).toBeNull();
-    expect(empty.deliveryEtag).toBeNull();
-  });
-});
-
-describe("getCachedDeliveryEtag", () => {
-  it("returns null when storage is empty and round-trips a stored etag", () => {
-    window.sessionStorage.clear();
-    expect(getCachedDeliveryEtag("sched-1", "attempt-1")).toBeNull();
-    window.sessionStorage.setItem(
-      "sat-bootstrap-etag:sched-1:attempt-1",
-      JSON.stringify({ etag: '"abc"', payload: {} }),
-    );
-    expect(getCachedDeliveryEtag("sched-1", "attempt-1")).toBe('"abc"');
-  });
-
-  it("returns null on corrupt storage (fail-open to full fetch)", () => {
-    window.sessionStorage.setItem("sat-bootstrap-etag:sched-1:attempt-1", "not-json{");
-    expect(getCachedDeliveryEtag("sched-1", "attempt-1")).toBeNull();
-    window.sessionStorage.setItem(
-      "sat-bootstrap-etag:sched-1:attempt-1",
-      JSON.stringify({ payload: {} }),
-    );
-    expect(getCachedDeliveryEtag("sched-1", "attempt-1")).toBeNull();
-    window.sessionStorage.clear();
   });
 });

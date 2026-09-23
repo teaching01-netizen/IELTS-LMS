@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -77,10 +78,10 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 	// B1: reconcile locks attempt + runtime rows explicitly; it never depends
 	// on a repeatable snapshot, so RC only shrinks its gap-lock footprint.
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
-		var attemptRow string
+		var attemptRow, providerKey string
 		if err := t.QueryRowContext(ctx,
-			"SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
-			attemptID, scheduleID).Scan(&attemptRow); err != nil {
+			"SELECT id, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), '') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&attemptRow, &providerKey); err != nil {
 			if err == sql.ErrNoRows {
 				return nil
 			}
@@ -120,6 +121,16 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		// finished attempt into a spurious completion attempt and a 503.
 		didWork := false
 		drainedAtEntry := false
+		// SAT keeps the module open for a short save-only window after the
+		// student clock freezes. ACT retains its existing timeout boundary.
+		closingAsOf := asOf
+		if providerKey == "sat" {
+			var dbNow time.Time
+			if err := t.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&dbNow); err != nil {
+				return err
+			}
+			closingAsOf = dbNow.UTC().Add(-attempts.SATSaveGrace)
+		}
 		for i := 0; i < reconcileCap; i++ {
 			mod, err := lockReconcileRowTx(ctx, t, attemptID)
 			if err != nil {
@@ -142,7 +153,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				}
 				break
 			}
-			expired, err := reconcileModuleExpiredTx(ctx, t, runtimeID, runtimeStatus, timingModel, currentStageKey, currentStageOrder, mod, asOf)
+			expired, err := reconcileModuleExpiredTx(ctx, t, runtimeID, runtimeStatus, timingModel, currentStageKey, currentStageOrder, mod, closingAsOf, providerKey == "sat")
 			if err != nil {
 				return err
 			}
@@ -315,20 +326,27 @@ func lockReconcileRowTx(ctx context.Context, t tx.Tx, attemptID string) (*reconc
 }
 
 // reconcileModuleExpiredTx mirrors the Rust per-model expiry branches.
-func reconcileModuleExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus, timingModel string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time) (bool, error) {
+func reconcileModuleExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus, timingModel string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time, satClosing ...bool) (bool, error) {
+	closing := len(satClosing) > 0 && satClosing[0]
 	switch timingModel {
 	case examruntime.TimingModelCohortStage:
 		// legacy: no in-repo writer assigns this timing model (schedules.go
 		// selects cohort_section_v3 for SAT, legacy otherwise). Retained only
 		// because an out-of-repo ops migration could still have written it.
-		return reconcileCohortStageExpiredTx(ctx, t, runtimeID, runtimeStatus, currentStageKey, currentStageOrder, mod, asOf)
+		return reconcileCohortStageExpiredTx(ctx, t, runtimeID, runtimeStatus, currentStageKey, currentStageOrder, mod, asOf, closing)
 	case examruntime.TimingModelCohortSection:
-		return reconcileCohortSectionExpiredTx(ctx, t, runtimeID, runtimeStatus, currentStageKey, currentStageOrder, mod, asOf)
+		return reconcileCohortSectionExpiredTx(ctx, t, runtimeID, runtimeStatus, currentStageKey, currentStageOrder, mod, asOf, closing)
 	default:
-		if runtimeStatus == "completed" || runtimeStatus == "cancelled" {
+		if runtimeStatus == "cancelled" || (runtimeStatus == "completed" && !closing) {
 			return true, nil
 		}
-		return mod.state == "active" && mod.pausedAt == nil && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf) <= 0, nil
+		if runtimeStatus == "completed" && mod.startedAt == nil {
+			return true, nil
+		}
+		if closing && runtimeStatus == "completed" && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf.Add(attempts.SATSaveGrace)) > 0 {
+			return true, nil // A proctor closed the room before this module's clock ended.
+		}
+		return (mod.state == "active" || (closing && runtimeStatus == "completed" && mod.state == "review")) && mod.pausedAt == nil && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf) <= 0, nil
 	}
 }
 
@@ -336,8 +354,9 @@ func reconcileModuleExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeSt
 // runtime expires everything; an earlier stage expires the row; the current
 // stage expires on completed status or an elapsed live clock (paused clocks
 // never expire).
-func reconcileCohortStageExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time) (bool, error) {
-	if runtimeStatus == "completed" || runtimeStatus == "cancelled" {
+func reconcileCohortStageExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time, satClosing ...bool) (bool, error) {
+	closing := len(satClosing) > 0 && satClosing[0]
+	if runtimeStatus == "cancelled" || (runtimeStatus == "completed" && !closing) {
 		return true, nil
 	}
 	var sectionKey, adaptiveRole string
@@ -361,9 +380,16 @@ func reconcileCohortStageExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runt
 	if stage == nil {
 		return false, assessmentConflict("RUNTIME_STAGE_MISSING", "SAT runtime stage `"+expectedStageKey+"` is missing.")
 	}
+	if closing && stage.startedAt != nil && (runtimeStatus == "completed" || stage.status == "completed" || (currentStageOrder != nil && stage.order < *currentStageOrder)) &&
+		stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf.Add(attempts.SATSaveGrace)) > 0 {
+		return true, nil // An authorized early stage end is not a timer expiry.
+	}
+	if closing && runtimeStatus == "completed" {
+		return stage.startedAt == nil || stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0, nil
+	}
 	if currentStageKey.Valid && currentStageOrder != nil {
 		if stage.order < *currentStageOrder {
-			return true, nil
+			return !closing || stage.startedAt == nil || stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0, nil
 		}
 		if currentStageKey.String == expectedStageKey {
 			if runtimeStatus == "paused" || stage.pausedAt != nil {
@@ -371,7 +397,7 @@ func reconcileCohortStageExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runt
 			}
 			switch {
 			case stage.status == "completed":
-				return true, nil
+				return !closing || stage.startedAt == nil || stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0, nil
 			case stage.status == "live" && stage.startedAt != nil:
 				return stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0, nil
 			default:
@@ -400,8 +426,9 @@ func reconcileCohortStageExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runt
 // that the visible clock is the module's allotment, a stalled client whose
 // module clock has run out would otherwise sit on a module the student's own
 // screen says is over.
-func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time) (bool, error) {
-	if runtimeStatus == "completed" || runtimeStatus == "cancelled" {
+func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time, satClosing ...bool) (bool, error) {
+	closing := len(satClosing) > 0 && satClosing[0]
+	if runtimeStatus == "cancelled" || (runtimeStatus == "completed" && !closing) {
 		return true, nil
 	}
 	var sectionKey string
@@ -420,9 +447,16 @@ func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, ru
 	if stage == nil {
 		return false, assessmentConflict("SECTION_CLOCK_MISSING", "SAT section clock `"+sectionKey+"` is missing.")
 	}
+	if closing && stage.startedAt != nil && (runtimeStatus == "completed" || stage.status == "completed" || (currentStageOrder != nil && stage.order < *currentStageOrder)) &&
+		stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf.Add(attempts.SATSaveGrace)) > 0 {
+		return true, nil // An authorized early section end is not a timer expiry.
+	}
+	if closing && runtimeStatus == "completed" {
+		return stage.startedAt == nil || stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0, nil
+	}
 	if currentStageKey.Valid && currentStageOrder != nil {
 		if stage.order < *currentStageOrder {
-			return true, nil
+			return !closing || stage.startedAt == nil || stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0, nil
 		}
 		if currentStageKey.String == sectionKey {
 			if runtimeStatus == "paused" || stage.pausedAt != nil {
@@ -431,7 +465,7 @@ func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, ru
 			sectionExpired := false
 			switch {
 			case stage.status == "completed":
-				sectionExpired = true
+				sectionExpired = !closing || stage.startedAt == nil || stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0
 			case stage.status == "live" && stage.startedAt != nil:
 				sectionExpired = stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0
 			}

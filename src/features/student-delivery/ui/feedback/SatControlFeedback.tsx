@@ -60,7 +60,7 @@ export function SatTimeoutOverlay({
   saveFailure,
   onRetrySave,
 }: {
-  saveFailureKind: "offline" | "retryable" | "terminal" | "superseded" | null;
+  saveFailureKind: "offline" | "retryable" | "terminal" | "expired" | "superseded" | null;
   saveFailure: string | null;
   onRetrySave: () => void;
 }) {
@@ -68,7 +68,7 @@ export function SatTimeoutOverlay({
   const note =
     saveFailureKind === "offline"
       ? SAT_COPY.timeout.offline
-      : saveFailureKind === "retryable" || saveFailureKind === "terminal"
+      : saveFailureKind === "retryable" || saveFailureKind === "terminal" || saveFailureKind === "expired"
         ? saveFailure || SAT_COPY.timeout.failed
         : saveFailureKind === "superseded"
           ? SAT_COPY.review.saveSuperseded
@@ -87,7 +87,7 @@ export function SatTimeoutOverlay({
         />
         <p className="text-[14px] font-semibold text-[var(--sat-text)]">{SAT_COPY.timeout.title}</p>
         <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">{note}</p>
-        {hasSaveFailure && saveFailureKind !== "superseded" ? (
+        {hasSaveFailure && saveFailureKind !== "superseded" && saveFailureKind !== "expired" ? (
           <button
             type="button"
             onClick={onRetrySave}

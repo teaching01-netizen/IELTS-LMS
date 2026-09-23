@@ -79,6 +79,16 @@ describe("SatReviewPage", () => {
     expect(onRetrySave).toHaveBeenCalledOnce();
   });
 
+  it("shows a closed save window without offering a futile retry", () => {
+    renderReview({
+      saveFailure: "A final answer was not confirmed before the save window ended.",
+      saveFailureKind: "expired",
+      onRetrySave: vi.fn(),
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("save window ended");
+    expect(screen.queryByRole("button", { name: SAT_COPY.review.retrySave })).not.toBeInTheDocument();
+  });
+
   it("labels the exit with its destination question", () => {
     renderReview({ currentQuestionIndex: 1 });
     expect(screen.getByRole("button", { name: "Back to question 2" })).toBeInTheDocument();

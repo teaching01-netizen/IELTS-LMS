@@ -7,15 +7,15 @@ test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
 test.describe('SAT student transitions', () => {
   test.describe.configure({ timeout: 240_000 });
-  test.skip(
-    ({ browserName }, testInfo) => browserName !== 'chromium' || testInfo.project.name !== 'chromium',
-    'The transition flow runs once in desktop Chromium; device sizes are checked in the scenario.',
-  );
 
   test('moves from pre-start through early branch routing, the scheduled break, and completion', async ({
     page,
     browser,
-  }) => {
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'chromium',
+      'The transition flow runs once in desktop Chromium; device sizes are checked in the scenario.',
+    );
     const { studentContext, studentPage, scheduleId, candidateId } = await createRunningSatSession(browser, page, {
       label: 'transitions',
       startRuntime: false,

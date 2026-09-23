@@ -30,7 +30,6 @@ import {
   configureSatDeliveryAttempt,
   satDeliveryGateway,
 } from "../infrastructure/satDeliveryGateway";
-import { hasBackendStatusCode } from "../infrastructure/assessmentDeliveryBackendGateway";
 import {
   calculatorWorkspaceKey,
   clearCalculatorWorkspace,
@@ -357,7 +356,6 @@ export function useSatExamController({
   const refresh = useCallback(
     async (
       surfaceError = false,
-      ifNoneMatch?: string | null,
       /**
        * Transport-outcome probe. `refresh` resolves for a failed fetch (every
        * other caller, including `void refresh(...)`, depends on that), so the
@@ -367,17 +365,21 @@ export function useSatExamController({
       onTransportOutcome?: (ok: boolean) => void,
     ) => {
       try {
-        const payload = await satDeliveryGateway.bootstrap(scheduleId, attemptId, ifNoneMatch ?? null);
+        // Unconditional read: the bootstrap payload is LIVE attempt state
+        // (module attempts, the adaptive route, responses, timers, result), so
+        // there is no attempt-state validator to send. A version-scoped
+        // If-None-Match answered 304 soon after Module 1 ended — the published
+        // exam version had not moved even though the server had just routed the
+        // candidate to a different Module 2 — and the runner kept the stale
+        // module. Equivalent-payload skipping stays client-side
+        // (isEquivalentBootstrap), where it cannot hide a server-side routing
+        // decision.
+        const payload = await satDeliveryGateway.bootstrap(scheduleId, attemptId);
         onTransportOutcome?.(true);
-        // Phase 04: poll-hint commit — 304, stale, and equivalent payloads
-        // all surface as null (no-change), exactly like the 304 path below.
+        // Phase 04: poll-hint commit — stale and equivalent payloads surface
+        // as null (no-change).
         return acceptPayloadAndRoute(payload, { kind: "poll" }) ? payload : null;
       } catch (loadError) {
-        // A 304 (not modified) is not a failure: no new payload, no error.
-        if (hasBackendStatusCode(loadError, 304)) {
-          onTransportOutcome?.(true);
-          return null;
-        }
         onTransportOutcome?.(false);
         if (surfaceError && identityGenerationRef.current === renderIdentityGeneration) {
           setError(
@@ -392,18 +394,17 @@ export function useSatExamController({
 
   // Phase 02 bootstrap effect (singleflight per identity+version): the only
   // new-import is the pure seed matcher (no React, no fetch). Rules: one
-  // network call per (identityKey, staticVersionId); ETag passed only from a
-  // matching seed; 304 silent; superseded-generation failures silent; initial
-  // failure still setError so error && !data stays reachable; success path
-  // identical to before (acceptPayloadAndRoute bootstrap-hint + its
-  // internal bootstrapLoaded dispatch, committed atomically).
+  // network call per (identityKey, staticVersionId); superseded-generation
+  // failures silent; initial failure still setError so error && !data stays
+  // reachable; success path identical to before (acceptPayloadAndRoute
+  // bootstrap-hint + its internal bootstrapLoaded dispatch, committed
+  // atomically).
   // StrictMode note: React mounts, unmounts (cleanup sets cancelled = true
   // for that run only), then re-runs the effect. The second run JOINS the
-  // still-in-flight shared promise (same map key + same ETag) instead of
-  // firing a second gateway call — so StrictMode double-effects cost one
-  // network call. Parent re-renders without dep changes do not re-run the
-  // effect at all; only an identity rotation or a seed staticVersionId /
-  // deliveryEtag scalar change starts a new request.
+  // still-in-flight shared promise (same map key) instead of firing a second
+  // gateway call — so StrictMode double-effects cost one network call. Parent
+  // re-renders without dep changes do not re-run the effect at all; only an
+  // identity rotation or a seed staticVersionId change starts a new request.
   const bootstrapSeedRef = useRef(bootstrapSeed);
   bootstrapSeedRef.current = bootstrapSeed;
   // Singleflight per (identity, version): StrictMode double-invoke + parent
@@ -412,11 +413,8 @@ export function useSatExamController({
   // NOTE: the promise is stored WITHOUT a .then tap attached at set time —
   // taps attach per-effect-run below — so the map never triggers
   // unhandledrejection on failure paths.
-  // The entry also records the ETag it was sent with: a re-run that would
-  // send a DIFFERENT If-None-Match must not join the in-flight request (the
-  // server answer is scoped to the ETag sent), it starts its own call.
   const bootstrapInflightRef = useRef(
-    new Map<string, { etag: string | null; run: Promise<AssessmentDeliveryBootstrap> }>(),
+    new Map<string, Promise<AssessmentDeliveryBootstrap>>(),
   );
 
   useEffect(() => {
@@ -425,20 +423,16 @@ export function useSatExamController({
     // rotated while the parent re-rendered) must never scope the fetch.
     const seed = bootstrapSeedRef.current;
     const seedOk = seedMatchesIdentity(seed, { scheduleId, attemptId, candidateId });
-    const ifNoneMatch = seedOk ? (seed?.deliveryEtag ?? null) : null;
     const requestKey = identityKey + "::" + (seedOk ? (seed?.staticVersionId ?? "") : "");
 
     let cancelled = false;
-    const inFlight = bootstrapInflightRef.current.get(requestKey);
-    // Join the in-flight request ONLY when it was sent with the same ETag;
-    // a changed ETag scopes a different conditional request and must fire.
-    const joinable = inFlight && inFlight.etag === ifNoneMatch ? inFlight.run : null;
-    const run = joinable ?? satDeliveryGateway.bootstrap(scheduleId, attemptId, ifNoneMatch);
-    if (!joinable) bootstrapInflightRef.current.set(requestKey, { etag: ifNoneMatch, run });
+    const run = bootstrapInflightRef.current.get(requestKey)
+      ?? satDeliveryGateway.bootstrap(scheduleId, attemptId);
+    bootstrapInflightRef.current.set(requestKey, run);
 
     void run.then(
       (payload) => {
-        if (bootstrapInflightRef.current.get(requestKey)?.run === run) {
+        if (bootstrapInflightRef.current.get(requestKey) === run) {
           bootstrapInflightRef.current.delete(requestKey);
         }
         if (cancelled || identityGenerationRef.current !== generationAtCall) return; // superseded: silent
@@ -448,11 +442,10 @@ export function useSatExamController({
         acceptPayloadAndRoute(payload, { kind: "bootstrap" });
       },
       (loadError: unknown) => {
-        if (bootstrapInflightRef.current.get(requestKey)?.run === run) {
+        if (bootstrapInflightRef.current.get(requestKey) === run) {
           bootstrapInflightRef.current.delete(requestKey);
         }
         if (cancelled || identityGenerationRef.current !== generationAtCall) return;
-        if (hasBackendStatusCode(loadError, 304)) return; // not-modified: not a failure
         setError(loadError instanceof Error ? loadError.message : "Unable to load the SAT attempt.");
       },
     );
@@ -460,12 +453,12 @@ export function useSatExamController({
       cancelled = true;
     };
     // Deps: identityKey (covers schedule/attempt/candidate rotation) + seed
-    // staticVersionId (republish rebootstrap) + seed ETag scalar — NOT the
-    // whole seed object (it churns with runtimeSnapshot). candidateId is read
-    // via identityKey/seed-match only (kept out of deps to avoid refire on
-    // unrelated prop churn). acceptPayloadAndRoute stays: stable per identity.
+    // staticVersionId (republish rebootstrap) — NOT the whole seed object (it
+    // churns with runtimeSnapshot). candidateId is read via identityKey/
+    // seed-match only (kept out of deps to avoid refire on unrelated prop
+    // churn). acceptPayloadAndRoute stays: stable per identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acceptPayloadAndRoute, identityKey, scheduleId, attemptId, bootstrapSeed?.staticVersionId, bootstrapSeed?.deliveryEtag]);
+  }, [acceptPayloadAndRoute, identityKey, scheduleId, attemptId, bootstrapSeed?.staticVersionId]);
 
   useEffect(() => {
     // Exam-day P1: the local `now` must advance in every timing model. The
@@ -483,7 +476,6 @@ export function useSatExamController({
   // The offline listener is always cleaned up — a one-shot addEventListener
   // without removeEventListener leaks a stale closure per poll cycle.
   const pollFailuresRef = useRef(0);
-  const pollEtagRef = useRef<string | null>(null);
   useEffect(() => {
     // Keep recovery polling alive while finalization is in flight. A
     // bootstrap that carries `result` recovers submitting → complete via
@@ -518,7 +510,7 @@ export function useSatExamController({
         // refresh; reschedule the cadence after reconnect.
         onOnline = () => {
           pollFailuresRef.current = 0;
-          void refresh(false, null, recordTransportOutcome).finally(schedule);
+          void refresh(false, recordTransportOutcome).finally(schedule);
         };
         // One-shot: exactly one reconnect per outage. A handler that stays
         // registered after firing would make every later reconnect poll once
@@ -526,16 +518,7 @@ export function useSatExamController({
         window.addEventListener("online", onOnline, { once: true });
         return;
       }
-      void refresh(false, pollEtagRef.current, recordTransportOutcome).then(
-        (payload) => {
-          // Phase 04 dead-store note (documented, not fixed): the typed
-          // AssessmentDeliveryBootstrap payload carries no `etag` field, so
-          // this read is always undefined and pollEtagRef stays null. The
-          // poll-skip layer (isEquivalentBootstrap) is the real no-change
-          // path; fetch/ETag plumbing stays owned by Phase 02.
-          const etag = (payload as { etag?: unknown } | null)?.etag;
-          if (typeof etag === "string" && etag) pollEtagRef.current = etag;
-        },
+      void refresh(false, recordTransportOutcome).catch(
         // Safety net for an unexpected throw; transport failures arrive through
         // recordTransportOutcome, which owns the backoff counter.
         () => { recordTransportOutcome(false); },
@@ -630,7 +613,7 @@ export function useSatExamController({
   // externally-driven data changes (e.g. a resumed page whose server module
   // already started, or a break whose next module opened in another tab). Dedupe-keyed
   // so StrictMode double-invoke cannot double-dispatch; at most one action
-  // per (versionId, runtimeRevision, phase, moduleKey).
+  // per (versionId, runtimeRevision, phase, active module id).
   useEffect(() => {
     if (!data || (state.phase !== "directions" && state.phase !== "break")) return;
     const activeAttempt = findActiveAttempt(data);
@@ -1063,12 +1046,18 @@ export function useSatExamController({
     }
   }, [attemptId, data?.versionId, finalizeAssessment, isSubmitting, recoveryNeedsRetry, refresh, scheduleId, state.phase]);
 
+  // Identity lookup, never a key lookup: the module the runner is sitting is
+  // the id the server selected (route decision -> module attempt -> bootstrap).
+  // A moduleKey match could resolve the other adaptive branch, a same-key
+  // module in another section, or a stale duplicate — and an empty moduleId
+  // (recovered legacy snapshot) resolves nothing rather than guessing.
   const stateModule = useMemo(() => {
     if (!data || (state.phase !== "module" && state.phase !== "review")) return null;
+    if (!state.moduleId) return null;
     return (
       data.sections
         .flatMap((section) => section.modules)
-        .find((candidate) => candidate.moduleKey === state.moduleKey) ?? null
+        .find((candidate) => candidate.id === state.moduleId) ?? null
     );
   }, [data, state]);
 
@@ -1271,7 +1260,9 @@ export function useSatExamController({
   // Phase 04 commit-first / reconciler-second: the poll commit dispatches
   // showDirections synchronously when it carries the finalized predicate;
   // this stays as the idempotent safety net for externally-driven data
-  // changes, dedupe-keyed on (versionId, runtimeRevision, phase, moduleKey).
+  // changes, dedupe-keyed on (versionId, runtimeRevision, moduleId,
+  // moduleAttemptId) — never the business moduleKey, which the Lower and
+  // Higher branch of one section can share.
   useEffect(() => {
     if (!data || (state.phase !== "module" && state.phase !== "review") || !stateModule) return;
     const attempt = findAttemptForModule(data, stateModule.id);
@@ -1279,8 +1270,7 @@ export function useSatExamController({
       const nextAttempt = findPendingAttempt(data);
       const nextModule = moduleForAttempt(data, nextAttempt);
       if (nextModule && nextModule.id !== stateModule.id) {
-        const moduleKey = "moduleKey" in state ? state.moduleKey : stateModule.moduleKey;
-        const key = `${data.versionId}:${data.timing.runtimeRevision}:${state.phase}:${moduleKey}`;
+        const key = `${data.versionId}:${data.timing.runtimeRevision}:${stateModule.id}:${attempt.id}`;
         if (pollReconcileKeyRef.current === key) return;
         pollReconcileKeyRef.current = key;
         dispatch({ type: "showDirections" });

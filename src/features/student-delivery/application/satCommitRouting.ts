@@ -57,6 +57,9 @@ export function startModuleRouteAction(
   return {
     type: "routeToModule",
     sectionKey,
+    // The server-selected module ID is the runtime identity; moduleKey only
+    // rides along as display metadata.
+    moduleId: module.id,
     moduleKey: module.moduleKey,
     questionIds: module.questions.map((question) => question.examQuestionId),
     startedAt: timing.startedAt,
@@ -99,18 +102,21 @@ export function decideSatCommitRoute(
       }
       if (
         (preState.phase === "module" || preState.phase === "review") &&
-        "moduleKey" in preState
+        "moduleId" in preState
       ) {
+        // Identity comparison by id: a key lookup could resolve the OTHER
+        // adaptive branch (or a same-key module in another section) and then
+        // treat the already-finalized current module as still open.
         const currentModule = payload.sections
           .flatMap((section) => section.modules)
-          .find((candidate) => candidate.moduleKey === preState.moduleKey);
+          .find((candidate) => candidate.id === preState.moduleId);
         const attempt = currentModule
           ? findAttemptForModule(payload, currentModule.id)
           : undefined;
         if (attempt && matchesFinalModuleState(attempt.state)) {
           const nextAttempt = findPendingAttempt(payload);
           const nextModule = moduleForAttempt(payload, nextAttempt);
-          if (nextModule && nextModule.moduleKey !== preState.moduleKey) {
+          if (nextModule && nextModule.id !== preState.moduleId) {
             return { type: "showDirections" } as const;
           }
           if (!nextModule) {

@@ -44,7 +44,7 @@ export interface SatResponsePersistenceOptions {
   credentialAttempt?: StudentAttempt | null | undefined;
 }
 
-export type SatResponseFailureKind = 'offline' | 'retryable' | 'terminal' | 'superseded';
+export type SatResponseFailureKind = 'offline' | 'retryable' | 'terminal' | 'expired' | 'superseded';
 
 export interface SatResponseSaveContext {
   moduleAttemptId: string;
@@ -261,7 +261,10 @@ export function useSatResponsePersistence({
         }
         setBlockedDrafts(blockedIds);
         const display = mapEngineStatus(status, blockedIds.length);
-        if (status === 'durability_fault') {
+        if (error?.includes('DEADLINE_EXPIRED')) {
+          setFailure('A final answer was not confirmed before the save window ended. It remains on this device. Please contact your proctor.');
+          setFailureKind('expired');
+        } else if (status === 'durability_fault') {
           setFailure(error ?? 'Answer storage is unavailable.');
           setFailureKind('terminal');
         } else if (display === 'blocked_attention') {
@@ -276,6 +279,9 @@ export function useSatResponsePersistence({
         } else if (status === 'conflict_terminal') {
           setFailure(error ?? 'This response can no longer be changed.');
           setFailureKind('terminal');
+        } else if (status === 'saved_locally' && error) {
+          setFailure(error);
+          setFailureKind('retryable');
         } else if (status === 'synced' && display === 'saved') {
           setFailure(null);
           setFailureKind(null);
@@ -283,7 +289,15 @@ export function useSatResponsePersistence({
       },
     });
     v2EngineRef.current = engine;
-    const recovery = engine.recover().catch((error: unknown) => {
+    const recovery = engine.recover().then(() => {
+      if (
+        mountedRef.current &&
+        identityGenerationRef.current === generation &&
+        v2EngineRef.current === engine
+      ) {
+        setTombstoneCount(engine.getQuarantined().length);
+      }
+    }).catch((error: unknown) => {
       if (
         !mountedRef.current ||
         identityGenerationRef.current !== generation ||
@@ -367,7 +381,9 @@ export function useSatResponsePersistence({
         )
           return;
         await engine.acceptResponse(response.questionId, satDraftToDurablePayload(response), {
-          drainImmediately: context?.interactionType !== 'typing',
+          drainImmediately:
+            context?.interactionType !== 'typing' ||
+            (context.remainingSeconds <= 5),
         });
       };
       const acceptance = saveV2();
