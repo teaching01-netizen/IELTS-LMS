@@ -2,6 +2,7 @@ import { CircleSlash2 } from "lucide-react";
 import type { ChoiceOption } from "../../../exam-rendering/api/assessmentContracts";
 import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import { isSatSelectionGestureEcho } from "../annotations/satSelectionDragGuard";
+import type { ReactNode } from "react";
 
 export interface SatSingleChoiceAnswerProps {
   questionId: string;
@@ -12,6 +13,8 @@ export interface SatSingleChoiceAnswerProps {
   disabled: boolean;
   onChange: (optionId: string) => void;
   onToggleElimination: (optionId: string) => void;
+  /** Reuse the question's text surface while keeping radio controls outside it. */
+  renderOptionContent?: ((option: ChoiceOption) => ReactNode) | undefined;
 }
 
 export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
@@ -85,7 +88,9 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 // strike lists, equations, and mixed content — not just <p>.
                 className={`min-w-0 flex-1 sat-type-body text-[var(--sat-text)] ${eliminated ? "line-through decoration-[1.5px]" : ""}`}
               >
-                <StructuredContentRenderer content={option.content} />
+                {props.renderOptionContent
+                  ? props.renderOptionContent(option)
+                  : <StructuredContentRenderer content={option.content} />}
               </div>
             </label>
             {eliminated ? (

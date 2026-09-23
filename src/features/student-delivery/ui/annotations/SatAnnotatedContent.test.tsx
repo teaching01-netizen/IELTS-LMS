@@ -1,7 +1,7 @@
 import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSatTextAnnotation, emptySatAnnotations } from '../../domain/satResponses';
-import { clearSatGestureOrigin, clearSatSelectionGesture, markSatPointerDown } from './satSelectionDragGuard';
+import { createSatTextAnnotation, emptySatAnnotations, SAT_ANNOTATION_LIMIT } from '../../domain/satResponses';
+import { clearSatGestureOrigin, clearSatSelectionGesture, isSatSelectionGestureEcho, markSatPointerDown } from './satSelectionDragGuard';
 import { SatAnnotatedContent } from './SatAnnotatedContent';
 import { SatAnnotationViewContext, type SatAnnotationView } from './SatAnnotationViewContext';
 import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
@@ -98,9 +98,11 @@ describe('SAT annotation rendering', () => {
   it('marks the region as annotatable only when the section allows it', () => {
     const { container } = renderContent();
     expect(container.querySelector('[data-sat-annotation-region="stimulus"]')).toHaveAttribute('data-sat-highlight-preview', 'true');
+    expect(container.querySelector('[data-sat-selection-protected="true"]')).not.toBeNull();
     const { container: readOnly } = renderContent({ enabled: false });
     expect(readOnly.querySelector('[data-sat-annotation-region]')).toBeNull();
     expect(readOnly.querySelector('[data-sat-highlight-preview]')).toBeNull();
+    expect(readOnly.querySelector('[data-sat-selection-protected="true"]')).not.toBeNull();
   });
 
   it('reports a completed selection upward without applying anything itself', () => {
@@ -563,7 +565,32 @@ describe('SAT owned touch selection', () => {
       prefix: 'A ',
       suffix: ' grows.',
     });
+    expect(isSatSelectionGestureEcho()).toBe(true);
     expect(window.getSelection()?.rangeCount).toBe(0);
+  });
+
+  it('retires answer activation before the annotation limit rejects an owned range', () => {
+    const onLimitReached = vi.fn();
+    const annotations = {
+      version: 2 as const,
+      legacyQuestionNote: '',
+      annotations: Array.from({ length: SAT_ANNOTATION_LIMIT }, () =>
+        createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 0, endOffset: 1, exact: 'A' }),
+      ),
+    };
+    const { container } = renderContent({ annotations, onLimitReached }, view(), { ownedTouchSelection: true });
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+    const restoreMedia = stubCoarsePointerDevice();
+    const restoreHit = stubHitTest(leaf);
+    restoreEnvironment = () => {
+      restoreHit();
+      restoreMedia();
+    };
+
+    longPressAndDrag([2, 4, 6]);
+
+    expect(onLimitReached).toHaveBeenCalledOnce();
+    expect(isSatSelectionGestureEcho()).toBe(true);
   });
 
   it('takes the word under the hold when the finger never travels', () => {

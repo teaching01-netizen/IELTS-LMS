@@ -1,5 +1,6 @@
 import type { TextPoint } from '@shared/ui/selection-v2/domain/selectionTypes';
 import type { SatTextAnchor } from '../../domain/satResponses';
+import { createSatAnnotationNodeId, type SatAnnotationRegion } from '../../domain/satAnnotationIdentity';
 
 export interface SatTextSelectionOptions {
   /**
@@ -51,7 +52,7 @@ export function satAnnotationBlockForPoint(point: TextPoint): Element | null {
  * / Share menu over the passage. Neither path is privileged: an anchor is a
  * character span, and it does not matter who measured it.
  */
-export function captureSatTextRange(root: HTMLElement, region: string, range: Range, options: SatTextSelectionOptions = {}): SatTextAnchor | null {
+export function captureSatTextRange(root: HTMLElement, region: SatAnnotationRegion, range: Range, options: SatTextSelectionOptions = {}): SatTextAnchor | null {
   if (range.collapsed) return null;
   const elementFor = (node: Node) => node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
   const startElement = elementFor(range.startContainer);
@@ -75,7 +76,7 @@ export function captureSatTextRange(root: HTMLElement, region: string, range: Ra
   if (text.slice(startOffset, endOffset) !== exact) return null;
   const nodeId = block.dataset['contentTextNode'];
   if (!nodeId) return null;
-  return { nodeId: `${region}:${nodeId}`, startOffset, endOffset, exact,
+  return { nodeId: createSatAnnotationNodeId(region, nodeId), startOffset, endOffset, exact,
     prefix: text.slice(Math.max(0, startOffset - 64), startOffset), suffix: text.slice(endOffset, endOffset + 64) };
 }
 
@@ -84,7 +85,7 @@ export function captureSatTextRange(root: HTMLElement, region: string, range: Ra
  * shape only the platform's own selection can have (exactly one live range) and
  * hands the span to the core.
  */
-export function captureSatTextSelection(root: HTMLElement, region: string, selection: Selection | null, options: SatTextSelectionOptions = {}): SatTextAnchor | null {
+export function captureSatTextSelection(root: HTMLElement, region: SatAnnotationRegion, selection: Selection | null, options: SatTextSelectionOptions = {}): SatTextAnchor | null {
   if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
   return captureSatTextRange(root, region, selection.getRangeAt(0), options);
 }

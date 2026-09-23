@@ -12,6 +12,7 @@ import { SatSelectionActionsPanel } from './SatSelectionActionsPanel';
  */
 
 const anchor = { nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree' };
+const environment = { coarsePointer: false, nativeSelectionUi: false };
 const actions = { highlight: vi.fn(), underline: vi.fn(), addNote: vi.fn() };
 const mark = createSatTextAnnotation({
   kind: 'highlight', nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree', color: 'yellow',
@@ -33,7 +34,7 @@ function outsideNode(): HTMLElement {
 }
 
 function renderSelectionPanel(onClose = vi.fn()) {
-  render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions} onClose={onClose} />);
+  render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions} environment={environment} onClose={onClose} />);
   return onClose;
 }
 
@@ -41,7 +42,7 @@ function renderEditControls(onClose = vi.fn()) {
   render(
     <SatAnnotationEditControls
       annotation={mark}
-      touch={false}
+      environment={environment}
       onColor={vi.fn()}
       onUnderline={vi.fn()}
       onNote={vi.fn()}
@@ -109,10 +110,10 @@ describe('annotation tools: press outside to dismiss', () => {
   it('calls the newest dismissal after a re-render', () => {
     const first = vi.fn();
     const second = vi.fn();
-    const { rerender } = render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions} onClose={first} />);
+    const { rerender } = render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions} environment={environment} onClose={first} />);
     // A re-render mid-life must not leave the listener holding the old callback:
     // the surface that closes is the one on screen, not the one that was.
-    rerender(<SatSelectionActionsPanel anchor={anchor} currentColor="pink" actions={actions} onClose={second} />);
+    rerender(<SatSelectionActionsPanel anchor={anchor} currentColor="pink" actions={actions} environment={environment} onClose={second} />);
     press(outsideNode());
     expect(second).toHaveBeenCalledTimes(1);
     expect(first).not.toHaveBeenCalled();

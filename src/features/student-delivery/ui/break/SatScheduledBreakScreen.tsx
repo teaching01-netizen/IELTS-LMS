@@ -1,12 +1,13 @@
+import { useRef } from "react";
+import type { SatBreakEntryProgress, SatBreakPhase } from "../../application/satStudentSurface";
 import { formatSatTime } from "../../domain/satTiming";
 import { SatPresenceSurface } from "../motion/SatPresenceSurface";
 
-export type SatBreakEntryProgress = "idle" | "starting" | "retrying";
-
-export type SatScheduledBreakPhase =
-  | "waiting-for-break"
-  | "on-break"
-  | "opening-next-section";
+// The three break phases are one stage, so their names live with the stage
+// selector; the screen re-exports them for the surfaces that only know the
+// break UI.
+export type { SatBreakEntryProgress };
+export type SatScheduledBreakPhase = SatBreakPhase;
 
 export function SatScheduledBreakScreen({
   phase,
@@ -20,8 +21,17 @@ export function SatScheduledBreakScreen({
   entryProgress?: SatBreakEntryProgress;
 }) {
   const nextSection = nextSectionKey === "math" ? "Math" : "Reading and Writing";
-  const displayedTime =
-    remainingSeconds === null ? null : formatSatTime(Math.max(0, remainingSeconds));
+  // The countdown slot NEVER unmounts while the break is on screen: waiting for
+  // the break, taking the break and opening the next section are one surface,
+  // and a card that loses its big number between phases jumps at exactly the
+  // moment the next section starts. The run-out phase has no time left to count,
+  // so the slot keeps the last value but is hidden — never a 0:00 the student
+  // could read as remaining time, and never a hole where the clock was.
+  const lastSecondsRef = useRef<number | null>(null);
+  if (remainingSeconds !== null) lastSecondsRef.current = remainingSeconds;
+  const heldSeconds = remainingSeconds ?? lastSecondsRef.current;
+  const displayedTime = heldSeconds === null ? null : formatSatTime(Math.max(0, heldSeconds));
+  const timerReserved = remainingSeconds === null && displayedTime !== null;
   const contextLabel =
     phase === "waiting-for-break"
       ? "Section complete"
@@ -58,6 +68,9 @@ export function SatScheduledBreakScreen({
             className="sat-tabular mt-4 text-5xl font-semibold"
             role="timer"
             aria-label={`Time remaining ${displayedTime}`}
+            data-sat-break-timer={timerReserved ? "reserved" : "live"}
+            aria-hidden={timerReserved ? true : undefined}
+            style={timerReserved ? { visibility: "hidden" } : undefined}
           >
             {displayedTime}
           </p>

@@ -15,7 +15,7 @@ export function isSatHighlightColor(value: unknown): value is SatHighlightColor 
 }
 
 export interface SatTextAnchor {
-  /** Stable structured-content node id (primary locator with offsets). */
+  /** Annotation region plus stable structured-content node id, scoped before serialization. */
   nodeId: string;
   startOffset: number;
   endOffset: number;
@@ -66,7 +66,7 @@ export interface SatQuestionResponseDraft {
 export const SAT_ANNOTATION_NOTE_LIMIT = 2_000;
 export const SAT_ANNOTATION_TEXT_LIMIT = 2_000;
 const SAT_ANNOTATION_CONTEXT_LIMIT = 64;
-const SAT_MAX_ANNOTATIONS = 200;
+export const SAT_ANNOTATION_LIMIT = 200;
 
 let annotationSequence = 0;
 function createAnnotationId(): string {
@@ -140,7 +140,7 @@ function normalizeAnnotationsList(value: unknown): SatTextAnnotation[] {
   const seen = new Set<string>();
   const out: SatTextAnnotation[] = [];
   for (const entry of value) {
-    if (out.length >= SAT_MAX_ANNOTATIONS) break;
+    if (out.length >= SAT_ANNOTATION_LIMIT) break;
     const normalized = normalizeAnnotation(entry);
     if (!normalized || seen.has(normalized.id)) continue;
     seen.add(normalized.id);

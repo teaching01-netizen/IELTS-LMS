@@ -2,14 +2,11 @@ import { createContext, useContext } from 'react';
 import type { SatTextAnchor, SatTextAnnotation } from '../../domain/satResponses';
 
 /**
- * Bridge between the exam shell (which owns annotation state and renders the
- * contextual toolbar) and the annotated content (which owns the marks and the
- * selection gesture).
+ * Bridge from the exam shell's annotation state to text rendering and selection.
  *
- * Direction matters: the shell is an ANCESTOR of the question renderer, so the
- * content can consume this context, while every MUTATION still flows up into
- * the shell and from there to the route's response commands. Nothing here
- * writes an annotation.
+ * The renderer paints marks, the selection hook reports captured anchors, and
+ * mutations flow up to the shell and route response commands. This context
+ * never writes annotations.
  */
 export interface SatAnnotationView {
   /** Annotation whose editor is open (drawn with emphasis). */

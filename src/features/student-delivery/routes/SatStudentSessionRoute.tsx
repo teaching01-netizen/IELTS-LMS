@@ -17,9 +17,14 @@ import type { SatBootstrapSeed } from "../bootstrap/satBootstrapSeed";
 import { useSatExamController } from "../hooks/useSatExamController";
 import { useSatReadingPreferences } from "../hooks/useSatReadingPreferences";
 import { useSatEntryTransitionHold } from "../hooks/useSatEntryTransitionHold";
-import { deriveSatStudentTransitionSurface } from "../application/satStudentSurface";
+import {
+  deriveSatStudentStage,
+  type SatExamStage,
+  type SatStudentStage,
+} from "../application/satStudentSurface";
 import {
   findAttemptForModule,
+  moduleStartsNewSection,
   sectionForModule,
   studentModuleTitle,
 } from "../application/satRuntimeSelectors";
@@ -39,13 +44,12 @@ import { SatQuestionRenderer } from "../ui/question/SatQuestionRenderer";
 import { SatReviewPage } from "../ui/review/SatReviewPage";
 import { SatCalculatorPanel } from "../ui/tools/SatCalculatorPanel";
 import { SatReferenceSheetPanel } from "../ui/tools/SatReferenceSheetPanel";
-import {
-  SatScheduledBreakScreen,
-  type SatBreakEntryProgress,
-} from "../ui/break/SatScheduledBreakScreen";
+import { SatScheduledBreakScreen } from "../ui/break/SatScheduledBreakScreen";
 import { SatPresenceSurface } from "../ui/motion/SatPresenceSurface";
+import { SatStudentStageHost } from "../ui/stage/SatStudentStageHost";
 import { SatCompleteScreen, SatTerminatedScreen } from "../ui/transitions/SatCompleteScreen";
 import { SatEntryRecoveryScreen } from "../ui/transitions/SatEntryRecoveryScreen";
+import { SatModuleHandoffStatus } from "../ui/transitions/SatModuleHandoffStatus";
 import { SatPreStartScreen } from "../ui/transitions/SatPreStartScreen";
 import { useStudentExamPageLock } from "@components/student/layout/useStudentExamPageLock";
 import { useStudentExamViewport } from "@components/student/layout/useStudentExamViewport";
@@ -76,7 +80,7 @@ export interface SatStudentSessionRouteProps {
 }
 
 function assertNever(surface: never): never {
-  throw new Error(`Unhandled SAT student transition surface: ${surface}`);
+  throw new Error(`Unhandled SAT student stage: ${surface}`);
 }
 
 function sectionLabel(displayOrder: number, title: string): string {
@@ -145,14 +149,6 @@ export function SatStudentSessionRoute({
   const [breakVeilOpen, setBreakVeilOpen] = useState(false);
 
   const { state, data, result, error, commands, persistence } = exam;
-  // Phase 4: the between-sections surfaces must never freeze at a 0:00 countdown
-  // with no explanation — an entry in flight says so, and an attempt that
-  // settled without opening the module says it is still retrying.
-  const breakEntryProgress: SatBreakEntryProgress = exam.isStarting
-    ? "starting"
-    : exam.autoEntryRecoverable
-      ? "retrying"
-      : "idle";
   // Phase 04 hold-previous-UI vessel: a render-time fallback (ref, not
   // state — holding must not itself trigger renders or reset clocks).
   // Updated only on successful module/review renders; cleared on identity
@@ -171,11 +167,16 @@ export function SatStudentSessionRoute({
       pendingSection?.displayOrder === 0 &&
       data.attempt.moduleAttempts.every((moduleAttempt) => moduleAttempt.state === "not_started"),
   );
-  const betweenSections =
-    state.phase === "break" ||
-    (state.phase === "directions" && (pendingSection?.displayOrder ?? 0) > 0);
+  /**
+   * Arms the bounded entry-hold window for the pending module.
+   *
+   * It is what a student WITHOUT a retained frame waits out — a reload that
+   * lands mid-handoff shows "restoring" and only escalates to the recovery
+   * surface after this window; with a frame in hand, the handoff status owns
+   * the moment instead and the window is never consulted.
+   */
   const entryTransitionKey =
-    state.phase === "directions" && exam.pendingModule && !betweenSections
+    state.phase === "directions" && exam.pendingModule
       ? `${identityKey}:${exam.pendingModule.id}`
       : null;
   const entryHoldExpired = useSatEntryTransitionHold(entryTransitionKey);
@@ -186,6 +187,30 @@ export function SatStudentSessionRoute({
     prevIdentityKeyRef.current = identityKey;
     lastValidFrameRef.current = null;
   }
+  /**
+   * A render carrying a different attempt/candidate is not a transition: it is a
+   * different page. The stage host replaces the surface at once — no cross-fade
+   * of the previous attempt's exam into the new one, and no layer of the old
+   * attempt left fading behind it.
+   */
+  const attemptChangedRef = useRef(identityKey);
+  const attemptChanged = attemptChangedRef.current !== identityKey;
+  attemptChangedRef.current = identityKey;
+  /**
+   * The one way a student stage reaches the viewport.
+   *
+   * Everything the route renders goes through the host, so the student has
+   * exactly one surface at a time and a stage change is a cross-fade instead of
+   * a cut from one full-screen tree to another. `children` may be a keyed array
+   * when a stage renders more than one layer (the module handoff adds its status
+   * card beside the frozen exam frame) — position 0 is the stage's own surface in
+   * every case, which is what keeps the exam frame mounted across a handoff.
+   */
+  const stageHost = (target: SatStudentStage, children: ReactNode) => (
+    <SatStudentStageHost stage={target} instant={attemptChanged}>
+      {children}
+    </SatStudentStageHost>
+  );
   useEffect(() => {
     lastValidFrameRef.current = null;
   }, [identityKey]);
@@ -197,10 +222,19 @@ export function SatStudentSessionRoute({
   const heldFrame = lastValidFrameRef.current;
   const heldFrameFresh =
     heldFrame != null && Date.now() - heldFrame.renderedAt < SKEW_HOLD_MS;
+  /**
+   * The page lock and the measured exam height belong to the ATTEMPT, not to a
+   * phase: a module handoff and the scheduled break happen inside the same
+   * attempt, and releasing the lock between them re-acquired it on the next
+   * module — re-measuring the viewport and restoring a document scroll the exam
+   * had already taken. Terminal phases still release it.
+   */
   const examViewportActive =
     state.phase === "module" ||
     state.phase === "review" ||
-    (state.phase === "directions" && !betweenSections && heldFrame !== null);
+    state.phase === "directions" ||
+    state.phase === "break" ||
+    state.phase === "submitting";
   const examViewport = useStudentExamViewport(examViewportActive);
   useStudentExamPageLock(examViewportActive);
   useStudentFocusedControlVisibility(examViewportActive && examViewport.keyboardOpen);
@@ -224,42 +258,117 @@ export function SatStudentSessionRoute({
     ensureDesmosPreconnect();
   }, []);
 
-  if (error && !data) {
-    return (
-      <SatErrorSurface
-        title="SAT delivery unavailable"
-        description="Your responses are safe. The exam could not be loaded just now."
-        detail={error}
-        actionLabel="Exit"
-        onAction={() => void onExit()}
-      />
-    );
-  }
+  /* ------------------------------------------------------------------ *
+   * The stage (Stage model)
+   *
+   * One decision, from facts the route already holds: which single surface the
+   * student is on. Everything below renders through the host, so a module
+   * handoff is a content change inside the exam stage rather than a walk
+   * through intermediate screens.
+   * ------------------------------------------------------------------ */
+  const liveQuestionId =
+    state.phase === "module" && "questionIds" in state
+      ? state.questionIds[state.questionIndex]
+      : null;
+  const liveQuestion =
+    liveQuestionId && exam.stateModule
+      ? exam.stateModule.questions.find(
+          (candidate) => candidate.examQuestionId === liveQuestionId,
+        ) ?? null
+      : null;
+  const terminated =
+    data?.proctorStatus === "terminated" ||
+    data?.scheduleRuntimeStatus === "completed" ||
+    data?.scheduleRuntimeStatus === "cancelled";
+  const allModulesFinal =
+    Boolean(data) &&
+    (data?.attempt.moduleAttempts.length ?? 0) > 0 &&
+    (data?.attempt.moduleAttempts.every(
+      (moduleAttempt) => moduleAttempt.state === "submitted" || moduleAttempt.state === "locked",
+    ) ?? false);
+  const entryBlocked =
+    exam.entryReason === "runtime-not-live" ||
+    exam.entryReason === "proctor-blocked" ||
+    exam.entryReason === "stage-not-ready";
+  const stage = deriveSatStudentStage({
+    runnerPhase: state.phase,
+    hasData: Boolean(data),
+    loadFailed: Boolean(error) && !data,
+    hasResult: Boolean(data?.result) || Boolean(result),
+    terminated,
+    terminatedByProctor: data?.proctorStatus === "terminated",
+    finalizationFailed: Boolean(error),
+    allModulesFinal,
+    isInitialEntry: initialEntry,
+    pendingModule:
+      data && exam.pendingModule && pendingSection
+        ? {
+            id: exam.pendingModule.id,
+            title: studentModuleTitle(exam.pendingModule),
+            sectionKey:
+              pendingSection.sectionKey === "math" ? "math" : "reading-writing",
+            // Structural, never ordinal: the module immediately before this one
+            // in exam order decides whether the student is crossing a section.
+            startsNewSection: moduleStartsNewSection(data, exam.pendingModule.id),
+          }
+        : null,
+    hasExamFrame: heldFrame !== null,
+    frameFresh: heldFrameFresh,
+    moduleResolved: Boolean(exam.stateModule && exam.stateModuleAttempt && exam.stateSection),
+    moduleQuestionResolved: state.phase !== "module" || (liveQuestion !== null && liveQuestionId !== null),
+    entryRecoverable: exam.autoEntryRecoverable,
+    entryBlocked,
+    entryHoldExpired,
+    pendingBreakSeconds: exam.pendingBreakSeconds,
+    pendingSectionWaitSeconds: exam.pendingSectionWaitSeconds,
+    entryInFlight: exam.isStarting,
+    attemptKey: identityKey,
+  });
+
   if (!data) {
-    return (
+    if (stage.kind === "error") {
+      return stageHost(
+        stage,
+        <SatErrorSurface
+          title="SAT delivery unavailable"
+          description="Your responses are safe. The exam could not be loaded just now."
+          {...(error ? { detail: error } : {})}
+          actionLabel="Exit"
+          onAction={() => void onExit()}
+        />,
+      );
+    }
+    return stageHost(
+      stage,
       <SatPreStartScreen
         reason="loading"
         runtimeStatus="loading"
         proctorStatus="connecting"
         stageReady={false}
-      />
+      />,
     );
   }
-  if (data.result || state.phase === "complete") {
+
+  if (stage.kind === "complete") {
     lastValidFrameRef.current = null;
-    return <SatCompleteScreen result={data.result ?? result} onExit={onExit} />;
+    return stageHost(
+      stage,
+      <SatCompleteScreen result={data.result ?? result} onExit={onExit} />,
+    );
   }
-  if (data.proctorStatus === "terminated") {
+  if (stage.kind === "terminated") {
     lastValidFrameRef.current = null;
-  }
-  if (data.scheduleRuntimeStatus === "completed" || data.scheduleRuntimeStatus === "cancelled") {
-    lastValidFrameRef.current = null;
-  }
-  if (data.proctorStatus === "terminated") {
-    return <SatTerminatedScreen note={data.proctorNote} onExit={onExit} />;
-  }
-  if (data.scheduleRuntimeStatus === "completed" || data.scheduleRuntimeStatus === "cancelled") {
-    return <SatTerminatedScreen note="The proctor has ended this exam session." onExit={onExit} />;
+    return stageHost(
+      stage,
+      <SatTerminatedScreen
+        note={
+          stage.byProctor
+            ? data.proctorNote
+            : "The proctor has ended this exam session."
+        }
+        onExit={onExit}
+      />,
+    );
   }
 
   const currentCalculatorModule =
@@ -342,125 +451,13 @@ export function SatStudentSessionRoute({
     </>
   );
 
-  const allModulesFinal =
-    data.attempt.moduleAttempts.length > 0 &&
-    data.attempt.moduleAttempts.every(
-      (moduleAttempt) => moduleAttempt.state === "submitted" || moduleAttempt.state === "locked",
-    );
-  if (state.phase === "directions" && allModulesFinal) {
-    if (error && !exam.isSubmitting && !data.result) {
-      return (
-        <div
-          className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] px-6 py-8 text-[var(--sat-text)]"
-          role="alert"
-        >
-          <div className="w-full max-w-md text-center">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Your SAT result could not be finished
-            </h1>
-            <p className="mt-3 text-[15px] leading-6 text-[var(--sat-text-secondary)]">
-              Your saved answers are safe. Retry now or keep this screen open while it completes automatically.
-            </p>
-            <button
-              type="button"
-              onClick={() => void commands.retryFinalization()}
-              disabled={exam.isSubmitting}
-              className="sat-touch-target sat-pressable mt-6 rounded-full border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-5 text-[14px] font-semibold text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2 disabled:opacity-60"
-            >
-              {exam.isSubmitting ? "Retrying…" : "Retry finalization"}
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return <SatLoadingSurface label="Finalizing SAT responses…" />;
-  }
-
-  const pendingNextSectionKey =
-    state.phase === "break"
-      ? state.nextSectionKey
-      : pendingSection?.sectionKey === "math"
-        ? "math"
-        : "reading-writing";
-  const entryBlocked =
-    exam.entryReason === "runtime-not-live" ||
-    exam.entryReason === "proctor-blocked" ||
-    exam.entryReason === "stage-not-ready";
-  const transitionSurface = deriveSatStudentTransitionSurface({
-    runnerPhase: state.phase,
-    isInitialEntry: initialEntry,
-    isBetweenSections: betweenSections,
-    hasPreviousExamFrame: heldFrame !== null,
-    nextSectionKey: pendingNextSectionKey,
-    pendingBreakSeconds: exam.pendingBreakSeconds,
-    pendingSectionWaitSeconds: exam.pendingSectionWaitSeconds,
-    entryRecoverable: exam.autoEntryRecoverable,
-    entryBlocked,
-    entryHoldExpired,
-  });
-
-  if (transitionSurface) {
-    switch (transitionSurface.kind) {
-      case "scheduled-break":
-        return (
-          <SatScheduledBreakScreen
-            phase={transitionSurface.phase}
-            nextSectionKey={transitionSurface.nextSectionKey}
-            remainingSeconds={transitionSurface.remainingSeconds}
-            entryProgress={breakEntryProgress}
-          />
-        );
-      case "pre-start":
-        return withCalculatorHost(
-          <SatPreStartScreen
-            reason={transitionSurface.reason}
-            runtimeStatus={data.scheduleRuntimeStatus}
-            proctorStatus={data.proctorStatus}
-            stageReady={exam.pendingStageReady}
-          />
-        );
-      case "entry-recovery":
-        return withCalculatorHost(
-          <SatEntryRecoveryScreen
-            module={exam.pendingModule}
-            isRetrying={exam.isStarting}
-            onRetry={exam.retryModuleEntry}
-          />
-        );
-      case "hold-exam-frame":
-        if (heldFrame) {
-          return (
-            <SatPresenceSurface
-              className="sat-ui min-h-[100dvh] min-w-0"
-              data-sat-student-frame
-              data-sat-transition-hold
-              aria-hidden="true"
-              inert
-            >
-              {heldFrame.element}
-            </SatPresenceSurface>
-          );
-        }
-        return withCalculatorHost(
-          <SatPreStartScreen
-            reason="restoring"
-            runtimeStatus={data.scheduleRuntimeStatus}
-            proctorStatus={data.proctorStatus}
-            stageReady={exam.pendingStageReady}
-          />
-        );
-      default:
-        return assertNever(transitionSurface);
-    }
-  }
-  if (state.phase === "submitting") {
-    // Exam-day P1: a failed finalization must be visible and retryable —
-    // never a bare spinner. Recovery polling continues underneath, so the
-    // panel can also resolve on its own when connectivity returns.
-    if (error) {
-      // Phase 03 bare-branch rule: a retry panel owns the full screen — no
-      // hidden tool tree, no competing live region. Copy is Phase 05-owned.
-      return (
+  if (stage.kind === "finalizing") {
+    // Exam-day P1: a failed finalization must be visible and retryable — never
+    // a bare spinner. Recovery polling continues underneath, so the panel can
+    // also resolve on its own when connectivity returns.
+    if (stage.failed) {
+      return stageHost(
+        stage,
         <div
           className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] px-6 py-8 text-[var(--sat-text)]"
           role="alert"
@@ -488,57 +485,175 @@ export function SatStudentSessionRoute({
               {exam.isSubmitting ? "Retrying…" : "Retry finalization"}
             </button>
           </div>
-        </div>
+        </div>,
       );
     }
-    // Phase 03 bare-branch rule: a single live region owns the screen.
-    return (
+    return stageHost(
+      stage,
       <SatLoadingSurface
-        label={exam.autoSubmitted ? "Time expired — submitting your saved answers." : "Finalizing SAT responses…"}
-      />
+        kind="finalizing"
+        label={
+          exam.autoSubmitted
+            ? "Time expired — submitting your saved answers."
+            : "Finalizing SAT responses…"
+        }
+      />,
     );
   }
-  // Phase 04 hold-previous-UI rule (C2): while state.phase is
-  // module/review but the module is momentarily unresolvable, keep rendering
-  // the previous valid frame while the hold is fresh; the bounded fallback
-  // (bare Refreshing, kind="module-refresh" per Phase 01 contract) shows
-  // only with no held frame or after hold expiry (genuine resolution
-  // failure). SAT state unavailable is unreachable for transient skew — it
-  // renders only when no held frame exists (phase=loading+data-present
-  // under-one-frame window or a genuine invariant violation).
-  if (state.phase !== "module" && state.phase !== "review") {
-    // Defensive order: a fresh held frame wins even here (never swap valid
-    // exam UI for the error on a one-frame mismatch).
-    if (heldFrame && heldFrameFresh) {
-      return (
-        <SatPresenceSurface className="sat-ui min-h-[100dvh] min-w-0" data-sat-student-frame>
-          {heldFrame.element}
-        </SatPresenceSurface>
-      );
-    }
+
+  if (stage.kind === "scheduled-break") {
+    // One break surface for all three phases: the stage key is the boundary, so
+    // waiting → on break → opening next section never remounts the card.
+    return stageHost(
+      stage,
+      <SatScheduledBreakScreen
+        phase={stage.phase}
+        nextSectionKey={stage.nextSectionKey}
+        remainingSeconds={stage.remainingSeconds}
+        entryProgress={stage.entryProgress}
+      />,
+    );
+  }
+
+  if (stage.kind === "pre-start") {
+    return stageHost(
+      stage,
+      withCalculatorHost(
+        <SatPreStartScreen
+          reason={stage.reason}
+          runtimeStatus={data.scheduleRuntimeStatus}
+          proctorStatus={data.proctorStatus}
+          stageReady={exam.pendingStageReady}
+        />,
+      ),
+    );
+  }
+
+  if (stage.kind === "entry-recovery") {
+    return stageHost(
+      stage,
+      withCalculatorHost(
+        <SatEntryRecoveryScreen
+          module={exam.pendingModule}
+          isRetrying={exam.isStarting}
+          onRetry={exam.retryModuleEntry}
+        />,
+      ),
+    );
+  }
+
+  if (stage.kind === "error") {
     // Phase 03 bare-branch rule: an error surface owns the full screen.
-    return (
+    return stageHost(
+      stage,
       <SatErrorSurface
-        title="SAT state unavailable"
-        description="The assessment state could not be recovered."
+        title={
+          stage.reason === "question" ? "SAT question unavailable" : "SAT state unavailable"
+        }
+        description={
+          stage.reason === "question"
+            ? "The active question could not be recovered."
+            : "The assessment state could not be recovered."
+        }
         actionLabel="Exit"
         onAction={() => void onExit()}
-      />
+      />,
     );
   }
-  if (!exam.stateModule || !exam.stateModuleAttempt || !exam.stateSection) {
-    if (heldFrame && heldFrameFresh) {
-      return (
-        <SatPresenceSurface className="sat-ui min-h-[100dvh] min-w-0" data-sat-student-frame>
-          {heldFrame.element}
-        </SatPresenceSurface>
-      );
-    }
+
+  /* Exhaustive by construction: every non-exam stage kind returned above. A new
+   * kind added to the selector fails THIS assignment at compile time instead of
+   * silently rendering the exam frame for it. */
+  const examStage: SatExamStage = stage;
+
+  /* ------------------------------------------------------------------ *
+   * The exam stage
+   *
+   * One stage for the whole attempt. Its contents below are: the live frame,
+   * the bounded skew hold, the bare refresh fallback, and the module handoff —
+   * which keeps the finished frame exactly where it is and adds one live status
+   * card beside it.
+   * ------------------------------------------------------------------ */
+  const retainedFrame = heldFrame;
+  const refreshFallback = (
     // Phase 03 bare-branch rule: transient skew shows the loader only — the
     // warm tree remounts once the module resolves (no prewarm here). The
     // fallback renders BARE (no withCalculatorHost) per the Phase 01/03
     // single-surface contract: exactly one role=status, no hidden Desmos iframes.
-    return <SatLoadingSurface kind="module-refresh" label="Refreshing SAT module…" />;
+    <SatLoadingSurface kind="module-refresh" label="Refreshing SAT module…" />
+  );
+  if (examStage.content !== "live") {
+    // A frame that vanished between the stage decision and here is a resolution
+    // failure, and the refresh fallback is the same answer as a stale hold —
+    // never a handoff over nothing.
+    if (!retainedFrame || examStage.content === "refreshing") {
+      return stageHost(examStage, refreshFallback);
+    }
+    if (examStage.content === "skew-hold") {
+      // Interactive on purpose (Phase 04): a live answer dispatch wins, and the
+      // next resolved render replaces the cache.
+      return stageHost(examStage, [
+        <SatPresenceSurface
+          key="sat-exam-frame"
+          className="sat-ui min-h-[100dvh] min-w-0"
+          data-sat-student-frame
+          data-sat-skew-hold="true"
+        >
+          {retainedFrame.element}
+        </SatPresenceSurface>,
+      ]);
+    }
+    if (examStage.content === "opening") {
+      /**
+       * The module handoff, inside the exam.
+       *
+       * Position 0 is the same `SatPresenceSurface` the live frame renders, with
+       * the same retained element as its child, so React reconciles the frame
+       * instead of remounting it: the shell, its DOM, its tool hosts and its zoom
+       * plane never leave. Position 1 is the live status card — a SIBLING of the
+       * hidden frame, never inside it, so an assistive-tech student hears exactly
+       * the one thing that changed. `data-sat-transition-hold` keeps its existing
+       * meaning for keyboard guards and e2e.
+       */
+      return stageHost(examStage, [
+        // SAME key and same position as the live frame below: React reconciles
+        // the frame instead of remounting it, which is the whole point of the
+        // handoff. Keying it differently here is what a handoff cannot afford.
+        <SatPresenceSurface
+          key="sat-exam-frame"
+          className="sat-ui min-h-[100dvh] min-w-0"
+          data-sat-student-frame
+          data-sat-transition-hold="true"
+          aria-hidden="true"
+          inert
+        >
+          {retainedFrame.element}
+        </SatPresenceSurface>,
+        <SatModuleHandoffStatus
+          key="sat-module-handoff"
+          moduleTitle={examStage.pendingModuleTitle ?? "the next module"}
+          retrying={exam.autoEntryRecoverable}
+          remainingSeconds={exam.handoffSeconds ?? null}
+          onRetry={exam.retryModuleEntry}
+        />,
+      ]);
+    }
+    return assertNever(examStage.content);
+  }
+
+  if (state.phase !== "module" && state.phase !== "review") {
+    // Unreachable: the stage reports `live` only while the runner is in a
+    // working phase. It stays as the narrowing guard the frame reads below need
+    // (and as the honest answer if a future phase ever resolves a module).
+    return stageHost(examStage, refreshFallback);
+  }
+
+  const stateModule = exam.stateModule;
+  const stateSection = exam.stateSection;
+  if (!stateModule || !stateSection) {
+    // The stage only reports `live` when both resolve; a frame that vanished
+    // between the two reads is a resolution failure, not a handoff.
+    return stageHost(stage, refreshFallback);
   }
 
   const navigationItems = buildSatQuestionNavigationItems(
@@ -547,7 +662,7 @@ export function SatStudentSessionRoute({
     state.responses
   );
   const answeredCount = answeredSatQuestionCount(state.questionIds, state.responses);
-  const activeSectionLabel = sectionLabel(exam.stateSection.displayOrder, exam.stateSection.title);
+  const activeSectionLabel = sectionLabel(stateSection.displayOrder, stateSection.title);
   const persistenceBlocked = Boolean(persistence.failure);
 
   if (state.phase === "review") {
@@ -570,7 +685,7 @@ export function SatStudentSessionRoute({
         />
         <SatReviewPage
           sectionLabel={activeSectionLabel}
-          moduleTitle={studentModuleTitle(exam.stateModule)}
+          moduleTitle={studentModuleTitle(stateModule)}
           remainingLabel={formatSatTime(exam.remainingSeconds)}
           remainingSeconds={exam.remainingSeconds}
           examHeight={examViewport.stableExamHeight}
@@ -588,7 +703,7 @@ export function SatStudentSessionRoute({
           currentQuestionIndex={state.questionIndex}
           onSelectQuestion={commands.returnToQuestion}
           onBack={commands.returnToModule}
-          onSubmit={() => void commands.submitModule(exam.stateModule!.id)}
+          onSubmit={() => void commands.submitModule(stateModule.id)}
           onRetrySave={() => {
             void persistence.retryFailed();
           }}
@@ -596,35 +711,31 @@ export function SatStudentSessionRoute({
       </>
     );
     lastValidFrameRef.current = { element: reviewElement, renderedAt: Date.now() };
-    return (
-      <SatPresenceSurface className="sat-ui min-h-[100dvh] min-w-0" data-sat-student-frame>
+    return stageHost(stage, [
+      <SatPresenceSurface
+        key="sat-exam-frame"
+        className="sat-ui min-h-[100dvh] min-w-0"
+        data-sat-student-frame
+      >
         {reviewElement}
-      </SatPresenceSurface>
-    );
+      </SatPresenceSurface>,
+    ]);
   }
 
-  const questionId = state.questionIds[state.questionIndex];
-  const question = exam.stateModule.questions.find(
-    (candidate) => candidate.examQuestionId === questionId
-  );
+  const question = liveQuestion;
+  const questionId = liveQuestionId;
   if (!question || !questionId) {
-    // Phase 03 bare-branch rule: an error surface owns the full screen.
-    return (
-      <SatErrorSurface
-        title="SAT question unavailable"
-        description="The active question could not be recovered."
-        actionLabel="Exit"
-        onAction={() => void onExit()}
-      />
-    );
+    // The stage selector owns this verdict; reaching here means the payload
+    // changed between the two reads in one render.
+    return stageHost(examStage, refreshFallback);
   }
 
   const response = responseForQuestion(state.responses, questionId);
   const interactionBlocked = exam.blocked || exam.isSubmitting || persistenceInteractionBlocked;
-  const directions = hasStructuredContent(exam.stateModule.instructions)
-    ? exam.stateModule.instructions
-    : hasStructuredContent(exam.stateSection.instructions)
-      ? exam.stateSection.instructions
+  const directions = hasStructuredContent(stateModule.instructions)
+    ? stateModule.instructions
+    : hasStructuredContent(stateSection.instructions)
+      ? stateSection.instructions
       : null;
   const saveState =
     persistence.failureKind === "offline"
@@ -661,7 +772,7 @@ export function SatStudentSessionRoute({
         onContinue={exam.acknowledgeTabSwitchWarning}
       />
       <SatExamShell
-        moduleIdentity={exam.stateModule.id}
+        moduleIdentity={stateModule.id}
         sectionLabel={activeSectionLabel}
         directions={directions}
         remainingLabel={formatSatTime(exam.remainingSeconds)}
@@ -676,7 +787,7 @@ export function SatStudentSessionRoute({
         calculatorOpen={state.activeTools.calculator}
         referenceAvailable={state.toolCapabilities.referenceSheet}
         referenceOpen={state.activeTools.referenceSheet}
-        notesAvailable={resolveSatExamToolPolicy(state.sectionKey, exam.stateModule.toolPolicy).notes}
+        notesAvailable={resolveSatExamToolPolicy(state.sectionKey, stateModule.toolPolicy).notes}
         blocked={interactionBlocked}
         saveState={saveState}
         saveFailure={persistence.failure}
@@ -767,9 +878,13 @@ export function SatStudentSessionRoute({
     </>
   );
   lastValidFrameRef.current = { element: moduleElement, renderedAt: Date.now() };
-  return (
-    <SatPresenceSurface className="sat-ui min-h-[100dvh] min-w-0" data-sat-student-frame>
+  return stageHost(stage, [
+    <SatPresenceSurface
+      key="sat-exam-frame"
+      className="sat-ui min-h-[100dvh] min-w-0"
+      data-sat-student-frame
+    >
       {moduleElement}
-    </SatPresenceSurface>
-  );
+    </SatPresenceSurface>,
+  ]);
 }

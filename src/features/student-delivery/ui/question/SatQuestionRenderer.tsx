@@ -12,6 +12,7 @@ import { SatQuestionHeader } from "./SatQuestionHeader";
 import { SatQuestionWorkspace } from "./SatQuestionWorkspace";
 import { SatSingleChoiceAnswer } from "./SatSingleChoiceAnswer";
 import { SatStudentProducedAnswer } from "./SatStudentProducedAnswer";
+import { satChoiceAnnotationRegion, type SatAnnotationRegion } from '../../domain/satAnnotationIdentity';
 
 export interface SatQuestionRendererProps {
   sectionKey: SatSectionKey;
@@ -47,7 +48,7 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
   const eliminationAvailable = props.question.answer.kind === "single_choice";
   const eliminated = new Set(props.response.eliminatedOptionIds);
   const policy = resolveSatExamToolPolicy(props.sectionKey, []);
-  const renderContent = (content: StructuredContent, region: 'stimulus' | 'prompt') => (
+  const renderContent = (content: StructuredContent, region: SatAnnotationRegion) => (
     <SatAnnotatedContent
       content={content}
       region={region}
@@ -98,6 +99,9 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
                 disabled={props.disabled}
                 onChange={props.onAnswerChange}
                 onToggleElimination={props.onToggleEliminatedOption}
+                renderOptionContent={(option) =>
+                  renderContent(option.content, satChoiceAnnotationRegion(option.id))
+                }
               />
             ) : (
               <SatStudentProducedAnswer

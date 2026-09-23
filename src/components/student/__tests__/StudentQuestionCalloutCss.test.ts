@@ -34,8 +34,8 @@ describe('student exam content callout guard CSS', () => {
       (rule) => rule.selectors.includes(fragment) && rule.body.includes(declaration),
     );
 
-  it('suppresses the callout on SAT prose and on highlightable exam text, in one rule', () => {
-    const prose = rulesWith('.student-exam-active .sat-exam-prose', '-webkit-touch-callout: none');
+  it('suppresses the callout on SAT selection roots and highlightable exam text, in one rule', () => {
+    const prose = rulesWith('.student-exam-active [data-sat-selection-protected="true"]', '-webkit-touch-callout: none');
     const highlightable = rulesWith(
       '.student-exam-active [data-student-highlightable="true"]',
       '-webkit-touch-callout: none',
@@ -43,12 +43,12 @@ describe('student exam content callout guard CSS', () => {
 
     expect(prose).toHaveLength(1);
     expect(highlightable).toEqual(prose);
-    expect(prose[0]!.selectors).toContain('.sat-exam-prose *');
+    expect(prose[0]!.selectors).toContain('[data-sat-selection-protected="true"] *');
     expect(prose[0]!.selectors).toContain('[data-student-highlightable="true"] *');
   });
 
-  it('keeps text selection available, because the highlights are built on it', () => {
-    const [guard] = rulesWith('.student-exam-active .sat-exam-prose', '-webkit-touch-callout: none');
+  it('keeps text selection available outside the coarse-pointer owned-selection rule', () => {
+    const [guard] = rulesWith('.student-exam-active [data-sat-selection-protected="true"]', '-webkit-touch-callout: none');
 
     expect(guard!.body).toContain('-webkit-user-select: text');
     expect(guard!.body).toContain('user-select: text');
@@ -57,14 +57,14 @@ describe('student exam content callout guard CSS', () => {
   });
 
   it('scopes the guard to an active exam, and away from form controls', () => {
-    const [guard] = rulesWith('.student-exam-active .sat-exam-prose', '-webkit-touch-callout: none');
+    const [guard] = rulesWith('.student-exam-active [data-sat-selection-protected="true"]', '-webkit-touch-callout: none');
     const selectors = guard!.selectors.split(',').map((selector) => selector.trim());
 
     expect(selectors).toHaveLength(4);
     for (const selector of selectors) {
       expect(selector.startsWith('.student-exam-active')).toBe(true);
     }
-    expect(guard!.selectors).not.toMatch(/input|textarea|select|button|contenteditable/);
+    expect(guard!.selectors).not.toMatch(/\b(?:input|textarea|select|button|contenteditable)\b/);
   });
 
   it('stops exam images and links from becoming drag sources', () => {
@@ -104,12 +104,12 @@ describe('owned touch selection CSS', () => {
     '',
   );
   const coarseBlocks = mediaBlocks(css, '(pointer: coarse)');
-  const owned = coarseBlocks.filter((block) => block.includes('.sat-exam-prose'));
+  const owned = coarseBlocks.filter((block) => block.includes('[data-sat-selection-protected="true"]'));
 
   it('removes native selection from both exam content surfaces, and only there', () => {
     expect(owned).toHaveLength(1);
-    expect(owned[0]).toContain('html.student-exam-active .sat-exam-prose');
-    expect(owned[0]).toContain('html.student-exam-active .sat-exam-prose *');
+    expect(owned[0]).toContain('html.student-exam-active [data-sat-selection-protected="true"]');
+    expect(owned[0]).toContain('html.student-exam-active [data-sat-selection-protected="true"] *');
     // IELTS passages and transcripts, whose capture path now takes an owned
     // range too. A selector here without a gesture behind it would delete
     // highlighting rather than protect it, so the pairing is asserted, not
@@ -127,9 +127,9 @@ describe('owned touch selection CSS', () => {
       .map(([, selectors = '']) => selectors.trim())
       .join(',\n');
 
-    expect(guarded).toContain('html.student-exam-active .sat-exam-prose');
+    expect(guarded).toContain('html.student-exam-active [data-sat-selection-protected="true"]');
     expect(guarded).toContain('data-student-highlightable');
-    expect(guarded).not.toMatch(/input|textarea|select|button|contenteditable/);
+    expect(guarded).not.toMatch(/\b(?:input|textarea|select|button|contenteditable)\b/);
     expect(guarded).not.toContain('student-exam-active img');
   });
 
@@ -144,7 +144,7 @@ describe('owned touch selection CSS', () => {
     const selectors = owned
       .join('\n')
       .matchAll(/([^{}]+)\{([^{}]*)\}/g);
-    const classAndAttribute = /^html\.student-exam-active\s+(?:\.sat-exam-prose|\[data-student-highlightable="true"\])/;
+    const classAndAttribute = /^html\.student-exam-active\s+(?:\[data-sat-selection-protected="true"\]|\[data-student-highlightable="true"\])/;
 
     for (const [, selectorText = ''] of selectors) {
       for (const selector of selectorText.split(',').map((part) => part.trim()).filter(Boolean)) {
@@ -236,7 +236,7 @@ describe('owned touch selection CSS', () => {
     };
     const removers = rules.filter(
       (rule) =>
-        /data-student-highlightable|sat-exam-prose/.test(rule.selectors) &&
+        /data-student-highlightable|data-sat-selection-protected/.test(rule.selectors) &&
         /user-select:\s*none/.test(rule.body),
     );
 

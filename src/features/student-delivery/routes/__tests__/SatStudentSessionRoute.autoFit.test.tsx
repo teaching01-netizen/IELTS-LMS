@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { createSatReadingPreferences } from "../../domain/satReadingPreferences";
@@ -303,7 +303,7 @@ describe("SatStudentSessionRoute auto-fit screen zoom", () => {
     expect(loadSatReadingPreferences("schedule-1", "attempt-1").examZoom).toBe(0.75);
   });
 
-  it("decides once per attempt: the next module does not decide again", () => {
+  it("decides once per attempt: the next module does not decide again", async () => {
     seedModulePhase();
     const measurements = stubPaneLayout(() => true);
 
@@ -315,10 +315,14 @@ describe("SatStudentSessionRoute auto-fit screen zoom", () => {
     expect(loadSatReadingPreferences("schedule-1", "attempt-1").examZoom).toBeUndefined();
     const firstShell = contentBox();
 
-    // Module boundary: the exam unmounts for the break screen...
+    // A section boundary: the exam leaves for the scheduled break. It departs
+    // through the stage cross-fade, so the zoom plane is gone once that settles
+    // — no exam surface is left behind.
     (controllerMock.current as { state: { phase: string } }).state.phase = "break";
     rerender(routeElement());
-    expect(document.querySelector("[data-sat-screen-zoom]")).toBeNull();
+    await waitFor(() =>
+      expect(document.querySelector("[data-sat-screen-zoom]")).toBeNull(),
+    );
 
     // ...and comes back as a NEW shell inside the SAME attempt.
     (controllerMock.current as { state: { phase: string } }).state.phase = "module";

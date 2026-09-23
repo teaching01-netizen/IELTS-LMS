@@ -20,8 +20,8 @@
  * make them in:
  *
  *   1. the source is gone → nothing to show;
- *   2. on a coarse pointer, the lane the native selection menu will claim is not
- *      a candidate: the browser paints that menu OVER our surface, so sharing it
+ *   2. when native selection UI exists, the lane it will claim is not a
+ *      candidate: the browser paints that menu OVER our surface, so sharing it
  *      means being covered by it. We take the lane the menu leaves;
  *   3. keep the side already in use while it still offers real room;
  *   4. otherwise move only to a side that justifies the move;
@@ -43,6 +43,12 @@
 export type SelectionMenuMode = 'floating' | 'hidden';
 
 export type SelectionMenuSide = 'above' | 'below';
+
+/** Independent facts about finger ergonomics and browser-owned selection UI. */
+export interface SelectionMenuEnvironment {
+  coarsePointer: boolean;
+  nativeSelectionUi: boolean;
+}
 
 export interface SelectionMenuBox {
   left: number;
@@ -92,17 +98,16 @@ export interface SelectionMenuBudgets {
   /** Smallest distance the menu keeps from any visible edge. */
   edge: number;
   /**
-   * Height the native selection menu needs. On a coarse pointer this answers one
-   * question — does the menu fit above the selection? — because iOS puts it there
-   * when it does and flips it below when it does not, and it is painted OVER our
-   * surface. So this decides WHICH LANE the menu will take, and therefore which
-   * lane is left for us, rather than how far from the selection our own lane has
-   * to start. Zero under a mouse, where no menu exists and no lane is given up.
+   * Height the native selection menu needs. When native selection UI exists this
+   * answers one question — does the menu fit above the selection? — because iOS
+   * puts it there when it does and flips it below when it does not, and it is
+   * painted OVER our surface. This decides WHICH LANE it takes. Zero when the
+   * browser has no selection UI to reserve.
    */
   nativeUiZone: number;
   /** Breathing room between the selection and the menu. */
   gap: number;
-  /** Extra room demanded on touch, so "comfortable" is not "just fits". */
+  /** Extra room demanded for a coarse pointer, so "comfortable" is not "just fits". */
   comfort: number;
   /** The same idea for a mouse, where just-fits is merely tight. */
   comfortFine: number;
@@ -126,20 +131,18 @@ export const SELECTION_MENU_BUDGET_DEFAULTS: SelectionMenuBudgets = {
 };
 
 /**
- * Resolve a budget for this input. A coarse pointer is the only difference
- * between the two worlds: it introduces the native selection menu, whose lane is
- * reserved for the browser (see `placeSelectionMenu`), and it asks for a comfort
- * buffer rather than a mouse's tighter one.
+ * Resolve a budget for this input. A coarse pointer asks for a larger comfort
+ * buffer; native selection UI independently reserves its lane.
  */
 export function resolveSelectionMenuBudgets(
-  touch: boolean,
+  environment: SelectionMenuEnvironment,
   base: Partial<SelectionMenuBudgets> | undefined = {},
 ): SelectionMenuBudgets {
   const merged: SelectionMenuBudgets = { ...SELECTION_MENU_BUDGET_DEFAULTS, ...base };
   return {
     ...merged,
-    nativeUiZone: touch ? merged.nativeUiZone : 0,
-    comfort: touch ? merged.comfort : merged.comfortFine,
+    nativeUiZone: environment.nativeSelectionUi ? merged.nativeUiZone : 0,
+    comfort: environment.coarsePointer ? merged.comfort : merged.comfortFine,
   };
 }
 
@@ -185,8 +188,8 @@ export interface SelectionMenuPlacementInput {
   size: { width: number; height: number };
   /** What the menu is doing now, for hysteresis. Null for a fresh selection. */
   previous?: SelectionMenuPlacement | null | undefined;
-  /** Coarse pointer: the native selection menu exists and claims its own zone. */
-  touch?: boolean | undefined;
+  /** Ergonomics and browser-owned selection UI are resolved independently. */
+  environment: SelectionMenuEnvironment;
   budgets?: Partial<SelectionMenuBudgets> | undefined;
 }
 
@@ -231,7 +234,8 @@ function intersectsViewport(anchor: SelectionMenuAnchor, viewport: SelectionMenu
  * merely adequate.
  */
 export function placeSelectionMenu(input: SelectionMenuPlacementInput): SelectionMenuPlacement {
-  const budgets = resolveSelectionMenuBudgets(input.touch === true, input.budgets);
+  const environment = input.environment;
+  const budgets = resolveSelectionMenuBudgets(environment, input.budgets);
   const { anchor, bounds, size, viewport } = input;
   const region = visibleRegion(bounds, viewport, budgets.edge);
 
@@ -243,11 +247,10 @@ export function placeSelectionMenu(input: SelectionMenuPlacementInput): Selectio
   const roomAbove = anchor.top - bounds.top - region.top;
   const roomBelow = region.bottom - (anchor.bottom - bounds.top);
 
-  // Which lane will the native selection menu claim? iOS paints it above the
-  // selection and only flips below when it cannot fit there — and it is drawn
-  // over everything we render, so on touch that lane is not ours to take. A
-  // mouse has no menu, so nothing is reserved.
-  const nativeLane: SelectionMenuSide | null = input.touch === true
+  // Which lane will browser-owned selection UI claim? iOS paints it above the
+  // selection and only flips below when it cannot fit there. Coarse-pointer
+  // ergonomics alone do not reserve a lane when the exam owns selection.
+  const nativeLane: SelectionMenuSide | null = environment.nativeSelectionUi
     ? (roomAbove >= budgets.nativeUiZone ? 'above' : 'below')
     : null;
   const previousSide = input.previous?.mode === 'floating' ? input.previous.side : null;
@@ -267,10 +270,10 @@ export function placeSelectionMenu(input: SelectionMenuPlacementInput): Selectio
    * 1. the side it is already on, if that side can hold it at all — a toolbar
    *    that kept its place through a tight measurement is worth more than a
    *    slightly roomier position that moves on every scroll tick;
-   * 2. the lane nobody else is using (on touch, the one the native menu leaves);
+   * 2. the lane nobody else is using (when present, the one native UI leaves);
    * 3. the lane the native menu will claim, but beyond the menu's own zone:
-   *    sitting past the menu is usable, sitting under it is not. With a mouse no
-   *    lane is reserved, so this step and the next one are touch-only;
+   *    sitting past the menu is usable, sitting under it is not. Without native
+   *    UI no lane is reserved, so this step and the next one are skipped;
    * 4. otherwise the lane that is ours, at the usual distance, which the clamp
    *    below then pins inside the visible region (`clamped` true).
    */
@@ -323,4 +326,3 @@ export function placeSelectionMenu(input: SelectionMenuPlacementInput): Selectio
     clamped: Math.abs(top - preferredTop) > CLAMP_EPSILON,
   };
 }
-

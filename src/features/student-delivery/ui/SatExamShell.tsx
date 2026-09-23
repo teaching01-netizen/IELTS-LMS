@@ -32,6 +32,7 @@ import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext
 import { SatNotesSurfaceHost } from './annotations/SatNotesSurfaceHost';
 import { SatSelectionActionsPanel } from './annotations/SatSelectionActionsPanel';
 import { SatExamViewportOverlay, SatExamZoomPlane } from './zoom/SatExamZoomContext';
+import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 
 export interface SatExamShellProps {
   moduleIdentity?: string;
@@ -171,7 +172,15 @@ export function SatExamShell(props: SatExamShellProps) {
     questionId: questionKey,
   }), [questionKey, props.blocked, props.calculatorAvailable, props.moduleIdentity, props.referenceAvailable, notesAvailable]);
   const interaction = useSatInteractionController(interactionCtx);
-  const touchAnnotations = useSatMediaQuery('(pointer: coarse)');
+  const coarsePointer = useSatMediaQuery('(pointer: coarse)');
+  const examScope = useStudentExamInteractionScope();
+  const selectionEnvironment = useMemo(
+    () => ({
+      coarsePointer,
+      nativeSelectionUi: coarsePointer && !examScope.ownedTouchSelection,
+    }),
+    [coarsePointer, examScope.ownedTouchSelection],
+  );
   // The compact layout stacks the panes and keeps its own scale, so it is the
   // one place the fit is never allowed to shrink the exam.
   const compactLayout = useSatMediaQuery('(max-width: 767px)');
@@ -594,13 +603,13 @@ export function SatExamShell(props: SatExamShellProps) {
             back to — when the room is not there the surface is pinned inside
             what the student can see, drops its caret rather than pointing at a
             line it is no longer beside, and scrolls its own rows. A coarse
-            pointer only widens the budget, because the native selection menu
-            needs a lane of its own on touch and nothing needs one under a
-            mouse. */}
+            coarse pointer widens touch comfort. Browser-owned selection UI
+            reserves a lane only when the interaction scope leaves selection to
+            the platform. */}
         {editingMark ? (
           <SatAnnotationEditControls
             annotation={editingMark}
-            touch={touchAnnotations}
+            environment={selectionEnvironment}
             disabled={props.blocked || !annotationsWritable}
             onColor={(color) => recolourMark(editingMark, color)}
             onUnderline={() => underlineMark(editingMark)}
@@ -616,7 +625,7 @@ export function SatExamShell(props: SatExamShellProps) {
             currentColor={currentColor}
             actions={selectionActions}
             disabled={props.blocked || !annotationsWritable}
-            touch={touchAnnotations}
+            environment={selectionEnvironment}
             onClose={surface.closeSelectionTools}
           />
         ) : null}

@@ -47,6 +47,7 @@ test.describe('SAT student transitions', () => {
       expect(beforeSubmit.find((module) => module.adaptiveRole === 'base')?.state).toBe('active');
 
       const branchEntry = await holdNextModuleStartResponse(studentPage, { failFirstRequest: true });
+      await markExamFrame(studentPage);
       try {
         await submitCurrentModule(studentPage);
         await expect.poll(() => branchEntry.attempts()).toBe(1, { timeout: 15_000 });
@@ -55,6 +56,19 @@ test.describe('SAT student transitions', () => {
         await branchEntry.entered;
         await expect(studentPage.locator('[data-sat-transition-hold]')).toBeVisible();
         await assertHeldExamCannotBeInteractedWith(studentPage);
+        // The open handoff stays INSIDE the exam: the finished frame keeps its
+        // place behind one live status, and no section-break surface appears.
+        await expect(studentPage.locator('[data-sat-transition-hold] [data-sat-student-frame]')).toBeVisible();
+        await expect(studentPage.locator('[data-sat-handoff]')).toBeVisible();
+        await expect(studentPage.getByTestId('sat-scheduled-break')).toHaveCount(0);
+        await assertSingleSatStage(studentPage);
+        // The first request was aborted, so this is the escalating state: the
+        // recovery action lives in the frame, never on its own screen.
+        await expect(studentPage.locator('[data-sat-handoff]')).toHaveAttribute(
+          'data-sat-handoff-state',
+          'retrying',
+        );
+        await expect(studentPage.getByRole('button', { name: 'Retry now' })).toBeVisible();
 
         await expect.poll(
           async () => {
@@ -69,6 +83,10 @@ test.describe('SAT student transitions', () => {
       }
       await expect(studentPage.locator('[data-sat-transition-hold]')).toHaveCount(0);
       await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible();
+      // One frame throughout: the handoff reconciled the surface it already had
+      // instead of mounting the next module on a fresh one.
+      await expectSameExamFrameNode(studentPage);
+      await assertSingleSatStage(studentPage);
       await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
       await expect(studentPage.getByRole('heading', { name: 'Review your answers' })).toHaveCount(0);
       await studentPage.reload({ waitUntil: 'domcontentloaded' });
@@ -78,6 +96,7 @@ test.describe('SAT student transitions', () => {
       await submitCurrentModule(studentPage);
       const scheduledBreak = studentPage.getByTestId('sat-scheduled-break');
       await expect(scheduledBreak).toBeVisible({ timeout: 30_000 });
+      await assertSingleSatStage(studentPage);
       await expect(scheduledBreak).toHaveAttribute('data-sat-break-phase', 'waiting-for-break');
       await expect(scheduledBreak.getByRole('heading', { level: 1 })).toHaveCount(1);
       await expect(scheduledBreak.getByRole('timer')).toBeVisible();
@@ -143,16 +162,27 @@ test.describe('SAT student transitions', () => {
       }, { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }).toBe('active');
 
       const mathBaseEntry = await holdNextModuleStartResponse(studentPage);
+      await markExamFrame(studentPage);
       try {
         await submitCurrentModule(studentPage);
         await mathBaseEntry.entered;
         await expect(studentPage.locator('[data-sat-transition-hold]')).toBeVisible();
         await assertHeldExamCannotBeInteractedWith(studentPage);
+        // Module 1 → Module 2 in a LATER section is still a module handoff, not
+        // a section boundary: the exam frame stays, the break surface does not
+        // re-appear, and the status does not escalate on a healthy entry.
+        await expect(studentPage.locator('[data-sat-handoff]')).toHaveAttribute(
+          'data-sat-handoff-state',
+          'opening',
+        );
+        await expect(studentPage.getByTestId('sat-scheduled-break')).toHaveCount(0);
+        await assertSingleSatStage(studentPage);
       } finally {
         mathBaseEntry.release();
         await mathBaseEntry.remove();
       }
       await expect(studentPage.locator('[data-sat-transition-hold]')).toHaveCount(0);
+      await expectSameExamFrameNode(studentPage);
 
       await expect.poll(async () => {
         const modules = await readSectionModules(studentPage, scheduleId, candidateId, 'math');
@@ -215,6 +245,46 @@ async function holdNextModuleStartResponse(
     release: releaseResolve,
     remove: () => page.unroute(routePattern),
   };
+}
+
+const EXAM_FRAME_MARKER = 'data-e2e-frame-marker';
+
+/**
+ * Marks the mounted exam frame so a later assertion can prove it is the SAME
+ * node — the handoff must reconcile the surface the student is on, never mount
+ * the next module on a fresh one.
+ */
+async function markExamFrame(page: import('@playwright/test').Page): Promise<void> {
+  const marked = await page.evaluate((attribute) => {
+    const frame = document.querySelector('[data-sat-student-frame]');
+    if (!frame) return false;
+    frame.setAttribute(attribute, 'same-node');
+    return true;
+  }, EXAM_FRAME_MARKER);
+  expect(marked, 'the exam frame must be mounted before the handoff').toBe(true);
+}
+
+async function expectSameExamFrameNode(page: import('@playwright/test').Page): Promise<void> {
+  const survived = await page.evaluate(
+    (attribute) =>
+      document.querySelector(`[data-sat-student-frame][${attribute}="same-node"]`) !== null,
+    EXAM_FRAME_MARKER,
+  );
+  expect(survived, 'the module handoff must not remount the exam frame').toBe(true);
+}
+
+/**
+ * Exactly one student stage is active. A stage may still be fading out, but a
+ * departing one is inert and hidden from assistive tech — so the student is
+ * never shown (or read) two surfaces at once.
+ */
+async function assertSingleSatStage(page: import('@playwright/test').Page): Promise<void> {
+  await expect(page.locator('[data-sat-stage]:not([data-sat-stage-exiting])')).toHaveCount(1);
+  const exiting = page.locator('[data-sat-stage-exiting]');
+  if ((await exiting.count()) > 0) {
+    await expect(exiting.first()).toHaveAttribute('aria-hidden', 'true');
+    await expect(exiting.first()).toHaveAttribute('inert');
+  }
 }
 
 async function assertHeldExamCannotBeInteractedWith(page: import('@playwright/test').Page): Promise<void> {

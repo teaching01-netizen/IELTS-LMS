@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { satChoiceAnnotationRegion } from '../../domain/satAnnotationIdentity';
 import { captureSatTextRange, captureSatTextSelection } from './satTextSelection';
 
 /**
@@ -58,6 +59,28 @@ describe('captureSatTextRange', () => {
       prefix: 'hello ',
       suffix: ' world',
     });
+  });
+
+  it('qualifies identical choice node ids with each stable option id', () => {
+    const root = buildRoot(
+      '<div data-content-text-node="same-id">Tree cover affects heat.</div>' +
+      '<div data-content-text-node="same-id">Tree cover affects heat.</div>',
+    );
+    const blocks = root.querySelectorAll('[data-content-text-node]');
+    const makeRange = (block: Element) => {
+      const range = document.createRange();
+      range.setStart(block.firstChild!, 0);
+      range.setEnd(block.firstChild!, 4);
+      return range;
+    };
+    const firstRegion = satChoiceAnnotationRegion('option:a');
+    const secondRegion = satChoiceAnnotationRegion('option:b');
+    const first = captureSatTextRange(root, firstRegion, makeRange(blocks[0]!));
+    const second = captureSatTextRange(root, secondRegion, makeRange(blocks[1]!));
+
+    expect(first?.nodeId).toBe('choice.option%3Aa:same-id');
+    expect(second?.nodeId).toBe('choice.option%3Ab:same-id');
+    expect(first?.nodeId).not.toBe(second?.nodeId);
   });
 
   it('returns null for a collapsed range, which names no text', () => {

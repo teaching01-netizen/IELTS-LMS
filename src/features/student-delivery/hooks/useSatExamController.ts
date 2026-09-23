@@ -775,6 +775,26 @@ export function useSatExamController({
         })
       : 0;
 
+  /**
+   * The shared section clock the student is still on while the next module
+   * opens, or null when this frame has no authority to quote one.
+   *
+   * `remainingSeconds` is derived from the ACTIVE module's section, so during a
+   * handoff (no active module) a section-keyed cohort frame resolves it to 0 —
+   * which is why the retained exam frame used to show a dead countdown. The
+   * section clock is the honest number there: it is the clock that governs the
+   * section the student is still inside, and no module clock may be invented for
+   * a module that has not started. Null (never 0) when the published stage names
+   * some other section, so a surface can leave the number out instead of faking
+   * one.
+   */
+  const handoffSeconds =
+    pendingSection && effectiveTiming?.stageKey &&
+    (effectiveTiming.stageKey === pendingSection.sectionKey ||
+      effectiveTiming.stageKey.startsWith(`${pendingSection.sectionKey}:`))
+      ? authoritativeRemainingSeconds
+      : null;
+
   // Keep the predecessor's timeout attribution for the module-advance metric.
   // It describes how Module 1 ended; server routing and automatic Module 2
   // entry work the same way for early submit and timeout.
@@ -1512,6 +1532,7 @@ export function useSatExamController({
     pendingModuleWindow,
     pendingBreakSeconds,
     pendingSectionWaitSeconds,
+    handoffSeconds,
     pendingStageReady,
     autoEntryRecoverable: entrySurface.recoverable,
     retryModuleEntry: entrySurface.retry,

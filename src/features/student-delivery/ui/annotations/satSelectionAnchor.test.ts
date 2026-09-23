@@ -5,6 +5,7 @@ import {
   satAnnotationLineRects,
   satAnnotationRangeFor,
 } from './satSelectionAnchor';
+import { satChoiceAnnotationRegion } from '../../domain/satAnnotationIdentity';
 
 const anchor = { nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree' };
 
@@ -68,6 +69,21 @@ describe('satSelectionAnchor: the DOM an anchor names', () => {
     expect(range?.toString()).toBe('tree');
     // Offsets past the end of the block cannot produce a usable range.
     expect(satAnnotationRangeFor({ ...anchor, startOffset: 0, endOffset: 999 })).toBeNull();
+  });
+
+  it('resolves equal choice text and node ids only within the stable option region', () => {
+    const firstRegion = satChoiceAnnotationRegion('option-a');
+    const secondRegion = satChoiceAnnotationRegion('option-b');
+    document.body.innerHTML =
+      `<div data-sat-annotation-region="${firstRegion}"><div data-content-text-node="p1">A tree grows.</div></div>` +
+      `<div data-sat-annotation-region="${secondRegion}"><div data-content-text-node="p1">A tree grows.</div></div>`;
+    const first = { ...anchor, nodeId: `${firstRegion}:p1` };
+    const second = { ...anchor, nodeId: `${secondRegion}:p1` };
+
+    expect(satAnnotationBlockFor(first)?.parentElement?.dataset['satAnnotationRegion']).toBe(firstRegion);
+    expect(satAnnotationBlockFor(second)?.parentElement?.dataset['satAnnotationRegion']).toBe(secondRegion);
+    expect(satAnnotationRangeFor(first)?.toString()).toBe('tree');
+    expect(satAnnotationRangeFor(second)?.toString()).toBe('tree');
   });
 
   it('returns null geometry when the engine cannot measure ranges (never a wrong position)', () => {

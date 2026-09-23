@@ -3,7 +3,7 @@ import { satAnnotationSurfaceChrome, type SatAnnotationSurfaceChrome } from './S
 import { useSatAnnotationAutofocus } from './useSatAnnotationAutofocus';
 import { useSatAnnotationDismiss } from './useSatAnnotationDismiss';
 import { useSatAnnotationPlacement } from './useSatAnnotationPlacement';
-import type { SelectionMenuPlacement } from '@shared/ui/selection-v2/engine/selectionPlacement';
+import type { SelectionMenuEnvironment, SelectionMenuPlacement } from '@shared/ui/selection-v2/engine/selectionPlacement';
 
 /**
  * Everything a surface needs to exist, in one call: where it goes, the chrome
@@ -24,8 +24,8 @@ export function useSatAnnotationSurface(
   options: {
     /** Identity of the thing the caret lands in; a new value re-focuses once. */
     autoFocusKey: string;
-    /** Coarse pointer: reserve the native selection menu's lane and widen the budget. */
-    touch?: boolean | undefined;
+    /** Coarse-pointer comfort and browser-owned UI are separate placement facts. */
+    environment: SelectionMenuEnvironment;
     visualScale?: number | undefined;
     /**
      * Close the surface because the student pressed outside it. Required on
@@ -42,7 +42,7 @@ export function useSatAnnotationSurface(
 } {
   const visualScale = options.visualScale ?? 1;
   const { placement, containerRef } = useSatAnnotationPlacement(anchor, {
-    touch: options.touch,
+    environment: options.environment,
     visualScale,
   });
   useSatAnnotationAutofocus(placement, options.autoFocusKey, containerRef);

@@ -38,7 +38,57 @@ function para(text: string) {
 
 function mathData(): AssessmentDeliveryBootstrap {
   const now = new Date().toISOString();
+  const moduleQuestion = {
+    examQuestionId: "q1",
+    questionId: "q1",
+    displayOrder: 0,
+    isPretest: false,
+    questionType: "single_choice" as const,
+    stimulus: para("Passage"),
+    prompt: para("Between sections marker question"),
+    answer: {
+      kind: "single_choice" as const,
+      options: ["A", "B"].map((id) => ({ id, content: para("Choice " + id) })),
+    },
+    metadata: {
+      sectionKey: "math",
+      domain: null,
+      skill: null,
+      difficulty: "medium" as const,
+      tags: [],
+    },
+    accessibility: { longDescription: null },
+  };
+  const moduleShape = {
+    id: "math-m1",
+    moduleKey: "math-m1",
+    title: "Math Module 1",
+    displayOrder: 0,
+    durationSeconds: 2100,
+    targetQuestionCount: 1,
+    adaptiveRole: "base",
+    instructions: para("Math module directions"),
+    toolPolicy: { calculator: false, reference_sheet: false },
+    questions: [moduleQuestion],
+  };
+  // Exam order, not display order, decides a section boundary: the Math section
+  // follows Reading and Writing, so it must be preceded by that section's own
+  // last module here. A payload whose first section is already Math is not a
+  // boundary — it is the shape that used to make Module 2 of a later section
+  // look like a section crossing.
   const sections = [
+    {
+      id: "sec-rw",
+      sectionKey: "reading-writing",
+      title: "Reading and Writing",
+      displayOrder: 0,
+      durationSeconds: 1920,
+      breakAfterSeconds: 0,
+      instructions: para("Reading and Writing directions"),
+      modules: [
+        { ...moduleShape, id: "rw-m1", moduleKey: "rw-m1", title: "Reading and Writing Module 1" },
+      ],
+    },
     {
       id: "sec-math",
       sectionKey: "math",
@@ -47,44 +97,27 @@ function mathData(): AssessmentDeliveryBootstrap {
       durationSeconds: 2100,
       breakAfterSeconds: 0,
       instructions: para("Math section directions"),
-      modules: [
-        {
-          id: "math-m1",
-          moduleKey: "math-m1",
-          title: "Math Module 1",
-          displayOrder: 0,
-          durationSeconds: 2100,
-          targetQuestionCount: 1,
-          adaptiveRole: "base",
-          instructions: para("Math module directions"),
-          toolPolicy: { calculator: false, reference_sheet: false },
-          questions: [
-            {
-              examQuestionId: "q1",
-              questionId: "q1",
-              displayOrder: 0,
-              isPretest: false,
-              questionType: "single_choice" as const,
-              stimulus: para("Passage"),
-              prompt: para("Between sections marker question"),
-              answer: {
-                kind: "single_choice" as const,
-                options: ["A", "B"].map((id) => ({ id, content: para("Choice " + id) })),
-              },
-              metadata: {
-                sectionKey: "math",
-                domain: null,
-                skill: null,
-                difficulty: "medium" as const,
-                tags: [],
-              },
-              accessibility: { longDescription: null },
-            },
-          ],
-        },
-      ],
+      modules: [moduleShape],
     },
   ];
+  const moduleAttemptShape = {
+    id: "ma-1",
+    moduleId: "math-m1",
+    state: "not_started",
+    allocatedSeconds: 2100,
+    availableAt: now,
+    startedAt: null,
+    pausedAt: null,
+    accumulatedPausedSeconds: 0,
+    extensionSeconds: 0,
+    deadlineAt: null,
+    remainingSeconds: 2100,
+    completionReason: null,
+    rawCorrect: null,
+    operationalQuestionCount: null,
+    toolState: {},
+    revision: 1,
+  };
   return {
     scheduleId: "schedule-1",
     examId: "exam-1",
@@ -113,23 +146,15 @@ function mathData(): AssessmentDeliveryBootstrap {
       id: "attempt-1",
       moduleAttempts: [
         {
-          id: "ma-1",
-          moduleId: "math-m1",
-          state: "not_started",
-          allocatedSeconds: 2100,
-          availableAt: now,
-          startedAt: null,
-          pausedAt: null,
-          accumulatedPausedSeconds: 0,
-          extensionSeconds: 0,
-          deadlineAt: null,
-          remainingSeconds: 2100,
-          completionReason: null,
-          rawCorrect: null,
-          operationalQuestionCount: null,
-          toolState: {},
-          revision: 1,
+          ...moduleAttemptShape,
+          id: "ma-rw-1",
+          moduleId: "rw-m1",
+          state: "submitted",
+          startedAt: now,
+          deadlineAt: now,
+          completionReason: "student_submit",
         },
+        moduleAttemptShape,
       ] as unknown as AssessmentDeliveryBootstrap["attempt"]["moduleAttempts"],
       responses: [],
     },
@@ -216,7 +241,19 @@ function branchPendingData(timedOut: boolean): AssessmentDeliveryBootstrap {
             Date.parse(data.serverNow) + (timedOut ? -5_000 : 600_000),
           ).toISOString(),
         },
-        { ...module1, id: "ma-rw-2", moduleId: "rw-m2-higher", revision: 3 },
+        {
+          ...module1,
+          id: "ma-rw-2",
+          moduleId: "rw-m2-higher",
+          // The server routed Module 2 exists but has not opened: no start, no
+          // deadline, no completion reason — only a not_started row may be
+          // entered (and an attempt carrying a started one is not a handoff).
+          state: "not_started",
+          startedAt: null,
+          deadlineAt: null,
+          completionReason: null,
+          revision: 3,
+        },
       ],
     } as unknown as AssessmentDeliveryBootstrap["attempt"],
   };

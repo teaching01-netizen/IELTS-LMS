@@ -1,4 +1,5 @@
 import type { SatTextAnchor } from '../../domain/satResponses';
+import { parseSatAnnotationNodeId } from '../../domain/satAnnotationIdentity';
 
 /**
  * Turning an anchor into the DOM it names: the block, the Range, and where that
@@ -13,18 +14,12 @@ import type { SatTextAnchor } from '../../domain/satResponses';
  * than none.
  */
 
-function regionAndNode(anchor: SatTextAnchor): { region: string; nodeId: string } | null {
-  const separator = anchor.nodeId.indexOf(':');
-  if (separator <= 0 || separator === anchor.nodeId.length - 1) return null;
-  return { region: anchor.nodeId.slice(0, separator), nodeId: anchor.nodeId.slice(separator + 1) };
-}
-
 /** The rendered text block an anchor points at, or null when it is not mounted. */
 export function satAnnotationBlockFor(anchor: SatTextAnchor): HTMLElement | null {
-  const parts = regionAndNode(anchor);
+  const parts = parseSatAnnotationNodeId(anchor.nodeId);
   if (!parts || typeof document === 'undefined') return null;
   const block = document.querySelector<HTMLElement>(
-    `[data-sat-annotation-region="${CSS.escape(parts.region)}"] [data-content-text-node="${CSS.escape(parts.nodeId)}"]`,
+    `[data-sat-annotation-region="${CSS.escape(parts.region)}"] [data-content-text-node="${CSS.escape(parts.contentNodeId)}"]`,
   );
   // Verify rather than trust: a recovered anchor can outlive the node it named.
   if (!block || !(block.textContent ?? '').slice(anchor.startOffset, anchor.endOffset).length) return null;

@@ -7,7 +7,7 @@ const passage = '.student-reading-passage-pane [data-student-highlightable="true
  * starts with, which is how the cluster cases find their text. See
  * `src/app/router/dev/SatAccessibilityDebugRoute.tsx` for the stimulus itself.
  */
-const clustersQuestion = '?product=sat&clusters=1';
+const clustersQuestion = '?product=sat&ownedTouchSelection=1&clusters=1';
 const clusterLeadIn = 'Several';
 const satSurface = 'SAT stimulus';
 const ieltsSurface = 'IELTS reading:passage:passage-1';
@@ -217,7 +217,7 @@ test('IELTS Reading: arming, caret resolution, range, capture and persistence', 
 });
 
 test('SAT: owned range reaches the actual shell toolbar and annotation state', async ({ page, browserName, isMobile }, info) => {
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const surface = page.locator('[data-sat-annotation-region="stimulus"]');
   await drag(page, surface, 'Several researchers', browserName, isMobile);
@@ -227,6 +227,58 @@ test('SAT: owned range reaches the actual shell toolbar and annotation state', a
   if (isMobile) expect(snapshot!.surfaces.find(item => item['surface'] === 'SAT stimulus')).toMatchObject({ captureSucceeded: true, onSelectCalled: true, anchorReported: true, pointerCancelSeen: false });
   await page.locator('[data-sat-selection-toolbar="true"]').getByRole('button', { name: /yellow/i }).click();
   await expect(surface.locator('[data-sat-highlight="true"]')).toHaveText('Several researchers');
+});
+
+test('SAT prompt wording uses the same owned selection surface as the passage', async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const prompt = page.locator('[data-sat-annotation-region="prompt"]');
+  await expect(prompt).toContainText('Which choice best states the main idea of the text?');
+
+  await drag(page, prompt, 'Which choice best states', browserName, isMobile);
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  const selection = await page.evaluate(() => ({
+    rangeCount: window.getSelection()?.rangeCount ?? 0,
+    collapsed: window.getSelection()?.isCollapsed ?? true,
+    lines: document.querySelectorAll('[data-student-selection-line]').length,
+    handles: document.querySelectorAll('[data-student-selection-handle]').length,
+  }));
+  expect(selection.rangeCount === 0 || selection.collapsed).toBe(true);
+  expect(selection.lines).toBeGreaterThan(0);
+  expect(selection.handles).toBe(2);
+});
+
+test('SAT choice wording uses owned selection, keeps the radio unchanged, and still answers on tap', async ({ page, browserName, isMobile }) => {
+  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const choice = page.locator('[data-sat-annotation-region="choice.a"]');
+  await expect(choice).toContainText('Tree cover can affect heat differently depending on local conditions.');
+
+  await drag(page, choice, 'Tree cover can affect heat', browserName, isMobile);
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  const selection = await page.evaluate(() => ({
+    rangeCount: window.getSelection()?.rangeCount ?? 0,
+    collapsed: window.getSelection()?.isCollapsed ?? true,
+    lines: document.querySelectorAll('[data-student-selection-line]').length,
+    handles: document.querySelectorAll('[data-student-selection-handle]').length,
+  }));
+  expect(selection.rangeCount === 0 || selection.collapsed).toBe(true);
+  expect(selection.lines).toBeGreaterThan(0);
+  expect(selection.handles).toBe(2);
+  await expect(page.getByRole('radio', { name: /Option A/ })).not.toBeChecked();
+
+  await page.locator('[data-sat-selection-toolbar="true"]').getByRole('button', { name: /yellow/i }).click();
+  await expect(choice.locator('[data-sat-highlight="true"]')).toContainText('Tree cover can affect heat');
+
+  // The next deliberate tap remains a normal answer action after the echo guard
+  // expires. Close the mark editor first because it intentionally shares the
+  // selected text's nearby surface and may cover the neighboring row.
+  await page.getByRole('button', { name: 'Close text tools' }).click();
+  await page.waitForTimeout(450);
+  await page.getByText('All cities experience identical temperature changes from tree cover.').click();
+  await expect(page.getByRole('radio', { name: /Option B/ })).toBeChecked();
 });
 
 /**
@@ -283,7 +335,7 @@ async function ownedSelectionGeometry(page: Page) {
  */
 test('a mid-word touch drag takes whole words, in both directions', async ({ page, browserName, isMobile }, info) => {
   test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
 
@@ -590,7 +642,7 @@ test('a body drag through a right-to-left run stays on whole words', async ({ pa
  */
 test('a body drag across a wrapped line stays on whole words', async ({ page, browserName, isMobile }, info) => {
   test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const surface = page.locator('[data-sat-annotation-region="stimulus"]');
   await nextFrames(page);
@@ -774,7 +826,7 @@ test('dragging the START handle back across clusters stops only on grapheme boun
  */
 test('a handle dragged past the opposite endpoint keeps the finger on its edge, in both directions', async ({ page, browserName, isMobile }, info) => {
   test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const surface = page.locator('[data-sat-annotation-region="stimulus"]');
   await nextFrames(page);
@@ -810,7 +862,7 @@ test('a handle dragged past the opposite endpoint keeps the finger on its edge, 
     // toolbar over the words that follow its run, and a press that landed there
     // would be a command rather than a claim — so each crossing is its own gesture,
     // on the same page and viewport the words were measured in.
-    await page.goto(`${fixture}?product=sat`);
+    await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
     await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
     await nextFrames(page);
     await drag(page, surface, gesture.claim.text, browserName, isMobile);
@@ -949,7 +1001,7 @@ test('SAT: scrolling the passage away keeps the selection and its handles, and h
   // — and `long=1` for a passage the length of a real one, because a pane that
   // cannot scroll cannot take the selection off the screen at all.
   await page.setViewportSize({ width: 390, height: 620 });
-  await page.goto(`${fixture}?product=sat&long=1`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1&long=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const phrase = 'Several researchers';
   const surface = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -1015,7 +1067,7 @@ async function loupeFrameScale(page: Page): Promise<number> {
 
 test('the magnifier is a picture of the prose, not a second exam surface', async ({ page, browserName, isMobile }) => {
   test.skip(!isMobile, 'The magnifier only exists on the owned touch selection.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
   const before = await surfaceCounts(page);
@@ -1161,7 +1213,7 @@ test('the magnifier follows the finger while a handle is dragged, line by line',
   // Long enough prose that the end handle can be taken down onto another line,
   // and short enough a viewport that the finger is over real words.
   await page.setViewportSize({ width: 390, height: 620 });
-  await page.goto(`${fixture}?product=sat&long=1`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1&long=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
   await drag(page, region, 'Several researchers', browserName, isMobile);
@@ -1259,7 +1311,7 @@ test('the magnifier follows the finger while a handle is dragged, line by line',
  */
 test('the lens re-reads a passage that moved under it without a scroll or a resize', async ({ page, browserName, isMobile }) => {
   test.skip(!isMobile, 'The magnifier only exists on the owned touch selection.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
   await drag(page, region, 'Several researchers', browserName, isMobile);
@@ -1331,7 +1383,7 @@ test('reduced motion greets the magnifier already settled, on every frame', asyn
   // Before the document loads: motion reads the preference once, the way a
   // student who has it set at the OS level arrives.
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
 
@@ -2160,7 +2212,7 @@ async function characterUnder(root: Locator, point: { x: number; y: number }) {
  */
 test('the handles are painted and hittable, and dragging one moves only that end', async ({ page, browserName, isMobile }) => {
   test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
   await drag(page, region, 'Several researchers', browserName, isMobile);
@@ -2257,7 +2309,7 @@ async function endpointGeometry(page: Page) {
  */
 test('a short selection grabs the endpoint the press belongs to, not the one on top', async ({ page, browserName, isMobile }, info) => {
   test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
   // A word in the middle of a line, so the START endpoint has room to be dragged
@@ -2396,7 +2448,7 @@ test('a short selection grabs the endpoint the press belongs to, not the one on 
  */
 test("a short selection's middle belongs to neither handle, and one press holds one intent", async ({ page, browserName, isMobile }) => {
   test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
   await drag(page, region, 'of', browserName, isMobile);
@@ -2475,7 +2527,7 @@ test("a short selection's middle belongs to neither handle, and one press holds 
 
 test("a tap on a mark while a selection rests dismisses the selection and still opens that mark's editor", async ({ page, browserName, isMobile }) => {
   test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
 
@@ -2582,7 +2634,7 @@ for (const product of ['IELTS', 'SAT'] as const) {
         return range;
       } });
     });
-    await page.goto(product === 'SAT' ? `${fixture}?product=sat` : fixture);
+    await page.goto(product === 'SAT' ? `${fixture}?product=sat&ownedTouchSelection=1` : fixture);
     await page.getByRole('button', { name: product === 'SAT' ? /^Highlights & Notes/ : 'Highlight', exact: product === 'IELTS' }).click();
     const surface = page.locator(product === 'SAT' ? '[data-sat-annotation-region="stimulus"]' : passage);
     const phrase = product === 'SAT' ? 'Several researchers' : 'beta gamma';
@@ -2610,7 +2662,7 @@ for (const product of ['IELTS', 'SAT'] as const) {
 
 test('a 3.5px nudge inside one glyph moves the lens box and leaves the loupe content byte-identical', async ({ page, browserName, isMobile }) => {
   test.skip(!isMobile, 'The magnifier only exists on the owned touch selection.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
 
@@ -2666,7 +2718,7 @@ test('a 3.5px nudge inside one glyph moves the lens box and leaves the loupe con
 
 test('a caret crossing is a measurable tick under the default preference — the sampler can see it', async ({ page, browserName, isMobile }) => {
   test.skip(!isMobile, 'The magnifier only exists on the owned touch selection.');
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
   await drag(page, region, 'extreme heat', browserName, isMobile);
@@ -2701,7 +2753,7 @@ test('reduced motion keeps the snap — event fired, content jumped — while th
   // the preference once per document, so a student who has it set at the OS
   // level arrives to a document that already knows.
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto(`${fixture}?product=sat`);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
   await drag(page, region, 'extreme heat', browserName, isMobile);

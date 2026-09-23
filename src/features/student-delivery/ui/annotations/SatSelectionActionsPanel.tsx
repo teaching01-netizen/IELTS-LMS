@@ -5,6 +5,7 @@ import {
   type SelectionMenuAction,
   type SelectionMenuChrome,
 } from '@shared/ui/selection-v2/react/SelectionActionMenu';
+import type { SelectionMenuEnvironment } from '@shared/ui/selection-v2/engine/selectionPlacement';
 import {
   SatAnnotationHeading,
   SatCloseControl,
@@ -59,7 +60,7 @@ export function SatSelectionActionsPanel({
   currentColor,
   actions,
   disabled,
-  touch = false,
+  environment,
   onClose,
 }: {
   anchor: SatTextAnchor;
@@ -67,13 +68,13 @@ export function SatSelectionActionsPanel({
   currentColor: SatHighlightColor;
   actions: SatSelectionActions;
   disabled?: boolean | undefined;
-  /** Coarse pointer: reserve the native selection menu's lane and widen the budget. */
-  touch?: boolean | undefined;
+  /** Coarse-pointer comfort and browser-owned UI are separate placement facts. */
+  environment: SelectionMenuEnvironment;
   /** Dismiss the tools without touching the selection or the marks. */
   onClose: () => void;
 }) {
   const visualScale = useSatExamZoom().scale;
-  const { placement, containerRef } = useSatAnnotationPlacement(anchor, { touch, visualScale });
+  const { placement, containerRef } = useSatAnnotationPlacement(anchor, { environment, visualScale });
   // The student has already selected text; landing the caret on the first action
   // means the mark is one keystroke away, and it is also what makes the walk
   // below reachable at all.

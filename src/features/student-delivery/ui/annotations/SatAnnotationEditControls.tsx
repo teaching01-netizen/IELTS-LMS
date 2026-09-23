@@ -11,6 +11,7 @@ import {
 import { SatAnnotationCaret, SatAnnotationSurfaceBody, SAT_ANNOTATION_ROW, SAT_ANNOTATION_ROW_DIVIDED } from './SatAnnotationSurfaceFrame';
 import { useSatAnnotationSurface } from './useSatAnnotationSurface';
 import { useSatExamZoom } from '../zoom/SatExamZoomContext';
+import type { SelectionMenuEnvironment } from '@shared/ui/selection-v2/engine/selectionPlacement';
 
 /**
  * Edit controls for an annotation that already exists.
@@ -27,8 +28,8 @@ import { useSatExamZoom } from '../zoom/SatExamZoomContext';
  * placement engine, the same shared chrome, the same one presentation and the
  * same clamp-when-there-is-no-room rule. A mark's controls therefore appear
  * where the student left them (and where the taps that made them were), on a
- * mouse and on glass alike — `touch` reserves the native selection menu's lane
- * and widens the budget; it does not decide anything about how this looks.
+ * mouse and on glass alike — coarse-pointer comfort and native selection UI are
+ * separate placement inputs; neither changes the surface's presentation.
  *
  * Since these controls are also what a mark becomes the instant a highlight
  * lands (see useSatAnnotationSurface), this is the whole post-highlight surface:
@@ -39,7 +40,7 @@ import { useSatExamZoom } from '../zoom/SatExamZoomContext';
  */
 export function SatAnnotationEditControls({
   annotation,
-  touch,
+  environment,
   disabled,
   onColor,
   onUnderline,
@@ -48,8 +49,8 @@ export function SatAnnotationEditControls({
   onClose,
 }: {
   annotation: SatTextAnnotation;
-  /** Coarse pointer: reserve the native selection menu's lane and widen the budget. */
-  touch: boolean;
+  /** Coarse-pointer comfort and browser-owned UI are separate placement facts. */
+  environment: SelectionMenuEnvironment;
   disabled?: boolean | undefined;
   onColor: (color: SatHighlightColor) => void;
   onUnderline: () => void;
@@ -65,7 +66,7 @@ export function SatAnnotationEditControls({
   // hunting for the controls.
   const { placement, chrome, containerRef } = useSatAnnotationSurface(annotation.anchor, {
     autoFocusKey: annotation.id,
-    touch,
+    environment,
     visualScale,
     onDismiss: onClose,
   });

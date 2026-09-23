@@ -1,0 +1,139 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import type { SatTextAnchor } from '../../domain/satResponses';
+import { SAT_ANNOTATION_LIMIT } from '../../domain/satResponses';
+import type { SatAnnotationRegion } from '../../domain/satAnnotationIdentity';
+import { useSatAnnotationView } from './SatAnnotationViewContext';
+import {
+  captureSatTextRange,
+  captureSatTextSelection,
+  isSatSelectionInsideAnnotationUi,
+  satAnnotationBlockForPoint,
+} from './satTextSelection';
+import { markSatPointerDown, markSatSelectionGestureEnded } from './satSelectionDragGuard';
+import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
+import { useStudentTouchSelectionDiagnostics } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
+import { browserCaretResolver } from '@shared/ui/selection-v2/engine/selectionPoint';
+import { nearestScrollableAncestor } from '@shared/ui/selection-v2/engine/selectionAutoScroll';
+import { useStudentSelectionGesture } from '@shared/ui/selection-v2/react/useStudentSelectionGesture';
+
+interface UseSatAnnotationSelectionOptions {
+  rootRef: RefObject<HTMLDivElement | null>;
+  region: SatAnnotationRegion;
+  enabled: boolean;
+  annotationCount: number;
+  onLimitReached?: (() => void) | undefined;
+}
+
+/** Owns browser/app selection capture and the annotation-cap notice. */
+export function useSatAnnotationSelection({
+  rootRef,
+  region,
+  enabled,
+  annotationCount,
+  onLimitReached,
+}: UseSatAnnotationSelectionOptions) {
+  const view = useSatAnnotationView();
+  const { ownedTouchSelection } = useStudentExamInteractionScope();
+  const diagnostics = useStudentTouchSelectionDiagnostics(rootRef, {
+    surface: `SAT ${region}`,
+    enabled: enabled && view.annotationModeEnabled && ownedTouchSelection,
+    ownedTouchSelection,
+    toolModeOrAnnotationMode: view.annotationModeEnabled,
+  });
+  const [limitNotice, setLimitNotice] = useState(false);
+  const limitTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (limitTimer.current !== null) window.clearTimeout(limitTimer.current);
+  }, []);
+
+  const flashLimitNotice = useCallback(() => {
+    setLimitNotice(true);
+    onLimitReached?.();
+    if (limitTimer.current !== null) window.clearTimeout(limitTimer.current);
+    limitTimer.current = window.setTimeout(() => setLimitNotice(false), 6000);
+  }, [onLimitReached]);
+
+  const reportSelection = useRef<((anchor: SatTextAnchor) => void) | null>(null);
+  reportSelection.current = view.onSelectionCaptured ?? null;
+  const modeEnabled = useRef(view.annotationModeEnabled);
+  modeEnabled.current = view.annotationModeEnabled;
+
+  const reportAnchor = useCallback((anchor: SatTextAnchor) => {
+    if (annotationCount >= SAT_ANNOTATION_LIMIT) {
+      flashLimitNotice();
+      return;
+    }
+    reportSelection.current?.(anchor);
+  }, [annotationCount, flashLimitNotice]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const report = (event: Event) => {
+      const root = rootRef.current;
+      if (!root) return;
+      const scope = root.parentElement ?? root;
+      if (event.type === 'pointerup' && (!(event.target instanceof Node) || !scope.contains(event.target))) return;
+      if (event.target instanceof Node && isSatSelectionInsideAnnotationUi(event.target)) return;
+
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) markSatSelectionGestureEnded();
+      if (!modeEnabled.current) return;
+
+      const anchor = captureSatTextSelection(root, region, selection, { allowAnnotationControls: true });
+      if (!anchor) return;
+      selection?.removeAllRanges();
+      reportAnchor(anchor);
+    };
+
+    const begin = (event: Event) => {
+      const { clientX, clientY } = event as PointerEvent;
+      if (typeof clientX !== 'number' || typeof clientY !== 'number') return;
+      markSatPointerDown(clientX, clientY);
+    };
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) report(event);
+    };
+
+    document.addEventListener('pointerdown', begin, true);
+    document.addEventListener('pointerup', report);
+    document.addEventListener('keyup', keyboard);
+    return () => {
+      document.removeEventListener('pointerdown', begin, true);
+      document.removeEventListener('pointerup', report);
+      document.removeEventListener('keyup', keyboard);
+    };
+  }, [enabled, region, reportAnchor, rootRef]);
+
+  const reportOwnedRange = useCallback((range: Range) => {
+    markSatSelectionGestureEnded();
+    const root = rootRef.current;
+    if (!root) return;
+    const anchor = captureSatTextRange(root, region, range, { allowAnnotationControls: true });
+    diagnostics?.record('captureSatTextRange', { captureSucceeded: !!anchor });
+    if (!anchor) return;
+    reportAnchor(anchor);
+    diagnostics?.record('reportAnchor', {
+      anchorReported: !!reportSelection.current && annotationCount < SAT_ANNOTATION_LIMIT,
+    });
+  }, [annotationCount, diagnostics, region, reportAnchor, rootRef]);
+
+  const resolveCaretAtPoint = useMemo(
+    () => browserCaretResolver(document, diagnostics),
+    [diagnostics],
+  );
+
+  const selection = useStudentSelectionGesture({
+    enabled: enabled && view.annotationModeEnabled && ownedTouchSelection,
+    activation: 'drag',
+    rootRef,
+    diagnostics,
+    resolveCaretAtPoint,
+    onSelect: reportOwnedRange,
+    boundaryFor: satAnnotationBlockForPoint,
+    scrollContainer: nearestScrollableAncestor,
+  });
+
+  return { selection, limitNotice };
+}
