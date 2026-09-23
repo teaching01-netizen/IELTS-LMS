@@ -554,6 +554,75 @@ describe('SatSessionRoomRoute', () => {
     expect(document.querySelector('.sat-banner-enter')).toBeInTheDocument();
   });
 
+  // The room's timers are the one thing a proctor cross-checks by eye: the hero
+  // clock, the run sheet, the roster row and the inspector all name the same
+  // section clock, so they must read the same instant. They used to be four
+  // independent corrections — two bands, three sources — and drifted seconds
+  // apart, which is what "the timer is not in sync" looked like on screen.
+  describe('one clock across the room', () => {
+    const readingOf = (label: string) =>
+      Array.from(document.querySelectorAll('.sat-room__inspector-panel dl dt'))
+        .find((node) => node.textContent === label)
+        ?.parentElement?.querySelector('dd')?.textContent ?? null;
+
+    function renderClockedRoom() {
+      const now = Date.now();
+      const deadline = new Date(now + 9 * 60_000).toISOString();
+      const serverNow = new Date(now).toISOString();
+      const clockedRuntime = {
+        ...runtime,
+        currentSectionDeadlineAt: deadline,
+        currentSectionRemainingSeconds: 540,
+        serverNow,
+      };
+      const clockedStudent = {
+        ...student,
+        runtimeStatus: 'live' as const,
+        runtimeSectionStatus: 'live' as const,
+        runtimeDeadlineAt: deadline,
+        runtimeServerNow: serverNow,
+        runtimeModuleRole: 'base' as const,
+        runtimeModuleDeadlineAt: new Date(now + 5 * 60_000).toISOString(),
+        runtimeModuleRemainingSeconds: 300,
+      };
+      controllerMock.mockReset();
+      controllerMock.mockReturnValue({
+        schedules: [schedule], runtimeSnapshots: [clockedRuntime], sessions: [clockedStudent], alerts: [], error: null, isLoading: false,
+        roomClock: { serverNow, receivedAt: now },
+        reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+        handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+      });
+      render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+      return {
+        hero: document.querySelector('.sat-room__clock')?.textContent ?? null,
+        row: screen.getByRole('option', { name: 'Open Ananda S.' }),
+        sheetSection: document.querySelector('[data-sat-run-sheet-remaining="section"] span:last-child')?.textContent ?? null,
+      };
+    }
+
+    it('reads the same section clock on the hero, the roster, the run sheet and the inspector', () => {
+      const { hero, row, sheetSection } = renderClockedRoom();
+
+      expect(hero).toMatch(/^\d{1,2}:\d{2}$/);
+      // The roster row names the room's clock beside the candidate's module clock.
+      expect(row.querySelector('.sat-room__row-sub')?.textContent).toBe(`Section clock ${hero}`);
+      // The run sheet's live section row counts the same deadline.
+      expect(sheetSection).toBe(hero);
+      // The inspector's section clock is the candidate's window on that same clock.
+      expect(readingOf('Section clock')).toBe(hero);
+      // The module clock stays the candidate's own window, not the section's.
+      expect(readingOf('Module clock')).toMatch(/^\d{1,2}:\d{2}$/);
+      expect(readingOf('Module clock')).not.toBe(hero);
+    });
+
+    it('keeps the roster row precise for the selected student instead of riding the 15s band', () => {
+      const { hero, row } = renderClockedRoom();
+      // Same instant, both surfaces: a coarse row could show this clock up to 15
+      // seconds away from the hero clock the proctor is reading beside it.
+      expect(row.querySelector('.sat-room__row-sub')?.textContent).toBe(`Section clock ${hero}`);
+    });
+  });
+
   describe('session room ops hierarchy (phase 04)', () => {
     const room = () => render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
 

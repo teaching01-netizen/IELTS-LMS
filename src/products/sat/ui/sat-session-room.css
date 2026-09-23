@@ -972,6 +972,7 @@ button.sat-room__attention-filter:hover {
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
+    padding: 20px 16px 32px;
   }
 
   .sat-room__inspector-close {

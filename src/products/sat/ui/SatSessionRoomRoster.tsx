@@ -1,5 +1,6 @@
 import type { StudentSession } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
+import type { ServerClockSnapshot } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { SatSearchField } from './SatPage';
 import { SatRoomStudentRow } from './SatSessionRoomStudents';
 
@@ -10,6 +11,7 @@ export function SatSessionRoomRoster({
   visibleStudents,
   selectedStudent,
   runtime,
+  roomClock,
   search,
   onSearchChange,
   attentionFilter,
@@ -21,6 +23,7 @@ export function SatSessionRoomRoster({
   visibleStudents: StudentSession[];
   selectedStudent: StudentSession | null;
   runtime: ExamSessionRuntime;
+  roomClock?: ServerClockSnapshot | null | undefined;
   search: string;
   onSearchChange: (value: string) => void;
   attentionFilter: AttentionFilter;
@@ -100,6 +103,7 @@ export function SatSessionRoomRoster({
             key={student.id}
             student={student}
             runtime={runtime}
+            roomClock={roomClock}
             selected={selectedStudent?.id === student.id}
             onSelect={(trigger) => onSelect(student.id, trigger)}
           />

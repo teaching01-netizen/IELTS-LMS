@@ -1779,6 +1779,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 .sat-exam-overlay-root {
   position: absolute;
   inset: 0;
+  background: transparent;
   pointer-events: none;
 }
 

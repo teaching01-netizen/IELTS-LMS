@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { SatPageError, SatPageLoading } from '../ui/SatPage';
 import { logError, logInfo } from '../../../shared/observability/errorLogger';
 import { useAuthSession } from '../../../features/auth/authSession';
-import { useAuthoritativeDeadlineClock, useServerClockNowMs } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
+import { resolveRoomClock, useAuthoritativeDeadlineClock, useRoomClockMs } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { useProctorRouteController } from '../../../features/proctor/hooks/useProctorRouteController';
 import { examDeliveryService } from '../../../features/proctor/infrastructure/proctorGateway';
 import { SatStatusPill } from '../ui/SatPage';
@@ -55,16 +55,23 @@ export function SatSessionRoomRoute() {
   }, [attentionFilter, search, students]);
   const selectedStudent = students.find((student) => student.id === selectedStudentId) ?? students[0] ?? null;
   const currentStageStatus = runtime?.sections.find((section) => section.sectionKey === runtime?.currentSectionKey)?.status ?? null;
+  // The room's own clock: ONE accepted server instant (the freshest read of the
+  // refresh, paired with the instant it landed) plus the shared 1s tick. The
+  // hero clock, the run sheet, every roster row and the inspector all read the
+  // same instant, so no two windows on this page can count the same deadline
+  // seconds apart.
+  const roomClock = useMemo(
+    () => resolveRoomClock(controller.roomClock, runtime?.serverNow ?? null),
+    [controller.roomClock, runtime?.serverNow],
+  );
+  const serverNowMs = useRoomClockMs(roomClock);
   const stageRemainingSeconds = useAuthoritativeDeadlineClock({
     deadlineAt: runtime?.currentSectionDeadlineAt ?? null,
     serverNow: runtime?.serverNow ?? null,
     fallbackSeconds: runtime?.currentSectionRemainingSeconds ?? 0,
     running: runtime?.status === 'live' && currentStageStatus === 'live',
+    roomClock,
   });
-  // The room's own clock: the shared 1s tick corrected onto the server's
-  // instant, so every window on this page counts down together. Before this,
-  // only the section clock ticked and each module window was a static span.
-  const serverNowMs = useServerClockNowMs(runtime?.serverNow ?? null);
   // ONE projection for the header and the table: the room builds the run sheet
   // from its own ticking clock and hands the same rows to the table, so "which
   // section and which module are we in?" has exactly one answer on the page.
@@ -199,6 +206,7 @@ export function SatSessionRoomRoute() {
           key={selectedStudent.id}
           student={selectedStudent}
           runtime={runtime}
+          roomClock={roomClock}
           variant={roomMode === 'review' ? 'review' : 'operational'}
           pendingActions={pendingActions}
           blocked={isStale}
@@ -274,6 +282,7 @@ export function SatSessionRoomRoute() {
           visibleStudents={visibleStudents}
           selectedStudent={selectedStudent}
           runtime={runtime}
+          roomClock={roomClock}
           search={search}
           onSearchChange={setSearch}
           attentionFilter={attentionFilter}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExamPlanSection, ExamSessionRuntime, ProctorPresence } from "../../../../types/domain";
-import { mergeProctorRuntime } from "../mergeProctorRuntime";
+import { mergeProctorRuntime, runtimeProjectionSupersedes } from "../mergeProctorRuntime";
 
 const examPlan: ExamPlanSection[] = [
   {
@@ -56,6 +56,40 @@ function runtime(overrides: Partial<ExamSessionRuntime> = {}): ExamSessionRuntim
   };
 }
 
+// The socket ingest path asks the same question before it accepts a frame, so
+// the decision is asserted on its own as well as through the merge.
+describe("runtimeProjectionSupersedes", () => {
+  it("accepts a newer revision and rejects an older one", () => {
+    expect(
+      runtimeProjectionSupersedes(
+        runtime({ revision: 4, serverNow: "2026-01-01T09:00:00.000Z" }),
+        runtime({ revision: 5, serverNow: "2026-01-01T09:00:01.000Z" }),
+      ),
+    ).toBe(true);
+    expect(
+      runtimeProjectionSupersedes(
+        runtime({ revision: 5, serverNow: "2026-01-01T09:00:00.000Z" }),
+        runtime({ revision: 4, serverNow: "2026-01-01T09:00:09.000Z" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("orders two reads of one revision by their own stamp", () => {
+    expect(
+      runtimeProjectionSupersedes(
+        runtime({ revision: 7, serverNow: "2026-01-01T09:00:00.000Z" }),
+        runtime({ revision: 7, serverNow: "2026-01-01T09:00:06.000Z" }),
+      ),
+    ).toBe(true);
+    expect(
+      runtimeProjectionSupersedes(
+        runtime({ revision: 7, serverNow: "2026-01-01T09:00:06.000Z" }),
+        runtime({ revision: 7, serverNow: "2026-01-01T09:00:00.000Z" }),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("mergeProctorRuntime", () => {
   it("preserves the detail-only exam plan when a newer summary omits it", () => {
     const detail = runtime({ examPlan, revision: 4 });
@@ -80,18 +114,81 @@ describe("mergeProctorRuntime", () => {
     expect(mergeProctorRuntime(detail, newerSummary).examPlan).toEqual(examPlan);
   });
 
-  it("enriches a same-revision summary with the detail plan without regressing live fields", () => {
-    const summary = runtime({ revision: 7, examPlan: null, currentSectionRemainingSeconds: 120 });
-    const detail = runtime({
+  // A live section sits on one revision for as long as it runs, so "the revision
+  // did not change" only means "another read of the same state" — the read's own
+  // stamp decides which copy is fresh. Gating the whole object on a strictly
+  // greater revision froze the room's clock (serverNow, deadline, sections) at
+  // the first payload of the revision while the per-student rows kept advancing.
+  it("accepts a newer read of the same revision, including its live clock", () => {
+    const stale = runtime({
+      revision: 7,
+      examPlan: null,
+      serverNow: "2026-01-01T09:00:00.000Z",
+      currentSectionRemainingSeconds: 120,
+      currentSectionDeadlineAt: "2026-01-01T09:02:00.000Z",
+    });
+    const fresherRead = runtime({
       revision: 7,
       examPlan,
+      serverNow: "2026-01-01T09:00:06.000Z",
+      currentSectionRemainingSeconds: 600,
+      currentSectionDeadlineAt: "2026-01-01T09:10:00.000Z",
+    });
+
+    const merged = mergeProctorRuntime(stale, fresherRead);
+
+    expect(merged.examPlan).toEqual(examPlan);
+    expect(merged.serverNow).toBe("2026-01-01T09:00:06.000Z");
+    expect(merged.currentSectionRemainingSeconds).toBe(600);
+    expect(merged.currentSectionDeadlineAt).toBe("2026-01-01T09:10:00.000Z");
+  });
+
+  it("still refuses an older read of the same revision", () => {
+    const fresh = runtime({
+      revision: 7,
+      examPlan,
+      serverNow: "2026-01-01T09:00:06.000Z",
+      currentSectionRemainingSeconds: 600,
+    });
+    const lateArrival = runtime({
+      revision: 7,
+      examPlan: null,
+      serverNow: "2026-01-01T09:00:00.000Z",
+      currentSectionRemainingSeconds: 120,
+    });
+
+    const merged = mergeProctorRuntime(fresh, lateArrival);
+
+    expect(merged.currentSectionRemainingSeconds).toBe(600);
+    expect(merged.serverNow).toBe("2026-01-01T09:00:06.000Z");
+    expect(merged.examPlan).toEqual(examPlan);
+  });
+
+  it("falls back to updatedAt when a projection carries no serverNow", () => {
+    const stale = runtime({
+      revision: 7,
+      updatedAt: "2026-01-01T09:00:00.000Z",
+      serverNow: undefined,
+      currentSectionRemainingSeconds: 120,
+    });
+    const fresherRead = runtime({
+      revision: 7,
+      updatedAt: "2026-01-01T09:00:06.000Z",
+      serverNow: undefined,
       currentSectionRemainingSeconds: 600,
     });
 
-    const merged = mergeProctorRuntime(summary, detail);
+    expect(mergeProctorRuntime(stale, fresherRead).currentSectionRemainingSeconds).toBe(600);
+  });
 
-    expect(merged.examPlan).toEqual(examPlan);
+  it("keeps what it holds when two reads of one revision are stamped alike", () => {
+    const held = runtime({ revision: 7, examPlan, currentSectionRemainingSeconds: 120 });
+    const incoming = runtime({ revision: 7, currentSectionRemainingSeconds: 600 });
+
+    const merged = mergeProctorRuntime(held, incoming);
+
     expect(merged.currentSectionRemainingSeconds).toBe(120);
+    expect(merged.examPlan).toEqual(examPlan);
   });
 
   it("keeps the newest runtime while retaining plan and presence from older reads", () => {

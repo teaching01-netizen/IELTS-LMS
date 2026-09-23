@@ -1,5 +1,5 @@
 import { Fragment, useMemo } from 'react';
-import type { ExamPlanSection, ExamSessionRuntime } from '../../../types/domain';
+import type { ExamPlanSection } from '../../../types/domain';
 import { SatEyebrow, SatSectionCard } from './SatPage';
 import {
   buildSatRunSheet,
@@ -10,6 +10,7 @@ import {
   type SatRunSheet as SatRunSheetModel,
   type SatRunSheetRow,
   type SatRunSheetRowStatus,
+  type SatRunSheetRuntime,
 } from './sessionRunSheet';
 
 const STATUS_LABEL: Record<SatRunSheetRowStatus, string> = {
@@ -57,10 +58,7 @@ export function SatRunSheet({
   sheet: providedSheet,
 }: {
   plan?: ExamPlanSection[] | null | undefined;
-  runtime?:
-    | Pick<ExamSessionRuntime, 'sections' | 'actualStartAt' | 'actualEndAt' | 'status' | 'serverNow'>
-    | null
-    | undefined;
+  runtime?: SatRunSheetRuntime | null | undefined;
   scheduledStartAt?: string | null | undefined;
   now?: string | null | undefined;
   /** Precomputed projection (the session room builds one for its header too). */

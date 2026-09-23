@@ -50,6 +50,7 @@ describe('session room layout contracts', () => {
       'minmax(260px, 290px) minmax(0, 1fr) minmax(320px, 370px)',
     );
     expect(value(desktop, '.sat-room__body', 'grid-template-areas')).toBe('"roster workspace inspector"');
+    expect(value(desktop, '.sat-room__inspector-panel', 'padding')).toBe('20px 16px 32px');
   });
 
   it('uses a two-column tablet workspace with a viewport inspector dialog', () => {
