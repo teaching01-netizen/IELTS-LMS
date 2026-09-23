@@ -39,7 +39,7 @@ const exam: ExamEntity = {
 function link(id: string, name: string, versionId: string, versionNumber: number, status: AssessmentAccessLink['status']): AssessmentAccessLink {
   return {
     id, examId: exam.id, examTitle: exam.title, providerKey: 'sat', publishedVersionId: versionId,
-    versionNumber, scheduleId: `schedule-${id}`, name, audienceType: 'cohort', audienceLabel: name,
+    versionNumber, publishScope: 'full', scheduleId: `schedule-${id}`, name, audienceType: 'cohort', audienceLabel: name,
     accessMode: 'student_code', availabilityType: 'anytime', opensAt: null, closesAt: null,
     lifecycleState: status === 'paused' ? 'paused' : status === 'revoked' ? 'revoked' : 'active', status,
     selectedStudentCount: 0, metrics: { registered: 10, started: 8, submitted: 4 },
@@ -50,7 +50,7 @@ function link(id: string, name: string, versionId: string, versionNumber: number
 
 const overview: AccessDistributionOverview = {
   currentPublishedVersion: {
-    id: 'version-5', versionNumber: 5, revision: 1, publishNotes: null, createdAt: '2026-08-28T00:00:00Z',
+    id: 'version-5', versionNumber: 5, revision: 1, publishNotes: null, publishScope: 'full', createdAt: '2026-08-28T00:00:00Z',
   },
   links: [
     link('link-current', 'Saturday Class', 'version-5', 5, 'live'),

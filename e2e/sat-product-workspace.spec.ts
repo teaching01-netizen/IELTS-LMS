@@ -32,7 +32,7 @@ async function correctAnswerPlan(moduleId: string): Promise<Array<{ examQuestion
   // them would inflate answeredCount beyond rawCorrect and break the
   // rawCorrect >= answeredCount assertion.
   const keyRows = await queryDb<{ exam_question_id: string; answer_definition: string }>(
-    `SELECT eq.id AS exam_question_id, qr.answer_definition AS answer_definition
+    `SELECT eq.id AS exam_question_id, CAST(qr.answer_definition AS CHAR) AS answer_definition
        FROM assessment_exam_questions eq
        JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id
       WHERE eq.module_id = ? AND eq.is_pretest = FALSE`,
@@ -57,6 +57,38 @@ async function correctAnswerPlan(moduleId: string): Promise<Array<{ examQuestion
     }
   }
   return plan;
+}
+
+async function leaveMathBaseModuleIncomplete(examId: string): Promise<void> {
+  const drafts = await queryDb<{ current_draft_version_id: string | null }>(
+    "SELECT current_draft_version_id FROM exam_entities WHERE id = ?",
+    [examId],
+  );
+  const draftVersionId = drafts[0]?.current_draft_version_id;
+  if (!draftVersionId) throw new Error("SAT draft version was not available for the Math blocker setup");
+  const modules = await queryDb<{
+    module_id: string;
+    target_question_count: number;
+    authored_questions: number;
+  }>(
+    `SELECT m.id AS module_id, m.target_question_count, COUNT(eq.id) AS authored_questions
+       FROM assessment_modules m
+       JOIN assessment_sections s ON s.id = m.section_id
+       LEFT JOIN assessment_exam_questions eq ON eq.module_id = m.id
+      WHERE s.exam_version_id = ? AND s.section_key = 'math' AND m.adaptive_role = 'base'
+      GROUP BY m.id, m.target_question_count
+      ORDER BY m.display_order
+      LIMIT 1`,
+    [draftVersionId],
+  );
+  const module = modules[0];
+  if (!module) throw new Error("SAT Math base module was not available for the blocker setup");
+  const incompleteTarget = Math.max(Number(module.target_question_count), Number(module.authored_questions)) + 1;
+  const changed = await executeUpdate(
+    "UPDATE assessment_modules SET target_question_count = ? WHERE id = ?",
+    [incompleteTarget, module.module_id],
+  );
+  if (changed !== 1) throw new Error("Could not leave the SAT Math base module incomplete");
 }
 
 async function finishCurrentSatSection(
@@ -296,7 +328,7 @@ type SatAttemptHarness = {
 async function startSatAttempt(
   page: Page,
   browser: { newContext: () => Promise<BrowserContext> },
-  options: { titlePrefix?: string; linkPrefix?: string; studentPrefix?: string } = {}
+  options: { titlePrefix?: string; linkPrefix?: string; studentPrefix?: string; publishScope?: "full" | "reading-writing" | "math"; leaveMathIncomplete?: boolean } = {}
 ): Promise<SatAttemptHarness> {
   const stamp = Date.now().toString(36);
   const examTitle = `${options.titlePrefix ?? "SAT Product Smoke"} ${stamp}`;
@@ -323,13 +355,47 @@ async function startSatAttempt(
   await page.getByRole("button", { name: "Load 147 questions" }).click();
   await expect(page.getByText("147 of 147 authored")).toBeVisible({ timeout: 90_000 });
 
+  if (options.leaveMathIncomplete) {
+    await leaveMathBaseModuleIncomplete(examId);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: examTitle })).toBeVisible({ timeout: 30_000 });
+  }
+
   await page.getByRole("button", { name: "Release" }).click();
   await expect(page).toHaveURL(`/sat/exams/${examId}/release`);
-  await expect(page.getByRole("heading", { name: "Ready to publish" })).toBeVisible({ timeout: 30_000 });
+  if (options.leaveMathIncomplete) {
+    const releaseChecks = page.getByRole("region", { name: "Release checks" });
+    await expect(releaseChecks).toBeVisible({ timeout: 30_000 });
+    const fullScopeChecks = page.getByRole("button", { name: "Run checks" });
+    await expect(fullScopeChecks).toBeEnabled({ timeout: 30_000 });
+    await fullScopeChecks.click();
+    await expect(releaseChecks).toHaveAttribute("aria-busy", "false");
+    await expect(page.getByRole("heading", { name: "Review required" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Fix before publishing")).toBeVisible();
+    await page.getByRole("radio", { name: "Reading & Writing" }).check();
+    await expect(page.getByText(/Checks cover Reading & Writing/)).toBeVisible();
+    const readingWritingChecks = page.getByRole("button", { name: "Run checks" });
+    await expect(readingWritingChecks).toBeEnabled({ timeout: 30_000 });
+    await readingWritingChecks.click();
+    await expect(releaseChecks).toHaveAttribute("aria-busy", "false");
+    await expect(page.getByRole("heading", { name: "Ready to publish" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Fix before publishing")).toHaveCount(0);
+  } else {
+    await expect(page.getByRole("heading", { name: "Ready to publish" })).toBeVisible({ timeout: 30_000 });
+  }
+  if (options.publishScope && options.publishScope !== "full") {
+    await page.getByRole("radio", { name: options.publishScope === "math" ? "Math" : "Reading & Writing" }).check();
+  }
   await page.getByRole("button", { name: "Publish" }).click();
   const publishDialog = page.getByRole("dialog");
   await expect(publishDialog).toBeVisible();
-  await publishDialog.getByRole("button", { name: "Publish", exact: true }).click();
+  const publishAction =
+    options.publishScope === "math"
+      ? "Publish Math"
+      : options.publishScope === "reading-writing"
+        ? "Publish Reading & Writing"
+        : "Publish Full SAT";
+  await publishDialog.getByRole("button", { name: publishAction, exact: true }).click();
 
   await expect(page).toHaveURL(`/sat/exams/${examId}/access`, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Student Access", exact: true })).toBeVisible();
@@ -347,6 +413,9 @@ async function startSatAttempt(
   await studentPage.goto(joinHref);
   await expect(studentPage.getByRole("heading", { name: linkName })).toBeVisible();
   await expect(studentPage.getByText(`${examTitle} · Version 1`)).toBeVisible();
+  if (options.publishScope === "reading-writing") {
+    await expect(studentPage.getByText(/You'll take Reading & Writing only/)).toBeVisible();
+  }
   await studentPage.getByLabel("Full name").fill(studentName);
   await studentPage.getByLabel("Email").fill(studentEmail);
   await studentPage.getByRole("button", { name: /Continue/i }).click();
@@ -358,7 +427,7 @@ async function startSatAttempt(
     throw new Error("Student handoff did not include schedule and candidate ids");
 
   await page.goto("/sat/sessions");
-  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible({ timeout: 30_000 });
   const sessionRow = page
     .locator("button")
     .filter({ hasText: examTitle })
@@ -368,6 +437,11 @@ async function startSatAttempt(
   await sessionRow.click();
   await expect(page).toHaveURL(`/sat/sessions/${scheduleId}`);
   await expect(page.getByText(studentName).first()).toBeVisible({ timeout: 30_000 });
+  if (options.publishScope === "reading-writing") {
+    const runSheet = page.getByRole("list", { name: "Run sheet stages" });
+    await expect(runSheet).toContainText("Reading & Writing");
+    await expect(runSheet).not.toContainText("Math");
+  }
   await page.getByRole("button", { name: "Start" }).click();
   await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
 
@@ -426,7 +500,7 @@ async function startSatAttempt(
 }
 
 test.describe("Digital SAT product workspace", () => {
-  test("keeps the SAT run sheet, roster, and student inspection inside their desktop scroll regions", async ({
+  test("keeps the SAT room responsive and makes the tablet inspector keyboard-modal", async ({
     page,
     browser,
   }, testInfo) => {
@@ -450,98 +524,124 @@ test.describe("Digital SAT product workspace", () => {
         await page.setViewportSize(viewport);
         await page.goto(`/sat/sessions/${scheduleId}`);
         await expect(page.getByRole("heading", { name: "Waiting to begin" })).toHaveCount(0);
-        await expect(page.getByRole("heading", { name: studentName })).toBeVisible({ timeout: 30_000 });
+        const studentOption = page.getByRole("option", { name: `Open ${studentName}` });
+        await expect(studentOption).toBeVisible({ timeout: 30_000 });
+        if (viewport.width >= 1440) {
+          await expect(page.getByRole("heading", { name: studentName })).toBeVisible();
+        }
         await expect(page.getByText("Run sheet", { exact: true })).toBeVisible();
 
         const metrics = await page.evaluate(() => {
           const workspace = document.querySelector<HTMLElement>(".sat-room__workspace");
-          const timeline = document.querySelector<HTMLElement>(".sat-room__timeline-pane");
-          const studentPane = document.querySelector<HTMLElement>(".sat-room__student-pane");
+          const roster = document.querySelector<HTMLElement>(".sat-room__roster");
+          const studentList = document.querySelector<HTMLElement>('.sat-room__roster [role="listbox"]');
           const room = document.querySelector<HTMLElement>(".sat-room");
           const inspector = room?.querySelector<HTMLElement>(".sat-room__inspector");
-          if (!workspace || !timeline || !studentPane || !room || !inspector) throw new Error("SAT session room did not render");
+          if (!workspace || !roster || !studentList || !room) throw new Error("SAT session room did not render");
+          const workspaceRect = workspace.getBoundingClientRect();
+          const rosterRect = roster.getBoundingClientRect();
+          const inspectorRect = inspector?.getBoundingClientRect() ?? null;
           return {
             viewportWidth: window.innerWidth,
             viewportHeight: window.innerHeight,
             documentHeight: document.documentElement.scrollHeight,
-            workspaceTop: workspace.getBoundingClientRect().top,
-            workspaceRight: workspace.getBoundingClientRect().right,
-            timelineClientHeight: timeline.clientHeight,
-            timelineScrollHeight: timeline.scrollHeight,
-            timelineOverflowY: getComputedStyle(timeline).overflowY,
-            studentClientHeight: studentPane.clientHeight,
-            studentScrollHeight: studentPane.scrollHeight,
-            studentOverflowY: getComputedStyle(studentPane).overflowY,
+            documentWidth: document.documentElement.scrollWidth,
+            workspaceTop: workspaceRect.top,
+            workspaceRight: workspaceRect.right,
+            workspaceBottom: workspaceRect.bottom,
+            workspaceClientHeight: workspace.clientHeight,
+            workspaceScrollHeight: workspace.scrollHeight,
             workspaceOverflowY: getComputedStyle(workspace).overflowY,
+            rosterTop: rosterRect.top,
+            rosterBottom: rosterRect.bottom,
+            rosterClientHeight: studentList.clientHeight,
+            rosterScrollHeight: studentList.scrollHeight,
+            rosterOverflowY: getComputedStyle(studentList).overflowY,
             rowCount: workspace.querySelectorAll("[data-sat-run-sheet-row]").length,
-            inspectorDisplay: getComputedStyle(inspector).display,
-            inspectorTop: inspector.getBoundingClientRect().top,
-            inspectorBottom: inspector.getBoundingClientRect().bottom,
-            inspectorLeft: inspector.getBoundingClientRect().left,
+            inspectorTop: inspectorRect?.top ?? null,
+            inspectorLeft: inspectorRect?.left ?? null,
+            inspectorDisplay: inspector ? getComputedStyle(inspector).display : "portal",
           };
         });
         expect(metrics.rowCount).toBeGreaterThan(5);
+        expect(metrics.documentWidth).toBeLessThanOrEqual(viewport.width + 1);
 
         if (viewport.width >= 1024) {
           expect(metrics.documentHeight).toBeLessThanOrEqual(viewport.height + 1);
-          expect(metrics.timelineScrollHeight).toBeGreaterThan(metrics.timelineClientHeight);
-          expect(metrics.timelineOverflowY).toBe("auto");
-          expect(metrics.studentScrollHeight).toBeGreaterThan(metrics.studentClientHeight);
-          expect(metrics.studentOverflowY).toBe("auto");
-          expect(metrics.workspaceOverflowY).toBe("hidden");
+          expect(metrics.workspaceOverflowY).toBe("auto");
+          expect(metrics.rosterOverflowY).toBe("auto");
           if (viewport.width >= 1440) {
             await expect(page.locator(".sat-room__inspector")).toBeVisible();
-            expect(metrics.inspectorLeft).toBeGreaterThanOrEqual(metrics.workspaceRight - 1);
+            expect(metrics.inspectorLeft ?? 0).toBeGreaterThanOrEqual(metrics.workspaceRight - 1);
+            await expect(page.locator(".sat-room__inspector-dialog")).toHaveCount(0);
+            if (viewport.width === 1600) {
+              await testInfo.attach("sat-session-room-1600-wide", {
+                body: await page.screenshot(),
+                contentType: "image/png",
+              });
+            }
           } else {
-            await expect(page.locator(".sat-room__inspector")).toBeVisible();
-            expect(metrics.inspectorDisplay).not.toBe("none");
-            expect(metrics.inspectorBottom).toBeLessThanOrEqual(metrics.workspaceTop + 1);
+            await studentOption.click();
+            const dialog = page.getByRole("dialog", { name: "Selected student inspector" });
+            await expect(dialog).toBeVisible();
+            await expect(dialog).toHaveAttribute("aria-modal", "true");
+            await expect(page.getByRole("button", { name: "Close student inspector" })).toBeFocused();
+            await expect(dialog.locator("[data-sat-room-student-detail]")).toBeVisible();
+            if (viewport.width === 1280) {
+              await testInfo.attach("sat-session-room-1280-tablet-inspector", {
+                body: await page.screenshot(),
+                contentType: "image/png",
+              });
+            }
+
+            await page.keyboard.press("Shift+Tab");
+            expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+            await page.keyboard.press("Escape");
+            await expect(dialog).toHaveCount(0);
+            await expect(studentOption).toBeFocused();
           }
 
-          await page.locator(".sat-room__timeline-pane").evaluate((timeline) => {
-            timeline.scrollTop = timeline.scrollHeight;
+          await page.locator(".sat-room__workspace").evaluate((workspace) => {
+            workspace.scrollTop = workspace.scrollHeight;
           });
           await expect(page.locator(".sat-room__sticky-context")).toHaveClass(/is-visible/);
           await expect(page.locator(".sat-room__header")).toBeVisible();
           await expect(page.locator(".sat-room__roster-head")).toBeVisible();
-          if (viewport.width < 1440) {
-            await expect(page.locator(".sat-room__sticky-health")).toBeVisible();
-          } else {
-            await expect(page.locator(".sat-room__inspector")).toContainText("Online");
+          if (viewport.width >= 1440) {
+            await expect(page.locator(".sat-room__context-health")).toContainText("Online");
+            const detail = page.locator(".sat-room__inspector [data-sat-room-student-detail]");
+            await expect(detail).toBeVisible();
+            const studentBounds = await detail.evaluate((element) => {
+              const owner = element.closest(".sat-room__inspector-panel");
+              if (!owner) throw new Error("Student detail has no inspector scroll owner");
+              const detailRect = element.getBoundingClientRect();
+              const paneRect = owner.getBoundingClientRect();
+              return { detailBottom: detailRect.bottom, paneTop: paneRect.top, paneBottom: paneRect.bottom };
+            });
+            expect(studentBounds.detailBottom).toBeLessThanOrEqual(studentBounds.paneBottom + 1);
+            expect(studentBounds.detailBottom).toBeGreaterThan(studentBounds.paneTop);
           }
-          const timelinePosition = await page.locator(".sat-room__timeline-pane").evaluate((timeline) => timeline.scrollTop);
-          await page.locator(".sat-room__student-pane").evaluate((studentPane) => {
-            studentPane.scrollTop = studentPane.scrollHeight;
-          });
-          const independentPositions = await page.locator(".sat-room__student-pane").evaluate((studentPane) => ({
-            studentTop: studentPane.scrollTop,
-            timelineTop: document.querySelector<HTMLElement>(".sat-room__timeline-pane")?.scrollTop ?? -1,
-          }));
-          expect(independentPositions.studentTop).toBeGreaterThan(0);
-          expect(independentPositions.timelineTop).toBe(timelinePosition);
-          await expect(page.locator("[data-sat-room-student-detail]")).toBeVisible();
-          const studentBounds = await page.locator("[data-sat-room-student-detail]").evaluate((detail) => {
-            const detailRect = detail.getBoundingClientRect();
-            const paneRect = detail.closest(".sat-room__student-pane")!.getBoundingClientRect();
-            return { detailBottom: detailRect.bottom, paneTop: paneRect.top, paneBottom: paneRect.bottom };
-          });
-          expect(studentBounds.detailBottom).toBeLessThanOrEqual(studentBounds.paneBottom + 1);
-          expect(studentBounds.detailBottom).toBeGreaterThan(studentBounds.paneTop);
         } else {
           expect(metrics.workspaceOverflowY).toBe("visible");
           expect(metrics.documentHeight).toBeGreaterThan(viewport.height);
           const landmarks = await page.evaluate(() => {
             const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
             return {
-              inspectorTop: rect(".sat-room__inspector").top,
               rosterTop: rect(".sat-room__roster").top,
               workspaceTop: rect(".sat-room__workspace").top,
+              inspectorTop: rect(".sat-room__inspector").top,
             };
           });
-          expect(landmarks.inspectorTop).toBeLessThan(landmarks.rosterTop);
           expect(landmarks.rosterTop).toBeLessThan(landmarks.workspaceTop);
+          expect(landmarks.workspaceTop).toBeLessThan(landmarks.inspectorTop);
           await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
           await expect(page.locator("[data-sat-room-student-detail]")).toBeVisible();
+          if (viewport.width === 390) {
+            await testInfo.attach("sat-session-room-390-mobile", {
+              body: await page.screenshot({ fullPage: true }),
+              contentType: "image/png",
+            });
+          }
         }
       }
     } finally {
@@ -680,6 +780,68 @@ test.describe("Digital SAT product workspace", () => {
       await expect(page.getByText(examTitle)).toHaveCount(0);
       await page.goto("/admin/results");
       await expect(page.getByText(studentName)).toHaveCount(0);
+    } finally {
+      await studentContext.close();
+    }
+  });
+
+  test("delivers a pinned Reading & Writing release through the complete student journey", async ({
+    page,
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const harness = await startSatAttempt(page, browser, {
+      titlePrefix: "SAT Reading Writing Release",
+      linkPrefix: "SAT Reading Writing Link",
+      studentPrefix: "SAT Reading Writing Student",
+      publishScope: "reading-writing",
+      leaveMathIncomplete: true,
+    });
+    const { studentPage, studentContext, scheduleId, candidateId, attemptId } = harness;
+    try {
+      const runtime = await readSatRuntime(page, scheduleId);
+      expect(runtime.sections.map((section) => section.sectionKey)).toEqual(["reading-writing"]);
+
+      const deliveredPlan = await studentPage.evaluate(
+        async ({ scheduleId: id, attemptId: attempt, candidateId: candidate }) => {
+          const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+          delivery.configureAssessmentDeliveryAttempt(id, attempt, candidate);
+          const snapshot = await delivery.assessmentDeliveryApi.bootstrap(id, attempt);
+          return {
+            sectionKeys: snapshot.sections.map((section) => section.sectionKey),
+            moduleIds: snapshot.sections.flatMap((section) => section.modules.map((module) => module.id)),
+            attemptModuleIds: snapshot.attempt.moduleAttempts.map((moduleAttempt) => moduleAttempt.moduleId),
+          };
+        },
+        { scheduleId, attemptId, candidateId },
+      );
+      expect(deliveredPlan.sectionKeys).toEqual(["reading-writing"]);
+      expect(deliveredPlan.attemptModuleIds.length).toBeGreaterThan(0);
+      expect(deliveredPlan.attemptModuleIds.every((moduleId) => deliveredPlan.moduleIds.includes(moduleId))).toBe(true);
+
+      const finished = await finishCurrentSatSection(studentPage, scheduleId, attemptId, candidateId);
+      expect(finished.sectionKey).toBe("reading-writing");
+      expect(finished.submittedModuleIds).toHaveLength(2);
+      expect(finished.branchRole).toMatch(/^(lower|higher)_branch$/);
+
+      const result = await studentPage.evaluate(
+        async ({ scheduleId: id, attemptId: attempt, candidateId: candidate }) => {
+          const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+          delivery.configureAssessmentDeliveryAttempt(id, attempt, candidate);
+          return delivery.assessmentDeliveryApi.submitAssessment(id, attempt, { submissionId: attempt });
+        },
+        { scheduleId, attemptId, candidateId },
+      );
+      expect(result.sections.map((section) => section.sectionKey)).toEqual(["reading-writing"]);
+
+      const runtimePlan = await queryDb<{ section_key: string; gap_after_minutes: number }>(
+        `SELECT section_key, gap_after_minutes
+           FROM exam_session_runtime_sections
+          WHERE runtime_id = (SELECT id FROM exam_session_runtimes WHERE schedule_id = ?)
+          ORDER BY section_order`,
+        [scheduleId],
+      );
+      expect(runtimePlan).toEqual([{ section_key: "reading-writing", gap_after_minutes: 0 }]);
     } finally {
       await studentContext.close();
     }

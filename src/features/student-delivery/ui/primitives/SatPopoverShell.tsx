@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { SAT_COPY } from "../../domain/satCopy";
 import { useSatMediaQuery } from "../useSatMediaQuery";
 import { SatPresenceSurface } from "../motion/SatPresenceSurface";
+import { SatExamOverlayPortal } from "../zoom/SatExamZoomContext";
 
 export const SAT_COMPACT_POPOVER_QUERY = "(max-width: 720px), (max-height: 560px)";
 
@@ -155,6 +156,7 @@ export function SatPopoverShell(props: SatPopoverShellProps): React.JSX.Element 
   );
 
   return (
+    <SatExamOverlayPortal>
     <AnimatePresence initial={false}>
       {props.open ? (
         compact ? (
@@ -172,6 +174,7 @@ export function SatPopoverShell(props: SatPopoverShellProps): React.JSX.Element 
         )
       ) : null}
     </AnimatePresence>
+    </SatExamOverlayPortal>
   );
 }
 

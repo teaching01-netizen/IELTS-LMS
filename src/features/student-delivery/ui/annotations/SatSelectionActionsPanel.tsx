@@ -21,6 +21,7 @@ import {
 } from './SatAnnotationSurfaceFrame';
 import { useSatAnnotationAutofocus } from './useSatAnnotationAutofocus';
 import { useSatAnnotationPlacement } from './useSatAnnotationPlacement';
+import { useSatExamZoom } from '../zoom/SatExamZoomContext';
 
 export interface SatSelectionActions {
   highlight: (anchor: SatTextAnchor, color: SatHighlightColor) => void;
@@ -71,12 +72,13 @@ export function SatSelectionActionsPanel({
   /** Dismiss the tools without touching the selection or the marks. */
   onClose: () => void;
 }) {
-  const { placement, containerRef } = useSatAnnotationPlacement(anchor, { touch });
+  const visualScale = useSatExamZoom().scale;
+  const { placement, containerRef } = useSatAnnotationPlacement(anchor, { touch, visualScale });
   // The student has already selected text; landing the caret on the first action
   // means the mark is one keystroke away, and it is also what makes the walk
   // below reachable at all.
   useSatAnnotationAutofocus(placement, `${anchor.nodeId}:${anchor.startOffset}:${anchor.endOffset}`, containerRef);
-  const surface = satAnnotationSurfaceChrome(placement);
+  const surface = satAnnotationSurfaceChrome(placement, visualScale);
 
   const list: SelectionMenuAction[] = [
     {
@@ -114,7 +116,7 @@ export function SatSelectionActionsPanel({
     // one claims none of them: the Highlights shortcut focuses the first control
     // it finds, and it must not find one nobody can see.
     attributes: surface.hidden ? {} : { 'data-sat-selection-toolbar': 'true' },
-    caret: <SatAnnotationCaret placement={placement} />,
+    caret: <SatAnnotationCaret placement={placement} visualScale={visualScale} />,
     heading: <SatAnnotationHeading />,
     bodyMaxHeight: surface.bodyMaxHeight,
     // The caret is drawn outside the border box, so the rows scroll in their own

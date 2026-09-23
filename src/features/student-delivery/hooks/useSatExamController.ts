@@ -775,12 +775,9 @@ export function useSatExamController({
         })
       : 0;
 
-  // Module-advance fix: a branch module (Module 2) is opened by the automatic
-  // path only when the module before it in the same section ended because its
-  // own clock ran out — the timeout hand-off the runbook describes. Read from
-  // the payload rather than from local submit state so a reload or an offline
-  // reconnect reaches the same verdict (see application/satEntry.ts on why
-  // `completionReason` cannot answer this).
+  // Keep the predecessor's timeout attribution for the module-advance metric.
+  // It describes how Module 1 ended; server routing and automatic Module 2
+  // entry work the same way for early submit and timeout.
   const previousModuleTimedOut = useMemo(
     () => (data && pendingModule ? previousModuleEndedByClock(data, pendingModule) : false),
     [data, pendingModule],
@@ -903,7 +900,6 @@ export function useSatExamController({
     breakSeconds: pendingBreakSeconds,
     sectionWaitSeconds: pendingSectionWaitSeconds,
     phase: state.phase,
-    previousModuleTimedOut,
   });
 
   // Phase 4: the entry surface is what the student sees when the break
@@ -1518,6 +1514,8 @@ export function useSatExamController({
     pendingSectionWaitSeconds,
     pendingStageReady,
     autoEntryRecoverable: entrySurface.recoverable,
+    retryModuleEntry: entrySurface.retry,
+    entryReason: entryDecision.reason,
     // True while the automatic entry path owns the pending module; the
     // directions screen keeps its Start button recovery-only only then, so a
     // branch module nobody will auto-start keeps a working button.

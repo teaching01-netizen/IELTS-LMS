@@ -17,6 +17,19 @@ dotenv.config({ path: path.resolve("backend/.env.example"), override: false });
 
 const backendApiUrl = process.env["VITE_BACKEND_API_URL"] ?? "http://localhost:4000";
 const backendApiOrigin = new URL(backendApiUrl).origin;
+// The shared E2E seed is destructive to fixture rows, so prefer a dedicated
+// test database when the runner supplies one. Otherwise keep compatibility
+// with explicit runner DATABASE_URL values and the local Go direct DSN.
+const databaseUrl =
+  inheritedEnv["TEST_DATABASE_URL"] ??
+  process.env["TEST_DATABASE_URL"] ??
+  inheritedEnv["DATABASE_URL"] ??
+  inheritedEnv["DATABASE_DIRECT_URL"] ??
+  process.env["DATABASE_DIRECT_URL"] ??
+  process.env["DATABASE_URL"];
+// globalSetup and E2E database helpers use process.env directly, so keep their
+// connection consistent with the server processes configured below.
+if (databaseUrl) process.env["DATABASE_URL"] = databaseUrl;
 const coeditPublicUrl =
   inheritedEnv["AUTHORING_COEDIT_PUBLIC_URL"] ?? `${backendApiOrigin}/authoring-coedit`;
 const coeditPublicWSScheme =
@@ -41,7 +54,7 @@ function coeditMysqlDsn(databaseUrl: string | undefined): string {
 
 const coeditDatabaseUrl =
   inheritedEnv["AUTHORING_COEDIT_MYSQL_DSN"] ??
-  coeditMysqlDsn(process.env["DATABASE_URL"] ?? process.env["DATABASE_DIRECT_URL"]);
+  coeditMysqlDsn(databaseUrl);
 const backendCookieEnv = {
   COOKIE_SECURE: process.env["COOKIE_SECURE"] ?? "false",
   SESSION_COOKIE_NAME: process.env["SESSION_COOKIE_NAME"] ?? "session",
@@ -49,6 +62,7 @@ const backendCookieEnv = {
 };
 const backendRuntimeEnv = {
   ...process.env,
+  ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}),
   ...backendCookieEnv,
   // Local E2E must not inherit the public placeholder values from
   // backend/.env.example; the embedded service is reachable through the API.

@@ -40,10 +40,15 @@ export function readSatToolSafeArea(): SatSafeArea {
   return { top: header + inset, right: inset, bottom: footer + inset, left: inset };
 }
 
-export function readSatToolViewport(): SatViewport {
+export function readSatToolViewport(
+  viewportToLogicalLength: (physicalLength: number) => number = (length) => length,
+): SatViewport {
   try {
     if (typeof window === 'undefined') return { w: 1280, h: 800 };
-    return { w: window.innerWidth, h: window.innerHeight };
+    return {
+      w: viewportToLogicalLength(window.innerWidth),
+      h: viewportToLogicalLength(window.innerHeight),
+    };
   } catch {
     return { w: 1280, h: 800 };
   }

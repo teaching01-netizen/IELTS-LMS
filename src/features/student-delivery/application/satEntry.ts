@@ -21,14 +21,10 @@ import {
  * (`deriveSatEntryDecision`), and the attempt bookkeeping the entry hook keeps
  * (`canAttemptEntry` / `settleEntry`).
  *
- * Module 2 (Phase: module-advance fix). The adaptive lower/higher branch module
- * used to be vetoed outright (`not-base-module`), which left the student on a
- * directions screen whose Start button was disabled (it is recovery-only while
- * the automatic path owns the module) and whose copy promised an automatic
- * open. Module 2 now has an owner: the module before it in the same section
- * ended because its own clock ran out (`previousModuleTimedOut`), i.e. the
- * timeout hand-off — a student who submits Module 1 early still gets the
- * directions screen, but with a working button.
+ * An adaptive branch module is selected by the server when Module 1 closes.
+ * Once that server-supplied attempt is unstarted and the timing/proctor gates
+ * allow entry, this client automatically opens it whether Module 1 timed out
+ * or was submitted early.
  */
 
 export type SatEntryReason =
@@ -45,22 +41,18 @@ export type SatEntryReason =
   | "section-wait"
   | "initial-entry"
   | "next-section-entry"
-  | "next-module-entry"
-  | "awaiting-student";
+  | "next-module-entry";
 
 export interface SatEntryDecision {
   shouldStart: boolean;
   reason: SatEntryReason;
   /**
    * The automatic path owns this module: it starts as soon as the gates open.
-   * The directions screen may keep its Start button recovery-only while this is
-   * true, and may say the module is opening. False means nothing will ever
-   * start this module for the student — the screen must offer a working button.
    */
   autoStartPending: boolean;
 }
 
-/** The gates shared by auto-entry and the directions screen's start button. */
+/** The gates shared by automatic entry and its recovery action. */
 export interface SatEntryGateInput {
   module: AssessmentDeliveryModule | null;
   runtimeStatus: string;
@@ -76,14 +68,6 @@ export interface SatEntryDecisionInput {
   breakSeconds: number;
   sectionWaitSeconds: number;
   phase: string;
-  /**
-   * Whether the module before this one in the SAME section ended because its
-   * own allotment ran out (see `previousModuleTimedOut`). Only a branch module
-   * reads it: a base module's rules never depend on how its section started.
-   * Absent/false is the safe answer — a branch module whose predecessor cannot
-   * be proven timed out is the student's to open.
-   */
-  previousModuleTimedOut?: boolean;
 }
 
 /**
@@ -155,9 +139,8 @@ export function moduleAttemptEndedByOwnClock(
 
 /**
  * Whether the module that precedes `module` inside its own section ended on its
- * own clock. A section holds one base module and exactly one branch module, so
- * "the other module in the section" is the predecessor whose hand-off decides
- * whether Module 2 opens by itself.
+ * own clock. This is retained for entry observability only; server routing and
+ * entry eligibility do not depend on it.
  */
 export function previousModuleTimedOut(
   payload: AssessmentDeliveryBootstrap,
@@ -181,11 +164,11 @@ function waiting(reason: SatEntryReason): SatEntryDecision {
 }
 
 /**
- * The one decision both entry paths read. Section 0 is the first module (the
- * proctor's Start opens it); a later section only opens once the authoritative
- * break and the previous section's clock are both over. A branch module
- * (Module 2) opens by itself only on the timeout hand-off from the module
- * before it; otherwise the student opens it.
+ * The one decision both entry paths read. Section 0 is the first module (it
+ * opens when the proctor starts the runtime); a later section only opens once
+ * the authoritative break and the previous section's clock are both over. A
+ * branch module is selected by the server and opens automatically once its
+ * unstarted attempt exists.
  */
 export function deriveSatEntryDecision({
   data,
@@ -195,7 +178,6 @@ export function deriveSatEntryDecision({
   breakSeconds,
   sectionWaitSeconds,
   phase,
-  previousModuleTimedOut: predecessorTimedOut = false,
 }: SatEntryDecisionInput): SatEntryDecision {
   if (phase !== "directions" && phase !== "break") {
     return waiting("phase-not-entering");
@@ -236,9 +218,7 @@ export function deriveSatEntryDecision({
     // that created this one, so there is nothing left to decide here — the only
     // question is who opens it.
     if (!attempt || !isUnstartedAttempt(attempt)) return waiting("already-started");
-    return predecessorTimedOut
-      ? { shouldStart: true, reason: "next-module-entry", autoStartPending: true }
-      : { shouldStart: false, reason: "awaiting-student", autoStartPending: false };
+    return { shouldStart: true, reason: "next-module-entry", autoStartPending: true };
   }
 
   return attempt && isUnstartedAttempt(attempt)

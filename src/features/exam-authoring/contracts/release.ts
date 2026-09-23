@@ -1,3 +1,5 @@
+import type { SatPublishScope } from "./assessment";
+
 export type AssessmentReleaseLifecycleState =
   | "never_published"
   | "published_current"
@@ -8,6 +10,7 @@ export interface ReleasePublishedVersion {
   versionNumber: number;
   revision: number;
   publishNotes: string | null;
+  publishScope: SatPublishScope;
   publishedAt: string;
 }
 

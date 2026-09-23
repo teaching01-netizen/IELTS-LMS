@@ -7,6 +7,7 @@
 
 import type { ExamState, ExamConfig, ExamType, ModuleType } from "../types";
 import type { ExamProviderKey } from "../features/exam-authoring/contracts/provider";
+import type { SatPublishScope } from "../features/exam-authoring/contracts/assessment";
 import type {
   StudentAttempt as StudentAttemptRecord,
   StudentAttemptMutation as PendingAttemptMutation,
@@ -91,6 +92,7 @@ export interface ExamEntity {
   // Version pointers
   currentDraftVersionId: string | null;
   currentPublishedVersionId: string | null;
+  currentPublishedScope?: SatPublishScope | null | undefined;
 
   // Permissions summary (simplified for now, can be expanded)
   canEdit: boolean;
@@ -221,6 +223,7 @@ export interface ExamSchedule {
   proctorDisplayName: string;
   gradingDisplayName: string;
   publishedVersionId: string; // Always points to immutable version
+  publishScope?: SatPublishScope | undefined;
 
   // Schedule details
   cohortName: string;

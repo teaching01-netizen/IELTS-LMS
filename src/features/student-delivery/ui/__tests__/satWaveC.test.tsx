@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SAT_COPY } from "../../domain/satCopy";
 import { SatSaveStatus } from "../feedback/SatSaveStatus";
 import { SatReviewPage } from "../review/SatReviewPage";
 import { SatCompleteScreen } from "../transitions/SatCompleteScreen";
-import { SatDirectionsScreen } from "../transitions/SatDirectionsScreen";
+import { SatPreStartScreen } from "../transitions/SatPreStartScreen";
 import { SatExamFooter } from "../shell/SatExamFooter";
 import { SatQuestionNavigator } from "../shell/SatQuestionNavigator";
 import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
@@ -134,46 +134,22 @@ describe("Wave C R-14 review subhead drops the eyebrow echo", () => {
 });
 
 describe("Wave C R-14 complete eyebrow becomes Digital SAT", () => {
-  it("stacks Digital SAT above the SAT Complete H1 (matches directions)", () => {
-    render(<SatCompleteScreen result={null} onExit={vi.fn()} />);
+  it("uses the same Digital SAT eyebrow on pre-start and completion surfaces", () => {
+    const { unmount } = render(<SatCompleteScreen result={null} onExit={vi.fn()} />);
     expect(screen.getByText("Digital SAT")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "SAT Complete" })).toBeInTheDocument();
     // The old echo word is gone from the eyebrow slot.
     expect(screen.queryByText("Complete", { exact: true })).not.toBeInTheDocument();
-    // Directions eyebrow parity: same section-agnostic eyebrow string.
-    expect(read("transitions/SatDirectionsScreen.tsx")).toContain("Digital SAT");
-  });
-});
-
-describe("Wave C R-16c leave-confirm destutter", () => {
-  it("states the same two facts without the stutter or the abstract term", () => {
-    expect(SAT_COPY.directions.leaveConfirmBody).toBe(
-      "Answers you have already saved stay saved. Anything you are typing right now may not.",
-    );
-    expect(SAT_COPY.directions.leaveConfirmBody).not.toContain("Unsaved work");
-    // Title + buttons unchanged.
-    expect(SAT_COPY.directions.leaveConfirmTitle).toBe("Leave this exam?");
-    expect(SAT_COPY.directions.stayAndContinue).toBe("Stay and continue");
-    expect(SAT_COPY.directions.leaveForSure).toBe("Leave without saving more");
-  });
-
-  it("reaches the modal description + visible paragraph through the same key", () => {
+    unmount();
     render(
-      <SatDirectionsScreen
-        module={null}
-        sectionLabel="Section 1: Reading and Writing"
-        runtimeStatus="live"
-        proctorStatus="active"
-        isStarting={false}
-        error={null}
-        onStart={vi.fn()}
-        onExit={vi.fn()}
+      <SatPreStartScreen
+        reason="initial"
+        runtimeStatus="not_started"
+        proctorStatus="connecting"
+        stageReady={false}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Leave exam" }));
-    const dialog = screen.getByRole("dialog", { name: "Leave this exam?" });
-    expect(dialog).toHaveTextContent("Anything you are typing right now may not.");
-    expect(dialog).not.toHaveTextContent("Unsaved work");
+    expect(screen.getAllByText("Digital SAT")).toHaveLength(1);
   });
 });
 

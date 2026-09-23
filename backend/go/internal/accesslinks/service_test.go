@@ -27,7 +27,7 @@ func begin(mock sqlmock.Sqlmock) {
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
 }
 
-// linkRow returns the 25-column link_selectSQL() projection.
+// linkRow returns the 26-column link_selectSQL() projection.
 func linkRow(live bool) *sqlmock.Rows {
 	var opens, closes any
 	now := time.Now().UTC()
@@ -40,14 +40,14 @@ func linkRow(live bool) *sqlmock.Rows {
 	}
 	return sqlmock.NewRows([]string{
 		"id", "exam_id", "exam_title", "provider_key",
-		"published_version_id", "version_number", "schedule_id", "name", "enabled_sections",
+		"published_version_id", "version_number", "publish_scope", "schedule_id", "name", "enabled_sections",
 		"audience_type", "audience_label", "access_mode", "availability_type",
 		"opens_at", "closes_at", "lifecycle_state", "revision", "created_at", "updated_at",
 		"selected_student_count", "registered_count", "started_count", "submitted_count",
 		"is_current_release", "has_participation",
 	}).AddRow(
 		"link-1", "exam-1", "IELTS Mock", "ielts",
-		"ver-1", 3, "sched-1", "Saturday Class", nil,
+		"ver-1", 3, "full", "sched-1", "Saturday Class", nil,
 		"anyone", nil, "student_code", "scheduled",
 		opens, closes, "active", 2, now, now,
 		0, 1, 1, 0,
@@ -55,10 +55,17 @@ func linkRow(live bool) *sqlmock.Rows {
 	)
 }
 
-// linkLockRow returns the 5-column lock_link_tx() projection.
-func linkLockRow(participation int, enabledSections any) *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision", "enabled_sections", "has_participation"}).
-		AddRow("sched-1", "active", 4, enabledSections, participation)
+// linkLockRow returns the pinned release and link scope under the edit lock.
+func linkLockRow(participation int, enabledSections any, pin ...string) *sqlmock.Rows {
+	providerKey, publishScope := "ielts", "full"
+	if len(pin) > 0 {
+		providerKey = pin[0]
+	}
+	if len(pin) > 1 {
+		publishScope = pin[1]
+	}
+	return sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision", "enabled_sections", "has_participation", "provider_key", "sat_publish_scope"}).
+		AddRow("sched-1", "active", 4, enabledSections, participation, providerKey, publishScope)
 }
 
 // expectLinkSelect stubs the post-commit re-read in s.Get.
@@ -83,7 +90,7 @@ func TestCreateHappyPathQueryShape(t *testing.T) {
 		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id"}).
 			AddRow("IELTS Mock", "ielts", nil, "ver-1"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id")).WillReturnRows(
-		sqlmock.NewRows([]string{"is_published"}).AddRow(true))
+		sqlmock.NewRows([]string{"is_published", "sat_publish_scope"}).AddRow(true, "full"))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO exam_schedules (id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name")).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_access_links")).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM assessment_access_link_members")).WillReturnResult(sqlmock.NewResult(0, 0))
@@ -245,7 +252,7 @@ func TestSetLifecycleStaleRevisionConflicts(t *testing.T) {
 	defer db.Close()
 	s := svc(db)
 	begin(mock)
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_access_links WHERE id")).WillReturnRows(linkLockRow(0, nil))
+	mock.ExpectQuery(regexp.QuoteMeta("assessment_access_links.id = ? FOR UPDATE")).WillReturnRows(linkLockRow(0, nil))
 	mock.ExpectRollback()
 	if _, err := s.SetLifecycle(context.Background(), "link-1", SetLifecycleRequest{
 		Revision: 1,

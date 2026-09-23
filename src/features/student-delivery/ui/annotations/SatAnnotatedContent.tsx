@@ -20,6 +20,7 @@ import { browserCaretResolver } from '@shared/ui/selection-v2/engine/selectionPo
 import { nearestScrollableAncestor } from '@shared/ui/selection-v2/engine/selectionAutoScroll';
 import { useStudentSelectionGesture } from '@shared/ui/selection-v2/react/useStudentSelectionGesture';
 import { SelectionOverlay } from '@shared/ui/selection-v2/react/SelectionOverlay';
+import { useSatExamZoom } from '../zoom/SatExamZoomContext';
 import { isSatDragRelease, markSatPointerDown, markSatSelectionGestureEnded } from './satSelectionDragGuard';
 
 export const SAT_ANNOTATION_LIMIT = 200;
@@ -70,6 +71,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
   /** Announced + inline notice when the 200-annotation cap drops a gesture. */
   onLimitReached?: (() => void) | undefined;
 }) {
+  const { scale: visualScale, viewportOverlayRoot } = useSatExamZoom();
   const root = useRef<HTMLDivElement>(null);
   const view = useSatAnnotationView();
   // Declared by the session route, never inferred here: a preview that renders
@@ -431,7 +433,12 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
       {/* The owned selection: lines, handles, magnifier. It stays painted after
           the finger lifts, so the span the student is deciding about remains
           visible under the shell's toolbar instead of vanishing at release. */}
-      <SelectionOverlay selection={touchSelection} loupe={{ sourceRef: root }} />
+      <SelectionOverlay
+        selection={touchSelection}
+        visualScale={visualScale}
+        portalContainer={viewportOverlayRoot}
+        loupe={{ sourceRef: root }}
+      />
 
       {limitNotice ? (
         <p role="alert" data-testid={"sat-annotation-limit-" + region} className="mb-2 rounded-[8px] border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-3 py-2 text-[13px] font-medium text-[var(--sat-danger)]">

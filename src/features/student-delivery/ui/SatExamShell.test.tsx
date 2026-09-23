@@ -77,7 +77,7 @@ describe("SatExamShell", () => {
     const topbar = container.querySelector<HTMLElement>(".sat-exam-topbar > div")!;
     const footer = container.querySelector<HTMLElement>(".sat-exam-footer > div")!;
     const main = container.querySelector<HTMLElement>("#sat-question-content")!;
-    const zoom = container.querySelector<HTMLElement>("[data-sat-content-zoom]")!;
+    const zoom = container.querySelector<HTMLElement>("[data-sat-fit-root]")!;
 
     expect(shell).toHaveClass("min-w-0");
     expect(blockedRegion).toHaveClass("min-w-0");
@@ -131,12 +131,30 @@ describe("SatExamShell", () => {
     expect(directionsPanelId).toBeTruthy();
     const directionsDialog = screen.getByRole("dialog", { name: "Directions" });
     expect(directionsDialog).toHaveAttribute("id", directionsPanelId);
+    expect(directionsDialog.closest("[data-sat-exam-overlay-root]")).toBe(
+      container.querySelector("[data-sat-exam-overlay-root]"),
+    );
     // Exactly one element carries the id, and it is the dialog itself — never
     // an inner scroll body.
     expect(document.querySelectorAll(`[id="${directionsPanelId}"]`)).toHaveLength(1);
     expect(container.querySelector(`[id="${directionsPanelId}"]`)).toBe(directionsDialog);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(directions).not.toHaveAttribute("aria-controls");
+
+    const displayTrigger = screen.getByRole("button", { name: "Display" });
+    fireEvent.click(displayTrigger);
+    const displayDialog = screen.getByRole("dialog", { name: "Display" });
+    expect(displayDialog.closest("[data-sat-exam-overlay-root]")).toBe(
+      container.querySelector("[data-sat-exam-overlay-root]"),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    fireEvent.click(container.querySelector<HTMLElement>('[data-sat-focus="topbar-more"]')!);
+    const moreMenu = screen.getByRole("menu");
+    expect(moreMenu.closest("[data-sat-exam-overlay-root]")).toBe(
+      container.querySelector("[data-sat-exam-overlay-root]"),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
 
     const navigator = screen.getByRole("button", { name: /Open question navigator/ });
     expect(navigator).not.toHaveAttribute("aria-controls");
@@ -146,21 +164,40 @@ describe("SatExamShell", () => {
     const navigatorDialog = screen.getByRole("dialog", { name: /Section 2: Math Questions/ });
     expect(navigatorDialog).toHaveAttribute("id", navigatorPanelId);
     expect(document.querySelectorAll(`[id="${navigatorPanelId}"]`)).toHaveLength(1);
+    expect(navigatorDialog.closest("[data-sat-exam-overlay-root]")).toBe(
+      container.querySelector("[data-sat-exam-overlay-root]"),
+    );
+  });
+
+  it("keeps failure recovery chrome in the zoomed exam overlay layer", () => {
+    const { container } = render(
+      <SatExamShell
+        {...props({ saveState: "failed", saveFailure: "Could not save", onRetrySave: vi.fn() })}
+      />,
+    );
+    const root = container.querySelector("[data-sat-exam-overlay-root]");
+    const status = screen.getByTestId("sat-save-status");
+
+    expect(status.closest("[data-sat-exam-overlay-root]")).toBe(root);
+    expect(root).toHaveClass("sat-ui");
+    expect(root).toHaveAttribute("data-sat-contrast", "default");
+    expect(status.closest("[inert]")).toBeNull();
+    expect(within(status).getByRole("button")).toBeEnabled();
   });
 
   it("publishes the stable viewport height and keyboard state without remounting the shell", () => {
-    const { rerender } = render(
+    const { rerender, container } = render(
       <SatExamShell {...props({ examHeight: 900, keyboardOpen: false })} />,
     );
     const shell = screen.getByTestId("sat-exam-shell");
 
-    expect(shell).toHaveStyle("--student-exam-height: 900px");
+    expect(container.querySelector("[data-sat-exam-viewport]")).toHaveStyle("--student-exam-height: 900px");
     expect(shell).toHaveAttribute("data-sat-keyboard-open", "false");
 
     rerender(<SatExamShell {...props({ examHeight: 900, keyboardOpen: true })} />);
 
     expect(screen.getByTestId("sat-exam-shell")).toBe(shell);
-    expect(shell).toHaveStyle("--student-exam-height: 900px");
+    expect(container.querySelector("[data-sat-exam-viewport]")).toHaveStyle("--student-exam-height: 900px");
     expect(shell).toHaveAttribute("data-sat-keyboard-open", "true");
   });
 
@@ -520,22 +557,66 @@ describe("SatExamShell", () => {
     );
   });
 
-  it("renders the content box at the student's screen zoom without resizing the box", () => {
-    render(
+  it("renders the whole shell through the logical screen-zoom plane", () => {
+    const { container } = render(
       <SatExamShell
         {...props({
           readingPreferences: { ...createSatReadingPreferences(), examZoom: 0.75 },
         })}
       />,
     );
-    const box = document.querySelector<HTMLElement>("[data-sat-content-zoom]")!;
-    expect(box).toHaveAttribute("data-sat-content-zoom", "0.75");
-    // zoom scales what is inside the box; the box itself stays exactly the pane
-    // region it fills. A compensated width here (calc(100% / zoom)) would draw
-    // the exam wider than its pane and get it clipped.
-    expect(box.style.zoom).toBe("0.75");
-    expect(box.style.width).toBe("100%");
-    expect(box.style.height).toBe("100%");
+    const plane = container.querySelector<HTMLElement>("[data-sat-zoom-plane]")!;
+    const shell = screen.getByTestId("sat-exam-shell");
+    expect(plane).toHaveAttribute("data-sat-screen-zoom", "0.75");
+    expect(plane.style.transform).toBe("scale(0.75)");
+    expect(Number.parseFloat(plane.style.width)).toBeCloseTo(100 / 0.75, 8);
+    expect(Number.parseFloat(plane.style.height)).toBeCloseTo(100 / 0.75, 8);
+    expect(shell.parentElement).toBe(plane);
+    expect(plane.querySelector(".sat-exam-topbar")).toBeInTheDocument();
+    expect(plane.querySelector(".sat-exam-footer")).toBeInTheDocument();
+    expect(plane.querySelector("#sat-question-content")).toBeInTheDocument();
+    expect(plane.querySelector(".sat-exam-shell [style*=zoom]")).toBeNull();
+  });
+
+  it("routes normal dialogs into exam space and keeps the break veil in viewport space", () => {
+    const { container } = render(
+      <SatExamShell
+        {...props({
+          helpOpen: true,
+          onCloseHelp: vi.fn(),
+          breakVeilOpen: true,
+          onReturnFromBreak: vi.fn(),
+          floatingToolChildren: <div data-testid="zoomed-tool">Tool</div>,
+        })}
+      />,
+    );
+
+    const examOverlay = container.querySelector("[data-sat-exam-overlay-root]")!;
+    const viewportOverlay = container.querySelector("[data-sat-viewport-overlay-root]")!;
+    expect(screen.getByRole("dialog", { name: "Help" }).parentElement).toBe(examOverlay);
+    expect(screen.getByTestId("sat-break-veil").parentElement).toBe(viewportOverlay);
+    expect(screen.getByTestId("zoomed-tool").closest("[data-sat-zoom-plane]")).toBe(
+      container.querySelector("[data-sat-zoom-plane]"),
+    );
+  });
+
+  it("keeps text size and screen zoom in separate preference fields", () => {
+    const onReadingPreferencesChange = vi.fn();
+    const { rerender } = render(<SatExamShell {...props({ onReadingPreferencesChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    const dialog = screen.getByRole("dialog", { name: "Display" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Increase text size" }));
+    expect(onReadingPreferencesChange).toHaveBeenLastCalledWith(expect.objectContaining({ textScale: 1.15 }));
+    onReadingPreferencesChange.mockClear();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close display settings" }));
+    rerender(<SatExamShell {...props({
+      onReadingPreferencesChange,
+      readingPreferences: { ...createSatReadingPreferences(), textScale: 1.15 },
+    })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Display" })).getByRole("button", { name: "Increase screen zoom" }));
+    expect(onReadingPreferencesChange).toHaveBeenLastCalledWith(expect.objectContaining({ textScale: 1.15, examZoom: 1.25 }));
   });
 
   it("offers Fit to screen in Display, and measures rather than guesses when pressed", () => {
@@ -548,8 +629,8 @@ describe("SatExamShell", () => {
 
     // This page has no panes to measure, so the walk ends without inventing a
     // zoom: the exam renders the student's 100%, and no decision is reported.
-    expect(document.querySelector("[data-sat-content-zoom]")).toHaveAttribute(
-      "data-sat-content-zoom",
+    expect(document.querySelector("[data-sat-screen-zoom]")).toHaveAttribute(
+      "data-sat-screen-zoom",
       "1",
     );
     expect(onReadingPreferencesChange).not.toHaveBeenCalled();

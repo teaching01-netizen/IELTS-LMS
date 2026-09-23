@@ -16,6 +16,8 @@ import type { StudentAttempt } from "../../../types/studentAttempt";
 import type { SatBootstrapSeed } from "../bootstrap/satBootstrapSeed";
 import { useSatExamController } from "../hooks/useSatExamController";
 import { useSatReadingPreferences } from "../hooks/useSatReadingPreferences";
+import { useSatEntryTransitionHold } from "../hooks/useSatEntryTransitionHold";
+import { deriveSatStudentTransitionSurface } from "../application/satStudentSurface";
 import {
   findAttemptForModule,
   sectionForModule,
@@ -37,9 +39,14 @@ import { SatQuestionRenderer } from "../ui/question/SatQuestionRenderer";
 import { SatReviewPage } from "../ui/review/SatReviewPage";
 import { SatCalculatorPanel } from "../ui/tools/SatCalculatorPanel";
 import { SatReferenceSheetPanel } from "../ui/tools/SatReferenceSheetPanel";
-import { SatBreakScreen, type SatBreakEntryProgress } from "../ui/transitions/SatBreakScreen";
+import {
+  SatScheduledBreakScreen,
+  type SatBreakEntryProgress,
+} from "../ui/break/SatScheduledBreakScreen";
+import { SatPresenceSurface } from "../ui/motion/SatPresenceSurface";
 import { SatCompleteScreen, SatTerminatedScreen } from "../ui/transitions/SatCompleteScreen";
-import { SatDirectionsScreen } from "../ui/transitions/SatDirectionsScreen";
+import { SatEntryRecoveryScreen } from "../ui/transitions/SatEntryRecoveryScreen";
+import { SatPreStartScreen } from "../ui/transitions/SatPreStartScreen";
 import { useStudentExamPageLock } from "@components/student/layout/useStudentExamPageLock";
 import { useStudentExamViewport } from "@components/student/layout/useStudentExamViewport";
 import { useStudentFocusedControlVisibility } from "@components/student/layout/useStudentFocusedControlVisibility";
@@ -66,6 +73,10 @@ export interface SatStudentSessionRouteProps {
   bootstrapSeed?: SatBootstrapSeed | null;
   initialIsLoading?: boolean;
   onExit: () => void | Promise<void>;
+}
+
+function assertNever(surface: never): never {
+  throw new Error(`Unhandled SAT student transition surface: ${surface}`);
 }
 
 function sectionLabel(displayOrder: number, title: string): string {
@@ -142,10 +153,6 @@ export function SatStudentSessionRoute({
     : exam.autoEntryRecoverable
       ? "retrying"
       : "idle";
-  const examViewportActive = state.phase === "module" || state.phase === "review";
-  const examViewport = useStudentExamViewport(examViewportActive);
-  useStudentExamPageLock(examViewportActive);
-  useStudentFocusedControlVisibility(examViewportActive && examViewport.keyboardOpen);
   // Phase 04 hold-previous-UI vessel: a render-time fallback (ref, not
   // state — holding must not itself trigger renders or reset clocks).
   // Updated only on successful module/review renders; cleared on identity
@@ -154,6 +161,24 @@ export function SatStudentSessionRoute({
   // fallback below mounts none (bare per Phase 01/03 single-surface rule).
   const lastValidFrameRef = useRef<{ element: ReactElement; renderedAt: number } | null>(null);
   const identityKey = `${scheduleId}:${attemptId}:${candidateId}`;
+  const pendingSection = data && exam.pendingModule
+    ? sectionForModule(data, exam.pendingModule.id)
+    : null;
+  const initialEntry = Boolean(
+    data &&
+      state.phase === "directions" &&
+      exam.pendingModule?.adaptiveRole === "base" &&
+      pendingSection?.displayOrder === 0 &&
+      data.attempt.moduleAttempts.every((moduleAttempt) => moduleAttempt.state === "not_started"),
+  );
+  const betweenSections =
+    state.phase === "break" ||
+    (state.phase === "directions" && (pendingSection?.displayOrder ?? 0) > 0);
+  const entryTransitionKey =
+    state.phase === "directions" && exam.pendingModule && !betweenSections
+      ? `${identityKey}:${exam.pendingModule.id}`
+      : null;
+  const entryHoldExpired = useSatEntryTransitionHold(entryTransitionKey);
   const screenZoomDecided =
     screenZoomDecidedFor === identityKey || screenZoomDecisionStored;
   const prevIdentityKeyRef = useRef<string | null>(null);
@@ -172,6 +197,13 @@ export function SatStudentSessionRoute({
   const heldFrame = lastValidFrameRef.current;
   const heldFrameFresh =
     heldFrame != null && Date.now() - heldFrame.renderedAt < SKEW_HOLD_MS;
+  const examViewportActive =
+    state.phase === "module" ||
+    state.phase === "review" ||
+    (state.phase === "directions" && !betweenSections && heldFrame !== null);
+  const examViewport = useStudentExamViewport(examViewportActive);
+  useStudentExamPageLock(examViewportActive);
+  useStudentFocusedControlVisibility(examViewportActive && examViewport.keyboardOpen);
   const flushAnnotations = useCallback(() => {
     // The durability engine publishes offline/failure status to the shell; local edits remain recoverable.
     void persistence.flush().catch(() => undefined);
@@ -205,7 +237,12 @@ export function SatStudentSessionRoute({
   }
   if (!data) {
     return (
-      <SatLoadingSurface label="Loading Digital SAT…" />
+      <SatPreStartScreen
+        reason="loading"
+        runtimeStatus="loading"
+        proctorStatus="connecting"
+        stageReady={false}
+      />
     );
   }
   if (data.result || state.phase === "complete") {
@@ -301,84 +338,120 @@ export function SatStudentSessionRoute({
         />
       ) : null}
       {content}
-      {calculatorHost}
+      {!inModulePhase ? calculatorHost : null}
     </>
   );
 
-  if (state.phase === "directions") {
-    const pendingSection = exam.pendingModule
-      ? sectionForModule(data, exam.pendingModule.id)
-      : null;
-    if (exam.pendingSectionWaitSeconds > 0 && exam.pendingModule) {
-      return withCalculatorHost(
-        <SatBreakScreen
-          nextSectionKey={pendingSection?.sectionKey === "math" ? "math" : "reading-writing"}
-          remainingSeconds={exam.pendingSectionWaitSeconds}
-          mode="waiting"
-          entryProgress={breakEntryProgress}
-        />
-      );
-    }
-    if (exam.pendingBreakSeconds > 0 && exam.pendingModule) {
-      return withCalculatorHost(
-        <SatBreakScreen
-          nextSectionKey={pendingSection?.sectionKey === "math" ? "math" : "reading-writing"}
-          remainingSeconds={exam.pendingBreakSeconds}
-          entryProgress={breakEntryProgress}
-        />
-      );
-    }
-    // Exam-day re-audit defect 2: terminal recovery failed while all modules
-    // are final — surface the same retry offered in `submitting` instead of
-    // stranding the student on directions with an error and no action.
-    const terminalRecoveryFailed =
-      Boolean(error) &&
-      !exam.isSubmitting &&
-      !data.result &&
-      data.attempt.moduleAttempts.length > 0 &&
-      data.attempt.moduleAttempts.every((moduleAttempt) =>
-        moduleAttempt.state === "submitted" || moduleAttempt.state === "locked",
-      );
-    return withCalculatorHost(
-      <SatDirectionsScreen
-        module={exam.pendingModule}
-        sectionLabel={
-          pendingSection
-            ? sectionLabel(pendingSection.displayOrder, pendingSection.title)
-            : "Next SAT module"
-        }
-        runtimeStatus={data.scheduleRuntimeStatus}
-        proctorStatus={data.proctorStatus}
-        isStarting={exam.isStarting}
-        moduleWindow={exam.pendingModuleWindow}
-        stageReady={exam.pendingStageReady}
-        entryRecoverable={exam.autoEntryRecoverable}
-        autoStartPending={exam.entryAutoStartPending}
-        error={error}
-        onStart={() => void commands.startPendingModule()}
-        onExit={onExit}
-        secondaryActionLabel={terminalRecoveryFailed ? "Retry finalization" : undefined}
-        onSecondaryAction={terminalRecoveryFailed ? () => void commands.retryFinalization() : undefined}
-        secondaryActionPending={terminalRecoveryFailed ? exam.isSubmitting : undefined}
-      />
+  const allModulesFinal =
+    data.attempt.moduleAttempts.length > 0 &&
+    data.attempt.moduleAttempts.every(
+      (moduleAttempt) => moduleAttempt.state === "submitted" || moduleAttempt.state === "locked",
     );
+  if (state.phase === "directions" && allModulesFinal) {
+    if (error && !exam.isSubmitting && !data.result) {
+      return (
+        <div
+          className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] px-6 py-8 text-[var(--sat-text)]"
+          role="alert"
+        >
+          <div className="w-full max-w-md text-center">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Your SAT result could not be finished
+            </h1>
+            <p className="mt-3 text-[15px] leading-6 text-[var(--sat-text-secondary)]">
+              Your saved answers are safe. Retry now or keep this screen open while it completes automatically.
+            </p>
+            <button
+              type="button"
+              onClick={() => void commands.retryFinalization()}
+              disabled={exam.isSubmitting}
+              className="sat-touch-target sat-pressable mt-6 rounded-full border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-5 text-[14px] font-semibold text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2 disabled:opacity-60"
+            >
+              {exam.isSubmitting ? "Retrying…" : "Retry finalization"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return <SatLoadingSurface label="Finalizing SAT responses…" />;
   }
 
-  if (state.phase === "break") {
-    const waitingForScheduledBreak = exam.pendingSectionWaitSeconds > 0;
-    const breakSeconds = waitingForScheduledBreak
-      ? exam.pendingSectionWaitSeconds
-      : exam.pendingBreakSeconds;
-    // Phase 03 bare-branch rule: a break screen is timer-only full-viewport
-    // chrome — no hidden tool tree. Directions re-warms before module entry.
-    return (
-      <SatBreakScreen
-        nextSectionKey={state.nextSectionKey}
-        remainingSeconds={breakSeconds > 0 ? breakSeconds : null}
-        mode={waitingForScheduledBreak ? "waiting" : "break"}
-        entryProgress={breakEntryProgress}
-      />
-    );
+  const pendingNextSectionKey =
+    state.phase === "break"
+      ? state.nextSectionKey
+      : pendingSection?.sectionKey === "math"
+        ? "math"
+        : "reading-writing";
+  const entryBlocked =
+    exam.entryReason === "runtime-not-live" ||
+    exam.entryReason === "proctor-blocked" ||
+    exam.entryReason === "stage-not-ready";
+  const transitionSurface = deriveSatStudentTransitionSurface({
+    runnerPhase: state.phase,
+    isInitialEntry: initialEntry,
+    isBetweenSections: betweenSections,
+    hasPreviousExamFrame: heldFrame !== null,
+    nextSectionKey: pendingNextSectionKey,
+    pendingBreakSeconds: exam.pendingBreakSeconds,
+    pendingSectionWaitSeconds: exam.pendingSectionWaitSeconds,
+    entryRecoverable: exam.autoEntryRecoverable,
+    entryBlocked,
+    entryHoldExpired,
+  });
+
+  if (transitionSurface) {
+    switch (transitionSurface.kind) {
+      case "scheduled-break":
+        return (
+          <SatScheduledBreakScreen
+            phase={transitionSurface.phase}
+            nextSectionKey={transitionSurface.nextSectionKey}
+            remainingSeconds={transitionSurface.remainingSeconds}
+            entryProgress={breakEntryProgress}
+          />
+        );
+      case "pre-start":
+        return withCalculatorHost(
+          <SatPreStartScreen
+            reason={transitionSurface.reason}
+            runtimeStatus={data.scheduleRuntimeStatus}
+            proctorStatus={data.proctorStatus}
+            stageReady={exam.pendingStageReady}
+          />
+        );
+      case "entry-recovery":
+        return withCalculatorHost(
+          <SatEntryRecoveryScreen
+            module={exam.pendingModule}
+            isRetrying={exam.isStarting}
+            onRetry={exam.retryModuleEntry}
+          />
+        );
+      case "hold-exam-frame":
+        if (heldFrame) {
+          return (
+            <SatPresenceSurface
+              className="sat-ui min-h-[100dvh] min-w-0"
+              data-sat-student-frame
+              data-sat-transition-hold
+              aria-hidden="true"
+              inert
+            >
+              {heldFrame.element}
+            </SatPresenceSurface>
+          );
+        }
+        return withCalculatorHost(
+          <SatPreStartScreen
+            reason="restoring"
+            runtimeStatus={data.scheduleRuntimeStatus}
+            proctorStatus={data.proctorStatus}
+            stageReady={exam.pendingStageReady}
+          />
+        );
+      default:
+        return assertNever(transitionSurface);
+    }
   }
   if (state.phase === "submitting") {
     // Exam-day P1: a failed finalization must be visible and retryable —
@@ -436,7 +509,13 @@ export function SatStudentSessionRoute({
   if (state.phase !== "module" && state.phase !== "review") {
     // Defensive order: a fresh held frame wins even here (never swap valid
     // exam UI for the error on a one-frame mismatch).
-    if (heldFrame && heldFrameFresh) return heldFrame.element;
+    if (heldFrame && heldFrameFresh) {
+      return (
+        <SatPresenceSurface className="sat-ui min-h-[100dvh] min-w-0" data-sat-student-frame>
+          {heldFrame.element}
+        </SatPresenceSurface>
+      );
+    }
     // Phase 03 bare-branch rule: an error surface owns the full screen.
     return (
       <SatErrorSurface
@@ -449,7 +528,11 @@ export function SatStudentSessionRoute({
   }
   if (!exam.stateModule || !exam.stateModuleAttempt || !exam.stateSection) {
     if (heldFrame && heldFrameFresh) {
-      return heldFrame.element;
+      return (
+        <SatPresenceSurface className="sat-ui min-h-[100dvh] min-w-0" data-sat-student-frame>
+          {heldFrame.element}
+        </SatPresenceSurface>
+      );
     }
     // Phase 03 bare-branch rule: transient skew shows the loader only — the
     // warm tree remounts once the module resolves (no prewarm here). The
@@ -513,7 +596,11 @@ export function SatStudentSessionRoute({
       </>
     );
     lastValidFrameRef.current = { element: reviewElement, renderedAt: Date.now() };
-    return reviewElement;
+    return (
+      <SatPresenceSurface className="sat-ui min-h-[100dvh] min-w-0" data-sat-student-frame>
+        {reviewElement}
+      </SatPresenceSurface>
+    );
   }
 
   const questionId = state.questionIds[state.questionIndex];
@@ -642,6 +729,21 @@ export function SatStudentSessionRoute({
           });
         }}
         isTakingOver={persistence.isTakingOver}
+        floatingToolChildren={
+          <>
+            {calculatorHost}
+            {state.toolCapabilities.referenceSheet ? (
+              <SatReferenceSheetPanel
+                open={state.phase === "module" && state.activeTools.referenceSheet}
+                disabled={interactionBlocked}
+                scheduleId={scheduleId}
+                attemptId={attemptId}
+                moduleAttemptId={exam.stateModuleAttempt?.id ?? "unknown-module"}
+                onClose={() => commands.closeTool("reference_sheet")}
+              />
+            ) : null}
+          </>
+        }
       >
         <SatQuestionRenderer
           sectionKey={state.sectionKey}
@@ -662,19 +764,12 @@ export function SatStudentSessionRoute({
           }
         />
       </SatExamShell>
-
-      {state.toolCapabilities.referenceSheet ? (
-        <SatReferenceSheetPanel
-          open={state.phase === "module" && state.activeTools.referenceSheet}
-          disabled={interactionBlocked}
-          scheduleId={scheduleId}
-          attemptId={attemptId}
-          moduleAttemptId={exam.stateModuleAttempt?.id ?? "unknown-module"}
-          onClose={() => commands.closeTool("reference_sheet")}
-        />
-      ) : null}
     </>
   );
   lastValidFrameRef.current = { element: moduleElement, renderedAt: Date.now() };
-  return moduleElement;
+  return (
+    <SatPresenceSurface className="sat-ui min-h-[100dvh] min-w-0" data-sat-student-frame>
+      {moduleElement}
+    </SatPresenceSurface>
+  );
 }

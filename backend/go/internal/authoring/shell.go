@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // ShellState is the explicit lifecycle answer of the authoring shell read.
@@ -87,11 +88,20 @@ func (s *Service) ShellLifecycle(ctx context.Context, examID string) (ShellResul
 // provider is sat and a light structural gate otherwise. A mid-check draft
 // revision move is a CONFLICT (mirrors validate()).
 func (s *Service) ValidateExam(ctx context.Context, examID string) (ValidationReport, error) {
+	return s.ValidateExamForScope(ctx, examID, satpublish.ScopeFull)
+}
+
+// ValidateExamForScope validates SAT readiness for the selected release scope.
+func (s *Service) ValidateExamForScope(ctx context.Context, examID string, scope satpublish.Scope) (ValidationReport, error) {
+	normalizedScope, err := satpublish.NormalizeScope(scope)
+	if err != nil {
+		return ValidationReport{}, apperrors.New(apperrors.CodeValidation, err.Error())
+	}
 	shell, err := s.Shell(ctx, examID)
 	if err != nil {
 		return ValidationReport{}, err
 	}
-	rep := ValidationReport{ExamID: examID, VersionID: shell.VersionID, VersionRevision: shell.VersionRevision, Errors: []ValidationIssue{}, Warnings: []ValidationIssue{}}
+	rep := ValidationReport{ExamID: examID, VersionID: shell.VersionID, VersionRevision: shell.VersionRevision, PublishScope: normalizedScope, Errors: []ValidationIssue{}, Warnings: []ValidationIssue{}}
 	if shell.ProviderKey != "sat" {
 		for _, sec := range shell.Sections {
 			if len(sec.Modules) == 0 {
@@ -101,7 +111,7 @@ func (s *Service) ValidateExam(ctx context.Context, examID string) (ValidationRe
 		rep.Valid = len(rep.Errors) == 0
 		return rep, nil
 	}
-	return s.validateSATExam(ctx, shell, rep)
+	return s.validateSATExam(ctx, shell, rep, normalizedScope)
 }
 
 type sectionQuerier interface {

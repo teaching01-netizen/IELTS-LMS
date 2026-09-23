@@ -1,10 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SatSaveStatus } from "../feedback/SatSaveStatus";
 import { SatHelpModal } from "../help/SatHelpModal";
-import { SatDirectionsScreen } from "../transitions/SatDirectionsScreen";
 
 const UI = __dirname + "/..";
 const read = (rel: string) => readFileSync(resolve(UI, rel), "utf8");
@@ -78,41 +77,6 @@ describe("Wave D R-22 help glyphs 20px with 78px rows", () => {
     expect(document.querySelectorAll(".lucide.h-6.w-6").length).toBe(0);
     const source = read("help/SatHelpModal.tsx");
     expect(source).not.toContain("h-6 w-6");
-  });
-});
-
-describe("Wave D R-23 destructive action uses the accent-text token (pixel-identical)", () => {
-  it("leaves no text-white literal on the danger fill; accent-text token wins", () => {
-    const source = read("transitions/SatDirectionsScreen.tsx");
-    expect(source).toContain("text-[var(--sat-accent-text)]");
-    expect(source).not.toContain("text-white");
-  });
-
-  it("computed color is equal (pixel-identical today: #fff === #ffffff)", () => {
-    // --sat-accent-text resolves to #fff (default) / #ffffff (sat scope):
-    // identical to the old text-white literal. Pin via source + token value.
-    const css = readFileSync(resolve(UI, "../../../index.css"), "utf8");
-    expect(css).toContain("--sat-accent-text: #fff");
-    render(
-      <SatDirectionsScreen
-        module={null}
-        sectionLabel="Section 1: Reading and Writing"
-        runtimeStatus="live"
-        proctorStatus="active"
-        isStarting={false}
-        error={null}
-        onStart={vi.fn()}
-        onExit={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Leave exam" }));
-    const dialog = screen.getByRole("dialog", { name: "Leave this exam?" });
-    const leave = screen.getByRole("button", { name: "Leave without saving more" });
-    expect(dialog.contains(leave)).toBe(true);
-    expect(leave.className).toContain("text-[var(--sat-accent-text)]");
-    expect(leave.className).not.toContain("text-white");
-    // Only the modal shell (layer/role/copy) is asserted — no z/role/copy change.
-    expect(dialog).toHaveAttribute("aria-label", "Leave this exam?");
   });
 });
 

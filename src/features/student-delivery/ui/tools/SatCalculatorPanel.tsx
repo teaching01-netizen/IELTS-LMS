@@ -16,6 +16,7 @@ import { satToolGeometryKey } from "../../infrastructure/satToolGeometryStore";
 import { useSatMediaQuery } from "../useSatMediaQuery";
 import { resolveSatToolSize } from "../../domain/satToolSizePolicy";
 import { satToolViewKey } from "../../infrastructure/satToolStateStore";
+import { useSatExamZoom } from "../zoom/SatExamZoomContext";
 
 export interface SatCalculatorPanelProps {
   open: boolean;
@@ -49,6 +50,7 @@ export function SatCalculatorPanel({
     () => calculatorLocaleKey(scheduleId, attemptId, moduleAttemptId),
     [attemptId, moduleAttemptId, scheduleId]
   );
+  const { logicalSize } = useSatExamZoom();
   const [mode, setMode] = useState<DesmosCalculatorMode>(
     () => loadCalculatorWorkspace(storageKey).activeMode
   );
@@ -144,7 +146,7 @@ export function SatCalculatorPanel({
       geometryKey={satToolGeometryKey(scheduleId, attemptId, moduleAttemptId, "calculator")}
       viewStateKey={satToolViewKey(scheduleId, attemptId, moduleAttemptId)}
       defaultGeometry={{
-        x: Math.max(32, window.innerWidth - (firstOpenSize.w + 52)),
+        x: Math.max(32, logicalSize({ width: window.innerWidth, height: window.innerHeight }).width - (firstOpenSize.w + 52)),
         y: 110,
         w: firstOpenSize.w,
         h: firstOpenSize.h,

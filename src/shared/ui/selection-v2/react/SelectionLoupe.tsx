@@ -103,6 +103,8 @@ export interface SelectionLoupeProps {
   snapRevision?: number | undefined;
   /** The element whose rendered text is magnified. */
   sourceRef: RefObject<HTMLElement | null>;
+  /** Visual scale applied to the source's ancestor; defaults to one. */
+  visualScale?: number | undefined;
   /** Override the responsive lens size, in CSS pixels. */
   diameter?: number | undefined;
   magnification?: number | undefined;
@@ -116,6 +118,7 @@ export function SelectionLoupe({
   caretPoint,
   snapRevision = 0,
   sourceRef,
+  visualScale = 1,
   diameter,
   magnification = 1.5,
   offset,
@@ -145,8 +148,8 @@ export function SelectionLoupe({
       setPicture(null);
       return;
     }
-    setPicture(buildPicture(element, host, frame.current));
-  }, [open, sourceRef]);
+    setPicture(buildPicture(element, host, frame.current, visualScale));
+  }, [open, sourceRef, visualScale]);
 
   /**
    * Put the source's CURRENT box into the state the picture is translated by.
@@ -158,9 +161,9 @@ export function SelectionLoupe({
    * frame and no more.
    */
   const measureSource = useCallback(() => {
-    const box = readPictureBox(sourceRef.current);
+    const box = readPictureBox(sourceRef.current, visualScale);
     if (box) setPicture((previous) => (previous ? settlePicture(previous, box) : previous));
-  }, [sourceRef]);
+  }, [sourceRef, visualScale]);
 
   // The commit that paints, while the lens is open: the box the picture is
   // translated by is the box the passage has on the frame the student sees.
@@ -252,7 +255,7 @@ export function SelectionLoupe({
           className="selection-v2-loupe-content"
           style={{
             width: picture ? picture.width : 0,
-            transform: `translate3d(${content?.left ?? 0}px, ${content?.top ?? 0}px, 0) scale(${magnification})`,
+            transform: `translate3d(${content?.left ?? 0}px, ${content?.top ?? 0}px, 0) scale(${(picture?.visualScale ?? 1) * magnification})`,
             pointerEvents: 'none',
           }}
         />

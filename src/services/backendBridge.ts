@@ -16,6 +16,7 @@ import type {
   SectionRuntimeState,
 } from "../types/domain";
 import type { ModuleType } from "../types";
+import type { SatPublishScope } from "../features/exam-authoring/contracts/assessment";
 import { createTtlLruCache } from "../utils/ttlLruCache";
 
 type BackendEnvelope<T> = {
@@ -45,6 +46,7 @@ type BackendExamEntity = {
   archivedAt?: string | null | undefined;
   currentDraftVersionId?: string | null | undefined;
   currentPublishedVersionId?: string | null | undefined;
+  currentPublishedScope?: SatPublishScope | null | undefined;
   totalQuestions?: number | null | undefined;
   totalReadingQuestions?: number | null | undefined;
   totalListeningQuestions?: number | null | undefined;
@@ -120,6 +122,7 @@ type BackendExamSchedule = {
   proctorDisplayName?: string | null | undefined;
   gradingDisplayName?: string | null | undefined;
   publishedVersionId: string;
+  publishScope?: SatPublishScope | undefined;
   cohortName: string;
   institution?: string | null | undefined;
   startTime: string;
@@ -481,6 +484,7 @@ export function mapBackendExamEntity(payload: BackendExamEntity): ExamEntity {
     archivedAt: payload.archivedAt ?? undefined,
     currentDraftVersionId: payload.currentDraftVersionId ?? null,
     currentPublishedVersionId: payload.currentPublishedVersionId ?? null,
+    currentPublishedScope: payload.currentPublishedScope ?? null,
     canEdit: payload.canEdit === true,
     canPublish: payload.canPublish === true,
     canDelete: payload.canDelete === true,
@@ -571,6 +575,7 @@ export function mapBackendSchedule(payload: BackendExamSchedule): ExamSchedule {
     proctorDisplayName: payload.proctorDisplayName ?? payload.examTitle,
     gradingDisplayName: payload.gradingDisplayName ?? payload.examTitle,
     publishedVersionId: payload.publishedVersionId,
+    publishScope: payload.publishScope,
     cohortName: payload.cohortName,
     institution: payload.institution ?? undefined,
     startTime: payload.startTime,

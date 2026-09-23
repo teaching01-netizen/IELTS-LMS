@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"testing"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
@@ -135,6 +136,54 @@ func TestLoadExamPlanWithoutVersionSkipsRead(t *testing.T) {
 	}
 	if plan != nil {
 		t.Fatalf("no version means no plan, got %+v", plan)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadScopedExamPlanIntersectsLinkAndReleaseScopes(t *testing.T) {
+	mock, q := examPlanQuerier(t)
+	planSectionPlanRows(
+		mock,
+		[]driver.Value{"sec-rw", "reading-writing", "Reading & Writing", 0, 5760, 600},
+		[]driver.Value{"sec-math", "math", "Math", 1, 4200, 0},
+	)
+	planModulePlanRows(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ? LIMIT 1")).WithArgs("sched-1").WillReturnRows(
+		sqlmock.NewRows([]string{"enabled_sections"}).AddRow(`["reading-writing"]`),
+	)
+
+	plan, err := loadScopedExamPlan(context.Background(), q, "sched-1", "pv-1", examdomain.SATPublishScopeFull)
+	if err != nil {
+		t.Fatalf("loadScopedExamPlan must succeed: %v", err)
+	}
+	if len(plan) != 1 || plan[0].SectionKey != "reading-writing" || plan[0].GapAfterMinutes != 0 {
+		t.Fatalf("link scope must narrow the authored plan and remove its final cross-section break: %+v", plan)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadScopedExamPlanUsesImmutableReleaseScopeWithoutLink(t *testing.T) {
+	mock, q := examPlanQuerier(t)
+	planSectionPlanRows(
+		mock,
+		[]driver.Value{"sec-rw", "reading-writing", "Reading & Writing", 0, 5760, 600},
+		[]driver.Value{"sec-math", "math", "Math", 1, 4200, 0},
+	)
+	planModulePlanRows(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ? LIMIT 1")).WithArgs("sched-1").WillReturnRows(
+		sqlmock.NewRows([]string{"enabled_sections"}),
+	)
+
+	plan, err := loadScopedExamPlan(context.Background(), q, "sched-1", "pv-1", examdomain.SATPublishScopeReadingWriting)
+	if err != nil {
+		t.Fatalf("loadScopedExamPlan must succeed without a link: %v", err)
+	}
+	if len(plan) != 1 || plan[0].SectionKey != "reading-writing" || plan[0].GapAfterMinutes != 0 {
+		t.Fatalf("release scope must narrow the authored plan and remove its final cross-section break: %+v", plan)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

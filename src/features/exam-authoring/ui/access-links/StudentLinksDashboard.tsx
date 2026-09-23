@@ -461,7 +461,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
           <div className="h-5 w-px bg-black/[0.08]" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-semibold tracking-[-0.01em]">{exam.title}</p>
-            <p className="truncate text-[11px] font-medium text-slate-500">Student Access · Version {version.versionNumber} is published</p>
+            <p className="truncate text-[11px] font-medium text-slate-500">Student Access · Version {version.versionNumber} · {version.publishScope === "full" ? "Full SAT" : `${version.publishScope === "math" ? "Math" : "Reading & Writing"} only`}</p>
           </div>
           <CollaborationHeaderCluster surface="access" />
           <SatPrimaryButton onClick={() => openEditor(null)} icon={<Plus size={14} aria-hidden="true" />} ariaLabel="New Student Link">New Student Link</SatPrimaryButton>
@@ -566,7 +566,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         </div>
       </SatContainer>
 
-      <AccessLinkEditorSheet open={editorOpen} link={editingLink} providerKey={exam.providerKey ?? null} members={(membersQuery.data ?? []) as AccessLinkMemberInput[]} isSaving={saving} onClose={() => { if (!saving) { setEditorOpen(false); setEditingLink(null); } }} onCreate={createLink} onUpdate={updateLink} />
+      <AccessLinkEditorSheet open={editorOpen} link={editingLink} providerKey={exam.providerKey ?? null} publishScope={version?.publishScope ?? "full"} members={(membersQuery.data ?? []) as AccessLinkMemberInput[]} isSaving={saving} onClose={() => { if (!saving) { setEditorOpen(false); setEditingLink(null); } }} onCreate={createLink} onUpdate={updateLink} />
       <AccessLinkShareSheet open={Boolean(shareLink)} link={shareLink} onClose={() => setShareLink(null)} onPresent={() => { setPresentLink(shareLink); setShareLink(null); }} />
       <AccessLinkPresentView open={Boolean(presentLink)} link={presentLink} onClose={() => setPresentLink(null)} />
       <AuthoringConfirmDialog

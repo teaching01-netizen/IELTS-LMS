@@ -2,12 +2,14 @@ export type StudentAccessLinkStatus = 'live' | 'upcoming' | 'ended' | 'paused' |
 export type StudentAccessMode = 'student_code' | 'open';
 export type StudentAudienceType = 'anyone' | 'cohort' | 'selected_students';
 export type StudentAvailabilityType = 'scheduled' | 'anytime';
+export type StudentSatPublishScope = 'full' | 'reading-writing' | 'math';
 
 export interface PublicStudentAccessLink {
   id: string;
   examTitle: string;
   providerKey: string;
   versionNumber: number;
+  publishScope: StudentSatPublishScope;
   name: string;
   /**
    * The sections this link admits, or null for every section the published

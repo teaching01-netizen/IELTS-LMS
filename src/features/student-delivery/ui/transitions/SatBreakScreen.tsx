@@ -1,15 +1,8 @@
 import { formatSatTime } from "../../domain/satTiming";
 import { SAT_COPY } from "../../domain/satCopy";
+import type { SatBreakEntryProgress } from "../break/SatScheduledBreakScreen";
 
-/**
- * Entry progress for the between-sections surface (Phase 4).
- *
- * A null countdown means the break window has not reached the client yet. The
- * surface keeps that state explicit instead of rendering a misleading 0:00;
- * once the server publishes the absolute next-section instant, the caller
- * supplies the full configured countdown.
- */
-export type SatBreakEntryProgress = "idle" | "starting" | "retrying";
+export type { SatBreakEntryProgress } from "../break/SatScheduledBreakScreen";
 
 export function SatBreakScreen({
   nextSectionKey,

@@ -2,6 +2,7 @@ import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SelectionLoupe, resolveLoupeDiameter } from '../react/SelectionLoupe';
+import { pictureTranslation, type LoupePicture } from '../react/loupePicture';
 
 /**
  * The magnifier's picture, and what it must NOT carry with it.
@@ -84,6 +85,26 @@ const PROSE = `
 `;
 
 describe('SelectionLoupe', () => {
+  it.each([0.5, 0.75, 1, 1.25, 1.5, 1.75, 2])('maps the same resolved caret boundary through the loupe at scale %s', (visualScale) => {
+    const picture: LoupePicture = {
+      left: 30,
+      top: 200,
+      width: 400,
+      visualScale,
+      backdrop: '#fff',
+      origin: { x: 4, y: 8 },
+    };
+    const logicalCaret = { x: 100, y: 20 };
+    const viewportCaret = {
+      x: picture.left + logicalCaret.x * visualScale,
+      y: picture.top + logicalCaret.y * visualScale,
+    };
+    const translation = pictureTranslation(picture, viewportCaret, 120, 1.5);
+
+    expect(translation.left + visualScale * 1.5 * (picture.origin.x + logicalCaret.x)).toBeCloseTo(60);
+    expect(translation.top + visualScale * 1.5 * (picture.origin.y + logicalCaret.y)).toBeCloseTo(60);
+  });
+
   it('does not become a second addressable surface', () => {
     const sourceRef = source(PROSE);
     render(<SelectionLoupe open fingerPoint={{ x: 40, y: 200 }} sourceRef={sourceRef} />);

@@ -198,6 +198,7 @@ func examsPublishHandler(app *App) http.HandlerFunc {
 		}
 		var req struct {
 			PublishNotes           *string `json:"publishNotes"`
+			PublishScope           string  `json:"publishScope"`
 			Revision               int     `json:"revision"`
 			ExpectedDraftVersionID *string `json:"expectedDraftVersionId"`
 			ExpectedDraftRevision  *int    `json:"expectedDraftRevision"`
@@ -217,6 +218,7 @@ func examsPublishHandler(app *App) http.HandlerFunc {
 		id := chi.URLParam(r, "id")
 		out, err := app.Exams.PublishForActor(r.Context(), actorOf(r.Context()), id, exams.PublishRequest{
 			PublishNotes:           req.PublishNotes,
+			PublishScope:           exams.SATPublishScope(req.PublishScope),
 			Revision:               req.Revision,
 			ExpectedDraftVersionID: req.ExpectedDraftVersionID,
 			ExpectedDraftRevision:  req.ExpectedDraftRevision,
@@ -315,14 +317,14 @@ func versionSummaryHandler(app *App) http.HandlerFunc {
 		versionID := chi.URLParam(r, "versionID")
 		var id, examID string
 		var versionNumber, revision int
-		var parentVersionID, contentSnapshot, configSnapshot, validationSnapshot sql.NullString
+		var parentVersionID, contentSnapshot, configSnapshot, validationSnapshot, publishScope sql.NullString
 		var createdBy string
 		var createdAt time.Time
 		var publishNotes sql.NullString
 		var isDraft, isPublished bool
 		err := app.DB.QueryRowContext(r.Context(),
-			`SELECT id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision, created_at, publish_notes FROM exam_versions WHERE id = ?`,
-			versionID).Scan(&id, &examID, &versionNumber, &parentVersionID, &contentSnapshot, &configSnapshot, &validationSnapshot, &createdBy, &isDraft, &isPublished, &revision, &createdAt, &publishNotes)
+			`SELECT id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision, created_at, publish_notes, sat_publish_scope FROM exam_versions WHERE id = ?`,
+			versionID).Scan(&id, &examID, &versionNumber, &parentVersionID, &contentSnapshot, &configSnapshot, &validationSnapshot, &createdBy, &isDraft, &isPublished, &revision, &createdAt, &publishNotes, &publishScope)
 		if err == sql.ErrNoRows {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Version not found."))
 			return
@@ -348,6 +350,11 @@ func versionSummaryHandler(app *App) http.HandlerFunc {
 		}
 		if publishNotes.Valid {
 			out["publishNotes"] = publishNotes.String
+		}
+		if publishScope.Valid {
+			out["publishScope"] = publishScope.String
+		} else if isPublished {
+			out["publishScope"] = exams.SATPublishScopeFull
 		}
 		if parentVersionID.Valid {
 			out["parentVersionId"] = parentVersionID.String

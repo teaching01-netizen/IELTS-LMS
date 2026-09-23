@@ -191,11 +191,12 @@ type Metrics struct {
 
 // PublishedVersionSummary mirrors PublishedAccessVersionSummary.
 type PublishedVersionSummary struct {
-	ID            string    `json:"id"`
-	VersionNumber int32     `json:"versionNumber"`
-	Revision      int32     `json:"revision"`
-	PublishNotes  *string   `json:"publishNotes"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID            string                     `json:"id"`
+	VersionNumber int32                      `json:"versionNumber"`
+	Revision      int32                      `json:"revision"`
+	PublishNotes  *string                    `json:"publishNotes"`
+	PublishScope  examdomain.SATPublishScope `json:"publishScope"`
+	CreatedAt     time.Time                  `json:"createdAt"`
 }
 
 // Overview mirrors AccessDistributionOverview.
@@ -206,14 +207,15 @@ type Overview struct {
 
 // AccessLink mirrors AssessmentAccessLink.
 type AccessLink struct {
-	ID                 string `json:"id"`
-	ExamID             string `json:"examId"`
-	ExamTitle          string `json:"examTitle"`
-	ProviderKey        string `json:"providerKey"`
-	PublishedVersionID string `json:"publishedVersionId"`
-	VersionNumber      int32  `json:"versionNumber"`
-	ScheduleID         string `json:"scheduleId"`
-	Name               string `json:"name"`
+	ID                 string                     `json:"id"`
+	ExamID             string                     `json:"examId"`
+	ExamTitle          string                     `json:"examTitle"`
+	ProviderKey        string                     `json:"providerKey"`
+	PublishedVersionID string                     `json:"publishedVersionId"`
+	VersionNumber      int32                      `json:"versionNumber"`
+	PublishScope       examdomain.SATPublishScope `json:"publishScope"`
+	ScheduleID         string                     `json:"scheduleId"`
+	Name               string                     `json:"name"`
 	// EnabledSections is the link's section scope; nil/null means every
 	// section the published version enables (today's behaviour).
 	EnabledSections      []string         `json:"enabledSections"`
@@ -236,19 +238,20 @@ type AccessLink struct {
 
 // PublicAccessLink mirrors PublicAssessmentAccessLink.
 type PublicAccessLink struct {
-	ID               string           `json:"id"`
-	ExamTitle        string           `json:"examTitle"`
-	ProviderKey      string           `json:"providerKey"`
-	VersionNumber    int32            `json:"versionNumber"`
-	Name             string           `json:"name"`
-	EnabledSections  []string         `json:"enabledSections"`
-	AudienceType     AudienceType     `json:"audienceType"`
-	AudienceLabel    *string          `json:"audienceLabel"`
-	AccessMode       Mode             `json:"accessMode"`
-	AvailabilityType AvailabilityType `json:"availabilityType"`
-	OpensAt          *time.Time       `json:"opensAt"`
-	ClosesAt         *time.Time       `json:"closesAt"`
-	Status           Status           `json:"status"`
+	ID               string                     `json:"id"`
+	ExamTitle        string                     `json:"examTitle"`
+	ProviderKey      string                     `json:"providerKey"`
+	VersionNumber    int32                      `json:"versionNumber"`
+	PublishScope     examdomain.SATPublishScope `json:"publishScope"`
+	Name             string                     `json:"name"`
+	EnabledSections  []string                   `json:"enabledSections"`
+	AudienceType     AudienceType               `json:"audienceType"`
+	AudienceLabel    *string                    `json:"audienceLabel"`
+	AccessMode       Mode                       `json:"accessMode"`
+	AvailabilityType AvailabilityType           `json:"availabilityType"`
+	OpensAt          *time.Time                 `json:"opensAt"`
+	ClosesAt         *time.Time                 `json:"closesAt"`
+	Status           Status                     `json:"status"`
 }
 
 // MemberInput mirrors AccessLinkMemberInput.
@@ -386,7 +389,7 @@ func unavailable(msg string) *apperrors.Error {
 // flag. Column order is load-bearing for scanAccessLink.
 func linkSelectSQL() string {
 	return "SELECT l.id, l.exam_id, e.title AS exam_title, e.provider_key," +
-		" l.published_version_id, v.version_number, l.schedule_id, l.name, l.enabled_sections," +
+		" l.published_version_id, v.version_number, v.sat_publish_scope, l.schedule_id, l.name, l.enabled_sections," +
 		" l.audience_type, l.audience_label, l.access_mode, l.availability_type," +
 		" l.opens_at, l.closes_at, l.lifecycle_state, l.revision, l.created_at, l.updated_at," +
 		" (SELECT COUNT(*) FROM assessment_access_link_members m WHERE m.link_id = l.id) AS selected_student_count," +
@@ -401,18 +404,25 @@ func linkSelectSQL() string {
 		" JOIN exam_versions v ON v.id = l.published_version_id"
 }
 
+func normalizeScopeValue(raw string) examdomain.SATPublishScope {
+	if strings.TrimSpace(raw) == "" {
+		return examdomain.SATPublishScopeFull
+	}
+	return examdomain.SATPublishScope(strings.TrimSpace(raw))
+}
+
 func scanAccessLink(row interface {
 	Scan(dest ...any) error
 }) (AccessLink, error) {
 	var l AccessLink
 	var audience, mode, availability, lifecycle string
-	var label, enabledSections sql.NullString
+	var label, enabledSections, publishScope sql.NullString
 	var opensAt, closesAt sql.NullTime
 	var selected, registered, started, submitted int64
 	var isCurrent, hasParticipation sql.NullInt64
 	if err := row.Scan(
 		&l.ID, &l.ExamID, &l.ExamTitle, &l.ProviderKey,
-		&l.PublishedVersionID, &l.VersionNumber, &l.ScheduleID, &l.Name, &enabledSections,
+		&l.PublishedVersionID, &l.VersionNumber, &publishScope, &l.ScheduleID, &l.Name, &enabledSections,
 		&audience, &label, &mode, &availability,
 		&opensAt, &closesAt, &lifecycle, &l.Revision, &l.CreatedAt, &l.UpdatedAt,
 		&selected, &registered, &started, &submitted,
@@ -441,6 +451,7 @@ func scanAccessLink(row interface {
 	l.AvailabilityType = availabilityType
 	l.LifecycleState = lifecycleState
 	l.EnabledSections = parseEnabledSections(enabledSections)
+	l.PublishScope = normalizeScopeValue(publishScope.String)
 	if label.Valid {
 		v := label.String
 		l.AudienceLabel = &v
@@ -646,10 +657,11 @@ func nullableOrg(org sql.NullString) any {
 
 // examPin is the locked exam header plus the resolved published version.
 type examPin struct {
-	title       string
-	providerKey string
-	orgID       sql.NullString
-	versionID   string
+	title        string
+	providerKey  string
+	orgID        sql.NullString
+	versionID    string
+	publishScope examdomain.SATPublishScope
 }
 
 // pinExamVersionTx mirrors resolve_published_version_tx(): it locks the exam
@@ -677,9 +689,10 @@ func pinExamVersionTx(ctx context.Context, q tx.Tx, examID string, requested *st
 		pin.versionID = current.String
 	}
 	var published sql.NullBool
+	var publishScope sql.NullString
 	err = q.QueryRowContext(ctx,
-		"SELECT is_published FROM exam_versions WHERE id = ? AND exam_id = ?",
-		pin.versionID, examID).Scan(&published)
+		"SELECT is_published, sat_publish_scope FROM exam_versions WHERE id = ? AND exam_id = ?",
+		pin.versionID, examID).Scan(&published, &publishScope)
 	if err == sql.ErrNoRows {
 		return pin, notFound("Exam version not found.")
 	}
@@ -689,7 +702,33 @@ func pinExamVersionTx(ctx context.Context, q tx.Tx, examID string, requested *st
 	if !published.Valid || !published.Bool {
 		return pin, badRequest("Student Access can only target an immutable published version.")
 	}
+	pin.publishScope = normalizeScopeValue(publishScope.String)
 	return pin, nil
+}
+
+// validateEffectiveSections prevents a SAT link from delivering no sections
+// after its section choice intersects the immutable published release.
+func validateEffectiveSections(providerKey string, publishScope examdomain.SATPublishScope, enabledSections []string) error {
+	if !hasEffectiveSections(providerKey, publishScope, enabledSections) {
+		return badRequest("Student Link scope must include at least one section enabled in its published version.")
+	}
+	return nil
+}
+
+func hasEffectiveSections(providerKey string, publishScope examdomain.SATPublishScope, enabledSections []string) bool {
+	if providerKey != "sat" {
+		return true
+	}
+	releaseScope := examdomain.ParseSATPublishScope(string(publishScope))
+	var linkScope map[string]bool
+	if len(enabledSections) > 0 {
+		linkScope = make(map[string]bool, len(enabledSections))
+		for _, key := range enabledSections {
+			linkScope[key] = true
+		}
+	}
+	effectiveScope := examdomain.IntersectSectionScopes(releaseScope, linkScope)
+	return effectiveScope == nil || len(effectiveScope) > 0
 }
 
 // validateWindowForExistingScheduleTx mirrors
@@ -714,9 +753,11 @@ func validateWindowForExistingScheduleTx(ctx context.Context, q tx.Tx, scheduleI
 
 // linkLock mirrors LinkLockRow.
 type linkLock struct {
-	scheduleID string
-	lifecycle  LifecycleState
-	revision   int32
+	scheduleID   string
+	providerKey  string
+	publishScope examdomain.SATPublishScope
+	lifecycle    LifecycleState
+	revision     int32
 	// enabledSections is the stored scope (nil = all sections).
 	enabledSections []string
 	// hasParticipation reports whether any student joined or started the
@@ -731,14 +772,18 @@ type linkLock struct {
 func lockLinkTx(ctx context.Context, q tx.Tx, linkID string) (linkLock, error) {
 	var lock linkLock
 	var lifecycle string
-	var enabledSections sql.NullString
+	var enabledSections, publishScope sql.NullString
 	var hasParticipation sql.NullInt64
 	err := q.QueryRowContext(ctx,
-		"SELECT schedule_id, lifecycle_state, revision, enabled_sections,"+
+		"SELECT assessment_access_links.schedule_id, assessment_access_links.lifecycle_state, assessment_access_links.revision, assessment_access_links.enabled_sections,"+
 			" (EXISTS(SELECT 1 FROM schedule_registrations r WHERE r.schedule_id = assessment_access_links.schedule_id LIMIT 1)"+
 			" OR EXISTS(SELECT 1 FROM student_attempts a WHERE a.schedule_id = assessment_access_links.schedule_id LIMIT 1)) AS has_participation"+
-			" FROM assessment_access_links WHERE id = ? FOR UPDATE",
-		linkID).Scan(&lock.scheduleID, &lifecycle, &lock.revision, &enabledSections, &hasParticipation)
+			" , exam_entities.provider_key, exam_versions.sat_publish_scope"+
+			" FROM assessment_access_links"+
+			" JOIN exam_entities ON exam_entities.id = assessment_access_links.exam_id"+
+			" JOIN exam_versions ON exam_versions.id = assessment_access_links.published_version_id"+
+			" WHERE assessment_access_links.id = ? FOR UPDATE",
+		linkID).Scan(&lock.scheduleID, &lifecycle, &lock.revision, &enabledSections, &hasParticipation, &lock.providerKey, &publishScope)
 	if err == sql.ErrNoRows {
 		return lock, notFound("Access link was not found.")
 	}
@@ -751,6 +796,7 @@ func lockLinkTx(ctx context.Context, q tx.Tx, linkID string) (linkLock, error) {
 	}
 	lock.lifecycle = state
 	lock.enabledSections = parseEnabledSections(enabledSections)
+	lock.publishScope = normalizeScopeValue(publishScope.String)
 	lock.hasParticipation = hasParticipation.Valid && hasParticipation.Int64 != 0
 	return lock, nil
 }
@@ -825,16 +871,17 @@ func insertLinkTx(ctx context.Context, q tx.Tx, linkID, examID, versionID, sched
 func (s *Service) Overview(ctx context.Context, examID string) (Overview, error) {
 	var out Overview
 	row := s.db.QueryRowContext(ctx,
-		"SELECT v.id, v.version_number, v.revision, v.publish_notes, v.created_at"+
+		"SELECT v.id, v.version_number, v.revision, v.publish_notes, v.sat_publish_scope, v.created_at"+
 			" FROM exam_entities e JOIN exam_versions v ON v.id = e.current_published_version_id"+
 			" WHERE e.id = ? AND v.is_published = TRUE", examID)
 	var current PublishedVersionSummary
-	var notes sql.NullString
-	if err := row.Scan(&current.ID, &current.VersionNumber, &current.Revision, &notes, &current.CreatedAt); err != nil {
+	var notes, publishScope sql.NullString
+	if err := row.Scan(&current.ID, &current.VersionNumber, &current.Revision, &notes, &publishScope, &current.CreatedAt); err != nil {
 		if err != sql.ErrNoRows {
 			return Overview{}, err
 		}
 	} else {
+		current.PublishScope = normalizeScopeValue(publishScope.String)
 		if notes.Valid {
 			v := notes.String
 			current.PublishNotes = &v
@@ -885,7 +932,7 @@ func (s *Service) PublicLink(ctx context.Context, linkID string) (PublicAccessLi
 	}
 	return PublicAccessLink{
 		ID: link.ID, ExamTitle: link.ExamTitle, ProviderKey: link.ProviderKey,
-		VersionNumber: link.VersionNumber, Name: link.Name, EnabledSections: link.EnabledSections,
+		VersionNumber: link.VersionNumber, PublishScope: link.PublishScope, Name: link.Name, EnabledSections: link.EnabledSections,
 		AudienceType:  link.AudienceType,
 		AudienceLabel: link.AudienceLabel, AccessMode: link.AccessMode,
 		AvailabilityType: link.AvailabilityType, OpensAt: link.OpensAt, ClosesAt: link.ClosesAt,
@@ -940,6 +987,9 @@ func (s *Service) Create(ctx context.Context, examID, createdBy string, req Crea
 		if err != nil {
 			return err
 		}
+		if err := validateEffectiveSections(pin.providerKey, pin.publishScope, enabledSections); err != nil {
+			return err
+		}
 		if err := insertBackingScheduleTx(ctx, q, scheduleID, examID, pin, cohort, start, end, createdBy); err != nil {
 			return err
 		}
@@ -988,6 +1038,9 @@ func (s *Service) Update(ctx context.Context, linkID string, req UpdateRequest) 
 				}
 				enabledSections = requested
 			}
+		}
+		if err := validateEffectiveSections(current.providerKey, current.publishScope, enabledSections); err != nil {
+			return err
 		}
 		var memberInputs []MemberInput
 		if req.SelectedStudents == nil {
@@ -1213,6 +1266,9 @@ func (s *Service) Duplicate(ctx context.Context, linkID, createdBy string, req D
 		if err != nil {
 			return err
 		}
+		if err := validateEffectiveSections(pin.providerKey, pin.publishScope, parseEnabledSections(source.enabledSections)); err != nil {
+			return err
+		}
 		cohort := normalizedName
 		if label != nil {
 			cohort = *label
@@ -1302,9 +1358,9 @@ func (s *Service) ResolveEntry(ctx context.Context, linkID, studentCode, student
 		// latest committed state, not the unlocked Get above.
 		var lifecycle, availability string
 		var opensAt, closesAt sql.NullTime
-		var enabledSections sql.NullString
+		var enabledSections, publishScope sql.NullString
 		var scheduleID, providerKey, accessMode, audienceType string
-		if err := q.QueryRowContext(ctx, "SELECT l.schedule_id, e.provider_key, l.access_mode, l.audience_type, l.lifecycle_state, l.availability_type, l.opens_at, l.closes_at, l.enabled_sections FROM assessment_access_links l JOIN exam_entities e ON e.id = l.exam_id WHERE l.id = ? FOR UPDATE", linkID).Scan(&scheduleID, &providerKey, &accessMode, &audienceType, &lifecycle, &availability, &opensAt, &closesAt, &enabledSections); err != nil {
+		if err := q.QueryRowContext(ctx, "SELECT l.schedule_id, e.provider_key, l.access_mode, l.audience_type, l.lifecycle_state, l.availability_type, l.opens_at, l.closes_at, l.enabled_sections, v.sat_publish_scope FROM assessment_access_links l JOIN exam_entities e ON e.id = l.exam_id JOIN exam_versions v ON v.id = l.published_version_id WHERE l.id = ? FOR UPDATE", linkID).Scan(&scheduleID, &providerKey, &accessMode, &audienceType, &lifecycle, &availability, &opensAt, &closesAt, &enabledSections, &publishScope); err != nil {
 			if err == sql.ErrNoRows {
 				return notFound("Access link was not found.")
 			}
@@ -1325,6 +1381,9 @@ func (s *Service) ResolveEntry(ctx context.Context, linkID, studentCode, student
 		avail, err := ParseAvailabilityType(availability)
 		if err != nil {
 			return err
+		}
+		if !hasEffectiveSections(providerKey, normalizeScopeValue(publishScope.String), parseEnabledSections(enabledSections)) {
+			return unavailable("This Student Link has no sections enabled in its published release.")
 		}
 		var o, c *time.Time
 		if opensAt.Valid {

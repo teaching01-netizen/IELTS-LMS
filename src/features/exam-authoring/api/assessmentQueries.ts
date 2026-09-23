@@ -12,6 +12,7 @@ import type {
   LoadSampleExamRequest,
   PublishAssessmentRequest,
   ReorderQuestionsRequest,
+  SatPublishScope,
   UpdateSectionDeliverySettingsRequest,
 } from "../contracts/assessment";
 
@@ -146,9 +147,9 @@ export function useLoadSatSampleExam(examId: string) {
   });
 }
 
-export function useAssessmentValidation(examId: string) {
+export function useAssessmentValidation(examId: string, publishScope: SatPublishScope = "full") {
   return useMutation({
-    mutationFn: () => assessmentAuthoringApi.validateExam(examId),
+    mutationFn: () => assessmentAuthoringApi.validateExam(examId, publishScope),
   });
 }
 
@@ -156,14 +157,15 @@ export function useAssessmentReleaseReadiness(
   examId: string,
   versionId: string | undefined,
   versionRevision: number | undefined,
+  publishScope: SatPublishScope = "full",
   enabled = true
 ) {
   return useQuery({
     queryKey:
       versionId !== undefined && versionRevision !== undefined
-        ? assessmentKeys.readiness(examId, versionId, versionRevision)
+        ? assessmentKeys.readiness(examId, versionId, versionRevision, publishScope)
         : [...assessmentKeys.readinessRoot(examId), "missing"],
-    queryFn: () => assessmentAuthoringApi.validateExam(examId),
+    queryFn: () => assessmentAuthoringApi.validateExam(examId, publishScope),
     enabled: enabled && Boolean(versionId) && versionRevision !== undefined,
     // validateExam is expensive: manual "Run checks" is the source of truth.
     // A short stale window plus no focus refetch avoids hammering it while

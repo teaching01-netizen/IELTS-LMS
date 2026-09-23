@@ -8,6 +8,7 @@ import { invalidateExamList, useExamListQuery } from '../../../features/exam-aut
 import { examAuthoringFacade } from '../../../features/exam-authoring/api/examAuthoringFacade';
 import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/application/authoringEntryIntent';
 import type { ExamEntity } from '../../../types/domain';
+import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { SatConfirmDialog, SatFormDialog, isSatCreationDirty } from '../ui/ConfirmDialog';
 import {
   SatContainer,
@@ -165,7 +166,7 @@ export function SatExamLibraryRoute() {
                   <span className="min-w-0 flex-1">
                     {/* Density ladder: Library titles at 14px; Sessions/Results names at 13px + score. */}
                     <span className="block truncate text-[14px] font-semibold tracking-[-0.012em] text-slate-900">{exam.title}</span>
-                    <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{exam.totalQuestions ?? 0} questions · {formatDate(exam.updatedAt)}</span>
+                    <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{exam.currentPublishedVersionId ? `${satPublishScopeCopy(exam.currentPublishedScope ?? 'full')} · ` : ''}{exam.totalQuestions ?? 0} questions · {formatDate(exam.updatedAt)}</span>
                   </span>
                   <SatStatusPill tone={statusTone(status)}>{status}</SatStatusPill>
                   <ArrowRight size={15} className="sat-row-chevron shrink-0 text-slate-400 group-hover:text-slate-500" aria-hidden="true" />

@@ -234,7 +234,7 @@ function stubPaneLayout(fits: (zoom: number) => boolean) {
   const measurements = { count: 0 };
   const heightOf = (property: "scrollHeight" | "clientHeight"): number => {
     const zoom = Number(
-      document.querySelector("[data-sat-content-zoom]")?.getAttribute("data-sat-content-zoom") ?? 1,
+      document.querySelector("[data-sat-screen-zoom]")?.getAttribute("data-sat-screen-zoom") ?? 1,
     );
     if (property === "clientHeight") return 900;
     return fits(zoom) ? 600 : 1400;
@@ -270,7 +270,8 @@ function renderRoute(attemptId = "attempt-1") {
   return render(routeElement(attemptId));
 }
 
-const contentBox = () => document.querySelector("[data-sat-content-zoom]")!;
+const contentBox = () => document.querySelector("[data-sat-zoom-plane]")!;
+const fitRoot = () => document.querySelector("[data-sat-fit-root]")!;
 
 describe("SatStudentSessionRoute auto-fit screen zoom", () => {
   beforeEach(() => {
@@ -297,8 +298,8 @@ describe("SatStudentSessionRoute auto-fit screen zoom", () => {
     // fits (4 = 2 panes x 2 candidates) — and the exam is rendering that
     // decision.
     expect(measurements.count).toBe(4);
-    expect(contentBox()).toHaveAttribute("data-sat-content-zoom", "0.75");
-    expect(contentBox()).toHaveAttribute("data-sat-fit-probing", "false");
+    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "0.75");
+    expect(fitRoot()).toHaveAttribute("data-sat-fit-probing", "false");
     expect(loadSatReadingPreferences("schedule-1", "attempt-1").examZoom).toBe(0.75);
   });
 
@@ -310,14 +311,14 @@ describe("SatStudentSessionRoute auto-fit screen zoom", () => {
 
     // Module 1 fits at the resting zoom, so the decision stores no zoom at all.
     expect(measurements.count).toBe(2);
-    expect(contentBox()).toHaveAttribute("data-sat-content-zoom", "1");
+    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "1");
     expect(loadSatReadingPreferences("schedule-1", "attempt-1").examZoom).toBeUndefined();
     const firstShell = contentBox();
 
     // Module boundary: the exam unmounts for the break screen...
     (controllerMock.current as { state: { phase: string } }).state.phase = "break";
     rerender(routeElement());
-    expect(document.querySelector("[data-sat-content-zoom]")).toBeNull();
+    expect(document.querySelector("[data-sat-screen-zoom]")).toBeNull();
 
     // ...and comes back as a NEW shell inside the SAME attempt.
     (controllerMock.current as { state: { phase: string } }).state.phase = "module";
@@ -329,7 +330,7 @@ describe("SatStudentSessionRoute auto-fit screen zoom", () => {
     // which is the only thing that could have stopped this — module 1 stored no
     // zoom to gate on.
     expect(measurements.count).toBe(2);
-    expect(contentBox()).toHaveAttribute("data-sat-content-zoom", "1");
+    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "1");
     unmount();
   });
 
@@ -357,7 +358,7 @@ describe("SatStudentSessionRoute auto-fit screen zoom", () => {
     renderRoute();
 
     expect(afterReload.count).toBe(0);
-    expect(contentBox()).toHaveAttribute("data-sat-content-zoom", "1");
+    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "1");
   });
 
   it("starts a new attempt undecided", () => {
@@ -397,7 +398,7 @@ describe("SatStudentSessionRoute auto-fit screen zoom", () => {
 
       expect(measurements.count, `examZoom ${examZoom}`).toBe(0);
       expect(contentBox(), `examZoom ${examZoom}`).toHaveAttribute(
-        "data-sat-content-zoom",
+        "data-sat-screen-zoom",
         String(examZoom),
       );
       cleanup();

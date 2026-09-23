@@ -4,6 +4,7 @@ import { SAT_COPY } from "../../domain/satCopy";
 import { AnimatePresence } from "motion/react";
 import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
 import { SatPresenceSurface } from "../motion/SatPresenceSurface";
+import { SatExamOverlayPortal } from "../zoom/SatExamZoomContext";
 
 export interface SatQuestionNavigatorProps {
   id?: string;
@@ -86,7 +87,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
       role="dialog"
       aria-labelledby={titleId}
       data-sat-navigator-presentation={compact ? "compact" : "anchored"}
-      className={`${compact ? "relative max-h-[min(70dvh,560px)] w-[min(620px,calc(100vw-16px))] rounded-[12px] border" : "relative max-h-[min(54dvh,460px)] w-[min(620px,calc(100vw-32px))] rounded-[10px] border"} overflow-y-auto border-[var(--sat-divider)] bg-[var(--sat-surface)] px-4 py-4 shadow-[var(--sat-shadow-modal)] sm:px-7 sm:py-5`}
+      className={`${compact ? "relative max-h-[min(var(--sat-exam-logical-height-70,70dvh),560px)] w-[min(620px,calc(var(--sat-exam-logical-width,100vw)-16px))] rounded-[12px] border" : "relative max-h-[min(var(--sat-exam-logical-height-54,54dvh),460px)] w-[min(620px,calc(var(--sat-exam-logical-width,100vw)-32px))] rounded-[10px] border"} overflow-y-auto border-[var(--sat-divider)] bg-[var(--sat-surface)] px-4 py-4 shadow-[var(--sat-shadow-modal)] sm:px-7 sm:py-5`}
     >
       <div className="flex items-start justify-between gap-4 border-b border-[var(--sat-divider)] pb-3">
         <h2 id={titleId} className="sat-type-input font-semibold text-[var(--sat-text)]">
@@ -181,6 +182,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
   );
 
   return (
+    <SatExamOverlayPortal>
     <div
       className="pointer-events-none fixed inset-x-0 bottom-[calc(86px+var(--student-safe-bottom))] z-[80] flex justify-center px-2 sm:px-4"
       data-sat-navigator-anchor="footer"
@@ -197,5 +199,6 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
         ) : null}
       </AnimatePresence>
     </div>
+    </SatExamOverlayPortal>
   );
 }

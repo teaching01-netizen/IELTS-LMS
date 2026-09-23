@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
@@ -27,7 +28,7 @@ func TestListSessionsEmptySchedules(t *testing.T) {
 		"planned_duration_minutes, delivery_mode, recurrence_type, " +
 		"recurrence_interval, recurrence_end_date, buffer_before_minutes, " +
 		"buffer_after_minutes, auto_start, auto_stop, status, created_at, " +
-		"created_by, updated_at, revision"
+		"created_by, updated_at, revision, (SELECT sat_publish_scope FROM exam_versions WHERE id = exam_schedules.published_version_id)"
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + cols)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "exam_id", "provider_key", "organization_id", "exam_title",
@@ -36,7 +37,7 @@ func TestListSessionsEmptySchedules(t *testing.T) {
 			"planned_duration_minutes", "delivery_mode", "recurrence_type",
 			"recurrence_interval", "recurrence_end_date", "buffer_before_minutes",
 			"buffer_after_minutes", "auto_start", "auto_stop", "status", "created_at",
-			"created_by", "updated_at", "revision",
+			"created_by", "updated_at", "revision", "publish_scope",
 		}))
 
 	got, err := svc.ListSessions(context.Background(), Actor{ID: "admin-1", Role: RoleAdmin, CSRFVerified: true}, true)
@@ -45,6 +46,38 @@ func TestListSessionsEmptySchedules(t *testing.T) {
 	}
 	if got == nil || len(got) != 0 {
 		t.Fatalf("empty schedules must yield an empty non-nil slice, got %+v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadSessionScheduleIncludesPinnedSATScope(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + sessionScheduleColumns + " FROM exam_schedules WHERE id = ?")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "exam_id", "provider_key", "organization_id", "exam_title", "proctor_display_name", "grading_display_name",
+			"published_version_id", "cohort_name", "institution", "start_time", "end_time", "planned_duration_minutes",
+			"delivery_mode", "recurrence_type", "recurrence_interval", "recurrence_end_date", "buffer_before_minutes",
+			"buffer_after_minutes", "auto_start", "auto_stop", "status", "created_at", "created_by", "updated_at", "revision", "publish_scope",
+		}).AddRow(
+			"sched-1", "exam-1", "sat", nil, "Practice", "Practice", "Practice", "pv-1", "Morning", nil,
+			now, now.Add(4*time.Hour), 180, "proctor_start", "none", 1, nil, nil, nil, false, false, "scheduled",
+			now, "admin", now, 0, "reading-writing",
+		))
+
+	schedule, err := loadSessionSchedule(context.Background(), db, "sched-1")
+	if err != nil {
+		t.Fatalf("loadSessionSchedule must succeed: %v", err)
+	}
+	if schedule.PublishScope != "reading-writing" {
+		t.Fatalf("session schedule must carry its immutable version scope, got %q", schedule.PublishScope)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

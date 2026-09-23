@@ -57,6 +57,8 @@ export interface SatAnnotationPlacementOptions {
    * roomier budget, because a finger needs more than a cursor does.
    */
   touch?: boolean | undefined;
+  /** Logical-to-viewport scale of the exam plane containing this surface. */
+  visualScale?: number | undefined;
 }
 
 /**
@@ -100,6 +102,7 @@ export function useSatAnnotationPlacement(
   const frameRef = useRef<number | null>(null);
   const settleRef = useRef<number | null>(null);
   const touch = options.touch === true;
+  const visualScale = options.visualScale ?? 1;
 
   /** Take a decision as final: it is what the student sees from now on. */
   const reveal = useCallback((next: SelectionMenuPlacement) => {
@@ -125,7 +128,7 @@ export function useSatAnnotationPlacement(
   }, []);
 
   const measure = useCallback(() => {
-    const measurement = measureSatAnnotation(containerRef.current, anchor);
+    const measurement = measureSatAnnotation(containerRef.current, anchor, visualScale);
     const budgets = readSatAnnotationBudgets();
 
     if (!anchor) {
@@ -170,7 +173,7 @@ export function useSatAnnotationPlacement(
       touch,
       budgets,
     }));
-  }, [anchor, armRemeasure, reveal, settleCapMs, touch]);
+  }, [anchor, armRemeasure, reveal, settleCapMs, touch, visualScale]);
 
   // The settle timer outlives any single subscription: a rotation wait must not
   // be cancelled by a re-render, and when it ends it has to place the selection

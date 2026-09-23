@@ -3,6 +3,7 @@ import { Dialog } from "radix-ui";
 import { X } from "lucide-react";
 import { satOverlayZClass, type SatOverlayLayer } from "./satOverlayZ";
 import { SatContrastContext } from "../reading/SatContrastContext";
+import { useSatExamZoom } from "../zoom/SatExamZoomContext";
 
 export interface SatCenterModalProps {
   open: boolean;
@@ -37,6 +38,7 @@ export interface SatCenterModalProps {
  */
 export function SatCenterModal(props: SatCenterModalProps) {
   const contrast = useContext(SatContrastContext);
+  const { examOverlayRoot } = useSatExamZoom();
   const closeRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const layer = props.layer ?? "helpModal";
@@ -70,7 +72,7 @@ export function SatCenterModal(props: SatCenterModalProps) {
 
   return (
     <Dialog.Root open={props.open} onOpenChange={handleOpenChange}>
-      <Dialog.Portal>
+      <Dialog.Portal container={examOverlayRoot ?? undefined}>
         <Dialog.Overlay
           className={
             props.overlayClassName ??
@@ -86,7 +88,7 @@ export function SatCenterModal(props: SatCenterModalProps) {
           }}
           className={
             props.contentClassName ??
-            `sat-ui fixed left-1/2 top-1/2 ${layerClass} flex max-h-[min(740px,calc(100vh-80px))] ${props.wide ? "w-[min(650px,calc(100vw-32px))]" : "w-[min(560px,calc(100vw-32px))]"} -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-modal-bg)] text-[var(--sat-text)] shadow-[var(--sat-shadow-modal)]`
+            `sat-ui fixed left-1/2 top-1/2 ${layerClass} flex max-h-[min(740px,calc(var(--sat-exam-logical-height,100dvh)-80px))] ${props.wide ? "w-[min(650px,calc(var(--sat-exam-logical-width,100vw)-32px))]" : "w-[min(560px,calc(var(--sat-exam-logical-width,100vw)-32px))]"} -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-modal-bg)] text-[var(--sat-text)] shadow-[var(--sat-shadow-modal)]`
           }
         >
           <div className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--sat-divider-soft)] px-7">

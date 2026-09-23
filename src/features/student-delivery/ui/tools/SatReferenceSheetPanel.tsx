@@ -29,6 +29,7 @@ import {
   readSatToolSafeArea,
   readSatToolViewport,
 } from "./satToolPlacementRuntime";
+import { useSatExamZoom } from "../zoom/SatExamZoomContext";
 import {
   SAT_REFERENCE_VIEWPORT_FALLBACK_HEIGHT,
   SAT_REFERENCE_VIEWPORT_FALLBACK_WIDTH,
@@ -222,6 +223,7 @@ export function SatReferenceSheetPanel({
   moduleAttemptId = "debug-module",
   onClose,
 }: SatReferenceSheetPanelProps) {
+  const { viewportToLogicalLength } = useSatExamZoom();
   const geometryKey = satToolGeometryKey(scheduleId, attemptId, moduleAttemptId, "reference");
   const viewKey = satReferenceViewKey(scheduleId, attemptId, moduleAttemptId);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -246,11 +248,11 @@ export function SatReferenceSheetPanel({
   const defaultGeometry = useMemo<SatToolGeometry>(() => {
     if (typeof window === "undefined") return fallbackSatReferenceGeometry();
     try {
-      return defaultSatReferenceGeometry(readSatToolViewport(), readSatToolSafeArea());
+      return defaultSatReferenceGeometry(readSatToolViewport(viewportToLogicalLength), readSatToolSafeArea());
     } catch {
       return fallbackSatReferenceGeometry();
     }
-  }, []);
+  }, [viewportToLogicalLength]);
   const initialStageSize = useMemo(
     () => ({
       w: defaultGeometry.w,
@@ -293,7 +295,7 @@ export function SatReferenceSheetPanel({
     setCollapsed((current) => (current === restored.collapsed ? current : restored.collapsed));
     if (open && typeof window !== "undefined") {
       try {
-        const viewport = readSatToolViewport();
+        const viewport = readSatToolViewport(viewportToLogicalLength);
         const safeArea = readSatToolSafeArea();
         const savedGeom = loadSatToolGeometry(geometryKey);
         if (savedGeom) {
@@ -338,7 +340,7 @@ export function SatReferenceSheetPanel({
         applyScroll();
       }
     }
-  }, [viewKey, open, geometryKey, stage.w, stageH]);
+  }, [viewKey, open, geometryKey, stage.w, stageH, viewportToLogicalLength]);
 
   // R-04 Step 6.5 — collapse toggle: the panel is the controller (replaces
   // the R-03 local useState path — the primitive's externallyControlled
@@ -449,7 +451,7 @@ export function SatReferenceSheetPanel({
       frame = schedule(() => {
         frame = null;
         try {
-          const viewport = readSatToolViewport();
+          const viewport = readSatToolViewport(viewportToLogicalLength);
           const safeArea = readSatToolSafeArea();
           const current = loadSatToolGeometry(geometryKey);
           if (!current) return;
@@ -469,7 +471,7 @@ export function SatReferenceSheetPanel({
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [open, viewKey, geometryKey]);
+  }, [open, viewKey, geometryKey, viewportToLogicalLength]);
 
   // The primitive's own geometry state is the commit surface (its dialog
   // node carries left/top/width/height in style); this observer mirrors its
@@ -568,7 +570,7 @@ export function SatReferenceSheetPanel({
   const referenceMaxSize = useMemo<{ w: number; h: number }>(() => {
     if (typeof window === "undefined") return resolveSatToolMaxSize("reference", { w: 1248, h: 602 });
     try {
-      const viewport = readSatToolViewport();
+      const viewport = readSatToolViewport(viewportToLogicalLength);
       const safeArea = readSatToolSafeArea();
       return resolveSatToolMaxSize("reference", {
         w: viewport.w - safeArea.left - safeArea.right,
@@ -577,7 +579,7 @@ export function SatReferenceSheetPanel({
     } catch {
       return resolveSatToolMaxSize("reference", { w: 1248, h: 602 });
     }
-  }, []);
+  }, [viewportToLogicalLength]);
   // R-07 Step 4 — overflow-hidden-at-fit switch via the exported pure
   // fn (no scale duplication): fit = satRefFitScale(w, 1, h),
   // render = satRefFitScale(w, zoom, h). At fit (render <= fit + epsilon)

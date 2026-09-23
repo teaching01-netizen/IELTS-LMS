@@ -198,11 +198,13 @@ describe("Wave B R-10/R-17 token swap is size-preserving", () => {
     "shell/SatTimerWarning.tsx",
     "shell/SatReadingPopover.tsx",
     "annotations/SatNotesColumn.tsx",
-    "transitions/SatDirectionsScreen.tsx",
+    "transitions/SatPreStartScreen.tsx",
+    "transitions/SatEntryRecoveryScreen.tsx",
+    "break/SatScheduledBreakScreen.tsx",
     "shell/SatQuestionNavigator.tsx",
   ];
 
-  it("no text-[13/14/15/18px] literals remain in the six Wave B files", () => {
+  it("no text-[13/14/15/18px] literals remain in the Wave B files", () => {
     for (const file of scoped) {
       const source = read(file);
       expect(source, file).not.toContain("text-[13px]");
@@ -232,8 +234,7 @@ describe("Wave B R-10/R-17 token swap is size-preserving", () => {
         expect(source, file + " " + literal).toContain("scale-exception");
       }
     }
-    // Spot pins: 30px directions H1, 22px warning clock, 12px display subtitle/output.
-    expect(read("transitions/SatDirectionsScreen.tsx")).toContain("text-[30px]");
+    // Spot pins: 22px warning clock and 12px display subtitle/output.
     expect(read("shell/SatTimerWarning.tsx")).toContain("text-[22px]");
     expect(read("shell/SatReadingPopover.tsx")).toContain("text-[12px]");
   });

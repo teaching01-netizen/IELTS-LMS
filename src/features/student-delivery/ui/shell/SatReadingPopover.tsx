@@ -58,8 +58,8 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
       triggerRef={triggerRef}
       onClose={onClose}
       closeLabel={SAT_COPY.displaySettings.close}
-      anchoredClassName="sat-ui sat-popover-anchored fixed right-[calc(1rem+var(--student-safe-right))] top-[calc(var(--student-safe-top)+98px)] z-[84] w-[320px] max-h-[calc(100dvh-140px)] overflow-y-auto rounded-[8px] border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
-      compactClassName="sat-ui w-full max-w-[520px] max-h-[calc(100dvh-16px)] overflow-y-auto rounded-t-[14px] border border-b-0 border-[var(--sat-divider)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
+      anchoredClassName="sat-ui sat-popover-anchored fixed right-[calc(1rem+var(--student-safe-right))] top-[calc(var(--student-safe-top)+98px)] z-[84] w-[320px] max-h-[calc(var(--sat-exam-logical-height,100dvh)-140px)] overflow-y-auto rounded-[8px] border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
+      compactClassName="sat-ui w-full max-w-[520px] max-h-[calc(var(--sat-exam-logical-height,100dvh)-16px)] overflow-y-auto rounded-t-[14px] border border-b-0 border-[var(--sat-divider)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
       backdropClassName="sat-dialog-backdrop fixed inset-0 z-[83] flex items-end justify-center bg-black/20"
     >
       <div className="px-4 pb-2 pt-1">

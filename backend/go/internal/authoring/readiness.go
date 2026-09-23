@@ -650,8 +650,8 @@ func validateSATPublishQuestion(row questionValidationRow) []ValidationIssue {
 	return out
 }
 
-func (s *Service) validateSATExam(ctx context.Context, shell Shell, rep ValidationReport) (ValidationReport, error) {
-	issues, err := satpublish.ValidateDraft(ctx, s.db, shell.VersionID)
+func (s *Service) validateSATExam(ctx context.Context, shell Shell, rep ValidationReport, scope satpublish.Scope) (ValidationReport, error) {
+	issues, err := satpublish.ValidateDraftForScope(ctx, s.db, shell.VersionID, scope)
 	if err != nil {
 		return ValidationReport{}, err
 	}

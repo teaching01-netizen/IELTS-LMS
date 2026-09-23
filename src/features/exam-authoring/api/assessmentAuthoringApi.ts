@@ -25,6 +25,7 @@ import type {
   SatWorkbookUndoState,
   PublishedAssessmentVersion,
   PublishAssessmentRequest,
+  SatPublishScope,
   QuestionRevision,
   SaveQuestionRevisionFieldsRequest,
   SaveQuestionRevisionRequest,
@@ -223,9 +224,10 @@ export const assessmentAuthoringApi = {
     );
   },
 
-  validateExam(examId: string): Promise<AssessmentValidationReport> {
-    return backendPost<AssessmentValidationReport>(
-      `/v1/assessment-authoring/exams/${examId}/validate`
+  validateExam(examId: string, publishScope: SatPublishScope = "full"): Promise<AssessmentValidationReport> {
+    return backendPost<AssessmentValidationReport, { publishScope: SatPublishScope }>(
+      `/v1/assessment-authoring/exams/${examId}/validate`,
+      { publishScope }
     );
   },
 

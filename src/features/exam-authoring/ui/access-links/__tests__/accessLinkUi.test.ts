@@ -17,6 +17,7 @@ function linkWith(overrides: Partial<AssessmentAccessLink>): AssessmentAccessLin
     providerKey: "sat",
     publishedVersionId: "version-5",
     versionNumber: 5,
+    publishScope: "full",
     scheduleId: "schedule-1",
     name: "Saturday Class",
     audienceType: "cohort",

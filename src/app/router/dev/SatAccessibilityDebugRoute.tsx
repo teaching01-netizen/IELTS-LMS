@@ -10,6 +10,7 @@ import { SatQuestionRenderer } from "../../../features/student-delivery/ui/quest
 import { SatBlockingOverlay } from "../../../features/student-delivery/ui/feedback/SatControlFeedback";
 import { SatCalculatorPanel } from "../../../features/student-delivery/ui/tools/SatCalculatorPanel";
 import { SatReferenceSheetPanel } from "../../../features/student-delivery/ui/tools/SatReferenceSheetPanel";
+import { StudentExamInteractionScopeProvider } from "../../../shared/ui/touch-selection/StudentExamInteractionScope";
 
 const paragraph = (id: string, text: string) => ({
   version: 1 as const,
@@ -171,6 +172,8 @@ export function SatAccessibilityDebugRoute() {
    * something, and `?long=1` alone is the same page without it.
    */
   const autoFit = params.get("autoFit") === "1";
+  /** Opt into the student-owned touch gesture used by SAT live delivery. */
+  const ownedTouchSelection = params.get("ownedTouchSelection") === "1";
   const paused = params.get("paused") === "1";
   const initialTool =
     params.get("tool") === "calculator"
@@ -222,7 +225,7 @@ export function SatAccessibilityDebugRoute() {
   }));
 
   return (
-    <>
+    <StudentExamInteractionScopeProvider ownedTouchSelection={ownedTouchSelection}>
       {paused ? <SatBlockingOverlay note="Accessibility harness pause" /> : null}
       <SatExamShell
         sectionLabel={math ? "Section 2: Math" : "Section 1: Reading and Writing"}
@@ -313,6 +316,6 @@ export function SatAccessibilityDebugRoute() {
           />
         </>
       ) : null}
-    </>
+    </StudentExamInteractionScopeProvider>
   );
 }

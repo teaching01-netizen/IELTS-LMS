@@ -11,10 +11,10 @@ import (
 // scheduleProbeRows builds the 26-column session-schedule row with a
 // non-live status (pages then skip the runtime load: 2 queries total).
 func scheduleProbeRows() *sqlmock.Rows {
-	cols := []string{"id", "exam_id", "provider_key", "organization_id", "exam_title", "proctor_display_name", "grading_display_name", "published_version_id", "cohort_name", "institution", "start_time", "end_time", "planned_duration_minutes", "delivery_mode", "recurrence_type", "recurrence_interval", "recurrence_end_date", "buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop", "status", "created_at", "created_by", "updated_at", "revision"}
+	cols := []string{"id", "exam_id", "provider_key", "organization_id", "exam_title", "proctor_display_name", "grading_display_name", "published_version_id", "cohort_name", "institution", "start_time", "end_time", "planned_duration_minutes", "delivery_mode", "recurrence_type", "recurrence_interval", "recurrence_end_date", "buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop", "status", "created_at", "created_by", "updated_at", "revision", "publish_scope"}
 	now := time.Now().UTC()
 	return sqlmock.NewRows(cols).AddRow(
-		"sched-1", "exam-1", "ielts", nil, "Exam", "P", "G", "v-1", "cohort", nil, now, now, 60, "online", "none", 0, nil, nil, nil, false, false, "scheduled", now, "admin", now, 1,
+		"sched-1", "exam-1", "ielts", nil, "Exam", "P", "G", "v-1", "cohort", nil, now, now, 60, "online", "none", 0, nil, nil, nil, false, false, "scheduled", now, "admin", now, 1, nil,
 	)
 }
 

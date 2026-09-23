@@ -3,6 +3,7 @@ import { CircleQuestionMark, Coffee, Keyboard, ScanLine } from "lucide-react";
 import { SAT_COPY } from "../../domain/satCopy";
 import { SAT_OVERLAY_Z, satOverlayZClass } from "../primitives/satOverlayZ";
 import { useSatMediaQuery } from "../useSatMediaQuery";
+import { SatExamOverlayPortal } from "../zoom/SatExamZoomContext";
 
 export interface SatMoreMenuProps {
   open: boolean;
@@ -145,6 +146,7 @@ export function SatMoreMenu(props: SatMoreMenuProps) {
 
   if (compact) {
     return (
+      <SatExamOverlayPortal>
       <div
         className="fixed inset-0 flex items-end justify-center bg-black/20"
         style={{ zIndex: SAT_OVERLAY_Z.moreMenu }}
@@ -154,8 +156,8 @@ export function SatMoreMenu(props: SatMoreMenuProps) {
       >
         {panel}
       </div>
+      </SatExamOverlayPortal>
     );
   }
-  return panel;
+  return <SatExamOverlayPortal>{panel}</SatExamOverlayPortal>;
 }
-

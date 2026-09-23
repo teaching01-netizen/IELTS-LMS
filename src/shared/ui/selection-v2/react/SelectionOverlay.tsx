@@ -118,6 +118,10 @@ function pressOn(event: Event, pressed: Element | null): SelectionHandlePointerE
 
 export interface SelectionOverlayProps {
   selection: SelectionOverlaySelection;
+  /** Scale for visible chrome in a product-owned visual space; measured rects stay viewport-based. */
+  visualScale?: number | undefined;
+  /** Physical-viewport portal root, when the product owns one. */
+  portalContainer?: HTMLElement | null | undefined;
   /** Accessible names for the two handle controls. */
   handleLabels?: { start: string; end: string } | undefined;
   /** Shown while a hold is claiming text or a handle is moving. */
@@ -126,6 +130,8 @@ export interface SelectionOverlayProps {
 
 export function SelectionOverlay({
   selection,
+  visualScale = 1,
+  portalContainer,
   handleLabels = { start: 'Adjust selection start', end: 'Adjust selection end' },
   loupe,
 }: SelectionOverlayProps) {
@@ -239,7 +245,7 @@ export function SelectionOverlay({
   if (!visible) return null;
 
   return (
-    <SelectionFloatingLayer open label="Selection">
+    <SelectionFloatingLayer open label="Selection" portalContainer={portalContainer}>
       <SelectionHighlight rects={selection.rects} />
 
       {selection.startHandle ? (
@@ -250,6 +256,7 @@ export function SelectionOverlay({
           // one stays settled instead of swelling along with it.
           held={selection.adjusting && selection.phase === 'adjusting-start'}
           snapRevision={snapRevision}
+          visualScale={visualScale}
         />
       ) : null}
       {selection.endHandle ? (
@@ -258,6 +265,7 @@ export function SelectionOverlay({
           label={handleLabels.end}
           held={selection.adjusting && selection.phase === 'adjusting-end'}
           snapRevision={snapRevision}
+          visualScale={visualScale}
         />
       ) : null}
 
@@ -268,6 +276,7 @@ export function SelectionOverlay({
           caretPoint={pointer.caret}
           snapRevision={snapRevision}
           sourceRef={loupe.sourceRef}
+          visualScale={visualScale}
         />
       ) : null}
     </SelectionFloatingLayer>

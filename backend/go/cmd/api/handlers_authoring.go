@@ -18,6 +18,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // observeAuthoringOp records authoring_operation_total{operation,outcome}
@@ -1000,7 +1001,16 @@ func authorValidateHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring service is unavailable."))
 			return
 		}
-		out, err := app.Authoring.ValidateExam(r.Context(), chi.URLParam(r, "examID"))
+		var req struct {
+			PublishScope string `json:"publishScope"`
+		}
+		if r.ContentLength != 0 {
+			if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
+				httpx.WriteError(w, r, err)
+				return
+			}
+		}
+		out, err := app.Authoring.ValidateExamForScope(r.Context(), chi.URLParam(r, "examID"), satpublish.Scope(req.PublishScope))
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

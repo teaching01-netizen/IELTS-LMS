@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, LoaderCircle, Rocket } from "lucide-react";
-import type { AssessmentAuthoringShell } from "../../contracts/assessment";
+import type { AssessmentAuthoringShell, SatPublishScope } from "../../contracts/assessment";
 import {
   MAX_PUBLISH_NOTES_LENGTH,
   candidateSecondsForSection,
@@ -18,12 +18,13 @@ interface PublishAssessmentDialogProps {
   blockerCount: number;
   warningCount: number;
   candidateSeconds: number;
+  publishScope: SatPublishScope;
   candidateEstimateStale: boolean;
   isPublishing: boolean;
   isUpdate: boolean;
   currentPublishedVersionNumber: number | null;
   onClose: () => void;
-  onConfirm: (publishNotes?: string) => Promise<void>;
+  onConfirm: (scope: SatPublishScope, publishNotes?: string) => Promise<void>;
 }
 
 export function PublishAssessmentDialog({
@@ -32,6 +33,7 @@ export function PublishAssessmentDialog({
   shell,
   blockerCount,
   candidateSeconds,
+  publishScope,
   candidateEstimateStale,
   isPublishing,
   isUpdate,
@@ -56,7 +58,7 @@ export function PublishAssessmentDialog({
     submittingRef.current = true;
     setLocalError(null);
     try {
-      await onConfirm(normalizePublishNotes(notes));
+      await onConfirm(publishScope, normalizePublishNotes(notes));
       onClose();
     } catch (error) {
       setLocalError(toUserFacingPublishError(error));
@@ -68,11 +70,11 @@ export function PublishAssessmentDialog({
   return (
     <AuthoringDialog
       open={open}
-      title={isUpdate ? `Publish changes to ${examTitle}?` : `Publish ${examTitle}?`}
+      title={`Publish ${publishScope === "full" ? "Full SAT" : publishScope === "math" ? "Math" : "Reading & Writing"}${publishScope === "full" ? "" : " only"}?`}
       description={
         isUpdate && currentPublishedVersionNumber
           ? `Students continue to receive Version ${currentPublishedVersionNumber} until this update is published.`
-          : "Students will receive this release until you publish a later update."
+          : `${examTitle} will be available to students in this release scope.`
       }
       onClose={onClose}
       closeDisabled={isPublishing}
@@ -97,19 +99,32 @@ export function PublishAssessmentDialog({
             <span className="font-semibold text-foreground">{formatDuration(candidateSeconds)}</span>
           </div>
           <div className="mt-3 border-t border-border pt-3">
-            {shell.sections.map((section) => (
+            {shell.sections
+              .filter((section) => publishScope === "full" || section.sectionKey === publishScope)
+              .map((section, index, sections) => (
               <div
                 key={section.id}
                 className="flex items-center justify-between gap-3 py-1.5 text-xs"
               >
                 <span className="text-muted-foreground">{section.title}</span>
                 <span className="font-semibold text-foreground">
-                  {formatDuration(candidateSecondsForSection(section))}
+                  {formatDuration(candidateSecondsForSection({
+                    ...section,
+                    breakAfterSeconds: index === sections.length - 1 ? 0 : section.breakAfterSeconds,
+                  }))}
                 </span>
               </div>
-            ))}
+              ))}
           </div>
         </div>
+
+        {publishScope !== "full" ? (
+          <div className="mt-4 rounded-2xl border border-border p-4 text-sm leading-6">
+            <p className="font-semibold text-foreground">Not included</p>
+            <p className="text-muted-foreground">{publishScope === "math" ? "Reading & Writing" : "Math"}</p>
+            <p className="mt-2 text-muted-foreground">Students using this release will only receive the selected section.</p>
+          </div>
+        ) : null}
 
         <div className="mt-4 flex items-start gap-2 rounded-2xl border border-border p-4">
           {blockerCount === 0 ? (
@@ -178,7 +193,9 @@ export function PublishAssessmentDialog({
             ) : (
               <Rocket size={15} aria-hidden="true" />
             )}
-            {isPublishing ? "Publishing\u2026" : isUpdate ? "Publish Update" : "Publish"}
+            {isPublishing
+              ? "Publishing\u2026"
+              : `Publish ${publishScope === "full" ? "Full SAT" : publishScope === "math" ? "Math" : "Reading & Writing"}`}
           </button>
         </div>
       </div>

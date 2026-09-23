@@ -37,7 +37,7 @@ export function SatUnscheduledBreakVeil(props: SatUnscheduledBreakVeilProps) {
       aria-modal="true"
       aria-label={SAT_COPY.unscheduledBreak.veilTitle}
       data-testid="sat-break-veil"
-      className={"sat-ui fixed inset-0 " + satOverlayZClass("breakVeil") + " grid place-items-center bg-[var(--sat-background)] px-6"}
+      className={"sat-ui pointer-events-auto fixed inset-0 " + satOverlayZClass("breakVeil") + " grid place-items-center bg-[var(--sat-background)] px-6"}
     >
       <div className="w-full max-w-[480px] text-center">
         <p className="flex items-center justify-center gap-2 text-[15px] font-semibold text-[var(--sat-text-secondary)]">

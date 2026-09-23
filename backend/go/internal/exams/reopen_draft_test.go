@@ -41,12 +41,12 @@ func TestReopenDraftHealsOrphanDraftExam(t *testing.T) {
 			"id", "slug", "title", "provider_key", "provider_exam_type",
 			"exam_type", "status", "visibility", "organization_id", "owner_id",
 			"current_draft_version_id", "current_published_version_id",
-			"schema_version", "revision", "created_at", "updated_at",
+			"schema_version", "revision", "created_at", "updated_at", "current_published_scope",
 		}).AddRow(
 			"exam-orphan", "orphan", "Orphan Exam", "ielts", nil,
 			"Academic", "draft", "organization", nil, "owner-1",
 			nil, nil,
-			1, 0, time.Now(), time.Now(),
+			1, 0, time.Now(), time.Now(), nil,
 		))
 	// No surviving versions.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE exam_id = ?")).
@@ -72,12 +72,12 @@ func TestReopenDraftHealsOrphanDraftExam(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "exam_id", "version_number", "parent_version_id",
 			"content_snapshot", "config_snapshot", "validation_snapshot",
-			"created_by", "publish_notes", "is_draft", "is_published",
+			"created_by", "publish_notes", "sat_publish_scope", "is_draft", "is_published",
 			"revision", "created_at",
 		}).AddRow(
 			"ver-new", "exam-orphan", 1, nil,
 			"{}", "{}", nil,
-			"actor-1", nil, true, false,
+			"actor-1", nil, nil, true, false,
 			0, time.Now(),
 		))
 	mock.ExpectCommit()
@@ -115,12 +115,12 @@ func TestReopenDraftClonesPublishedSnapshot(t *testing.T) {
 			"id", "slug", "title", "provider_key", "provider_exam_type",
 			"exam_type", "status", "visibility", "organization_id", "owner_id",
 			"current_draft_version_id", "current_published_version_id",
-			"schema_version", "revision", "created_at", "updated_at",
+			"schema_version", "revision", "created_at", "updated_at", "current_published_scope",
 		}).AddRow(
 			"exam-sealed", "sealed", "Sealed Exam", "ielts", nil,
 			"Academic", "published", "organization", nil, "owner-1",
 			nil, "ver-pub",
-			1, 7, time.Now(), time.Now(),
+			1, 7, time.Now(), time.Now(), "reading-writing",
 		))
 	// Latest surviving version is the published seal; reuse its snapshots.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE exam_id = ?")).
@@ -146,12 +146,12 @@ func TestReopenDraftClonesPublishedSnapshot(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "exam_id", "version_number", "parent_version_id",
 			"content_snapshot", "config_snapshot", "validation_snapshot",
-			"created_by", "publish_notes", "is_draft", "is_published",
+			"created_by", "publish_notes", "sat_publish_scope", "is_draft", "is_published",
 			"revision", "created_at",
 		}).AddRow(
 			"ver-new", "exam-sealed", 4, "ver-pub",
 			string(content), string(config), nil,
-			"actor-1", nil, true, false,
+			"actor-1", nil, nil, true, false,
 			0, time.Now(),
 		))
 	mock.ExpectCommit()
@@ -185,24 +185,24 @@ func TestReopenDraftReturnsExistingDraft(t *testing.T) {
 			"id", "slug", "title", "provider_key", "provider_exam_type",
 			"exam_type", "status", "visibility", "organization_id", "owner_id",
 			"current_draft_version_id", "current_published_version_id",
-			"schema_version", "revision", "created_at", "updated_at",
+			"schema_version", "revision", "created_at", "updated_at", "current_published_scope",
 		}).AddRow(
 			"exam-live", "live", "Live Exam", "ielts", nil,
 			"Academic", "draft", "organization", nil, "owner-1",
 			"ver-live", nil,
-			1, 1, time.Now(), time.Now(),
+			1, 1, time.Now(), time.Now(), nil,
 		))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id = ?")).
 		WithArgs("ver-live").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "exam_id", "version_number", "parent_version_id",
 			"content_snapshot", "config_snapshot", "validation_snapshot",
-			"created_by", "publish_notes", "is_draft", "is_published",
+			"created_by", "publish_notes", "sat_publish_scope", "is_draft", "is_published",
 			"revision", "created_at",
 		}).AddRow(
 			"ver-live", "exam-live", 2, nil,
 			"{}", "{}", nil,
-			"owner-1", nil, true, false,
+			"owner-1", nil, nil, true, false,
 			5, time.Now(),
 		))
 	mock.ExpectCommit()

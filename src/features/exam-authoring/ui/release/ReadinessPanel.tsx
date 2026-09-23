@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw } from "lucide-react";
-import type { AssessmentValidationIssue, AssessmentValidationReport } from "../../contracts/assessment";
+import type { AssessmentValidationIssue, AssessmentValidationReport, SatPublishScope } from "../../contracts/assessment";
 import {
   getSATPublishBlockers,
   SAT_PUBLISH_READINESS_FAMILIES,
@@ -10,6 +10,7 @@ import { releaseDisabledButtonClass, releaseSurfaceClass, readinessToneClass } f
 
 interface ReadinessPanelProps {
   readiness: AssessmentValidationReport | null;
+  publishScope?: SatPublishScope;
   isChecking: boolean;
   error: string | null;
   staleBanner: string | null;
@@ -20,6 +21,7 @@ interface ReadinessPanelProps {
 
 export function ReadinessPanel({
   readiness,
+  publishScope = "full",
   isChecking,
   error,
   staleBanner,
@@ -44,8 +46,9 @@ export function ReadinessPanel({
             Release checks
           </h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Checks are evaluated by the SAT provider against the exact draft revision shown on
-            this page.
+            {publishScope === "full"
+              ? "Checks cover both SAT sections for the exact draft revision shown on this page."
+              : `Checks cover ${publishScope === "math" ? "Math" : "Reading & Writing"} for the exact draft revision shown on this page. Excluded-section issues do not block this release.`}
           </p>
         </div>
         {readOnlyPassedLabel ? null : (

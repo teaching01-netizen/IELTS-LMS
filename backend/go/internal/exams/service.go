@@ -153,42 +153,44 @@ func NewService(db *sql.DB, runner *tx.Runner) *Service {
 // Exam is the list/detail row mirrored from ExamEntity (camelCase wire shape
 // is the handler's job; this struct keeps snake parity with columns).
 type Exam struct {
-	ID                      string    `json:"id"`
-	Slug                    string    `json:"slug"`
-	Title                   string    `json:"title"`
-	ProviderKey             string    `json:"providerKey"`
-	ProviderExamType        *string   `json:"providerExamType,omitempty"`
-	ExamType                string    `json:"examType"`
-	Status                  string    `json:"status"`
-	Visibility              string    `json:"visibility"`
-	OrganizationID          *string   `json:"organizationId,omitempty"`
-	OwnerID                 string    `json:"ownerId"`
-	CurrentDraftVersionID   *string   `json:"currentDraftVersionId,omitempty"`
-	CurrentPublishedVersion *string   `json:"currentPublishedVersionId,omitempty"`
-	SchemaVersion           int       `json:"schemaVersion"`
-	Revision                int       `json:"revision"`
-	CreatedAt               time.Time `json:"createdAt"`
-	UpdatedAt               time.Time `json:"updatedAt"`
-	CanEdit                 bool      `json:"canEdit"`
-	CanPublish              bool      `json:"canPublish"`
-	CanDelete               bool      `json:"canDelete"`
+	ID                      string           `json:"id"`
+	Slug                    string           `json:"slug"`
+	Title                   string           `json:"title"`
+	ProviderKey             string           `json:"providerKey"`
+	ProviderExamType        *string          `json:"providerExamType,omitempty"`
+	ExamType                string           `json:"examType"`
+	Status                  string           `json:"status"`
+	Visibility              string           `json:"visibility"`
+	OrganizationID          *string          `json:"organizationId,omitempty"`
+	OwnerID                 string           `json:"ownerId"`
+	CurrentDraftVersionID   *string          `json:"currentDraftVersionId,omitempty"`
+	CurrentPublishedVersion *string          `json:"currentPublishedVersionId,omitempty"`
+	CurrentPublishedScope   *SATPublishScope `json:"currentPublishedScope,omitempty"`
+	SchemaVersion           int              `json:"schemaVersion"`
+	Revision                int              `json:"revision"`
+	CreatedAt               time.Time        `json:"createdAt"`
+	UpdatedAt               time.Time        `json:"updatedAt"`
+	CanEdit                 bool             `json:"canEdit"`
+	CanPublish              bool             `json:"canPublish"`
+	CanDelete               bool             `json:"canDelete"`
 }
 
 // Version is the exam_versions row projection used by ListVersions.
 type Version struct {
-	ID            string          `json:"id"`
-	ExamID        string          `json:"examId"`
-	VersionNumber int             `json:"versionNumber"`
-	ParentVersion *string         `json:"parentVersionId,omitempty"`
-	Content       json.RawMessage `json:"contentSnapshot"`
-	Config        json.RawMessage `json:"configSnapshot"`
-	Validation    json.RawMessage `json:"validationSnapshot,omitempty"`
-	CreatedAt     time.Time       `json:"createdAt"`
-	CreatedBy     string          `json:"createdBy"`
-	PublishNotes  *string         `json:"publishNotes,omitempty"`
-	IsDraft       bool            `json:"isDraft"`
-	IsPublished   bool            `json:"isPublished"`
-	Revision      int             `json:"revision"`
+	ID            string           `json:"id"`
+	ExamID        string           `json:"examId"`
+	VersionNumber int              `json:"versionNumber"`
+	ParentVersion *string          `json:"parentVersionId,omitempty"`
+	Content       json.RawMessage  `json:"contentSnapshot"`
+	Config        json.RawMessage  `json:"configSnapshot"`
+	Validation    json.RawMessage  `json:"validationSnapshot,omitempty"`
+	CreatedAt     time.Time        `json:"createdAt"`
+	CreatedBy     string           `json:"createdBy"`
+	PublishNotes  *string          `json:"publishNotes,omitempty"`
+	PublishScope  *SATPublishScope `json:"publishScope,omitempty"`
+	IsDraft       bool             `json:"isDraft"`
+	IsPublished   bool             `json:"isPublished"`
+	Revision      int              `json:"revision"`
 }
 
 // Event is one exam_events audit row.
@@ -213,6 +215,7 @@ type ValidationIssue struct {
 // ValidationReport mirrors ExamValidationSummary for the publish gate.
 type ValidationReport struct {
 	ExamID         string            `json:"examId"`
+	PublishScope   SATPublishScope   `json:"publishScope"`
 	DraftVersionID *string           `json:"draftVersionId,omitempty"`
 	CanPublish     bool              `json:"canPublish"`
 	Errors         []ValidationIssue `json:"errors"`
@@ -253,6 +256,7 @@ type SaveDraftRequest struct {
 // release instead of sealing a second published version.
 type PublishRequest struct {
 	PublishNotes           *string
+	PublishScope           SATPublishScope
 	Revision               int
 	ExpectedDraftVersionID *string
 	ExpectedDraftRevision  *int
@@ -293,14 +297,14 @@ func claimPublishOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, f
 	return storedResult, false, nil
 }
 
-const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at"
+const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id)"
 
 func scanExam(row interface {
 	Scan(dest ...any) error
 }) (Exam, error) {
 	var e Exam
-	var providerExamType, orgID, draftID, pubID sql.NullString
-	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	var providerExamType, orgID, draftID, pubID, publishedScope sql.NullString
+	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope); err != nil {
 		return Exam{}, err
 	}
 	if providerExamType.Valid {
@@ -318,6 +322,11 @@ func scanExam(row interface {
 	if pubID.Valid {
 		v := pubID.String
 		e.CurrentPublishedVersion = &v
+		scope := SATPublishScopeFull
+		if publishedScope.Valid && strings.TrimSpace(publishedScope.String) != "" {
+			scope = SATPublishScope(publishedScope.String)
+		}
+		e.CurrentPublishedScope = &scope
 	}
 	return e, nil
 }
@@ -799,10 +808,14 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 	if normalizedKey != "" && len(normalizedKey) > 128 {
 		return Version{}, validationError("operationKey must contain between 1 and 128 characters.")
 	}
+	requestedScope, err := satpublish.NormalizeScope(req.PublishScope)
+	if err != nil {
+		return Version{}, validationError(err.Error())
+	}
 	publishScope := "publish:" + examID
 	var publishFingerprint string
 	if normalizedKey != "" {
-		raw, err := json.Marshal(map[string]any{"exam": examID, "rev": req.Revision, "draft": req.ExpectedDraftVersionID, "draftRev": req.ExpectedDraftRevision, "notes": req.PublishNotes})
+		raw, err := json.Marshal(map[string]any{"exam": examID, "rev": req.Revision, "draft": req.ExpectedDraftVersionID, "draftRev": req.ExpectedDraftRevision, "notes": req.PublishNotes, "scope": requestedScope})
 		if err != nil {
 			return Version{}, err
 		}
@@ -811,7 +824,7 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 		sum := sha256.Sum256(raw)
 		publishFingerprint = fmt.Sprintf("%x", sum[:])
 	}
-	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err = s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if normalizedKey != "" {
 			replay, claimed, err := claimPublishOperationKey(ctx, q, actorID, publishScope, normalizedKey, publishFingerprint)
 			if err != nil {
@@ -874,7 +887,7 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 			}
 		}
 		if provider == ProviderSAT {
-			issues, err := satpublish.ValidateDraft(ctx, q, draftID)
+			issues, err := satpublish.ValidateDraftForScope(ctx, q, draftID, requestedScope)
 			if err != nil {
 				return err
 			}
@@ -885,7 +898,11 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 				return rejection
 			}
 		}
-		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET is_draft = FALSE, is_published = TRUE, publish_notes = ?, revision = revision + 1 WHERE id = ?", nullableStrPtr(req.PublishNotes), draftID); err != nil {
+		var persistedScope any
+		if provider == ProviderSAT {
+			persistedScope = string(requestedScope)
+		}
+		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET is_draft = FALSE, is_published = TRUE, publish_notes = ?, sat_publish_scope = ?, revision = revision + 1 WHERE id = ?", nullableStrPtr(req.PublishNotes), persistedScope, draftID); err != nil {
 			return err
 		}
 		// The entity and draft remain locked until both publication pointers commit.
@@ -1110,11 +1127,19 @@ func (s *Service) ListEvents(ctx context.Context, examID string) ([]Event, error
 // publish-gate report. SAT uses the normalized four-rule publish contract;
 // ACT science sections are allow-listed here.
 func (s *Service) GetValidation(ctx context.Context, examID string) (ValidationReport, error) {
+	return s.GetValidationForScope(ctx, examID, SATPublishScopeFull)
+}
+
+func (s *Service) GetValidationForScope(ctx context.Context, examID string, scope SATPublishScope) (ValidationReport, error) {
+	normalizedScope, err := satpublish.NormalizeScope(scope)
+	if err != nil {
+		return ValidationReport{}, validationError(err.Error())
+	}
 	exam, err := s.Get(ctx, examID)
 	if err != nil {
 		return ValidationReport{}, err
 	}
-	rep := ValidationReport{Errors: []ValidationIssue{}, Warnings: []ValidationIssue{}, ValidatedAt: time.Now().UTC(), ExamID: examID}
+	rep := ValidationReport{Errors: []ValidationIssue{}, Warnings: []ValidationIssue{}, ValidatedAt: time.Now().UTC(), ExamID: examID, PublishScope: normalizedScope}
 	if EffectiveProviderKey(exam.ProviderKey, exam.ExamType) == ProviderSAT {
 		if exam.CurrentDraftVersionID == nil {
 			rep.Errors = append(rep.Errors, ValidationIssue{Field: "contentSnapshot", Message: "Draft content is missing. Save a draft before publishing."})
@@ -1122,7 +1147,7 @@ func (s *Service) GetValidation(ctx context.Context, examID string) (ValidationR
 			return rep, nil
 		}
 		rep.DraftVersionID = exam.CurrentDraftVersionID
-		issues, err := satpublish.ValidateDraft(ctx, s.db, *exam.CurrentDraftVersionID)
+		issues, err := satpublish.ValidateDraftForScope(ctx, s.db, *exam.CurrentDraftVersionID, normalizedScope)
 		if err != nil {
 			return ValidationReport{}, err
 		}
@@ -1171,7 +1196,7 @@ func (s *Service) GetValidation(ctx context.Context, examID string) (ValidationR
 
 // ListVersions returns every version for an exam, newest first.
 func (s *Service) ListVersions(ctx context.Context, examID string) ([]Version, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, is_draft, is_published, revision, created_at FROM exam_versions WHERE exam_id = ? ORDER BY version_number DESC, created_at DESC", examID)
+	rows, err := s.db.QueryContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, sat_publish_scope, is_draft, is_published, revision, created_at FROM exam_versions WHERE exam_id = ? ORDER BY version_number DESC, created_at DESC", examID)
 	if err != nil {
 		return nil, err
 	}
@@ -1229,22 +1254,23 @@ func validateContentShape(contentStr, configStr, providerKey string) []Validatio
 // validation snapshot, without the heavy content/config snapshots.
 // It mirrors BuilderService::list_version_summaries (auth lives in handlers).
 type VersionSummary struct {
-	ID            string          `json:"id"`
-	ExamID        string          `json:"examId"`
-	VersionNumber int             `json:"versionNumber"`
-	ParentVersion *string         `json:"parentVersionId,omitempty"`
-	Validation    json.RawMessage `json:"validationSnapshot,omitempty"`
-	CreatedBy     string          `json:"createdBy"`
-	CreatedAt     time.Time       `json:"createdAt"`
-	PublishNotes  *string         `json:"publishNotes,omitempty"`
-	IsDraft       bool            `json:"isDraft"`
-	IsPublished   bool            `json:"isPublished"`
+	ID            string           `json:"id"`
+	ExamID        string           `json:"examId"`
+	VersionNumber int              `json:"versionNumber"`
+	ParentVersion *string          `json:"parentVersionId,omitempty"`
+	Validation    json.RawMessage  `json:"validationSnapshot,omitempty"`
+	CreatedBy     string           `json:"createdBy"`
+	CreatedAt     time.Time        `json:"createdAt"`
+	PublishNotes  *string          `json:"publishNotes,omitempty"`
+	PublishScope  *SATPublishScope `json:"publishScope,omitempty"`
+	IsDraft       bool             `json:"isDraft"`
+	IsPublished   bool             `json:"isPublished"`
 }
 
 // ListVersionSummaries returns the light summary rows for an exam, newest
 // first (mirrors list_version_summaries: exam_id = ? ORDER BY created_at DESC).
 func (s *Service) ListVersionSummaries(ctx context.Context, examID string) ([]VersionSummary, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(validation_snapshot AS CHAR), created_by, created_at, publish_notes, is_draft, is_published FROM exam_versions WHERE exam_id = ? ORDER BY created_at DESC", examID)
+	rows, err := s.db.QueryContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(validation_snapshot AS CHAR), created_by, created_at, publish_notes, sat_publish_scope, is_draft, is_published FROM exam_versions WHERE exam_id = ? ORDER BY created_at DESC", examID)
 	if err != nil {
 		return nil, err
 	}
@@ -1252,8 +1278,8 @@ func (s *Service) ListVersionSummaries(ctx context.Context, examID string) ([]Ve
 	var out []VersionSummary
 	for rows.Next() {
 		var v VersionSummary
-		var parent, validation, notes sql.NullString
-		if err := rows.Scan(&v.ID, &v.ExamID, &v.VersionNumber, &parent, &validation, &v.CreatedBy, &v.CreatedAt, &notes, &v.IsDraft, &v.IsPublished); err != nil {
+		var parent, validation, notes, publishScope sql.NullString
+		if err := rows.Scan(&v.ID, &v.ExamID, &v.VersionNumber, &parent, &validation, &v.CreatedBy, &v.CreatedAt, &notes, &publishScope, &v.IsDraft, &v.IsPublished); err != nil {
 			return nil, err
 		}
 		if parent.Valid {
@@ -1267,13 +1293,20 @@ func (s *Service) ListVersionSummaries(ctx context.Context, examID string) ([]Ve
 			n := notes.String
 			v.PublishNotes = &n
 		}
+		if publishScope.Valid {
+			scope := SATPublishScope(publishScope.String)
+			v.PublishScope = &scope
+		} else if v.IsPublished {
+			scope := SATPublishScopeFull
+			v.PublishScope = &scope
+		}
 		out = append(out, v)
 	}
 	return out, rows.Err()
 }
 
 func loadVersion(ctx context.Context, q tx.Tx, id string) (Version, error) {
-	row := q.QueryRowContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, is_draft, is_published, revision, created_at FROM exam_versions WHERE id = ?", id)
+	row := q.QueryRowContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, sat_publish_scope, is_draft, is_published, revision, created_at FROM exam_versions WHERE id = ?", id)
 	return scanVersion(row)
 }
 
@@ -1284,7 +1317,8 @@ func scanVersion(row interface {
 	var parent sql.NullString
 	var content, config, validation sql.NullString
 	var notes sql.NullString
-	if err := row.Scan(&v.ID, &v.ExamID, &v.VersionNumber, &parent, &content, &config, &validation, &v.CreatedBy, &notes, &v.IsDraft, &v.IsPublished, &v.Revision, &v.CreatedAt); err != nil {
+	var publishScope sql.NullString
+	if err := row.Scan(&v.ID, &v.ExamID, &v.VersionNumber, &parent, &content, &config, &validation, &v.CreatedBy, &notes, &publishScope, &v.IsDraft, &v.IsPublished, &v.Revision, &v.CreatedAt); err != nil {
 		return Version{}, err
 	}
 	if parent.Valid {
@@ -1303,6 +1337,13 @@ func scanVersion(row interface {
 	if notes.Valid {
 		n := notes.String
 		v.PublishNotes = &n
+	}
+	if publishScope.Valid {
+		scope := SATPublishScope(publishScope.String)
+		v.PublishScope = &scope
+	} else if v.IsPublished {
+		scope := SATPublishScopeFull
+		v.PublishScope = &scope
 	}
 	return v, nil
 }
