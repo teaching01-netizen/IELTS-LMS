@@ -830,8 +830,8 @@ describe("useStudentSessionRouteData backend mode", () => {
               activeSection: "reading",
               pollAfterSecs: 2,
             }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          ),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
         );
       }
       return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
@@ -849,11 +849,11 @@ describe("useStudentSessionRouteData backend mode", () => {
     await waitFor(
       () => {
         const liveCalls = fetchMock.mock.calls.filter(([calledUrl]) =>
-          String(calledUrl).includes("/live?candidateId="),
+          String(calledUrl).includes("/live?candidateId=")
         );
         expect(liveCalls.length).toBeGreaterThanOrEqual(2);
       },
-      { timeout: 3_000 },
+      { timeout: 3_000 }
     );
     await waitFor(() => {
       expect(result.current.attemptSnapshot?.revision).toBe(2);
@@ -1182,7 +1182,9 @@ describe("useStudentSessionRouteData backend mode", () => {
         return Promise.resolve(jsonResponse(satStatic));
       }
       if (url === "/api/v1/student/sessions/sched-1/live?candidateId=W250334") {
-        return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt("ver-9"), "ver-9")));
+        return Promise.resolve(
+          jsonResponse(buildLiveSessionContext(buildAttempt("ver-9"), "ver-9"))
+        );
       }
       return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt("ver-9"))));
     });
@@ -1213,7 +1215,7 @@ describe("useStudentSessionRouteData backend mode", () => {
     vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
     vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());
     global.fetch = vi.fn(() =>
-      Promise.resolve(jsonErrorResponse("Transient backend outage")),
+      Promise.resolve(jsonErrorResponse("Transient backend outage"))
     ) as typeof fetch;
 
     const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
@@ -1358,8 +1360,16 @@ describe("useStudentSessionRouteData backend mode", () => {
       // The reconnect gap closer: the client tells the server what it has.
       expect(socket.url).toContain("lastSeenRuntimeRevision=");
 
+      const liveFetchesBeforeSocketOpen = liveFetchCount(fetchMock);
       socket.open();
       await waitFor(() => expect(result.current.liveSocketConnected).toBe(true));
+
+      // Connecting schedules a debounced authoritative refresh. Let that
+      // request settle before taking the baseline so coverage-heavy CI cannot
+      // race it into the stale-frame assertions below.
+      await waitFor(() =>
+        expect(liveFetchCount(fetchMock)).toBeGreaterThan(liveFetchesBeforeSocketOpen)
+      );
 
       const baseline = liveFetchCount(fetchMock);
       socket.emit({
@@ -1380,12 +1390,22 @@ describe("useStudentSessionRouteData backend mode", () => {
       expect(liveFetchCount(fetchMock)).toBe(baseline);
 
       // A schedule_runtime frame AT the applied revision is a replay: ignored.
-      socket.emit({ kind: "schedule_runtime", id: "sched-1", revision: 42, event: "pause_runtime" });
+      socket.emit({
+        kind: "schedule_runtime",
+        id: "sched-1",
+        revision: 42,
+        event: "pause_runtime",
+      });
       expect(liveFetchCount(fetchMock)).toBe(baseline);
 
       // A newer transition refreshes immediately (the 500ms coalescer is for
       // answer bursts, not for the frame that opens the exam).
-      socket.emit({ kind: "schedule_runtime", id: "sched-1", revision: 43, event: "start_runtime" });
+      socket.emit({
+        kind: "schedule_runtime",
+        id: "sched-1",
+        revision: 43,
+        event: "start_runtime",
+      });
       await waitFor(() => expect(liveFetchCount(fetchMock)).toBe(baseline + 1));
     });
 
@@ -1417,11 +1437,16 @@ describe("useStudentSessionRouteData backend mode", () => {
       // Every later authoritative fetch answers with the older revision.
       fetchMock.mockResolvedValue(
         jsonResponse(
-          buildLiveSessionContext(buildAttempt(), "ver-1", { revision: 41, status: "live" }),
-        ),
+          buildLiveSessionContext(buildAttempt(), "ver-1", { revision: 41, status: "live" })
+        )
       );
       const baseline = liveFetchCount(fetchMock);
-      socket.emit({ kind: "schedule_runtime", id: "sched-1", revision: 43, event: "start_runtime" });
+      socket.emit({
+        kind: "schedule_runtime",
+        id: "sched-1",
+        revision: 43,
+        event: "start_runtime",
+      });
       await waitFor(() => expect(liveFetchCount(fetchMock)).toBe(baseline + 1));
       // Give the (discarded) payload a chance to land before asserting.
       await act(async () => {
@@ -1460,7 +1485,9 @@ describe("useStudentSessionRouteData backend mode", () => {
         const socket = MockSocket.instances[MockSocket.instances.length - 1]!;
         socket.open();
         await waitFor(() => expect(result.current.liveSocketConnected).toBe(true));
-        expect(captured.some((metric) => metric['name'] === "student_ws_connect_success")).toBe(true);
+        expect(captured.some((metric) => metric["name"] === "student_ws_connect_success")).toBe(
+          true
+        );
 
         // The server's reconnect snapshot is ahead of what the client held.
         socket.emit({
@@ -1469,13 +1496,15 @@ describe("useStudentSessionRouteData backend mode", () => {
           runtime: { ...buildRuntime(), revision: 42, status: "paused" },
         });
         await waitFor(() =>
-          expect(captured.some((metric) => metric['name'] === "runtime_revision_gap_on_reconnect")).toBe(
-            true,
-          ),
+          expect(
+            captured.some((metric) => metric["name"] === "runtime_revision_gap_on_reconnect")
+          ).toBe(true)
         );
-        const gap = captured.find((metric) => metric['name'] === "runtime_revision_gap_on_reconnect");
-        expect(typeof gap?.['revisionGap']).toBe("number");
-        expect(gap?.['revisionGap'] as number).toBeGreaterThan(0);
+        const gap = captured.find(
+          (metric) => metric["name"] === "runtime_revision_gap_on_reconnect"
+        );
+        expect(typeof gap?.["revisionGap"]).toBe("number");
+        expect(gap?.["revisionGap"] as number).toBeGreaterThan(0);
 
         // A runtime transition frame carries its commit instant.
         socket.emit({
@@ -1486,18 +1515,20 @@ describe("useStudentSessionRouteData backend mode", () => {
           createdAt: new Date(Date.now() - 120).toISOString(),
         });
         await waitFor(() =>
-          expect(captured.some((metric) => metric['name'] === "runtime_event_to_client_ms")).toBe(true),
+          expect(captured.some((metric) => metric["name"] === "runtime_event_to_client_ms")).toBe(
+            true
+          )
         );
-        const latency = captured.find((metric) => metric['name'] === "runtime_event_to_client_ms");
-        expect(latency?.['reason']).toBe("start_runtime");
-        expect(latency?.['latencyMs'] as number).toBeGreaterThanOrEqual(100);
+        const latency = captured.find((metric) => metric["name"] === "runtime_event_to_client_ms");
+        expect(latency?.["reason"]).toBe("start_runtime");
+        expect(latency?.["latencyMs"] as number).toBeGreaterThanOrEqual(100);
 
         // A drop after a healthy open is its own signal.
         socket.close();
         await waitFor(() =>
-          expect(captured.some((metric) => metric['name'] === "student_ws_disconnect_after_open")).toBe(
-            true,
-          ),
+          expect(
+            captured.some((metric) => metric["name"] === "student_ws_disconnect_after_open")
+          ).toBe(true)
         );
       } finally {
         window.removeEventListener("student-observability-metric", listener);
@@ -1533,9 +1564,7 @@ describe("useStudentSessionRouteData backend mode", () => {
           await vi.advanceTimersByTimeAsync(40_000);
         });
 
-        expect(
-          captured.some((metric) => metric['name'] === 'poll_fallback_activation'),
-        ).toBe(true);
+        expect(captured.some((metric) => metric["name"] === "poll_fallback_activation")).toBe(true);
       } finally {
         window.removeEventListener("student-observability-metric", listener);
         vi.useRealTimers();
