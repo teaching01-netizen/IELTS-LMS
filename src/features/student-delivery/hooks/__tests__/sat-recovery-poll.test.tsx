@@ -356,7 +356,7 @@ describe("SAT shared clock under a cohort pause", () => {
 
   // The deadline hook's `running` flag and the personal countdown now read the
   // same rule (satSharedClockRunning). A paused stage must freeze BOTH clocks so
-  // a planned pause drill cannot drain a section to zero and auto-submit.
+  // a planned pause drill cannot drain a section to zero and trigger timeout finalization.
   it("freezes the shared clock on a paused stage and never submits", async () => {
     gatewayMocks.bootstrap.mockResolvedValue(deliveryPayload({ stageStatus: "paused" }));
     const hook = mount(true);

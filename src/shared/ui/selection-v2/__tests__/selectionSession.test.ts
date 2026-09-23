@@ -208,6 +208,28 @@ describe('a body gesture selects whole words', () => {
  * across an inline boundary). None of those strings may appear.
  */
 describe('a drag across a node boundary keeps the run word-granular', () => {
+  it('clamps a product-bounded run and its moving endpoint to the starting text block', () => {
+    const first = textNode('alpha beta');
+    const second = textNode('gamma delta');
+    const boundary = first.parentElement!;
+    const session = newSession('drag');
+
+    session.press({
+      pointerId: 1,
+      pointerType: 'touch',
+      x: 0,
+      y: 0,
+      point: { node: first, offset: 7 },
+      boundaryFor: () => boundary,
+    });
+    session.move({ pointerId: 1, x: 40, y: 0, point: { node: second, offset: 4 } });
+
+    expect(session.range()?.toString()).toBe('beta');
+    expect(boundary.contains(session.range()!.startContainer)).toBe(true);
+    expect(boundary.contains(session.range()!.endContainer)).toBe(true);
+    expect(session.movingEndpoint()).toEqual({ node: first, offset: first.length });
+  });
+
   it('spans two paragraphs, in both directions, and survives the release', () => {
     const first = textNode('alpha beta');
     const second = textNode('gamma delta');

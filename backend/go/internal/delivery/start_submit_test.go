@@ -224,3 +224,39 @@ func TestDeliverySubmitModuleNotActive(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDeliverySubmitModuleDisabledBeforeDeadline(t *testing.T) {
+	for _, state := range []string{"active", "review"} {
+		t.Run(state, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			svc := deliverySvc(db)
+			now := time.Now().UTC()
+			deliverySaveBinding(mock)
+			deliveryReconcileDrained(mock)
+			deliverySaveBegin(mock)
+			deliveryModuleWorkableTx(mock)
+			deliveryModuleRow(mock, state, now.Add(-time.Minute))
+			deliveryLegacyGate(mock)
+			mock.ExpectRollback()
+
+			_, err = svc.SubmitModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
+			appErr, ok := apperrors.As(err)
+			if !ok || appErr.Code != apperrors.CodeAssessmentConflict {
+				t.Fatalf("expected ASSESSMENT_CONFLICT, got %v", err)
+			}
+			if appErr.HTTPStatus != 409 || appErr.Details["reason"] != "STUDENT_MODULE_SUBMIT_DISABLED" {
+				t.Fatalf("unexpected compatibility conflict: %+v", appErr)
+			}
+			if appErr.Message != "SAT modules close automatically when the authoritative time ends." {
+				t.Fatalf("unexpected conflict message %q", appErr.Message)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

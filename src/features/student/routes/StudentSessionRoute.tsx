@@ -8,6 +8,8 @@ import { SatStudentSessionRoute } from '../../student-delivery/routes/SatStudent
 import { SatLoadingSurface } from '../../student-delivery/api/satStateSurfaces';
 import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 import { StudentTouchSelectionDiagnosticsProvider } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
+import { clearSatResumeLocator, loadSatResumeLocator, saveSatResumeLocator } from '../../student-delivery/infrastructure/satResumeLocator';
+import { getVerifiedTerminalState } from '../domain/exam-session/terminalState';
 
 /**
  * Student Session Route
@@ -47,7 +49,32 @@ export function StudentSessionRoute() {
   } =
     useStudentSessionRouteData(scheduleId, studentId);
 
+  React.useEffect(() => {
+    if (providerKey !== 'sat' || !scheduleId || !attemptSnapshot?.id || !attemptSnapshot.candidateId) return;
+    const terminal = getVerifiedTerminalState({ attempt: attemptSnapshot, runtime: runtimeSnapshot });
+    if (
+      terminal !== 'not_terminal' ||
+      attemptSnapshot.phase === 'post-exam' ||
+      attemptSnapshot.phase === 'submitted' ||
+      runtimeSnapshot?.status === 'completed' ||
+      runtimeSnapshot?.status === 'cancelled'
+    ) {
+      clearSatResumeLocator();
+      return;
+    }
+    const prior = loadSatResumeLocator();
+    saveSatResumeLocator({
+      scheduleId,
+      candidateId: attemptSnapshot.candidateId,
+      attemptId: attemptSnapshot.id,
+      ...(prior?.scheduleId === scheduleId && prior.candidateId === attemptSnapshot.candidateId && prior.accessLinkId
+        ? { accessLinkId: prior.accessLinkId }
+        : {}),
+    });
+  }, [attemptSnapshot, providerKey, runtimeSnapshot, scheduleId]);
+
   const navigateToStudentCheckIn = async () => {
+    clearSatResumeLocator();
     try {
       await logoutAll();
     } catch {

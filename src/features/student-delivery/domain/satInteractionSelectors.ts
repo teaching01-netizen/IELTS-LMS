@@ -33,11 +33,10 @@ export interface SatInteractionView {
   gate: 'interactive' | 'blocked' | 'terminal';
   surface: SatInteractionState['surface'];
   annotation: {
-    /** True while the student has armed annotation (selection may raise tools). */
+    /** True while the student has armed annotation (a selection may raise tools). */
     modeEnabled: boolean;
-    /** True while a live annotation selection exists (contextual toolbar up). */
-    hasSelection: boolean;
-    selection: SatInteractionState['annotation']['selection'];
+    /** The contextual toolbar anchor; the Selection v2 session owns the Range. */
+    selectionToolsAnchor: SatInteractionState['annotation']['selectionToolsAnchor'];
   };
 }
 
@@ -75,8 +74,7 @@ export function selectSatInteraction(
     surface: state.surface,
     annotation: {
       modeEnabled: state.annotation.modeEnabled,
-      hasSelection: state.annotation.selection !== null,
-      selection: state.annotation.selection,
+      selectionToolsAnchor: state.annotation.selectionToolsAnchor,
     },
   };
 }

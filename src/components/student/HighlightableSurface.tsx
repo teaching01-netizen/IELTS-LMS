@@ -39,13 +39,12 @@ export function HighlightableSurface({
   const innerHtml = useMemo(() => ({ __html: html }), [html]);
   // Gesture policy is NOT declared here — neither `user-select` nor
   // `touch-action`. Both are owned by the stylesheet (index.css), which is the
-  // only place that can also see whether a locked exam is active. A real student
-  // exam removes the platform's own selection under a coarse pointer and, while a
-  // highlight tool is armed, takes the drag itself (`touch-action: none`, keyed
-  // off the marker `useStudentSelectionGesture` sets on this element). An inline
-  // `auto` here would outrank both rules and leave the two authorities
-  // contradicting each other — which is precisely how the gesture got cancelled
-  // by the browser's own panning on a real device.
+  // only place that can also see whether a locked exam is active. A touch pointer
+  // on an enabled student exam surface sets the app-owner marker, which suppresses
+  // native selection; an armed highlight tool also declares `touch-action: none`
+  // before the gesture. Pointer media queries do not decide ownership. An inline
+  // `auto` here would outrank the stylesheet and let the browser take the gesture
+  // back with its own panning.
   const surfaceStyle: React.CSSProperties = {
     ...(highlightSelectionColor
       ? ({ ['--student-highlight-selection-color' as string]: highlightSelectionColor } as React.CSSProperties)

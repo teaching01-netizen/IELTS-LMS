@@ -182,6 +182,10 @@ function generateClientUuid(): string {
   return `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
 }
 
+export function createStudentClientSessionId(): string {
+  return generateClientUuid();
+}
+
 function getBrowserStorage(type: "localStorage" | "sessionStorage"): Storage | null {
   try {
     const owner:
@@ -958,7 +962,12 @@ function ensureClientSessionId(
   const local = getBrowserStorage("localStorage");
 
   const storageKey = getClientSessionStorageKey(scheduleId, studentKey);
-  const stored = session?.getItem(storageKey) ?? local?.getItem(storageKey) ?? null;
+  let stored: string | null = null;
+  try {
+    stored = session?.getItem(storageKey) ?? local?.getItem(storageKey) ?? null;
+  } catch {
+    // Writer identity storage is best-effort; denied storage gets a new id.
+  }
   if (stored && !forceNew) {
     try {
       session?.setItem(storageKey, stored);
@@ -1018,6 +1027,15 @@ export function ensureClientSessionIdForStudentKey(
   return ensureClientSessionId(scheduleId, studentKey, preferredClientSessionId);
 }
 
+/** Persist an identity supplied by student admission for the canonical writer key. */
+export function restoreClientSessionIdForStudentKey(
+  scheduleId: string,
+  studentKey: string,
+  clientSessionId: string,
+): string {
+  return ensureClientSessionId(scheduleId, studentKey, clientSessionId, true);
+}
+
 /** Canonical SAT writer-key derivation (single owner — defect 3). */
 export function satWriterStudentKey(scheduleId: string, candidateId: string): string {
   return `student-${scheduleId}-${candidateId}`;
@@ -1036,9 +1054,10 @@ export function restoreClientSessionIdForAttempt(
 }
 
 export async function refreshAttemptCredentialForAttempt(
-  attempt: StudentAttempt
+  attempt: StudentAttempt,
+  preferredClientSessionId?: string,
 ): Promise<boolean> {
-  const clientSessionId = ensureClientSessionIdForAttempt(attempt);
+  const clientSessionId = preferredClientSessionId ?? ensureClientSessionIdForAttempt(attempt);
   return refreshAttemptCredentialForAttemptFromAdapter(attempt, clientSessionId);
 }
 

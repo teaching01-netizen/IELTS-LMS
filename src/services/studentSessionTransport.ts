@@ -37,6 +37,7 @@ export interface StudentSessionTransport {
       candidateId: string,
       clientSessionId: string,
     ) => string;
+    resume: (scheduleId: string, clientSessionId?: string) => string;
     precheck: (scheduleId: string) => string;
     bootstrap: (scheduleId: string) => string;
     heartbeat: (scheduleId: string, responseMode?: HeartbeatResponseMode) => string;
@@ -64,6 +65,11 @@ export const studentSessionTransport: StudentSessionTransport = {
           clientSessionId,
         }),
       ),
+    resume: (scheduleId, clientSessionId) => {
+      const params = new URLSearchParams({ refreshAttemptCredential: 'true' });
+      if (clientSessionId) params.set('clientSessionId', clientSessionId);
+      return appendQuery(`/v1/student/sessions/${scheduleId}`, params);
+    },
     precheck: (scheduleId) => `/v1/student/sessions/${scheduleId}/precheck`,
     bootstrap: (scheduleId) => `/v1/student/sessions/${scheduleId}/bootstrap`,
     heartbeat: (scheduleId, responseMode) =>

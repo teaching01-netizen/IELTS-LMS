@@ -21,7 +21,7 @@ bootstrap/       parent→controller bootstrap seed handoff
 | authoritative projection (bootstrap payload) | `acceptPayloadAndRoute` in `hooks/useSatExamController.ts` | **only** writer of `dataRef` + `data`; validates identity + monotonic runtime revision |
 | durable response queue, blocked/quarantine | `shared/durability/DurableResponseEngine.ts` | provider hooks adapt it; the engine owns the boundary invariant (`assertBoundarySettled`) |
 | finalization claim + in-flight | `application/satFinalizationGate.ts` | one instance per controller; claim/release/single-flight/reset |
-| which recovery copy a backend rejection gets | `application/satSubmitConflicts.ts` | structured code/`details.reason`, never the HTTP status |
+| how delivery-command conflicts recover | `application/satSubmitConflicts.ts` | structured code/`details.reason`, never the HTTP status |
 | which phase action a committed payload produces | `application/satCommitRouting.ts` | pure route table, one entry per producer hint |
 | pending module to open | `application/satRuntimeSelectors.ts` + `application/satEntry.ts` | selectors are pure; entry decision is pure |
 | displayed countdown + expiry authority | `application/satTimingPolicy.ts` (`satCountdown`) | derived together so the two roles cannot drift; legacy → personal clock, cohort-stage → stage clock, cohort-section → the module's own allotment capped by the shared section clock (expiry inert on a mismatched stage) |
@@ -58,9 +58,9 @@ on it, and the hook supplies the ticking `now`, the skew and the payload reads.
   `acceptPayloadAndRoute` with a hint. It must not write `dataRef` directly.
 - New backend conflict reasons go in `satSubmitConflicts.ts`; new phase
   transitions go in `satCommitRouting.ts` + the reducer.
-- Finalization has two drivers (module-submit commit path, recovery effect).
-  Both must go through the finalization gate; never add a third `useRef` that
-  re-implements the claim.
+- Commit routing and the recovery effect can both notice an authoritative
+  terminal payload; both must go through the finalization gate. Never add a
+  third `useRef` that re-implements the claim.
 - Policy that is pure belongs in `application/` with a unit test beside it;
   if a rule needs a React harness to test, it is in the wrong layer.
 - Clock and cadence questions go to `satTimingPolicy` / `satPollCadence`, not

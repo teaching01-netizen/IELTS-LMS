@@ -2,9 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, ArrowRight, CheckCircle2, Clock3, Link2, LoaderCircle, LockKeyhole } from 'lucide-react';
 import { useAuthSession, type StudentQueuedAdmission } from '../../auth/api/authSession';
+import { SatErrorSurface, SatLoadingSurface } from '../../student-delivery/api/satStateSurfaces';
+import { resumeSatStudentSession } from '../../student-delivery/application/satStudentResume';
+import {
+  clearSatResumeLocator,
+  loadSatResumeLocator,
+  matchesSatResumeLocator,
+  saveSatResumeLocator,
+  type SatResumeLocatorV1,
+} from '../../student-delivery/infrastructure/satResumeLocator';
+import {
+  createStudentClientSessionId,
+  ensureClientSessionIdForStudentKey,
+  restoreClientSessionIdForStudentKey,
+  satWriterStudentKey,
+} from '@services/studentAttemptRepository';
 import { useStudentAccessLink } from '../api/access-link/studentAccessLinkQueries';
 import type { PublicStudentAccessLink } from '../contracts/access-link/PublicStudentAccessLink';
 import { accessLinkSectionStudentCopy, effectiveAccessLinkSections } from '../../exam-authoring/contracts/accessLinks';
+import { hasBackendStatusCode } from '@services/backendBridge';
 
 /**
  * The scope copy for a narrowed link, or null when the link admits every
@@ -35,6 +51,11 @@ interface AccessLinkQueuePollFailure {
   position: number;
   attempts: number;
 }
+
+type ResumeState =
+  | { kind: 'idle' | 'checking' | 'not-resumable' }
+  | { kind: 'resumable'; route: string }
+  | { kind: 'offline'; reason: 'network' | 'server_error' };
 
 interface PersistedAccessLinkQueue {
   ticket: StudentQueuedAdmission;
@@ -148,7 +169,12 @@ export function StudentAccessLinkEntryRoute() {
   const { accessLinkId } = useParams<{ accessLinkId: string }>();
   const navigate = useNavigate();
   const linkQuery = useStudentAccessLink(accessLinkId);
-  const { studentEntry } = useAuthSession();
+  const { studentEntry, status: authStatus, session, refresh } = useAuthSession();
+  const [resumeLocator, setResumeLocator] = useState<SatResumeLocatorV1 | null>(() => loadSatResumeLocator());
+  const [resumeState, setResumeState] = useState<ResumeState>({ kind: 'idle' });
+  const [resumeRetry, setResumeRetry] = useState(0);
+  const resumePromiseRef = useRef<{ key: string; promise: ReturnType<typeof resumeSatStudentSession> } | null>(null);
+  const linkClientSessionIdRef = useRef<string | null>(null);
   const initial = useMemo(() => readProfile(accessLinkId ?? ''), [accessLinkId]);
   const [restoredQueue] = useState<PersistedAccessLinkQueue | null>(() =>
     loadPersistedAccessLinkQueue(accessLinkId ?? ''),
@@ -165,6 +191,11 @@ export function StudentAccessLinkEntryRoute() {
   const pollAttemptsRef = useRef(0);
   const submittingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setResumeLocator(loadSatResumeLocator());
+    linkClientSessionIdRef.current = null;
+  }, [accessLinkId]);
 
   const clearFieldError = (field: keyof AccessForm) => {
     setErrors((current) => {
@@ -203,8 +234,104 @@ export function StudentAccessLinkEntryRoute() {
 
   const link = linkQuery.data ?? null;
   const canEnter = link?.status === 'live';
+  const locatorForThisLink = Boolean(
+    link && matchesSatResumeLocator(resumeLocator, { scheduleId: link.scheduleId, accessLinkId: link.id }),
+  );
 
-  const finishEntry = useCallback((activeLink: PublicStudentAccessLink, submitted: AccessForm, result: { scheduleId: string; studentCode: string }) => {
+  useEffect(() => {
+    if (
+      accessLinkId &&
+      resumeLocator?.accessLinkId === accessLinkId &&
+      linkQuery.error &&
+      hasBackendStatusCode(linkQuery.error, 404)
+    ) {
+      clearSatResumeLocator();
+    }
+  }, [accessLinkId, linkQuery.error, resumeLocator]);
+
+  useEffect(() => {
+    if (!link || !accessLinkId) return;
+    const linkedLocator = matchesSatResumeLocator(resumeLocator, {
+      scheduleId: link.scheduleId,
+      accessLinkId: link.id,
+    });
+    if (link.status !== 'live') {
+      if (resumeLocator?.accessLinkId === link.id) clearSatResumeLocator();
+      setResumeState({ kind: 'not-resumable' });
+      return;
+    }
+    if (resumeLocator?.accessLinkId === link.id && resumeLocator.scheduleId !== link.scheduleId) {
+      clearSatResumeLocator();
+    }
+    if (link.providerKey !== 'sat' || !linkedLocator) {
+      setResumeState({ kind: 'idle' });
+      return;
+    }
+    if (authStatus === 'loading') return;
+    if (authStatus !== 'authenticated' || session?.user.role !== 'student') {
+      setResumeState({ kind: 'not-resumable' });
+      return;
+    }
+    if (!navigator.onLine) {
+      setResumeState({ kind: 'offline', reason: 'network' });
+      return;
+    }
+
+    const key = `${link.id}:${resumeRetry}`;
+    const existing = resumePromiseRef.current;
+    const promise = existing?.key === key
+      ? existing.promise
+      : resumeSatStudentSession({
+          scheduleId: link.scheduleId,
+          locator: resumeLocator,
+          ...(resumeLocator?.candidateId ? { candidateIdHint: resumeLocator.candidateId } : {}),
+        });
+    if (!existing || existing.key !== key) resumePromiseRef.current = { key, promise };
+    let active = true;
+    setResumeState({ kind: 'checking' });
+    void promise.then((result) => {
+      if (!active) return;
+      if (result.kind === 'resumed') {
+        if (!result.terminal) {
+          saveSatResumeLocator({
+            scheduleId: link.scheduleId,
+            candidateId: result.attempt.candidateId,
+            attemptId: result.attempt.id,
+            accessLinkId: link.id,
+          });
+        }
+        setResumeState({ kind: 'resumable', route: result.route });
+        navigate(result.route, { replace: true });
+      } else if (result.kind === 'transient-error') {
+        setResumeState({ kind: 'offline', reason: result.reason });
+      } else {
+        setResumeState({ kind: 'not-resumable' });
+      }
+    });
+    return () => { active = false; };
+  }, [accessLinkId, authStatus, link, navigate, resumeLocator, resumeRetry, session?.user.role]);
+
+  useEffect(() => {
+    if (link?.providerKey !== 'sat' || !locatorForThisLink) return;
+    const retryWhenOnline = () => {
+      if (!navigator.onLine) return;
+      void refresh().finally(() => {
+        resumePromiseRef.current = null;
+        setResumeLocator(loadSatResumeLocator());
+        setResumeRetry((value) => value + 1);
+      });
+    };
+    window.addEventListener('online', retryWhenOnline);
+    return () => window.removeEventListener('online', retryWhenOnline);
+  }, [link?.providerKey, locatorForThisLink, refresh]);
+
+  const retrySatResume = () => {
+    setResumeLocator(loadSatResumeLocator());
+    resumePromiseRef.current = null;
+    void refresh().finally(() => setResumeRetry((value) => value + 1));
+  };
+
+  const finishEntry = useCallback((activeLink: PublicStudentAccessLink, submitted: AccessForm, result: { scheduleId: string; studentCode: string; attemptId?: string | undefined; clientSessionId?: string | undefined }) => {
     // Navigation depends only on admission success: saveProfile is
     // best-effort and never throws, so a full/blocked store still enters.
     const normalizedEmail = submitted.email.trim().toLocaleLowerCase();
@@ -213,6 +340,21 @@ export function StudentAccessLinkEntryRoute() {
       studentCode: activeLink.accessMode === 'open' ? '' : result.studentCode,
       email: normalizedEmail,
     });
+    if (activeLink.providerKey === 'sat') {
+      saveSatResumeLocator({
+        scheduleId: result.scheduleId,
+        candidateId: result.studentCode,
+        ...(result.attemptId ? { attemptId: result.attemptId } : {}),
+        accessLinkId: activeLink.id,
+      });
+      if (result.clientSessionId) {
+        restoreClientSessionIdForStudentKey(
+          result.scheduleId,
+          satWriterStudentKey(result.scheduleId, result.studentCode),
+          result.clientSessionId,
+        );
+      }
+    }
     navigate(buildStudentRoute(result.scheduleId, result.studentCode));
   }, [navigate]);
 
@@ -220,11 +362,24 @@ export function StudentAccessLinkEntryRoute() {
     const normalizedCode = normalizeStudentCode(submitted.studentCode);
     const normalizedName = submitted.studentName.trim();
     const normalizedEmail = submitted.email.trim().toLocaleLowerCase();
+    let clientSessionId: string | undefined;
+    if (activeLink.providerKey === 'sat') {
+      if (activeLink.accessMode === 'student_code') {
+        clientSessionId = ensureClientSessionIdForStudentKey(
+          activeLink.scheduleId,
+          satWriterStudentKey(activeLink.scheduleId, normalizedCode),
+        );
+      } else {
+        linkClientSessionIdRef.current ??= createStudentClientSessionId();
+        clientSessionId = linkClientSessionIdRef.current;
+      }
+    }
     return studentEntry({
       accessLinkId: activeLink.id,
       wcode: activeLink.accessMode === 'student_code' ? normalizedCode : '',
       email: normalizedEmail,
       studentName: normalizedName,
+      ...(clientSessionId ? { clientSessionId } : {}),
     });
   }, [studentEntry]);
 
@@ -325,8 +480,17 @@ export function StudentAccessLinkEntryRoute() {
     return () => { cancelled = true; window.clearTimeout(timeout); };
   }, [accessLinkId, finishEntry, link, queuePollFailure, queued, queuedForm, submitEntry]);
 
+  if (linkQuery.isLoading && resumeLocator?.providerKey === 'sat' && resumeLocator.accessLinkId === accessLinkId) return <SatLoadingSurface label="Checking your Student Link…" />;
   if (linkQuery.isLoading) return <EntryShell><div className="flex min-h-72 flex-col items-center justify-center"><LoaderCircle size={24} className="animate-spin text-slate-400"/><p className="mt-3 text-sm font-medium text-slate-500">Opening your exam…</p></div></EntryShell>;
   if (linkQuery.error || !link) return <EntryShell><UnavailableState icon={<AlertCircle size={24}/>} title="This Student Link isn't available" description={linkQuery.error instanceof Error ? linkQuery.error.message : 'Ask your teacher for a current link.'}/></EntryShell>;
+  if (
+    link.providerKey === 'sat' && locatorForThisLink &&
+    (authStatus === 'loading' || resumeState.kind === 'checking' ||
+      (authStatus === 'authenticated' && session?.user.role === 'student' && resumeState.kind === 'idle'))
+  ) return <SatLoadingSurface label="Reconnecting to your SAT…" />;
+  if (link.providerKey === 'sat' && locatorForThisLink && resumeState.kind === 'offline') {
+    return <SatErrorSurface title="We couldn’t reconnect to your SAT" description={resumeState.reason === 'server_error' ? 'The exam service is temporarily unavailable. Your saved responses are still on this device. Try again shortly.' : 'Check your connection. Your saved responses are still on this device, and you can retry when you’re back online.'} actionLabel="Retry" onAction={retrySatResume}/>;
+  }
   if (!canEnter) return <EntryShell><LinkAvailabilityState link={link}/></EntryShell>;
 
   const scopeCopy = accessLinkScopeCopy(link);

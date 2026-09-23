@@ -32,8 +32,7 @@ import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satTo
 export type SatCommitHint =
   | { kind: "bootstrap" }
   | { kind: "poll" }
-  | { kind: "startModule"; moduleId: string }
-  | { kind: "submitModule"; moduleId: string };
+  | { kind: "startModule"; moduleId: string };
 
 export interface SatCommitIdentity {
   scheduleId: string;
@@ -84,23 +83,6 @@ export function decideSatCommitRoute(
       const activeModule = moduleForAttempt(payload, findActiveAttempt(payload));
       if (!activeModule) return null;
       return startModuleRouteAction(payload, activeModule);
-    }
-    case "submitModule": {
-      // SAT-005: the post-submit route (submit / break / directions) is derived
-      // from the payload argument, never from data read back after await.
-      const nextAttempt = findPendingAttempt(payload);
-      const nextModule = moduleForAttempt(payload, nextAttempt);
-      if (!nextModule) return { type: "submit" } as const;
-      const currentSection = sectionForModule(payload, hint.moduleId);
-      const nextSection = sectionForModule(payload, nextModule.id);
-      if (currentSection && nextSection && nextSection.id !== currentSection.id) {
-        return {
-          type: "startBreak",
-          nextSectionKey: nextSection.sectionKey === "math" ? "math" : "reading-writing",
-          resumeAt: nextAttempt?.availableAt ?? payload.serverNow,
-        } as const;
-      }
-      return { type: "showDirections" } as const;
     }
     case "poll": {
       if (payload.result && preState.phase !== "complete") {

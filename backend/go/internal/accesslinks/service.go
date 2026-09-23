@@ -239,6 +239,7 @@ type AccessLink struct {
 // PublicAccessLink mirrors PublicAssessmentAccessLink.
 type PublicAccessLink struct {
 	ID               string                     `json:"id"`
+	ScheduleID       string                     `json:"scheduleId"`
 	ExamTitle        string                     `json:"examTitle"`
 	ProviderKey      string                     `json:"providerKey"`
 	VersionNumber    int32                      `json:"versionNumber"`
@@ -931,7 +932,7 @@ func (s *Service) PublicLink(ctx context.Context, linkID string) (PublicAccessLi
 		return PublicAccessLink{}, err
 	}
 	return PublicAccessLink{
-		ID: link.ID, ExamTitle: link.ExamTitle, ProviderKey: link.ProviderKey,
+		ID: link.ID, ScheduleID: link.ScheduleID, ExamTitle: link.ExamTitle, ProviderKey: link.ProviderKey,
 		VersionNumber: link.VersionNumber, PublishScope: link.PublishScope, Name: link.Name, EnabledSections: link.EnabledSections,
 		AudienceType:  link.AudienceType,
 		AudienceLabel: link.AudienceLabel, AccessMode: link.AccessMode,

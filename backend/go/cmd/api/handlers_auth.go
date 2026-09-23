@@ -86,7 +86,7 @@ func writeCreatedSession(w http.ResponseWriter, r *http.Request, app *App, userI
 		httpx.WriteError(w, r, err)
 		return
 	}
-	setSessionCookies(w, app, sessionToken, csrfToken)
+	setCreatedSessionCookies(w, app, role, sessionToken, csrfToken, expiresAt, idleTimeoutAt, now)
 	httpx.WriteJSON(w, http.StatusOK, payload)
 }
 
@@ -228,6 +228,37 @@ func setSessionCookies(w http.ResponseWriter, app *App, sessionToken, csrfToken 
 	})
 }
 
+// setCreatedSessionCookies makes student sessions survive a browser restart,
+// while bounding both cookies by the server-side absolute and idle deadlines.
+// Staff cookie behavior remains session-scoped.
+func setCreatedSessionCookies(w http.ResponseWriter, app *App, role, sessionToken, csrfToken string, expiresAt, idleTimeoutAt, now time.Time) {
+	if role != auth.RoleStudent {
+		setSessionCookies(w, app, sessionToken, csrfToken)
+		return
+	}
+	deadline := expiresAt
+	if idleTimeoutAt.Before(deadline) {
+		deadline = idleTimeoutAt
+	}
+	maxAge := int(deadline.Sub(now).Seconds())
+	if maxAge <= 0 {
+		maxAge = -1
+	}
+	sameSite := http.SameSiteStrictMode
+	if strings.ToLower(app.Config.Environment) == "development" {
+		sameSite = http.SameSiteLaxMode
+	}
+	secure := app.Config.CookieSecure
+	http.SetCookie(w, &http.Cookie{
+		Name: app.Config.EffectiveSessionCookieName(), Value: sessionToken, Path: "/",
+		HttpOnly: true, Secure: secure, SameSite: sameSite, Expires: deadline.UTC(), MaxAge: maxAge,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name: app.Config.EffectiveCsrfCookieName(), Value: csrfToken, Path: "/",
+		HttpOnly: false, Secure: secure, SameSite: sameSite, Expires: deadline.UTC(), MaxAge: maxAge,
+	})
+}
+
 // clearSessionCookies expires both auth cookies, mirroring issuance
 // attributes (Path/HttpOnly/Secure/SameSite) so browsers actually drop them.
 func clearSessionCookies(w http.ResponseWriter, app *App) {
@@ -242,7 +273,6 @@ func clearSessionCookies(w http.ResponseWriter, app *App) {
 
 // sessionHandler returns the current session identity.
 func sessionHandler(app *App) http.HandlerFunc {
-	_ = app
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := requireSession(w, r)
 		if sess == nil {
@@ -252,6 +282,11 @@ func sessionHandler(app *App) http.HandlerFunc {
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
+		}
+		if sess.Role == auth.RoleStudent {
+			if cookie, cookieErr := r.Cookie(app.Config.EffectiveSessionCookieName()); cookieErr == nil && cookie.Value != "" {
+				setCreatedSessionCookies(w, app, sess.Role, cookie.Value, sess.CSRFToken, sess.ExpiresAt, sess.IdleTimeoutAt, time.Now().UTC())
+			}
 		}
 		httpx.WriteJSON(w, http.StatusOK, payload)
 	}

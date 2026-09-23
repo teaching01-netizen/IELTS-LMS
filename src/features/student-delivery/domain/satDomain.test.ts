@@ -325,7 +325,7 @@ describe('SAT delivery domain', () => {
   // payload rather than from local submit state, so the live session, a poll
   // that discovers a server-side finalization, an offline reconnect, and a
   // reload all reach the same verdict. `completionReason` cannot answer it:
-  // the client's own expiry submit is recorded as `student_submit`.
+  // historical attempts may still contain `student_submit`.
   it('derives the Module 2 hand-off from the finished module\'s own clock', () => {
     const baseModule = { id: 'rw-m1', adaptiveRole: 'base' } as AssessmentDeliveryModule;
     const branchModule = { id: 'rw-m2-lower', adaptiveRole: 'lower_branch' } as AssessmentDeliveryModule;

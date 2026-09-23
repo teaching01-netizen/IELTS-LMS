@@ -1,13 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuthSession } from "../../auth/api/authSession";
-import { studentAttemptRepository } from "@student/application/studentAttemptFacade";
 import {
   getStudentEntrySchedule,
   isStudentEntryScheduleBlockedError,
 } from "../infrastructure/studentEntryGateway";
 import { commonSchemas } from "@shared/lib/validateApiResponse";
 import { entryQueueDelayMs, parseEntryQueueError } from "../infrastructure/studentEntryGateway";
+import { SatErrorSurface, SatLoadingSurface } from "../../student-delivery/api/satStateSurfaces";
+import { resumeSatStudentSession } from "../../student-delivery/application/satStudentResume";
+import {
+  loadSatResumeLocator,
+  saveSatResumeLocator,
+  type SatResumeLocatorV1,
+} from "../../student-delivery/infrastructure/satResumeLocator";
+import {
+  ensureClientSessionIdForStudentKey,
+  restoreClientSessionIdForStudentKey,
+  satWriterStudentKey,
+} from "@services/studentAttemptRepository";
 
 interface EntryFormData {
   wcode: string;
@@ -41,7 +52,11 @@ function loadLastWcode(scheduleId: string): string | null {
     return null;
   }
 
-  return window.localStorage.getItem(`${LAST_WCODE_STORAGE_PREFIX}${scheduleId}`);
+  try {
+    return window.localStorage.getItem(`${LAST_WCODE_STORAGE_PREFIX}${scheduleId}`);
+  } catch {
+    return null;
+  }
 }
 
 function storeLastWcode(scheduleId: string, wcode: string): void {
@@ -49,7 +64,11 @@ function storeLastWcode(scheduleId: string, wcode: string): void {
     return;
   }
 
-  window.localStorage.setItem(`${LAST_WCODE_STORAGE_PREFIX}${scheduleId}`, wcode);
+  try {
+    window.localStorage.setItem(`${LAST_WCODE_STORAGE_PREFIX}${scheduleId}`, wcode);
+  } catch {
+    // Saved form details are optional and must not block entry.
+  }
 }
 
 function storeCandidateProfile(
@@ -61,10 +80,14 @@ function storeCandidateProfile(
     return;
   }
 
-  window.localStorage.setItem(
-    `${PROFILE_STORAGE_PREFIX}${scheduleId}:${wcode}`,
-    JSON.stringify(profile)
-  );
+  try {
+    window.localStorage.setItem(
+      `${PROFILE_STORAGE_PREFIX}${scheduleId}:${wcode}`,
+      JSON.stringify(profile)
+    );
+  } catch {
+    // Saved form details are optional and must not block entry.
+  }
 }
 
 function loadCandidateProfile(
@@ -75,7 +98,12 @@ function loadCandidateProfile(
     return null;
   }
 
-  const raw = window.localStorage.getItem(`${PROFILE_STORAGE_PREFIX}${scheduleId}:${wcode}`);
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(`${PROFILE_STORAGE_PREFIX}${scheduleId}:${wcode}`);
+  } catch {
+    return null;
+  }
   if (!raw) {
     return null;
   }
@@ -116,8 +144,13 @@ function queueEtaSeconds(retryAfterMs: number): number {
 
 type ScheduleAvailability =
   | { state: "ready"; providerKey: "ielts" | "sat" | "act" }
-  | { state: "unavailable"; title: string; description: string }
+  | { state: "unavailable"; title: string; description: string; providerKey?: "ielts" | "sat" | "act" }
   | { state: "unknown" };
+
+type ResumeState =
+  | { kind: "idle" | "checking" | "not-resumable" }
+  | { kind: "resumable"; route: string }
+  | { kind: "offline"; reason: "network" | "server_error" };
 
 function scheduleStatusCopy(status: string): { title: string; description: string } {
   switch (status) {
@@ -167,7 +200,7 @@ async function loadScheduleAvailability(scheduleId: string): Promise<ScheduleAva
       schedule.status === "completed" ||
       schedule.status === "cancelled"
     ) {
-      return { state: "unavailable", ...scheduleStatusCopy(schedule.status) };
+      return { state: "unavailable", providerKey: schedule.providerKey, ...scheduleStatusCopy(schedule.status) };
     }
     return { state: "ready", providerKey: schedule.providerKey };
   } catch (error) {
@@ -182,7 +215,8 @@ export function StudentEntryRoute() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { studentEntry } = useAuthSession();
+  const { studentEntry, status: authStatus, session, refresh } = useAuthSession();
+  const [resumeLocator, setResumeLocator] = useState<SatResumeLocatorV1 | null>(() => loadSatResumeLocator());
 
   // S3-C8/M1: direct entry branches by provider. A SAT schedule requires
   // only code + name + email (nickname/IELTS course are hidden and omitted
@@ -192,16 +226,24 @@ export function StudentEntryRoute() {
   const [scheduleAvailability, setScheduleAvailability] = useState<ScheduleAvailability>({
     state: "unknown",
   });
+  const [scheduleAvailabilityLoading, setScheduleAvailabilityLoading] = useState(Boolean(scheduleId));
+  const [resumeState, setResumeState] = useState<ResumeState>({ kind: "idle" });
+  const [resumeRetry, setResumeRetry] = useState(0);
+  const resumePromiseRef = useRef<{ key: string; promise: ReturnType<typeof resumeSatStudentSession> } | null>(null);
 
   useEffect(() => {
+    setResumeLocator(loadSatResumeLocator());
     if (!scheduleId) {
+      setScheduleAvailabilityLoading(false);
       return;
     }
     let cancelled = false;
+    setScheduleAvailabilityLoading(true);
     void (async () => {
       const availability = await loadScheduleAvailability(scheduleId);
       if (!cancelled) {
         setScheduleAvailability(availability);
+        setScheduleAvailabilityLoading(false);
       }
     })();
     return () => {
@@ -210,10 +252,93 @@ export function StudentEntryRoute() {
   }, [scheduleId]);
 
   const isSatSchedule =
-    scheduleAvailability.state === "ready" && scheduleAvailability.providerKey === "sat";
-  const isSat = providerOverride === "sat" || isSatSchedule;
+    (scheduleAvailability.state === "ready" || scheduleAvailability.state === "unavailable") &&
+    scheduleAvailability.providerKey === "sat";
+  const locatorSuggestsSat = Boolean(resumeLocator && resumeLocator.scheduleId === scheduleId);
+  const isSat = providerOverride === "sat" || isSatSchedule ||
+    (scheduleAvailability.state === "unknown" && locatorSuggestsSat);
   const availabilityGate =
     scheduleAvailability.state === "unavailable" ? scheduleAvailability : null;
+
+  useEffect(() => {
+    if (!scheduleId || !isSat) {
+      setResumeState({ kind: "idle" });
+      return;
+    }
+    if (scheduleAvailabilityLoading) {
+      return;
+    }
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      setResumeState({ kind: "offline", reason: "network" });
+      return;
+    }
+    if (authStatus === "loading") return;
+    if (authStatus !== "authenticated" || session?.user.role !== "student") {
+      setResumeState({ kind: "not-resumable" });
+      return;
+    }
+
+    const key = `${scheduleId}:${resumeRetry}`;
+    const existing = resumePromiseRef.current;
+    const promise = existing?.key === key
+      ? existing.promise
+      : resumeSatStudentSession({ scheduleId, locator: resumeLocator });
+    if (!existing || existing.key !== key) resumePromiseRef.current = { key, promise };
+    let active = true;
+    setResumeState({ kind: "checking" });
+    void promise.then((result) => {
+      if (!active) return;
+      if (result.kind === "resumed") {
+        setResumeState({ kind: "resumable", route: result.route });
+        if (!result.terminal) {
+          saveSatResumeLocator({
+            scheduleId,
+            candidateId: result.attempt.candidateId,
+            attemptId: result.attempt.id,
+            ...(resumeLocator?.accessLinkId && resumeLocator.scheduleId === scheduleId
+              ? { accessLinkId: resumeLocator.accessLinkId }
+              : {}),
+          });
+        }
+        navigate(result.route, { replace: true });
+        return;
+      }
+      if (result.kind === "transient-error") {
+        setResumeState({ kind: "offline", reason: result.reason });
+        return;
+      }
+      setResumeState({ kind: "not-resumable" });
+    });
+    return () => {
+      active = false;
+    };
+  }, [authStatus, isSat, navigate, resumeLocator, resumeRetry, scheduleAvailabilityLoading, scheduleId, session?.user.role]);
+
+  useEffect(() => {
+    if (!isSat) return;
+    const retryWhenOnline = () => {
+      if (!navigator.onLine) return;
+      void refresh().finally(() => {
+        resumePromiseRef.current = null;
+        setResumeLocator(loadSatResumeLocator());
+        setResumeRetry((value) => value + 1);
+      });
+    };
+    window.addEventListener("online", retryWhenOnline);
+    return () => window.removeEventListener("online", retryWhenOnline);
+  }, [isSat, refresh]);
+
+  const retrySatResume = () => {
+    if (scheduleId) {
+      setResumeLocator(loadSatResumeLocator());
+      setResumePromiseRefForRetry();
+      void refresh().finally(() => setResumeRetry((value) => value + 1));
+    }
+  };
+
+  function setResumePromiseRefForRetry() {
+    resumePromiseRef.current = null;
+  }
 
   const initialWcode = useMemo(() => {
     if (!scheduleId) {
@@ -224,6 +349,9 @@ export function StudentEntryRoute() {
     if (queryWcode) {
       return normalizeAccessCode(queryWcode);
     }
+
+    const locator = loadSatResumeLocator();
+    if (locator?.scheduleId === scheduleId) return normalizeAccessCode(locator.candidateId);
 
     const stored = loadLastWcode(scheduleId);
     return stored ? normalizeAccessCode(stored) : "";
@@ -292,39 +420,6 @@ export function StudentEntryRoute() {
     pollAttemptsRef.current = 0;
     mountSnapshotRef.current = { initialWcode, scheduleId };
   }, [initialWcode, scheduleId]);
-
-  useEffect(() => {
-    if (!scheduleId) {
-      return;
-    }
-
-    const normalizedWcode = normalizeAccessCode(initialWcode);
-    if (!normalizedWcode) {
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const attempts = await studentAttemptRepository.getAttemptsByScheduleId(scheduleId);
-        const activeAttempt = attempts.find(
-          (candidate) =>
-            candidate.phase !== "post-exam" &&
-            normalizeAccessCode(candidate.candidateId) === normalizedWcode
-        );
-
-        if (activeAttempt && !cancelled) {
-          navigate(buildStudentRoute(scheduleId, normalizedWcode), { replace: true });
-        }
-      } catch {
-        // Fall back to manual check-in.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [initialWcode, navigate, scheduleId]);
 
   const handleInputChange = (field: keyof EntryFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -395,15 +490,19 @@ export function StudentEntryRoute() {
     setQueuePollFailure(null);
 
     try {
+      const clientSessionId = isSat
+        ? ensureClientSessionIdForStudentKey(scheduleId, satWriterStudentKey(scheduleId, normalizedWcode))
+        : undefined;
       const result = await studentEntry({
         scheduleId,
         wcode: normalizedWcode,
         email: normalizedEmail,
         studentName: normalizedName,
+        ...(clientSessionId ? { clientSessionId } : {}),
         ...(isSat ? {} : { nickname: normalizedNickname, ieltsCourse: normalizedIeltsCourse }),
       });
 
-      if ("state" in result && result.state === "queued") {
+      if (!("user" in result)) {
         const payload = {
           wcode: normalizedWcode,
           email: normalizedEmail,
@@ -427,7 +526,23 @@ export function StudentEntryRoute() {
         nickname: normalizedNickname,
         ieltsCourse: normalizedIeltsCourse,
       });
-      navigate(buildStudentRoute(scheduleId, normalizedWcode));
+      const admittedScheduleId = result.scheduleId || scheduleId;
+      const admittedCode = result.studentCode || normalizedWcode;
+      if (isSat) {
+        saveSatResumeLocator({
+          scheduleId: admittedScheduleId,
+          candidateId: admittedCode,
+          ...(result.attemptId ? { attemptId: result.attemptId } : {}),
+        });
+        if (result.clientSessionId) {
+          restoreClientSessionIdForStudentKey(
+            admittedScheduleId,
+            satWriterStudentKey(admittedScheduleId, admittedCode),
+            result.clientSessionId,
+          );
+        }
+      }
+      navigate(buildStudentRoute(admittedScheduleId, admittedCode));
     } catch (error) {
       // Plan C3/D3: ENTRY_GATE 429s are bounded retry, not a server-owned
       // queue. Keep the submitted payload in memory and retry at the
@@ -484,11 +599,15 @@ export function StudentEntryRoute() {
     const timer = window.setTimeout(async () => {
       pollAttemptsRef.current += 1;
       try {
+        const clientSessionId = isSat
+          ? ensureClientSessionIdForStudentKey(scheduleId, satWriterStudentKey(scheduleId, queuedPayload.wcode))
+          : undefined;
         const result = await studentEntry({
           scheduleId,
           wcode: queuedPayload.wcode,
           email: queuedPayload.email,
           studentName: queuedPayload.studentName,
+          ...(clientSessionId ? { clientSessionId } : {}),
           ...(isSat
             ? {}
             : { nickname: queuedPayload.nickname, ieltsCourse: queuedPayload.ieltsCourse }),
@@ -496,7 +615,7 @@ export function StudentEntryRoute() {
         if (cancelled) {
           return;
         }
-        if ("state" in result && result.state === "queued") {
+        if (!("user" in result)) {
           setQueuedAdmission(true);
           setQueueRetryAfterMs(entryQueueDelayMs(Math.ceil(result.pollAfterMs / 1000)));
           return;
@@ -512,7 +631,23 @@ export function StudentEntryRoute() {
           nickname: queuedPayload.nickname,
           ieltsCourse: queuedPayload.ieltsCourse,
         });
-        navigate(buildStudentRoute(scheduleId, queuedPayload.wcode));
+        const admittedScheduleId = result.scheduleId || scheduleId;
+        const admittedCode = result.studentCode || queuedPayload.wcode;
+        if (isSat) {
+          saveSatResumeLocator({
+            scheduleId: admittedScheduleId,
+            candidateId: admittedCode,
+            ...(result.attemptId ? { attemptId: result.attemptId } : {}),
+          });
+          if (result.clientSessionId) {
+            restoreClientSessionIdForStudentKey(
+              admittedScheduleId,
+              satWriterStudentKey(admittedScheduleId, admittedCode),
+              result.clientSessionId,
+            );
+          }
+        }
+        navigate(buildStudentRoute(admittedScheduleId, admittedCode));
       } catch (error) {
         if (!cancelled) {
           const queue = parseEntryQueueError(error);
@@ -549,6 +684,27 @@ export function StudentEntryRoute() {
     scheduleId,
     studentEntry,
   ]);
+
+  if (
+    isSat &&
+    (scheduleAvailabilityLoading || authStatus === "loading" || resumeState.kind === "checking" ||
+      (authStatus === "authenticated" && session?.user.role === "student" && resumeState.kind === "idle"))
+  ) {
+    return <SatLoadingSurface label="Reconnecting to your SAT…" />;
+  }
+
+  if (isSat && resumeState.kind === "offline") {
+    return (
+      <SatErrorSurface
+        title="We couldn’t reconnect to your SAT"
+        description={resumeState.reason === "server_error"
+          ? "The exam service is temporarily unavailable. Your saved responses are still on this device. Try again shortly."
+          : "Check your connection. Your saved responses are still on this device, and you can retry when you’re back online."}
+        actionLabel="Retry"
+        onAction={retrySatResume}
+      />
+    );
+  }
 
   if (availabilityGate && !queuedAdmission && !queuePollFailure) {
     return (

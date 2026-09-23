@@ -239,6 +239,12 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         visualScale={visualScale}
         portalContainer={viewportOverlayRoot}
         loupe={{ sourceRef: root }}
+        onEscape={() => {
+          if (view.selectionToolsVisible !== true) return false;
+          view.onSelectionToolsDismissed?.();
+          return true;
+        }}
+        onSelectionCleared={view.onSelectionCleared}
       />
 
       {limitNotice ? (

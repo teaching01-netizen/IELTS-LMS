@@ -3,16 +3,25 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StudentAccessLinkEntryRoute } from '../StudentAccessLinkEntryRoute';
 import type { PublicStudentAccessLink } from '../../contracts/access-link/PublicStudentAccessLink';
+import { saveSatResumeLocator } from '../../../student-delivery/infrastructure/satResumeLocator';
 
 const mocks = vi.hoisted(() => ({
   studentEntry: vi.fn(),
+  authStatus: 'unauthenticated' as string,
+  session: null as unknown,
+  refresh: vi.fn(),
+  resume: vi.fn(),
   link: null as PublicStudentAccessLink | null,
   error: null as Error | null,
   isLoading: false,
 }));
 
 vi.mock('../../../auth/api/authSession', () => ({
-  useAuthSession: () => ({ studentEntry: mocks.studentEntry }),
+  useAuthSession: () => ({ studentEntry: mocks.studentEntry, status: mocks.authStatus, session: mocks.session, refresh: mocks.refresh }),
+}));
+
+vi.mock('../../../student-delivery/application/satStudentResume', () => ({
+  resumeSatStudentSession: mocks.resume,
 }));
 
 vi.mock('../../api/access-link/studentAccessLinkQueries', () => ({
@@ -26,6 +35,7 @@ vi.mock('../../api/access-link/studentAccessLinkQueries', () => ({
 function liveLink(overrides: Partial<PublicStudentAccessLink> = {}): PublicStudentAccessLink {
   return {
     id: 'link-public-1',
+    scheduleId: 'schedule-link-1',
     examTitle: 'Digital SAT',
     providerKey: 'sat',
     versionNumber: 4,
@@ -48,9 +58,9 @@ function DestinationProbe() {
   return <div data-testid="destination">{location.pathname}</div>;
 }
 
-function renderRoute() {
+function renderRoute(path = '/join/link-public-1') {
   render(
-    <MemoryRouter initialEntries={['/join/link-public-1']}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/join/:accessLinkId" element={<StudentAccessLinkEntryRoute />} />
         <Route path="/student/:scheduleId/:studentId" element={<DestinationProbe />} />
@@ -66,6 +76,10 @@ function enterIdentity() {
 
 beforeEach(() => {
   mocks.studentEntry.mockReset();
+  mocks.resume.mockReset();
+  mocks.refresh.mockReset();
+  mocks.authStatus = 'unauthenticated';
+  mocks.session = null;
   mocks.link = liveLink();
   mocks.error = null;
   mocks.isLoading = false;
@@ -74,6 +88,47 @@ beforeEach(() => {
 });
 
 describe('StudentAccessLinkEntryRoute', () => {
+  it('automatically resumes through the same active Student Link', async () => {
+    saveSatResumeLocator({
+      scheduleId: 'schedule-link-1',
+      candidateId: 'old-form-candidate',
+      attemptId: 'stale-attempt-id',
+      accessLinkId: 'link-public-1',
+    });
+    mocks.authStatus = 'authenticated';
+    mocks.session = { user: { role: 'student' } };
+    mocks.resume.mockResolvedValue({
+      kind: 'resumed',
+      route: '/student/schedule-link-1/server-candidate',
+      terminal: false,
+      attempt: { id: 'server-attempt', candidateId: 'server-candidate' },
+    });
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('destination')).toHaveTextContent('/student/schedule-link-1/server-candidate');
+    });
+    expect(mocks.resume).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText('Full name')).not.toBeInTheDocument();
+  });
+
+  it('does not use a locator saved for a different Student Link', async () => {
+    saveSatResumeLocator({
+      scheduleId: 'schedule-link-1',
+      candidateId: 'W123456',
+      accessLinkId: 'link-public-1',
+    });
+    mocks.authStatus = 'authenticated';
+    mocks.session = { user: { role: 'student' } };
+    mocks.link = liveLink({ id: 'link-other', scheduleId: 'schedule-other' });
+
+    renderRoute('/join/link-other');
+
+    await waitFor(() => expect(screen.getByLabelText('Full name')).toBeVisible());
+    expect(mocks.resume).not.toHaveBeenCalled();
+  });
+
   it('uses the public link id only, omits student code for open links, and navigates with the server-issued handoff', async () => {
     mocks.studentEntry.mockResolvedValue({
       user: { id: 'user-1', email: 'ada@example.com', role: 'student', state: 'active' },
@@ -88,12 +143,13 @@ describe('StudentAccessLinkEntryRoute', () => {
     enterIdentity();
     fireEvent.click(screen.getByRole('button', { name: /Continue/i }));
 
-    await waitFor(() => expect(mocks.studentEntry).toHaveBeenCalledWith({
+    await waitFor(() => expect(mocks.studentEntry).toHaveBeenCalledWith(expect.objectContaining({
       accessLinkId: 'link-public-1',
       wcode: '',
       email: 'ada@example.com',
       studentName: 'Ada Student',
-    }));
+    })));
+    expect(mocks.studentEntry.mock.calls[0]?.[0].clientSessionId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(await screen.findByTestId('destination')).toHaveTextContent(
       '/student/internal-schedule-1/guest-server-issued',
     );

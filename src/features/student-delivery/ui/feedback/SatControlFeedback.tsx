@@ -55,20 +55,27 @@ export function SatLeaseConflictNotice({
   );
 }
 
-export function SatSubmissionOverlay({
-  title = "Finalizing module…",
-  note = "Your latest responses are being verified.",
-  autoSubmitted = false,
+export function SatTimeoutOverlay({
+  saveFailureKind,
+  saveFailure,
+  onRetrySave,
 }: {
-  title?: string;
-  note?: string;
-  /** Timeout attribution (Phase 1): timeout submits name expiry, manual submits do not. */
-  autoSubmitted?: boolean;
+  saveFailureKind: "offline" | "retryable" | "terminal" | "superseded" | null;
+  saveFailure: string | null;
+  onRetrySave: () => void;
 }) {
-  const resolvedTitle = autoSubmitted ? "Time expired — submitting your saved answers." : title;
+  const hasSaveFailure = saveFailureKind !== null;
+  const note =
+    saveFailureKind === "offline"
+      ? SAT_COPY.timeout.offline
+      : saveFailureKind === "retryable" || saveFailureKind === "terminal"
+        ? saveFailure || SAT_COPY.timeout.failed
+        : saveFailureKind === "superseded"
+          ? SAT_COPY.review.saveSuperseded
+          : SAT_COPY.timeout.recordingAnswers;
   return (
     <div
-      className="sat-ui fixed inset-0 z-[95] grid place-items-center bg-[var(--sat-background)]/90"
+      className="sat-ui fixed inset-0 z-[80] grid place-items-center bg-[var(--sat-background)]/90"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -78,8 +85,17 @@ export function SatSubmissionOverlay({
           className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-[var(--sat-divider-soft)] border-t-[var(--sat-text)] motion-reduce:hidden"
           aria-hidden="true"
         />
-        <p className="text-[14px] font-semibold text-[var(--sat-text)]">{resolvedTitle}</p>
+        <p className="text-[14px] font-semibold text-[var(--sat-text)]">{SAT_COPY.timeout.title}</p>
         <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">{note}</p>
+        {hasSaveFailure && saveFailureKind !== "superseded" ? (
+          <button
+            type="button"
+            onClick={onRetrySave}
+            className="sat-touch-target sat-pressable mt-4 rounded-full border border-[var(--sat-divider)] px-5 text-[14px] font-semibold text-[var(--sat-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+          >
+            {SAT_COPY.review.retrySave}
+          </button>
+        ) : null}
       </div>
     </div>
   );

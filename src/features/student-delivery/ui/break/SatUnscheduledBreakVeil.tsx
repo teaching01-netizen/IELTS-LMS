@@ -12,16 +12,16 @@ export interface SatUnscheduledBreakVeilProps {
 
 /**
  * Bluebook Unscheduled Break veil (Phase 8). Blocks question interaction
- * while showing the LIVE module timer — time keeps running, autosubmit at
- * zero still fires underneath, persistence/outbox keep running. No backend
+ * while showing the LIVE module timer — time keeps running, timeout
+ * reconciliation proceeds independently, persistence/outbox keep running. No backend
  * pause call: this is presentation-only. Return restores the exact question
  * (scroll preserved: the question tree never unmounts beneath the veil).
  *
  * Distinct from the proctor pause veil (frozen timer + proctor note) and the
  * scheduled break screen (break countdown, auto-advance). If proctor pause
  * lands while veiled, the blocking veil (z 100) covers this veil; time
- * expiry submission (z 95) also covers it. The veil sits on the
- * breakVeil (94) contract layer: above tools/modals but below submission.
+ * expiry transition (z 95) also covers it. The veil sits on the
+ * breakVeil (94) contract layer: above tools/modals but below the transition.
  */
 export function SatUnscheduledBreakVeil(props: SatUnscheduledBreakVeilProps) {
   const returnRef = useRef<HTMLButtonElement>(null);

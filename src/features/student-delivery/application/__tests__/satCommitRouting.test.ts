@@ -154,48 +154,6 @@ describe("SAT commit route table", () => {
     ).toEqual({ type: "submit" });
   });
 
-  it("routes a module-submit response to directions, break, or submit", () => {
-    const sameSection: Spec[] = [
-      { id: "m-1", sectionKey: "reading-writing", state: "submitted" },
-      { id: "m-2", sectionKey: "reading-writing", state: "not_started" },
-    ];
-    expect(
-      decideSatCommitRoute(
-        state("review", "m-1-key"),
-        payload(sameSection),
-        { kind: "submitModule", moduleId: "m-1" },
-        IDENTITY,
-      ),
-    ).toEqual({ type: "showDirections" });
-
-    const nextSection: Spec[] = [
-      { id: "m-1", sectionKey: "reading-writing", state: "submitted" },
-      { id: "m-2", sectionKey: "math", state: "not_started" },
-    ];
-    expect(
-      decideSatCommitRoute(
-        state("review", "m-1-key"),
-        payload(nextSection),
-        { kind: "submitModule", moduleId: "m-1" },
-        IDENTITY,
-      ),
-    ).toEqual({
-      type: "startBreak",
-      nextSectionKey: "math",
-      resumeAt: "2026-09-10T08:05:00.000Z",
-    });
-
-    const lastModule: Spec[] = [{ id: "m-1", sectionKey: "reading-writing", state: "submitted" }];
-    expect(
-      decideSatCommitRoute(
-        state("review", "m-1-key"),
-        payload(lastModule),
-        { kind: "submitModule", moduleId: "m-1" },
-        IDENTITY,
-      ),
-    ).toEqual({ type: "submit" });
-  });
-
   it("routes a startModule response into the module the payload opened", () => {
     const opened: Spec[] = [
       {
@@ -233,23 +191,12 @@ describe("SAT commit route table", () => {
   // ONE section (no Math module attempt anywhere), and the exam must end after
   // it with no new end-of-exam logic. The route table only ever reads the
   // payload's module attempts, so the whole walk is: last module submitted ->
-  // submit -> a poll carrying the result -> complete.
+  // server timeout reconciliation -> result -> complete.
   it("completes after the single section of a one-section run", () => {
     const verbalOnly: Spec[] = [
       { id: "rw-m1", sectionKey: "reading-writing", state: "submitted" },
       { id: "rw-m2", sectionKey: "reading-writing", state: "submitted" },
     ];
-
-    // Submitting the last module of the only section finalizes instead of
-    // opening a break or a next section.
-    expect(
-      decideSatCommitRoute(
-        state("review", "rw-m2-key"),
-        payload(verbalOnly),
-        { kind: "submitModule", moduleId: "rw-m2" },
-        IDENTITY,
-      ),
-    ).toEqual({ type: "submit" });
 
     // A poll that arrives after the server finalized the last module starts
     // finalization from wherever the student is (SAT-002 path).

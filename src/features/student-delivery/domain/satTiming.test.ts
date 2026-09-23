@@ -42,9 +42,8 @@ describe('SAT timing wire contracts', () => {
   });
 
   it('freezes the personal countdown while the cohort stage is paused', () => {
-    // Exam-day re-audit defect 9: the authoritative section clock stops when
-    // the stage leaves live; personal must freeze with it or min() drains to
-    // a spurious auto-submit during a planned pause drill.
+    // The authoritative section clock stops when the stage leaves live;
+    // personal must freeze with it or min() reaches zero during a pause.
     const startedAt = '2026-09-10T08:00:00.000Z';
     const started = {
       ...attempt,

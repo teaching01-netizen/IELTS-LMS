@@ -79,7 +79,19 @@ export function SatResultDetailRoute() {
     return map;
   }, [questions]);
   if (query.isLoading) return <SatPageLoading label="Opening SAT result…" />;
-  if (query.error || !query.data) return <SatPageError title="SAT result could not load" description={query.error instanceof Error ? query.error.message : 'The result is unavailable.'} retryLabel="Back to Results" onRetry={() => navigate('/sat/results')} />;
+  if (query.error) {
+    return (
+      <SatPageError
+        title="SAT result details could not load"
+        description="Could not load response details. Retry to try again."
+        retryLabel="Retry"
+        onRetry={() => void query.refetch()}
+      />
+    );
+  }
+  if (!query.data) {
+    return <SatPageError title="SAT result could not load" description="The result is unavailable." retryLabel="Back to Results" onRetry={() => navigate('/sat/results')} />;
+  }
 
   const { summary } = query.data;
   const raw = rawTotals(sections);

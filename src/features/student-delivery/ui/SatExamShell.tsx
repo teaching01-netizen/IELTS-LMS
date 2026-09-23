@@ -264,7 +264,7 @@ export function SatExamShell(props: SatExamShellProps) {
   const {
     annotationModeEnabled,
     toggleAnnotationMode,
-    selection,
+    selectionToolsAnchor,
     annotationView,
     selectionActions,
     currentColor,
@@ -619,9 +619,9 @@ export function SatExamShell(props: SatExamShellProps) {
             onRemove={() => removeMark(editingMark)}
             onClose={surface.closeMarkEditor}
           />
-        ) : selection ? (
+        ) : selectionToolsAnchor ? (
           <SatSelectionActionsPanel
-            anchor={selection}
+            anchor={selectionToolsAnchor}
             currentColor={currentColor}
             actions={selectionActions}
             disabled={props.blocked || !annotationsWritable}
@@ -711,7 +711,7 @@ export function SatExamShell(props: SatExamShellProps) {
       ) : null}
       {/* Bluebook Unscheduled Break (Phase 8): confirm first (dangerous
           action), then a running-timer veil. Timer keeps running, answers
-          intact, autosubmit still fires underneath. No backend pause call. */}
+          intact, timeout reconciliation continues underneath. No backend pause call. */}
       {props.breakConfirmOpen !== undefined && props.onCloseBreakConfirm && props.onTakeBreak ? (
         <SatUnscheduledBreakDialog
           open={props.breakConfirmOpen}

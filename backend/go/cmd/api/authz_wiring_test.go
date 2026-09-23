@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authz"
@@ -56,6 +57,13 @@ func sentinelOK() http.HandlerFunc {
 func TestAuthzWiringAnonSessionRoute401s(t *testing.T) {
 	h := authzTestRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil)
+	// A browser may keep a persistent cookie past revocation or expiry. The
+	// cookie is only a lookup key; without a live server-side session the
+	// route remains anonymous.
+	req.AddCookie(&http.Cookie{
+		Name: config.Load().EffectiveSessionCookieName(), Value: "revoked-student-session",
+		Path: "/", HttpOnly: true, Expires: time.Now().Add(24 * time.Hour), MaxAge: 24 * 60 * 60,
+	})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {

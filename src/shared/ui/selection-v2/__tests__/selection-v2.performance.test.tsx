@@ -58,7 +58,7 @@ function harness() {
       rootRef,
       resolveCaretAtPoint,
       onSelect: () => {},
-      isCoarsePointer: () => true,
+      isOwnedPointer: (event) => event.pointerType === 'touch',
       requestFrame: frames.requestFrame,
       cancelFrame: frames.cancelFrame,
     });

@@ -150,12 +150,9 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 	return out, nil
 }
 
-// SubmitModule submits one SAT module attempt. It mirrors submit_module (Rust
-// assessment_delivery.rs:722-765) verbatim: same prologue, module FOR UPDATE,
-// the submitted|locked idempotent shortcut, the active|review-only gate, the
-// timing gate plus the personal-deadline workability check, and
-// finalize_module_tx (student_submit).
-// Reconcile-then-write per Rust submit_module:730 (own tx, before the write tx).
+// SubmitModule is retained for old clients. It may return an already-terminal
+// authoritative bootstrap, but active SAT modules can only end through server
+// timeout reconciliation or an authorized proctor action.
 func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, writerBinding ...string) (*Bootstrap, error) {
 	if urlScheduleID != bearerScheduleID {
 		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
@@ -209,15 +206,12 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 				return err
 			}
 		}
-		if _, err := s.finalizeModuleTx(ctx, t, bearerAttemptID, active, "student_submit"); err != nil {
-			return err
-		}
-		rev, err := s.appendModuleEventsTx(ctx, t, scheduleID, bearerAttemptID, liveEventModuleSubmitted)
-		if err != nil {
-			return err
-		}
-		hubEvents = dualModuleEvents(scheduleID, bearerAttemptID, rev, liveEventModuleSubmitted)
-		return nil
+		conflict := assessmentConflict(
+			"STUDENT_MODULE_SUBMIT_DISABLED",
+			"SAT modules close automatically when the authoritative time ends.",
+		)
+		conflict.HTTPStatus = 409
+		return conflict
 	}); err != nil {
 		return nil, err
 	}
@@ -452,8 +446,9 @@ type nextModuleRow struct {
 
 // finalizeModuleTx mirrors finalize_module_tx (Rust
 // assessment_delivery.rs:2131-2217): score the module responses, flip the row
-// to submitted (student_submit never locks) with a not_started/active/review
-// CAS, then route + insert the follow-up module attempt.
+// to submitted or locked with a not_started/active/review CAS, then route +
+// insert the follow-up module attempt. Historical student_submit reasons stay
+// readable; new student traffic cannot invoke this finalizer.
 func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID string, active saveActiveModule, completionReason string) (*nextModuleRow, error) {
 	scoring, err := loadScoringRowsTx(ctx, t, active.id, active.moduleID)
 	if err != nil {

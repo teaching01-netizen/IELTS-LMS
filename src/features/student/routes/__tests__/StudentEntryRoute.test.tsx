@@ -7,6 +7,8 @@ import { StudentEntryRoute } from "../StudentEntryRoute";
 const navigateMock = vi.fn();
 const studentEntryMock = vi.fn();
 const getStudentEntryScheduleMock = vi.hoisted(() => vi.fn());
+const authSessionMock = vi.hoisted(() => ({ status: 'unauthenticated' as string, session: null as unknown, refresh: vi.fn() }));
+const resumeSatStudentSessionMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../infrastructure/studentEntryGateway", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../infrastructure/studentEntryGateway")>();
@@ -18,7 +20,11 @@ vi.mock("../../infrastructure/studentEntryGateway", async (importOriginal) => {
 });
 
 vi.mock("../../../auth/authSession", () => ({
-  useAuthSession: () => ({ studentEntry: studentEntryMock }),
+  useAuthSession: () => ({ ...authSessionMock, studentEntry: studentEntryMock }),
+}));
+
+vi.mock("../../../student-delivery/application/satStudentResume", () => ({
+  resumeSatStudentSession: resumeSatStudentSessionMock,
 }));
 
 vi.mock("react-router-dom", async () => {
@@ -29,14 +35,15 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-function renderRoute(scheduleId: string) {
-  render(
+function renderRoute(scheduleId: string, strict = false) {
+  const route = (
     <MemoryRouter initialEntries={[`/student/${scheduleId}`]}>
       <Routes>
         <Route path="/student/:scheduleId" element={<StudentEntryRoute />} />
       </Routes>
     </MemoryRouter>
   );
+  render(strict ? <React.StrictMode>{route}</React.StrictMode> : route);
 }
 
 function submitForm(wcode = "W250334") {
@@ -79,6 +86,10 @@ describe("StudentEntryRoute", () => {
     navigateMock.mockReset();
     studentEntryMock.mockReset();
     getStudentEntryScheduleMock.mockReset();
+    resumeSatStudentSessionMock.mockReset();
+    authSessionMock.status = 'unauthenticated';
+    authSessionMock.session = null;
+    authSessionMock.refresh.mockReset();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
@@ -151,8 +162,9 @@ describe("StudentEntryRoute", () => {
     });
   });
 
-  it("auto-resumes an existing attempt for the last wcode instead of forcing check-in again", async () => {
+  it("does not let the local attempt cache authorize automatic resume", async () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440001";
+    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "sat" });
     window.localStorage.setItem(`ielts-student-last-wcode:${scheduleId}`, "W250334");
     window.localStorage.setItem(
       "ielts_student_attempts_v1",
@@ -200,71 +212,29 @@ describe("StudentEntryRoute", () => {
 
     renderRoute(scheduleId);
 
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith(`/student/${scheduleId}/W250334`, {
-        replace: true,
-      });
-    });
-
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Exam Check-in" })).toBeInTheDocument());
+    expect(navigateMock).not.toHaveBeenCalled();
     expect(studentEntryMock).not.toHaveBeenCalled();
   });
 
-  it("auto-resumes an existing attempt for non-legacy access codes", async () => {
-    const scheduleId = "550e8400-e29b-41d4-a716-446655440126";
-    const accessCode = "guest-alpha_01";
-    window.localStorage.setItem(`ielts-student-last-wcode:${scheduleId}`, accessCode);
-    window.localStorage.setItem(
-      "ielts_student_attempts_v1",
-      JSON.stringify([
-        {
-          id: "attempt-2",
-          scheduleId,
-          studentKey: `student-${scheduleId}-${accessCode}`,
-          examId: "exam-1",
-          examTitle: "Mock Exam",
-          candidateId: accessCode,
-          candidateName: "Student One",
-          candidateEmail: "student@example.com",
-          phase: "exam",
-          currentModule: "reading",
-          currentQuestionId: null,
-          answers: {},
-          writingAnswers: {},
-          flags: {},
-          violations: [],
-          integrity: {
-            preCheck: null,
-            deviceFingerprintHash: null,
-            clientSessionId: null,
-            lastDisconnectAt: null,
-            lastReconnectAt: null,
-            lastHeartbeatAt: null,
-            lastHeartbeatStatus: "idle",
-          },
-          recovery: {
-            lastRecoveredAt: null,
-            lastLocalMutationAt: null,
-            lastPersistedAt: null,
-            lastDroppedMutations: null,
-            pendingMutationCount: 0,
-            serverAcceptedThroughSeq: 0,
-            clientSessionId: null,
-            syncState: "idle",
-          },
-          createdAt: "2026-04-24T00:00:00.000Z",
-          updatedAt: "2026-04-24T00:00:00.000Z",
-        },
-      ])
-    );
-
-    renderRoute(scheduleId);
-
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith(`/student/${scheduleId}/${accessCode}`, {
-        replace: true,
-      });
+  it("resumes once for an authenticated SAT student under StrictMode", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440142";
+    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "sat" });
+    authSessionMock.status = "authenticated";
+    authSessionMock.session = { user: { role: "student" } };
+    resumeSatStudentSessionMock.mockResolvedValue({
+      kind: "resumed",
+      route: `/student/${scheduleId}/canonical-student`,
+      terminal: false,
+      attempt: { id: "attempt-1", candidateId: "canonical-student" },
     });
 
+    renderRoute(scheduleId, true);
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith(`/student/${scheduleId}/canonical-student`, { replace: true });
+    });
+    expect(resumeSatStudentSessionMock).toHaveBeenCalledTimes(1);
     expect(studentEntryMock).not.toHaveBeenCalled();
   });
 
@@ -539,6 +509,8 @@ describe("StudentEntryRoute", () => {
       </MemoryRouter>
     );
 
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Exam Check-in" })).toBeInTheDocument());
+
     // S3-C8/M1: nickname + IELTS course are hidden for SAT direct entry.
     expect(screen.queryByLabelText(/nickname/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/ielts course/i)).not.toBeInTheDocument();
@@ -555,12 +527,13 @@ describe("StudentEntryRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
     await waitFor(() => {
-      expect(studentEntryMock).toHaveBeenCalledWith({
+      expect(studentEntryMock).toHaveBeenCalledWith(expect.objectContaining({
         scheduleId,
         wcode: "W250334",
         email: "sat@example.com",
         studentName: "SAT Student",
-      });
+      }));
+      expect(studentEntryMock.mock.calls[0]?.[0].clientSessionId).toMatch(/^[0-9a-f-]{36}$/i);
     });
 
     await waitFor(() => {

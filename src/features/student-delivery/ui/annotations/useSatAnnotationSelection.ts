@@ -58,6 +58,7 @@ export function useSatAnnotationSelection({
   reportSelection.current = view.onSelectionCaptured ?? null;
   const modeEnabled = useRef(view.annotationModeEnabled);
   modeEnabled.current = view.annotationModeEnabled;
+  const ownedTouchPointers = useRef(new Set<number>());
 
   const reportAnchor = useCallback((anchor: SatTextAnchor) => {
     if (annotationCount >= SAT_ANNOTATION_LIMIT) {
@@ -74,6 +75,7 @@ export function useSatAnnotationSelection({
       const root = rootRef.current;
       if (!root) return;
       const scope = root.parentElement ?? root;
+      if (event.type === 'pointerup' && ownedTouchPointers.current.delete((event as PointerEvent).pointerId)) return;
       if (event.type === 'pointerup' && (!(event.target instanceof Node) || !scope.contains(event.target))) return;
       if (event.target instanceof Node && isSatSelectionInsideAnnotationUi(event.target)) return;
 
@@ -88,9 +90,24 @@ export function useSatAnnotationSelection({
     };
 
     const begin = (event: Event) => {
-      const { clientX, clientY } = event as PointerEvent;
+      const pointer = event as PointerEvent;
+      const { clientX, clientY } = pointer;
       if (typeof clientX !== 'number' || typeof clientY !== 'number') return;
       markSatPointerDown(clientX, clientY);
+      const root = rootRef.current;
+      if (
+        pointer.pointerType === 'touch'
+        && ownedTouchSelection
+        && modeEnabled.current
+        && root
+        && pointer.target instanceof Node
+        && root.contains(pointer.target)
+      ) {
+        ownedTouchPointers.current.add(pointer.pointerId);
+      }
+    };
+    const endOwnedTouch = (event: Event) => {
+      if (event.type === 'pointercancel') ownedTouchPointers.current.delete((event as PointerEvent).pointerId);
     };
     const keyboard = (event: KeyboardEvent) => {
       if (event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) report(event);
@@ -98,13 +115,16 @@ export function useSatAnnotationSelection({
 
     document.addEventListener('pointerdown', begin, true);
     document.addEventListener('pointerup', report);
+    document.addEventListener('pointercancel', endOwnedTouch);
     document.addEventListener('keyup', keyboard);
     return () => {
       document.removeEventListener('pointerdown', begin, true);
       document.removeEventListener('pointerup', report);
+      document.removeEventListener('pointercancel', endOwnedTouch);
       document.removeEventListener('keyup', keyboard);
+      ownedTouchPointers.current.clear();
     };
-  }, [enabled, region, reportAnchor, rootRef]);
+  }, [enabled, ownedTouchSelection, region, reportAnchor, rootRef]);
 
   const reportOwnedRange = useCallback((range: Range) => {
     markSatSelectionGestureEnded();

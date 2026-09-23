@@ -62,6 +62,10 @@ var metricHelpText = map[string]string{
 	MEntryGateAdmit:                    "Total entry-gate admissions (D3 check-ins).",
 	MEntryGateQueued:                   "Total entry-gate bounded-retry 429s (D3).",
 	MEntryGateCapacityTotal:            "Total entry-gate capacity rejections by tier and key class.",
+	MStudentResumeProbeTotal:           "Authenticated SAT resume probes reaching the server session resolver.",
+	MStudentResumeSuccessTotal:         "SAT resume probes resolved to a canonical student attempt.",
+	MStudentResumeFailureTotal:         "SAT resume probe failures by bounded reason.",
+	MStudentResumeRecoveryMS:           "Duration in milliseconds of the most recent SAT resume probe.",
 	MRollupRefresh:                     "Total proctor rollup refreshes (D4 worker).",
 	MRollupLag:                         "Freshness in seconds of the proctor rollup row (D4 lag).",
 	MShedExam:                          "Total requests served under exam shed budgets (E2).",
@@ -129,17 +133,21 @@ const (
 	MWSLeaseFailures  = "websocket_lease_acquire_failures_total"
 	MWSSlowDisconnect = "websocket_slow_client_disconnects_total"
 
-	MVersionCacheHit        = "version_cache_hit_total"
-	MVersionCacheMiss       = "version_cache_miss_total"
-	MPresenceTouch          = "presence_touch_total"
-	MPresenceFlush          = "presence_flush_total"
-	MEntryGateAdmit         = "entry_gate_admit_total"
-	MEntryGateQueued        = "entry_gate_queued_total"
-	MEntryGateCapacityTotal = "http_entry_gate_capacity_rejected_total"
-	MRollupRefresh          = "proctor_rollup_refresh_total"
-	MRollupLag              = "proctor_rollup_lag_seconds"
-	MShedExam               = "shed_exam_requests_total"
-	MQueryTimeout           = "query_budget_exhausted_total"
+	MVersionCacheHit           = "version_cache_hit_total"
+	MVersionCacheMiss          = "version_cache_miss_total"
+	MPresenceTouch             = "presence_touch_total"
+	MPresenceFlush             = "presence_flush_total"
+	MEntryGateAdmit            = "entry_gate_admit_total"
+	MEntryGateQueued           = "entry_gate_queued_total"
+	MEntryGateCapacityTotal    = "http_entry_gate_capacity_rejected_total"
+	MStudentResumeProbeTotal   = "student_resume_probe_total"
+	MStudentResumeSuccessTotal = "student_resume_success_total"
+	MStudentResumeFailureTotal = "student_resume_failure_total"
+	MStudentResumeRecoveryMS   = "student_resume_recovery_ms"
+	MRollupRefresh             = "proctor_rollup_refresh_total"
+	MRollupLag                 = "proctor_rollup_lag_seconds"
+	MShedExam                  = "shed_exam_requests_total"
+	MQueryTimeout              = "query_budget_exhausted_total"
 
 	MSessionCacheHit = "session_cache_hit_total"
 	// MAssessmentConflict counts structured SAT delivery conflicts by their
@@ -342,6 +350,10 @@ func Names() []string {
 		MEntryGateAdmit,
 		MEntryGateQueued,
 		MEntryGateCapacityTotal,
+		MStudentResumeProbeTotal,
+		MStudentResumeSuccessTotal,
+		MStudentResumeFailureTotal,
+		MStudentResumeRecoveryMS,
 		MRollupRefresh,
 		MRollupLag,
 		MShedExam,

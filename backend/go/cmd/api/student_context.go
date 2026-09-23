@@ -424,6 +424,7 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 		if clientSessionID == "" {
 			clientSessionID = uuid.NewString()
 		}
+		context["clientSessionId"] = clientSessionID
 		lease := uint64(1)
 		token, expiresAt, err := auth.IssueAttemptToken(ctx, app.DB, app.Config, sess.UserID, scheduleID, attemptID, clientSessionID, nil, &lease, time.Now().UTC())
 		if err != nil {

@@ -10,11 +10,11 @@ import React, { createContext, useContext, useMemo, type ReactNode } from 'react
  * second caller, and the failure mode is silent: a staff preview that quietly
  * behaves like a locked exam, or an exam that quietly does not.
  *
- * `ownedTouchSelection` means: this is a real student sitting a real exam, its
- * prose is `user-select: none` under a coarse pointer, and the app — not the
- * platform — owns the selection gesture. Without it, the platform's own
- * selection is the only one there is, which is what every authoring surface and
- * every preview wants.
+ * `ownedTouchSelection` means this is real student delivery and the Selection
+ * v2 adapter may own physical touch pointers on declared exam text. The adapter
+ * uses `PointerEvent.pointerType`; pointer media queries only affect ergonomics.
+ * Without this capability, the platform keeps selection ownership, which is
+ * what every authoring surface and preview needs.
  *
  * Two responsibilities that look alike and are not:
  *

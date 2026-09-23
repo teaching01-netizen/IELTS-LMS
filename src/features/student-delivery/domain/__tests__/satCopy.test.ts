@@ -6,8 +6,6 @@ import {
   satLastQuestionLabel,
   satNoteActionsLabel,
   satNoteFieldLabel,
-  satSubmitConfirmSummary,
-  satSubmitConfirmTitle,
   satTimerRevealedAnnouncement,
 } from "../satCopy";
 
@@ -101,8 +99,6 @@ describe("satCopy controlled vocabulary", () => {
     expect(long.length).toBeLessThan(80);
     expect(long.endsWith("\u2026\u201D")).toBe(true);
     expect(satBackToQuestionLabel(7)).toBe("Back to question 7");
-    expect(satSubmitConfirmTitle("Module 2")).toBe("Submit Module 2 answers?");
-    expect(satSubmitConfirmSummary(3, 2)).toBe("3 unanswered \u00B7 2 flagged");
     expect(satLastQuestionLabel(27, 27)).toBe("Question 27 of 27, last question");
     expect(satContinueToDirectionsLabel("Math")).toBe("Continue to Math directions");
     expect(satTimerRevealedAnnouncement()).toContain("5 minutes left");

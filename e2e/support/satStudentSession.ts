@@ -16,6 +16,8 @@ export async function createRunningSatSession(
   adminPage: Page,
   options: RunningSatSessionOptions,
 ) {
+  // Keep stale authoring selectors from consuming the entire test timeout.
+  adminPage.setDefaultTimeout(30_000);
   const suffix = Date.now().toString(36);
   const label = options.label.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
   const examTitle = `SAT ${label} ${suffix}`;
@@ -25,7 +27,9 @@ export async function createRunningSatSession(
 
   await adminPage.goto('/sat/exams');
   await expect(adminPage.getByRole('heading', { name: 'Exam Library' })).toBeVisible();
-  await adminPage.getByRole('button', { name: 'New SAT' }).first().click();
+  const createSatButton = adminPage.getByRole('button', { name: 'Create SAT' }).first();
+  await expect(createSatButton).toBeVisible({ timeout: 30_000 });
+  await createSatButton.click();
   await adminPage.getByLabel('SAT exam name').fill(examTitle);
   await adminPage.getByRole('button', { name: 'Create' }).click();
   await expect(adminPage).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i, { timeout: 30_000 });
@@ -34,17 +38,19 @@ export async function createRunningSatSession(
   await adminPage.getByRole('menuitem', { name: /Load sample exam/ }).click();
   await expect(adminPage.getByRole('dialog', { name: 'Load sample SAT' })).toBeVisible();
   await adminPage.getByRole('button', { name: 'Load 147 questions' }).click();
-  await expect(adminPage.getByText('147 of 147 questions authored')).toBeVisible({ timeout: 90_000 });
+  await expect(adminPage.getByText('147 of 147 authored')).toBeVisible({ timeout: 90_000 });
 
   await adminPage.getByRole('button', { name: 'Release' }).click();
   await expect(adminPage).toHaveURL(/\/release$/);
   await adminPage.getByRole('button', { name: 'Publish' }).click();
   const publishDialog = adminPage.getByRole('dialog');
   await expect(publishDialog).toBeVisible();
-  await publishDialog.getByRole('button', { name: 'Publish' }).click();
+  await publishDialog.getByRole('button', { name: 'Publish Full SAT', exact: true }).click();
 
   await expect(adminPage).toHaveURL(/\/access$/);
-  await adminPage.getByRole('button', { name: 'New Link' }).click();
+  const newStudentLinkButton = adminPage.getByRole('button', { name: 'New Student Link' }).first();
+  await expect(newStudentLinkButton).toBeVisible();
+  await newStudentLinkButton.click();
   await adminPage.getByLabel('Student Link name').fill(linkName);
   await adminPage.getByRole('button', { name: /Name \+ email only/i }).click();
   await adminPage.getByRole('button', { name: /Anytime/i }).click();
@@ -54,10 +60,16 @@ export async function createRunningSatSession(
   if (!joinHref) throw new Error('SAT student join URL was not created.');
 
   const studentContext = await browser.newContext(options.studentContext);
+  studentContext.setDefaultTimeout(30_000);
   await stubScreenDetails(studentContext);
   const studentPage = await studentContext.newPage();
   await studentPage.goto(joinHref);
-  await expect(studentPage.getByRole('heading', { name: linkName })).toBeVisible();
+  try {
+    await expect(studentPage.getByRole('heading', { name: linkName })).toBeVisible({ timeout: 30_000 });
+  } catch (error) {
+    const pageText = await studentPage.locator('body').innerText().catch(() => 'Unable to read page text.');
+    throw new Error(`Student Link page did not load at ${studentPage.url()}: ${pageText.slice(0, 1_000)}`, { cause: error });
+  }
   await studentPage.getByLabel('Full name').fill(studentName);
   await studentPage.getByLabel('Email').fill(studentEmail);
   await studentPage.getByRole('button', { name: /Continue/i }).click();
@@ -88,5 +100,5 @@ export async function createRunningSatSession(
     await expect(studentPage.locator('input[type="radio"]').first()).toBeVisible({ timeout: 30_000 });
   }
 
-  return { studentContext, studentPage, scheduleId, candidateId };
+  return { studentContext, studentPage, scheduleId, candidateId, joinHref };
 }

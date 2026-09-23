@@ -1,11 +1,10 @@
 /**
  * SAT clock policy: what the student is shown versus what may close the module.
  *
- * The backend applies a personal module deadline only for the legacy timing
- * model (`usesPersonalDeadline()`); cohort models are governed by the shared
- * runtime clock. Keeping the two roles apart is what audit SAT-003 fixed — a
- * cohort-section module whose personal allotment hit zero must NOT auto-submit
- * while the section clock is still live.
+ * The backend reconciles both the personal module deadline and cohort section
+ * deadline. The browser uses the same expiry clock only to freeze input, flush
+ * pending answers, and request an authoritative refresh; it never closes a
+ * module itself.
  *
  * Everything here is pure: the hook owns the ticking `now`, the authoritative
  * deadline hook, and the payload reads; this module owns the rules.
@@ -115,9 +114,8 @@ export interface SatCountdown {
  *   legacy         -> personal clock is both;
  *   cohort-stage   -> the published stage clock is both;
  *   cohort-section -> the module's own allotment, capped by the shared section
- *                     clock, is both; the expiry is null (inert) when the stage
- *                     names another section — the backend would reject a submit
- *                     under that stage anyway.
+ *                     clock, is both; expiry is null (inert) when the stage
+ *                     names another section.
  *
  * Why the section-keyed pair is a minimum: a candidate sits Module 1 plus
  * exactly one Module 2, so the section's authored length is M1 + one branch,

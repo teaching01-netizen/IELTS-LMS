@@ -6,6 +6,7 @@ export type StudentSatPublishScope = 'full' | 'reading-writing' | 'math';
 
 export interface PublicStudentAccessLink {
   id: string;
+  scheduleId: string;
   examTitle: string;
   providerKey: string;
   versionNumber: number;

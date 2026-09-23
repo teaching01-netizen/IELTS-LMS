@@ -29,6 +29,7 @@ import {
   studentModuleTitle,
 } from "../application/satRuntimeSelectors";
 import { responseForQuestion } from "../domain/satResponses";
+import { SAT_COPY } from "../domain/satCopy";
 import { satAnnotationEducationKey } from "../infrastructure/satAnnotationEducationStore";
 import {
   hasSatExamZoomDecision,
@@ -58,7 +59,7 @@ import {
   SatBlockingOverlay,
   SatControlBanner,
   SatLeaseConflictNotice,
-  SatSubmissionOverlay,
+  SatTimeoutOverlay,
 } from "../ui/feedback/SatControlFeedback";
 import { SatIntegrityWarning } from "../ui/feedback/SatIntegrityWarning";
 
@@ -143,7 +144,7 @@ export function SatStudentSessionRoute({
   const [helpOpen, setHelpOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Bluebook Unscheduled Break (Phase 8): confirm + veil, both transient.
-  // The module timer keeps running; autosubmit/persistence unaffected.
+  // The module timer keeps running; answer persistence is unaffected.
   // Available in module phase only (review has no module clock to veil).
   const [breakConfirmOpen, setBreakConfirmOpen] = useState(false);
   const [breakVeilOpen, setBreakVeilOpen] = useState(false);
@@ -493,9 +494,9 @@ export function SatStudentSessionRoute({
       <SatLoadingSurface
         kind="finalizing"
         label={
-          exam.autoSubmitted
-            ? "Time expired — submitting your saved answers."
-            : "Finalizing SAT responses…"
+          exam.timeoutTransitionStarted
+            ? SAT_COPY.timeout.recordingAnswers
+            : SAT_COPY.transitions.finalizingResult
         }
       />,
     );
@@ -663,7 +664,6 @@ export function SatStudentSessionRoute({
   );
   const answeredCount = answeredSatQuestionCount(state.questionIds, state.responses);
   const activeSectionLabel = sectionLabel(stateSection.displayOrder, stateSection.title);
-  const persistenceBlocked = Boolean(persistence.failure);
 
   if (state.phase === "review") {
     // Phase 04: record the last valid review frame (element cached at render
@@ -683,6 +683,13 @@ export function SatStudentSessionRoute({
           open={exam.pendingTabSwitchWarning !== null}
           onContinue={exam.acknowledgeTabSwitchWarning}
         />
+        {exam.answerInteractionBlocked ? (
+          <SatTimeoutOverlay
+            saveFailureKind={persistence.failureKind}
+            saveFailure={persistence.failure}
+            onRetrySave={() => void persistence.retryFailed()}
+          />
+        ) : null}
         <SatReviewPage
           sectionLabel={activeSectionLabel}
           moduleTitle={studentModuleTitle(stateModule)}
@@ -692,18 +699,12 @@ export function SatStudentSessionRoute({
           keyboardOpen={examViewport.keyboardOpen}
           items={navigationItems}
           answeredCount={answeredCount}
-          isSubmitting={exam.isSubmitting}
-          persistenceBlocked={persistenceBlocked || persistence.pendingCount > 0}
-          readinessInput={{
-            isSubmitting: exam.isSubmitting,
-            failure: persistence.failure,
-            failureKind: persistence.failureKind,
-            pendingCount: persistence.pendingCount,
-          }}
+          pendingSaveCount={persistence.pendingCount}
+          saveFailure={persistence.failure}
+          saveFailureKind={persistence.failureKind}
           currentQuestionIndex={state.questionIndex}
           onSelectQuestion={commands.returnToQuestion}
           onBack={commands.returnToModule}
-          onSubmit={() => void commands.submitModule(stateModule.id)}
           onRetrySave={() => {
             void persistence.retryFailed();
           }}
@@ -731,7 +732,8 @@ export function SatStudentSessionRoute({
   }
 
   const response = responseForQuestion(state.responses, questionId);
-  const interactionBlocked = exam.blocked || exam.isSubmitting || persistenceInteractionBlocked;
+  const interactionBlocked =
+    exam.blocked || exam.isSubmitting || exam.answerInteractionBlocked || persistenceInteractionBlocked;
   const directions = hasStructuredContent(stateModule.instructions)
     ? stateModule.instructions
     : hasStructuredContent(stateSection.instructions)
@@ -764,7 +766,13 @@ export function SatStudentSessionRoute({
       {exam.showAlmostUp && !exam.isSubmitting ? (
         <SatControlBanner tone="warning">Time almost up — answers save automatically.</SatControlBanner>
       ) : null}
-      {exam.isSubmitting ? <SatSubmissionOverlay autoSubmitted={exam.autoSubmitted} /> : null}
+      {exam.answerInteractionBlocked ? (
+        <SatTimeoutOverlay
+          saveFailureKind={persistence.failureKind}
+          saveFailure={persistence.failure}
+          onRetrySave={() => void persistence.retryFailed()}
+        />
+      ) : null}
       {/* Integrity hold sits above every tool and dialog (blocking layer): a
           student cannot dismiss it and keep working behind it. */}
       <SatIntegrityWarning

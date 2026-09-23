@@ -34,6 +34,18 @@ const inlineNextWord = 'examined';
 const crossWord = 'measurements';
 const inlineSpoken = 'Several researchers examined how canopy density changes surface temperature near paved ground.';
 const crossSpoken = 'Their follow-up measurements suggest the relationship holds in cooler climates as well.';
+type NativeSelectionAuditEntry = {
+  rangeCount: number;
+  isCollapsed: boolean;
+  anchorInsideRoot: boolean;
+  focusInsideRoot: boolean;
+};
+
+declare global {
+  interface Window {
+    __nativeSelectionAudit?: NativeSelectionAuditEntry[];
+  }
+}
 /**
  * What a range's `toString()` says for the run that spans both paragraphs.
  *
@@ -193,7 +205,7 @@ test('IELTS Reading: arming, caret resolution, range, capture and persistence', 
   await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toHaveAttribute('aria-pressed', 'true');
   expect(await surface.evaluate((root, original) => root === original, before)).toBe(true);
   const styles = await surface.evaluate(root => ({ marker: root.getAttribute('data-student-owned-touch-selection'), select: getComputedStyle(root).getPropertyValue('-webkit-user-select'), touch: getComputedStyle(root).touchAction }));
-  expect(styles).toEqual(isMobile ? { marker: 'true', select: 'none', touch: 'none' } : { marker: null, select: 'text', touch: 'auto' });
+  expect(styles).toEqual({ marker: 'true', select: 'text', touch: 'none' });
   await drag(page, surface, 'beta gamma', browserName, isMobile);
   await expect(surface.locator('mark')).toHaveText('beta gamma');
   const snapshot = await page.evaluate(() => window.__studentTouchSelectionDebug?.snapshot());
@@ -229,8 +241,160 @@ test('SAT: owned range reaches the actual shell toolbar and annotation state', a
   await expect(surface.locator('[data-sat-highlight="true"]')).toHaveText('Several researchers');
 });
 
+async function startNativeSelectionAudit(page: Page) {
+  await page.addInitScript(() => {
+    window.__nativeSelectionAudit = [];
+    document.addEventListener('selectionchange', () => {
+      const root = document.querySelector('[data-sat-selection-protected="true"]');
+      const selection = window.getSelection();
+      window.__nativeSelectionAudit?.push({
+        rangeCount: selection?.rangeCount ?? 0,
+        isCollapsed: selection?.isCollapsed ?? true,
+        anchorInsideRoot: !!root && !!selection?.anchorNode && root.contains(selection.anchorNode),
+        focusInsideRoot: !!root && !!selection?.focusNode && root.contains(selection.focusNode),
+      });
+    }, { capture: true });
+  });
+}
+
+test('SAT: a long hold on selected words keeps the app range and never creates a native range', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'The touch gesture requires a mobile browser context.');
+  await startNativeSelectionAudit(page);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const surface = page.locator('[data-sat-annotation-region="stimulus"]');
+  const phrase = 'Several researchers';
+  await drag(page, surface, phrase, browserName, isMobile);
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  const before = await liveSelectionText(page);
+  expect(before).toBe(phrase);
+
+  const { from, to } = await coordinates(surface, phrase);
+  const point = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  const finger = await press(page, surface, browserName);
+  await finger.down(point);
+  await page.waitForTimeout(1200);
+  await finger.release();
+  await nextFrames(page);
+
+  const result = await page.evaluate(() => {
+    const record = window.__studentTouchSelectionDebug?.snapshot().surfaces.find((item) => item['surface'] === 'SAT stimulus');
+    const native = window.getSelection();
+    return {
+      rangeText: record?.['rangeText'],
+      ownerMarkerPresent: record?.['ownerMarkerPresent'],
+      computedUserSelect: record?.['computedUserSelect'],
+      computedWebkitUserSelect: record?.['computedWebkitUserSelect'],
+      nativeRangeCount: native?.rangeCount ?? 0,
+      nativeCollapsed: native?.isCollapsed ?? true,
+      lines: document.querySelectorAll('[data-student-selection-line]').length,
+      handles: document.querySelectorAll('[data-student-selection-handle]').length,
+      nativeSelectionAudit: window.__nativeSelectionAudit ?? [],
+      selectionChanges: window.__studentTouchSelectionDebug?.snapshot().documentEvents
+        .filter((event) => event['stage'] === 'selectionchange'),
+    };
+  });
+  await info.attach('selected-text-hold', { body: JSON.stringify(result, null, 2), contentType: 'application/json' });
+  expect(result.rangeText).toBe(before);
+  expect(result.ownerMarkerPresent).toBe(true);
+  expect([result.computedUserSelect, result.computedWebkitUserSelect]).toContain('none');
+  expect(result.nativeRangeCount === 0 || result.nativeCollapsed).toBe(true);
+  expect(result.lines).toBeGreaterThan(0);
+  expect(result.handles).toBe(2);
+  expect(result.nativeSelectionAudit.every((entry) => entry.rangeCount === 0 || entry.isCollapsed)).toBe(true);
+  expect(result.selectionChanges?.every((event) => event['nativeSelectionRangeCount'] === 0 || event['nativeSelectionCollapsed'] === true)).toBe(true);
+});
+
+test('SAT: an aggressive drag toward another text region stays in its starting block', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'The touch gesture requires a mobile browser context.');
+  await startNativeSelectionAudit(page);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const surface = page.locator('[data-sat-annotation-region="stimulus"]');
+  const prompt = page.locator('[data-sat-annotation-region="prompt"]');
+  const phrase = 'Several researchers';
+  const { from } = await coordinates(surface, phrase);
+  const outsideBlock = await coordinates(prompt, 'Which choice best states');
+  const originBlockId = await surface.locator('[data-content-text-node]').first().getAttribute('data-content-text-node');
+
+  const finger = await press(page, surface, browserName);
+  await finger.down(from);
+  await finger.move(outsideBlock.to);
+  await nextFrames(page);
+  await finger.release();
+  await nextFrames(page);
+
+  const result = await page.evaluate(() => {
+    const record = window.__studentTouchSelectionDebug?.snapshot().surfaces.find((item) => item['surface'] === 'SAT stimulus');
+    const native = window.getSelection();
+    return {
+      rangeText: record?.['rangeText'],
+      startBlockId: record?.['rangeStartSatBlockId'],
+      endBlockId: record?.['rangeEndSatBlockId'],
+      withinOneBlock: record?.['rangeWithinSingleSatTextBlock'],
+      nativeRangeCount: native?.rangeCount ?? 0,
+      nativeCollapsed: native?.isCollapsed ?? true,
+      nativeSelectionAudit: window.__nativeSelectionAudit ?? [],
+      lines: document.querySelectorAll('[data-student-selection-line]').length,
+      handles: document.querySelectorAll('[data-student-selection-handle]').length,
+    };
+  });
+  await info.attach('bounded-sat-range', { body: JSON.stringify(result, null, 2), contentType: 'application/json' });
+  expect(result.rangeText).toBeTruthy();
+  expect(result.startBlockId).toBe(originBlockId);
+  expect(result.endBlockId).toBe(originBlockId);
+  expect(result.withinOneBlock).toBe(true);
+  expect(result.nativeRangeCount === 0 || result.nativeCollapsed).toBe(true);
+  expect(result.nativeSelectionAudit.every((entry) => entry.rangeCount === 0 || entry.isCollapsed)).toBe(true);
+  expect(result.lines).toBeGreaterThan(0);
+  expect(result.handles).toBe(2);
+});
+
+test('SAT: closing text tools preserves the range and tapping its body restores the toolbar', async ({ page, browserName, isMobile }, info) => {
+  test.skip(!isMobile, 'The touch gesture requires a mobile browser context.');
+  await startNativeSelectionAudit(page);
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
+  await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
+  const surface = page.locator('[data-sat-annotation-region="stimulus"]');
+  const phrase = 'Several researchers';
+  await drag(page, surface, phrase, browserName, isMobile);
+  const before = await liveSelectionText(page);
+  expect(before).toBe(phrase);
+
+  await page.locator('[data-sat-selection-toolbar="true"]').getByRole('button', { name: 'Close text tools' }).click();
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toHaveCount(0);
+  expect(await page.locator('[data-student-selection-handle]').count()).toBe(2);
+  expect(await liveSelectionText(page)).toBe(before);
+  await expect(surface).toHaveAttribute('data-student-selection-owner', 'app');
+  expect(await surface.evaluate((root) => getComputedStyle(root).getPropertyValue('-webkit-user-select') || getComputedStyle(root).getPropertyValue('user-select'))).toBe('none');
+  await page.waitForTimeout(250);
+
+  const { from, to } = await coordinates(surface, phrase);
+  const point = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  const finger = await press(page, surface, browserName);
+  await finger.down(point);
+  await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+  await finger.release();
+  await nextFrames(page);
+
+  const result = await page.evaluate(() => ({
+    rangeText: window.__studentTouchSelectionDebug?.snapshot().surfaces.find((item) => item['surface'] === 'SAT stimulus')?.['rangeText'],
+    nativeRangeCount: window.getSelection()?.rangeCount ?? 0,
+    nativeCollapsed: window.getSelection()?.isCollapsed ?? true,
+    nativeSelectionAudit: window.__nativeSelectionAudit ?? [],
+    lines: document.querySelectorAll('[data-student-selection-line]').length,
+    handles: document.querySelectorAll('[data-student-selection-handle]').length,
+  }));
+  await info.attach('toolbar-reactivation', { body: JSON.stringify(result, null, 2), contentType: 'application/json' });
+  expect(result.rangeText).toBe(before);
+  expect(result.nativeRangeCount === 0 || result.nativeCollapsed).toBe(true);
+  expect(result.nativeSelectionAudit.every((entry) => entry.rangeCount === 0 || entry.isCollapsed)).toBe(true);
+  expect(result.lines).toBeGreaterThan(0);
+  expect(result.handles).toBe(2);
+});
+
 test('SAT prompt wording uses the same owned selection surface as the passage', async ({ page, browserName, isMobile }) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const prompt = page.locator('[data-sat-annotation-region="prompt"]');
@@ -250,7 +414,7 @@ test('SAT prompt wording uses the same owned selection surface as the passage', 
 });
 
 test('SAT choice wording uses owned selection, keeps the radio unchanged, and still answers on tap', async ({ page, browserName, isMobile }) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const choice = page.locator('[data-sat-annotation-region="choice.a"]');
@@ -334,7 +498,7 @@ async function ownedSelectionGeometry(page: Page) {
  * behind a green draw path.
  */
 test('a mid-word touch drag takes whole words, in both directions', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -401,7 +565,7 @@ test('a mid-word touch drag takes whole words, in both directions', async ({ pag
  * release committed.
  */
 test('a drag out of an inline element and into the next paragraph keeps whole words', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(fixture);
   await page.getByRole('button', { name: 'Highlight', exact: true }).click();
   const surface = page.locator(passage);
@@ -520,7 +684,7 @@ test('a drag out of an inline element and into the next paragraph keeps whole wo
  * are asking the same authority where a word begins.
  */
 test('a body drag through Thai stays on whole words', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(fixture);
   await page.getByRole('button', { name: 'Highlight', exact: true }).click();
   const surface = page.locator(passage);
@@ -579,7 +743,7 @@ test('a body drag through Thai stays on whole words', async ({ page, browserName
  * fail on the very first step.
  */
 test('a body drag through a right-to-left run stays on whole words', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(fixture);
   await page.getByRole('button', { name: 'Highlight', exact: true }).click();
   const surface = page.locator(passage);
@@ -641,7 +805,7 @@ test('a body drag through a right-to-left run stays on whole words', async ({ pa
  * so the premise is asserted before the gesture starts.
  */
 test('a body drag across a wrapped line stays on whole words', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const surface = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -697,7 +861,7 @@ test('a body drag across a wrapped line stays on whole words', async ({ page, br
  * surface a resting selection keeps them on.
  */
 test('dragging the END handle across clusters stops only on grapheme boundaries', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}${clustersQuestion}`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const surface = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -753,7 +917,7 @@ test('dragging the END handle across clusters stops only on grapheme boundaries'
 });
 
 test('dragging the START handle back across clusters stops only on grapheme boundaries', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}${clustersQuestion}`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const surface = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -825,7 +989,7 @@ test('dragging the START handle back across clusters stops only on grapheme boun
  * crossed, in both directions.
  */
 test('a handle dragged past the opposite endpoint keeps the finger on its edge, in both directions', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const surface = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -995,7 +1159,7 @@ test('a handle dragged past the opposite endpoint keeps the finger on its edge, 
 });
 
 test('SAT: scrolling the passage away keeps the selection and its handles, and hides the tools', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'The exam owns touch selection only on a coarse pointer.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   // A viewport short enough that the passage is longer than its pane — on a pad
   // in portrait it fits, and a scroll that cannot move the words cannot test this
   // — and `long=1` for a passage the length of a real one, because a pane that
@@ -2211,7 +2375,7 @@ async function characterUnder(root: Locator, point: { x: number; y: number }) {
  * adjusting one end leaves the other exactly where it was.
  */
 test('the handles are painted and hittable, and dragging one moves only that end', async ({ page, browserName, isMobile }) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -2308,7 +2472,7 @@ async function endpointGeometry(page: Page) {
  * goes through — so the case cannot quietly become a test of something else.
  */
 test('a short selection grabs the endpoint the press belongs to, not the one on top', async ({ page, browserName, isMobile }, info) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -2447,7 +2611,7 @@ test('a short selection grabs the endpoint the press belongs to, not the one on 
  * end handle's invisible target and dragged it.
  */
 test("a short selection's middle belongs to neither handle, and one press holds one intent", async ({ page, browserName, isMobile }) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -2526,7 +2690,7 @@ test("a short selection's middle belongs to neither handle, and one press holds 
  */
 
 test("a tap on a mark while a selection rests dismisses the selection and still opens that mark's editor", async ({ page, browserName, isMobile }) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
   await page.getByRole('button', { name: /^Highlights & Notes/ }).click();
   const region = page.locator('[data-sat-annotation-region="stimulus"]');
@@ -2596,7 +2760,7 @@ test('preview keeps native selection and diagnostics are opt-in', async ({ page 
 });
 
 test('IELTS real layout fallback works when native caret APIs are unavailable', async ({ page, browserName, isMobile }) => {
-  test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+  test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await page.addInitScript(() => {
     Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: undefined });
     Object.defineProperty(document, 'caretRangeFromPoint', { configurable: true, value: undefined });
@@ -2613,7 +2777,7 @@ test('IELTS real layout fallback works when native caret APIs are unavailable', 
 
 for (const product of ['IELTS', 'SAT'] as const) {
   test(`${product}: recovers from Safari returning a text caret outside the touched passage`, async ({ page, browserName, isMobile }, info) => {
-    test.skip(!isMobile, 'Owned selection is only used on coarse pointers.');
+    test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
     // Reproduce the supplied device trace: the standard API is unavailable,
     // and the legacy API returns a connected text node outside the exam root.
     // Layout and the pointer gesture still run through the actual components.

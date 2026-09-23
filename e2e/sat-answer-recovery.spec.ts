@@ -132,16 +132,15 @@ test.describe('SAT answer durability recovery', () => {
       await radios.nth(2).check();
       await waitForSatSaved(studentPage);
 
-      // The current Phase 1 scaffold stops at the first real module submit;
-      // sat-product-workspace.spec.ts already owns the full branch/result
-      // journey. Phase 2 will join these two legs once the SAT fixture is
-      // shared instead of authoring a 147-question exam per acceptance test.
+      // Review remains available for navigation and state inspection, while
+      // module completion stays owned by the server clock.
       await studentPage.getByRole('button', { name: /Review answers/ }).click();
       await expect(studentPage.getByRole('heading', { name: 'Review your answers' })).toBeVisible();
-      await studentPage.getByRole('button', { name: 'Submit module' }).click();
-      await expect(studentPage.getByTestId('sat-submit-confirm')).toBeVisible();
-      await studentPage.getByRole('button', { name: 'Submit anyway' }).click();
-      await expect(studentPage.getByTestId('sat-exam-shell')).not.toBeVisible({ timeout: 30_000 });
+      await expect(studentPage.getByRole('button', { name: 'Submit module', exact: true })).toHaveCount(0);
+      await expect(studentPage.getByRole('button', { name: 'Submit anyway', exact: true })).toHaveCount(0);
+      await expect(studentPage.getByTestId('sat-submit-confirm')).toHaveCount(0);
+      await studentPage.getByRole('button', { name: /Back to question/ }).click();
+      await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible();
     } finally {
       await studentContext.close();
     }

@@ -1,9 +1,9 @@
 /**
  * One finalization per authoritative revision.
  *
- * Two independent drivers ask for finalization: the module-submit commit path
- * (the student's own last submit) and the data-driven recovery effect (a poll
- * discovering the server already finalized the last module). Both must resolve
+ * Two independent drivers ask for finalization: the terminal-state commit path
+ * (the server has finalized the last module) and the data-driven recovery effect
+ * (a poll discovering that same terminal state). Both must resolve
  * to exactly one completion call per revision — two calls burned two
  * idempotent-but-wasteful requests and reported whichever error landed last —
  * while a *failure* must stay re-attemptable.

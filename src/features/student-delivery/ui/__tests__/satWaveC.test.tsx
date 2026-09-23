@@ -115,11 +115,11 @@ describe("Wave C R-14 review subhead drops the eyebrow echo", () => {
         remainingLabel="12:00"
         items={REVIEW_ITEMS}
         answeredCount={1}
-        isSubmitting={false}
-        persistenceBlocked={false}
+        pendingSaveCount={0}
+        saveFailure={null}
+        saveFailureKind={null}
         onSelectQuestion={vi.fn()}
         onBack={vi.fn()}
-        onSubmit={vi.fn()}
       />,
     );
     // H1 still owns the pronoun.

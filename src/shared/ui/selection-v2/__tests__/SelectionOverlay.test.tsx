@@ -23,6 +23,7 @@ function resting(overrides: Partial<SelectionOverlaySelection> = {}): SelectionO
     pointer: { finger: { x: 30, y: 120 }, caret: null, snapRevision: 0 },
     adjusting: false,
     beginHandleAdjustment: vi.fn(),
+    activateCurrentSelection: vi.fn(),
     dismiss: vi.fn(),
     // The gesture's own guards as the hook answers them for a control the
     // gesture would NOT handle (a toolbar, an input): dismissed, delivered.
@@ -215,6 +216,32 @@ describe('handles', () => {
   });
 });
 
+describe('a resting selection can be reactivated without changing its range', () => {
+  it('reports a press on the selected body and consumes the same pointerdown', () => {
+    const selection = resting();
+    const outsideListener = vi.fn();
+    render(<SelectionOverlay selection={selection} />);
+    document.addEventListener('pointerdown', outsideListener);
+    try {
+      const event = createEvent.pointerDown(document.body, {
+        bubbles: true,
+        cancelable: true,
+        clientX: 30,
+        clientY: 110,
+      });
+      fireEvent(document.body, event);
+
+      expect(selection.activateCurrentSelection).toHaveBeenCalledTimes(1);
+      expect(selection.beginHandleAdjustment).not.toHaveBeenCalled();
+      expect(selection.dismiss).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(true);
+      expect(outsideListener).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('pointerdown', outsideListener);
+    }
+  });
+});
+
 /**
  * The overlay paints and dismisses; it does not raise a menu. A product's
  * toolbar must also appear for the browser's own selection — a mouse drag, a
@@ -282,6 +309,21 @@ describe('dismissal', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
 
     expect(selection.dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismisses contextual tools on the first Escape and the selection on the second', () => {
+    const selection = resting();
+    const onEscape = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false);
+    const onSelectionCleared = vi.fn();
+    render(<SelectionOverlay selection={selection} onEscape={onEscape} onSelectionCleared={onSelectionCleared} />);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(selection.dismiss).not.toHaveBeenCalled();
+    expect(onSelectionCleared).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(selection.dismiss).toHaveBeenCalledTimes(1);
+    expect(onSelectionCleared).toHaveBeenCalledTimes(1);
   });
 
   it('ends the selection on a press outside it', () => {
@@ -376,6 +418,8 @@ describe('a resting selection is resized only by acquiring a visible handle', ()
       fireEvent(body, event);
 
       expect(selection.dismiss).not.toHaveBeenCalled();
+      expect(selection.activateCurrentSelection).toHaveBeenCalledTimes(1);
+      expect(selection.beginHandleAdjustment).not.toHaveBeenCalled();
       expect(event.defaultPrevented).toBe(true);
       // stopPropagation in capture: the event never reaches the target, so the
       // prose's own pointerdown — the thing that would start a new selection —

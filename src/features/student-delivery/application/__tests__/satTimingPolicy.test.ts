@@ -170,9 +170,8 @@ describe("SAT entry-window policy (late arrival)", () => {
 });
 
 describe("SAT countdown policy (SAT-003)", () => {
-  // The bug this policy exists to prevent: a cohort-section module whose
-  // personal allotment ran out must not auto-submit, because the backend only
-  // enforces a personal deadline for the legacy model.
+  // The browser uses the published deadline to freeze input and flush saves;
+  // finalization remains server-owned for every timing model.
   it("gives the legacy model the personal clock as both display and expiry", () => {
     expect(
       satCountdown({
@@ -267,7 +266,7 @@ describe("SAT countdown policy (SAT-003)", () => {
 
   // No section identity (absent or empty key) is not "this module's section":
   // the display stays at zero and no expiry can fire, so an unidentifiable
-  // frame can never auto-submit.
+  // frame can never trigger a local timeout transition.
   it("treats an absent or empty section key as no identity in a section-keyed cohort", () => {
     for (const sectionKey of [null, undefined, ""] as const) {
       expect(
@@ -297,7 +296,7 @@ describe("SAT countdown policy (SAT-003)", () => {
   });
 
   // The inert case: the shared clock is counting another section, so there is
-  // no authority for this module at all — a submit would be rejected anyway.
+  // no authority for this module; the local timeout must stay inert.
   it("has no expiry authority while the stage names another section", () => {
     expect(
       satCountdown({

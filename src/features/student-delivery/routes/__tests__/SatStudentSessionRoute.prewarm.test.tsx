@@ -260,7 +260,6 @@ function setup(opts: {
   data: AssessmentDeliveryBootstrap;
   examOverrides?: Record<string, unknown>;
   routeError?: string | null;
-  autoSubmitted?: boolean;
   answersRecorded?: boolean;
 }) {
   const state = {
@@ -318,7 +317,6 @@ function setup(opts: {
     remainingSeconds: 2100,
     blocked: false,
     warning: null,
-    autoSubmitted: opts.autoSubmitted ?? false,
     answersRecorded: opts.answersRecorded ?? false,
     showAlmostUp: false,
     persistence: basePersistence(),

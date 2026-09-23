@@ -122,12 +122,15 @@ function getAttemptCredentialStorage(): StoredAttemptCredential[] {
   const local = getBrowserStorage('localStorage');
   const session = getBrowserStorage('sessionStorage');
 
-  const localCredentials = parseAttemptCredentialStorage(
-    local?.getItem(STORAGE_KEY_ATTEMPT_CREDENTIALS) ?? null,
-  );
-  const sessionCredentials = parseAttemptCredentialStorage(
-    session?.getItem(STORAGE_KEY_ATTEMPT_CREDENTIALS) ?? null,
-  );
+  const read = (storage: Storage | null): string | null => {
+    try {
+      return storage?.getItem(STORAGE_KEY_ATTEMPT_CREDENTIALS) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const localCredentials = parseAttemptCredentialStorage(read(local));
+  const sessionCredentials = parseAttemptCredentialStorage(read(session));
 
   return mergeAttemptCredentials(localCredentials, sessionCredentials);
 }

@@ -223,14 +223,12 @@ describe("SAT cohort module clock", () => {
     vi.useRealTimers();
   });
 
-  // Module clock contract: the student reads the module's own allotment, so the
-  // module closes when that allotment ends — while the section clock still has
-  // time on it. The section clock only caps (a module never outlives its
-  // section); it is not the clock the module counts down.
-  it("expires a cohort-section module at its own allotment, capped by the section", async () => {
-    gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
-    // Keep the submission pending so the test observes only the call.
-    gatewayMocks.submitModule.mockImplementation(() => new Promise(() => {}));
+  // The student clock freezes at its own allotment, flushes queued answers,
+  // then asks the server for an authoritative reconciliation.
+  it("freezes at its own allotment and reconciles without submitting", async () => {
+    gatewayMocks.bootstrap.mockImplementation(() =>
+      Promise.resolve(cohortBootstrapAt(new Date().toISOString())),
+    );
     const hook = renderHook(() =>
       useSatExamController({
         scheduleId: "schedule",
@@ -253,12 +251,16 @@ describe("SAT cohort module clock", () => {
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     expect(hook.result.current.remainingSeconds).toBe(1);
 
-    // +1s: the module allotment is gone and the module closes, even though the
-    // section clock still reads 60s.
+    // +1s: the local module timer reaches zero while the section clock still
+    // reads 60s. The client freezes and flushes; only server reconciliation
+    // may close the module.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(gatewayMocks.submitModule).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.answerInteractionBlocked).toBe(true);
+    expect(persistenceMock.flush).toHaveBeenCalled();
+    expect(gatewayMocks.bootstrap.mock.calls.length).toBeGreaterThan(1);
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     hook.unmount();
     vi.useRealTimers();
   });

@@ -45,11 +45,12 @@ test.describe('SAT student transitions', () => {
 
       const beforeSubmit = await readSectionModules(studentPage, scheduleId, candidateId, 'reading-writing');
       expect(beforeSubmit.find((module) => module.adaptiveRole === 'base')?.state).toBe('active');
+      await expectEarlyModuleSubmitRejected(studentPage, scheduleId, candidateId);
 
       const branchEntry = await holdNextModuleStartResponse(studentPage, { failFirstRequest: true });
       await markExamFrame(studentPage);
       try {
-        await submitCurrentModule(studentPage);
+        await reviewAndExpireCurrentModule(studentPage, scheduleId);
         await expect.poll(() => branchEntry.attempts()).toBe(1, { timeout: 15_000 });
         await branchEntry.failed;
         await expect.poll(() => branchEntry.attempts()).toBe(2, { timeout: 15_000 });
@@ -93,7 +94,7 @@ test.describe('SAT student transitions', () => {
       await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
       await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
 
-      await submitCurrentModule(studentPage);
+      await reviewAndExpireCurrentModule(studentPage, scheduleId);
       const scheduledBreak = studentPage.getByTestId('sat-scheduled-break');
       await expect(scheduledBreak).toBeVisible({ timeout: 30_000 });
       await assertSingleSatStage(studentPage);
@@ -164,7 +165,7 @@ test.describe('SAT student transitions', () => {
       const mathBaseEntry = await holdNextModuleStartResponse(studentPage);
       await markExamFrame(studentPage);
       try {
-        await submitCurrentModule(studentPage);
+        await reviewAndExpireCurrentModule(studentPage, scheduleId);
         await mathBaseEntry.entered;
         await expect(studentPage.locator('[data-sat-transition-hold]')).toBeVisible();
         await assertHeldExamCannotBeInteractedWith(studentPage);
@@ -193,7 +194,7 @@ test.describe('SAT student transitions', () => {
       await studentPage.reload({ waitUntil: 'domcontentloaded' });
       await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
 
-      await submitCurrentModule(studentPage);
+      await reviewAndExpireCurrentModule(studentPage, scheduleId);
       await expect(studentPage.getByRole('heading', { name: 'SAT Complete' })).toBeVisible({ timeout: 60_000 });
       await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
     } finally {
@@ -202,12 +203,58 @@ test.describe('SAT student transitions', () => {
   });
 });
 
-async function submitCurrentModule(page: import('@playwright/test').Page): Promise<void> {
+async function reviewAndExpireCurrentModule(
+  page: import('@playwright/test').Page,
+  scheduleId: string,
+): Promise<void> {
   await page.getByRole('button', { name: /Open question navigator/ }).click();
   await page.getByRole('button', { name: 'Review answers', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Review your answers' })).toBeVisible();
-  await page.getByRole('button', { name: 'Submit module', exact: true }).click();
-  await page.getByRole('button', { name: 'Submit anyway', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Submit module', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Submit anyway', exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('sat-submit-confirm')).toHaveCount(0);
+  const changed = await executeUpdate(
+    `UPDATE assessment_module_attempts ma
+       JOIN student_attempts a ON a.id = ma.attempt_id
+        SET ma.started_at = NOW(6) - INTERVAL 1 HOUR,
+            ma.updated_at = NOW(6)
+      WHERE a.schedule_id = ?
+        AND ma.state IN ('active', 'review')`,
+    [scheduleId],
+  );
+  expect(changed, 'the current SAT module clock must expire through server reconciliation').toBe(1);
+}
+
+async function expectEarlyModuleSubmitRejected(
+  page: import('@playwright/test').Page,
+  scheduleId: string,
+  candidateId: string,
+): Promise<void> {
+  const outcome = await page.evaluate(async ({ scheduleId, candidateId }) => {
+    const liveResponse = await fetch(
+      `/api/v1/student/sessions/${scheduleId}/live?candidateId=${encodeURIComponent(candidateId)}`,
+    );
+    const livePayload = await liveResponse.json();
+    const attemptId = livePayload?.data?.attempt?.id ?? livePayload?.attempt?.id;
+    if (typeof attemptId !== 'string') throw new Error('SAT attempt was unavailable for the early-submit check.');
+    const delivery = await import('/src/features/student-delivery/api/assessmentDeliveryApi.ts');
+    delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
+    const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
+    const active = snapshot.attempt.moduleAttempts.find((item) => item.state === 'active' || item.state === 'review');
+    if (!active) throw new Error('SAT module was not active for the early-submit check.');
+    try {
+      await delivery.assessmentDeliveryApi.submitModule(scheduleId, attemptId, { moduleId: active.moduleId });
+      return { accepted: true, status: 200, reason: null };
+    } catch (error) {
+      const apiError = error as { status?: number; details?: { reason?: string } };
+      return { accepted: false, status: apiError.status ?? null, reason: apiError.details?.reason ?? null };
+    }
+  }, { scheduleId, candidateId });
+  expect(outcome).toEqual({
+    accepted: false,
+    status: 409,
+    reason: 'STUDENT_MODULE_SUBMIT_DISABLED',
+  });
 }
 
 async function holdNextModuleStartResponse(
@@ -312,14 +359,13 @@ async function assertHeldExamCannotBeInteractedWith(page: import('@playwright/te
     return;
   }
 
-  const submit = held.getByRole('button', {
-    name: 'Submit module',
-    exact: true,
-    includeHidden: true,
-  });
-  const submitBounds = await submit.boundingBox();
-  if (!submitBounds) throw new Error('The held review submit control was not visible.');
-  await page.mouse.click(submitBounds.x + submitBounds.width / 2, submitBounds.y + submitBounds.height / 2);
+  await expect(held.getByRole('heading', { name: 'Review your answers' })).toBeVisible();
+  await expect(held.getByRole('button', { name: 'Submit module', exact: true })).toHaveCount(0);
+  const backToQuestion = held.getByRole('button', { name: /Back to question/ }).first();
+  const backBounds = await backToQuestion.boundingBox();
+  if (!backBounds) throw new Error('The held review navigation control was not visible.');
+  await page.mouse.click(backBounds.x + backBounds.width / 2, backBounds.y + backBounds.height / 2);
+  await expect(held.getByRole('heading', { name: 'Review your answers' })).toBeVisible();
   await expect(page.getByTestId('sat-submit-confirm')).toHaveCount(0);
 }
 

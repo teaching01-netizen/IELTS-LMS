@@ -355,7 +355,6 @@ function seed(
     remainingSeconds: 0,
     blocked: false,
     warning: null,
-    autoSubmitted: false,
     answersRecorded: false,
     showAlmostUp: false,
     persistence: {

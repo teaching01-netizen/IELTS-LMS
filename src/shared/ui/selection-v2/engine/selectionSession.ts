@@ -73,6 +73,7 @@ import {
   createWordRangeAt,
   resolveWordRunAcrossNodes,
 } from './selectionRange';
+import { compareTextPoints } from './selectionPoint';
 import {
   resolveHandleAcquisition,
   selectionAnchorRect,
@@ -285,9 +286,25 @@ export function createSelectionSession(options: {
     if (finger.node !== anchor.node) {
       // The claim is one node's boundaries; the run has to be expressed in two.
       const across = resolveWordRunAcrossNodes(anchor, anchorAt(finger));
-      const acrossRange = createSelectionRange(across.fixed, across.moving);
+      // A product boundary may be narrower than the document's text flow (SAT
+      // anchors name one rendered text block). A finger that resolves beyond it
+      // is clamped here as well as in the grapheme path below.
+      const acrossRange = boundary
+        ? createSelectionRangeWithin(boundary, across.fixed, across.moving)
+        : createSelectionRange(across.fixed, across.moving);
       if (!acrossRange) return null;
-      return { range: acrossRange, fixed: across.fixed, moving: across.moving };
+      if (
+        acrossRange.startContainer.nodeType !== Node.TEXT_NODE
+        || acrossRange.endContainer.nodeType !== Node.TEXT_NODE
+      ) return null;
+      const rangeStart = { node: acrossRange.startContainer as Text, offset: acrossRange.startOffset };
+      const rangeEnd = { node: acrossRange.endContainer as Text, offset: acrossRange.endOffset };
+      const forward = compareTextPoints(across.fixed, across.moving) <= 0;
+      return {
+        range: acrossRange,
+        fixed: forward ? rangeStart : rangeEnd,
+        moving: forward ? rangeEnd : rangeStart,
+      };
     }
     const origin = { start: anchor.start, end: anchor.end };
     const { span: run, side } = resolveWordDragSpan(origin, expandToWordAt(finger, options.segmenter, options.words));
@@ -440,7 +457,14 @@ export function createSelectionSession(options: {
     movingEndpoint: () => {
       const finger = state.moving;
       const body = state.phase === 'selecting' || state.phase === 'extending';
-      if (body && anchor && finger && span.range) return clampPointToRange(finger, span.range);
+      if (body && anchor && finger && span.range) {
+        // Product boundaries can be narrower than the containing root. When a
+        // caret resolver returns text from beyond that boundary, the span's
+        // moving endpoint is the clamped edge; never magnify the out-of-block
+        // caret the Range deliberately refused.
+        if (boundary && !boundary.contains(finger.node)) return span.moving;
+        return clampPointToRange(finger, span.range);
+      }
       return span.moving ?? finger;
     },
 

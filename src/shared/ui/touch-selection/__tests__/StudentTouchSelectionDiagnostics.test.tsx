@@ -41,16 +41,40 @@ it('shows actual listener, DOM events, capture outcome, and cleans up on exit', 
     expect(panel).toHaveTextContent('"mutationApplied": true');
     expect(window.getSelection()?.toString()).toBe('');
     expect(root.querySelector('mark')).toHaveTextContent('beta');
+    const snapshot = window.__studentTouchSelectionDebug!.snapshot();
+    const surface = snapshot.surfaces[0] as Record<string, unknown>;
+    expect(surface).toMatchObject({
+      coarse: true,
+      anyCoarse: true,
+      ownedTouchSelectionMarkerPresent: true,
+      ownerMarkerPresent: false,
+      protectedRootPresent: false,
+      nativeSelectionRangeCount: 0,
+    });
+    expect(surface['maxTouchPoints']).toEqual(expect.any(Number));
+    expect(snapshot.documentEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        stage: 'pointerdown',
+        pointerType: 'touch',
+        ownerMarkerPresent: true,
+        protectedRootPresent: false,
+        nativeSelectionRangeCount: 0,
+      }),
+    ]));
+    expect(snapshot.documentEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ stage: 'pointermove', pointerType: 'touch', ownerMarkerPresent: true }),
+    ]));
+    expect(snapshot.documentEvents.some((event) => event['stage'] === 'pointerdown' && event['pointerType'] === 'touch')).toBe(true);
     unmount();
     expect(window.__studentTouchSelectionDebug).toBeUndefined();
   } finally { delete (document as Document & { caretPositionFromPoint?: unknown }).caretPositionFromPoint; }
 });
 
-const coarse = () => true;
+const touchPointer = (event: PointerEvent) => event.pointerType === 'touch';
 function DelayedRoot({ visible }: { visible: boolean }) {
   const root = useRef<HTMLDivElement>(null);
   const diagnostics = useStudentTouchSelectionDiagnostics(root, { surface: 'delayed test root', enabled: true, ownedTouchSelection: true, toolModeOrAnnotationMode: 'highlight' });
-  useStudentSelectionGesture({ enabled: true, activation: 'drag', rootRef: root, diagnostics, resolveCaretAtPoint: () => null, onSelect: () => {}, isCoarsePointer: coarse });
+  useStudentSelectionGesture({ enabled: true, activation: 'drag', rootRef: root, diagnostics, resolveCaretAtPoint: () => null, onSelect: () => {}, isOwnedPointer: touchPointer });
   return visible ? <div ref={root}>Late root</div> : null;
 }
 

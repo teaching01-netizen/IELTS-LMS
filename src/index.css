@@ -898,22 +898,16 @@
     user-select: text;
   }
 
-  /* On a coarse pointer, every SAT text surface is app-owned or unselectable.
-     The listener is armed only while annotations are on, and touch-action:none
-     stays dynamic on that armed root. The explicit text root keeps choice prose
-     inside the same ownership boundary as stimulus and prompt while radio,
-     marker, elimination, notes, and calculator controls remain outside it.
-
-     `html.student-exam-active` outranks translation guard rules, and keeps this
-     restricted to a locked exam and the primary coarse pointer. */
-  @media (pointer: coarse) {
-    html.student-exam-active [data-sat-selection-protected="true"],
-    html.student-exam-active [data-sat-selection-protected="true"] *,
-    html.student-exam-active [data-student-highlightable="true"],
-    html.student-exam-active [data-student-highlightable="true"] * {
-      -webkit-user-select: none;
-      user-select: none;
-    }
+  /* Suppress native ranges only after the selection adapter sees a touch on an
+     armed exam surface. The explicit owner marker is removed for mouse and
+     keyboard selection, so a trackpad on a touch iPad still follows the native
+     desktop path. It remains while an app-owned touch range rests. */
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"],
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] *,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"],
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] * {
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   /* THE OTHER HALF OF THAT OWNERSHIP: the browser must be told not to PAN, and
@@ -926,23 +920,13 @@
      that left a student on an iPad with nothing selecting at all — and no jsdom
      test can catch it, because jsdom never runs a real scrolling gesture.
 
-     `touch-action: none` is the only declaration that settles ownership in
-     advance. It applies to touches that begin on this element or anywhere inside
-     it — the used value is taken from the whole ancestor chain — so the prose
-     needs no `*` rule of its own.
-
-     The marker is set by `useStudentSelectionGesture` only when an armed tool
-     can select on a coarse pointer, and it is ALSO gated on the exam class here,
-     so a marker left on a lobby or preview surface is inert. That gate is not
-     cosmetic: those phases render the same surfaces, and taking their scroll
-     away would be a real regression. `html.student-exam-active` rather than
-     `.student-exam-active` for the same reason as the rule above — it outranks
-     `.student-reading-passage-pane { touch-action: auto }` (0,2,1 against
-     0,1,0) instead of tying with it and being decided by file order. */
-  @media (pointer: coarse) {
-    html.student-exam-active [data-student-owned-touch-selection="true"] {
-      touch-action: none;
-    }
+     `touch-action: none` is the only declaration that settles touch ownership
+     in advance. The adapter marks only its enabled exam surface. Pointer type,
+     not the primary-pointer media query, decides whether a physical gesture is
+     touch-owned. `html.student-exam-active` keeps this inert in previews and
+     lobbies and outranks the reading pane's default touch action. */
+  html.student-exam-active [data-student-owned-touch-selection="true"] {
+    touch-action: none;
   }
 
   /* Exam content is not a drag source: dragging an image or a link would carry

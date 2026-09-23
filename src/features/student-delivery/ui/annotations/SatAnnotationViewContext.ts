@@ -28,10 +28,16 @@ export interface SatAnnotationView {
    * mean something in both directions.
    */
   annotationModeEnabled: boolean;
+  /** Whether contextual controls are visible for the current anchor. */
+  selectionToolsVisible?: boolean | undefined;
   /** Student tapped or activated an existing mark: open its editor. */
   openEditor: (annotation: SatTextAnnotation) => void;
   /** A completed text selection, reported upward for the toolbar. */
   onSelectionCaptured?: ((anchor: SatTextAnchor) => void) | undefined;
+  /** Hide contextual tools while the Selection v2 range stays selected. */
+  onSelectionToolsDismissed?: (() => void) | undefined;
+  /** The visual Selection v2 range itself ended. */
+  onSelectionCleared?: (() => void) | undefined;
 }
 
 const EMPTY_VIEW: SatAnnotationView = {
@@ -40,6 +46,7 @@ const EMPTY_VIEW: SatAnnotationView = {
   // Default OFF: a context that never armed annotation cannot raise controls,
   // which is the safe end of the invariant.
   annotationModeEnabled: false,
+  selectionToolsVisible: false,
   openEditor: () => undefined,
 };
 

@@ -38,8 +38,8 @@ import {
 } from "../infrastructure/satCalculatorWorkspace";
 import { clearSatReadingPreferences } from "../infrastructure/satReadingPreferencesStore";
 import { createSatRunnerState, satRunnerReducer } from "../application/satRunnerReducer";
-// SAT-005/007: commit-to-phase routing and submit-conflict policy live in
-// application/ (pure); the hook only wires them to state and the gateway.
+// SAT-005/007: commit-to-phase routing and conflict policy live in application/
+// (pure); the hook only wires them to state and the gateway.
 import {
   decideSatCommitRoute,
   startModuleRouteAction,
@@ -141,11 +141,12 @@ export function useSatExamController({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const timeoutSubmissionKeyRef = useRef<string | null>(null);
+  const timeoutTransitionKeyRef = useRef<string | null>(null);
+  const [timeoutTransitionKey, setTimeoutTransitionKey] = useState<string | null>(null);
+  const [timeoutTransitionStarted, setTimeoutTransitionStarted] = useState(false);
   // SAT-002: one owner for "which revision may finalize, and is one already
   // running" — the claim / single-flight / release rules live in
-  // application/satFinalizationGate.ts so both drivers (the module-submit
-  // commit path and the recovery effect) apply them identically.
+  // application/satFinalizationGate.ts and protect the automatic result path.
   const finalizationGateRef = useRef(
     createSatFinalizationGate<AssessmentResult | null>()
   );
@@ -186,9 +187,10 @@ export function useSatExamController({
     setError(null);
     setIsSubmitting(false);
     setIsStarting(false);
-    setAutoSubmitted(false);
+    setTimeoutTransitionStarted(false);
+    setTimeoutTransitionKey(null);
     setAnswersRecorded(false);
-    timeoutSubmissionKeyRef.current = null;
+    timeoutTransitionKeyRef.current = null;
     dataRef.current = null;
     // A rotated identity must not inherit the previous attempt's finalization
     // claim (the revision key already scopes by attempt, this keeps the
@@ -243,9 +245,8 @@ export function useSatExamController({
   // payload was accepted (boolean; 304 stays null at the refresh layer) and
   // runs setData + the at-most-one phase dispatch in the same synchronous
   // tick so React 18+ batches them into one render. The hint selects the
-  // route decision; startModule/submitModule hints commit data here and
-  // dispatch via their existing call-site logic in the same tick (see
-  // startPendingModule/submitModule below).
+  // route decision; startModule hints commit data here and dispatch the route
+  // in the same tick (see startPendingModule below).
   const acceptPayloadAndRoute = useCallback(
     (
       payload: AssessmentDeliveryBootstrap,
@@ -274,10 +275,10 @@ export function useSatExamController({
         // mutation responses — a poll may have committed the server's advance
         // first, and skipping the decision would strand the runner. Data
         // writes stay skipped; only the phase action and hydration run.
-        if (hint.kind === "startModule" || hint.kind === "submitModule") {
+        if (hint.kind === "startModule") {
           const action = decideSatCommitRoute(stateRef.current, current, hint, commitIdentity);
           if (action) dispatch(action);
-          if (hint.kind === "startModule" && action?.type === "routeToModule") {
+          if (action?.type === "routeToModule") {
             const activeModule = moduleForAttempt(current, findActiveAttempt(current));
             if (activeModule) hydrateModuleResponsesRef.current?.(current, activeModule);
           }
@@ -796,8 +797,7 @@ export function useSatExamController({
       : null;
 
   // Keep the predecessor's timeout attribution for the module-advance metric.
-  // It describes how Module 1 ended; server routing and automatic Module 2
-  // entry work the same way for early submit and timeout.
+  // Routing and automatic entry follow the server's selected next module.
   const previousModuleTimedOut = useMemo(
     () => (data && pendingModule ? previousModuleEndedByClock(data, pendingModule) : false),
     [data, pendingModule],
@@ -840,7 +840,7 @@ export function useSatExamController({
       // mid-module. One event per confirmed open makes "Module 1 timed out,
       // Module 2 never opened" a queryable funnel step.
       emitStudentObservabilityMetric("sat_module_advance", {
-        reason: previousModuleTimedOut ? "timeout" : "student",
+        reason: previousModuleTimedOut ? "timeout" : "server",
         sectionKey: pendingSection?.sectionKey ?? null,
         adaptiveRole: pendingModule.adaptiveRole,
       });
@@ -1014,160 +1014,6 @@ export function useSatExamController({
       );
     });
   }, [attemptId, data, finalizeAssessment, state.phase]);
-
-  const submitModule = useCallback(
-    async (moduleId: string) => {
-      if (isSubmitting) return;
-      const generation = identityGenerationRef.current;
-      const isCurrent = () => identityGenerationRef.current === generation;
-      const submittedModuleAttemptId = data ? findAttemptForModule(data, moduleId)?.id : undefined;
-      setIsSubmitting(true);
-      setError(null);
-      // SAT-007 slice 2: a control-epoch or durability conflict means our local
-      // view is stale, not that the request is illegal. Refresh the authoritative
-      // epoch/revision and send exactly ONE more attempt before treating it as a
-      // real failure. Section closures and writer supersession are deliberately
-      // excluded: the module is genuinely gone, or another window owns the
-      // attempt and retrying here cannot help.
-      const submitModuleRequest = async () => {
-        try {
-          return await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
-        } catch (conflict) {
-          if (!isStaleConflictRejection(conflict)) throw conflict;
-          await refresh(false);
-          return await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
-        }
-      };
-      try {
-        await persistence.flush();
-        if (!isCurrent()) return;
-        // SAT-004: module submission is a boundary too. flush() only proves
-        // the queue drained — a blocked draft can be visible outside the
-        // queue — so refuse to finalize the module while any visible answer
-        // is unsettled. The shared barrier is the same one the terminal
-        // submit uses.
-        await persistence.assertBoundarySettled?.();
-        if (!isCurrent()) return;
-        const next = await submitModuleRequest();
-        if (!isCurrent()) return;
-        if (next.scheduleId !== scheduleId || next.attempt.id !== attemptId) return;
-        // SAT-005: the submitModule hint commits data AND dispatches the
-        // post-submit route action (submit / break / directions) in one
-        // monotonic commit — mutation responses no longer have a privileged
-        // bypass around the stale-revision guard. A rejected payload reports
-        // false; the newer committed state (or the poll/recovery safety nets)
-        // owns the route from there.
-        if (!acceptPayloadAndRoute(next, { kind: "submitModule", moduleId })) return;
-        if (submittedModuleAttemptId) {
-          clearCalculatorWorkspace(
-            calculatorWorkspaceKey(scheduleId, attemptId, submittedModuleAttemptId)
-          );
-        }
-        const committed = dataRef.current;
-        const nextAttempt = committed ? findPendingAttempt(committed) : undefined;
-        const nextModule = committed ? moduleForAttempt(committed, nextAttempt) : null;
-        if (!nextModule) {
-          // SAT-002: claim the finalization identity for this revision before
-          // the data-driven recovery effect can see the same terminal
-          // projection — one completion attempt, one error to report. The
-          // effect clears it on failure so retries (manual or from a later
-          // revision) still work.
-          if (committed) {
-            finalizationGateRef.current.claim(
-              finalizationGateRef.current.revisionKey(attemptId, committed)
-            );
-          }
-          const finalResult = await finalizeAssessment(
-            generation,
-            committed?.versionId ?? next.versionId
-          );
-          if (!finalResult || !isCurrent()) return;
-          clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
-          clearSatReadingPreferences(scheduleId, attemptId);
-          return;
-        }
-        return;
-      } catch (submitError) {
-        if (!isCurrent()) return;
-        const refreshed = await refresh(false);
-        if (!isCurrent()) return;
-        if (refreshed?.result) {
-          clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
-          clearSatReadingPreferences(scheduleId, attemptId);
-          setResult(refreshed.result);
-          dispatch({
-            type: "recover",
-            state: {
-              phase: "complete",
-              scheduleId,
-              candidateId,
-              assessmentId: refreshed.versionId,
-              resultId: refreshed.result.id,
-            },
-          });
-          return;
-        }
-
-        if (refreshed) {
-          const nextAttempt = findPendingAttempt(refreshed);
-          const nextModule = moduleForAttempt(refreshed, nextAttempt);
-          if (nextModule && nextModule.id !== moduleId) {
-            if (submittedModuleAttemptId) {
-              clearCalculatorWorkspace(
-                calculatorWorkspaceKey(scheduleId, attemptId, submittedModuleAttemptId)
-              );
-            }
-            dispatch({ type: "showDirections" });
-            return;
-          }
-        }
-        // SAT-007: writer supersession is not a section transition. The
-        // attempt is live somewhere else; the correct instruction is to
-        // continue there (or take the attempt over), never to wait for a
-        // module close that will not arrive on this client.
-        if (isWriterSupersededRejection(submitError)) {
-          setError(
-            "This attempt is now active in another window. Your saved answers are safe — continue there, or use Take over to resume here."
-          );
-          return;
-        }
-        // Phase 4: the server's clock has moved past ours — the section clock
-        // closed underneath the submit, the runtime paused, or the reconciler
-        // already finalized this module. Not a student error and not a
-        // timeout (a timeout keeps the attribution the zero-remaining path
-        // already set): say what is happening and let the poll loop, or
-        // reconnect when this ran offline, move the student on.
-        if (isSectionClosingRejection(submitError)) {
-          setError(
-            "The exam is finalizing this module — your answers are safe. Keep this screen open."
-          );
-          return;
-        }
-        // The retry already refetched once. Say what is actually true — the
-        // module is NOT closed and the last answers were not lost — instead of
-        // the backend's raw code, which reads like an exam error to a student.
-        if (isStaleConflictRejection(submitError)) {
-          setError(
-            "This device and the server disagreed about the latest revision, so the module was not submitted. Your answers are saved — submit the module again."
-          );
-          return;
-        }
-        setError(submitError instanceof Error ? submitError.message : "Module submission failed.");
-      } finally {
-        if (isCurrent()) setIsSubmitting(false);
-      }
-    },
-    [
-      acceptPayloadAndRoute,
-      attemptId,
-      data,
-      isSubmitting,
-      persistence,
-      refresh,
-      finalizeAssessment,
-      scheduleId,
-    ]
-  );
 
   // All modules are finalized but no result exists: the finalize call failed
   // and polling alone cannot create a result. Eligibility is derived from
@@ -1350,6 +1196,17 @@ export function useSatExamController({
     personalSeconds: personalModuleRemainingSeconds,
     authoritativeSeconds: authoritativeRemainingSeconds,
   });
+  const activeModuleAttemptKey =
+    stateModule && stateModuleAttempt
+      ? `${stateModule.id}:${stateModuleAttempt.id}`
+      : null;
+  const timeoutTransitionPending =
+    activeModuleAttemptKey !== null && timeoutTransitionKey === activeModuleAttemptKey;
+  const answerInteractionBlocked =
+    timeoutTransitionPending ||
+    (activeModuleAttemptKey !== null &&
+      expiryRemainingSeconds !== null &&
+      expiryRemainingSeconds <= 0);
 
   const saveContext = useCallback(
     (interactionType: "typing" | "discrete") => {
@@ -1378,25 +1235,35 @@ export function useSatExamController({
     ) {
       return;
     }
-    // Phase 04 skew guard: a skew frame that looks like 0 (a missing attempt
-    // resolves through the section-clock fallback) must neither submit
-    // nor consume timeoutSubmissionKeyRef — submit fires only from a
-    // resolved frame. Key stays moduleId:attemptId-scoped, exactly once.
+    // Phase 04 skew guard: a skew frame with no resolved attempt must not
+    // consume the timeout transition key. The timer only freezes the client;
+    // the server reconciler owns module completion.
     if (!data || !findAttemptForModule(data, stateModule.id)) return;
     const key = `${stateModule.id}:${stateModuleAttempt.id}`;
     // SAT-003: expiry is judged on the authoritative clock only. A null
     // expiry means this frame has no authority for the module yet (mismatched
     // cohort stage) — keep the timeout inert rather than trusting the
     // student-facing allotment.
-    if (expiryRemainingSeconds === null || expiryRemainingSeconds > 0) {
-      if (timeoutSubmissionKeyRef.current !== key) timeoutSubmissionKeyRef.current = null;
+    if (expiryRemainingSeconds === null) return;
+    if (expiryRemainingSeconds > 0) {
+      if (timeoutTransitionKeyRef.current === key) {
+        timeoutTransitionKeyRef.current = null;
+        setTimeoutTransitionKey((current) => current === key ? null : current);
+      }
       return;
     }
-    if (stateModuleAttempt.pausedAt || timeoutSubmissionKeyRef.current === key) return;
-    timeoutSubmissionKeyRef.current = key;
-    setAutoSubmitted(true);
-    void submitModule(stateModule.id);
-  }, [data, expiryRemainingSeconds, state.phase, stateModule, stateModuleAttempt, submitModule]);
+    if (stateModuleAttempt.pausedAt || timeoutTransitionKeyRef.current === key) return;
+    timeoutTransitionKeyRef.current = key;
+    setTimeoutTransitionKey(key);
+    setTimeoutTransitionStarted(true);
+    const generation = identityGenerationRef.current;
+    void persistenceRef.current.flush().catch(() => undefined).then(() => {
+      if (identityGenerationRef.current !== generation) return;
+      // This read is a recovery nudge only. The periodic worker and bootstrap
+      // reconciliation finalize the module from authoritative server time.
+      void refresh(true);
+    });
+  }, [data, expiryRemainingSeconds, refresh, state.phase, stateModule, stateModuleAttempt]);
 
   // Phase 04 commit-first / reconciler-second: the poll commit dispatches
   // showDirections synchronously when it carries the finalized predicate;
@@ -1436,6 +1303,7 @@ export function useSatExamController({
       change: SatResponseDraftChange,
       interactionType: "typing" | "discrete"
     ): SatQuestionResponseDraft | null => {
+      if (answerInteractionBlocked) return null;
       const current = currentResponse(questionId);
       if (!current) return null;
       const next = applySatResponseDraftChange(current, change);
@@ -1443,7 +1311,7 @@ export function useSatExamController({
       persistence.save(next, saveContext(interactionType));
       return next;
     },
-    [currentResponse, persistence, saveContext]
+    [answerInteractionBlocked, currentResponse, persistence, saveContext]
   );
 
   const setAnswer = useCallback(
@@ -1495,26 +1363,23 @@ export function useSatExamController({
   );
 
   const setAnnotations = useCallback((questionId: string, annotations: SatQuestionAnnotations) => {
+    if (answerInteractionBlocked) return;
     const current = currentResponse(questionId);
     if (!current || (state.phase !== 'module' && state.phase !== 'review') || !resolveSatExamToolPolicy(state.sectionKey, []).highlight) return;
     dispatch({ type: 'setAnnotations', questionId, annotations });
     persistence.save({ ...current, annotations }, saveContext('discrete'));
-  }, [currentResponse, persistence, saveContext, state]);
+  }, [answerInteractionBlocked, currentResponse, persistence, saveContext, state]);
 
   const returnToQuestion = useCallback((questionIndex: number) => {
+    if (answerInteractionBlocked) return;
     dispatch({ type: "selectQuestion", questionIndex });
     dispatch({ type: "returnToModule" });
-  }, []);
+  }, [answerInteractionBlocked]);
 
   const blocked = Boolean(
     data && (data.proctorStatus === "paused" || data.scheduleRuntimeStatus === "paused")
   );
   const warning = data?.proctorStatus === "warned" ? data.proctorNote : null;
-  // Timeout attribution (Phase 1): distinguishes the auto-submit overlay copy
-  // ("Time expired — submitting…") from a manual submit. Set when the
-  // zero-remaining effect fires; cleared on identity change and once the
-  // phase leaves module/review (submit pipeline consumed it).
-  const [autoSubmitted, setAutoSubmitted] = useState(false);
   // Exam-day P1: distinguishes "answers recorded, generating result" from
   // "submission failed, answers safe locally — retry". Set once flush +
   // V2 submit ack inside finalizeAssessment; cleared on identity change.
@@ -1548,7 +1413,9 @@ export function useSatExamController({
     remainingSeconds,
     blocked,
     warning,
-    autoSubmitted,
+    answerInteractionBlocked,
+    timeoutTransitionPending,
+    timeoutTransitionStarted,
     answersRecorded,
     // Exam-screen integrity hold: present once the student returns from a
     // visibility excursion, cleared only by acknowledging it.
@@ -1560,7 +1427,6 @@ export function useSatExamController({
     commitForTest,
     commands: {
       startPendingModule,
-      submitModule,
       retryFinalization,
       takeOverDurabilityLease: persistence.takeOverLease,
       setAnswer,
@@ -1568,21 +1434,33 @@ export function useSatExamController({
       toggleEliminatedOption,
       setAnnotationNote,
       setAnnotations,
-      selectQuestion: (questionIndex: number) =>
-        dispatch({ type: "selectQuestion", questionIndex }),
+      selectQuestion: (questionIndex: number) => {
+        if (answerInteractionBlocked) return;
+        dispatch({ type: "selectQuestion", questionIndex });
+      },
       returnToQuestion,
-      previousQuestion: () =>
+      previousQuestion: () => {
+        if (answerInteractionBlocked) return;
         dispatch({
           type: "selectQuestion",
           questionIndex: state.phase === "module" ? state.questionIndex - 1 : 0,
-        }),
-      nextQuestion: () =>
+        });
+      },
+      nextQuestion: () => {
+        if (answerInteractionBlocked) return;
         dispatch({
           type: "selectQuestion",
           questionIndex: state.phase === "module" ? state.questionIndex + 1 : 0,
-        }),
-      reviewModule: () => dispatch({ type: "reviewModule" }),
-      returnToModule: () => dispatch({ type: "returnToModule" }),
+        });
+      },
+      reviewModule: () => {
+        if (answerInteractionBlocked) return;
+        dispatch({ type: "reviewModule" });
+      },
+      returnToModule: () => {
+        if (answerInteractionBlocked) return;
+        dispatch({ type: "returnToModule" });
+      },
       showDirections: () => dispatch({ type: "showDirections" }),
       toggleCalculator: () => dispatch({ type: "toggleTool", tool: "calculator" }),
       toggleReference: () => dispatch({ type: "toggleTool", tool: "reference_sheet" }),

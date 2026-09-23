@@ -1,5 +1,5 @@
 /**
- * SAT submit-path conflict policy.
+ * SAT delivery-command conflict policy.
  *
  * The delivery backend answers HTTP 409 for several unrelated situations —
  * writer supersession (ACTIVE_SESSION_SUPERSEDED), version collisions,

@@ -22,6 +22,15 @@ describe('studentSessionTransport', () => {
     );
   });
 
+  it('builds the cookie-authenticated resume endpoint without a candidate id', () => {
+    expect(studentSessionTransport.paths.resume('schedule-1', 'session-abc')).toBe(
+      '/v1/student/sessions/schedule-1?refreshAttemptCredential=true&clientSessionId=session-abc',
+    );
+    expect(studentSessionTransport.paths.resume('schedule-1')).toBe(
+      '/v1/student/sessions/schedule-1?refreshAttemptCredential=true',
+    );
+  });
+
   it('builds heartbeat endpoint with optional response mode', () => {
     expect(studentSessionTransport.paths.heartbeat('schedule-1')).toBe(
       '/v1/student/sessions/schedule-1/heartbeat',

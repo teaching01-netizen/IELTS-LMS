@@ -6,7 +6,7 @@ import type { TextPoint } from '../domain/selectionTypes';
 
 type Handlers = {
   enabled?: boolean;
-  coarse?: boolean;
+  ownedPointer?: (event: PointerEvent) => boolean;
   activation?: 'long-press' | 'drag';
   boundaryFor?: (point: TextPoint) => Element | null;
   onSelect?: (range: Range, text: string) => void;
@@ -82,7 +82,7 @@ function harness(handlers: Handlers = {}) {
       rootRef,
       resolveCaretAtPoint,
       onSelect,
-      isCoarsePointer: () => handlers.coarse ?? true,
+      isOwnedPointer: handlers.ownedPointer,
       longPressMs: handlers.longPressMs ?? 350,
       moveTolerancePx: 8,
       activation: handlers.activation,
@@ -184,6 +184,23 @@ afterEach(() => {
 });
 
 describe('claiming text', () => {
+  it('uses the physical pointer type, independent of the primary pointer media query', () => {
+    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: false } as MediaQueryList);
+    const mouse = harness();
+    fireEvent.pointerDown(mouse.prose, { pointerType: 'mouse', pointerId: 1, clientX: 7, clientY: 10 });
+    expect(mouse.view.result.current.phase).toBe('idle');
+    expect(mouse.onSelect).not.toHaveBeenCalled();
+    mouse.view.unmount();
+
+    const touch = harness();
+    touchDown(touch.prose, 7);
+    hold(touch.frames);
+    touchUp(touch.prose, 7);
+    frame(touch.frames);
+    expect(touch.onSelect).toHaveBeenCalledTimes(1);
+    expect(touch.onSelect.mock.calls[0]?.[1]).toBe('beta');
+  });
+
   it('selects nothing for a tap', () => {
     const { prose, onSelect, frames, view } = harness();
 

@@ -599,7 +599,7 @@ describe("useSatExamController convergence (Phase 04)", () => {
     vi.useRealTimers();
   });
 
-  it("T7: unresolvable skew frame never submits; recovery at 0 submits exactly once", async () => {
+  it("T7: a resolved zero-time frame freezes answers, flushes saves, and reconciles without submitting", async () => {
     const p = modulePayload({
       currentModuleId: "m-1",
       currentModuleKey: "rw-m1",
@@ -607,8 +607,8 @@ describe("useSatExamController convergence (Phase 04)", () => {
     });
     p.attempt.moduleAttempts[0].remainingSeconds = 0;
     p.attempt.moduleAttempts[0].deadlineAt = new Date(Date.now() - 1000).toISOString();
+    p.attempt.moduleAttempts[0].startedAt = new Date(Date.now() - 120_000).toISOString();
     gatewayMocks.bootstrap.mockResolvedValue(p);
-    gatewayMocks.submitModule.mockResolvedValue(p);
     const hook = renderHook(() =>
       useSatExamController({
         scheduleId: "schedule",
@@ -617,16 +617,17 @@ describe("useSatExamController convergence (Phase 04)", () => {
       }),
     );
     await waitFor(() => expect(hook.result.current.data).not.toBeNull());
-    // Resolved zero-remaining frame submits once (keyed module:attempt).
+    // Resolve the pending-module entry so the zero-time active frame is live.
     gatewayMocks.startModule.mockImplementation(async () => p);
     await act(async () => {
       await hook.result.current.commands.startPendingModule();
     });
     await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(gatewayMocks.submitModule).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(persistenceMock.flush).toHaveBeenCalled());
+    expect(hook.result.current.answerInteractionBlocked).toBe(true);
+    expect("submitModule" in hook.result.current.commands).toBe(false);
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
+    expect(gatewayMocks.bootstrap.mock.calls.length).toBeGreaterThan(1);
   });
 
   it("identity: state.candidateId equals the candidate prop after bootstrap", async () => {

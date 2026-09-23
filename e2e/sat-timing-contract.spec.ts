@@ -467,7 +467,7 @@ test.describe('SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       ).toBe(true);
 
       // Join during the authoritative break. The candidate has no active
-      // module to auto-submit while the test is proving the shared boundary;
+      // module to time out while the test is proving the shared boundary;
       // the same route still consumes the real access link/bootstrap path.
       studentContext = await browser.newContext();
       await stubScreenDetails(studentContext);

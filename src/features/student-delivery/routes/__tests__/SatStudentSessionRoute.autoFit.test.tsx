@@ -201,7 +201,6 @@ function seedModulePhase() {
     remainingSeconds: 1200,
     blocked: false,
     warning: null,
-    autoSubmitted: false,
     answersRecorded: false,
     showAlmostUp: false,
     persistence: {

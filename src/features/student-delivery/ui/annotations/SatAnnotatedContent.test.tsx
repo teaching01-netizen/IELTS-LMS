@@ -459,15 +459,15 @@ type PointCapable = Document & {
 /**
  * The owned touch gesture, end to end.
  *
- * This is the iPad case. The exam's prose is `user-select: none` under a coarse
- * pointer, so the platform never makes a selection — and the exam makes one
- * itself instead. What these cases pin is that the owned range reaches the very
+ * This is the touch case. Once the app claims the physical touch pointer, the
+ * exam disables native text selection and creates the range itself. These
+ * cases pin that the owned range reaches the very
  * same capture the desktop selection does, while `window.getSelection()` stays
  * empty the whole time. The empty selection is the point: it is what the
  * platform attaches its Copy / Find / Look Up bar to.
  *
- * jsdom has no hit test and no media queries, so both capabilities are stubbed
- * at the boundary the hook takes them from. Everything else — the hold, the
+ * jsdom has no hit test, so hit testing is stubbed at the boundary the hook
+ * takes it from. Everything else — the hold, the
  * tolerance, the ordering, the capture — runs for real.
  */
 describe('SAT owned touch selection', () => {
@@ -477,6 +477,7 @@ describe('SAT owned touch selection', () => {
     restoreEnvironment?.();
     restoreEnvironment = null;
     vi.useRealTimers();
+    window.getSelection()?.removeAllRanges();
   });
 
   function stubCoarsePointerDevice() {
@@ -518,6 +519,62 @@ describe('SAT owned touch selection', () => {
     }
     fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
   }
+
+  it('owns only touch selection on a protected exam root and suppresses late native ranges', () => {
+    window.getSelection()?.removeAllRanges();
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ onSelectionCaptured }), { ownedTouchSelection: true });
+    const region = container.querySelector('[data-sat-annotation-region]') as HTMLElement;
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+
+    fireEvent.pointerDown(region, { pointerType: 'touch', pointerId: 8, clientX: 2, clientY: 10 });
+    expect(region).toHaveAttribute('data-student-selection-owner', 'app');
+
+    const selectStart = new Event('selectstart', { bubbles: true, cancelable: true });
+    fireEvent(region, selectStart);
+    expect(selectStart.defaultPrevented).toBe(true);
+
+    const range = document.createRange();
+    range.setStart(leaf, 0);
+    range.setEnd(leaf, 4);
+    window.getSelection()?.addRange(range);
+    fireEvent(document, new Event('selectionchange'));
+    expect(window.getSelection()?.rangeCount).toBe(0);
+    expect(onSelectionCaptured).not.toHaveBeenCalled();
+  });
+
+  it('leaves mouse and editor selections on the browser path', () => {
+    window.getSelection()?.removeAllRanges();
+    const { container } = renderContent({}, view(), { ownedTouchSelection: true });
+    const region = container.querySelector('[data-sat-annotation-region]') as HTMLElement;
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+
+    fireEvent.pointerDown(region, { pointerType: 'mouse', pointerId: 9, clientX: 2, clientY: 10 });
+    expect(region).not.toHaveAttribute('data-student-selection-owner');
+    const range = document.createRange();
+    range.setStart(leaf, 0);
+    range.setEnd(leaf, 4);
+    window.getSelection()?.addRange(range);
+    fireEvent(document, new Event('selectionchange'));
+    expect(window.getSelection()?.toString()).toBe('A tr');
+
+    window.getSelection()?.removeAllRanges();
+    const editor = document.createElement('div');
+    editor.setAttribute('contenteditable', 'true');
+    editor.textContent = 'edit me';
+    region.append(editor);
+    fireEvent.pointerDown(editor, { pointerType: 'touch', pointerId: 10, clientX: 2, clientY: 10 });
+    expect(region).not.toHaveAttribute('data-student-selection-owner');
+    const editorSelectStart = new Event('selectstart', { bubbles: true, cancelable: true });
+    fireEvent(editor, editorSelectStart);
+    expect(editorSelectStart.defaultPrevented).toBe(false);
+    const editorSelection = document.createRange();
+    editorSelection.setStart(editor.firstChild!, 0);
+    editorSelection.setEnd(editor.firstChild!, 4);
+    window.getSelection()?.addRange(editorSelection);
+    fireEvent(document, new Event('selectionchange'));
+    expect(window.getSelection()?.toString()).toBe('edit');
+  });
 
   it('declares the owned drag to the browser while the mode is armed and only then', () => {
     const armed = stubCoarsePointerDevice();
@@ -669,29 +726,26 @@ describe('SAT owned touch selection', () => {
       restoreMedia();
     };
 
-    // Scope defaults to false: same coarse pointer, same hit test, no ownership.
+    // Scope defaults to false: the same physical touch and hit test, no ownership.
     longPressAndDrag([2, 6]);
     expect(onSelectionCaptured).not.toHaveBeenCalled();
   });
 
-  it('leaves a fine-pointer device to the platform, which still makes its own selection', () => {
+  it('owns a physical touch gesture even when the primary pointer is fine', () => {
     const onSelectionCaptured = vi.fn();
     const { container } = renderContent({}, view({ onSelectionCaptured }), { ownedTouchSelection: true });
     const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
-    const restoreMedia = stubCoarsePointerDevice();
+    const originalMatchMedia = window.matchMedia;
     const restoreHit = stubHitTest(leaf);
     restoreEnvironment = () => {
       restoreHit();
-      restoreMedia();
+      window.matchMedia = originalMatchMedia;
     };
-    // A desktop browser reports a fine primary pointer, so the owned gesture
-    // stands down and the native path below still works.
     window.matchMedia = (() => ({ matches: false })) as unknown as typeof window.matchMedia;
 
     longPressAndDrag([2, 6]);
-    expect(onSelectionCaptured).not.toHaveBeenCalled();
-
-    selectText(container, 2, 6);
     expect(onSelectionCaptured).toHaveBeenCalledWith(expect.objectContaining({ exact: 'tree' }));
+    expect(container.querySelector('[data-sat-selection-protected="true"]')).toHaveAttribute('data-student-selection-owner', 'app');
+    expect(window.getSelection()?.rangeCount).toBe(0);
   });
 });

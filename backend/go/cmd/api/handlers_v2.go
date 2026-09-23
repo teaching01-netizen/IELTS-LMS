@@ -972,21 +972,30 @@ func verifyDirectEntryCode(ctx context.Context, app *App, scheduleID, wcode, stu
 func studentEntryHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Wcode        string  `json:"wcode"`
-			Email        string  `json:"email"`
-			StudentName  string  `json:"studentName"`
-			ScheduleID   string  `json:"scheduleId"`
-			AccessLinkID string  `json:"accessLinkId"`
-			AccessCode   string  `json:"accessCode"`
-			LinkToken    string  `json:"linkToken"`
-			CaptchaToken string  `json:"captchaToken"`
-			EntrySession string  `json:"entrySession"`
-			Nickname     *string `json:"nickname"`
-			IELTSCourse  *string `json:"ieltsCourse"`
+			Wcode           string  `json:"wcode"`
+			Email           string  `json:"email"`
+			StudentName     string  `json:"studentName"`
+			ScheduleID      string  `json:"scheduleId"`
+			AccessLinkID    string  `json:"accessLinkId"`
+			AccessCode      string  `json:"accessCode"`
+			LinkToken       string  `json:"linkToken"`
+			CaptchaToken    string  `json:"captchaToken"`
+			EntrySession    string  `json:"entrySession"`
+			ClientSessionID string  `json:"clientSessionId"`
+			Nickname        *string `json:"nickname"`
+			IELTSCourse     *string `json:"ieltsCourse"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &body); err != nil {
 			httpx.WriteError(w, r, err)
 			return
+		}
+		if strings.TrimSpace(body.ClientSessionID) != "" {
+			clientSessionID, parseErr := uuid.Parse(strings.TrimSpace(body.ClientSessionID))
+			if parseErr != nil {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "clientSessionId must be a UUID."))
+				return
+			}
+			body.ClientSessionID = clientSessionID.String()
 		}
 		if (strings.TrimSpace(body.Wcode) == "" && strings.TrimSpace(body.AccessLinkID) == "") || strings.TrimSpace(body.Email) == "" || strings.TrimSpace(body.StudentName) == "" {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Access code, email and student name are required."))
@@ -1120,7 +1129,10 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
-		clientSessionID := uuid.NewString()
+		clientSessionID := strings.TrimSpace(body.ClientSessionID)
+		if clientSessionID == "" {
+			clientSessionID = uuid.NewString()
+		}
 		// Plan D3 unique-key-first fast path: pre-provisioned attempts (or
 		// check-in retries that already minted one) skip the mint tx
 		// entirely — 1 unlocked SELECT. Misses fall through to the mint tx
@@ -1150,8 +1162,8 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		setSessionCookies(w, app, sessionToken, csrfToken)
 		sessionExpiresAt, idleTimeoutAt := auth.SessionExpiry(app.Config, auth.RoleStudent, now)
+		setCreatedSessionCookies(w, app, auth.RoleStudent, sessionToken, csrfToken, sessionExpiresAt, idleTimeoutAt, now)
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{
 			"user":             map[string]any{"id": userID, "email": email, "displayName": displayName, "role": auth.RoleStudent, "state": "active"},
 			"csrfToken":        csrfToken,
@@ -1162,6 +1174,7 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			"attemptToken":     token,
 			"attemptId":        att.AttemptID,
 			"attemptExpiresAt": attemptExpiresAt.UTC(),
+			"clientSessionId":  clientSessionID,
 		})
 	}
 }

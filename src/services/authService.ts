@@ -48,6 +48,7 @@ export interface StudentEntrySuccess extends AuthSession {
   attemptId?: string | undefined;
   attemptToken?: string | undefined;
   attemptExpiresAt?: string | undefined;
+  clientSessionId?: string | undefined;
 }
 
 export type StudentEntryResult = StudentEntrySuccess | StudentQueuedAdmission;
@@ -80,6 +81,7 @@ interface StudentEntryPayload {
   studentName: string;
   nickname?: string | undefined;
   ieltsCourse?: string | undefined;
+  clientSessionId?: string | undefined;
 }
 
 function extractEnvelopeData<T>(response: { data?: BackendEnvelope<T> | T | undefined }): T {

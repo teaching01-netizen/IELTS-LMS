@@ -171,9 +171,9 @@ function submitted(moduleId: string): ModuleAttempt {
  * Module 2 is the adaptive branch module the server creates in the same
  * transaction that scores Module 1 and writes its routing decision. Whether the
  * automatic path opens it depends on the module before it ending on its own
- * clock, which the payload carries as a deadline already behind serverNow —
- * `completionReason` cannot express it, because the client's own expiry submit
- * is recorded as `student_submit`.
+ * clock, which the payload carries as a deadline already behind serverNow.
+ * `completionReason` alone cannot express it for historical attempts because
+ * they may contain `student_submit`.
  */
 const MODULE_RW_M2 = "module-rw-m2";
 
@@ -856,9 +856,9 @@ describe("useSatExamController auto-entry", () => {
     },
   );
 
-  // AT-02: the server-selected adaptive module auto-opens after either a
-  // timeout or an early Module 1 submit.
-  it("opens the routed Module 2 automatically when Module 1 was submitted early", async () => {
+  // Historical attempts may contain a student_submit terminal reason. They
+  // remain readable, but new student traffic cannot create this state.
+  it("opens the server-selected Module 2 for a historical early-submit attempt", async () => {
     const routed = earlySubmitBranchBootstrap();
     gatewayMocks.bootstrap.mockResolvedValue(routed);
     gatewayMocks.startModule.mockResolvedValue(openedModule(routed, MODULE_RW_M2, 4));
@@ -875,20 +875,18 @@ describe("useSatExamController auto-entry", () => {
     ).toBe(MODULE_RW_M2);
   });
 
-  // AT-06/AT-09: Module 2's own clock runs out, the route moves to the next
-  // section, and nothing finalizes the attempt while that section's Module 1 is
-  // still waiting its turn.
-  it("moves a timed-out Module 2 to the next section's wait without finalizing", async () => {
-    gatewayMocks.bootstrap.mockResolvedValue(branchExpiredBootstrap());
-    gatewayMocks.submitModule.mockResolvedValue(betweenSectionsPendingBootstrap());
+  // At zero, the client freezes input and asks for an authoritative refresh.
+  // The server's returned terminal state then advances to the next section.
+  it("reconciles a timed-out Module 2 without a student submit mutation", async () => {
+    gatewayMocks.bootstrap
+      .mockResolvedValueOnce(branchExpiredBootstrap())
+      .mockResolvedValue(betweenSectionsPendingBootstrap());
 
     const hook = renderController();
 
-    await waitFor(() => expect(gatewayMocks.submitModule).toHaveBeenCalledTimes(1));
-    expect(gatewayMocks.submitModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {
-      moduleId: MODULE_RW_M2,
-    });
     await waitFor(() => expect(hook.result.current.state.phase).toBe("break"));
+    await waitFor(() => expect(persistenceMock.flush).toHaveBeenCalled());
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     expect(gatewayMocks.submitAssessment).not.toHaveBeenCalled();
     // The next section is not live yet, so its Module 1 waits: the wait is what
     // holds the student, not a premature result screen.

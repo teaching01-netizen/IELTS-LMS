@@ -447,11 +447,10 @@ export function useSatResponsePersistence({
     if (ready) await ready;
     const engine = v2EngineRef.current;
     if (!engine) throw new Error('V2 response durability engine is not ready.');
-    // Submit gate (WP4/WP5) + SAT-004 boundary barrier: the same engine
-    // invariant the module boundary uses. Blocked/quarantined drafts and any
-    // unsettled visible intent must be resolved or explicitly discarded
-    // before submit; never silently exclude drafts. Throwing blocks the
-    // submitModule/finalize path, which surfaces failure/failureKind in the
+    // Blocked/quarantined drafts and unsettled visible intent must be resolved
+    // or explicitly discarded before finalization; never silently exclude
+    // drafts. Throwing blocks the
+    // assessment-finalize path, which surfaces failure/failureKind in the
     // route banner + review page. engine.submit() keeps its own guard as the
     // provider-independent backstop below.
     await assertBoundarySettled();

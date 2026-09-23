@@ -235,7 +235,6 @@ function seed(
     remainingSeconds: 2100,
     blocked: false,
     warning: null,
-    autoSubmitted: false,
     answersRecorded: false,
     showAlmostUp: false,
     pendingTabSwitchWarning,

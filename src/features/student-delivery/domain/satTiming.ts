@@ -84,8 +84,8 @@ export function snapshotRemainingSeconds(
  * Exam-day re-audit defect 9: a cohort-stage pause freezes the authoritative
  * section clock (`running` false in useAuthoritativeDeadlineClock), so the
  * personal clock must freeze too — otherwise min(personal ticking,
- * authoritative frozen) drains to a spurious auto-submit during a planned
- * pause drill. Pass cohortRunning=false when the stage is not live.
+ * authoritative frozen) reaches zero during a planned pause drill. Pass
+ * cohortRunning=false when the stage is not live.
  */
 export function personalModuleRemainingSeconds(
   attempt: AssessmentModuleAttemptSnapshot | undefined,

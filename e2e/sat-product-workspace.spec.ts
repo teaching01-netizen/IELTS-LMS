@@ -8,9 +8,28 @@ test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 type SatBootstrapSummary = {
   attemptId: string;
   sectionKey: string;
-  submittedModuleIds: string[];
+  timedOutModuleIds: string[];
   answeredCount: number;
   branchRole: string | null;
+};
+
+type SatDeliveryFrame = {
+  sections: Array<{
+    id: string;
+    sectionKey: string;
+    modules: Array<{ id: string; adaptiveRole: string }>;
+  }>;
+  attempt: {
+    id: string;
+    moduleAttempts: Array<{
+      id: string;
+      moduleId: string;
+      state: string;
+      completionReason: string | null;
+      rawCorrect: number | null;
+    }>;
+  };
+  result: { id: string } | null;
 };
 
 type SatRuntime = {
@@ -98,10 +117,8 @@ async function finishCurrentSatSection(
   candidateId: string,
   options: { answerQuestions?: boolean } = {}
 ): Promise<SatBootstrapSummary> {
-  // Audit finding 1: answerQuestions=false drives the SAME journey a student
-  // who answered nothing takes — start and submit every module with an empty
-  // response set — so the terminal V2 submit has to accept it rather than
-  // 400ing into a finalization loop that no retry can repair.
+  // answerQuestions=false drives the same timeout journey with an empty
+  // response set; the server still scores and completes the attempt.
   const answerQuestions = options.answerQuestions ?? true;
   // Resolve the live section + base module in the browser, then answer in
   // Node-resolved key order via the real V2 transport inside the browser.
@@ -137,7 +154,7 @@ async function finishCurrentSatSection(
   if (answerQuestions && answerPlan.length < 1) {
     throw new Error(`No answerable base questions for ${live.sectionKey}`);
   }
-  return page.evaluate(
+  const prepared = await page.evaluate(
     async ({ scheduleId, attemptId, candidateId, baseModuleId, answerPlan, answerQuestions: shouldAnswer }) => {
       const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
       delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
@@ -148,24 +165,6 @@ async function finishCurrentSatSection(
       if (!section) throw new Error("Base module missing from bootstrap");
       const base = section.modules.find((module) => module.id === baseModuleId);
       if (!base) throw new Error("Base module missing from bootstrap");
-
-      const submittedModuleIds: string[] = [];
-      const submitModule = async (moduleId: string) => {
-        const attempt = snapshot.attempt.moduleAttempts.find((item) => item.moduleId === moduleId);
-        if (!attempt) throw new Error(`No module attempt for ${moduleId}`);
-        if (attempt.state === "not_started") {
-          snapshot = await delivery.assessmentDeliveryApi.startModule(scheduleId, attemptId, {
-            moduleId,
-          });
-        }
-        const current = snapshot.attempt.moduleAttempts.find((item) => item.moduleId === moduleId);
-        if (current && !["submitted", "locked"].includes(current.state)) {
-          snapshot = await delivery.assessmentDeliveryApi.submitModule(scheduleId, attemptId, {
-            moduleId,
-          });
-        }
-        submittedModuleIds.push(moduleId);
-      };
 
       // The strict module gate rejects writes for not_started modules, so
       // the base attempt must be started before V2 answers are accepted.
@@ -214,36 +213,125 @@ async function finishCurrentSatSection(
         engine.destroy();
         if (answeredCount < 1) throw new Error(`No answerable base questions for ${section.sectionKey}`);
       }
-      await submitModule(base.id);
-
-      const selectedBranchAttempt = snapshot.attempt.moduleAttempts.find((attempt) => {
-        if (!["not_started", "active", "review"].includes(attempt.state)) return false;
-        return section.modules.some(
-          (module) => module.id === attempt.moduleId && module.adaptiveRole !== "base"
-        );
-      });
-      if (!selectedBranchAttempt)
-        throw new Error(`No adaptive branch selected for ${section.sectionKey}`);
-      const branchModule = section.modules.find((module) => module.id === selectedBranchAttempt.moduleId);
-      await submitModule(selectedBranchAttempt.moduleId);
-
+      const baseAttempt = snapshot.attempt.moduleAttempts.find((item) => item.moduleId === base.id);
+      if (!baseAttempt || !["active", "review"].includes(baseAttempt.state)) {
+        throw new Error(`Base module did not become active for ${section.sectionKey}`);
+      }
       return {
         attemptId: snapshot.attempt.id,
         sectionKey: section.sectionKey,
-        submittedModuleIds,
+        baseModuleAttemptId: baseAttempt.id,
         answeredCount,
-        branchRole: branchModule?.adaptiveRole ?? null,
       };
     },
     { scheduleId, attemptId, candidateId, baseModuleId: live.baseModuleId, answerPlan, answerQuestions },
   );
+
+  await expireSatModuleAttempt(prepared.baseModuleAttemptId);
+  let branchFrame: SatDeliveryFrame | null = null;
+  await expect.poll(async () => {
+    const frame = await readSatDeliveryFrame(page, scheduleId, prepared.attemptId, candidateId);
+    const base = frame.attempt.moduleAttempts.find((item) => item.id === prepared.baseModuleAttemptId);
+    const branch = frame.attempt.moduleAttempts.find((item) => {
+      const module = frame.sections
+        .find((section) => section.sectionKey === prepared.sectionKey)
+        ?.modules.find((candidate) => candidate.id === item.moduleId);
+      return module !== undefined && module.adaptiveRole !== "base";
+    });
+    if (base && ["submitted", "locked"].includes(base.state) && branch?.state === "active") {
+      branchFrame = frame;
+      return "active";
+    }
+    return branch?.state ?? base?.state ?? "missing";
+  }, { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }).toBe("active");
+  if (!branchFrame) throw new Error(`The server did not open the adaptive module for ${prepared.sectionKey}`);
+
+  const branchAttempt = branchFrame.attempt.moduleAttempts.find((item) => {
+    const module = branchFrame!.sections
+      .find((section) => section.sectionKey === prepared.sectionKey)
+      ?.modules.find((candidate) => candidate.id === item.moduleId);
+    return module !== undefined && module.adaptiveRole !== "base" && item.state === "active";
+  });
+  if (!branchAttempt) throw new Error(`No active adaptive module for ${prepared.sectionKey}`);
+  await expireSatModuleAttempt(branchAttempt.id);
+
+  let terminalFrame: SatDeliveryFrame | null = null;
+  await expect.poll(async () => {
+    const frame = await readSatDeliveryFrame(page, scheduleId, prepared.attemptId, candidateId);
+    const branch = frame.attempt.moduleAttempts.find((item) => item.id === branchAttempt.id);
+    if (branch && ["submitted", "locked"].includes(branch.state)) {
+      terminalFrame = frame;
+      return "terminal";
+    }
+    return branch?.state ?? "missing";
+  }, { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }).toBe("terminal");
+  if (!terminalFrame) throw new Error(`The server did not close the adaptive module for ${prepared.sectionKey}`);
+
+  const sectionModules = terminalFrame.sections.find(
+    (section) => section.sectionKey === prepared.sectionKey,
+  )?.modules ?? [];
+  const branchModule = sectionModules.find((module) => module.id === branchAttempt.moduleId);
+  const timedOutModuleIds = terminalFrame.attempt.moduleAttempts
+    .filter((item) => [prepared.baseModuleAttemptId, branchAttempt.id].includes(item.id))
+    .filter((item) => ["submitted", "locked"].includes(item.state))
+    .map((item) => item.moduleId);
+  return {
+    attemptId: prepared.attemptId,
+    sectionKey: prepared.sectionKey,
+    timedOutModuleIds,
+    answeredCount: prepared.answeredCount,
+    branchRole: branchModule?.adaptiveRole ?? null,
+  };
+}
+
+async function expireSatModuleAttempt(moduleAttemptId: string): Promise<void> {
+  const changed = await executeUpdate(
+    `UPDATE assessment_module_attempts
+        SET started_at = NOW(6) - INTERVAL 1 HOUR,
+            updated_at = NOW(6)
+      WHERE id = ?
+        AND state IN ('active', 'review')`,
+    [moduleAttemptId],
+  );
+  if (changed !== 1) throw new Error(`Expected active SAT module attempt ${moduleAttemptId} to expire`);
+}
+
+async function readSatDeliveryFrame(
+  page: Page,
+  scheduleId: string,
+  attemptId: string,
+  candidateId: string,
+): Promise<SatDeliveryFrame> {
+  return page.evaluate(async ({ scheduleId, attemptId, candidateId }) => {
+    const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+    delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
+    const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
+    return {
+      sections: snapshot.sections.map((section) => ({
+        id: section.id,
+        sectionKey: section.sectionKey,
+        modules: section.modules.map((module) => ({ id: module.id, adaptiveRole: module.adaptiveRole })),
+      })),
+      attempt: {
+        id: snapshot.attempt.id,
+        moduleAttempts: snapshot.attempt.moduleAttempts.map((item) => ({
+          id: item.id,
+          moduleId: item.moduleId,
+          state: item.state,
+          completionReason: item.completionReason,
+          rawCorrect: item.rawCorrect,
+        })),
+      },
+      result: snapshot.result ? { id: snapshot.result.id } : null,
+    };
+  }, { scheduleId, attemptId, candidateId });
 }
 
 // Pause leg — freeze the live cohort stage mid-module, ASSERT the
 // freeze is observable while paused (status + frozen countdown), then
 // resume. Answers saved across the pause must survive and routing must
 // still reflect them (personal clock freezes with the cohort stage, so no
-// spurious auto-submit fires mid-pause).
+// spurious timeout reconciliation fires mid-pause).
 async function pauseAndResumeCurrentSatSection(page: Page, scheduleId: string) {
   const paused = await executeUpdate(
     "UPDATE exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id " +
@@ -649,7 +737,7 @@ test.describe("Digital SAT product workspace", () => {
     }
   });
 
-  test("creates, publishes, joins, proctors, submits, and surfaces a SAT result without IELTS leakage", async ({
+  test("creates, publishes, joins, times out, and surfaces a SAT result without IELTS leakage", async ({
     page,
     browser,
   }) => {
@@ -673,7 +761,7 @@ test.describe("Digital SAT product workspace", () => {
       );
       expect(reading.sectionKey).toBe("reading-writing");
 
-      // Pause leg: freeze + resume the live stage after reading submits.
+      // Pause leg: freeze + resume the live stage after reading times out.
       // The math section must still open and route on V2-saved answers.
       await pauseAndResumeCurrentSatSection(page, scheduleId);
 
@@ -699,9 +787,8 @@ test.describe("Digital SAT product workspace", () => {
         .poll(async () => studentPage.evaluate(() => window.navigator.onLine), { timeout: 15_000 })
         .toBe(true);
 
-      // Takeover leg: rotate the writer lease, ASSERT the epoch
-      // increments, and adopt the new session for the final submit —
-      // fire-and-forget would prove nothing about adoption.
+      // Takeover leg: rotate the writer lease, ASSERT the epoch increments,
+      // and adopt the new session after automatic completion.
       const takeoverEpoch = await studentPage.evaluate(
         async ({ scheduleId, attemptId }) => {
           const durable = await import("/src/features/student/infrastructure/responseDurabilityTransport.ts");
@@ -716,11 +803,8 @@ test.describe("Digital SAT product workspace", () => {
       );
       expect(takeoverEpoch).toBeGreaterThan(1);
 
-      // Exam-day re-audit defect 8: the app finalizes with the STABLE
-      // submissionId=attemptId (singleflight + server replay), so the E2E
-      // must too — a random UUID would never exercise the duplicate-finalize
-      // idempotency the release depends on. Submit twice with the stable id
-      // and require one identical result.
+      // Completion is server-owned. Replaying the stable finalization id after
+      // the automatic result exists must return the identical result.
       const submitStable = () => studentPage.evaluate(
         async ({ scheduleId, attemptId, candidateId }) => {
           const delivery =
@@ -821,7 +905,7 @@ test.describe("Digital SAT product workspace", () => {
 
       const finished = await finishCurrentSatSection(studentPage, scheduleId, attemptId, candidateId);
       expect(finished.sectionKey).toBe("reading-writing");
-      expect(finished.submittedModuleIds).toHaveLength(2);
+      expect(finished.timedOutModuleIds).toHaveLength(2);
       expect(finished.branchRole).toMatch(/^(lower|higher)_branch$/);
 
       const result = await studentPage.evaluate(
@@ -847,12 +931,8 @@ test.describe("Digital SAT product workspace", () => {
     }
   });
 
-  // Audit finding 1 (release blocker): a student who answers NOTHING may submit
-  // every module — the product allows unanswered questions — but the terminal
-  // V2 submit used to reject the empty response set with a bare 400, so the
-  // attempt could never reach a result and every retry failed the same way.
-  // This leg is the whole point of the fix: zero responses in, real result out.
-  test("finalizes a SAT attempt the student left completely unanswered", async ({
+  // An unanswered attempt still reaches a result after server-owned timeouts.
+  test("finalizes a completely unanswered SAT attempt automatically", async ({
     page,
     browser,
   }) => {
@@ -865,7 +945,7 @@ test.describe("Digital SAT product workspace", () => {
     const { studentPage, studentContext, scheduleId, candidateId, attemptId, studentName, examTitle } =
       harness;
     try {
-      for (const sectionKey of ["reading-writing", "math"] as const) {
+      for (const [index, sectionKey] of (["reading-writing", "math"] as const).entries()) {
         const finished = await finishCurrentSatSection(
           studentPage,
           scheduleId,
@@ -876,13 +956,16 @@ test.describe("Digital SAT product workspace", () => {
         expect(finished.sectionKey).toBe(sectionKey);
         // The journey is only meaningful if the student truly answered nothing.
         expect(finished.answeredCount).toBe(0);
+        if (index === 0) {
+          await expireCurrentSatSection(scheduleId);
+          await expect.poll(async () => (await readSatRuntime(page, scheduleId)).currentSectionKey, {
+            timeout: 30_000,
+          }).toBe("math");
+        }
       }
 
-      // The app's OWN finalization must produce the result — this test never
-      // calls the completion endpoint directly, because the broken path was
-      // exactly persistence.submit() 400ing before completion was ever reached.
-      // Zero raw is a legitimate score, not a transport failure: the practice
-      // table's floor is 200 per section, so both sections at zero = 400.
+      // Zero raw is a legitimate score: the practice table's floor is 200 per
+      // section, so both sections at zero = 400.
       await expect
         .poll(
           async () => {

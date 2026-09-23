@@ -57,6 +57,9 @@ export interface SatInteractionController {
   toggleAnnotationMode: () => void;
   /** Capture the span the toolbar will act on (refused while the mode is off). */
   selectionCaptured: (anchor: SatTextAnchor) => void;
+  /** Hide contextual annotation tools while preserving the Selection v2 Range. */
+  selectionToolsDismissed: () => void;
+  /** Report that the visual selection itself ended. */
   selectionCleared: () => void;
   questionNavigated: (moduleKey: string, questionId: string) => void;
   moduleScopeChanged: (moduleKey: string, questionId: string) => void;
@@ -157,8 +160,8 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
                 : { type: 'SURFACE_CLOSED' },
             );
             return;
-          case 'CLEAR_SELECTION':
-            dispatchEvent({ type: 'TEXT_SELECTION_CLEARED' });
+          case 'DISMISS_SELECTION_TOOLS':
+            dispatchEvent({ type: 'TEXT_SELECTION_TOOLS_DISMISSED' });
             return;
           case 'DISABLE_LINE_READER':
             // Line-reader preference state lives outside this machine; the
@@ -267,6 +270,7 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
     (anchor: SatTextAnchor) => dispatchIntent({ type: 'TEXT_SELECTION_CAPTURED', anchor }),
     [dispatchIntent],
   );
+  const selectionToolsDismissed = useCallback(() => dispatchIntent({ type: 'TEXT_SELECTION_TOOLS_DISMISSED' }), [dispatchIntent]);
   const selectionCleared = useCallback(() => dispatchIntent({ type: 'TEXT_SELECTION_CLEARED' }), [dispatchIntent]);
   const questionNavigated = useCallback(
     (moduleKey: string, questionId: string) =>
@@ -293,8 +297,8 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
         dispatchEvent({ type: 'ANNOTATION_NOTE_EDITOR_CLOSED' });
         return true;
       }
-      if (action.type === 'CLEAR_SELECTION') {
-        dispatchEvent({ type: 'TEXT_SELECTION_CLEARED' });
+      if (action.type === 'DISMISS_SELECTION_TOOLS') {
+        dispatchEvent({ type: 'TEXT_SELECTION_TOOLS_DISMISSED' });
         return true;
       }
       dispatchEvent(
@@ -329,6 +333,7 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
     annotationModeEnabled: state.annotation.modeEnabled,
     toggleAnnotationMode,
     selectionCaptured,
+    selectionToolsDismissed,
     selectionCleared,
     questionNavigated,
     moduleScopeChanged,
