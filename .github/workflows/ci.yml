@@ -5,6 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   go-backend:
     runs-on: ubuntu-latest
@@ -287,8 +291,22 @@ jobs:
             exit 1
           fi
 
-  e2e-tests:
+  e2e-test-shards:
+    name: e2e-tests (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: "1/4"
+            label: 1-of-4
+          - shard: "2/4"
+            label: 2-of-4
+          - shard: "3/4"
+            label: 3-of-4
+          - shard: "4/4"
+            label: 4-of-4
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     services:
       mysql:
         image: mysql:8.4
@@ -352,15 +370,29 @@ jobs:
         run: go run ./cmd/migrate
 
       - name: Run E2E Tests
-        run: bunx playwright test
+        run: bunx playwright test --shard=${{ matrix.shard }}
 
       - name: Upload E2E Test Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.label }}
           path: playwright-report/
           retention-days: 30
+
+  e2e-tests:
+    if: always()
+    needs: e2e-test-shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all E2E shards passed
+        run: |
+          if [[ "${{ needs.e2e-test-shards.result }}" != "success" ]]; then
+            echo "E2E shard result: ${{ needs.e2e-test-shards.result }}"
+            exit 1
+          fi
+          echo "All E2E shards passed."
 
   # The authoring lifecycle gate (plan Phase 16).
   #
