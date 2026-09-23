@@ -405,10 +405,6 @@ func normalizeScienceContent(content map[string]any) map[string]any {
 	return content
 }
 
-func normalizeScienceQuestion(question map[string]any) map[string]any {
-	return normalizeScienceQuestionWithRule(question, "")
-}
-
 func normalizeScienceQuestionWithRule(question map[string]any, fallbackRule string) map[string]any {
 	out := map[string]any{}
 	for key, value := range question {
@@ -927,32 +923,6 @@ func acceptedAnswer(content map[string]any, questionID string) (any, bool) {
 		}
 	}
 	return nil, false
-}
-
-func weightsFromConfig(config map[string]any, n int) []int {
-	w := make([]int, n)
-	for i := range w {
-		w[i] = 1
-	}
-	raw, ok := config["weights"].([]any)
-	if !ok {
-		return w
-	}
-	for i := range w {
-		if i < len(raw) {
-			switch v := raw[i].(type) {
-			case float64:
-				if v >= 1 {
-					w[i] = int(v)
-				}
-			case int:
-				if v >= 1 {
-					w[i] = v
-				}
-			}
-		}
-	}
-	return w
 }
 
 func answersEqual(given, accepted any) bool {

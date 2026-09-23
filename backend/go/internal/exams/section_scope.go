@@ -43,10 +43,10 @@ func NormalizeSectionScope(sections []string) ([]string, error) {
 	for _, raw := range sections {
 		key := strings.TrimSpace(raw)
 		if key == "" {
-			return nil, fmt.Errorf("Every section in a Student Link scope needs a section key.")
+			return nil, fmt.Errorf("every section in a Student Link scope needs a section key")
 		}
 		if key != LinkSectionReadingWriting && key != LinkSectionMath {
-			return nil, fmt.Errorf("Unknown section for a Student Link scope: %s.", key)
+			return nil, fmt.Errorf("unknown section for a Student Link scope: %s", key)
 		}
 		selected[key] = true
 	}

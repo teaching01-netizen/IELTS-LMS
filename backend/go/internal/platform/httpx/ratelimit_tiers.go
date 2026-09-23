@@ -349,7 +349,7 @@ func denyTierRateLimit(w http.ResponseWriter, r *http.Request, tier, keyClass st
 		telemetry.DefaultRegistry.IncCounter(telemetry.MShedExam)
 	}
 	route := routeOf(r)
-	if route == "" || strings.HasPrefix(route, "/") && strings.Contains(route, "{") == false && len(route) > 64 {
+	if route == "" || strings.HasPrefix(route, "/") && !strings.Contains(route, "{") && len(route) > 64 {
 		route = r.URL.Path
 		if len(route) > 64 {
 			route = route[:64]

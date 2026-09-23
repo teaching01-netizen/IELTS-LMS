@@ -425,11 +425,11 @@ func scienceRuleAllows(values []string, rule string) bool {
 }
 
 func scienceAnswerMalformed(value any) bool {
-	switch value.(type) {
+	switch typed := value.(type) {
 	case nil, string:
 		return false
 	case []any:
-		for _, item := range value.([]any) {
+		for _, item := range typed {
 			if scienceAnswerMalformed(item) {
 				return true
 			}

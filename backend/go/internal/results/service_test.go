@@ -104,11 +104,11 @@ func TestSATDetailTypesDefaultToEmptyDetail(t *testing.T) {
 	// arrays (not null) so older section-only clients keep working and new
 	// table UIs can map without nil guards.
 	detail := SATDetail{Summary: ResultSummary{}, Sections: []SATSection{}}
-	if detail.Questions != nil && len(detail.Questions) != 0 {
+	if len(detail.Questions) != 0 {
 		t.Fatalf("expected nil questions on zero detail, got %#v", detail.Questions)
 	}
 	for _, section := range detail.Sections {
-		if section.Modules != nil && len(section.Modules) != 0 {
+		if len(section.Modules) != 0 {
 			t.Fatalf("expected nil modules on zero section, got %#v", section.Modules)
 		}
 	}

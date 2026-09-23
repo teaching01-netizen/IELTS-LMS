@@ -633,30 +633,6 @@ func loadScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, mod
 	return out, nil
 }
 
-// loadScoringRowsLegacyTx is the pre-V2 scoring join, retained for
-// historical probes and tests pinning the legacy fallback. It emits no
-// scoring telemetry itself: callers that page on legacy gaps route through
-// loadScoringRowsV2FirstTx (the only paged path); direct users must decide
-// their own paging (a silent historical probe must never page on-call).
-func loadScoringRowsLegacyTx(ctx context.Context, t tx.Tx, moduleAttemptID, moduleID string) ([]scoringRow, error) {
-	rows, err := t.QueryContext(ctx,
-		"SELECT eq.is_pretest, qr.answer_definition, ar.response FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id LEFT JOIN assessment_question_responses ar ON ar.module_attempt_id = ? AND ar.exam_question_id = eq.id WHERE eq.module_id = ? ORDER BY eq.display_order",
-		moduleAttemptID, moduleID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []scoringRow
-	for rows.Next() {
-		var r scoringRow
-		if err := rows.Scan(&r.isPretest, &r.answerDefinition, &r.response); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
 // scoreScoringRows mirrors score_scoring_rows (Rust
 // assessment_delivery.rs:2715): pretest rows never count; a malformed answer
 // definition or a non-string response counts as incorrect.

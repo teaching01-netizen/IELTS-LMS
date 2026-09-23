@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -937,14 +936,6 @@ func enforceExportRateLimit(app *App, w http.ResponseWriter, r *http.Request) bo
 		}
 	}
 	return true
-}
-
-func retryAfterSeconds(d time.Duration) string {
-	seconds := int(d / time.Second)
-	if seconds < 1 {
-		seconds = 1
-	}
-	return strconv.Itoa(seconds)
 }
 
 // resultsExportHandler restores the Rust-compatible legacy export contract.

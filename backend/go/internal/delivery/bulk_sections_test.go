@@ -39,17 +39,6 @@ func bulkDeliverySPRAnswer(response string) string {
 		response + `]}`
 }
 
-// deliveryPayload is one flat SQL row for the shared bulk/nested payload.
-type deliveryPayload struct {
-	sectionID, sectionKey, title     string
-	moduleID, moduleKey, moduleTitle string
-	adaptiveRole, toolPolicy         string
-	examQuestionID, questionID       string
-	questionType, answer, metadata   string
-	displayOrder                     int
-	isPretest                        bool
-}
-
 // TestDeliveryBulkEquivalence is the delivery-side AT-01 proof: the bulk
 // loader must produce byte-identical JSON to the nested loader for the same
 // version, including empty-array-not-null for the module with no questions.

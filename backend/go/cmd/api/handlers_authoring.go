@@ -546,24 +546,6 @@ func bytesTrimSpace(b json.RawMessage) []byte {
 	return bytes.TrimSpace(b)
 }
 
-// decodeDraft decodes a question draft from the request body.
-func decodeDraft(r *http.Request) (authoring.QuestionDraft, error) {
-	var req draftPayload
-	if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
-		return authoring.QuestionDraft{}, err
-	}
-	return authoring.QuestionDraft{
-		QuestionType:  req.QuestionType,
-		Stimulus:      req.Stimulus,
-		Prompt:        req.Prompt,
-		Answer:        req.Answer,
-		Rationale:     req.Rationale,
-		Metadata:      req.Metadata,
-		Accessibility: req.Accessibility,
-		IsPretest:     req.IsPretest,
-	}, nil
-}
-
 // authorCreateQuestionHandler creates one question in a module.
 // The frontend POSTs with no body; an explicit draft is also accepted for
 // API clients. Either way the service synthesizes a section-aware default.

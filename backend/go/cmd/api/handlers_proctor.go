@@ -166,17 +166,6 @@ func proctorHasLiveAssignment(ctx context.Context, db *sql.DB, scheduleID, userI
 	return exists, nil
 }
 
-// proctorSessionLimits resolves the audit/alert limits: ?mode=dashboard
-// switches to the bounded dashboard path (defaults audit 200 / alert 100,
-// mirroring Rust), otherwise both stay unbounded (Rust default options) so
-// the service builds alerts from the audit rows with no second query.
-func proctorSessionLimits(r *http.Request) (auditLimit, alertLimit int) {
-	if strings.TrimSpace(r.URL.Query().Get("mode")) != "dashboard" {
-		return 0, 0
-	}
-	return proctorLimitParam(r, "auditLimit", 200), proctorLimitParam(r, "alertLimit", 100)
-}
-
 // parseProctorDashboardLimits parses dashboard limits fail-closed
 // (WS-13.1): malformed numerics yield FieldError (400); absent keeps
 // legacy defaults; numerics <= 0 clamp to the legacy default path via

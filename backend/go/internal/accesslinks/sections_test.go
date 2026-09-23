@@ -107,8 +107,7 @@ func TestLinkProjectionCarriesEnabledSections(t *testing.T) {
 	}
 	defer db.Close()
 	s := svc(db)
-	rows := linkRow(true)
-	rows = sqlmock.NewRows(linkColumns()).AddRow(
+	rows := sqlmock.NewRows(linkColumns()).AddRow(
 		"link-1", "exam-1", "SAT Mock", "sat",
 		"ver-1", 3, "sched-1", "Verbal only", `["reading-writing"]`,
 		"anyone", nil, "student_code", "scheduled",

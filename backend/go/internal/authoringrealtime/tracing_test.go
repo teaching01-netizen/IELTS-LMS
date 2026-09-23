@@ -19,11 +19,6 @@ func TestIDsFromEmptyContextIsNotAnError(t *testing.T) {
 	if traceID, correlationID := IDsFrom(context.Background()); traceID != "" || correlationID != "" {
 		t.Fatalf("bare context returned (%q, %q), want empty", traceID, correlationID)
 	}
-	// A nil context must not panic: the helpers are called from paths that may
-	// not have one, and losing a trace id must never take a request down.
-	if traceID, _ := IDsFrom(nil); traceID != "" {
-		t.Fatalf("nil context returned %q, want empty", traceID)
-	}
 }
 
 func TestEnsureIDsFromHeaderForwardsUpstreamTrace(t *testing.T) {

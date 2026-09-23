@@ -160,6 +160,8 @@ func (c *readPerfCountingConn) BeginTx(ctx context.Context, opts driver.TxOption
 	if beginner, ok := c.Conn.(driver.ConnBeginTx); ok {
 		return beginner.BeginTx(ctx, opts)
 	}
+	//lint:ignore SA1019 driver.Conn.Begin is the required legacy fallback when
+	// the wrapped driver does not implement ConnBeginTx.
 	return c.Conn.Begin()
 }
 
@@ -171,11 +173,13 @@ type readPerfCountingStmt struct {
 
 func (s *readPerfCountingStmt) Exec(args []driver.Value) (driver.Result, error) {
 	s.counter.executions.Add(1)
+	//lint:ignore SA1019 this wrapper preserves the legacy driver.Stmt contract.
 	return s.Stmt.Exec(args)
 }
 
 func (s *readPerfCountingStmt) Query(args []driver.Value) (driver.Rows, error) {
 	s.counter.executions.Add(1)
+	//lint:ignore SA1019 this wrapper preserves the legacy driver.Stmt contract.
 	return s.Stmt.Query(args)
 }
 
@@ -188,6 +192,7 @@ func (s *readPerfCountingStmt) ExecContext(ctx context.Context, args []driver.Na
 	for i, arg := range args {
 		values[i] = arg.Value
 	}
+	//lint:ignore SA1019 this is the legacy fallback for drivers without StmtExecContext.
 	return s.Stmt.Exec(values)
 }
 
@@ -200,6 +205,7 @@ func (s *readPerfCountingStmt) QueryContext(ctx context.Context, args []driver.N
 	for i, arg := range args {
 		values[i] = arg.Value
 	}
+	//lint:ignore SA1019 this is the legacy fallback for drivers without StmtQueryContext.
 	return s.Stmt.Query(values)
 }
 
