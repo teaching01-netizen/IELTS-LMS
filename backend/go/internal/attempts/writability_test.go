@@ -138,21 +138,33 @@ func TestEnsureWritablePersonalSATIgnoresCohortSectionState(t *testing.T) {
 	}
 }
 
-func TestEnsurePersonalQuestionRequiresConfirmedStartedOffer(t *testing.T) {
+// The single-operation offer flow (StartModuleOfferAck) sets the module to
+// active with started_at = DB NOW and never writes entry_confirmed_at. An
+// active personal module with a started_at in the past and a live deadline is
+// writable even when entry_confirmed_at is NULL; only a missing or future
+// started_at refuses.
+func TestEnsurePersonalQuestionWritableOnStartedModuleWithoutEntryConfirmation(t *testing.T) {
 	now := time.Date(2026, 9, 24, 2, 0, 10, 0, time.UTC)
 	started := now.Add(-time.Second)
 	deadline := now.Add(time.Minute)
 	gate := RuntimeGate{TimingModel: "sat_personal_v1", Status: "live", ActiveSectionKey: "math", SectionLive: false, Now: now}
 	owner := QuestionOwner{
 		ModuleState: "active", SectionKey: "reading-writing", TimingModel: "sat_personal_v1",
-		ModuleStartedAt: &started, ModuleDeadlineAt: &deadline, EntryConfirmedAt: &started,
+		ModuleStartedAt: &started, ModuleDeadlineAt: &deadline, EntryConfirmedAt: nil,
 	}
 	if err := ensureQuestionAdmittedForProvider(owner, gate, "q-1", string(ProviderSAT)); err != nil {
-		t.Fatalf("personal question should not be restricted by the cohort section cursor: %v", err)
+		t.Fatalf("active module with started_at and deadline must accept a response without entry confirmation: %v", err)
 	}
-	owner.EntryConfirmedAt = nil
+
+	owner.ModuleStartedAt = nil
 	if err := ensureQuestionAdmittedForProvider(owner, gate, "q-1", string(ProviderSAT)); err == nil {
-		t.Fatal("unconfirmed personal offer must not accept a response")
+		t.Fatal("module without started_at must not accept a response")
+	}
+
+	future := now.Add(time.Second)
+	owner.ModuleStartedAt = &future
+	if err := ensureQuestionAdmittedForProvider(owner, gate, "q-1", string(ProviderSAT)); err == nil {
+		t.Fatal("module with a future started_at must not accept a response")
 	}
 }
 
