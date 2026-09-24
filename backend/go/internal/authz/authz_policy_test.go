@@ -122,7 +122,7 @@ var expectedAnnotated = []string{
 	"POST /submissions/{submissionID}/reopen-review",
 	"GET /results/{resultID}/events",
 	"GET /dashboard", "GET /analytics", "POST /export",
-	"GET /sat", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
+	"GET /sat", "GET /sat/access-groups", "GET /sat/attempts", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
 	"GET /{resultID}/events", "GET /{resultID}",
 	"POST /uploads", "POST /import-url", "PUT /uploads/{assetID}", "POST /uploads/{assetID}/complete",
 	"GET /assets/{assetID}", "GET /{assetID}/content", "GET /{assetID}",
@@ -260,6 +260,25 @@ func TestAssessmentAccessDeleteIsWriterOnly(t *testing.T) {
 	for _, role := range []string{RoleAdminObserver, RoleProctor, RoleGrader, RoleStudent, ""} {
 		if Allow(role, policy) {
 			t.Errorf("%s must not be able to delete a Student Link", role)
+		}
+	}
+}
+
+func TestSATResultsWorkspaceReadAdmitsObserverAndAssignedStaff(t *testing.T) {
+	for _, key := range []string{"GET /sat/access-groups", "GET /sat/attempts"} {
+		policy, ok := LookupKey(Table, key)
+		if !ok {
+			t.Fatalf("%s must have an explicit route policy", key)
+		}
+		for _, role := range []string{RoleAdmin, RoleAdminObserver, RoleGrader, RoleProctor} {
+			if !Allow(role, policy) {
+				t.Errorf("%s must allow %s", key, role)
+			}
+		}
+		for _, role := range []string{RoleBuilder, RoleStudent, ""} {
+			if Allow(role, policy) {
+				t.Errorf("%s must deny %s", key, role)
+			}
 		}
 	}
 }

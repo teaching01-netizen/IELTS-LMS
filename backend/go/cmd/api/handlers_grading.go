@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,7 +24,7 @@ import (
 // Grading policy: reads, SaveDraft, OverrideObjectiveQuestion and
 // GradeObjective serve Admin|Grader; MarkComplete, MarkReadyToRelease,
 // ReleaseNow and ReopenReview are Admin-only. Results reads serve
-// Admin|Grader|Proctor; fetching one result additionally allows Student.
+// Admin|AdminObserver|Grader|Proctor; fetching one result additionally allows Student.
 
 // latestSubmissionForSchedule resolves the newest student_submissions row
 // for a schedule (WS-05: thin shim over grading.Service; the SQL lives in
@@ -1001,23 +1002,90 @@ func gradingProfileExportHandler(app *App) http.HandlerFunc {
 	}
 }
 
-// resultsSATListHandler lists ready-to-release SAT results.
+// resultsSATListHandler is retained as a compatibility list for older clients.
 func resultsSATListHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader, auth.RoleProctor) == nil {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
 			return
 		}
 		if app.Results == nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Results service not configured."))
 			return
 		}
-		out, err := app.Results.ListReadyToRelease(r.Context(), actorOf(r.Context()), "sat", gradingLimitParam(r))
+		out, err := app.Results.ListSATResults(r.Context(), actorOf(r.Context()))
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
 		if out == nil {
 			httpx.WriteJSON(w, http.StatusOK, []any{})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+func resultsSATAccessGroupsHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
+			return
+		}
+		if app.Results == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Results service not configured."))
+			return
+		}
+		out, err := app.Results.ListSATAccessGroups(r.Context(), actorOf(r.Context()))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if out == nil {
+			out = []resultsdomain.SATAccessGroup{}
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+func resultsSATAttemptsHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
+			return
+		}
+		if app.Results == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Results service not configured."))
+			return
+		}
+		examID := strings.TrimSpace(r.URL.Query().Get("examId"))
+		scheduleID := strings.TrimSpace(r.URL.Query().Get("scheduleId"))
+		if examID == "" || scheduleID == "" {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "examId and scheduleId are required."))
+			return
+		}
+		limit, offset := 50, 0
+		var err error
+		if value := r.URL.Query().Get("limit"); value != "" {
+			limit, err = strconv.Atoi(value)
+			if err != nil || limit < 1 || limit > 100 {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "limit must be between 1 and 100."))
+				return
+			}
+		}
+		if value := r.URL.Query().Get("offset"); value != "" {
+			offset, err = strconv.Atoi(value)
+			if err != nil || offset < 0 {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "offset must be a non-negative integer."))
+				return
+			}
+		}
+		needle := strings.TrimSpace(r.URL.Query().Get("q"))
+		scoreFilter := strings.TrimSpace(r.URL.Query().Get("scoreFilter"))
+		if scoreFilter != "" && scoreFilter != "all" && scoreFilter != "available" && scoreFilter != "unavailable" {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "scoreFilter must be all, available, or unavailable."))
+			return
+		}
+		out, err := app.Results.ListSATAttempts(r.Context(), actorOf(r.Context()), examID, scheduleID, limit, offset, needle, scoreFilter)
+		if err != nil {
+			httpx.WriteError(w, r, err)
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, out)
@@ -1077,7 +1145,7 @@ func resultsACTScienceDetailHandler(app *App) http.HandlerFunc {
 // resultsSATGetHandler returns one SAT result with section detail.
 func resultsSATGetHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader, auth.RoleProctor) == nil {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
 			return
 		}
 		if app.Results == nil {

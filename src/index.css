@@ -852,11 +852,15 @@
     border-color: rgba(212, 76, 71, 0.55);
   }
 
+  /* The translation guard suppresses the long-press callout only. It used to
+     re-declare `user-select: text`, which during a real exam quietly handed
+     native selection back to every IELTS surface the moment the guard turned
+     on — a second authority for selection policy, resolved by specificity
+     instead of by whether a locked exam is running. Selection policy lives in
+     the exam-wide rules below. */
   .student-translation-guard-active [data-student-highlightable="true"],
   .student-translation-guard-active [data-student-highlightable="true"] * {
     -webkit-touch-callout: none;
-    -webkit-user-select: text;
-    user-select: text;
   }
 
   [data-student-question-callout-protected="true"],
@@ -885,16 +889,67 @@
     user-select: text;
   }
 
-  /* SAT roots retain ordinary browser selection until annotation mode arms.
-     IELTS keeps its existing callout guard on its highlightable boundary. */
-  .student-exam-active [data-sat-selection-protected="true"],
-  .student-exam-active [data-sat-selection-protected="true"] *,
-  .student-exam-active [data-student-highlightable="true"],
-  .student-exam-active [data-student-highlightable="true"] * {
+  /* IN A LOCKED EXAM, NATIVE TEXT SELECTION IS OFF — EVERY SURFACE.
+
+     The platform's Copy / Look Up / Translate / Search menu is attached to the
+     selection itself: while a selection can exist, iOS shows that menu over the
+     passage on a ~500 ms press, and no `contextmenu` handler can take it back —
+     the event arrives after the menu does. `user-select: none` is the only
+     reliable disable: it removes the loupe, the handles AND the menu by
+     platform guarantee. `-webkit-touch-callout: none` covers what is not text
+     (links, figures).
+
+     The class comes from `useStudentExamPageLock` and exists only while the
+     exam runs, so authoring, previews and the lobby keep ordinary selection
+     through the un-scoped defaults above.
+
+     Selection inside the exam exists in exactly two places:
+
+     1. Editable controls. The carve-out below keeps inputs, textareas and
+        contenteditable regions typable (and their edit menu reachable), the
+        same way the armed-surface carve-outs already do. No form controls live
+        inside the prose roots themselves — answer inputs and radios are
+        siblings of the protected text, not descendants.
+
+     2. An armed highlight/annotation tool. IELTS surfaces get their text back
+        through the marker the gesture sets before contact
+        (`data-student-owned-touch-selection`, present exactly while the tool
+        is armed): drag-select, Alt+H and the screen-reader path keep the
+        `user-select: text` they had, and the menu still stays away because the
+        scoped callout guard does not depend on selection. SAT surfaces are
+        owned outright by the `data-student-selection-owner` rule below:
+        Selection v2 draws the selection and the platform draws nothing. This
+        is what the gesture code has always assumed — "on these surfaces the
+        platform's selection is suppressed". */
+  html.student-exam-active,
+  html.student-exam-active * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  html.student-exam-active input,
+  html.student-exam-active textarea,
+  html.student-exam-active select,
+  html.student-exam-active [contenteditable]:not([contenteditable="false"]),
+  html.student-exam-active [contenteditable]:not([contenteditable="false"]) * {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  html.student-exam-active [data-student-highlightable="true"][data-student-owned-touch-selection="true"],
+  html.student-exam-active [data-student-highlightable="true"][data-student-owned-touch-selection="true"] * {
     -webkit-user-select: text;
     user-select: text;
   }
 
+  /* Belt-and-braces on the two text roots the long-press bug was about: the
+     exam-wide rule above already suppresses the callout everywhere; this keeps
+     the guard explicit and independently reviewable for passage and prompt
+     copy, armed or not. Selection is not re-decided here. */
+  .student-exam-active [data-sat-selection-protected="true"],
+  .student-exam-active [data-sat-selection-protected="true"] *,
   .student-exam-active [data-student-highlightable="true"],
   .student-exam-active [data-student-highlightable="true"] * {
     -webkit-touch-callout: none;

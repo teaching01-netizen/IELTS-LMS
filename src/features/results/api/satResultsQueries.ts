@@ -2,7 +2,37 @@ import { useQuery } from '@tanstack/react-query';
 import { resultsGateway } from '../infrastructure/resultsGateway';
 
 export type SatAssessmentRoute = 'lower' | 'higher';
-export type SatResultOutcomeStatus = 'scored' | 'pending' | 'invalidated_proctor' | 'invalidated_timeout';
+export type SatResultOutcomeStatus = 'scored' | 'pending' | 'invalidated_proctor' | 'invalidated_timeout' | 'unscored';
+
+export interface SatAccessGroupSummary {
+  scheduleId: string;
+  accessLinkId: string | null;
+  accessLinkName: string;
+  accessLinkState: string | null;
+  examId: string;
+  examTitle: string;
+  versionNumber: number;
+  cohortName: string;
+  attemptCount: number;
+  submittedCount: number;
+  scoredCount: number;
+  pendingCount: number;
+  invalidatedCount: number;
+  latestSubmittedAt: string | null;
+}
+
+export interface SatAttemptRow extends Omit<SatResultSummary, 'id' | 'submissionId' | 'scoreKind'> {
+  resultId: string | null;
+  attemptId: string;
+}
+
+export interface SatAttemptPage {
+  items: SatAttemptRow[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}
 
 export interface SatResultSummary {
   id: string;
@@ -67,13 +97,24 @@ export interface SatResultDetail {
 export const satResultKeys = {
   all: ['sat-results'] as const,
   list: () => [...satResultKeys.all, 'list'] as const,
+  attempts: (examId: string, scheduleId: string, offset: number, needle: string, scoreFilter: string) => [...satResultKeys.all, 'attempts', examId, scheduleId, offset, needle, scoreFilter] as const,
   detail: (resultId: string) => [...satResultKeys.all, 'detail', resultId] as const,
 };
 
 export function useSatResultsQuery() {
   return useQuery({
     queryKey: satResultKeys.list(),
-    queryFn: () => resultsGateway.get<SatResultSummary[]>('/v1/results/sat'),
+    queryFn: () => resultsGateway.get<SatAccessGroupSummary[]>('/v1/results/sat/access-groups'),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
+}
+
+export function useSatAttemptsQuery(examId?: string, scheduleId?: string, offset = 0, needle = '', scoreFilter = 'all') {
+  return useQuery({
+    queryKey: satResultKeys.attempts(examId ?? '', scheduleId ?? '', offset, needle, scoreFilter),
+    queryFn: () => resultsGateway.get<SatAttemptPage>(`/v1/results/sat/attempts?examId=${encodeURIComponent(examId ?? '')}&scheduleId=${encodeURIComponent(scheduleId ?? '')}&limit=50&offset=${offset}&q=${encodeURIComponent(needle)}&scoreFilter=${encodeURIComponent(scoreFilter)}`),
+    enabled: Boolean(examId && scheduleId),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
   });

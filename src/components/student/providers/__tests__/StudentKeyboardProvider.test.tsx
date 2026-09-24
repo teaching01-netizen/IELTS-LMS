@@ -127,6 +127,9 @@ describe('StudentKeyboardProvider', () => {
           <div data-testid="highlight-target" data-student-highlightable="true">
             Passage text
           </div>
+          <div data-testid="sat-text" data-sat-selection-protected="true">
+            SAT passage text
+          </div>
           <div
             data-testid="question-copy"
             data-student-question-callout-protected="true"
@@ -175,6 +178,7 @@ describe('StudentKeyboardProvider', () => {
       editor: screen.getByTestId('editor'),
       objectiveInput: screen.getByTestId('objective-input'),
       highlightTarget: screen.getByTestId('highlight-target'),
+      satText: screen.getByTestId('sat-text'),
       questionCopy: screen.getByTestId('question-copy'),
     };
   }
@@ -329,8 +333,10 @@ describe('StudentKeyboardProvider', () => {
   // The exemption these two cases used to assert WAS the bug: handing the
   // native menu back to the browser on passage text is exactly what let a
   // long-press on the reading pane expose Copy / Look Up / Search mid-exam.
-  // Blocking the menu costs the surface nothing, because selection is kept
-  // (`user-select: text`) and only the platform's menu goes away.
+  // Blocking the menu here costs the surface nothing: the stylesheet already
+  // owns selection policy in a locked exam (off exam-wide, restored while the
+  // highlight tool is armed), and this handler only guarantees that no menu —
+  // and no violation — comes of touching the passage.
   it('blocks the context menu on highlightable reading text with highlight mode armed', () => {
     const harness = renderHarness();
 
@@ -363,6 +369,38 @@ describe('StudentKeyboardProvider', () => {
       harness.highlightTarget.dispatchEvent(event);
     });
     expect(event.defaultPrevented).toBe(true);
+    expect(harness.runtime.state.violations).toHaveLength(0);
+  });
+
+  // SAT copy never carries `data-student-highlightable`; it is marked with
+  // `data-sat-selection-protected` instead. Before this branch it fell through
+  // to the generic exam handler, so resting a finger on the passage for two
+  // seconds cost a CONTEXT_MENU_BLOCKED violation on top of the OS menu.
+  it('blocks the context menu on SAT protected text during the exam without a violation', () => {
+    const harness = renderHarness();
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+
+    act(() => {
+      harness.satText.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(harness.runtime.state.violations).toHaveLength(0);
+    expect(saveStudentAuditEventMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves the context menu to the browser on SAT protected text outside the exam phase', () => {
+    const harness = renderHarness();
+    act(() => {
+      harness.runtime.actions.setPhase('pre-check');
+    });
+
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    act(() => {
+      harness.satText.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
     expect(harness.runtime.state.violations).toHaveLength(0);
   });
 

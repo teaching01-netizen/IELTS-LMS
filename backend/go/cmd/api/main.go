@@ -723,6 +723,8 @@ func BuildRouter(app *App) http.Handler {
 			// Deprecated compatibility alias for pre-parity Go profile clients.
 			authzRoute(r, "POST", "/export-profile", gradingProfileExportHandler(app))
 			authzRoute(r, "GET", "/sat", resultsSATListHandler(app))
+			authzRoute(r, "GET", "/sat/access-groups", resultsSATAccessGroupsHandler(app))
+			authzRoute(r, "GET", "/sat/attempts", resultsSATAttemptsHandler(app))
 			authzRoute(r, "GET", "/sat/{resultID}", resultsSATGetHandler(app))
 			authzRoute(r, "GET", "/act-science", resultsACTScienceHandler(app))
 			authzRoute(r, "GET", "/act-science/{attemptID}", resultsACTScienceDetailHandler(app))

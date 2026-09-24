@@ -71,6 +71,18 @@ function isWithinHighlightableContainer(target: EventTarget | null) {
   return false;
 }
 
+function isWithinSatSelectionProtectedText(target: EventTarget | null) {
+  const element = target instanceof HTMLElement
+    ? target
+    : target instanceof Node
+      ? target.parentElement
+      : null;
+
+  return Boolean(
+    element?.closest('[data-sat-selection-protected="true"]'),
+  );
+}
+
 function isWithinQuestionCalloutProtectedText(target: EventTarget | null) {
   const element = target instanceof HTMLElement
     ? target
@@ -490,12 +502,20 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       // exam, and like the protected question copy above it is blocked SILENTLY:
       // a long-press on a passage is how the student selects the text they are
       // about to highlight, so charging it as a violation would flag ordinary
-      // exam behavior. The menu is not what selection needs — the surface keeps
-      // `user-select: text`, so highlighting is untouched and only the
-      // platform's Copy / Look Up / Search / Share menu goes away. Handing that
-      // menu back to the browser here is what let a long-press on the reading
-      // pane expose it mid-exam, which blocking `contextmenu` alone cannot fix.
-      if (isWithinHighlightableContainer(event.target)) {
+      // exam behavior. Native selection itself is already off exam-wide
+      // (`user-select: none` in index.css) and returns only while the highlight
+      // tool is armed — so this branch has no menu worth showing and must never
+      // cost a violation. Blocking `contextmenu` alone was never enough: by the
+      // time the event exists, the platform has already built its menu.
+      //
+      // SAT passage, prompt, and choice copy is the same situation under a
+      // different marker: `[data-sat-selection-protected]` (it never carries
+      // `data-student-highlightable`). Left unrecognized it fell through to the
+      // generic branch below, so a student got a CONTEXT_MENU_BLOCKED violation
+      // merely for resting a finger on the text they were reading. Block it
+      // silently here; the CSS callout guard is what actually removes the
+      // platform menu.
+      if (isWithinHighlightableContainer(event.target) || isWithinSatSelectionProtectedText(event.target)) {
         if (runtimeStateRef.current.phase === 'exam') {
           event.preventDefault();
         }
