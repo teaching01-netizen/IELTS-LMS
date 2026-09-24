@@ -1,7 +1,7 @@
 import type { ExamSessionRuntime } from "../../../../types/domain";
 import type { StudentAttempt } from "../../../../types/studentAttempt";
 import { STUDENT_EXAM_PHASE, type StudentExamPhase } from "./studentExamPhase";
-import { getVerifiedTerminalState } from "./terminalState";
+import { getAttemptTerminalState } from "./terminalState";
 
 export interface DeriveStudentPhaseInput {
   readonly attempt: StudentAttempt | null;
@@ -10,8 +10,7 @@ export interface DeriveStudentPhaseInput {
 }
 
 export function deriveStudentPhase(input: DeriveStudentPhaseInput): StudentExamPhase {
-  const verifiedTerminal =
-    getVerifiedTerminalState({ attempt: input.attempt, runtime: input.runtime }) !== "not_terminal";
+  const verifiedTerminal = getAttemptTerminalState(input.attempt) !== "not_terminal";
 
   if (verifiedTerminal) {
     return STUDENT_EXAM_PHASE.POST_EXAM;

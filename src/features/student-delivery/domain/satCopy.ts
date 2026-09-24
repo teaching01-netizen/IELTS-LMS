@@ -121,18 +121,20 @@ export const SAT_COPY = {
   },
   review: {
     eyebrow: "Review your answers",
-    unansweredNotice: "Some questions are still unanswered. You may still submit the module.",
+    instructions: "Answers save automatically. You can review and change answers until time ends.",
+    unansweredNotice: "Some questions are still unanswered. You can return to them while time remains.",
     allAnswered: "Every question in this module has an answer.",
-    keepChecking: "Keep checking",
-    submitAnyway: "Submit anyway",
+    savingAnswers: "Saving answers" + "\u2026",
+    saveOffline: "You are offline. Your latest answers may still be pending.",
+    saveFailed: "Your latest answers could not be saved yet.",
+    saveSuperseded: "This attempt is active in another window. Saving is paused here.",
+    retrySave: "Retry Save",
   },
-  submit: {
-    submitModule: "Submit module",
-    submitting: "Submitting" + "\u2026",
-    cannotReturn: "You cannot return to this module after submitting.",
-    timeExpiredFinalizing: "Time expired \u2014 submitting your saved answers.",
-    finalizingResponses: "Finalizing SAT responses" + "\u2026",
-    almostUp: "Time almost up \u2014 answers save automatically.",
+  timeout: {
+    title: "Time is up",
+    recordingAnswers: "Your saved answers are being recorded.",
+    offline: "We could not confirm your latest save. Keep this screen open while you reconnect.",
+    failed: "We could not confirm your latest save. Keep this screen open and retry the save.",
   },
   transitions: {
     waitingForBreak: "Waiting for the break to start",
@@ -155,17 +157,8 @@ export const SAT_COPY = {
     // complete H1 reads as a Title Case fragment.
     completeTitle: "SAT Complete",
     completeSubtitle: "All responses submitted.",
-    practiceScoreReady: "Your unofficial practice score is ready.",
+    finalizingResult: "Finalizing SAT result" + "\u2026",
     backToDashboard: "Back to dashboard",
-    // A Student Link may admit only one section. That sitting has a section
-    // score (200\u2013800) and deliberately NO total \u2014 the 400\u20131600 scale is
-    // defined over both sections \u2014 so the completion screen names the section
-    // instead of leaving the score area blank.
-    sectionScoreHeading: "Section score",
-    sectionScoreOnlyNote:
-      "This link covered one section, so there is no total score. This is your unofficial practice result for that section.",
-    sectionLabelReadingWriting: "Reading and Writing",
-    sectionLabelMath: "Math",
   },
   timer: {
     hidden: "Timer hidden",
@@ -182,10 +175,6 @@ export const SAT_COPY = {
     takeOver: "Take over",
     retryNow: "Retry now",
     retry: "Retry",
-  },
-  submitReadiness: {
-    offlineBlocked: "You are offline. Answers are kept on this device.",
-    errorBlocked: "Saving needs attention before you can submit.",
   },
   // Highlights & Notes (self-teaching pass). Every control carries a written
   // label: the feature is meant to be understood by using it, with no tutorial
@@ -314,13 +303,6 @@ export const SAT_COPY = {
     enterFullScreen: "Enter full screen",
     exitFullScreen: "Exit full screen",
   },
-  timerWarning: {
-    // Wave C R-11: Title Case alert-title fragment, no period
-    // (alerts.md Content fragment rule; matches sibling alert titles).
-    title: "5 Minutes Remaining",
-    dismiss: "Dismiss timer warning",
-    body: "5 minutes remain in this module. Your hidden timer is shown again.",
-  },
 } as const;
 
 export type SatCopy = typeof SAT_COPY;
@@ -404,14 +386,6 @@ export function satImageControlsLabel(label: string): string {
 
 export function satBackToQuestionLabel(questionNumber: number): string {
   return "Back to question " + questionNumber;
-}
-
-export function satSubmitConfirmTitle(moduleTitle: string): string {
-  return "Submit " + moduleTitle + " answers?";
-}
-
-export function satSubmitConfirmSummary(unanswered: number, flagged: number): string {
-  return unanswered + " unanswered \u00B7 " + flagged + " flagged";
 }
 
 export function satLastQuestionLabel(questionNumber: number, questionCount: number): string {

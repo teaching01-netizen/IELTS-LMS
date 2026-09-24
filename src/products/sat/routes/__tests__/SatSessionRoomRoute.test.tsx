@@ -51,6 +51,16 @@ const student = {
   violations: [], warnings: 0, lastActivity: '2026-08-30T02:05:00Z', examId: 'sat-1', examName: 'Practice Test 06',
 };
 
+/**
+ * The room clock a mocked controller hands the route. Resolving it is the
+ * controller's job now (the accepted server instant, else the selected runtime's
+ * own stamp; `receivedAt: 0` is that same fallback's unknown receipt), and the
+ * route decides nothing — so a mock that omits `roomClock` renders an uncorrected
+ * clock. Every fixture here anchors its run sheet on `runtime.serverNow`, so the
+ * mocks whose assertions depend on the room's clock pass this.
+ */
+const resolvedRoomClock = { serverNow: runtime.serverNow, receivedAt: 0 };
+
 function useTabletMediaQuery() {
   const previous = Object.getOwnPropertyDescriptor(window, 'matchMedia');
   const mediaQuery = {
@@ -79,6 +89,7 @@ describe('SatSessionRoomRoute', () => {
     vi.clearAllMocks();
     controllerMock.mockReturnValue({
       schedules: [schedule], runtimeSnapshots: [runtime], sessions: [student], alerts: [], error: null, isLoading: false,
+      roomClock: resolvedRoomClock,
       reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
@@ -167,6 +178,7 @@ describe('SatSessionRoomRoute', () => {
     controllerMock.mockReset();
     controllerMock.mockReturnValue({
       schedules: [schedule], runtimeSnapshots: [runtime], sessions: [clocked], alerts: [], error: null, isLoading: false,
+      roomClock: resolvedRoomClock,
       reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });

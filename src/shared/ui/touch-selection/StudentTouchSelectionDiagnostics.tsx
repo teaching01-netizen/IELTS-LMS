@@ -18,7 +18,84 @@ const EMPTY_GESTURE = {
 
 interface SurfaceTrace extends TouchSelectionDiagnostics {
   snapshot: () => Record<string, unknown>;
-  observe: (event: PointerEvent) => boolean;
+  observe: (event: Event) => boolean;
+}
+
+function pointerTypeOf(event: Event): string | null {
+  return 'pointerType' in event && typeof (event as PointerEvent).pointerType === 'string'
+    ? (event as PointerEvent).pointerType
+    : null;
+}
+
+function nodeInside(root: HTMLElement, node: Node | null | undefined): boolean {
+  return node !== null && node !== undefined && root.contains(node);
+}
+
+function selectionIntersects(root: HTMLElement, selection: Selection | null): boolean {
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    try {
+      if (selection.getRangeAt(index).intersectsNode(root)) return true;
+    } catch {
+      // Detached ranges are not relevant to this surface.
+    }
+  }
+  return (selection.anchorNode !== null && root.contains(selection.anchorNode))
+    || (selection.focusNode !== null && root.contains(selection.focusNode));
+}
+
+function selectionEndpointOrigin(node: Node | null | undefined, root: HTMLElement | null): string {
+  if (!node) return 'null';
+  const element = node instanceof Element ? node : node.parentElement;
+  if (!element) return 'other';
+  if (element.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return 'editable';
+  if (element.closest('[data-selection-loupe-source]')) return 'loupe-clone';
+  if (element.closest('[data-student-selection-handle]')) return 'handle';
+  if (element.closest('[data-selection-action-menu]')) return 'toolbar';
+  if (element.closest('[data-selection-floating-layer], [data-selection-loupe], [data-selection-loupe-content]')) return 'floating-layer';
+  if (root && root.contains(node)) return 'source-root';
+  if (element === document.body) return 'body';
+  return 'other';
+}
+
+function selectionIntersectsV2Layer(selection: Selection | null): boolean {
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+  const inside = (node: Node | null): boolean => {
+    const element = node instanceof Element ? node : node?.parentElement;
+    return element?.closest(
+      '[data-selection-floating-layer], [data-selection-loupe-source], [data-selection-loupe-content], [data-selection-loupe], [data-student-selection-handle]',
+    ) != null;
+  };
+  if (inside(selection.anchorNode) || inside(selection.focusNode)) return true;
+  const layers = document.querySelectorAll('[data-selection-floating-layer], [data-selection-loupe-source]');
+  for (const layer of layers) {
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      try {
+        if (selection.getRangeAt(index).intersectsNode(layer)) return true;
+      } catch {
+        // Detached ranges are not relevant to this surface.
+      }
+    }
+  }
+  return false;
+}
+
+function selectionRootForEvent(event: Event): HTMLElement | null {
+  const target = event.target instanceof Element
+    ? event.target
+    : event.target instanceof Node
+      ? event.target.parentElement
+      : null;
+  const root = target?.closest<HTMLElement>(
+    '[data-sat-selection-protected="true"], [data-student-highlightable="true"]',
+  );
+  if (root) return root;
+  return document.querySelector<HTMLElement>(
+    '[data-sat-selection-protected="true"][data-student-selection-owner="app"], '
+      + '[data-student-highlightable="true"][data-student-selection-owner="app"]',
+  ) ?? document.querySelector<HTMLElement>(
+    '[data-sat-selection-protected="true"], [data-student-highlightable="true"]',
+  );
 }
 
 interface DiagnosticStore {
@@ -50,6 +127,7 @@ export function useStudentTouchSelectionDiagnostics(
     let listenerRoot: HTMLElement | null = null;
     let rootExistsAtEffect: boolean | null = null;
     let pointerId: number | null = null;
+    let activePointerType: string | null = null;
     let values: Record<string, unknown> = { ...EMPTY_GESTURE };
     const events: Record<string, unknown>[] = [];
     const record: TouchSelectionDiagnostics['record'] = (stage, details = {}) => {
@@ -65,43 +143,96 @@ export function useStudentTouchSelectionDiagnostics(
       snapshot: () => {
         const root = rootRef.current;
         const style = root ? getComputedStyle(root) : null;
+        const nativeSelection = window.getSelection();
         return {
           id, ...currentConfig.current,
           coarse: typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)').matches : null,
+          anyCoarse: typeof window.matchMedia === 'function' ? window.matchMedia('(any-pointer: coarse)').matches : null,
+          maxTouchPoints: navigator.maxTouchPoints ?? 0,
           rootExists: !!root, rootConnected: root?.isConnected ?? false, rootExistsAtEffect,
           listenerAttached: !!listenerRoot, listenerRootMatches: !!root && listenerRoot === root,
           markerPresent: root?.dataset['studentOwnedTouchSelection'] === 'true',
+          ownedTouchSelectionMarkerPresent: root?.dataset['studentOwnedTouchSelection'] === 'true',
+          protectedRootPresent: root?.getAttribute('data-sat-selection-protected') === 'true',
+          ownerMarkerPresent: root?.getAttribute('data-student-selection-owner') === 'app',
           computedUserSelect: style?.getPropertyValue('user-select') ?? '',
           computedWebkitUserSelect: style?.getPropertyValue('-webkit-user-select') ?? '',
           computedTouchAction: style?.touchAction ?? '', computedDisplay: style?.display ?? '',
           examClassPresent: document.documentElement.classList.contains('student-exam-active'),
-          nativeSelectionRangeCount: window.getSelection()?.rangeCount ?? 0,
+          nativeSelectionRangeCount: nativeSelection?.rangeCount ?? 0,
+          nativeSelectionCollapsed: nativeSelection?.isCollapsed ?? null,
+          nativeAnchorInsideSatRoot: !!root && root.getAttribute('data-sat-selection-protected') === 'true' && nodeInside(root, nativeSelection?.anchorNode),
+          nativeFocusInsideSatRoot: !!root && root.getAttribute('data-sat-selection-protected') === 'true' && nodeInside(root, nativeSelection?.focusNode),
           renderedMarkCount: root?.querySelectorAll('mark[data-highlighted="true"], [data-sat-highlight="true"]').length ?? 0,
           ...values, events: [...events],
         };
       },
       observe: (event) => {
+        const pointerEvent = event.type.startsWith('pointer');
+        const pointerIdForEvent = pointerEvent && typeof (event as PointerEvent).pointerId === 'number'
+          ? (event as PointerEvent).pointerId
+          : null;
         const inside = event.target instanceof Node && !!rootRef.current?.contains(event.target);
         if (event.type === 'pointerdown') {
           if (!inside) return false;
           values = { ...EMPTY_GESTURE };
           events.length = 0;
-          pointerId = event.pointerId;
-        } else if (pointerId === null || event.pointerId !== pointerId) return false;
+          pointerId = pointerIdForEvent;
+          activePointerType = pointerTypeOf(event);
+        } else if (event.type === 'selectstart') {
+          if (!inside) return false;
+        } else if (event.type === 'selectionchange') {
+          const root = rootRef.current;
+          if (!root || root.getAttribute('data-sat-selection-protected') !== 'true') return false;
+          // Loupe-originated selections must NOT be filtered out: the clone lives
+          // outside the SAT root, so `selectionIntersects(root)` is false for
+          // exactly the leak this diagnostics exists to catch.
+          const selection = window.getSelection();
+          const inRoot = selectionIntersects(root, selection);
+          const inLayer = selectionIntersectsV2Layer(selection);
+          if (!inRoot && !inLayer && pointerId === null && root.getAttribute('data-student-selection-owner') !== 'app') return false;
+        } else if (pointerEvent && (pointerId === null || pointerIdForEvent !== pointerId)) return false;
+        else if (!pointerEvent) return false;
         const root = rootRef.current;
         const style = root ? getComputedStyle(root) : null;
         const targetStyle = event.target instanceof Element ? getComputedStyle(event.target) : null;
+        const nativeSelection = window.getSelection();
+        const pointer = pointerEvent ? event as PointerEvent : null;
         record(`dom:${event.type}`, {
-          pointerId: event.pointerId, pointerType: event.pointerType, trusted: event.isTrusted,
+          pointerId: pointerIdForEvent, pointerType: pointerTypeOf(event), activePointerType, trusted: event.isTrusted,
+          coarse: typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)').matches : null,
+          anyCoarse: typeof window.matchMedia === 'function' ? window.matchMedia('(any-pointer: coarse)').matches : null,
+          maxTouchPoints: navigator.maxTouchPoints ?? 0,
           eventTarget: describeTouchSelectionNode(event.target instanceof Node ? event.target : null),
-          targetInsideRoot: inside, clientX: event.clientX, clientY: event.clientY,
+          targetInsideRoot: inside, clientX: pointer?.clientX ?? null, clientY: pointer?.clientY ?? null,
           defaultPrevented: event.defaultPrevented,
           // Snapshot BEFORE the handler, so arming after pointerdown cannot hide a bad initial style.
           markerAtEvent: root?.dataset['studentOwnedTouchSelection'] === 'true',
+          ownedTouchSelectionMarkerAtEvent: root?.dataset['studentOwnedTouchSelection'] === 'true',
+          protectedRootAtEvent: root?.getAttribute('data-sat-selection-protected') === 'true',
+          ownerMarkerAtEvent: root?.getAttribute('data-student-selection-owner') === 'app',
           touchActionAtEvent: style?.touchAction ?? '',
+          computedUserSelectAtEvent: style?.getPropertyValue('user-select') ?? '',
+          computedWebkitUserSelectAtEvent: style?.getPropertyValue('-webkit-user-select') ?? '',
           userSelectAtEvent: style?.getPropertyValue('-webkit-user-select') || style?.getPropertyValue('user-select') || '',
+          targetComputedUserSelect: targetStyle?.getPropertyValue('user-select') ?? '',
+          targetComputedWebkitUserSelect: targetStyle?.getPropertyValue('-webkit-user-select') ?? '',
           targetUserSelect: targetStyle?.getPropertyValue('-webkit-user-select') || targetStyle?.getPropertyValue('user-select') || '',
           targetTouchAction: targetStyle?.touchAction ?? '',
+          nativeSelectionRangeCount: nativeSelection?.rangeCount ?? 0,
+          nativeSelectionCollapsed: nativeSelection?.isCollapsed ?? null,
+          nativeAnchorInsideSatRoot: !!root && root.getAttribute('data-sat-selection-protected') === 'true' && nodeInside(root, nativeSelection?.anchorNode),
+          nativeFocusInsideSatRoot: !!root && root.getAttribute('data-sat-selection-protected') === 'true' && nodeInside(root, nativeSelection?.focusNode),
+          nativeAnchorOrigin: selectionEndpointOrigin(nativeSelection?.anchorNode, rootRef.current),
+          nativeFocusOrigin: selectionEndpointOrigin(nativeSelection?.focusNode, rootRef.current),
+          nativeIntersectsSelectionV2Layer: selectionIntersectsV2Layer(nativeSelection),
+          nativeRangeTextLength: Array.from({ length: nativeSelection?.rangeCount ?? 0 }, (_, index) => {
+            try {
+              return nativeSelection?.getRangeAt(index).toString().length ?? 0;
+            } catch {
+              return 0;
+            }
+          }).reduce((total, length) => total + length, 0),
         });
         if (event.type === 'pointerup' || event.type === 'pointercancel') pointerId = null;
         return true;
@@ -132,18 +263,41 @@ export function StudentTouchSelectionDiagnosticsProvider({ children, enabled }: 
     if (!store) return;
     const debug = { snapshot: store.snapshot };
     window.__studentTouchSelectionDebug = debug;
-    const observe = (event: PointerEvent) => {
+    const observe = (event: Event) => {
       if (event.target instanceof Element && event.target.closest('[data-touch-selection-diagnostics]')) return;
       // Keep raw events even if every ref is missing or the target is outside
       // the registered roots; otherwise a missing listener could look like no input.
       if (event.type === 'pointerdown') store.documentEvents.length = 0;
-      store.documentEvents.push({ ms: Math.round(performance.now()), stage: event.type, pointerId: event.pointerId, pointerType: event.pointerType, clientX: event.clientX, clientY: event.clientY, trusted: event.isTrusted, eventTarget: describeTouchSelectionNode(event.target instanceof Node ? event.target : null) });
+      const pointer = event.type.startsWith('pointer') ? event as PointerEvent : null;
+      const selection = window.getSelection();
+      const surfaceRoot = selectionRootForEvent(event);
+      store.documentEvents.push({
+        ms: Math.round(performance.now()), stage: event.type,
+        pointerId: pointer?.pointerId ?? null, pointerType: pointer?.pointerType ?? null,
+        coarse: typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)').matches : null,
+        anyCoarse: typeof window.matchMedia === 'function' ? window.matchMedia('(any-pointer: coarse)').matches : null,
+        maxTouchPoints: navigator.maxTouchPoints ?? 0,
+        clientX: pointer?.clientX ?? null, clientY: pointer?.clientY ?? null,
+        trusted: event.isTrusted,
+        eventTarget: describeTouchSelectionNode(event.target instanceof Node ? event.target : null),
+        protectedRootPresent: surfaceRoot?.getAttribute('data-sat-selection-protected') === 'true',
+        ownerMarkerPresent: surfaceRoot?.getAttribute('data-student-selection-owner') === 'app',
+        nativeSelectionRangeCount: selection?.rangeCount ?? 0,
+        nativeSelectionCollapsed: selection?.isCollapsed ?? null,
+        nativeAnchorInsideSatRoot: !!surfaceRoot && surfaceRoot.getAttribute('data-sat-selection-protected') === 'true' && nodeInside(surfaceRoot, selection?.anchorNode),
+        nativeFocusInsideSatRoot: !!surfaceRoot && surfaceRoot.getAttribute('data-sat-selection-protected') === 'true' && nodeInside(surfaceRoot, selection?.focusNode),
+        nativeAnchorInsideSelectionRoot: !!surfaceRoot && nodeInside(surfaceRoot, selection?.anchorNode),
+        nativeFocusInsideSelectionRoot: !!surfaceRoot && nodeInside(surfaceRoot, selection?.focusNode),
+        nativeAnchorOrigin: selectionEndpointOrigin(selection?.anchorNode, surfaceRoot),
+        nativeFocusOrigin: selectionEndpointOrigin(selection?.focusNode, surfaceRoot),
+        nativeIntersectsSelectionV2Layer: selectionIntersectsV2Layer(selection),
+      });
       if (store.documentEvents.length > 120) store.documentEvents.splice(40, 1);
       for (const [id, trace] of store.surfaces) {
         if (trace.observe(event)) store.activeId = id;
       }
     };
-    const events = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const;
+    const events = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'selectstart', 'selectionchange'] as const;
     for (const event of events) document.addEventListener(event, observe, { capture: true, passive: true });
     return () => {
       for (const event of events) document.removeEventListener(event, observe, true);

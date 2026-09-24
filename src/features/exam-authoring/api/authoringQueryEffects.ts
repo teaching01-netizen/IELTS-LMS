@@ -58,6 +58,7 @@ import type {
   SatPublishScope,
 } from "../contracts/assessment";
 import type { AssessmentReleaseState } from "../contracts/release";
+import type { AccessDistributionOverview } from "../contracts/accessLinks";
 import type { SatWorkspaceCommand } from "../realtime/coedit/workspaceCommands";
 
 export const assessmentKeys = {
@@ -410,6 +411,28 @@ export const authoringEffects = {
     ]);
   },
 
+  /** Permanently deleted access link: remove its projections and update the visible overview immediately. */
+  async accessDeleted(
+    queryClient: QueryClient,
+    examId: string,
+    linkId: string
+  ): Promise<void> {
+    queryClient.setQueryData<AccessDistributionOverview>(
+      accessLinkKeys.overview(examId),
+      (current) => current
+        ? { ...current, links: current.links.filter((link) => link.id !== linkId) }
+        : current
+    );
+    queryClient.removeQueries({ queryKey: accessLinkKeys.link(linkId) });
+    queryClient.removeQueries({ queryKey: accessLinkKeys.members(linkId) });
+    queryClient.removeQueries({ queryKey: accessLinkKeys.activity(linkId) });
+    queryClient.removeQueries({ queryKey: accessLinkKeys.public(linkId) });
+    await Promise.allSettled([
+      queryClient.invalidateQueries({ queryKey: accessLinkKeys.overview(examId) }),
+      queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) }),
+    ]);
+  },
+
   /**
    * A release was published. The working draft is sealed into a version, so the
    * draft shell key is DROPPED (not refetched): the next read must come from the
@@ -522,6 +545,10 @@ export const authoringEffects = {
       case "access.lifecycle_changed":
       case "access.duplicated":
         await authoringEffects.accessChanged(queryClient, examId, linkId);
+        return;
+      case "access.deleted":
+        if (linkId) await authoringEffects.accessDeleted(queryClient, examId, linkId);
+        else await authoringEffects.accessChanged(queryClient, examId);
         return;
       case "exam.published":
         await Promise.all([

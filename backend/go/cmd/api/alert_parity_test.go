@@ -99,6 +99,7 @@ func TestAlertRulesLabelValuesAreEmitted(t *testing.T) {
 		{"SATLegacyScoringFallbackDetected", telemetry.MSATScoreSource, "source", telemetry.SATScoreLegacy},
 		{"SATMixedScoringFallbackDetected", telemetry.MSATScoreFallbackRows, "", ""},
 		{"SATFinalizationRejectedSpike", telemetry.MSATFinalizeTotal, "outcome", telemetry.FinalizeRejected},
+		{"SATResultQuestionDetailFailure", telemetry.MSATResultQuestionDetailFailure, "", ""},
 	} {
 		blocks := strings.Split(body, "- alert: "+pin.alert)
 		if len(blocks) < 2 {

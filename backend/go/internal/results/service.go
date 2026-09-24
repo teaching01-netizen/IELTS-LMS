@@ -19,6 +19,7 @@ import (
 	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 // Outcome statuses owned by assessment_results (see 0044 lineage).
@@ -590,9 +591,12 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 		if modules, byModule, err := s.satModules(ctx, attemptID); err == nil {
 			attachSATModules(sections, modules, byModule)
 		}
-		if questions, err := s.satQuestions(ctx, attemptID); err == nil {
-			return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: questions}, nil
+		questions, err := s.satQuestions(ctx, attemptID)
+		if err != nil {
+			telemetry.IncCounter(telemetry.MSATResultQuestionDetailFailure)
+			return nil, fmt.Errorf("load SAT question responses: %w", err)
 		}
+		return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: questions}, nil
 	}
 	return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: []SATQuestion{}}, nil
 }
@@ -825,7 +829,7 @@ func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQues
 	// question_id reused across modules/versions can't project phantoms.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.section_key, m.module_key, m.display_order, eq.display_order,
-			eq.question_id, eq.is_pretest, ar.marked_for_review, ar.response,
+			eq.id AS exam_question_id, eq.question_id, eq.is_pretest, ar.marked_for_review, ar.response,
 			CAST(qr.answer_definition AS CHAR), CAST(v.response AS CHAR), v.response IS NOT NULL,
 			CAST(v.question_id AS CHAR)
 		FROM assessment_module_attempts ma
@@ -849,7 +853,7 @@ func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQues
 	defer rows.Close()
 	seen := make(map[string]struct{})
 	for rows.Next() {
-		var sectionKey, moduleKey, questionID string
+		var sectionKey, moduleKey, examQuestionID, questionID string
 		var moduleOrder, questionOrder int
 		var isPretest bool
 		var marked sql.NullBool
@@ -857,16 +861,16 @@ func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQues
 		var v2present sql.NullBool
 		var vQuestionID sql.NullString
 		if err := rows.Scan(&sectionKey, &moduleKey, &moduleOrder, &questionOrder,
-			&questionID, &isPretest, &marked, &response, &answerDef, &v2canonical, &v2present, &vQuestionID); err != nil {
+			&examQuestionID, &questionID, &isPretest, &marked, &response, &answerDef, &v2canonical, &v2present, &vQuestionID); err != nil {
 			return out, err
 		}
-		if _, dup := seen[questionID]; dup {
+		if _, dup := seen[examQuestionID]; dup {
 			// Second V2 match for the same question (eq.id +
 			// eq.question_id variants): ORDER BY placed the eq.id
 			// match first, so drop the duplicate, never double-list.
 			continue
 		}
-		seen[questionID] = struct{}{}
+		seen[examQuestionID] = struct{}{}
 		// V2 wins per question when its canonical payload is present.
 		if v2canonical.Valid && v2canonical.String != "" {
 			marked = sql.NullBool{Bool: assessscore.V2MarkedForReview(v2canonical.String), Valid: true}

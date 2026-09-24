@@ -1,5 +1,6 @@
 export {
   backendDelete,
+  backendDeleteWithBody,
   backendGet,
   backendPatch,
   backendPost,

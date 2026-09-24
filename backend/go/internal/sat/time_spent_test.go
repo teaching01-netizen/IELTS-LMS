@@ -42,6 +42,7 @@ func TestSATResultPersistsDerivedTimeSpent(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectCanonicalRouteDecisions(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE attempt_id = ? AND started_at IS NOT NULL")).
 		WillReturnRows(sqlmock.NewRows([]string{"seconds"}).AddRow(spent))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
@@ -88,6 +89,7 @@ func TestSATResultTimeSpentFallsBackWhenTimingMissing(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectCanonicalRouteDecisions(mock)
 	// SUM(...) over no started modules is NULL, not an error.
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE attempt_id = ? AND started_at IS NOT NULL")).
 		WillReturnRows(sqlmock.NewRows([]string{"seconds"}).AddRow(nil))

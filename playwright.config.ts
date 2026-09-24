@@ -13,7 +13,17 @@ const frontendUrl = `http://localhost:${frontendPort}`;
 // the same local/CI defaults here so the Go API receives a complete config.
 dotenv.config({ path: path.resolve(".env"), override: false });
 dotenv.config({ path: path.resolve("backend/.env"), override: false });
+const configuredStaffIdleMinutes = process.env["SESSION_IDLE_STAFF_MINS"];
+const configuredStudentIdleMinutes = process.env["SESSION_IDLE_STUDENT_MINS"];
 dotenv.config({ path: path.resolve("backend/.env.example"), override: false });
+
+// The Go-backed E2E suite reuses the sessions created by globalSetup across
+// every browser project. Keep test sessions alive through the CI job while
+// preserving any explicit runner or local override.
+process.env["SESSION_IDLE_STAFF_MINS"] =
+  inheritedEnv["SESSION_IDLE_STAFF_MINS"] ?? configuredStaffIdleMinutes ?? "600";
+process.env["SESSION_IDLE_STUDENT_MINS"] =
+  inheritedEnv["SESSION_IDLE_STUDENT_MINS"] ?? configuredStudentIdleMinutes ?? "600";
 
 const backendApiUrl = (process.env["VITE_BACKEND_API_URL"] ?? "http://localhost:4000").replace(
   /\/$/,

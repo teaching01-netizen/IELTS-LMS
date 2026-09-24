@@ -5,13 +5,14 @@ import { SatAnnotationEditControls } from './SatAnnotationEditControls';
 import { SatSelectionActionsPanel } from './SatSelectionActionsPanel';
 
 const anchor = { nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree' };
+const environment = { coarsePointer: false, nativeSelectionUi: false };
 
 function actions() {
   return { highlight: vi.fn(), underline: vi.fn(), addNote: vi.fn() };
 }
 
 /** The props a dismissal needs wherever a popover is rendered. */
-const closeProps = { onClose: vi.fn() };
+const closeProps = { onClose: vi.fn(), environment };
 
 /** Every action's marker, in the order the surface renders them. */
 function actionOrder(): Array<string | null> {
@@ -74,7 +75,7 @@ describe('desktop selection panel', () => {
 
   it('offers a written way out, and closing touches nothing', () => {
     const onClose = vi.fn();
-    render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} onClose={onClose} />);
+    render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} environment={environment} onClose={onClose} />);
     fireEvent.click(screen.getByRole('button', { name: 'Close text tools' }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Close text tools' })).toHaveAttribute('data-sat-annotation-dismiss', 'true');
@@ -122,7 +123,7 @@ describe('edit controls', () => {
     kind: 'highlight', nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree', color: 'pink', note: 'Check this',
   });
   /** What every render of the mark's controls needs beyond the mark itself. */
-  const base = { onClose: vi.fn() };
+  const base = { onClose: vi.fn(), environment };
 
   it('shows the current ink pressed, offers the note edit, and separates removal', () => {
     const onColor = vi.fn();
@@ -131,7 +132,6 @@ describe('edit controls', () => {
     render(
       <SatAnnotationEditControls
         annotation={mark}
-        touch={false}
         onColor={onColor}
         onUnderline={vi.fn()}
         onNote={onNote}
@@ -156,7 +156,7 @@ describe('edit controls', () => {
   it('asks to add a note on a bare mark and names removal after the mark kind', () => {
     const bare = createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree' });
     render(
-      <SatAnnotationEditControls annotation={bare} touch onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
+      <SatAnnotationEditControls annotation={bare} onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
     );
     expect(screen.getByRole('button', { name: 'Add note' })).toHaveTextContent('Add note');
     expect(screen.getByRole('button', { name: 'Remove underline' })).toBeInTheDocument();
@@ -175,7 +175,6 @@ describe('edit controls', () => {
     render(
       <SatAnnotationEditControls
         annotation={{ ...mark, note: undefined }}
-        touch={false}
         onColor={vi.fn()}
         onUnderline={vi.fn()}
         onNote={onNote}
@@ -195,7 +194,7 @@ describe('edit controls', () => {
 
   it('keeps the dismissal at the far end of the removal row', () => {
     render(
-      <SatAnnotationEditControls annotation={mark} touch={false} onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
+      <SatAnnotationEditControls annotation={mark} onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
     );
     const close = screen.getByRole('button', { name: 'Close text tools' });
     const remove = screen.getByRole('button', { name: 'Remove highlight' });

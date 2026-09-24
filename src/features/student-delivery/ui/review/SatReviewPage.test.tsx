@@ -1,13 +1,14 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SAT_COPY } from "../../domain/satCopy";
+import { SatControlBanner, SatLeaseConflictNotice } from "../feedback/SatControlFeedback";
 import { SatReviewPage } from "./SatReviewPage";
 import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
 
 const items: readonly SatQuestionNavigationItem[] = [
   { id: "q1", index: 0, number: 1, status: "answered", current: false, markedForReview: false },
   { id: "q2", index: 1, number: 2, status: "unanswered", current: false, markedForReview: true },
-  { id: "q3", index: 3, number: 3, status: "unanswered", current: false, markedForReview: false },
+  { id: "q3", index: 2, number: 3, status: "unanswered", current: false, markedForReview: false },
 ];
 
 function renderReview(overrides = {}) {
@@ -18,69 +19,74 @@ function renderReview(overrides = {}) {
       remainingLabel="12:00"
       items={items}
       answeredCount={1}
-      isSubmitting={false}
-      persistenceBlocked={false}
+      pendingSaveCount={0}
+      saveFailure={null}
+      saveFailureKind={null}
       onSelectQuestion={vi.fn()}
       onBack={vi.fn()}
-      onSubmit={vi.fn()}
       {...overrides}
     />,
   );
 }
 
-describe("SatReviewPage submit safety", () => {
-  it("requires two steps: Submit opens a confirm that names scope and counts", async () => {
-    const onSubmit = vi.fn();
-    renderReview({ onSubmit });
-    fireEvent.click(screen.getByRole("button", { name: SAT_COPY.submit.submitModule }));
-    expect(onSubmit).not.toHaveBeenCalled();
-    const dialog = screen.getByTestId("sat-submit-confirm");
-    expect(dialog).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Submit Module 1 answers?" })).toBeInTheDocument();
-    expect(dialog).toHaveTextContent("2 unanswered");
-    expect(dialog).toHaveTextContent("cannot return");
-    // X close shares the cancel label: scope into the dialog footer.
-    const { within } = await import("@testing-library/react");
-    const footerButtons = within(dialog).getAllByRole("button", { name: SAT_COPY.review.keepChecking });
-    fireEvent.click(footerButtons[footerButtons.length - 1]);
+describe("SatReviewPage", () => {
+  it("keeps review and return navigation without a module-submit control or dialog", () => {
+    const onSelectQuestion = vi.fn();
+    const onBack = vi.fn();
+    renderReview({ onSelectQuestion, onBack, currentQuestionIndex: 1 });
+
+    expect(screen.getByRole("heading", { name: SAT_COPY.review.eyebrow })).toBeInTheDocument();
+    expect(screen.getByText("2 unanswered")).toBeInTheDocument();
+    expect(screen.getByText("1 flagged")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /submit/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId("sat-submit-confirm")).not.toBeInTheDocument();
-    expect(onSubmit).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: SAT_COPY.submit.submitModule }));
-    fireEvent.click(screen.getByRole("button", { name: SAT_COPY.review.submitAnyway }));
-    expect(onSubmit).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Question 2, unanswered, flagged" }));
+    expect(onSelectQuestion).toHaveBeenCalledWith(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to question 2" }));
+    expect(onBack).toHaveBeenCalledOnce();
+    expect(screen.getByRole("timer")).toHaveTextContent("12:00");
   });
 
-  it("stays silent while answers are still saving", () => {
-    renderReview({
-      readinessInput: { isSubmitting: false, failure: null, failureKind: null, pendingCount: 2 },
-    });
-    const button = screen.getByRole("button", { name: SAT_COPY.submit.submitModule });
-    // Pending saves are not a decision the student can make, so nothing is
-    // said about them: no reason text and no advisory aria-disabled.
-    expect(button).not.toHaveAttribute("aria-describedby");
-    expect(button).not.toHaveAttribute("aria-disabled");
-    expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
-    expect(button).not.toBeDisabled();
+  it("shows an in-progress save status while keeping review available", () => {
+    renderReview({ pendingSaveCount: 2 });
+    expect(screen.getByRole("status")).toHaveTextContent(SAT_COPY.review.savingAnswers);
+    expect(screen.getByRole("button", { name: "Back to questions" })).toBeEnabled();
   });
 
-  it("hard-blocks retryable errors with reason and retry", () => {
+  it("shows offline state and keeps Retry Save available", () => {
     const onRetrySave = vi.fn();
     renderReview({
-      readinessInput: { isSubmitting: false, failure: "Timeout", failureKind: "retryable", pendingCount: 0 },
+      pendingSaveCount: 1,
+      saveFailure: "Offline",
+      saveFailureKind: "offline",
       onRetrySave,
     });
-    expect(screen.getByRole("button", { name: SAT_COPY.submit.submitModule })).toBeDisabled();
-    expect(screen.getByText(/needs attention/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: SAT_COPY.saveStatus.retryNow }));
+    expect(screen.getByRole("alert")).toHaveTextContent(SAT_COPY.review.saveOffline);
+    fireEvent.click(screen.getByRole("button", { name: SAT_COPY.review.retrySave }));
     expect(onRetrySave).toHaveBeenCalledOnce();
   });
 
-  it("hard-blocks offline with an offline reason", () => {
+  it("shows a failed-save reason and allows retry", () => {
+    const onRetrySave = vi.fn();
     renderReview({
-      readinessInput: { isSubmitting: false, failure: "Offline", failureKind: "offline", pendingCount: 0 },
+      saveFailure: "Gateway timeout",
+      saveFailureKind: "retryable",
+      onRetrySave,
     });
-    expect(screen.getByRole("button", { name: SAT_COPY.submit.submitModule })).toBeDisabled();
-    expect(screen.getByText(/kept on this device/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Gateway timeout");
+    fireEvent.click(screen.getByRole("button", { name: SAT_COPY.review.retrySave }));
+    expect(onRetrySave).toHaveBeenCalledOnce();
+  });
+
+  it("shows a closed save window without offering a futile retry", () => {
+    renderReview({
+      saveFailure: "A final answer was not confirmed before the save window ended.",
+      saveFailureKind: "expired",
+      onRetrySave: vi.fn(),
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("save window ended");
+    expect(screen.queryByRole("button", { name: SAT_COPY.review.retrySave })).not.toBeInTheDocument();
   });
 
   it("labels the exit with its destination question", () => {
@@ -94,79 +100,66 @@ describe("SatReviewPage submit safety", () => {
     expect(screen.getByText("Unanswered")).toBeInTheDocument();
     expect(screen.getByText("Flagged")).toBeInTheDocument();
   });
+
+  it("places recovery notices in their own row above review content", () => {
+    const onTakeOver = vi.fn();
+    const { container } = renderReview({
+      notices: <>
+        <SatControlBanner tone="warning">Proctor message</SatControlBanner>
+        <SatLeaseConflictNotice error="Save ownership changed" isTakingOver={false} onTakeOver={onTakeOver} />
+      </>,
+    });
+    const page = container.querySelector(".sat-review-page")!;
+    const notices = screen.getByTestId("sat-review-notices");
+    const content = page.querySelector("main")!;
+    expect(notices).toContainElement(screen.getByRole("status"));
+    expect(notices).toContainElement(screen.getByRole("alert"));
+    expect(notices.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notices.className).not.toMatch(/fixed|absolute/);
+    for (const notice of [screen.getByRole("status"), screen.getByRole("alert")]) {
+      expect(notice.className).not.toMatch(/fixed|absolute/);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Take over" }));
+    expect(onTakeOver).toHaveBeenCalledOnce();
+  });
 });
 
-describe("SatReviewPage timer announcer (Wave A R-04)", () => {
+describe("SatReviewPage timer announcer", () => {
   it("stays silent without remainingSeconds and announces thresholds announce-only", () => {
     const { rerender, unmount } = renderReview();
+    const props = {
+      sectionLabel: "Section 1: Reading and Writing",
+      moduleTitle: "Module 1",
+      items,
+      answeredCount: 1,
+      pendingSaveCount: 0,
+      saveFailure: null,
+      saveFailureKind: null,
+      onSelectQuestion: vi.fn(),
+      onBack: vi.fn(),
+    };
     const live = screen.getByTestId("sat-review-timer-announcement");
     expect(live).toHaveAttribute("aria-live", "polite");
     expect(live).toHaveTextContent("");
-    // Sitting on review across 300s produces exactly one polite announcement.
-    rerender(
-      <SatReviewPage
-        sectionLabel="Section 1: Reading and Writing"
-        moduleTitle="Module 1"
-        remainingLabel="05:01"
-        remainingSeconds={301}
-        items={items}
-        answeredCount={1}
-        isSubmitting={false}
-        persistenceBlocked={false}
-        onSelectQuestion={vi.fn()}
-        onBack={vi.fn()}
-        onSubmit={vi.fn()}
-      />,
-    );
-    rerender(
-      <SatReviewPage
-        sectionLabel="Section 1: Reading and Writing"
-        moduleTitle="Module 1"
-        remainingLabel="04:59"
-        remainingSeconds={299}
-        items={items}
-        answeredCount={1}
-        isSubmitting={false}
-        persistenceBlocked={false}
-        onSelectQuestion={vi.fn()}
-        onBack={vi.fn()}
-        onSubmit={vi.fn()}
-      />,
-    );
+    rerender(<SatReviewPage {...props} remainingLabel="05:01" remainingSeconds={301} />);
+    rerender(<SatReviewPage {...props} remainingLabel="04:59" remainingSeconds={299} />);
     expect(screen.getByTestId("sat-review-timer-announcement")).toHaveTextContent(
       "Low time: 5 minutes remaining",
     );
-    // No per-second chatter: a further tick keeps the same one-shot text.
-    rerender(
-      <SatReviewPage
-        sectionLabel="Section 1: Reading and Writing"
-        moduleTitle="Module 1"
-        remainingLabel="04:58"
-        remainingSeconds={298}
-        items={items}
-        answeredCount={1}
-        isSubmitting={false}
-        persistenceBlocked={false}
-        onSelectQuestion={vi.fn()}
-        onBack={vi.fn()}
-        onSubmit={vi.fn()}
-      />,
-    );
+    rerender(<SatReviewPage {...props} remainingLabel="04:58" remainingSeconds={298} />);
     expect(screen.getByTestId("sat-review-timer-announcement")).toHaveTextContent(
       "Low time: 5 minutes remaining (04:59 left)",
     );
-    // Announce-only: the submit confirm stays the only modal on review.
-    expect(screen.queryByTestId("sat-submit-confirm")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     unmount();
   });
 
-  it("keeps the timer toggle at target size with the quiet text-button treatment (Wave A R-05)", () => {
+  it("keeps the timer toggle at target size with the quiet text-button treatment", () => {
     renderReview({ onToggleTimer: vi.fn() });
     const toggle = screen.getByRole("button", { name: "Hide timer" });
     expect(toggle.className).toContain("sat-touch-target");
     expect(toggle.className).not.toContain("rounded-full");
     expect(toggle.className).toContain("hover:underline");
-    const label = toggle.querySelector("span");
-    expect(label?.className).toContain("sat-type-control-secondary");
+    expect(toggle.querySelector("span")?.className).toContain("sat-type-control-secondary");
   });
 });

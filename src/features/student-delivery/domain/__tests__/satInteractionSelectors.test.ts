@@ -55,24 +55,24 @@ describe('selectSatInteraction (dumb UI contract)', () => {
   it('exposes the armed annotation mode and the live selection as separate answers', () => {
     const anchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' };
     const view = selectSatInteraction(
-      { ...createSatInteractionState(), annotation: { modeEnabled: true, selection: anchor } },
+      { ...createSatInteractionState(), annotation: { modeEnabled: true, selectionToolsAnchor: anchor } },
       { ...ctx(), toolPolicy: { ...ctx().toolPolicy, highlight: true, underline: true, notes: true } },
     );
     expect(view.annotation.modeEnabled).toBe(true);
-    expect(view.annotation.hasSelection).toBe(true);
-    expect(view.annotation.selection).toEqual(anchor);
+    expect(view.annotation.selectionToolsAnchor).not.toBeNull();
+    expect(view.annotation.selectionToolsAnchor).toEqual(anchor);
 
     // The three states a caller must be able to tell apart: unarmed with nothing
     // selected, armed with nothing selected, armed with a selection. Collapsing
     // the mode into "is something selected" is exactly what this pass removed.
     const fresh = selectSatInteraction(createSatInteractionState(), ctx());
     expect(fresh.annotation.modeEnabled).toBe(false);
-    expect(fresh.annotation.hasSelection).toBe(false);
+    expect(fresh.annotation.selectionToolsAnchor).toBeNull();
     const armedOnly = selectSatInteraction(
-      { ...createSatInteractionState(), annotation: { modeEnabled: true, selection: null } },
+      { ...createSatInteractionState(), annotation: { modeEnabled: true, selectionToolsAnchor: null } },
       { ...ctx(), toolPolicy: { ...ctx().toolPolicy, highlight: true, underline: true, notes: true } },
     );
     expect(armedOnly.annotation.modeEnabled).toBe(true);
-    expect(armedOnly.annotation.hasSelection).toBe(false);
+    expect(armedOnly.annotation.selectionToolsAnchor).toBeNull();
   });
 });

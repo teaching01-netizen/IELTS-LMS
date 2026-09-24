@@ -8,12 +8,14 @@ async function openSatHarness(
     mode?: "reading" | "math" | "spr";
     paused?: boolean;
     tool?: "calculator" | "reference";
+    ownedTouchSelection?: boolean;
   } = {}
 ) {
   const params = new URLSearchParams();
   if (options.mode && options.mode !== "reading") params.set("mode", options.mode);
   if (options.paused) params.set("paused", "1");
   if (options.tool) params.set("tool", options.tool);
+  if (options.ownedTouchSelection) params.set("ownedTouchSelection", "1");
   await page.goto(`/__dev/sat-accessibility${params.size ? `?${params.toString()}` : ""}`);
   // First navigation of a run cold-transforms the app (worst in WebKit); the
   // harness mount is not the assertion under test, so allow it to settle.
@@ -391,9 +393,12 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(page.locator('[data-sat-annotation-region="stimulus"]')).toHaveCount(0);
   });
 
-  test('a selection hands the keyboard to the toolbar, and a drag on a mark is not a tap', async ({ page }) => {
+  test('a selection hands the keyboard to the toolbar, and a drag on a mark is not a tap', async ({ page, isMobile }) => {
     await page.setViewportSize({ width: 1280, height: 768 });
-    await openSatHarness(page);
+    // This is a locked student session. On a coarse pointer, exercise the same
+    // owned-selection scope used by real SAT delivery instead of relying on a
+    // synthetic native selection the platform cannot create in that scope.
+    await openSatHarness(page, { ownedTouchSelection: true });
     // Armed before the drag: an unarmed exam shows no toolbar at all, and this
     // test is about where the toolbar goes — and when it must not.
     await armHighlights(page);
@@ -421,6 +426,11 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(afterHighlight).toBeVisible();
     await expect(afterHighlight.getByRole('button', { name: 'Highlight Blue' })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('complementary', { name: 'Notes' })).toHaveCount(0);
+
+    // The rest of this case is specifically the desktop mouse-selection path.
+    // Coarse-pointer press arbitration (including a mark tap while selection
+    // rests) is covered by the owned-touch suite with real touch events.
+    if (isMobile) return;
 
     // A drag that ends on an existing mark is a student selecting NEW text: the
     // toolbar must survive and the edit dock must not steal the gesture.

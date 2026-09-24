@@ -25,6 +25,7 @@ function attemptPath(attemptId: string): string {
 async function withAttemptCredentialRefresh<T>(
   attempt: StudentAttempt | undefined,
   request: () => Promise<T>,
+  clientSessionId?: string,
 ): Promise<T> {
   try {
     return await request();
@@ -32,7 +33,7 @@ async function withAttemptCredentialRefresh<T>(
     if (!attempt || !hasBackendStatusCode(error, 401)) {
       throw error;
     }
-    const refreshed = await refreshAttemptCredentialForAttempt(attempt).catch(() => false);
+    const refreshed = await refreshAttemptCredentialForAttempt(attempt, clientSessionId).catch(() => false);
     if (!refreshed) {
       throw error;
     }
@@ -43,6 +44,7 @@ async function withAttemptCredentialRefresh<T>(
 export function createResponseDurabilityV2Transport(
   scheduleId: string,
   credentialAttempt?: StudentAttempt,
+  clientSessionId?: string,
 ): TransportClient {
   const attemptHeaders = (attemptId: string): Record<string, string> =>
     tryBuildAttemptAuthorizationHeader(scheduleId, attemptId) ?? {};
@@ -60,7 +62,8 @@ export function createResponseDurabilityV2Transport(
           `${attemptPath(attemptId)}/responses:batch`,
           request,
           requestConfig(attemptId),
-        )
+        ),
+        clientSessionId,
       ),
     submit: (attemptId, request: SubmitAttemptV2Request) =>
       withAttemptCredentialRefresh(credentialAttempt, () =>
@@ -68,14 +71,16 @@ export function createResponseDurabilityV2Transport(
           `${attemptPath(attemptId)}/submit`,
           request,
           requestConfig(attemptId, { timeout: 60_000 }),
-        )
+        ),
+        clientSessionId,
       ),
     fetchSnapshot: (attemptId) =>
       withAttemptCredentialRefresh(credentialAttempt, () =>
         backendGet<ResponseSnapshotV2 | ResponseAcknowledgementV2[]>(
           `${attemptPath(attemptId)}/responses`,
           requestConfig(attemptId),
-        )
+        ),
+        clientSessionId,
       ),
   };
 }

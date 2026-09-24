@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -214,6 +215,7 @@ type attemptCore struct {
 }
 
 type moduleRow struct {
+	ModuleID        string
 	SectionKey      string
 	ModuleKey       string
 	AdaptiveRole    string
@@ -528,16 +530,11 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		return nil, &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "SAT scoring policy is missing.", HTTPStatus: 400}
 	}
 
-	type accum struct {
-		raw, operational, target int64
-		route                    *string
-		modules                  []any
-	}
-	aggs := map[string]*accum{}
+	aggs := map[string]*resultAccum{}
 	for _, m := range mods {
 		a := aggs[m.SectionKey]
 		if a == nil {
-			a = &accum{}
+			a = &resultAccum{}
 			aggs[m.SectionKey] = a
 		}
 		a.raw += nullInt(m.RawCorrect)
@@ -551,6 +548,7 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 			}
 			r := route
 			a.route = &r
+			a.branchModuleID = m.ModuleID
 			a.target += m.TargetCount
 		}
 		a.modules = append(a.modules, map[string]any{
@@ -579,6 +577,18 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		if !containsSection(required, sectionKey) {
 			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has modules outside its %s sections.", strings.Join(required, " and ")), HTTPStatus: 400}
 		}
+	}
+
+	// Last-line integrity fence (P10): the administered branch of every
+	// section must be the module the router recorded for it. Without this the
+	// route below is derived from the branch alone and a corrupt attempt
+	// (decision HIGH, terminal LOW) would persist a confident wrong result.
+	decisions, err := loadRouteDecisionsTx(ctx, t, attempt.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := assertResultRouteIntegrity(ctx, attempt.ID, decisions, aggs); err != nil {
+		return nil, err
 	}
 
 	var sections []SectionResult
@@ -820,6 +830,17 @@ func lockedSubmissionID(ctx context.Context, t tx.Tx, attemptID string) (string,
 	return id.String, nil
 }
 
+// resultAccum aggregates one section's terminal modules during scoring: raw
+// hits, coverage, the administered adaptive route, and the branch module id
+// the route came from (the identity the result fence checks against the
+// recorded route decision).
+type resultAccum struct {
+	raw, operational, target int64
+	route                    *string
+	branchModuleID           string
+	modules                  []any
+}
+
 // moduleStatesAcceptable reports whether every loaded module row is in a state
 // the completion path accepts as done. The rule is owned by attempts
 // (SATModuleTerminal, which the provisional submit gate also uses); this is only
@@ -836,7 +857,7 @@ func moduleStatesAcceptable(mods []moduleRow) bool {
 
 func loadModules(ctx context.Context, t tx.Tx, attemptID string) ([]moduleRow, error) {
 	rows, err := t.QueryContext(ctx, `
-		SELECT s.section_key, m.module_key, m.adaptive_role, ma.state,
+		SELECT m.id, s.section_key, m.module_key, m.adaptive_role, ma.state,
 			ma.raw_correct, ma.operational_question_count, m.target_question_count
 		FROM assessment_module_attempts ma
 		JOIN assessment_modules m ON m.id = ma.module_id
@@ -850,13 +871,93 @@ func loadModules(ctx context.Context, t tx.Tx, attemptID string) ([]moduleRow, e
 	var out []moduleRow
 	for rows.Next() {
 		var m moduleRow
-		if err := rows.Scan(&m.SectionKey, &m.ModuleKey, &m.AdaptiveRole, &m.State,
+		if err := rows.Scan(&m.ModuleID, &m.SectionKey, &m.ModuleKey, &m.AdaptiveRole, &m.State,
 			&m.RawCorrect, &m.OperationalCons, &m.TargetCount); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// routeDecision is one recorded adaptive-routing decision for an attempt,
+// keyed by section key: the module the router selected and the route name
+// that selected it.
+type routeDecision struct {
+	SelectedModuleID string
+	SelectedRoute    string
+}
+
+// loadRouteDecisionsTx reads every recorded routing decision for the attempt
+// (one row per routed section), keyed by section key. Missing rows are not
+// an error here — the integrity fence below decides what a missing decision
+// means — so a corrupt or legacy attempt cannot silently become a result.
+func loadRouteDecisionsTx(ctx context.Context, t tx.Tx, attemptID string) (map[string]routeDecision, error) {
+	rows, err := t.QueryContext(ctx, `
+		SELECT s.section_key, rd.selected_module_id, rd.selected_route
+		FROM assessment_route_decisions rd
+		JOIN assessment_sections s ON s.id = rd.section_id
+		WHERE rd.attempt_id = ? FOR UPDATE`, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]routeDecision{}
+	for rows.Next() {
+		var sectionKey, selectedModuleID, selectedRoute string
+		if err := rows.Scan(&sectionKey, &selectedModuleID, &selectedRoute); err != nil {
+			return nil, err
+		}
+		out[sectionKey] = routeDecision{SelectedModuleID: selectedModuleID, SelectedRoute: selectedRoute}
+	}
+	return out, rows.Err()
+}
+
+// assertResultRouteIntegrity is the last-line fence before a result is
+// persisted: every administered adaptive branch must be the module the route
+// decision recorded for its section (selected_module_id), and the recorded
+// route name must match the branch's adaptive slot (higher <-> higher_branch,
+// lower <-> lower_branch). The result otherwise derives its route from the
+// administered branch alone and would confidently persist a branch the router
+// never selected. A mismatch fails loudly with SAT_ADAPTIVE_ROUTE_INTEGRITY
+// and persists nothing; the log carries identities only, never answers.
+func assertResultRouteIntegrity(ctx context.Context, attemptID string, decisions map[string]routeDecision, sections map[string]*resultAccum) error {
+	for sectionKey, a := range sections {
+		if a.route == nil {
+			continue
+		}
+		decision, ok := decisions[sectionKey]
+		if !ok {
+			return resultRouteIntegrityError(ctx, attemptID, sectionKey, "", "", a.branchModuleID, *a.route, "route_decision_missing")
+		}
+		if decision.SelectedModuleID != a.branchModuleID || decision.SelectedRoute != *a.route {
+			return resultRouteIntegrityError(ctx, attemptID, sectionKey, decision.SelectedModuleID, decision.SelectedRoute, a.branchModuleID, *a.route, "route_module_mismatch")
+		}
+	}
+	return nil
+}
+
+func resultRouteIntegrityError(ctx context.Context, attemptID, sectionKey, selectedModuleID, selectedRoute, actualModuleID, actualRoute, reason string) error {
+	telemetry.IncCounter(telemetry.MSATAdaptiveIntegrityViolation, "reason", reason)
+	slog.ErrorContext(ctx, "SAT adaptive result integrity violation",
+		slog.String("code", "SAT_ADAPTIVE_ROUTE_INTEGRITY"),
+		slog.String("attempt_id", attemptID),
+		slog.String("section_key", sectionKey),
+		slog.String("selected_route", selectedRoute),
+		slog.String("selected_module_id", selectedModuleID),
+		slog.String("actual_module_id", actualModuleID),
+		slog.String("actual_route", actualRoute))
+	conflict := apperrors.New(apperrors.CodeAssessmentConflict, "The recorded adaptive route does not match the administered module.")
+	conflict.Details = map[string]any{
+		"reason":           "SAT_ADAPTIVE_ROUTE_INTEGRITY",
+		"attemptId":        attemptID,
+		"sectionKey":       sectionKey,
+		"selectedRoute":    selectedRoute,
+		"selectedModuleId": selectedModuleID,
+		"actualModuleId":   actualModuleID,
+		"actualRoute":      actualRoute,
+	}
+	return conflict
 }
 
 // loadRunSectionsTx resolves the section set this run declared: the backing

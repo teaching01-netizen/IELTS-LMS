@@ -14,21 +14,20 @@ import type { SatExamToolPolicy } from './satToolPolicy';
  *
  * Parallel regions (never one giant union — no combinatorial explosion):
  *   - surface:    exactly one exclusive surface (structural impossibility of two)
- *   - annotation: the armed annotation mode + the transient selection it allows
+ *   - annotation: the armed mode + contextual toolbar anchor
  *   - scope:      module/question identity for explicit transition contracts
  *
  * Annotation is an ARMED MODE. The student turns it on with the labeled top-bar
  * control; only then can choosing text raise the contextual toolbar. The machine
- * owns both halves of that contract — `modeEnabled` (may selection produce
- * controls?) and `selection` (which span is live) — so OFF can never be
+ * owns the armed mode and the contextual toolbar anchor — so OFF can never be
  * defeated by a caller that reports a selection anyway.
  *
  * The invariant, in one line:
  *
- *     modeEnabled = false  →  selection must NEVER produce annotation controls
+ *     modeEnabled = false  →  no selection can raise annotation controls
  *
- * Everything else follows from it: turning the mode off drops the transient
- * selection and nothing else, existing marks stay rendered, and the Notes
+ * The Selection v2 session owns the visual Range separately. Turning the mode
+ * off clears its toolbar anchor and existing marks stay rendered; the Notes
  * column is an independent surface that neither follows nor drives the mode.
  *
  * Tool visibility is NOT a region here: the runner `activeTools`
@@ -95,12 +94,8 @@ export interface SatInteractionState {
      * only decides whether selection produces controls.
      */
     modeEnabled: boolean;
-    /**
-     * Live annotation selection (exact span + recovery context). Null when
-     * nothing is selected — which is also when no annotation toolbar may
-     * exist anywhere in the tree. Never non-null while `modeEnabled` is false.
-     */
-    selection: SatTextAnchor | null;
+    /** Anchor for contextual tools. It does not own the Selection v2 Range. */
+    selectionToolsAnchor: SatTextAnchor | null;
   };
   scope: {
     moduleKey: string;
@@ -132,6 +127,7 @@ export type SatInteractionEvent =
   | { type: 'REFERENCE_CLOSED' }
   | { type: 'REFERENCE_TOGGLED' }
   | { type: 'TEXT_SELECTION_CAPTURED'; anchor: SatTextAnchor }
+  | { type: 'TEXT_SELECTION_TOOLS_DISMISSED' }
   | { type: 'TEXT_SELECTION_CLEARED' }
   | { type: 'ANNOTATION_MODE_ENABLED' }
   | { type: 'ANNOTATION_MODE_DISABLED' }
@@ -159,7 +155,7 @@ export function createSatInteractionState(
 ): SatInteractionState {
   return {
     surface: { kind: 'none' },
-    annotation: { modeEnabled: false, selection: null },
+    annotation: { modeEnabled: false, selectionToolsAnchor: null },
     scope: { moduleKey: scope.moduleKey ?? '', questionId: scope.questionId ?? '' },
   };
 }
@@ -184,16 +180,16 @@ export function normalizeSatInteractionState(
   ctx: SatInteractionContext,
 ): SatInteractionState {
   // Annotation data regions (stimulus/prompt) only exist in R&W; leaving the
-  // capability drops a dangling selection AND disarms the mode, so a Math
-  // question can never inherit a toolbar (or an anchor) from a R&W one.
-  if (!isAnnotationAllowed(ctx.toolPolicy) && (state.annotation.selection !== null || state.annotation.modeEnabled)) {
-    return { ...state, annotation: { modeEnabled: false, selection: null } };
+  // capability drops a dangling toolbar anchor AND disarms the mode, so a Math
+  // question can never inherit controls (or an anchor) from a R&W one.
+  if (!isAnnotationAllowed(ctx.toolPolicy) && (state.annotation.selectionToolsAnchor !== null || state.annotation.modeEnabled)) {
+    return { ...state, annotation: { modeEnabled: false, selectionToolsAnchor: null } };
   }
   return state;
 }
 
 /**
- * Question contract: chrome and the transient selection never survive
+ * Question contract: chrome and the contextual toolbar anchor never survive
  * navigation, but the armed mode is the student's standing choice for the
  * module, so turning to the next question keeps it armed.
  */
@@ -205,7 +201,7 @@ function resetQuestionScope(
   return {
     ...state,
     surface: { kind: 'none' },
-    annotation: { ...state.annotation, selection: null },
+    annotation: { ...state.annotation, selectionToolsAnchor: null },
     scope: { moduleKey, questionId },
   };
 }
@@ -222,7 +218,7 @@ function resetModuleScope(
   return {
     ...state,
     surface: { kind: 'none' },
-    annotation: { modeEnabled: false, selection: null },
+    annotation: { modeEnabled: false, selectionToolsAnchor: null },
     scope: { moduleKey, questionId },
   };
 }
@@ -253,7 +249,7 @@ export function satInteractionReducer(
       next = {
         ...state,
         surface: { kind: 'navigator', returnFocus: event.returnFocus },
-        annotation: { ...state.annotation, selection: null },
+        annotation: { ...state.annotation, selectionToolsAnchor: null },
       };
       break;
     case 'DIRECTIONS_OPENED':
@@ -262,7 +258,7 @@ export function satInteractionReducer(
       next = {
         ...state,
         surface: { kind: 'directions', returnFocus: event.returnFocus },
-        annotation: { ...state.annotation, selection: null },
+        annotation: { ...state.annotation, selectionToolsAnchor: null },
       };
       break;
     case 'READING_SETTINGS_OPENED':
@@ -271,7 +267,7 @@ export function satInteractionReducer(
       next = {
         ...state,
         surface: { kind: 'reading-settings', returnFocus: event.returnFocus },
-        annotation: { ...state.annotation, selection: null },
+        annotation: { ...state.annotation, selectionToolsAnchor: null },
       };
       break;
     case 'QUESTION_NOTES_OPENED':
@@ -280,7 +276,7 @@ export function satInteractionReducer(
       next = {
         ...state,
         surface: { kind: 'question-notes', returnFocus: event.returnFocus },
-        annotation: { ...state.annotation, selection: null },
+        annotation: { ...state.annotation, selectionToolsAnchor: null },
       };
       break;
     case 'MORE_MENU_OPENED':
@@ -293,7 +289,7 @@ export function satInteractionReducer(
       next = {
         ...state,
         surface: { kind: 'more-menu', returnFocus: event.returnFocus },
-        annotation: { ...state.annotation, selection: null },
+        annotation: { ...state.annotation, selectionToolsAnchor: null },
       };
       break;
     case 'ANNOTATION_NOTE_EDITOR_OPENED':
@@ -305,7 +301,7 @@ export function satInteractionReducer(
           annotationId: event.annotationId,
           returnFocus: event.returnFocus,
         },
-        annotation: { ...state.annotation, selection: null },
+        annotation: { ...state.annotation, selectionToolsAnchor: null },
       };
       break;
     case 'QUESTION_NOTE_EDITOR_OPENED':
@@ -313,7 +309,7 @@ export function satInteractionReducer(
       next = {
         ...state,
         surface: { kind: 'question-note-editor', returnFocus: event.returnFocus },
-        annotation: { ...state.annotation, selection: null },
+        annotation: { ...state.annotation, selectionToolsAnchor: null },
       };
       break;
     case 'NOTE_EDITOR_SETTLED':
@@ -349,19 +345,23 @@ export function satInteractionReducer(
     case 'REFERENCE_TOGGLED':
       return state;
     case 'TEXT_SELECTION_CAPTURED':
-      // Selecting text may only produce annotation controls while the student has
-      // armed the mode. This guard is the invariant's single owner: whatever a
-      // caller reports, an unarmed exam can never raise a toolbar.
+      // A captured selection may only raise contextual controls while the
+      // student has armed the mode. The Selection v2 session owns its Range.
       if (opensRefused) return state;
       if (!state.annotation.modeEnabled) return state;
       if (!isAnnotationAllowed(ctx.toolPolicy)) return state;
       if (isSatNoteEditorSurface(state.surface)) return state;
       if (event.anchor.nodeId === '' || !(event.anchor.endOffset > event.anchor.startOffset)) return state;
-      next = { ...state, annotation: { ...state.annotation, selection: event.anchor } };
+      next = { ...state, annotation: { ...state.annotation, selectionToolsAnchor: event.anchor } };
+      break;
+    case 'TEXT_SELECTION_TOOLS_DISMISSED':
+      if (state.annotation.selectionToolsAnchor === null) return state;
+      next = { ...state, annotation: { ...state.annotation, selectionToolsAnchor: null } };
       break;
     case 'TEXT_SELECTION_CLEARED':
-      if (state.annotation.selection === null) return state;
-      next = { ...state, annotation: { ...state.annotation, selection: null } };
+      // The visual Range ended. Its toolbar anchor is no longer actionable.
+      if (state.annotation.selectionToolsAnchor === null) return state;
+      next = { ...state, annotation: { ...state.annotation, selectionToolsAnchor: null } };
       break;
     case 'ANNOTATION_MODE_ENABLED':
       // Arming is a capability + gate question only. It deliberately does not
@@ -373,12 +373,12 @@ export function satInteractionReducer(
       next = { ...state, annotation: { ...state.annotation, modeEnabled: true } };
       break;
     case 'ANNOTATION_MODE_DISABLED':
-      // The mode's own cleanup: the transient selection (and the controls it
-      // raised) go away, and nothing else does. No mark is deleted, no highlight
+      // The mode's own cleanup: the contextual anchor (and controls) go away,
+      // and nothing else does. No mark is deleted, no highlight
       // is hidden, and the exclusive surface — the Notes column, an open note
       // editor — is left exactly as it was.
-      if (!state.annotation.modeEnabled && state.annotation.selection === null) return state;
-      next = { ...state, annotation: { modeEnabled: false, selection: null } };
+      if (!state.annotation.modeEnabled && state.annotation.selectionToolsAnchor === null) return state;
+      next = { ...state, annotation: { modeEnabled: false, selectionToolsAnchor: null } };
       break;
     case 'QUESTION_CHANGED':
       // Explicit question contract: transient selection, editors, panels and
@@ -410,10 +410,10 @@ export function assertSatInteractionInvariants(
   ctx: SatInteractionContext,
 ): void {
   const failures: string[] = [];
-  if (state.annotation.selection !== null && !state.annotation.modeEnabled) {
+  if (state.annotation.selectionToolsAnchor !== null && !state.annotation.modeEnabled) {
     failures.push('Annotation selection without an armed annotation mode');
   }
-  if (state.annotation.selection !== null && !isAnnotationAllowed(ctx.toolPolicy)) {
+  if (state.annotation.selectionToolsAnchor !== null && !isAnnotationAllowed(ctx.toolPolicy)) {
     failures.push('Annotation selection without capability');
   }
   if (state.annotation.modeEnabled && !isAnnotationAllowed(ctx.toolPolicy)) {
@@ -422,7 +422,7 @@ export function assertSatInteractionInvariants(
   if (ctx.phase !== 'module' && state.surface.kind !== 'none') {
     failures.push('Question interaction surface outside module');
   }
-  if (state.annotation.selection !== null && isSatNoteEditorSurface(state.surface)) {
+  if (state.annotation.selectionToolsAnchor !== null && isSatNoteEditorSurface(state.surface)) {
     failures.push('Annotation selection behind the note editor');
   }
   if (failures.length > 0) {

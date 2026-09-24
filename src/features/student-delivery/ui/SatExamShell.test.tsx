@@ -169,18 +169,18 @@ describe("SatExamShell", () => {
     );
   });
 
-  it("keeps failure recovery chrome in the zoomed exam overlay layer", () => {
-    const { container } = render(
+  it("keeps failure recovery in the shell status row outside inert content", () => {
+    render(
       <SatExamShell
         {...props({ saveState: "failed", saveFailure: "Could not save", onRetrySave: vi.fn() })}
       />,
     );
-    const root = container.querySelector("[data-sat-exam-overlay-root]");
+    const shell = screen.getByTestId("sat-exam-shell");
     const status = screen.getByTestId("sat-save-status");
 
-    expect(status.closest("[data-sat-exam-overlay-root]")).toBe(root);
-    expect(root).toHaveClass("sat-ui");
-    expect(root).toHaveAttribute("data-sat-contrast", "default");
+    expect(shell).toContainElement(status);
+    expect(status.closest("[data-sat-exam-overlay-root]")).toBeNull();
+    expect(status.parentElement?.className).toContain("row-start-4");
     expect(status.closest("[inert]")).toBeNull();
     expect(within(status).getByRole("button")).toBeEnabled();
   });
@@ -439,18 +439,42 @@ describe("SatExamShell", () => {
     expect(onRetrySave).toHaveBeenCalledOnce();
   });
 
-  it("auto-reveals a hidden timer once at the 5-minute threshold and lets it hide again", () => {
+  it("keeps notices and save recovery outside the inert question region in flow rows", () => {
+    const { container } = render(
+      <SatExamShell
+        {...props({
+          blocked: true,
+          saveState: "superseded",
+          onTakeOver: vi.fn(),
+          notices: <div role="status">Proctor message</div>,
+        })}
+      />,
+    );
+    const shell = screen.getByTestId("sat-exam-shell");
+    const inert = screen.getByTestId("sat-exam-blocked-region");
+    const notices = screen.getByTestId("sat-exam-notices");
+    const saveStatus = screen.getByTestId("sat-save-status");
+    expect(shell.className).toContain("grid-rows-[auto_auto_minmax(0,1fr)_auto_auto]");
+    expect(inert).toHaveAttribute("inert");
+    expect(inert).not.toContainElement(notices);
+    expect(inert).not.toContainElement(saveStatus);
+    expect(notices.className).toContain("row-start-2");
+    expect(saveStatus.parentElement?.className).toContain("row-start-4");
+    expect(saveStatus.className).not.toMatch(/fixed|absolute/);
+    expect(container.querySelector("#sat-question-content")).toBeInTheDocument();
+  });
+
+  it("auto-reveals the hidden timer without covering the exam and announces it", () => {
     const { rerender } = render(<SatExamShell {...props({ remainingLabel: "05:02", remainingSeconds: 302 })} />);
     fireEvent.click(screen.getByRole("button", { name: "Hide timer" }));
     expect(screen.queryByText("05:02")).not.toBeInTheDocument();
     rerender(<SatExamShell {...props({ remainingLabel: "05:00", remainingSeconds: 300 })} />);
-    // Timer label + warning card both show the value (warning uses a testid).
-    expect(screen.getAllByText("05:00")).toHaveLength(2);
-    expect(screen.getByTestId("sat-timer-warning-time")).toHaveTextContent("05:00");
-    expect(screen.getByRole("button", { name: "Hide timer" })).toBeInTheDocument();
-    // The visual warning is dismissible and display-only.
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss timer warning" }));
+    expect(screen.getAllByText("05:00")).toHaveLength(1);
     expect(screen.queryByTestId("sat-timer-warning")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sat-timer-reveal-announcement")).toHaveTextContent(
+      "Timer shown — under 5 minutes left. You can hide it again.",
+    );
+    expect(screen.getByRole("button", { name: "Hide timer" })).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent("05:00");
     // One-shot: hiding again after the reveal must stick.
     fireEvent.click(screen.getByRole("button", { name: "Hide timer" }));
@@ -459,8 +483,9 @@ describe("SatExamShell", () => {
     // A fresh module (time back above five minutes) re-arms the reveal.
     rerender(<SatExamShell {...props({ remainingLabel: "32:00", remainingSeconds: 1920 })} />);
     rerender(<SatExamShell {...props({ remainingLabel: "04:59", remainingSeconds: 299 })} />);
-    expect(screen.getAllByText("04:59")).toHaveLength(2);
-    expect(screen.getByTestId("sat-timer-warning")).toBeInTheDocument();
+    expect(screen.getAllByText("04:59")).toHaveLength(1);
+    expect(screen.getByRole("timer")).toHaveTextContent("04:59");
+    expect(screen.queryByTestId("sat-timer-warning")).not.toBeInTheDocument();
   });
 
   it("fires the reveal only once while remaining below five minutes", () => {

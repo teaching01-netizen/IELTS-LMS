@@ -2,71 +2,29 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { StructuredContent } from '../../../exam-authoring/api/assessmentContracts';
 import { StructuredContentRenderer, type StaticStructuredImageEnlargeApi } from '../../../exam-rendering/api/structuredContent';
 import type { StructuredTextRenderer } from '../../../exam-rendering/api/structuredContent';
-import { applySatAnnotationsToText, resolveSatTextAnchor, type SatTextAnchor, type SatQuestionAnnotations, type SatTextAnnotation, type SatTextSegment } from '../../domain/satResponses';
+import { applySatAnnotationsToText, resolveSatTextAnchor, type SatQuestionAnnotations, type SatTextAnnotation, type SatTextSegment } from '../../domain/satResponses';
+import { createSatAnnotationNodeId, type SatAnnotationRegion } from '../../domain/satAnnotationIdentity';
 import { SAT_COPY } from '../../domain/satCopy';
 import { satHighlightInk, satHighlightMarkStyle } from './satAnnotationPalette';
 import { measureSatNoteMarkers } from './satAnnotationDom';
 import { satNoteMarkersEqual, type SatNoteMarker } from '../../domain/satNoteMarkers';
 import { useSatAnnotationView } from './SatAnnotationViewContext';
-import {
-  captureSatTextRange,
-  captureSatTextSelection,
-  isSatSelectionInsideAnnotationUi,
-  satAnnotationBlockForPoint,
-} from './satTextSelection';
-import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
-import { useStudentTouchSelectionDiagnostics } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
-import { browserCaretResolver } from '@shared/ui/selection-v2/engine/selectionPoint';
-import { nearestScrollableAncestor } from '@shared/ui/selection-v2/engine/selectionAutoScroll';
-import { useStudentSelectionGesture } from '@shared/ui/selection-v2/react/useStudentSelectionGesture';
+import { useSatAnnotationSelection } from './useSatAnnotationSelection';
 import { SelectionOverlay } from '@shared/ui/selection-v2/react/SelectionOverlay';
 import { useSatExamZoom } from '../zoom/SatExamZoomContext';
-import { isSatDragRelease, markSatPointerDown, markSatSelectionGestureEnded } from './satSelectionDragGuard';
-
-export const SAT_ANNOTATION_LIMIT = 200;
+import { isSatDragRelease } from './satSelectionDragGuard';
 
 /**
- * Renders annotatable SAT content and owns the text-selection gesture.
- *
- * Selecting text is how an annotation is CREATED, but only while the student has
- * armed the mode: finishing a selection reports the span upward (the shell
- * raises the contextual toolbar) when annotation is on, and does nothing at all
- * when it is off. Everything that changes an annotation — ink, underline, note,
- * removal — happens in the shell where the response is written, so this
- * component stays a renderer plus a gesture listener.
- *
- * The listener stays ATTACHED while the mode is off, and that is deliberate: it
- * also records that a text drag ended (so a drag released over an answer option
- * is not read as a tap on it). Detaching it would trade a visible bug for an
- * invisible one. The mode is read through a ref and the listener exits before
- * capturing anything, so no annotation state is touched either way.
- *
- * A CAPTURED selection is retired at the gesture: once the anchor is serialized
- * the browser's own selection has done its job, and leaving it live is what
- * hands the platform a Copy / Look Up / Search / Share bar to show the student.
- * An unarmed or unanchorable selection is left exactly as the browser made it —
- * that is the browser's business, not ours to clear.
- *
- * ON A TOUCH DEVICE THERE IS NO BROWSER SELECTION TO CAPTURE, and that is the
- * point. Retiring the selection the moment it is made is not enough there: the
- * platform paints its Copy / Look Up / Share bar off the SELECTION EVENT, so the
- * menu is already on screen before any handler of ours runs — which is exactly
- * what an iPad showed, with the exam's own toolbar beside it. Exam prose is
- * therefore `user-select: none` under a coarse pointer (see index.css) and the
- * selection comes from the exam instead: `useStudentSelectionGesture` builds a
- * range the platform never learns about, and it feeds the same
- * `captureSatTextRange` core the desktop selection does.
- *
- * Unlike the browser's selection, the exam's does NOT disappear when the finger
- * lifts. It stays painted with its handles while the shell's toolbar is up, so
- * the span the student is deciding about remains visible under the decision, and
- * a tap on that toolbar — anything outside the selection — is what dismisses it.
+ * Renders SAT text with saved annotations and note markers.
+ * Selection capture lives in `useSatAnnotationSelection`; writes flow upward
+ * through the shell's annotation view context.
  */
-export function SatAnnotatedContent({ content, annotations, region, enabled, enlarge, onLimitReached }: {
+export function SatAnnotatedContent({ content, annotations, region, enabled, selectionScopeKey, enlarge, onLimitReached }: {
   content: StructuredContent;
   annotations: SatQuestionAnnotations;
-  region: 'stimulus' | 'prompt';
+  region: SatAnnotationRegion;
   enabled: boolean;
+  selectionScopeKey?: string | undefined;
   enlarge?: StaticStructuredImageEnlargeApi | undefined;
   /** Announced + inline notice when the 200-annotation cap drops a gesture. */
   onLimitReached?: (() => void) | undefined;
@@ -74,169 +32,13 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
   const { scale: visualScale, viewportOverlayRoot } = useSatExamZoom();
   const root = useRef<HTMLDivElement>(null);
   const view = useSatAnnotationView();
-  // Declared by the session route, never inferred here: a preview that renders
-  // this same component reads the conservative default and keeps the platform's
-  // own selection.
-  const examScope = useStudentExamInteractionScope();
-  const diagnostics = useStudentTouchSelectionDiagnostics(root, {
-    surface: `SAT ${region}`, enabled: enabled && view.annotationModeEnabled && examScope.ownedTouchSelection,
-    ownedTouchSelection: examScope.ownedTouchSelection, toolModeOrAnnotationMode: view.annotationModeEnabled,
-  });
-  const [limitNotice, setLimitNotice] = useState(false);
-  const limitTimer = useRef<number | null>(null);
-  useEffect(() => () => { if (limitTimer.current !== null) window.clearTimeout(limitTimer.current); }, []);
-  const flashLimitNotice = useCallback(() => {
-    setLimitNotice(true);
-    onLimitReached?.();
-    if (limitTimer.current !== null) window.clearTimeout(limitTimer.current);
-    limitTimer.current = window.setTimeout(() => setLimitNotice(false), 6000);
-  }, [onLimitReached]);
-
-  // Live selection reporting through a ref so the listener below never needs
-  // re-binding: re-binding mid-gesture would lose the pointerup that completes
-  // the very selection being captured. The armed mode rides the same ref for the
-  // same reason — arming or disarming during a drag must not drop the release.
-  const reportSelection = useRef<((anchor: SatTextAnchor) => void) | null>(null);
-  reportSelection.current = view.onSelectionCaptured ?? null;
-  const modeEnabled = useRef(view.annotationModeEnabled);
-  modeEnabled.current = view.annotationModeEnabled;
-
-  /**
-   * Report a captured anchor, or the cap that refuses it.
-   *
-   * One path for both selection gestures — the browser's own on a mouse, the
-   * exam's on a touch device — because a captured anchor is the same fact
-   * either way, and the cap is a rule about the response rather than about how
-   * the text was chosen.
-   */
-  const reportAnchor = useCallback(
-    (anchor: SatTextAnchor) => {
-      if (annotations.annotations.length >= SAT_ANNOTATION_LIMIT) {
-        flashLimitNotice();
-        return;
-      }
-      reportSelection.current?.(anchor);
-    },
-    [annotations, flashLimitNotice],
-  );
-
-  /**
-   * Selection gesture. Capture is deliberately passive: a completed selection
-   * only reports the anchor. The one thing the content still enforces here is
-   * the annotation cap, so a student at 200 marks sees the limit notice the
-   * moment they select (rather than after pressing a color that cannot apply).
-   */
-  useEffect(() => {
-    if (!enabled) return;
-    const report = (event: Event) => {
-      if (!root.current) return;
-      const scope = root.current.parentElement ?? root.current;
-      if (event.type === 'pointerup' && (!(event.target instanceof Node) || !scope.contains(event.target))) return;
-      // The contextual toolbar is a sibling of the content; a pointer landing
-      // on it is a command, never a new selection.
-      if (event.target instanceof Node && isSatSelectionInsideAnnotationUi(event.target)) return;
-      const selection = window.getSelection();
-      // Any finished selection retires answer-click safety, even when it cannot
-      // be anchored (a drag across two blocks still ends with a click landing
-      // wherever the finger stopped). This runs whether or not annotation is
-      // armed: it protects the answer controls, and has nothing to do with the
-      // annotation mode.
-      if (selection && !selection.isCollapsed) markSatSelectionGestureEnded();
-      // The invariant, at the gesture: with the mode off the browser's own
-      // selection behavior is all there is. Nothing is captured, nothing is
-      // serialized, nothing is reported upward.
-      if (!modeEnabled.current) return;
-      const anchor = captureSatTextSelection(root.current, region, selection, {
-        allowAnnotationControls: true,
-      });
-      if (!anchor) return;
-      // Capture FIRST, then retire the browser's own selection. By this line the
-      // anchor is fully serialized (offsets plus the exact text) and the toolbar
-      // measures itself from that stored anchor rather than from
-      // `window.getSelection()`, so nothing downstream needs a live selection to
-      // still be there. Leaving it live is what lets the platform paint its
-      // Copy / Look Up / Search / Share bar over the passage — a long-press that
-      // blocking `contextmenu` does not fully suppress on touch.
-      selection?.removeAllRanges();
-      reportAnchor(anchor);
-    };
-    // Where the gesture began, so a release far from it reads as a drag rather
-    // than a tap on whatever mark it happened to end over.
-    const begin = (event: Event) => {
-      // Structural check rather than `instanceof PointerEvent`: the test
-      // renderer exposes a subset of the DOM, and a missing origin reads as a
-      // tap anyway.
-      const { clientX, clientY } = event as PointerEvent;
-      if (typeof clientX !== 'number' || typeof clientY !== 'number') return;
-      markSatPointerDown(clientX, clientY);
-    };
-    const keyboard = (event: KeyboardEvent) => {
-      if (event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) report(event);
-    };
-    document.addEventListener('pointerdown', begin, true);
-    document.addEventListener('pointerup', report);
-    document.addEventListener('keyup', keyboard);
-    return () => {
-      document.removeEventListener('pointerdown', begin, true);
-      document.removeEventListener('pointerup', report);
-      document.removeEventListener('keyup', keyboard);
-    };
-  }, [annotations, enabled, flashLimitNotice, region, reportAnchor]);
-
-  /**
-   * The touch path into the same capture.
-   *
-   * The range is built by the exam, so there is nothing to retire afterwards —
-   * no browser selection was ever made — and the span is confined to the
-   * paragraph the press landed in, which is the one shape an anchor can name.
-   */
-  const reportOwnedRange = useCallback(
-    (range: Range) => {
-      const element = root.current;
-      if (!element) return;
-      const anchor = captureSatTextRange(element, region, range, { allowAnnotationControls: true });
-      diagnostics?.record('captureSatTextRange', { captureSucceeded: !!anchor });
-      if (!anchor) return;
-      reportAnchor(anchor);
-      diagnostics?.record('reportAnchor', { anchorReported: !!reportSelection.current && annotations.annotations.length < SAT_ANNOTATION_LIMIT });
-    },
-    [annotations, diagnostics, region, reportAnchor],
-  );
-
-  // Built once: the resolver is a capability probe over `document`, and handing
-  // the hook a fresh function every render would be noise, not configuration.
-  const resolveCaretAtPoint = useMemo(() => browserCaretResolver(document, diagnostics), [diagnostics]);
-
-  /**
-   * Owned selection, armed only while Highlights & Notes is.
-   *
-   * The prose is unselectable under a coarse pointer (index.css), so the mode
-   * being OFF means passage text cannot be selected at all — which is the
-   * intended anti-cheat outcome, not a gap: an unarmed mode has no use for a
-   * selection, and a platform selection is what raises the Copy / Look Up bar.
-   *
-   * `activation: 'drag'` follows from that same arming. Because the mode is on,
-   * the prose has no platform selection to fall back on, and the old contract —
-   * hold still for 350 ms or the gesture is cancelled — meant the ordinary touch
-   * motion of pressing and dragging selected nothing at all. A hold still takes
-   * the word under the finger; a drag past the same tolerance now claims the
-   * text instead of abandoning it.
-   */
-  const touchSelection = useStudentSelectionGesture({
-    enabled: enabled && view.annotationModeEnabled && examScope.ownedTouchSelection,
-    activation: 'drag',
+  const { selection: touchSelection, limitNotice } = useSatAnnotationSelection({
     rootRef: root,
-    diagnostics,
-    resolveCaretAtPoint,
-    onSelect: reportOwnedRange,
-    boundaryFor: satAnnotationBlockForPoint,
-    // Dragging a handle to the edge of the prose workspace scrolls it, measured
-    // from the pane that actually scrolls at that moment.
-    scrollContainer: nearestScrollableAncestor,
-    // The selection is the student's, and the shell's toolbar is how they act on
-    // it. A tap on that toolbar is outside the selection, so it dismisses it —
-    // the same gesture that applies an annotation is the one that retires the
-    // span, with no second dismissal path to keep in step.
+    region,
+    selectionScopeKey,
+    enabled,
+    annotationCount: annotations.annotations.length,
+    onLimitReached,
   });
 
   const contentKey = JSON.stringify(content);
@@ -286,7 +88,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
   const renderText = useMemo<StructuredTextRenderer>(() => {
     const blocks = new Map<string, SatTextSegment[]>();
     return ({ nodeId, blockText, text, startOffset }) => {
-      const scopedId = region + ":" + nodeId;
+      const scopedId = createSatAnnotationNodeId(region, nodeId);
       // Key the segment cache on the source text: recovered ranges recompute
       // when content changes (new stimulus text) without a response edit.
       const cacheKey = scopedId + "\u0000" + blockText;
@@ -396,6 +198,8 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
     <div>
       <div
         ref={root}
+        data-sat-selection-protected="true"
+        data-sat-selection-scope={selectionScopeKey}
         data-sat-annotation-region={enabled ? region : undefined}
         data-sat-highlight-preview={enabled ? 'true' : undefined}
         className="relative rounded-[8px]"
@@ -438,6 +242,12 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         visualScale={visualScale}
         portalContainer={viewportOverlayRoot}
         loupe={{ sourceRef: root }}
+        onEscape={() => {
+          if (view.selectionToolsVisible !== true) return false;
+          view.onSelectionToolsDismissed?.();
+          return true;
+        }}
+        onSelectionCleared={view.onSelectionCleared}
       />
 
       {limitNotice ? (

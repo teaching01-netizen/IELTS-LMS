@@ -150,9 +150,10 @@ func TestSATTwinRaceConvergesToWinnerResult(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
-		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
+		sqlmock.NewRows([]string{"module_id", "section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("mod-rw-m1", "reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-rw-m2-lower", "reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-math-m1", "math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-math-m2-lower", "math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectCanonicalRouteDecisions(mock)
 	// First ownership probe: no row yet (this tx is the loser).
 	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
@@ -233,9 +234,10 @@ func TestSATSubmissionPersistsCandidateNameAndEmail(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
-		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
+		sqlmock.NewRows([]string{"module_id", "section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("mod-rw-m1", "reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-rw-m2-lower", "reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-math-m1", "math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-math-m2-lower", "math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectCanonicalRouteDecisions(mock)
 	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(
@@ -288,9 +290,10 @@ func TestSATTwinRaceWinnerPersistingRetries(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
-		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
+		sqlmock.NewRows([]string{"module_id", "section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("mod-rw-m1", "reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-rw-m2-lower", "reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-math-m1", "math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-math-m2-lower", "math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectCanonicalRouteDecisions(mock)
 	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(
@@ -328,7 +331,7 @@ func TestSATCompletionVsTimeoutUnsealed(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
-		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("rw", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("rw", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m1", "base", "active", nil, nil, int64(27)))
+		sqlmock.NewRows([]string{"module_id", "section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("mod-rw-m1", "rw", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-rw-m2-lower", "rw", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("mod-math-m1", "math", "math-m1", "base", "active", nil, nil, int64(27)))
 	mock.ExpectRollback()
 	_, err = svc.CompleteAssessment(context.Background(), CompleteRequest{AttemptID: "att-1", ScheduleID: "sched-1", SubmissionID: "sub-race", ActorKind: "student"})
 	if satCodeOf(err) != apperrors.CodeConflict {

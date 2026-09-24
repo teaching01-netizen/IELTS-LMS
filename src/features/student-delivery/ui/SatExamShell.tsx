@@ -13,7 +13,6 @@ import { SatQuestionNavigator } from "./shell/SatQuestionNavigator";
 import { SatUnscheduledBreakDialog } from './break/SatUnscheduledBreakDialog';
 import { SatUnscheduledBreakVeil } from './break/SatUnscheduledBreakVeil';
 import { SatHelpModal } from './help/SatHelpModal';
-import { SatTimerWarning } from './shell/SatTimerWarning';
 import { SatShortcutsModal } from './help/SatShortcutsModal';
 import { useSatShortcuts } from '../hooks/useSatShortcuts';
 import type { SatToolActionBinding } from '../domain/satToolActions';
@@ -32,6 +31,7 @@ import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext
 import { SatNotesSurfaceHost } from './annotations/SatNotesSurfaceHost';
 import { SatSelectionActionsPanel } from './annotations/SatSelectionActionsPanel';
 import { SatExamViewportOverlay, SatExamZoomPlane } from './zoom/SatExamZoomContext';
+import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 
 export interface SatExamShellProps {
   moduleIdentity?: string;
@@ -59,6 +59,8 @@ export interface SatExamShellProps {
   questionNote: string;
   readingPreferences: SatReadingPreferences;
   children: ReactNode;
+  /** Proctor, route, and recovery notices rendered in a dedicated exam row. */
+  notices?: ReactNode | undefined;
   /** Route-owned floating tools that share the exam's visual zoom space. */
   floatingToolChildren?: ReactNode | undefined;
   /**
@@ -171,7 +173,15 @@ export function SatExamShell(props: SatExamShellProps) {
     questionId: questionKey,
   }), [questionKey, props.blocked, props.calculatorAvailable, props.moduleIdentity, props.referenceAvailable, notesAvailable]);
   const interaction = useSatInteractionController(interactionCtx);
-  const touchAnnotations = useSatMediaQuery('(pointer: coarse)');
+  const coarsePointer = useSatMediaQuery('(pointer: coarse)');
+  const examScope = useStudentExamInteractionScope();
+  const selectionEnvironment = useMemo(
+    () => ({
+      coarsePointer,
+      nativeSelectionUi: coarsePointer && !examScope.ownedTouchSelection,
+    }),
+    [coarsePointer, examScope.ownedTouchSelection],
+  );
   // The compact layout stacks the panes and keeps its own scale, so it is the
   // one place the fit is never allowed to shrink the exam.
   const compactLayout = useSatMediaQuery('(max-width: 767px)');
@@ -216,9 +226,6 @@ export function SatExamShell(props: SatExamShellProps) {
     : null;
   const routeModalOpen = props.helpOpen === true || props.shortcutsOpen === true;
   const floatingToolOpen = props.calculatorOpen || props.referenceOpen;
-  // Bluebook 5-minute visual warning visibility (Phase 7 state; effect below).
-  // Declared above the Escape partition so the warning branch can read it.
-  const [timerWarningVisible, setTimerWarningVisible] = useState(false);
 
   /* ------------------------------------------------------------------ *
    * Highlights & Notes (armed mode)
@@ -255,7 +262,7 @@ export function SatExamShell(props: SatExamShellProps) {
   const {
     annotationModeEnabled,
     toggleAnnotationMode,
-    selection,
+    selectionToolsAnchor,
     annotationView,
     selectionActions,
     currentColor,
@@ -299,12 +306,6 @@ export function SatExamShell(props: SatExamShellProps) {
       // Reference) own Escape themselves; the shell must not double-handle
       // (e.g. disabling Line Reader under an open Help or a tool).
       if (routeModalOpen || floatingToolOpen) return;
-      // Wave B R-16: the 5-minute warning keeps alertdialog clothing, so it
-      // needs an Escape path. It takes priority over surface-close: one
-      // press dismisses the warning only (the warning's own listener
-      // performs the dismiss; this branch suppresses the surface-close so
-      // exactly one state change happens per press).
-      if (timerWarningVisible && !props.blocked) return;
       // Annotation chrome answers before exam surfaces: a mark's edit controls
       // are the innermost thing the student opened.
       if (closeMarkEditor()) return;
@@ -326,9 +327,6 @@ export function SatExamShell(props: SatExamShellProps) {
 
   const [timerVisible, setTimerVisible] = useState(true);
   const [timerRevealAnnounced, setTimerRevealAnnounced] = useState(false);
-  // Bluebook 5-minute visual warning (Phase 7): shown once per module when
-  // the threshold is crossed, dismissible, re-arms with the reveal state.
-  // Visibility state lives above the Escape partition (Wave B R-16).
   // Bluebook parity: a hidden timer automatically reveals once when the
   // module crosses the 5-minute threshold. One-shot per module timing
   // context: the student may hide it again afterwards without it reopening
@@ -344,11 +342,9 @@ export function SatExamShell(props: SatExamShellProps) {
       timerRevealFiredRef.current = true;
       setTimerVisible(true);
       setTimerRevealAnnounced(true);
-      setTimerWarningVisible(true);
     } else if (remaining != null && remaining > SAT_TIMER_AUTO_REVEAL_SECONDS) {
       timerRevealFiredRef.current = false;
       setTimerRevealAnnounced(false);
-      setTimerWarningVisible(false);
     }
     previousRemainingRef.current = remaining ?? null;
   }, [props.remainingSeconds]);
@@ -440,7 +436,7 @@ export function SatExamShell(props: SatExamShellProps) {
       planeClassName="sat-exam-zoom-plane"
     >
     <div
-      className="sat-ui sat-exam-shell grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-shell-bg)] text-[var(--sat-text)]"
+      className="sat-ui sat-exam-shell grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] overflow-hidden bg-[var(--sat-shell-bg)] text-[var(--sat-text)]"
       data-testid="sat-exam-shell"
       data-sat-contrast={props.readingPreferences.contrastMode ?? 'default'}
       data-sat-keyboard-open={props.keyboardOpen ? "true" : "false"}
@@ -459,6 +455,7 @@ export function SatExamShell(props: SatExamShellProps) {
       inert={props.blocked}
       className="contents min-w-0"
     >
+      <div className="row-start-1 min-w-0">
       <SatExamTopBar
         sectionLabel={props.sectionLabel}
         directions={props.directions}
@@ -494,6 +491,7 @@ export function SatExamShell(props: SatExamShellProps) {
         onReadingPreferencesChange={props.onReadingPreferencesChange}
         onFitToScreen={fit.fitNow}
       />
+      </div>
       {/* Bluebook More utility center (Phase 1): fixed-position dropdown
           pinned under the top-right More trigger (fixed right/top offsets
           mirror the trigger cell, so the panel can never drop to the shell
@@ -518,7 +516,7 @@ export function SatExamShell(props: SatExamShellProps) {
           Annotation geometry starts in viewport space and converts back into
           this shared plane for rendering. */}
       <main
-        className="relative min-h-0 min-w-0 overflow-hidden bg-[var(--sat-body-bg)]"
+        className="relative row-start-3 min-h-0 min-w-0 overflow-hidden bg-[var(--sat-body-bg)]"
         id="sat-question-content"
         data-sat-question-presentation="instant"
         data-sat-annotation-bounds="true"
@@ -594,13 +592,13 @@ export function SatExamShell(props: SatExamShellProps) {
             back to — when the room is not there the surface is pinned inside
             what the student can see, drops its caret rather than pointing at a
             line it is no longer beside, and scrolls its own rows. A coarse
-            pointer only widens the budget, because the native selection menu
-            needs a lane of its own on touch and nothing needs one under a
-            mouse. */}
+            coarse pointer widens touch comfort. Browser-owned selection UI
+            reserves a lane only when the interaction scope leaves selection to
+            the platform. */}
         {editingMark ? (
           <SatAnnotationEditControls
             annotation={editingMark}
-            touch={touchAnnotations}
+            environment={selectionEnvironment}
             disabled={props.blocked || !annotationsWritable}
             onColor={(color) => recolourMark(editingMark, color)}
             onUnderline={() => underlineMark(editingMark)}
@@ -610,13 +608,13 @@ export function SatExamShell(props: SatExamShellProps) {
             onRemove={() => removeMark(editingMark)}
             onClose={surface.closeMarkEditor}
           />
-        ) : selection ? (
+        ) : selectionToolsAnchor ? (
           <SatSelectionActionsPanel
-            anchor={selection}
+            anchor={selectionToolsAnchor}
             currentColor={currentColor}
             actions={selectionActions}
             disabled={props.blocked || !annotationsWritable}
-            touch={touchAnnotations}
+            environment={selectionEnvironment}
             onClose={surface.closeSelectionTools}
           />
         ) : null}
@@ -657,6 +655,7 @@ export function SatExamShell(props: SatExamShellProps) {
         ) : null}
       </main>
 
+      <div className="row-start-5 min-w-0">
       <SatExamFooter
         candidateName={props.candidateName}
         questionIndex={props.questionIndex}
@@ -670,6 +669,7 @@ export function SatExamShell(props: SatExamShellProps) {
         onOpenNavigator={() => toggleOverlay("navigator")}
         onReviewModule={props.onReviewModule}
       />
+      </div>
       <SatQuestionNavigator
         id={navigatorPanelId}
         open={activeOverlay === "navigator"}
@@ -702,7 +702,7 @@ export function SatExamShell(props: SatExamShellProps) {
       ) : null}
       {/* Bluebook Unscheduled Break (Phase 8): confirm first (dangerous
           action), then a running-timer veil. Timer keeps running, answers
-          intact, autosubmit still fires underneath. No backend pause call. */}
+          intact, timeout reconciliation continues underneath. No backend pause call. */}
       {props.breakConfirmOpen !== undefined && props.onCloseBreakConfirm && props.onTakeBreak ? (
         <SatUnscheduledBreakDialog
           open={props.breakConfirmOpen}
@@ -711,24 +711,21 @@ export function SatExamShell(props: SatExamShellProps) {
           returnFocusSelector='[data-sat-focus="topbar-more"]'
         />
       ) : null}
-      {/* Bluebook 5-minute warning (Phase 7): one-shot per module, live
-          remaining time. Hidden while blocked (pause veil owns attention).
-          Display-only: dismissing never touches timer or answers. */}
-      <SatTimerWarning
-        open={timerWarningVisible && !props.blocked}
-        remainingLabel={props.remainingLabel}
-        onDismiss={() => setTimerWarningVisible(false)}
-      />
     </div>
+      <div className="row-start-2 min-w-0" data-testid="sat-exam-notices">
+        {props.notices}
+      </div>
+      <div className="row-start-4 min-w-0 px-3 sm:px-5">
+        <SatSaveStatus
+          state={props.saveState}
+          saveFailure={props.saveFailure}
+          onRetrySave={props.onRetrySave}
+          onTakeOver={props.onTakeOver}
+          isTakingOver={props.isTakingOver}
+        />
+      </div>
     </div>
       {props.floatingToolChildren}
-      <SatSaveStatus
-        state={props.saveState}
-        saveFailure={props.saveFailure}
-        onRetrySave={props.onRetrySave}
-        onTakeOver={props.onTakeOver}
-        isTakingOver={props.isTakingOver}
-      />
       <SatExamViewportOverlay>
         {props.breakVeilOpen !== undefined && props.onReturnFromBreak ? (
           <SatUnscheduledBreakVeil

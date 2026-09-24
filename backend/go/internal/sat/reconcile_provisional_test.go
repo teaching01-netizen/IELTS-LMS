@@ -49,6 +49,7 @@ func TestSATWatchdogRepairsProvisionalReceiptAttempt(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectCanonicalRouteDecisions(mock)
 	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(
@@ -110,6 +111,7 @@ func TestSATWatchdogFallsBackFromOversizedReceiptSubmissionID(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectCanonicalRouteDecisions(mock)
 	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(
@@ -210,6 +212,7 @@ func TestReconcileProvisionalBatchIncludesReceiptCandidates(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectCanonicalRouteDecisions(mock)
 	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(
@@ -251,9 +254,9 @@ func satTimeSpent(mock sqlmock.Sqlmock) {
 // requires a recorded route per section, so the old fictitious "routing" role
 // (which no delivery path writes) is no longer a valid fixture.
 func satTerminalModules() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).
-		AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).
-		AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).
-		AddRow("math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).
-		AddRow("math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27))
+	return sqlmock.NewRows([]string{"module_id", "section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).
+		AddRow("mod-rw-m1", "reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).
+		AddRow("mod-rw-m2-lower", "reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).
+		AddRow("mod-math-m1", "math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).
+		AddRow("mod-math-m2-lower", "math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27))
 }

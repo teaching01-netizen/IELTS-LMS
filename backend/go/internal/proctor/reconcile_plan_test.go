@@ -8,6 +8,8 @@ package proctor
 import (
 	"testing"
 	"time"
+
+	"example.com/ielts-proctoring/internal/attempts"
 )
 
 var planBase = time.Date(2026, 9, 14, 9, 0, 0, 0, time.UTC)
@@ -212,6 +214,26 @@ func TestPlanSectionAdvance(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSATSaveGraceFreezesSectionBeforeStartingTheNext(t *testing.T) {
+	deadline := planBase.Add(64 * time.Minute)
+	sections := []runtimeSection{
+		liveSection("reading-writing", 1, 64, 0, planBase),
+		lockedSection("math", 2, 35, 0),
+	}
+	runtime := reconcileRuntime{activeSectionKey: ptr("reading-writing")}
+	if got := planSectionAdvance(runtime, sections, true, deadline.Add(time.Second), attempts.SATSaveGrace); len(got.steps) != 0 {
+		t.Fatalf("SAT section advanced before final saves closed: %+v", got.steps)
+	}
+	got := planSectionAdvance(runtime, sections, true, deadline.Add(attempts.SATSaveGrace), attempts.SATSaveGrace)
+	if len(got.steps) != 2 || got.steps[0].kind != stepCompleteSection || got.steps[1].kind != stepStartSection {
+		t.Fatalf("SAT section should complete and open math after grace: %+v", got.steps)
+	}
+	wantStart := deadline.Add(attempts.SATSaveGrace)
+	if !got.steps[1].startAt.Equal(wantStart) {
+		t.Fatalf("next section started at %v, want %v", got.steps[1].startAt, wantStart)
 	}
 }
 

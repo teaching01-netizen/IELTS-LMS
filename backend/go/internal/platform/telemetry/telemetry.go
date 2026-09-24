@@ -3,47 +3,55 @@
 package telemetry
 
 var metricHelpText = map[string]string{
-	MHTTPRequestsTotal:             "Total HTTP requests by method, route, and status class.",
-	MHTTPRequestDur:                "HTTP request duration in seconds.",
-	MHTTPInFlight:                  "Current number of in-flight HTTP requests.",
-	MPoolOpen:                      "Number of open database connections.",
-	MPoolInUse:                     "Number of database connections currently in use.",
-	MPoolWait:                      "Total number of waits for a database connection.",
-	MQueryDur:                      "Database query duration in seconds.",
-	MTxDur:                         "Database transaction duration in seconds.",
-	MDeadlocks:                     "Total number of database deadlocks.",
-	MV2BatchTotal:                  "Total v2 response batches by outcome.",
-	MV2CommandsTotal:               "Total v2 response commands by outcome.",
-	MSATScoreSource:                "Total SAT scoring passes by response source (v2 vs legacy fallback).",
-	MSATScoreFallbackRows:          "Total SAT scoring rows answered from legacy gaps inside V2-owned passes.",
-	MSATFinalizeTotal:              "Total SAT terminal finalizations by outcome (completed vs replayed vs rejected).",
-	MSATHeartbeatTotal:             "Total SAT student heartbeats recorded by path (memory vs inline).",
-	MV1MutationTotal:               "Total v1 mutation requests by outcome.",
-	MV1SubmitTotal:                 "Total v1 submit requests by outcome.",
-	MLeaseFencedTotal:              "Total v2 responses rejected by lease fencing.",
-	MControlStaleTotal:             "Total v2 responses rejected for a stale control epoch.",
-	MVersionCollTotal:              "Total v2 responses rejected for a version collision.",
-	MSubmitReplayTotal:             "Total replayed v2 submissions.",
-	MTerminalCreated:               "Total terminalization receipts created.",
-	MTerminalReplay:                "Total terminalization replays.",
-	MTerminalConflict:              "Total terminalization conflicts.",
-	MRepairMissing:                 "Total missing terminal receipts repaired.",
-	MInvariantViol:                 "Total terminal-state invariant violations observed.",
-	MOutboxPending:                 "Current number of pending outbox events.",
-	MOutboxOldestAge:               "Age in seconds of the oldest pending outbox event.",
-	MJobDuration:                   "Worker job duration in seconds.",
-	MJobFailures:                   "Total worker job failures.",
-	MSATPendingAge:                 "Age in seconds of the oldest provisional SAT result.",
-	MProjectionLag:                 "Grading projection lag in seconds.",
-	MGradingProjectionCorrupt:      "Total corrupt grading result projections by column.",
-	MRatelimitDeniedTotal:          "Total rate-limit denials by tier and key class.",
-	MRatelimitDBErrorTotal:         "Total distributed rate-limit database errors by tier and key class.",
-	MRatelimitCapacityTotal:        "Total rate-limit capacity rejections by tier and key class.",
-	MAuthoringOpTotal:              "Total authoring mutations by operation and outcome (save, create, batch, bulk, commit, publish).",
-	MAuthoringShellReadTotal:       "Total authoring shell reads by lifecycle state (ready, no_draft, exam_not_found, integrity_violation, failed). A no_draft read is a normal answer, not a fault.",
-	MAuthoringDraftOpenTotal:       "Total explicit draft-open commands by outcome (opened, exam_not_found, conflict, no_source, integrity_violation, failed).",
-	MAuthoringEventPublishTotal:    "Total authoring realtime events appended in-tx by operation and outcome.",
-	MAuthoringEventPublishFailures: "Total authoring realtime event append failures by operation (rolls the mutation back).", MAuthoringWSConnectionsCurrent: "Authoring sockets currently subscribed, sampled at every accept and close.",
+	MHTTPRequestsTotal:              "Total HTTP requests by method, route, and status class.",
+	MHTTPRequestDur:                 "HTTP request duration in seconds.",
+	MHTTPInFlight:                   "Current number of in-flight HTTP requests.",
+	MPoolOpen:                       "Number of open database connections.",
+	MPoolInUse:                      "Number of database connections currently in use.",
+	MPoolWait:                       "Total number of waits for a database connection.",
+	MQueryDur:                       "Database query duration in seconds.",
+	MTxDur:                          "Database transaction duration in seconds.",
+	MDeadlocks:                      "Total number of database deadlocks.",
+	MV2BatchTotal:                   "Total v2 response batches by outcome.",
+	MV2CommandsTotal:                "Total v2 response commands by outcome.",
+	MSATScoreSource:                 "Total SAT scoring passes by response source (v2 vs legacy fallback).",
+	MSATScoreFallbackRows:           "Total SAT scoring rows answered from legacy gaps inside V2-owned passes.",
+	MSATFinalizeTotal:               "Total SAT terminal finalizations by outcome (completed vs replayed vs rejected).",
+	MSATHeartbeatTotal:              "Total SAT student heartbeats recorded by path (memory vs inline).",
+	MSATStudentModuleSubmitRejected: "Total legacy SAT student module-submit calls rejected by server policy.",
+	MSATResponseWriteAfterTerminal:  "Total fresh SAT response writes refused at or after a terminal deadline.",
+	MSATResultQuestionDetailFailure: "Total SAT result question-detail reads that failed instead of returning an empty list.",
+	MSATTimeoutFinalize:             "Total SAT modules finalized by authoritative timeout reconciliation.",
+	MSATResponseReplayAfterTerminal: "Total exact SAT response replays served at or after the authoritative deadline.",
+	MSATAdaptiveIntegrityViolation:  "Total SAT adaptive-routing integrity violations where the recorded route decision and the administered module disagreed.",
+	MSATAdaptiveRouteTotal:          "Total SAT adaptive-routing decisions by section and selected route (higher vs lower).",
+	MSATAdaptiveModuleOpenTotal:     "Total SAT adaptive follow-up modules opened by adaptive role (higher_branch vs lower_branch).",
+	MV1MutationTotal:                "Total v1 mutation requests by outcome.",
+	MV1SubmitTotal:                  "Total v1 submit requests by outcome.",
+	MLeaseFencedTotal:               "Total v2 responses rejected by lease fencing.",
+	MControlStaleTotal:              "Total v2 responses rejected for a stale control epoch.",
+	MVersionCollTotal:               "Total v2 responses rejected for a version collision.",
+	MSubmitReplayTotal:              "Total replayed v2 submissions.",
+	MTerminalCreated:                "Total terminalization receipts created.",
+	MTerminalReplay:                 "Total terminalization replays.",
+	MTerminalConflict:               "Total terminalization conflicts.",
+	MRepairMissing:                  "Total missing terminal receipts repaired.",
+	MInvariantViol:                  "Total terminal-state invariant violations observed.",
+	MOutboxPending:                  "Current number of pending outbox events.",
+	MOutboxOldestAge:                "Age in seconds of the oldest pending outbox event.",
+	MJobDuration:                    "Worker job duration in seconds.",
+	MJobFailures:                    "Total worker job failures.",
+	MSATPendingAge:                  "Age in seconds of the oldest provisional SAT result.",
+	MProjectionLag:                  "Grading projection lag in seconds.",
+	MGradingProjectionCorrupt:       "Total corrupt grading result projections by column.",
+	MRatelimitDeniedTotal:           "Total rate-limit denials by tier and key class.",
+	MRatelimitDBErrorTotal:          "Total distributed rate-limit database errors by tier and key class.",
+	MRatelimitCapacityTotal:         "Total rate-limit capacity rejections by tier and key class.",
+	MAuthoringOpTotal:               "Total authoring mutations by operation and outcome (save, create, batch, bulk, commit, publish).",
+	MAuthoringShellReadTotal:        "Total authoring shell reads by lifecycle state (ready, no_draft, exam_not_found, integrity_violation, failed). A no_draft read is a normal answer, not a fault.",
+	MAuthoringDraftOpenTotal:        "Total explicit draft-open commands by outcome (opened, exam_not_found, conflict, no_source, integrity_violation, failed).",
+	MAuthoringEventPublishTotal:     "Total authoring realtime events appended in-tx by operation and outcome.",
+	MAuthoringEventPublishFailures:  "Total authoring realtime event append failures by operation (rolls the mutation back).", MAuthoringWSConnectionsCurrent: "Authoring sockets currently subscribed, sampled at every accept and close.",
 	MAuthoringReconnectsTotal:          "Authoring resubscribe outcomes: resumed, snapshot_required, or rejected.",
 	MAuthoringReplayTotal:              "Authoring replay requests by outcome: served, snapshot_required, or failed.",
 	MAuthoringResyncTotal:              "Authoring resyncs by declared reason. This is the freshness SLI: the cursor model is global and filtered, so a skipped sequence value is NOT a loss and no numeric gap is ever measured.",
@@ -62,6 +70,10 @@ var metricHelpText = map[string]string{
 	MEntryGateAdmit:                    "Total entry-gate admissions (D3 check-ins).",
 	MEntryGateQueued:                   "Total entry-gate bounded-retry 429s (D3).",
 	MEntryGateCapacityTotal:            "Total entry-gate capacity rejections by tier and key class.",
+	MStudentResumeProbeTotal:           "Authenticated SAT resume probes reaching the server session resolver.",
+	MStudentResumeSuccessTotal:         "SAT resume probes resolved to a canonical student attempt.",
+	MStudentResumeFailureTotal:         "SAT resume probe failures by bounded reason.",
+	MStudentResumeRecoveryMS:           "Duration in milliseconds of the most recent SAT resume probe.",
 	MRollupRefresh:                     "Total proctor rollup refreshes (D4 worker).",
 	MRollupLag:                         "Freshness in seconds of the proctor rollup row (D4 lag).",
 	MShedExam:                          "Total requests served under exam shed budgets (E2).",
@@ -102,14 +114,33 @@ const (
 	// Backend finalize/heartbeat series (exam-day re-audit observability
 	// residual): the release must page on server-observed terminal outcomes,
 	// not on frontend-emitted beacons that never arrive during an outage.
-	MSATFinalizeTotal  = "sat_finalize_total"
-	MSATHeartbeatTotal = "sat_heartbeat_total"
-	MV1MutationTotal   = "v1_mutation_requests_total"
-	MV1SubmitTotal     = "v1_submit_requests_total"
-	MLeaseFencedTotal  = "v2_lease_fenced_total"
-	MControlStaleTotal = "v2_control_epoch_stale_total"
-	MVersionCollTotal  = "v2_version_collision_total"
-	MSubmitReplayTotal = "v2_submit_replay_total"
+	MSATFinalizeTotal               = "sat_finalize_total"
+	MSATHeartbeatTotal              = "sat_heartbeat_total"
+	MSATStudentModuleSubmitRejected = "sat_student_module_submit_rejected_total"
+	MSATResponseWriteAfterTerminal  = "sat_response_write_after_terminal_total"
+	MSATResultQuestionDetailFailure = "sat_result_question_detail_failure_total"
+	MSATTimeoutFinalize             = "sat_timeout_finalize_total"
+	MSATResponseReplayAfterTerminal = "sat_response_replay_after_terminal_total"
+	// MSATAdaptiveIntegrityViolation is the last-line fence counter for the SAT
+	// adaptive identity chain: assessment_route_decisions.selected_module_id must
+	// equal the administered branch module's id, and its selected_route must
+	// match that module's adaptive_role (higher <-> higher_branch, lower <->
+	// lower_branch). Expected production value: 0 — a non-zero sample means the
+	// authored tree and the recorded decision disagree, which no scoring, UI or
+	// cache fix can make safe. Label is the reason vocabulary only.
+	MSATAdaptiveIntegrityViolation = "sat_adaptive_integrity_violation_total"
+	// MSATAdaptiveRouteTotal counts every recorded adaptive-routing decision.
+	// Labels are the closed section/route vocabulary only (section, route).
+	MSATAdaptiveRouteTotal = "sat_adaptive_route_total"
+	// MSATAdaptiveModuleOpenTotal counts every adaptive follow-up module the
+	// router opens. Label is the authored adaptive role only (role).
+	MSATAdaptiveModuleOpenTotal = "sat_adaptive_module_open_total"
+	MV1MutationTotal            = "v1_mutation_requests_total"
+	MV1SubmitTotal              = "v1_submit_requests_total"
+	MLeaseFencedTotal           = "v2_lease_fenced_total"
+	MControlStaleTotal          = "v2_control_epoch_stale_total"
+	MVersionCollTotal           = "v2_version_collision_total"
+	MSubmitReplayTotal          = "v2_submit_replay_total"
 
 	MTerminalCreated  = "terminalization_created_total"
 	MTerminalReplay   = "terminalization_replay_total"
@@ -129,17 +160,21 @@ const (
 	MWSLeaseFailures  = "websocket_lease_acquire_failures_total"
 	MWSSlowDisconnect = "websocket_slow_client_disconnects_total"
 
-	MVersionCacheHit        = "version_cache_hit_total"
-	MVersionCacheMiss       = "version_cache_miss_total"
-	MPresenceTouch          = "presence_touch_total"
-	MPresenceFlush          = "presence_flush_total"
-	MEntryGateAdmit         = "entry_gate_admit_total"
-	MEntryGateQueued        = "entry_gate_queued_total"
-	MEntryGateCapacityTotal = "http_entry_gate_capacity_rejected_total"
-	MRollupRefresh          = "proctor_rollup_refresh_total"
-	MRollupLag              = "proctor_rollup_lag_seconds"
-	MShedExam               = "shed_exam_requests_total"
-	MQueryTimeout           = "query_budget_exhausted_total"
+	MVersionCacheHit           = "version_cache_hit_total"
+	MVersionCacheMiss          = "version_cache_miss_total"
+	MPresenceTouch             = "presence_touch_total"
+	MPresenceFlush             = "presence_flush_total"
+	MEntryGateAdmit            = "entry_gate_admit_total"
+	MEntryGateQueued           = "entry_gate_queued_total"
+	MEntryGateCapacityTotal    = "http_entry_gate_capacity_rejected_total"
+	MStudentResumeProbeTotal   = "student_resume_probe_total"
+	MStudentResumeSuccessTotal = "student_resume_success_total"
+	MStudentResumeFailureTotal = "student_resume_failure_total"
+	MStudentResumeRecoveryMS   = "student_resume_recovery_ms"
+	MRollupRefresh             = "proctor_rollup_refresh_total"
+	MRollupLag                 = "proctor_rollup_lag_seconds"
+	MShedExam                  = "shed_exam_requests_total"
+	MQueryTimeout              = "query_budget_exhausted_total"
 
 	MSessionCacheHit = "session_cache_hit_total"
 	// MAssessmentConflict counts structured SAT delivery conflicts by their
@@ -314,6 +349,14 @@ func Names() []string {
 		MSATScoreFallbackRows,
 		MSATFinalizeTotal,
 		MSATHeartbeatTotal,
+		MSATStudentModuleSubmitRejected,
+		MSATResponseWriteAfterTerminal,
+		MSATResultQuestionDetailFailure,
+		MSATTimeoutFinalize,
+		MSATResponseReplayAfterTerminal,
+		MSATAdaptiveIntegrityViolation,
+		MSATAdaptiveRouteTotal,
+		MSATAdaptiveModuleOpenTotal,
 		MV1MutationTotal,
 		MV1SubmitTotal,
 		MLeaseFencedTotal,
@@ -342,6 +385,10 @@ func Names() []string {
 		MEntryGateAdmit,
 		MEntryGateQueued,
 		MEntryGateCapacityTotal,
+		MStudentResumeProbeTotal,
+		MStudentResumeSuccessTotal,
+		MStudentResumeFailureTotal,
+		MStudentResumeRecoveryMS,
 		MRollupRefresh,
 		MRollupLag,
 		MShedExam,

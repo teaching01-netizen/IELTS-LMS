@@ -11,7 +11,7 @@ export function SatControlBanner({
   const warning = tone === "warning";
   return (
     <div
-      className={`sat-ui sat-surface-enter fixed left-1/2 top-[calc(100px+var(--student-safe-top))] z-[85] w-[min(92vw,680px)] -translate-x-1/2 border px-4 py-3 text-center text-[14px] font-medium shadow-lg ${warning ? "border-[var(--sat-warning)] bg-[var(--sat-warning-soft)] text-[var(--sat-warning)]" : "border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]"}`}
+      className={`sat-ui sat-surface-enter mx-auto my-1 w-full max-w-[680px] border px-4 py-2 text-center text-[14px] font-medium ${warning ? "border-[var(--sat-warning)] bg-[var(--sat-warning-soft)] text-[var(--sat-warning)]" : "border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]"}`}
       role={warning ? "status" : "alert"}
       aria-live={warning ? "polite" : undefined}
     >
@@ -31,7 +31,7 @@ export function SatLeaseConflictNotice({
 }) {
   return (
     <div
-      className="sat-ui fixed inset-x-4 top-[calc(100px+var(--student-safe-top))] z-[90] mx-auto flex max-w-2xl items-center justify-between gap-4 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 text-left shadow-lg"
+      className="sat-ui mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-3 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 text-left"
       role="alert"
       aria-live="assertive"
     >
@@ -55,20 +55,27 @@ export function SatLeaseConflictNotice({
   );
 }
 
-export function SatSubmissionOverlay({
-  title = "Finalizing module…",
-  note = "Your latest responses are being verified.",
-  autoSubmitted = false,
+export function SatTimeoutOverlay({
+  saveFailureKind,
+  saveFailure,
+  onRetrySave,
 }: {
-  title?: string;
-  note?: string;
-  /** Timeout attribution (Phase 1): timeout submits name expiry, manual submits do not. */
-  autoSubmitted?: boolean;
+  saveFailureKind: "offline" | "retryable" | "terminal" | "expired" | "superseded" | null;
+  saveFailure: string | null;
+  onRetrySave: () => void;
 }) {
-  const resolvedTitle = autoSubmitted ? "Time expired — submitting your saved answers." : title;
+  const hasSaveFailure = saveFailureKind !== null;
+  const note =
+    saveFailureKind === "offline"
+      ? SAT_COPY.timeout.offline
+      : saveFailureKind === "retryable" || saveFailureKind === "terminal" || saveFailureKind === "expired"
+        ? saveFailure || SAT_COPY.timeout.failed
+        : saveFailureKind === "superseded"
+          ? SAT_COPY.review.saveSuperseded
+          : SAT_COPY.timeout.recordingAnswers;
   return (
     <div
-      className="sat-ui fixed inset-0 z-[95] grid place-items-center bg-[var(--sat-background)]/90"
+      className="sat-ui fixed inset-0 z-[80] grid place-items-center bg-[var(--sat-background)]/90"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -78,8 +85,17 @@ export function SatSubmissionOverlay({
           className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-[var(--sat-divider-soft)] border-t-[var(--sat-text)] motion-reduce:hidden"
           aria-hidden="true"
         />
-        <p className="text-[14px] font-semibold text-[var(--sat-text)]">{resolvedTitle}</p>
+        <p className="text-[14px] font-semibold text-[var(--sat-text)]">{SAT_COPY.timeout.title}</p>
         <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">{note}</p>
+        {hasSaveFailure && saveFailureKind !== "superseded" && saveFailureKind !== "expired" ? (
+          <button
+            type="button"
+            onClick={onRetrySave}
+            className="sat-touch-target sat-pressable mt-4 rounded-full border border-[var(--sat-divider)] px-5 text-[14px] font-semibold text-[var(--sat-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+          >
+            {SAT_COPY.review.retrySave}
+          </button>
+        ) : null}
       </div>
     </div>
   );

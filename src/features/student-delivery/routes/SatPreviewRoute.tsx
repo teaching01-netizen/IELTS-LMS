@@ -118,11 +118,11 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
           remainingLabel={remainingLabel}
           items={preview.navigationItems}
           answeredCount={answeredSatQuestionCount(preview.questionIds, preview.responses)}
-          isSubmitting={false}
-          persistenceBlocked={false}
+          pendingSaveCount={0}
+          saveFailure={null}
+          saveFailureKind={null}
           onSelectQuestion={preview.commands.selectQuestion}
           onBack={preview.commands.showQuestions}
-          onSubmit={preview.commands.continueFromReview}
         />
       </>
     );

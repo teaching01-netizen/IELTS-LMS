@@ -50,7 +50,7 @@ describe("SAT transition screens (Phase 6c)", () => {
     render(<SatCompleteScreen result={null} onExit={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "SAT Complete" })).toBeInTheDocument();
     expect(screen.getByText(/All responses submitted/)).toBeInTheDocument();
-    expect(screen.getByText(/unofficial practice score/)).toBeInTheDocument();
+    expect(screen.queryByText(/score/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Back to dashboard" })).toBeInTheDocument();
   });
 });

@@ -36,6 +36,7 @@ interface AuthSessionContextValue {
     studentName: string;
     nickname?: string | undefined;
     ieltsCourse?: string | undefined;
+    clientSessionId?: string | undefined;
   }) => Promise<StudentEntryResult>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
@@ -278,6 +279,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     studentName: string;
     nickname?: string | undefined;
     ieltsCourse?: string | undefined;
+    clientSessionId?: string | undefined;
   }) => {
     const result = await authService.studentEntry(payload);
     if (!('user' in result)) {

@@ -52,7 +52,6 @@ import {
 import { collectPublishedDiagramSnapshotIssues } from './studentSessionDiagnostics';
 import {
   buildSatBootstrapSeed,
-  getCachedDeliveryEtag,
   type SatBootstrapSeed,
 } from '../../student-delivery/api/satBootstrap';
 
@@ -917,6 +916,25 @@ export function useStudentSessionRouteData(
         setAttemptSnapshot(reconciledAttempt);
         liveReceivedAtRef.current = Date.now();
       } else if (!live.attempt) {
+        // SAT admission is server-owned. A successful live read with no
+        // attempt means this authenticated identity is not admitted to this
+        // schedule; a local cache entry must never turn that response into an
+        // exam route (or create a replacement attempt here).
+        if (loadedStatic.providerKey === 'sat') {
+          setAttemptSnapshot(null);
+          liveReceivedAtRef.current = Date.now();
+          appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
+            appliedFreshnessRef.current,
+            incomingFreshness,
+            {
+              applyAttempt: false,
+              applyRuntime: applyDecision.applyRuntime,
+            },
+          );
+          applyLoadTransition(source, { type: 'succeeded' });
+          return;
+        }
+
         const cachedAttempt = await readCachedAttemptForCandidate();
         if (cachedAttempt) {
           setAttemptSnapshot(cachedAttempt);
@@ -944,10 +962,7 @@ export function useStudentSessionRouteData(
           examId: loadedStatic.scheduleEntity.examId,
           examTitle: loadedStatic.scheduleEntity.examTitle,
           ...createCandidateProfile(candidateId, storedCandidateProfile),
-          currentModule:
-            loadedStatic.providerKey === 'sat'
-              ? 'reading'
-              : mappedRuntime?.currentSectionKey ?? firstEnabledModule,
+          currentModule: mappedRuntime?.currentSectionKey ?? firstEnabledModule,
         });
         setAttemptSnapshot(createdAttempt);
         liveReceivedAtRef.current = Date.now();
@@ -1166,8 +1181,9 @@ export function useStudentSessionRouteData(
   // Phase 02 seed (additive, memoized): non-null iff the SAT identity is
   // fully known. Bytes are NEVER reused — the child still bootstraps via
   // assessmentDeliveryApi.bootstrap; the seed only scopes that one call
-  // (identity/epochs/ETag) and lets the child skip re-fires (dedupe via
-  // singleflight + ETag/304, not byte reuse). Refs are read inside (stable,
+  // (identity/epochs) and lets the child skip re-fires (dedupe via
+  // singleflight, never a conditional read: the attempt payload is live
+  // state, so an exam-version validator must not suppress it). Refs are read inside (stable,
   // exempt from deps); every reactive input is listed so static re-resolve
   // (new schedule/state objects) rebuilds the seed. Seed identity churn is
   // harmless: the child bootstrap effect deps read seed scalars only.
@@ -1187,7 +1203,6 @@ export function useStudentSessionRouteData(
       runtimeSnapshot,
       liveSnapshotReceivedAt: liveReceivedAtRef.current,
       staticVersionId: staticVersionIdRef.current,
-      deliveryEtag: getCachedDeliveryEtag(scheduleId, attemptSnapshot.id),
       seedGeneration: refreshEpochRef.current,
     });
   }, [attemptSnapshot, candidateId, providerKey, runtimeSnapshot, schedule, scheduleId, state]);

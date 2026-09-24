@@ -98,6 +98,21 @@ function activePayload(): AssessmentDeliveryBootstrap {
   return p;
 }
 
+function expiredPayload(source: AssessmentDeliveryBootstrap): AssessmentDeliveryBootstrap {
+  const payload = structuredClone(source);
+  const serverNow = new Date().toISOString();
+  payload.serverNow = serverNow;
+  payload.timing.serverNow = serverNow;
+  payload.timing.runtimeRevision += 1;
+  const attempt = payload.attempt.moduleAttempts[0];
+  if (!attempt) throw new Error("Expected the SAT fixture to have one module attempt.");
+  attempt.state = "locked";
+  attempt.completionReason = "time_expired";
+  attempt.deadlineAt = new Date(Date.now() - 1000).toISOString();
+  attempt.remainingSeconds = 0;
+  return payload;
+}
+
 const opts = { scheduleId: "schedule", attemptId: "attempt-a", candidateId: "candidate", liveSocketConnected: true };
 async function settle() {
   await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
@@ -115,19 +130,18 @@ describe("SAT finalization recovery", () => {
     persistenceMock.submit.mockResolvedValue({} as never);
   });
 
-  it("recovers to complete via bootstrap polling after a submission outage", async () => {
+  it("recovers to complete via bootstrap polling after authoritative timeout finalization", async () => {
     const p = activePayload();
     gatewayMocks.bootstrap.mockResolvedValue(p);
+    gatewayMocks.submitAssessment.mockRejectedValueOnce(new Error("Network unavailable"));
     const hook = renderHook(() => useSatExamController(opts));
     await settle();
-    act(() => hook.result.current.commands.reviewModule());
-    expect(hook.result.current.state.phase).toBe("review");
-    const done = structuredClone(p);
-    done.attempt.moduleAttempts[0].state = "submitted";
-    gatewayMocks.submitModule.mockResolvedValue(done);
-    persistenceMock.submit.mockRejectedValueOnce(new Error("Network unavailable"));
-    gatewayMocks.bootstrap.mockRejectedValue(new Error("Network unavailable"));
-    await act(async () => { await hook.result.current.commands.submitModule("module"); });
+    const done = expiredPayload(p);
+    const seam = hook.result.current as unknown as {
+      commitForTest: (payload: AssessmentDeliveryBootstrap) => boolean;
+    };
+    act(() => { expect(seam.commitForTest(done)).toBe(true); });
+    await settle();
     expect(hook.result.current.error).toBe("Network unavailable");
     const calls = gatewayMocks.bootstrap.mock.calls.length;
     gatewayMocks.bootstrap.mockResolvedValue({
@@ -144,21 +158,15 @@ describe("SAT finalization recovery", () => {
     vi.useRealTimers();
   });
 
-  // SAT-002: the final module expires while the student is still on the
-  // question screen (never opened Review). The timeout must move the runner
-  // through `submitting`, and a failed finalization must stay retryable — the
-  // pre-fix behavior left phase `module` with no valid retry path.
-  it("finalizes after a question-screen timeout and retries a failed finalization", async () => {
+  // The local clock freezes input and drains queued responses. Only the later
+  // authoritative terminal payload may start assessment finalization.
+  it("freezes at the local timeout, then retries failed server-owned finalization", async () => {
     const p = activePayload();
     gatewayMocks.bootstrap.mockResolvedValue(p);
     const hook = renderHook(() => useSatExamController(opts));
     await settle();
     expect(hook.result.current.state.phase).toBe("module");
 
-    const done = structuredClone(p);
-    done.attempt.moduleAttempts[0].state = "submitted";
-    done.attempt.moduleAttempts[0].completionReason = "time_expired";
-    gatewayMocks.submitModule.mockResolvedValue(done);
     gatewayMocks.submitAssessment
       .mockRejectedValueOnce(new Error("completion backend down"))
       .mockResolvedValueOnce({
@@ -172,13 +180,19 @@ describe("SAT finalization recovery", () => {
       });
     gatewayMocks.bootstrap.mockRejectedValue(new Error("Network unavailable"));
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(70_000);
-    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(70_000); });
     await settle();
-    expect(gatewayMocks.submitModule).toHaveBeenCalledWith("schedule", "attempt-a", {
-      moduleId: "module",
-    });
+    expect(hook.result.current.answerInteractionBlocked).toBe(true);
+    expect(persistenceMock.flush).toHaveBeenCalled();
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
+    expect(hook.result.current.state.phase).toBe("module");
+
+    const done = expiredPayload(p);
+    const seam = hook.result.current as unknown as {
+      commitForTest: (payload: AssessmentDeliveryBootstrap) => boolean;
+    };
+    act(() => { expect(seam.commitForTest(done)).toBe(true); });
+    await settle();
     expect(hook.result.current.state.phase).toBe("submitting");
     expect(hook.result.current.error).toBe("completion backend down");
 
@@ -232,17 +246,18 @@ describe("SAT finalization recovery", () => {
     gatewayMocks.bootstrap.mockResolvedValue(p);
     const hook = renderHook(() => useSatExamController(opts));
     await settle();
-    act(() => hook.result.current.commands.reviewModule());
-    const done = structuredClone(p);
-    done.attempt.moduleAttempts[0].state = "submitted";
-    gatewayMocks.submitModule.mockResolvedValue(done);
+    const done = expiredPayload(p);
     gatewayMocks.submitAssessment
       .mockRejectedValueOnce(new Error("completion backend down"))
       .mockResolvedValueOnce({
         id: "result-1", submissionId: "attempt-a", providerKey: "sat",
         totalScore: 800, scorePayload: {}, scoreKind: "practice", sections: [],
       });
-    await act(async () => { await hook.result.current.commands.submitModule("module"); });
+    const seam = hook.result.current as unknown as {
+      commitForTest: (payload: AssessmentDeliveryBootstrap) => boolean;
+    };
+    act(() => { expect(seam.commitForTest(done)).toBe(true); });
+    await settle();
     expect(hook.result.current.state.phase).toBe("submitting");
     expect(hook.result.current.error).toBe("completion backend down");
     await act(async () => { await hook.result.current.commands.retryFinalization(); });

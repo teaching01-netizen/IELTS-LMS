@@ -20,14 +20,16 @@ function resting(overrides: Partial<SelectionOverlaySelection> = {}): SelectionO
     startHandle: { edge: 'start', x: 10, y: 100, direction: 'ltr', stem: 'up' },
     endHandle: { edge: 'end', x: 50, y: 144, direction: 'ltr', stem: 'down' },
     anchorRect: { left: 10, top: 100, width: 100, height: 44 },
-    pointer: { finger: { x: 30, y: 120 }, caret: null, snapRevision: 0 },
+    pointer: { pointerType: 'touch', finger: { x: 30, y: 120 }, caret: null, snapRevision: 0 },
     adjusting: false,
     beginHandleAdjustment: vi.fn(),
+    activateCurrentSelection: vi.fn(),
     dismiss: vi.fn(),
     // The gesture's own guards as the hook answers them for a control the
     // gesture would NOT handle (a toolbar, an input): dismissed, delivered.
     // A test whose press stands in for the prose overrides this with true.
     wouldBeginGesture: vi.fn(() => false),
+    wouldStartOwnedSelection: vi.fn(() => false),
     ...overrides,
   };
 }
@@ -215,6 +217,97 @@ describe('handles', () => {
   });
 });
 
+describe('a resting selection can be reactivated without changing its range', () => {
+  it('reports a press on the selected body and consumes the same pointerdown', () => {
+    const selection = resting();
+    const outsideListener = vi.fn();
+    render(<SelectionOverlay selection={selection} />);
+    document.addEventListener('pointerdown', outsideListener);
+    try {
+      const event = createEvent.pointerDown(document.body, {
+        bubbles: true,
+        cancelable: true,
+        clientX: 30,
+        clientY: 110,
+      });
+      fireEvent(document.body, event);
+
+      expect(selection.activateCurrentSelection).toHaveBeenCalledTimes(1);
+      expect(selection.beginHandleAdjustment).not.toHaveBeenCalled();
+      expect(selection.dismiss).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(true);
+      expect(outsideListener).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('pointerdown', outsideListener);
+    }
+  });
+
+  it('keeps the body range and paint unchanged when its consumed press is dragged', () => {
+    const selection = resting();
+    const before = {
+      text: selection.selectionText,
+      rects: structuredClone(selection.rects),
+      startHandle: structuredClone(selection.startHandle),
+      endHandle: structuredClone(selection.endHandle),
+    };
+    render(<SelectionOverlay selection={selection} />);
+
+    const down = createEvent.pointerDown(document.body, {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 14,
+      pointerType: 'touch',
+      clientX: 30,
+      clientY: 110,
+    });
+    fireEvent(document.body, down);
+    fireEvent.pointerMove(document.body, { pointerId: 14, pointerType: 'touch', clientX: 46, clientY: 116 });
+    fireEvent.pointerUp(document.body, { pointerId: 14, pointerType: 'touch', clientX: 46, clientY: 116 });
+
+    expect(selection.activateCurrentSelection).toHaveBeenCalledTimes(1);
+    expect(selection.beginHandleAdjustment).not.toHaveBeenCalled();
+    expect(selection.dismiss).not.toHaveBeenCalled();
+    expect({
+      text: selection.selectionText,
+      rects: selection.rects,
+      startHandle: selection.startHandle,
+      endHandle: selection.endHandle,
+    }).toEqual(before);
+  });
+});
+
+describe('outside dismissal with native text selection', () => {
+  it('consumes the first outside mouse drag that would begin another text selection', () => {
+    const selection = resting({ wouldStartOwnedSelection: vi.fn(() => true) });
+    const prose = document.createElement('p');
+    prose.textContent = 'new selectable prose';
+    document.body.append(prose);
+    const pagePointerDown = vi.fn();
+    document.addEventListener('pointerdown', pagePointerDown);
+    try {
+      render(<SelectionOverlay selection={selection} />);
+      const event = createEvent.pointerDown(prose, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 21,
+        pointerType: 'mouse',
+        button: 0,
+        clientX: 300,
+        clientY: 300,
+      });
+      fireEvent(prose, event);
+
+      expect(selection.dismiss).toHaveBeenCalledTimes(1);
+      expect(selection.wouldStartOwnedSelection).toHaveBeenCalledWith(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(pagePointerDown).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('pointerdown', pagePointerDown);
+      prose.remove();
+    }
+  });
+});
+
 /**
  * The overlay paints and dismisses; it does not raise a menu. A product's
  * toolbar must also appear for the browser's own selection — a mouse drag, a
@@ -282,6 +375,21 @@ describe('dismissal', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
 
     expect(selection.dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismisses contextual tools on the first Escape and the selection on the second', () => {
+    const selection = resting();
+    const onEscape = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false);
+    const onSelectionCleared = vi.fn();
+    render(<SelectionOverlay selection={selection} onEscape={onEscape} onSelectionCleared={onSelectionCleared} />);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(selection.dismiss).not.toHaveBeenCalled();
+    expect(onSelectionCleared).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(selection.dismiss).toHaveBeenCalledTimes(1);
+    expect(onSelectionCleared).toHaveBeenCalledTimes(1);
   });
 
   it('ends the selection on a press outside it', () => {
@@ -376,6 +484,8 @@ describe('a resting selection is resized only by acquiring a visible handle', ()
       fireEvent(body, event);
 
       expect(selection.dismiss).not.toHaveBeenCalled();
+      expect(selection.activateCurrentSelection).toHaveBeenCalledTimes(1);
+      expect(selection.beginHandleAdjustment).not.toHaveBeenCalled();
       expect(event.defaultPrevented).toBe(true);
       // stopPropagation in capture: the event never reaches the target, so the
       // prose's own pointerdown — the thing that would start a new selection —

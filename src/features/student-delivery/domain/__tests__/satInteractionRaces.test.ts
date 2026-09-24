@@ -113,7 +113,7 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
       ],
       rwCtx(),
     );
-    expect(selectingThenNavigate.annotation.selection).toBeNull();
+    expect(selectingThenNavigate.annotation.selectionToolsAnchor).toBeNull();
     // …but the mode does: it belongs to the module, not the question.
     expect(selectingThenNavigate.annotation.modeEnabled).toBe(true);
     assertSatInteractionInvariants(selectingThenNavigate, rwCtx());
@@ -127,9 +127,9 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
       ],
       rwCtx(),
     );
-    expect(captured.annotation.selection).not.toBeNull();
+    expect(captured.annotation.selectionToolsAnchor).not.toBeNull();
     const normalized = normalizeSatInteractionState(captured, mathCtx());
-    expect(normalized.annotation.selection).toBeNull();
+    expect(normalized.annotation.selectionToolsAnchor).toBeNull();
     expect(normalized.annotation.modeEnabled).toBe(false);
     assertSatInteractionInvariants(normalized, mathCtx());
   });
@@ -157,15 +157,15 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
       [
         { type: 'ANNOTATION_MODE_ENABLED' },
         { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
-        { type: 'TEXT_SELECTION_CLEARED' },
+        { type: 'TEXT_SELECTION_TOOLS_DISMISSED' },
         { type: 'ANNOTATION_MODE_DISABLED' },
       ],
       rwCtx(),
     );
-    expect(armedAndSelected.annotation.selection).not.toBeNull();
+    expect(armedAndSelected.annotation.selectionToolsAnchor).not.toBeNull();
     for (const state of [disarmFirst, escapeFirst]) {
       expect(state.annotation.modeEnabled).toBe(false);
-      expect(state.annotation.selection).toBeNull();
+      expect(state.annotation.selectionToolsAnchor).toBeNull();
       assertSatInteractionInvariants(state, rwCtx());
     }
   });
@@ -179,7 +179,7 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
       ],
       rwCtx(),
     );
-    expect(state.annotation.selection).toBeNull();
+    expect(state.annotation.selectionToolsAnchor).toBeNull();
     assertSatInteractionInvariants(state, rwCtx());
   });
 
@@ -209,7 +209,7 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
     // asserting that nothing happened rather than that nothing broke.
     const end = run(torture, rwCtx());
     expect(end.surface.kind).toBe('none');
-    expect(end.annotation.selection).toBeNull();
+    expect(end.annotation.selectionToolsAnchor).toBeNull();
     expect(end.annotation.modeEnabled).toBe(false);
   });
 });

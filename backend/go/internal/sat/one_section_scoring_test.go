@@ -36,11 +36,12 @@ func TestScoringOneSectionRunHasNoCompositeTotal(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections FROM assessment_access_links")).
 		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections"}).AddRow(`["reading-writing"]`))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
-		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).
-			AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).
-			AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
+		sqlmock.NewRows([]string{"module_id", "section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).
+			AddRow("mod-rw-m1", "reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).
+			AddRow("mod-rw-m2-lower", "reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	expectRouteDecisions(mock, [3]string{"reading-writing", "mod-rw-m2-lower", "lower"})
 	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(
@@ -106,9 +107,9 @@ func TestScoringFullRunStillRequiresBothSections(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
-		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).
-			AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).
-			AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
+		sqlmock.NewRows([]string{"module_id", "section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).
+			AddRow("mod-rw-m1", "reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).
+			AddRow("mod-rw-m2-lower", "reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
 	mock.ExpectRollback()

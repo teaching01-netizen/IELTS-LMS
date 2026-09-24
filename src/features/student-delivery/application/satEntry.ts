@@ -23,8 +23,7 @@ import {
  *
  * An adaptive branch module is selected by the server when Module 1 closes.
  * Once that server-supplied attempt is unstarted and the timing/proctor gates
- * allow entry, this client automatically opens it whether Module 1 timed out
- * or was submitted early.
+ * allow entry, this client automatically opens it after the prior module ends.
  */
 
 export type SatEntryReason =
@@ -109,21 +108,19 @@ function isUnstartedAttempt(attempt: AssessmentModuleAttemptSnapshot): boolean {
 /**
  * Tolerance for "this module's clock had run out by the time it ended". The
  * student-facing countdown is ceil-based and driven by a server-clock offset,
- * and the verdict is read from the submit response a round trip later, so an
- * exact `deadline <= serverNow` would be brittle by up to a second either way.
+ * and the verdict arrives in an authoritative bootstrap after reconciliation,
+ * so an exact `deadline <= serverNow` would be brittle by up to a second.
  */
 export const SAT_MODULE_TIMEOUT_TOLERANCE_MS = 1_000;
 
 /**
- * Whether one finished module attempt ended on its own clock rather than by a
- * student submit.
+ * Whether one finished module attempt ended on its own clock.
  *
  * This is read from the payload, not from local submit state, so the live
  * session, a poll that discovers a server-side finalization, an offline
  * reconnect, and a page reload all reach the same verdict. `completionReason`
- * cannot answer it: the client's own expiry submit goes through SubmitModule,
- * which records `student_submit` for every client-driven module close, and only
- * the server reconciler writes `time_expired`.
+ * alone cannot answer it because historical attempts may still contain
+ * `student_submit`.
  */
 export function moduleAttemptEndedByOwnClock(
   attempt: AssessmentModuleAttemptSnapshot | undefined,

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"regexp"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
@@ -41,14 +42,17 @@ func resolverNormalizedRow(mock sqlmock.Sqlmock, moduleID, sectionKey, state str
 func resolverNormalizedRowForProvider(mock sqlmock.Sqlmock, moduleID, sectionKey, state, provider string) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).
 		WithArgs("att-1", "q-1", "q-1", "att-1", "q-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "state", "provider_key"}).
-			AddRow(moduleID, sectionKey, state, provider))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "section_key", "state", "provider_key", "started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
+		}).AddRow(moduleID, sectionKey, state, provider, nil, nil, nil, nil))
 }
 
 func resolverSnapshotExpectations(mock sqlmock.Sqlmock, attemptID, questionID, snapshot, provider string) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).
 		WithArgs(attemptID, questionID, questionID, attemptID, questionID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "state", "provider_key"}))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "section_key", "state", "provider_key", "started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
+		}))
 	// Provider gate (defect 6): the snapshot fallback first checks whether
 	// the attempt belongs to a SAT exam.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts sa JOIN exam_schedules")).
@@ -58,6 +62,36 @@ func resolverSnapshotExpectations(mock sqlmock.Sqlmock, attemptID, questionID, s
 		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts a JOIN exam_versions v")).
 			WithArgs(attemptID).
 			WillReturnRows(sqlmock.NewRows([]string{"content_snapshot"}).AddRow(snapshot))
+	}
+}
+
+func TestV2ResolverUsesSATPersonalModuleDeadline(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).
+		WithArgs("att-1", "q-1", "q-1", "att-1", "q-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "section_key", "state", "provider_key", "started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
+		}).AddRow("mod-1", "reading-writing", "active", "sat", startedAt, 60, 10, 5))
+	owner, err := (v2Resolver{}).Resolve(context.Background(), tx, "att-1", "q-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner.ModuleDeadlineAt == nil || !owner.ModuleDeadlineAt.Equal(startedAt.Add(75*time.Second)) {
+		t.Fatalf("SAT personal deadline must include allotment, extension, and completed pauses: %+v", owner.ModuleDeadlineAt)
+	}
+	_ = tx.Rollback()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

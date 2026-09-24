@@ -5,6 +5,7 @@ import { measureSatAnnotation } from './satAnnotationPlacementRuntime';
 import {
   hiddenSelectionMenu,
   placeSelectionMenu,
+  type SelectionMenuEnvironment,
   type SelectionMenuPlacement,
 } from '@shared/ui/selection-v2/engine/selectionPlacement';
 
@@ -52,11 +53,10 @@ function newSession(): SatAnnotationPlacementSession {
 
 export interface SatAnnotationPlacementOptions {
   /**
-   * Coarse pointer. It never chooses the presentation — there is only one — it
-   * reserves the lane the native selection menu will claim and asks for a
-   * roomier budget, because a finger needs more than a cursor does.
+   * Separate ergonomics from browser UI: a coarse pointer widens the comfort
+   * budget, while only native selection UI reserves its lane.
    */
-  touch?: boolean | undefined;
+  environment: SelectionMenuEnvironment;
   /** Logical-to-viewport scale of the exam plane containing this surface. */
   visualScale?: number | undefined;
 }
@@ -90,7 +90,7 @@ export interface SatAnnotationPlacementOptions {
  */
 export function useSatAnnotationPlacement(
   anchor: SatTextAnchor | null,
-  options: SatAnnotationPlacementOptions = {},
+  options: SatAnnotationPlacementOptions,
 ): {
   placement: SelectionMenuPlacement | null;
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -101,7 +101,7 @@ export function useSatAnnotationPlacement(
   const session = useRef<SatAnnotationPlacementSession>(newSession());
   const frameRef = useRef<number | null>(null);
   const settleRef = useRef<number | null>(null);
-  const touch = options.touch === true;
+  const environment = options.environment;
   const visualScale = options.visualScale ?? 1;
 
   /** Take a decision as final: it is what the student sees from now on. */
@@ -170,10 +170,10 @@ export function useSatAnnotationPlacement(
       viewport: measurement.viewport,
       size: measurement.size,
       previous: session.current.previous,
-      touch,
+      environment,
       budgets,
     }));
-  }, [anchor, armRemeasure, reveal, settleCapMs, touch, visualScale]);
+  }, [anchor, armRemeasure, environment, reveal, settleCapMs, visualScale]);
 
   // The settle timer outlives any single subscription: a rotation wait must not
   // be cancelled by a re-render, and when it ends it has to place the selection

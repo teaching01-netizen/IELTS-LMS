@@ -19,15 +19,13 @@ const REVIEW_ITEMS: readonly SatQuestionNavigationItem[] = [
   { id: "q2", index: 1, number: 2, status: "unanswered", current: false, markedForReview: false },
 ];
 
-describe("Wave C R-11/R-12/R-15 copy-table contract (4 R-11 strings + R-12 key + R-15 canonical + alias-removed + H1 kept)", () => {
-  it("lands the four R-11 strings", () => {
+describe("Wave C R-11/R-12/R-15 copy-table contract (retained R-11 strings + R-12 key + R-15 canonical + alias-removed + H1 kept)", () => {
+  it("lands the three retained R-11 strings", () => {
     // (1) takeBreak — shared with R-12.
     expect(SAT_COPY.unscheduledBreak.takeBreak).toBe("Start my break");
     // (2) reviewAnswers — shared with R-15.
     expect(SAT_COPY.navigation.reviewAnswers).toBe("Review answers");
-    // (3) timerWarning.title — Title Case alert-title fragment.
-    expect(SAT_COPY.timerWarning.title).toBe("5 Minutes Remaining");
-    // (4) completeTitle — "SAT Complete": H1s are NOT sentence-case
+    // (3) completeTitle — "SAT Complete": H1s are NOT sentence-case
     // house-wide (directions H1 = Title Case section label, group headings =
     // Title Case; only the review H1 keeps sentence case as a deliberate
     // CTA-bare/H1-pronoun exception), so the complete H1 reads as a Title
@@ -115,11 +113,11 @@ describe("Wave C R-14 review subhead drops the eyebrow echo", () => {
         remainingLabel="12:00"
         items={REVIEW_ITEMS}
         answeredCount={1}
-        isSubmitting={false}
-        persistenceBlocked={false}
+        pendingSaveCount={0}
+        saveFailure={null}
+        saveFailureKind={null}
         onSelectQuestion={vi.fn()}
         onBack={vi.fn()}
-        onSubmit={vi.fn()}
       />,
     );
     // H1 still owns the pronoun.

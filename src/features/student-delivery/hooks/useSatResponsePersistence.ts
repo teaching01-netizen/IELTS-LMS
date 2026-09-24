@@ -26,7 +26,7 @@ import {
 import type { SatDeliveryGateway } from '../application/ports/SatDeliveryGateway';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 import {
-  ensureClientSessionIdForAttempt,
+  ensureBrowserClientSessionIdForAttempt,
   restoreClientSessionIdForAttempt,
   rotateClientSessionIdForAttempt,
 } from '@student/api/studentAttemptGateway';
@@ -44,7 +44,7 @@ export interface SatResponsePersistenceOptions {
   credentialAttempt?: StudentAttempt | null | undefined;
 }
 
-export type SatResponseFailureKind = 'offline' | 'retryable' | 'terminal' | 'superseded';
+export type SatResponseFailureKind = 'offline' | 'retryable' | 'terminal' | 'expired' | 'superseded';
 
 export interface SatResponseSaveContext {
   moduleAttemptId: string;
@@ -209,9 +209,11 @@ export function useSatResponsePersistence({
   }, [attemptId, scheduleId]);
 
   useEffect(() => {
+    const attempt = credentialAttemptRef.current ?? undefined;
     const transport = createResponseDurabilityV2Transport(
       scheduleId,
-      credentialAttemptRef.current ?? undefined
+      attempt,
+      attempt ? ensureBrowserClientSessionIdForAttempt(attempt) : undefined,
     );
     const initialLeaseEpoch =
       typeof leaseEpoch === 'number' && Number.isSafeInteger(leaseEpoch) && leaseEpoch > 0
@@ -259,7 +261,10 @@ export function useSatResponsePersistence({
         }
         setBlockedDrafts(blockedIds);
         const display = mapEngineStatus(status, blockedIds.length);
-        if (status === 'durability_fault') {
+        if (error?.includes('DEADLINE_EXPIRED')) {
+          setFailure('A final answer was not confirmed before the save window ended. It remains on this device. Please contact your proctor.');
+          setFailureKind('expired');
+        } else if (status === 'durability_fault') {
           setFailure(error ?? 'Answer storage is unavailable.');
           setFailureKind('terminal');
         } else if (display === 'blocked_attention') {
@@ -274,6 +279,9 @@ export function useSatResponsePersistence({
         } else if (status === 'conflict_terminal') {
           setFailure(error ?? 'This response can no longer be changed.');
           setFailureKind('terminal');
+        } else if (status === 'saved_locally' && error) {
+          setFailure(error);
+          setFailureKind('retryable');
         } else if (status === 'synced' && display === 'saved') {
           setFailure(null);
           setFailureKind(null);
@@ -281,7 +289,15 @@ export function useSatResponsePersistence({
       },
     });
     v2EngineRef.current = engine;
-    const recovery = engine.recover().catch((error: unknown) => {
+    const recovery = engine.recover().then(() => {
+      if (
+        mountedRef.current &&
+        identityGenerationRef.current === generation &&
+        v2EngineRef.current === engine
+      ) {
+        setTombstoneCount(engine.getQuarantined().length);
+      }
+    }).catch((error: unknown) => {
       if (
         !mountedRef.current ||
         identityGenerationRef.current !== generation ||
@@ -350,7 +366,7 @@ export function useSatResponsePersistence({
   }, []);
 
   const save = useCallback(
-    (response: SatQuestionResponseDraft, _context?: SatResponseSaveContext) => {
+    (response: SatQuestionResponseDraft, context?: SatResponseSaveContext) => {
       const generation = identityGenerationRef.current;
       const saveV2 = async () => {
         if (!v2EngineRef.current) {
@@ -364,7 +380,11 @@ export function useSatResponsePersistence({
           !mountedRef.current
         )
           return;
-        await engine.acceptResponse(response.questionId, satDraftToDurablePayload(response));
+        await engine.acceptResponse(response.questionId, satDraftToDurablePayload(response), {
+          drainImmediately:
+            context?.interactionType !== 'typing' ||
+            (context.remainingSeconds <= 5),
+        });
       };
       const acceptance = saveV2();
       v2PendingAcceptancesRef.current.add(acceptance);
@@ -447,11 +467,10 @@ export function useSatResponsePersistence({
     if (ready) await ready;
     const engine = v2EngineRef.current;
     if (!engine) throw new Error('V2 response durability engine is not ready.');
-    // Submit gate (WP4/WP5) + SAT-004 boundary barrier: the same engine
-    // invariant the module boundary uses. Blocked/quarantined drafts and any
-    // unsettled visible intent must be resolved or explicitly discarded
-    // before submit; never silently exclude drafts. Throwing blocks the
-    // submitModule/finalize path, which surfaces failure/failureKind in the
+    // Blocked/quarantined drafts and unsettled visible intent must be resolved
+    // or explicitly discarded before finalization; never silently exclude
+    // drafts. Throwing blocks the
+    // assessment-finalize path, which surfaces failure/failureKind in the
     // route banner + review page. engine.submit() keeps its own guard as the
     // provider-independent backstop below.
     await assertBoundarySettled();
@@ -569,7 +588,7 @@ export function useSatResponsePersistence({
       ) {
         throw new Error('Missing SAT attempt identity for lease takeover.');
       }
-      const previousClientSessionId = ensureClientSessionIdForAttempt(attempt);
+      const previousClientSessionId = ensureBrowserClientSessionIdForAttempt(attempt);
       const nextClientSessionId = rotateClientSessionIdForAttempt(attempt);
       let takeoverAccepted = false;
       setIsTakingOver(true);

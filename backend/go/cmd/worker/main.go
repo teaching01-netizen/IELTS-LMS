@@ -4,9 +4,9 @@
 //
 // Hot cycle (every worker fallback interval): bounded outbox drain (at most
 // 20 claim batches of at most OUTBOX_BATCH_SIZE rows under a 60s lease) plus
-// the grading projection when GRADING_PROJECTION_ENABLED. Slow cycle (every
-// worker maintenance interval): SAT reconciliation, terminal repairs,
-// invariant audit, retention and media cleanup.
+// the grading projection when GRADING_PROJECTION_ENABLED. SAT timeout
+// reconciliation runs independently every five seconds; slow cycle (every
+// worker maintenance interval) handles repairs, audits, retention and media.
 package main
 
 import (
@@ -38,11 +38,11 @@ import (
 	"example.com/ielts-proctoring/internal/terminalization"
 )
 
-// Jobs enumerates the background job set (mirrors the Rust worker cycles:
-// hot outbox+projection pass plus slower maintenance pass).
+// Jobs enumerates the background job set (hot outbox+projection, independent
+// SAT timeout reconciliation, and the slower maintenance pass).
 var Jobs = []string{
 	"DrainOutbox",
-	"ReconcileRuntimeTimeouts",
+	"ReconcileSATTimeouts",
 	"ReconcileExpiredSections",
 	"ReconcileSATProvisionalCompletion",
 	"RepairSATTerminalResults",
@@ -54,6 +54,10 @@ var Jobs = []string{
 	"NormalizeMediaDownloadURLs",
 	"RepairACTCanonicalResults",
 }
+
+// SAT timeout finalization is a correctness owner, so it runs independently
+// of the slower best-effort maintenance cadence.
+const satTimeoutReconcileInterval = 5 * time.Second
 
 // worker carries the handles every background job needs. Dependencies are
 // wired once in main and passed explicitly; there is no package-level state.
@@ -105,6 +109,7 @@ func (w *worker) sealerFor() terminalSealer {
 }
 
 func main() {
+	timeoutOnly := satTimeoutsOnlyRequested(os.Args[1:])
 	// WS-09 operator command: requeue one dead letter as a fresh outbox
 	// event (same idempotency key) and print the new event id. Fail
 	// closed on a missing/unresolvable id instead of inventing work.
@@ -187,6 +192,13 @@ func main() {
 	defer hot.Stop()
 	slow := time.NewTicker(slowEvery)
 	defer slow.Stop()
+	go w.runTimeoutReconcileLoop(ctx)
+	if timeoutOnly {
+		log.Printf("worker: starting SAT-timeout-only mode interval=%s", satTimeoutReconcileInterval)
+		<-ctx.Done()
+		log.Printf("worker: SAT-timeout-only mode stopped")
+		return
+	}
 
 	for {
 		select {
@@ -199,6 +211,31 @@ func main() {
 			w.runMaintenanceCycle(ctx, t)
 		}
 	}
+}
+
+func (w *worker) runTimeoutReconcileLoop(ctx context.Context) {
+	// One initial sweep avoids waiting a full interval on process start; the
+	// ticker runs independently of outbox and maintenance work thereafter.
+	w.runTimeoutReconcileCycle(ctx, time.Now().UTC())
+	ticker := time.NewTicker(satTimeoutReconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.runTimeoutReconcileCycle(ctx, time.Now().UTC())
+		}
+	}
+}
+
+func satTimeoutsOnlyRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "--sat-timeouts-only" {
+			return true
+		}
+	}
+	return false
 }
 
 // requeueDeadLetterID parses the WS-09 operator requeue flags from raw
@@ -875,6 +912,20 @@ func (w *worker) refreshRollups(ctx context.Context) {
 	}
 }
 
+// runTimeoutReconcileCycle is called on a bounded cadence in both continuous
+// and activity-driven deployments. The success log doubles as a worker-health
+// heartbeat; errors are visible even when the student is disconnected.
+func (w *worker) runTimeoutReconcileCycle(ctx context.Context, at time.Time) {
+	started := time.Now()
+	n, err := w.delivery.ReconcileTimeouts(ctx, at.UTC(), maintenance.SATRepairBatch)
+	if err != nil {
+		log.Printf("worker: SATTimeoutReconcile failed error=%v duration=%s", err, time.Since(started))
+		telemetry.IncCounter(telemetry.MJobFailures, "job", "sat_timeout_reconcile")
+		return
+	}
+	log.Printf("worker: SATTimeoutReconcile healthy finalized=%d duration=%s", n, time.Since(started))
+}
+
 // runMaintenanceCycle runs reconciliation, repair, audit, retention, media.
 func (w *worker) runMaintenanceCycle(ctx context.Context, at time.Time) {
 	defer observeJobDuration("maintenance", time.Now())
@@ -912,12 +963,6 @@ func (w *worker) runMaintenanceCycle(ctx context.Context, at time.Time) {
 	if w.cfg.RollupEnabled {
 		w.refreshRollups(ctx)
 	}
-	if n, err := w.delivery.ReconcileTimeouts(ctx, time.Now().UTC(), maintenance.SATRepairBatch); err != nil {
-		log.Printf("worker: ReconcileRuntimeTimeouts error: %v", err)
-	} else {
-		log.Printf("worker: ReconcileRuntimeTimeouts reconciled=%d", n)
-	}
-
 	if n, err := w.sat.ReconcileProvisional(ctx); err != nil {
 		log.Printf("worker: ReconcileSATProvisionalCompletion error: %v", err)
 	} else {

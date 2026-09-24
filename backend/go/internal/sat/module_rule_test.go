@@ -69,9 +69,9 @@ func TestFinalizerRefusesUnfinishedModule(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satModules(
-		[]driver.Value{"reading-writing", "rw-m1", "base", attempts.SATModuleSubmitted, int64(20), int64(27), int64(27)},
-		[]driver.Value{"reading-writing", "rw-m2-lower", "lower_branch", attempts.SATModuleSubmitted, int64(20), int64(27), int64(27)},
-		[]driver.Value{"math", "math-m1", "base", "active", int64(20), int64(27), int64(27)},
+		[]driver.Value{"mod-rw-m1", "reading-writing", "rw-m1", "base", attempts.SATModuleSubmitted, int64(20), int64(27), int64(27)},
+		[]driver.Value{"mod-rw-m2-lower", "reading-writing", "rw-m2-lower", "lower_branch", attempts.SATModuleSubmitted, int64(20), int64(27), int64(27)},
+		[]driver.Value{"mod-math-m1", "math", "math-m1", "base", "active", int64(20), int64(27), int64(27)},
 	))
 	// No policy read, no scoring write: the refusal happens before them.
 	mock.ExpectRollback()

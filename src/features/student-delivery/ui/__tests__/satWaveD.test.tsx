@@ -8,56 +8,14 @@ import { SatHelpModal } from "../help/SatHelpModal";
 const UI = __dirname + "/..";
 const read = (rel: string) => readFileSync(resolve(UI, rel), "utf8");
 
-describe("Wave D R-21 the failure banner clears the footer (96px + safe-bottom)", () => {
-  it("the one surviving banner branch rides bottom calc(96px + safe-bottom)", () => {
+describe("save failures stay in the exam layout", () => {
+  it("uses an in-flow alert without fixed positioning or overlay stacking", () => {
     const source = read("feedback/SatSaveStatus.tsx");
-    const hits = source.match(/bottom-\[calc\(96px\+var\(--student-safe-bottom\)\)\]/g) ?? [];
-    expect(hits.length).toBe(1);
-    expect(source).not.toContain("bottom-[calc(78px+");
-    expect(source).not.toContain("bottom-[calc(82px+");
-  });
-
-  it("keeps the failure geometry contract: the only banner is a z-[85] alert", () => {
+    expect(source).not.toMatch(/\bfixed\b/);
+    expect(source).not.toContain("z-[");
     const { unmount } = render(<SatSaveStatus state="failed" onRetrySave={vi.fn()} />);
-    const banner = screen.getByTestId("sat-save-status");
-    expect(banner.className).toContain("z-[85]");
-    expect(banner.className).toContain("bottom-[calc(96px+var(--student-safe-bottom))]");
-    expect(banner).toHaveAttribute("role", "alert");
+    expect(screen.getByTestId("sat-save-status")).toHaveAttribute("role", "alert");
     unmount();
-  });
-
-  it("banner rect clears the footer pill rect at 390x844 and desktop widths", () => {
-    // Geometry model (jsdom has no layout engine): footer pill occupies the
-    // bottom ~86px rhythm; the banner bottom edge sits at 96px + safe-area,
-    // i.e. 10px of air above the footer. Assert the arithmetic, not pixels:
-    // parse both offsets from source and require banner - footer >= 10.
-    const save = read("feedback/SatSaveStatus.tsx");
-    const nav = read("shell/SatQuestionNavigator.tsx");
-    const bannerOffsets = [...save.matchAll(/bottom-\[calc\((\d+)px\+var\(--student-safe-bottom\)\)\]/g)].map(
-      (m) => Number(m[1]),
-    );
-    const footerOffsets = [...nav.matchAll(/bottom-\[calc\((\d+)px\+var\(--student-safe-bottom\)\)\]/g)].map(
-      (m) => Number(m[1]),
-    );
-    expect(bannerOffsets).toHaveLength(1);
-    expect(footerOffsets.length).toBeGreaterThan(0);
-    const footerTop = Math.max(...footerOffsets); // navigator rhythm: 86px
-    expect(footerTop).toBe(86);
-    for (const banner of bannerOffsets) {
-      // banner rect bottom edge is above the footer rect top edge with air.
-      expect(banner - footerTop).toBeGreaterThanOrEqual(10);
-    }
-    // Same clearance holds regardless of viewport width (390x844 mobile and
-    // desktop share the fixed-bottom formula; only safe-area varies).
-    for (const viewportWidth of [390, 1440]) {
-      expect(viewportWidth).toBeGreaterThan(0);
-      for (const banner of bannerOffsets) {
-        expect(banner - footerTop).toBeGreaterThanOrEqual(10);
-      }
-    }
-    // Rects disjoint: banner bottom (96) > footer top (86) with equal
-    // safe-bottom terms cancelling, so intersection is empty at both sizes.
-    expect(Math.min(...bannerOffsets)).toBeGreaterThan(footerTop);
   });
 });
 

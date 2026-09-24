@@ -99,6 +99,72 @@ func TestGetSATResultNarrowsTenantToAssignment(t *testing.T) {
 	}
 }
 
+func expectScoredSATResultBase(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_results ar")).
+		WithArgs("result-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "submission_id", "provider_key", "outcome_status", "total_score", "score_payload", "release_status",
+			"schedule_id", "exam_id", "exam_title", "version_number", "candidate_id", "candidate_name", "candidate_email", "cohort_name", "submitted_at",
+		}).AddRow("result-1", "attempt-1", nil, "sat", OutcomeScored, int64(1200), `{}`, ReleaseReady, "schedule-1", "exam-1", "Practice SAT", 1, "candidate-1", "Student", nil, "Cohort", nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_section_results WHERE assessment_result_id = ?")).
+		WithArgs("result-1").
+		WillReturnRows(sqlmock.NewRows([]string{"section_key", "route", "raw_correct", "operational_question_count", "scaled_score", "details"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).
+		WithArgs("attempt-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"section_key", "module_key", "adaptive_role", "display_order", "state", "raw_correct", "operational_question_count",
+		}))
+}
+
+func TestGetSATResultQuestionQueryFailureIsNotAnEmptyResult(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	queryErr := errors.New("database unavailable")
+	expectScoredSATResultBase(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).
+		WithArgs("attempt-1").
+		WillReturnError(queryErr)
+
+	svc := NewService(db)
+	_, err = svc.GetSATResult(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "result-1")
+	if !errors.Is(err, queryErr) || !strings.Contains(err.Error(), "load SAT question responses") {
+		t.Fatalf("expected wrapped question-detail error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGetSATResultReturnsEmptyQuestionsOnlyAfterSuccessfulQuery(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	expectScoredSATResultBase(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).
+		WithArgs("attempt-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"section_key", "module_key", "module_display_order", "question_display_order", "exam_question_id", "question_id",
+			"is_pretest", "marked_for_review", "response", "answer_definition", "response_v2", "v2_present", "v_question_id",
+		}))
+
+	svc := NewService(db)
+	detail, err := svc.GetSATResult(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "result-1")
+	if err != nil {
+		t.Fatalf("expected successful empty detail query, got %v", err)
+	}
+	if detail == nil || detail.Questions == nil || len(detail.Questions) != 0 {
+		t.Fatalf("expected an explicitly empty question list, got %+v", detail)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSATDetailTypesDefaultToEmptyDetail(t *testing.T) {
 	// A zero SATDetail must serialize additive detail fields as empty
 	// arrays (not null) so older section-only clients keep working and new
@@ -195,14 +261,14 @@ func TestSATQuestionsApplyNullVerdictRule(t *testing.T) {
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"section_key", "module_key", "module_display_order", "question_display_order",
-			"question_id", "is_pretest", "marked_for_review", "response", "answer_definition",
+			"exam_question_id", "question_id", "is_pretest", "marked_for_review", "response", "answer_definition",
 			"response_v2", "v2_present", "v_question_id",
 		}).
-			AddRow("reading-writing", "rw-base", 1, 1, "q-scored", false, false, `"B"`, singleChoice, nil, false, nil).
-			AddRow("reading-writing", "rw-base", 1, 2, "q-wrong", false, true, `"A"`, singleChoice, nil, false, nil).
-			AddRow("reading-writing", "rw-base", 1, 3, "q-blank", false, false, nil, singleChoice, nil, false, nil).
-			AddRow("math", "m-base", 1, 1, "q-pre", true, false, `"B"`, singleChoice, nil, false, nil).
-			AddRow("math", "m-base", 1, 2, "q-nokey", false, false, `"B"`, `{"kind":"single_choice"}`, nil, false, nil))
+			AddRow("reading-writing", "rw-base", 1, 1, "eq-1", "q-scored", false, false, `"B"`, singleChoice, nil, false, nil).
+			AddRow("reading-writing", "rw-base", 1, 2, "eq-2", "q-wrong", false, true, `"A"`, singleChoice, nil, false, nil).
+			AddRow("reading-writing", "rw-base", 1, 3, "eq-3", "q-blank", false, false, nil, singleChoice, nil, false, nil).
+			AddRow("math", "m-base", 1, 1, "eq-4", "q-pre", true, false, `"B"`, singleChoice, nil, false, nil).
+			AddRow("math", "m-base", 1, 2, "eq-5", "q-nokey", false, false, `"B"`, `{"kind":"single_choice"}`, nil, false, nil))
 	svc := NewService(db)
 	questions, err := svc.satQuestions(context.Background(), "attempt-1")
 	if err != nil {
@@ -248,11 +314,11 @@ func TestSATQuestionsV2WinsOverLegacy(t *testing.T) {
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"section_key", "module_key", "module_display_order", "question_display_order",
-			"question_id", "is_pretest", "marked_for_review", "response", "answer_definition",
+			"exam_question_id", "question_id", "is_pretest", "marked_for_review", "response", "answer_definition",
 			"response_v2", "v2_present", "v_question_id",
 		}).
-			AddRow("reading-writing", "rw-base", 1, 1, "q-v2correct", false, false, `"A"`, singleChoice, `{"answer":"B","markedForReview":true}`, true, "q-v2correct").
-			AddRow("reading-writing", "rw-base", 1, 2, "q-v2stale", false, false, `"B"`, singleChoice, `{"answer":null}`, true, "q-v2stale"))
+			AddRow("reading-writing", "rw-base", 1, 1, "eq-v2-1", "q-v2correct", false, false, `"A"`, singleChoice, `{"answer":"B","markedForReview":true}`, true, "q-v2correct").
+			AddRow("reading-writing", "rw-base", 1, 2, "eq-v2-2", "q-v2stale", false, false, `"B"`, singleChoice, `{"answer":null}`, true, "q-v2stale"))
 	svc := NewService(db)
 	questions, err := svc.satQuestions(context.Background(), "attempt-1")
 	if err != nil {
@@ -276,6 +342,37 @@ func TestSATQuestionsV2WinsOverLegacy(t *testing.T) {
 	}
 	if byID["q-v2stale"].IsCorrect != nil {
 		t.Fatalf("expected null verdict when V2 owns with unusable answer, got %+v", byID["q-v2stale"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSATQuestionsDeduplicateByAdministeredQuestion(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	singleChoice := `{"kind":"single_choice","correctOptionId":"B"}`
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).
+		WithArgs("attempt-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"section_key", "module_key", "module_display_order", "question_display_order", "exam_question_id", "question_id",
+			"is_pretest", "marked_for_review", "response", "answer_definition", "response_v2", "v2_present", "v_question_id",
+		}).
+			AddRow("reading-writing", "rw-base", 1, 1, "exam-q-1", "shared-bank-q", false, false, `"B"`, singleChoice, nil, false, nil).
+			AddRow("math", "m-higher", 2, 1, "exam-q-2", "shared-bank-q", false, false, `"A"`, singleChoice, nil, false, nil))
+
+	questions, err := NewService(db).satQuestions(context.Background(), "attempt-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(questions) != 2 {
+		t.Fatalf("expected both administered placements for the reused question, got %+v", questions)
+	}
+	if questions[0].QuestionID != "shared-bank-q" || questions[1].QuestionID != "shared-bank-q" {
+		t.Fatalf("expected public question identity to remain the bank id, got %+v", questions)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

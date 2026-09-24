@@ -32,8 +32,7 @@ import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satTo
 export type SatCommitHint =
   | { kind: "bootstrap" }
   | { kind: "poll" }
-  | { kind: "startModule"; moduleId: string }
-  | { kind: "submitModule"; moduleId: string };
+  | { kind: "startModule"; moduleId: string };
 
 export interface SatCommitIdentity {
   scheduleId: string;
@@ -58,6 +57,9 @@ export function startModuleRouteAction(
   return {
     type: "routeToModule",
     sectionKey,
+    // The server-selected module ID is the runtime identity; moduleKey only
+    // rides along as display metadata.
+    moduleId: module.id,
     moduleKey: module.moduleKey,
     questionIds: module.questions.map((question) => question.examQuestionId),
     startedAt: timing.startedAt,
@@ -85,23 +87,6 @@ export function decideSatCommitRoute(
       if (!activeModule) return null;
       return startModuleRouteAction(payload, activeModule);
     }
-    case "submitModule": {
-      // SAT-005: the post-submit route (submit / break / directions) is derived
-      // from the payload argument, never from data read back after await.
-      const nextAttempt = findPendingAttempt(payload);
-      const nextModule = moduleForAttempt(payload, nextAttempt);
-      if (!nextModule) return { type: "submit" } as const;
-      const currentSection = sectionForModule(payload, hint.moduleId);
-      const nextSection = sectionForModule(payload, nextModule.id);
-      if (currentSection && nextSection && nextSection.id !== currentSection.id) {
-        return {
-          type: "startBreak",
-          nextSectionKey: nextSection.sectionKey === "math" ? "math" : "reading-writing",
-          resumeAt: nextAttempt?.availableAt ?? payload.serverNow,
-        } as const;
-      }
-      return { type: "showDirections" } as const;
-    }
     case "poll": {
       if (payload.result && preState.phase !== "complete") {
         return {
@@ -117,18 +102,21 @@ export function decideSatCommitRoute(
       }
       if (
         (preState.phase === "module" || preState.phase === "review") &&
-        "moduleKey" in preState
+        "moduleId" in preState
       ) {
+        // Identity comparison by id: a key lookup could resolve the OTHER
+        // adaptive branch (or a same-key module in another section) and then
+        // treat the already-finalized current module as still open.
         const currentModule = payload.sections
           .flatMap((section) => section.modules)
-          .find((candidate) => candidate.moduleKey === preState.moduleKey);
+          .find((candidate) => candidate.id === preState.moduleId);
         const attempt = currentModule
           ? findAttemptForModule(payload, currentModule.id)
           : undefined;
         if (attempt && matchesFinalModuleState(attempt.state)) {
           const nextAttempt = findPendingAttempt(payload);
           const nextModule = moduleForAttempt(payload, nextAttempt);
-          if (nextModule && nextModule.moduleKey !== preState.moduleKey) {
+          if (nextModule && nextModule.id !== preState.moduleId) {
             return { type: "showDirections" } as const;
           }
           if (!nextModule) {

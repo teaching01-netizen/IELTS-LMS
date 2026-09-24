@@ -48,16 +48,16 @@ describe('resolveEscapeAction (exactly one semantic action per press)', () => {
     expect(resolveEscapeAction(state, ctx()).type).toBe('CLOSE_SURFACE');
   });
 
-  it('clears the live annotation selection before the line reader', () => {
+  it('dismisses the contextual annotation tools before the line reader', () => {
     const selected = {
       ...createSatInteractionState(),
       annotation: {
         modeEnabled: true,
-        selection: { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' },
+        selectionToolsAnchor: { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' },
       },
     };
-    expect(resolveEscapeAction(selected, ctx()).type).toBe('CLEAR_SELECTION');
-    expect(resolveEscapeAction(selected, ctx(), { lineReaderEnabled: true }).type).toBe('CLEAR_SELECTION');
+    expect(resolveEscapeAction(selected, ctx()).type).toBe('DISMISS_SELECTION_TOOLS');
+    expect(resolveEscapeAction(selected, ctx(), { lineReaderEnabled: true }).type).toBe('DISMISS_SELECTION_TOOLS');
     // With no selection the line reader is the next thing Escape turns off.
     expect(resolveEscapeAction(createSatInteractionState(), ctx(), { lineReaderEnabled: true }).type).toBe('DISABLE_LINE_READER');
   });
@@ -68,7 +68,7 @@ describe('resolveEscapeAction (exactly one semantic action per press)', () => {
     // dismisses chrome, and the mode is not chrome. It has its own control.
     expect(
       resolveEscapeAction(
-        { ...createSatInteractionState(), annotation: { modeEnabled: true, selection: null } },
+        { ...createSatInteractionState(), annotation: { modeEnabled: true, selectionToolsAnchor: null } },
         ctx(),
       ).type,
     ).toBe('NOOP');

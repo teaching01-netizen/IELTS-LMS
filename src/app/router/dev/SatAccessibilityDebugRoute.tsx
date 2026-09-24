@@ -275,6 +275,7 @@ export function SatAccessibilityDebugRoute() {
         <SatQuestionRenderer
           sectionKey={math ? "math" : "reading-writing"}
           questionNumber={questionIndex + 1}
+          selectionScopeKey={`${math ? "math" : "reading-writing"}::${questionIndex}`}
           question={question}
           response={response}
           eliminationMode={eliminationMode}

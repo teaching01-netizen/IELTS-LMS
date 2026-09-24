@@ -30,6 +30,7 @@ export type SatInteractionIntent =
   | { type: 'ESCAPE_PRESSED'; lineReaderEnabled?: boolean | undefined }
   | { type: 'QUESTION_NAVIGATION_REQUESTED'; moduleKey: string; questionId: string }
   | { type: 'TEXT_SELECTION_CAPTURED'; anchor: SatTextAnchor }
+  | { type: 'TEXT_SELECTION_TOOLS_DISMISSED' }
   | { type: 'TEXT_SELECTION_CLEARED' }
   | { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' }
   | { type: 'ANNOTATION_EDITOR_CLOSED' }
@@ -198,6 +199,8 @@ export function resolveSatInteractionIntent(
         : { type: 'ANNOTATION_MODE_ENABLED' };
     case 'TEXT_SELECTION_CLEARED':
       return { type: 'TEXT_SELECTION_CLEARED' };
+    case 'TEXT_SELECTION_TOOLS_DISMISSED':
+      return { type: 'TEXT_SELECTION_TOOLS_DISMISSED' };
     case 'ANNOTATION_EDITOR_CLOSED':
       return { type: 'ANNOTATION_NOTE_EDITOR_CLOSED' };
     case 'NOTE_EDITOR_SETTLE_REQUESTED':

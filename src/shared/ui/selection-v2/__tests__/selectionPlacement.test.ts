@@ -4,14 +4,14 @@ import {
   SELECTION_MENU_BUDGET_DEFAULTS,
   type SelectionMenuAnchor,
   type SelectionMenuBox,
+  type SelectionMenuEnvironment,
   type SelectionMenuPlacement,
 } from '../engine/selectionPlacement';
 
 /**
  * The one placement rule, exercised from both ends it is used from: a product's
- * measured selection (SAT's per-line geometry, with the native menu's lane
- * reserved on touch) and a selection the exam owns (one box, no lane reserved).
- * Both are the same function, so a case that holds for one holds for the other.
+ * measured selection (SAT's per-line geometry) and a selection the exam owns
+ * (one box, no lane reserved). Ergonomics and native UI are independent inputs.
  */
 
 /**
@@ -61,7 +61,7 @@ function place(
   anchor: SelectionMenuAnchor,
   options: {
     previous?: SelectionMenuPlacement | null;
-    touch?: boolean;
+    environment?: SelectionMenuEnvironment;
     bounds?: typeof bounds;
     viewport?: typeof viewport;
     size?: typeof size;
@@ -74,7 +74,7 @@ function place(
     viewport: options.viewport ?? viewport,
     size: options.size ?? size,
     previous: options.previous ?? null,
-    touch: options.touch ?? false,
+    environment: options.environment ?? { coarsePointer: false, nativeSelectionUi: false },
     ...(options.budgets ? { budgets: options.budgets } : {}),
   });
 }
@@ -116,21 +116,30 @@ describe('placeSelectionMenu: where the menu goes', () => {
     expect(bare.side).toBe('above');
   });
 
-  it('takes the lane the native selection menu leaves free, never the one it covers', () => {
-    // iOS paints its menu above the selection and only flips it below when it
-    // does not fit there — and it is drawn OVER our surface, so on touch that
-    // lane is not ours even when it is the roomier one.
+  it('reserves a native selection lane only when native selection UI exists', () => {
+    // When browser-owned selection UI exists, iOS paints its menu above the
+    // selection and only flips it below when it does not fit there. It is drawn
+    // OVER our surface, so the claimed lane is unavailable even when roomier.
     const roomyAbove = geometry({ top: 300, bottom: 320 });
-    const withFinger = place(roomyAbove, { touch: true });
-    expect(withFinger.mode).toBe('floating');
-    expect(withFinger.side).toBe('below');
+    const withNativeUi = place(roomyAbove, {
+      environment: { coarsePointer: true, nativeSelectionUi: true },
+    });
+    expect(withNativeUi.mode).toBe('floating');
+    expect(withNativeUi.side).toBe('below');
+
+    // A real exam owns this selection, so it keeps the touch comfort budget but
+    // does not reserve a lane for UI the browser will not draw.
+    const owned = place(roomyAbove, {
+      environment: { coarsePointer: true, nativeSelectionUi: false },
+    });
+    expect(owned.side).toBe('above');
 
     // The same selection with a mouse reserves nothing, so the width above still
     // wins exactly as it always has.
     expect(place(roomyAbove).side).toBe('above');
   });
 
-  it('floats past the menu own zone when the menu has taken the only lane with room', () => {
+  it('floats past the native UI zone when native selection UI has taken the only lane with room', () => {
     // A selection near the top: iOS cannot fit its menu above and flips it
     // below, which is the lane we would have used. Above holds 48px against the
     // 144 a toolbar wants — so the toolbar goes into the menu's lane, but clear
@@ -138,7 +147,11 @@ describe('placeSelectionMenu: where the menu goes', () => {
     // sitting under it is not.
     const short = { left: 0, top: 0, width: 800, height: 400 };
     const high = geometry({ top: 60, bottom: 80 });
-    const withFinger = place(high, { touch: true, viewport: short, bounds: short });
+    const withFinger = place(high, {
+      environment: { coarsePointer: true, nativeSelectionUi: true },
+      viewport: short,
+      bounds: short,
+    });
     expect(withFinger.mode).toBe('floating');
     expect(withFinger.side).toBe('below');
     expect(withFinger.top).toBe(80 + NATIVE_ZONE + GAP);
@@ -152,6 +165,20 @@ describe('placeSelectionMenu: where the menu goes', () => {
     expect(withMouse.mode).toBe('floating');
     expect(withMouse.side).toBe('below');
     expect(withMouse.top).toBe(80 + GAP);
+  });
+
+  it('keeps coarse-pointer comfort spacing without a native UI lane', () => {
+    const short = { left: 0, top: 0, width: 800, height: 400 };
+    const high = geometry({ top: 60, bottom: 80 });
+    const owned = place(high, {
+      environment: { coarsePointer: true, nativeSelectionUi: false },
+      viewport: short,
+      bounds: short,
+    });
+
+    expect(owned.side).toBe('below');
+    expect(owned.top).toBe(80 + GAP);
+    expect(owned.top).not.toBe(80 + NATIVE_ZONE + GAP);
   });
 
   it('floats a selection that covers the viewport, and pins itself only when there is nothing left', () => {
@@ -351,6 +378,7 @@ describe('placeSelectionMenu: a selection the exam owns', () => {
       bounds: wide,
       viewport: wide,
       size: small,
+      environment: { coarsePointer: true, nativeSelectionUi: false },
     });
 
     expect(result.side).toBe('above');
@@ -366,6 +394,7 @@ describe('placeSelectionMenu: a selection the exam owns', () => {
       bounds: wide,
       viewport: { left: 0, top: 0, width: 200, height: 800 },
       size: small,
+      environment: { coarsePointer: false, nativeSelectionUi: false },
     });
 
     expect(result.width).toBe(200 - EDGE * 2);

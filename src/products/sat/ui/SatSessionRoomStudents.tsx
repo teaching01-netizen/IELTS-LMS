@@ -5,30 +5,12 @@ import { useAuthoritativeDeadlineClock, type ServerClockSnapshot } from '../../.
 import { SatEyebrow } from './SatPage';
 import { SatMenu } from './Menu';
 import { formatRunSheetRemaining, satModuleSlotLabel } from './sessionRunSheet';
+import { isSatAttemptLive, isSatStageLive } from './satStage';
 
 type StudentSessionWithModuleRole = StudentSession & {
   /** The server's own name for the SAT adaptive module slot. */
   runtimeCurrentModuleRole?: StudentSession['runtimeModuleRole'];
 };
-
-/**
- * The section status a row counts down on. The per-student projection carries
- * the stage it is sitting on; when a read omits it, the room's own stage is the
- * same fact, and a missing field must not silently freeze a live clock.
- */
-function stageStatusFor(
-  student: StudentSession,
-  runtime: ExamSessionRuntime | null,
-): string | null {
-  if (student.runtimeSectionStatus) return student.runtimeSectionStatus;
-  const key = student.runtimeCurrentSection ?? runtime?.currentSectionKey ?? null;
-  const section = runtime?.sections.find((candidate) => candidate.sectionKey === key);
-  return section?.status ?? null;
-}
-
-function roomStatusFor(student: StudentSession, runtime: ExamSessionRuntime | null): string | null {
-  return student.runtimeStatus ?? runtime?.status ?? null;
-}
 
 export function SatRoomStudentRow({
   student,
@@ -44,9 +26,7 @@ export function SatRoomStudentRow({
   onSelect: (trigger: HTMLButtonElement) => void;
 }) {
   const fallbackSeconds = student.runtimeTimeRemainingSeconds ?? student.timeRemaining;
-  const running = roomStatusFor(student, runtime) === 'live'
-    && stageStatusFor(student, runtime) === 'live'
-    && student.status !== 'terminated';
+  const running = isSatStageLive(runtime, student);
   const remaining = useAuthoritativeDeadlineClock({
     deadlineAt: student.runtimeDeadlineAt ?? runtime?.currentSectionDeadlineAt ?? null,
     serverNow: student.runtimeServerNow ?? runtime?.serverNow ?? null,
@@ -141,9 +121,7 @@ export function StudentDetail({
     'student-resume',
     'student-terminate',
   ].some((key) => pendingActions.has(key));
-  const sectionRunning = roomStatusFor(student, runtime) === 'live'
-    && stageStatusFor(student, runtime) === 'live'
-    && student.status !== 'terminated';
+  const sectionRunning = isSatStageLive(runtime, student);
   // Both of the panel's clocks take the same source chain: the student's own
   // projection first, the room's read behind it. The section clock used to have
   // no fallback at all, so a read that omitted either field quietly froze it on
@@ -157,7 +135,7 @@ export function StudentDetail({
   });
   const moduleKnown = student.runtimeModuleRemainingSeconds != null
     || student.runtimeModuleDeadlineAt != null;
-  const moduleRunning = roomStatusFor(student, runtime) === 'live' && student.status !== 'terminated';
+  const moduleRunning = isSatAttemptLive(runtime, student);
   const moduleRemaining = useAuthoritativeDeadlineClock({
     deadlineAt: student.runtimeModuleDeadlineAt ?? null,
     serverNow: student.runtimeServerNow ?? runtime?.serverNow ?? null,

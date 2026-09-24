@@ -21,15 +21,12 @@ import { expect, test, type Page } from '@playwright/test';
  *   5. a viewport that cannot hold a toolbar still gets a toolbar, pinned inside
  *      the visible region — there is no second presentation to retreat to;
  *   6. it appears promptly, but not the instant the gesture ends;
- *   7. the LANE follows the pointer type: the native selection menu owns the
- *      space above the selection on glass, so the toolbar takes the side below
- *      it, while a mouse — which has no such menu — keeps the side above.
+ *   7. coarse-pointer comfort and native selection UI are separate: a real
+ *      student exam owns touch selection and reserves no browser-menu lane.
  *
- * Phrase choices are deliberate. A selection near the top of a passage has no
- * conflict-free lane on glass (iOS flips its menu down into the only room, and
- * the lane above it is too short for a toolbar), so the cases that assert a
- * caret-bearing toolbar select mid-passage text, while the cramped case
- * deliberately uses a viewport too short for any lane to hold the controls.
+ * Phrase choices are deliberate. Mid-passage text leaves room for the normal
+ * placement rule to choose a side; the cramped case deliberately uses a
+ * viewport too short for any lane to hold the controls.
  */
 
 /** The one annotation surface there is. */
@@ -47,16 +44,14 @@ const PROFILES = [
 const SURFACE_MIN_WIDTH = 280;
 const SURFACE_MAX_WIDTH = 340;
 
-async function openHarness(page: Page, query = ''): Promise<void> {
+async function openHarness(page: Page, query = '?ownedTouchSelection=1'): Promise<void> {
   await page.goto(`/__dev/sat-accessibility${query}`);
   await expect(page.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 15_000 });
 }
 
 /**
- * Mid-passage text. On a phone the sentence occupies three rendered lines, which
- * puts the selection far enough down the visible region for the native menu to
- * have room above it — the arrangement the lane policy is about: the menu takes
- * the top lane, ours is the one below.
+ * Mid-passage text. On a phone the sentence occupies three rendered lines, so
+ * the placement rule has room to choose either side using its comfort budget.
  */
 const PHRASE = 'canopy density';
 
@@ -234,28 +229,21 @@ test.describe('annotation surface placement', () => {
       expectContained(geometry);
       expectDoesNotCoverSelection(geometry);
 
-      // The lane, which is the reason this suite runs on both pointer types. The
-      // browser paints the native selection menu above the selection and over
-      // anything we render there, so on glass the tools take the side below it —
-      // always, however much room the lane above happens to be offering. A mouse
-      // has no menu and therefore nothing reserved: it follows the geometry
-      // exactly as it always has, which on these profiles means flipping below
-      // too, because the room above the selection is smaller than the toolbar.
+      // This harness declares an owned student exam. A coarse pointer keeps its
+      // larger comfort budget, but the browser draws no selection UI to reserve
+      // a lane. Fine pointers use the tighter comfort budget.
       const selectionTop = geometry.firstLine?.top ?? 0;
       const selectionBottom = geometry.lastLine?.bottom ?? 0;
-      // Room above is measured the way the engine measures it: from the container's
-      // own top edge, minus its screen-edge margin (11px of hairline, which is the
-      // `--sat-annotation-edge` budget). A toolbar needs its own height plus the
-      // 12px gap and the mouse's 12px comfort buffer.
+      // Room above is measured from the container's own top edge and inset by
+      // the 12px edge budget. Coarse pointers ask for 24px comfort; fine pointers
+      // ask for 12px.
       const roomAbove = selectionTop - (geometry.bounds?.top ?? geometry.visible.top) - 12;
-      if (isMobile) {
-        expect(geometry.surface.top, 'a touch surface must stay out of the native menu\u2019s lane')
-          .toBeGreaterThanOrEqual(selectionBottom - 1);
-      } else if (roomAbove >= geometry.surface.height + 24) {
-        expect(geometry.surface.bottom, 'a mouse surface takes the lane above when it fits there')
+      const comfort = isMobile ? 24 : 12;
+      if (roomAbove >= geometry.surface.height + 12 + comfort) {
+        expect(geometry.surface.bottom, 'the surface takes the ordinary gap above when it comfortably fits')
           .toBeLessThanOrEqual(selectionTop + 1);
       } else {
-        expect(geometry.surface.top, 'a mouse surface flips below when above is too small')
+        expect(geometry.surface.top, 'the surface flips below when above is too small')
           .toBeGreaterThanOrEqual(selectionBottom - 1);
       }
 
@@ -315,8 +303,8 @@ test.describe('annotation surface placement', () => {
   test('keeps the toolbar inside a viewport too short for it', async ({ page, isMobile }) => {
     // Phone: a short viewport is what a software keyboard leaves behind. Desktop:
     // a window too short for a toolbar is the same problem with a mouse. The
-    // selection sits at the top of the passage, where no lane holds the controls
-    // — not the one the native menu leaves, and not its own either.
+    // selection sits at the top of the passage, where no ordinary gap holds the
+    // controls on either side.
     await page.setViewportSize(isMobile ? { width: 390, height: 330 } : { width: 1280, height: 300 });
     await openHarness(page);
     await selectStimulusText(page, 'Several');
@@ -525,7 +513,7 @@ test.describe('annotation surface placement', () => {
     // surface the student meets is the ordinary floating one with a caret, not
     // the pinned fallback.
     await page.setViewportSize({ width: 390, height: 620 });
-    await openHarness(page, '?long=1');
+    await openHarness(page, '?long=1&ownedTouchSelection=1');
     const phrase = PHRASE;
     await selectStimulusText(page, phrase);
     const toolbar = page.locator(SURFACE_SELECTOR);

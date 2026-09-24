@@ -239,6 +239,7 @@ type AccessLink struct {
 // PublicAccessLink mirrors PublicAssessmentAccessLink.
 type PublicAccessLink struct {
 	ID               string                     `json:"id"`
+	ScheduleID       string                     `json:"scheduleId"`
 	ExamTitle        string                     `json:"examTitle"`
 	ProviderKey      string                     `json:"providerKey"`
 	VersionNumber    int32                      `json:"versionNumber"`
@@ -931,7 +932,7 @@ func (s *Service) PublicLink(ctx context.Context, linkID string) (PublicAccessLi
 		return PublicAccessLink{}, err
 	}
 	return PublicAccessLink{
-		ID: link.ID, ExamTitle: link.ExamTitle, ProviderKey: link.ProviderKey,
+		ID: link.ID, ScheduleID: link.ScheduleID, ExamTitle: link.ExamTitle, ProviderKey: link.ProviderKey,
 		VersionNumber: link.VersionNumber, PublishScope: link.PublishScope, Name: link.Name, EnabledSections: link.EnabledSections,
 		AudienceType:  link.AudienceType,
 		AudienceLabel: link.AudienceLabel, AccessMode: link.AccessMode,
@@ -1146,6 +1147,31 @@ func (s *Service) SetLifecycle(ctx context.Context, linkID string, req SetLifecy
 		return zero, err
 	}
 	return s.Get(ctx, linkID)
+}
+
+// Delete permanently removes a Student Link and its member allowlist. The
+// backing schedule and all participation data belong to the exam session and
+// are intentionally preserved.
+func (s *Service) Delete(ctx context.Context, linkID string, revision int32) error {
+	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		current, err := lockLinkTx(ctx, q, linkID)
+		if err != nil {
+			return err
+		}
+		if current.revision != revision {
+			return conflict("Student Link changed while you were editing it. Refresh and try again.")
+		}
+		res, err := q.ExecContext(ctx,
+			"DELETE FROM assessment_access_links WHERE id = ? AND revision = ?",
+			linkID, revision)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return conflict("Student Link changed while you were editing it. Refresh and try again.")
+		}
+		return nil
+	})
 }
 
 // Duplicate mirrors duplicate(): locks the source (FOR UPDATE), fences on

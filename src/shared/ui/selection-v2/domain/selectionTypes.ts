@@ -61,7 +61,9 @@ export interface CaretGeometry {
  * magnifier that reports where the hand is rather than what the engine chose.
  */
 export interface SelectionPointerState {
-  /** Where the finger physically is, in viewport coordinates. */
+  /** The active input modality. Presentation can adapt without changing ownership. */
+  pointerType: string;
+  /** Where the pointer physically is, in viewport coordinates. */
   finger: { x: number; y: number };
   /** What the lens looks at: the caret the engine resolved, or null if none. */
   caret: CaretGeometry | null;

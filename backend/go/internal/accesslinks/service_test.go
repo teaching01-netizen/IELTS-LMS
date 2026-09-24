@@ -178,6 +178,69 @@ func TestGetNotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesOnlyAccessLinkAndFencesRevision(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := svc(db)
+
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_access_links")).WillReturnRows(
+		sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision", "enabled_sections", "has_participation", "provider_key", "sat_publish_scope"}).
+			AddRow("sched-1", "active", int32(0), nil, 1, "ielts", "full"))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM assessment_access_links WHERE id = ? AND revision = ?")).
+		WithArgs("link-1", int32(0)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := s.Delete(context.Background(), "link-1", 0); err != nil {
+		t.Fatalf("Delete must remove the link without touching its backing schedule: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteRejectsStaleRevision(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := svc(db)
+
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_access_links")).WillReturnRows(linkLockRow(1, nil))
+	mock.ExpectRollback()
+	if err := s.Delete(context.Background(), "link-1", 3); codeOf(err) != apperrors.CodeConflict {
+		t.Fatalf("expected CONFLICT for stale revision, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteMissingLink(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := svc(db)
+
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_access_links")).WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+	if err := s.Delete(context.Background(), "missing", 0); codeOf(err) != apperrors.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND for missing link, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // get happy path returns the scanned projection with derived live status.
 func TestGetHappyPath(t *testing.T) {
 	db, mock, err := sqlmock.New()

@@ -97,13 +97,16 @@ function payload(specs: Spec[], withResult = false): AssessmentDeliveryBootstrap
   } as unknown as AssessmentDeliveryBootstrap;
 }
 
-function state(phase: SatRunnerState["phase"], moduleKey?: string): SatRunnerState {
+// Runtime identity is the module ID the server selected; moduleKey rides along
+// as display metadata only (`${id}-key`, mirroring the payload fixture).
+function state(phase: SatRunnerState["phase"], moduleId?: string): SatRunnerState {
   return {
     phase,
     scheduleId: "schedule",
     candidateId: "candidate",
     assessmentId: "version",
-    moduleKey,
+    moduleId,
+    moduleKey: moduleId ? `${moduleId}-key` : undefined,
   } as unknown as SatRunnerState;
 }
 
@@ -141,7 +144,7 @@ describe("SAT commit route table", () => {
       { id: "m-2", sectionKey: "reading-writing", state: "not_started" },
     ];
     expect(
-      decideSatCommitRoute(state("module", "m-1-key"), payload(specs), { kind: "poll" }, IDENTITY),
+      decideSatCommitRoute(state("module", "m-1"), payload(specs), { kind: "poll" }, IDENTITY),
     ).toEqual({ type: "showDirections" });
   });
 
@@ -150,49 +153,7 @@ describe("SAT commit route table", () => {
   it("begins finalization when the poll finds no module left to open", () => {
     const specs: Spec[] = [{ id: "m-1", sectionKey: "reading-writing", state: "submitted" }];
     expect(
-      decideSatCommitRoute(state("module", "m-1-key"), payload(specs), { kind: "poll" }, IDENTITY),
-    ).toEqual({ type: "submit" });
-  });
-
-  it("routes a module-submit response to directions, break, or submit", () => {
-    const sameSection: Spec[] = [
-      { id: "m-1", sectionKey: "reading-writing", state: "submitted" },
-      { id: "m-2", sectionKey: "reading-writing", state: "not_started" },
-    ];
-    expect(
-      decideSatCommitRoute(
-        state("review", "m-1-key"),
-        payload(sameSection),
-        { kind: "submitModule", moduleId: "m-1" },
-        IDENTITY,
-      ),
-    ).toEqual({ type: "showDirections" });
-
-    const nextSection: Spec[] = [
-      { id: "m-1", sectionKey: "reading-writing", state: "submitted" },
-      { id: "m-2", sectionKey: "math", state: "not_started" },
-    ];
-    expect(
-      decideSatCommitRoute(
-        state("review", "m-1-key"),
-        payload(nextSection),
-        { kind: "submitModule", moduleId: "m-1" },
-        IDENTITY,
-      ),
-    ).toEqual({
-      type: "startBreak",
-      nextSectionKey: "math",
-      resumeAt: "2026-09-10T08:05:00.000Z",
-    });
-
-    const lastModule: Spec[] = [{ id: "m-1", sectionKey: "reading-writing", state: "submitted" }];
-    expect(
-      decideSatCommitRoute(
-        state("review", "m-1-key"),
-        payload(lastModule),
-        { kind: "submitModule", moduleId: "m-1" },
-        IDENTITY,
-      ),
+      decideSatCommitRoute(state("module", "m-1"), payload(specs), { kind: "poll" }, IDENTITY),
     ).toEqual({ type: "submit" });
   });
 
@@ -214,6 +175,9 @@ describe("SAT commit route table", () => {
     expect(action).toMatchObject({
       type: "routeToModule",
       sectionKey: "reading-writing",
+      // The server-selected module id is the runtime identity; the key is only
+      // display metadata carried alongside it.
+      moduleId: "m-1",
       moduleKey: "m-1-key",
       startedAt: NOW,
     });
@@ -233,29 +197,18 @@ describe("SAT commit route table", () => {
   // ONE section (no Math module attempt anywhere), and the exam must end after
   // it with no new end-of-exam logic. The route table only ever reads the
   // payload's module attempts, so the whole walk is: last module submitted ->
-  // submit -> a poll carrying the result -> complete.
+  // server timeout reconciliation -> result -> complete.
   it("completes after the single section of a one-section run", () => {
     const verbalOnly: Spec[] = [
       { id: "rw-m1", sectionKey: "reading-writing", state: "submitted" },
       { id: "rw-m2", sectionKey: "reading-writing", state: "submitted" },
     ];
 
-    // Submitting the last module of the only section finalizes instead of
-    // opening a break or a next section.
-    expect(
-      decideSatCommitRoute(
-        state("review", "rw-m2-key"),
-        payload(verbalOnly),
-        { kind: "submitModule", moduleId: "rw-m2" },
-        IDENTITY,
-      ),
-    ).toEqual({ type: "submit" });
-
     // A poll that arrives after the server finalized the last module starts
     // finalization from wherever the student is (SAT-002 path).
     expect(
       decideSatCommitRoute(
-        state("module", "rw-m2-key"),
+        state("module", "rw-m2"),
         payload(verbalOnly),
         { kind: "poll" },
         IDENTITY,

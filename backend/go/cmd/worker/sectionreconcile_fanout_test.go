@@ -23,11 +23,17 @@ import (
 // captureDelivery records the attempts it was asked to reconcile and fails the
 // named ones, so a test can assert per-attempt continuation.
 type captureDelivery struct {
-	reconciled []string
-	fail       map[string]error
+	reconciled   []string
+	fail         map[string]error
+	timeoutCalls int
+	timeoutAt    time.Time
+	timeoutBatch int64
 }
 
-func (c *captureDelivery) ReconcileTimeouts(context.Context, time.Time, int64) (int64, error) {
+func (c *captureDelivery) ReconcileTimeouts(_ context.Context, at time.Time, batch int64) (int64, error) {
+	c.timeoutCalls++
+	c.timeoutAt = at
+	c.timeoutBatch = batch
 	return 0, nil
 }
 
@@ -113,6 +119,25 @@ func TestSectionReconcileAcksOnFullSuccess(t *testing.T) {
 
 	if err := w.executeOutboxEvent(context.Background(), event); err != nil {
 		t.Fatalf("a fully reconciled batch must ack, got %v", err)
+	}
+}
+
+func TestTimeoutReconcileCycleUsesTheProvidedServerInstant(t *testing.T) {
+	delivery := &captureDelivery{}
+	w := sectionReconcileWorker(delivery)
+	at := time.Date(2026, 9, 23, 10, 30, 0, 0, time.UTC)
+	w.runTimeoutReconcileCycle(context.Background(), at)
+	if delivery.timeoutCalls != 1 || !delivery.timeoutAt.Equal(at) || delivery.timeoutBatch <= 0 {
+		t.Fatalf("timeout sweep must run once with the supplied instant and a bounded batch: %+v", delivery)
+	}
+}
+
+func TestSATTimeoutOnlyWorkerModeFlag(t *testing.T) {
+	if !satTimeoutsOnlyRequested([]string{"--sat-timeouts-only"}) {
+		t.Fatal("activity-driven timeout worker flag was not recognized")
+	}
+	if satTimeoutsOnlyRequested([]string{"requeue-dead-letter", "--id", "dead-letter"}) {
+		t.Fatal("operator requeue command must not select timeout-only mode")
 	}
 }
 

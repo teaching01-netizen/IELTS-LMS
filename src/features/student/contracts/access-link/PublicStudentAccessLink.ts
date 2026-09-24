@@ -42,6 +42,7 @@ export function studentAccessLinkSectionCopy(
 
 export interface PublicStudentAccessLink {
   id: string;
+  scheduleId: string;
   examTitle: string;
   providerKey: string;
   versionNumber: number;

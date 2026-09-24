@@ -10,6 +10,8 @@ export interface SatStudentProducedAnswerProps {
   value?: string;
   disabled: boolean;
   onChange: (value: string) => void;
+  /** Flush the latest local draft when the student leaves the answer field. */
+  onBlur?: (() => void) | undefined;
 }
 
 /**
@@ -25,6 +27,7 @@ export function SatStudentProducedAnswer({
   value = "",
   disabled,
   onChange,
+  onBlur,
 }: SatStudentProducedAnswerProps) {
   const inputId = `sat-spr-${questionId}`;
   const helpId = `${inputId}-help`;
@@ -36,10 +39,12 @@ export function SatStudentProducedAnswer({
     // validate non-empty drafts so "You may still submit" stays true.
     if (value.trim() === "") {
       setError(null);
+      onBlur?.();
       return;
     }
     const verdict = validateSatStudentResponse(value);
     setError(verdict.valid ? null : verdict.message);
+    onBlur?.();
   };
 
   return (

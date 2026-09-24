@@ -552,7 +552,7 @@ test.describe("E2E-05 Proctor advances during client flush (DB-verified)", () =>
       "SELECT phase FROM student_attempts WHERE id = ?",
       [attemptId],
       (rows) => rows[0].phase === "post-exam",
-      "attempt reached post-exam after the queued auto-submit worker ran"
+      "attempt reached post-exam after the queued finalization worker ran"
     );
     const submitObservedAtMs = Date.now();
 

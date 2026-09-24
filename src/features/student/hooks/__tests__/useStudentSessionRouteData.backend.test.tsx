@@ -173,6 +173,12 @@ function buildStaticSessionContext(versionId = "ver-1") {
   };
 }
 
+function buildSatStaticSessionContext() {
+  const context = buildStaticSessionContext();
+  (context.version.contentSnapshot as Record<string, unknown>).providerKey = "sat";
+  return context;
+}
+
 function buildRuntime() {
   return {
     id: "runtime-1",
@@ -1003,6 +1009,52 @@ describe("useStudentSessionRouteData backend mode", () => {
       expect(result.current.attemptSnapshot?.answers.q1).toBe("VALID_CACHED");
     });
   });
+
+  it.each([false, true])(
+    "does not admit SAT from a local attempt cache when the server returns no attempt (cached=%s)",
+    async (hasCachedAttempt) => {
+      vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
+      vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());
+      const getAttemptsSpy = vi.spyOn(studentAttemptRepository, "getAttemptsByScheduleId");
+      if (hasCachedAttempt) {
+        getAttemptsSpy.mockResolvedValue([
+          mapBackendStudentAttempt({
+            ...buildAttempt("ver-1"),
+            answers: { q1: "LOCAL_ONLY_ANSWER" },
+          }),
+        ]);
+      }
+
+      const fetchMock = vi.fn((url: string) => {
+        if (url === "/api/v1/student/sessions/sched-1/static?candidateId=W250334") {
+          return Promise.resolve(jsonResponse(buildSatStaticSessionContext()));
+        }
+        if (url === "/api/v1/student/sessions/sched-1/live?candidateId=W250334") {
+          return Promise.resolve(jsonResponse(buildLiveSessionContext(null)));
+        }
+        return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+      });
+      global.fetch = fetchMock as typeof fetch;
+
+      const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+        expect(result.current.providerKey).toBe("sat");
+      });
+
+      expect(result.current.attemptSnapshot).toBeNull();
+      expect(getAttemptsSpy).not.toHaveBeenCalled();
+      expect(
+        fetchMock.mock.calls.some(([url, init]) =>
+          String(url) === "/api/v1/student/sessions/sched-1/bootstrap" &&
+          (init as { method?: string } | undefined)?.method === "POST",
+        ),
+      ).toBe(false);
+    },
+  );
 
   it("preserves last-known runtime snapshot when a refresh payload temporarily omits runtime", async () => {
     vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");

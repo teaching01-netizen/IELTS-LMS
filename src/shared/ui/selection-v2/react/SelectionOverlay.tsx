@@ -37,8 +37,8 @@ import '../styles/selection.css';
  *   body        → the selected text is a no-drag zone: preserved and consumed,
  *                 never dismissed, never reaching the prose's own pointerdown
  *   outside     → dismissed in this same capture pass; consumed exactly when
- *                 the gesture's own pointerdown would otherwise see it — one
- *                 press, one intent, every other control keeps its press
+ *                 an owned gesture or product's native-selection path would
+ *                 otherwise start — one press, one intent; controls keep theirs
  *
  * Without the middle row, a short selection's two 44px endpoint boxes overlap
  * over the highlighted text and a press in the MIDDLE grabs an endpoint; without
@@ -80,15 +80,20 @@ export interface SelectionOverlaySelection extends SelectionPresentation {
    * names an edge nor guesses whether one was acquired.
    */
   beginHandleAdjustment: (event: SelectionHandlePointerEvent) => boolean;
+  /** Re-report the current session range when its resting body is tapped. */
+  activateCurrentSelection: () => boolean;
   dismiss: () => void;
   /**
    * Whether this press would reach the gesture's own pointerdown — the same
    * guards, answered by the one place that owns them (`wouldBeginGesture` on
    * the hook's return). The outside branch asks it so one pointerdown can
    * dismiss the selection AND be consumed when it would otherwise begin the
-   * next one, while toolbars, inputs and every other control keep their press.
+   * next owned gesture. The separate owned-selection predicate covers another
+   * text root in the same product scope; controls keep their press in either case.
    */
   wouldBeginGesture: (event: Event) => boolean;
+  /** Whether this outside press would start owned selection in another root. */
+  wouldStartOwnedSelection: (event: Event) => boolean;
 }
 
 /**
@@ -107,6 +112,7 @@ function pressOn(event: Event, pressed: Element | null): SelectionHandlePointerE
   const pointer = event as PointerEvent;
   return {
     pointerId: pointer.pointerId,
+    pointerType: pointer.pointerType,
     clientX: pointer.clientX,
     clientY: pointer.clientY,
     currentTarget: pressed,
@@ -126,6 +132,10 @@ export interface SelectionOverlayProps {
   handleLabels?: { start: string; end: string } | undefined;
   /** Shown while a hold is claiming text or a handle is moving. */
   loupe?: { sourceRef: RefObject<HTMLElement | null>; enabled?: boolean | undefined } | undefined;
+  /** Called when the visual range itself ends. */
+  onSelectionCleared?: (() => void) | undefined;
+  /** Return true after dismissing contextual tools to keep the range for one Escape. */
+  onEscape?: (() => boolean) | undefined;
 }
 
 export function SelectionOverlay({
@@ -134,6 +144,8 @@ export function SelectionOverlay({
   portalContainer,
   handleLabels = { start: 'Adjust selection start', end: 'Adjust selection end' },
   loupe,
+  onSelectionCleared,
+  onEscape,
 }: SelectionOverlayProps) {
   const visible = selection.phase !== 'idle' && selection.selectionText.length > 0;
   // The finger comes from the selection itself: it is the engine that follows it,
@@ -147,10 +159,15 @@ export function SelectionOverlay({
     && loupe !== undefined
     && loupe.enabled !== false
     && pointer !== null
+    && pointer.pointerType === 'touch'
     && selectionMovesEndpoint(selection.phase);
 
   const dismissRef = useRef(selection.dismiss);
   dismissRef.current = selection.dismiss;
+  const clearSelectionRef = useRef(onSelectionCleared);
+  clearSelectionRef.current = onSelectionCleared;
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
   // The current paint, read live by the listeners below: rects and handles are
   // re-measured every frame, and a listener bound once must not judge today's
   // press against yesterday's phase or lines.
@@ -160,10 +177,26 @@ export function SelectionOverlay({
   useEffect(() => {
     if (!visible) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+        // Hand keyboard text selection back to the browser as its own path. The
+        // gesture adapter removes touch ownership in capture; clearing this
+        // resting visual range here also keeps its toolbar anchor in sync.
+        dismissRef.current();
+        clearSelectionRef.current?.();
+        return;
+      }
       // Escape belongs to this surface, not to a menu: one key, one meaning, and
       // it is the same key that dismisses a system selection menu.
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (onEscapeRef.current?.() === true) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
       dismissRef.current();
+      clearSelectionRef.current?.();
     };
 
     /** Consume one press: nothing below this listener may learn it happened. */
@@ -199,6 +232,15 @@ export function SelectionOverlay({
       const onOwnChrome = pressed !== null;
       if (onOwnChrome && !resting) return;
       if (resting) {
+        const onSelectionBody = selectionContainsPoint(current.rects, clientX, clientY);
+        // Text itself is a no-drag zone. In particular, a body tap after the
+        // contextual tools were dismissed reactivates the owned Range without
+        // asking handle acquisition to reinterpret that press.
+        if (onSelectionBody && !onOwnChrome) {
+          current.activateCurrentSelection();
+          consume(event);
+          return;
+        }
         // The press is REPORTED, with its coordinates and the control it landed
         // on, and the answer is what this pass acts on — the session decides which
         // endpoint it grabs (one decision, one owner: two 44px boxes overlap on
@@ -216,7 +258,8 @@ export function SelectionOverlay({
         // pointerdown END here rather than both dismissing the old selection and
         // starting a new one. A control's 44px box is larger than the zone that
         // may BEGIN a drag, so the rest of that box is body too.
-        if (grabbed || onOwnChrome || selectionContainsPoint(current.rects, clientX, clientY)) {
+        if (grabbed || onOwnChrome || onSelectionBody) {
+          if (!grabbed && onSelectionBody) current.activateCurrentSelection();
           consume(event);
           return;
         }
@@ -231,7 +274,8 @@ export function SelectionOverlay({
       // cannot reach the gesture's handler anyway, so consumption would only
       // break the rest of the page. Menu and handle presses resolved above.
       dismissRef.current();
-      if (current.wouldBeginGesture(event)) consume(event);
+      clearSelectionRef.current?.();
+      if (current.wouldBeginGesture(event) || current.wouldStartOwnedSelection(event)) consume(event);
     };
 
     document.addEventListener('keydown', onKeyDown);

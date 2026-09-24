@@ -2,14 +2,11 @@ import { createContext, useContext } from 'react';
 import type { SatTextAnchor, SatTextAnnotation } from '../../domain/satResponses';
 
 /**
- * Bridge between the exam shell (which owns annotation state and renders the
- * contextual toolbar) and the annotated content (which owns the marks and the
- * selection gesture).
+ * Bridge from the exam shell's annotation state to text rendering and selection.
  *
- * Direction matters: the shell is an ANCESTOR of the question renderer, so the
- * content can consume this context, while every MUTATION still flows up into
- * the shell and from there to the route's response commands. Nothing here
- * writes an annotation.
+ * The renderer paints marks, the selection hook reports captured anchors, and
+ * mutations flow up to the shell and route response commands. This context
+ * never writes annotations.
  */
 export interface SatAnnotationView {
   /** Annotation whose editor is open (drawn with emphasis). */
@@ -31,10 +28,16 @@ export interface SatAnnotationView {
    * mean something in both directions.
    */
   annotationModeEnabled: boolean;
+  /** Whether contextual controls are visible for the current anchor. */
+  selectionToolsVisible?: boolean | undefined;
   /** Student tapped or activated an existing mark: open its editor. */
   openEditor: (annotation: SatTextAnnotation) => void;
   /** A completed text selection, reported upward for the toolbar. */
   onSelectionCaptured?: ((anchor: SatTextAnchor) => void) | undefined;
+  /** Hide contextual tools while the Selection v2 range stays selected. */
+  onSelectionToolsDismissed?: (() => void) | undefined;
+  /** The visual Selection v2 range itself ended. */
+  onSelectionCleared?: (() => void) | undefined;
 }
 
 const EMPTY_VIEW: SatAnnotationView = {
@@ -43,6 +46,7 @@ const EMPTY_VIEW: SatAnnotationView = {
   // Default OFF: a context that never armed annotation cannot raise controls,
   // which is the safe end of the invariant.
   annotationModeEnabled: false,
+  selectionToolsVisible: false,
   openEditor: () => undefined,
 };
 

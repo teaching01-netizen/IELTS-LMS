@@ -1,6 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "../../../../shared/api-client/errors";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { useSatExamController } from "../useSatExamController";
 
@@ -156,7 +155,7 @@ async function armedHook() {
   return hook;
 }
 
-describe("SAT module submit conflicts", () => {
+describe("SAT server-owned module lifecycle", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -168,10 +167,11 @@ describe("SAT module submit conflicts", () => {
     persistenceMock.assertBoundarySettled.mockResolvedValue(undefined);
   });
 
-  it("SAT-005: a stale submit response cannot overwrite newer committed state", async () => {
+  it("keeps newer authoritative state and exposes no student submit command", async () => {
     const hook = await armedHook();
-    // The server's authoritative advance has already been committed by the
-    // poll loop (runtimeRevision 9) before the mutation response lands.
+    // The server's authoritative frame has already been committed by the poll
+    // loop. An older frame cannot replace it, and no student mutation exists
+    // that could race that commit.
     const advanced = modulePayload("active", 9);
     const seam = hook.result.current as unknown as {
       commitForTest: (p: AssessmentDeliveryBootstrap) => boolean;
@@ -179,99 +179,11 @@ describe("SAT module submit conflicts", () => {
     act(() => {
       expect(seam.commitForTest(advanced)).toBe(true);
     });
-    act(() => hook.result.current.commands.reviewModule());
-    expect(hook.result.current.state.phase).toBe("review");
-
-    // The late mutation response carries the pre-advance revision.
-    gatewayMocks.submitModule.mockResolvedValue(modulePayload("submitted", 1));
-    await act(async () => {
-      await hook.result.current.commands.submitModule("m-1");
-    });
-
-    // Dropped: the newer projection owns the runner, and the stale payload's
-    // post-submit route (directions) was never dispatched.
-    expect(hook.result.current.data?.timing.runtimeRevision).toBe(9);
-    expect(hook.result.current.state.phase).toBe("review");
-
-    // ...and the drop must not strand the student: the poll loop is the owner
-    // from here. The server's next frame carries the module as finalized, and
-    // the runner must move through finalization to the result.
-    gatewayMocks.submitAssessment.mockResolvedValue({
-      id: "result-1",
-      submissionId: "attempt-a",
-      providerKey: "sat",
-      totalScore: 800,
-      scorePayload: {},
-      scoreKind: "practice",
-      sections: [],
-    });
     act(() => {
-      expect(seam.commitForTest(modulePayload("submitted", 10))).toBe(true);
+      expect(seam.commitForTest(modulePayload("locked", 1))).toBe(false);
     });
-    await settle();
-    expect(gatewayMocks.submitAssessment).toHaveBeenCalledWith("schedule", "attempt-a", {
-      submissionId: "attempt-a",
-    });
-    expect(hook.result.current.state.phase).toBe("complete");
-  });
-
-  // The predicate matrix itself is owned by
-  // application/__tests__/satSubmitConflicts.test.ts; what this suite proves is
-  // the wiring — that the right rejection reaches the right student copy.
-  it.each([
-    {
-      label: "writer supersession",
-      rejection: new ApiError({
-        code: "ACTIVE_SESSION_SUPERSEDED",
-        message: "This attempt is active elsewhere.",
-        status: 409,
-      }),
-      expected: "another window",
-      rejected: ["finalizing this module"],
-    },
-    {
-      label: "clock/state transition",
-      rejection: new ApiError({
-        code: "ASSESSMENT_CONFLICT",
-        message: "Section is not active.",
-        status: 409,
-        details: { reason: "SECTION_NOT_ACTIVE" },
-      }),
-      expected: "finalizing this module",
-      rejected: ["another window"],
-    },
-    {
-      label: "durable-state disagreement",
-      rejection: new ApiError({
-        code: "ASSESSMENT_CONFLICT",
-        message: "Response revision mismatch.",
-        status: 409,
-        details: { reason: "RESPONSE_REVISION_MISMATCH" },
-      }),
-      // Recoverable, and definitely not a closed section: the copy must not
-      // claim the module is finalizing, nor send the student to another window.
-      expected: "submit the module again",
-      rejected: ["finalizing this module", "another window"],
-    },
-    {
-      label: "unclassified 409",
-      rejection: new ApiError({
-        code: "SUBMISSION_ID_MISUSE",
-        message: "Submission identity already used.",
-        status: 409,
-      }),
-      expected: "Submission identity already used.",
-      rejected: ["finalizing this module", "another window", "submit the module again"],
-    },
-  ])("SAT-007: $label selects its own recovery copy", async ({ rejection, expected, rejected }) => {
-    const hook = await armedHook();
-    gatewayMocks.submitModule.mockRejectedValue(rejection);
-    await act(async () => {
-      await hook.result.current.commands.submitModule("m-1");
-    });
-    expect(hook.result.current.error).toContain(expected);
-    for (const copy of rejected) {
-      expect(hook.result.current.error).not.toContain(copy);
-    }
+    expect(hook.result.current.data?.timing.runtimeRevision).toBe(9);
+    expect("submitModule" in hook.result.current.commands).toBe(false);
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
   });
 });

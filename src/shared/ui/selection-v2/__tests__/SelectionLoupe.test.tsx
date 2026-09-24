@@ -1,4 +1,6 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SelectionLoupe, resolveLoupeDiameter } from '../react/SelectionLoupe';
@@ -125,7 +127,9 @@ describe('SelectionLoupe', () => {
     expect(Array.from(clone.attributes).map((attribute) => attribute.name).sort())
       .toEqual(['aria-hidden', 'data-selection-loupe-source', 'inert', 'style']);
     // Semantics and identity are gone from the subtree, not merely hidden.
-    expect(clone.querySelector('p')!.getAttributeNames()).toEqual([]);
+    // `style` alone survives: the sterilization hardening (`user-select`,
+    // `pointer-events`) is written inline so it holds even if the CSS is late.
+    expect(clone.querySelector('p')!.getAttributeNames()).toEqual(['style']);
     // And it is unreachable for pointer, focus and assistive technology alike.
     expect(clone).toHaveAttribute('inert');
     expect(clone).toHaveAttribute('aria-hidden', 'true');
@@ -133,6 +137,36 @@ describe('SelectionLoupe', () => {
     // picture: the engine's own marks are `role="button" tabindex="0"` spans.
     expect(clone.querySelectorAll('[tabindex="-1"]')).toHaveLength(1);
     expect(clone.querySelector('[tabindex="0"]')).toBeNull();
+  });
+
+  it('is sterile paint: the clone and every descendant are non-selectable', () => {
+    // jsdom drops `-webkit-*` declarations from the style object, so the
+    // webkit half of `dressPicture` is proven through the calls it issues
+    // (real browsers honor them); the standard half is proven on the nodes.
+    const spy = vi.spyOn(CSSStyleDeclaration.prototype, 'setProperty');
+    const sourceRef = source(PROSE);
+    render(<SelectionLoupe open fingerPoint={{ x: 40, y: 200 }} sourceRef={sourceRef} />);
+    try {
+      const issued = spy.mock.calls.map(
+        ([property, value, priority]) => `${property}=${value}/${priority ?? ''}`,
+      );
+      for (const property of ['-webkit-user-select', 'user-select', '-webkit-touch-callout', 'pointer-events']) {
+        expect(issued, property).toContain(`${property}=none/important`);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+
+    const clone = document.querySelector('[data-selection-loupe-source]') as HTMLElement;
+    const nodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
+    // At least the prose itself: a clone with no descendants proves nothing.
+    expect(nodes.length).toBeGreaterThan(1);
+    for (const node of nodes) {
+      expect(node.style.getPropertyValue('user-select')).toBe('none');
+      expect(node.style.getPropertyValue('pointer-events')).toBe('none');
+    }
+    // And the stylesheet contract on top of it.
+    expect(getComputedStyle(clone).userSelect).toBe('none');
   });
 
   it('magnifies a clone of the rendered content, taken once, with its ink intact', () => {
@@ -391,5 +425,35 @@ describe('the lens is sized for the device it is on', () => {
     // The override is what the geometry suite drives, so it has to win outright.
     rerender(<SelectionLoupe open fingerPoint={{ x: 40, y: 200 }} sourceRef={sourceRef} diameter={128} />);
     expect(document.querySelector('[data-selection-loupe]')).toHaveStyle({ width: '128px', height: '128px' });
+  });
+});
+
+describe('selection-v2 presentation is sterile', () => {
+  // Comments are stripped before the rules are read: the rationale above the
+  // rule talks about selection, and prose is not a selector.
+  const rules = [
+    ...readFileSync(resolve(__dirname, '../styles/selection.css'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .matchAll(/([^{}]+)\{([^{}]*)\}/g),
+  ].map(([, selectors = '', body = '']) => ({ selectors: selectors.trim(), body: body.trim() }));
+
+  it('denies native selection to the whole floating layer, loupe and clone', () => {
+    const sterile = rules.find((rule) => rule.selectors.includes('[data-selection-loupe-source]'));
+    expect(sterile).toBeDefined();
+    // The complete synthetic surface — layer, loupe, clone — never the page.
+    for (const selector of [
+      '.selection-v2-layer',
+      '.selection-v2-layer *',
+      '.selection-v2-loupe',
+      '.selection-v2-loupe *',
+      '[data-selection-loupe-source]',
+      '[data-selection-loupe-source] *',
+    ]) {
+      expect(sterile!.selectors, selector).toContain(selector);
+    }
+    expect(sterile!.selectors).not.toMatch(/html|body|\[data-sat-selection-protected\]/);
+    expect(sterile!.body).toContain('-webkit-touch-callout: none');
+    expect(sterile!.body).toContain('-webkit-user-select: none');
+    expect(sterile!.body).toContain('user-select: none');
   });
 });

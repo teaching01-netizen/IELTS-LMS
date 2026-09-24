@@ -15,6 +15,7 @@ import {
   SAT_ANNOTATION_NOTE_LIMIT,
   type SatQuestionAnnotations,
 } from './satResponses';
+import { createSatAnnotationNodeId, satChoiceAnnotationRegion } from './satAnnotationIdentity';
 
 /** Inks painted across a block, one entry per segment (null = unmarked). */
 function satAnnotationSegments(
@@ -29,6 +30,25 @@ describe('satResponses v2 annotations', () => {
   it('never applies another block’s annotation even when the text is identical', () => {
     const annotation = createSatTextAnnotation({ kind: 'highlight', nodeId: 'passage', startOffset: 0, endOffset: 4, exact: 'tree' });
     expect(applySatAnnotationsToText('tree', [annotation], 'question')).toEqual([{ start: 0, end: 4, highlight: null, underline: false }]);
+  });
+  it('uses the existing highlight, note, recolor, and removal path for a stable choice region', () => {
+    const choiceA = createSatAnnotationNodeId(satChoiceAnnotationRegion('option-a'), 'same-id');
+    const choiceB = createSatAnnotationNodeId(satChoiceAnnotationRegion('option-b'), 'same-id');
+    const anchor = { nodeId: choiceA, startOffset: 0, endOffset: 4, exact: 'Tree' };
+    const highlighted = applySatHighlightRange(emptySatAnnotationsV2(), anchor, 'yellow');
+
+    expect(satAnnotationSegments(highlighted.annotations, 'Tree cover affects heat.', choiceA)[0]).toBe('yellow');
+    expect(satAnnotationSegments(highlighted.annotations, 'Tree cover affects heat.', choiceB)).not.toContain('yellow');
+
+    const noted = restoreSatAnnotationNote(highlighted.annotations, highlighted.annotation.id, 'Check this choice');
+    expect(satAnnotatedNotes(noted)[0]?.anchor.nodeId).toBe(choiceA);
+    const recolored = setSatAnnotationColor(noted, highlighted.annotation.id, 'pink', '2026-09-23T00:00:00.000Z');
+    expect(satAnnotationSegments(recolored, 'Tree cover affects heat.', choiceA)[0]).toBe('pink');
+    expect(satAnnotationSegments(recolored, 'Tree cover affects heat.', choiceB)).not.toContain('pink');
+
+    const removed = removeSatAnnotationById(recolored, highlighted.annotation.id);
+    expect(satAnnotationSegments(removed, 'Tree cover affects heat.', choiceA)).not.toContain('pink');
+    expect(satAnnotatedNotes(removed)).toHaveLength(0);
   });
   it('recovers a highlight after text is inserted before its anchor', () => {
     const annotation = createSatTextAnnotation({ kind: 'highlight', nodeId: 'p', startOffset: 4, endOffset: 8, exact: 'tree', prefix: 'The ', suffix: ' grows.' });

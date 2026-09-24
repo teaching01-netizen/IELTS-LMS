@@ -29,6 +29,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
@@ -54,8 +55,18 @@ func durabilityAttemptRowsAs(status string) *sqlmock.Rows {
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
 		"response_revision", "deadline_at", "closing_grace_until",
-		"submitted_at", "final_submission", "proctor_status",
-	}).AddRow("att-1", "sched-1", "u-1", "", 2, status, "exam", 3, 7, 9, nil, nil, nil, nil, "active")
+		"submitted_at", "final_submission", "proctor_status", "provider_key",
+	}).AddRow("att-1", "sched-1", "u-1", "", 2, status, "exam", 3, 7, 9, nil, nil, nil, nil, "active", "")
+}
+
+func durabilitySATAttemptRows(deadline, grace time.Time) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
+		"delivery_status", "phase", "lease_epoch", "control_epoch",
+		"response_revision", "deadline_at", "closing_grace_until",
+		"submitted_at", "final_submission", "proctor_status", "provider_key",
+	}).AddRow("att-1", "sched-1", "u-1", "", 2, "running", "exam", 3, 7, 9,
+		deadline, grace, nil, nil, "active", "sat")
 }
 
 // durabilityReplayRaw is the stored canonical response backing every replay
@@ -233,6 +244,79 @@ func TestDurabilityContractExactReplaySurvivesTerminal(t *testing.T) {
 	}
 	if res.ResponseRevision != 9 {
 		t.Fatalf("post-terminal replay must not advance the revision, got %d", res.ResponseRevision)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDurabilityContractSATExactReplaySurvivesDeadline(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	secret := []byte("test-secret-32-bytes-long--------")
+	svc := testService(db, secret)
+	bearer := mintToken(t, secret, baseClaims())
+
+	cmd := SaveResponsesCommand{AttemptID: "att-1", LeaseEpoch: 3, ControlEpoch: 7,
+		Commands: []ResponseCommand{{WriteID: "w-1", QuestionID: "q-1", ClientVersion: 10, Response: ResponsePayload{Answer: "A"}}}}
+	reqHash, err := commandHash(cmd.Commands[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	durabilityFenceStubs(mock, durabilitySATAttemptRows(now.Add(-time.Second), now.Add(29*time.Second)))
+	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").
+		WithArgs("att-1", "w-1").
+		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "response_hash", "outcome", "server_revision", "canonical_response"}).
+			AddRow(reqHash, "resp-hash-1", "applied", uint64(4), durabilityReplayRaw))
+	mock.ExpectQuery("SELECT response_revision FROM student_attempts WHERE id").
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"response_revision"}).AddRow(uint64(9)))
+	mock.ExpectCommit()
+
+	qr, rl := liveStubs()
+	res, err := svc.SaveResponses(context.Background(), bearer, cmd, qr, rl)
+	if err != nil {
+		t.Fatalf("exact replay after the SAT deadline must succeed: %v", err)
+	}
+	if !res.Replayed || len(res.Acks) != 1 || res.Acks[0].ServerRevision != 4 || res.ResponseRevision != 9 {
+		t.Fatalf("deadline replay must return the stored ack without advancing revision: %+v", res)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDurabilityContractSATFreshWriteRejectedAfterSaveGrace(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	secret := []byte("test-secret-32-bytes-long--------")
+	svc := testService(db, secret)
+	bearer := mintToken(t, secret, baseClaims())
+
+	now := time.Now().UTC()
+	durabilityFenceStubs(mock, durabilitySATAttemptRows(now.Add(-4*time.Second), now.Add(26*time.Second)))
+	// The unseen id misses the replay probe, then lease/session fencing passes.
+	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-new").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT active_client_session_id").WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
+	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").
+		WithArgs("att-1", "w-new").WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+
+	cmd := SaveResponsesCommand{AttemptID: "att-1", LeaseEpoch: 3, ControlEpoch: 7,
+		Commands: []ResponseCommand{{WriteID: "w-new", QuestionID: "q-1", ClientVersion: 11, Response: ResponsePayload{Answer: "B"}}}}
+	qr, rl := liveStubs()
+	_, err = svc.SaveResponses(context.Background(), bearer, cmd, qr, rl)
+	e := durabilityErr(t, err)
+	if e.Code != apperrors.CodeDeadlineExpired || e.HTTPStatus != 422 {
+		t.Fatalf("fresh SAT write after save-only grace must be rejected as expired, got %s/%d", e.Code, e.HTTPStatus)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

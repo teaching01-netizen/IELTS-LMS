@@ -79,7 +79,6 @@ describe("SatStudentSessionRoute bootstrap handoff", () => {
       staticVersionId: "ver-3",
       attemptRevision: null,
       runtimeRevision: null,
-      deliveryEtag: '"e3"',
       seedGeneration: 5,
     };
     render(

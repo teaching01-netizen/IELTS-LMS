@@ -117,11 +117,11 @@ describe("useSatExamController attempt identity", () => {
     );
 
     await waitFor(() =>
-      expect(gatewayMocks.bootstrap).toHaveBeenCalledWith("schedule", "attempt-a", null)
+      expect(gatewayMocks.bootstrap).toHaveBeenCalledWith("schedule", "attempt-a")
     );
     hook.rerender({ attemptId: "attempt-b" });
     await waitFor(() =>
-      expect(gatewayMocks.bootstrap).toHaveBeenCalledWith("schedule", "attempt-b", null)
+      expect(gatewayMocks.bootstrap).toHaveBeenCalledWith("schedule", "attempt-b")
     );
 
     await act(async () => {
@@ -138,6 +138,28 @@ describe("useSatExamController attempt identity", () => {
     expect(hook.result.current.data?.attempt.id).toBe("attempt-b");
   });
 
+  it("does not seed a fresh SAT browser writer from the server attempt projection", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(bootstrap("attempt-a"));
+
+    renderHook(() => useSatExamController({
+      scheduleId: "schedule",
+      attemptId: "attempt-a",
+      candidateId: "candidate",
+      attemptSnapshot: {
+        id: "attempt-a",
+        recovery: { clientSessionId: "server-active-writer" },
+        integrity: { clientSessionId: "server-active-writer" },
+      } as never,
+    }));
+
+    await waitFor(() => expect(gatewayMocks.configureSatDeliveryAttempt).toHaveBeenCalled());
+    expect(gatewayMocks.configureSatDeliveryAttempt).toHaveBeenCalledWith(
+      "schedule",
+      "attempt-a",
+      "candidate",
+    );
+  });
+
   it("fires bootstrap exactly once across StrictMode double-effect + parent re-renders with churning snapshots", async () => {
     const gate = deferred<AssessmentDeliveryBootstrap>();
     gatewayMocks.bootstrap.mockImplementation(() => gate.promise);
@@ -151,7 +173,6 @@ describe("useSatExamController attempt identity", () => {
       staticVersionId: "ver-1",
       attemptRevision: 1,
       runtimeRevision: 1,
-      deliveryEtag: null,
       seedGeneration: 1,
     };
 
@@ -191,7 +212,7 @@ describe("useSatExamController attempt identity", () => {
     expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards a matching seed ETag as ifNoneMatch and drops ETag on identity mismatch", async () => {
+  it("bootstraps unconditionally for a matching seed and for an identity mismatch", async () => {
     gatewayMocks.bootstrap.mockResolvedValue(bootstrap("attempt-a"));
     const matching = {
       scheduleId: "schedule",
@@ -203,7 +224,6 @@ describe("useSatExamController attempt identity", () => {
       staticVersionId: "ver-1",
       attemptRevision: null,
       runtimeRevision: null,
-      deliveryEtag: '"etag-1"',
       seedGeneration: 1,
     };
     const hook = renderHook(() =>
@@ -215,7 +235,11 @@ describe("useSatExamController attempt identity", () => {
       }),
     );
     await waitFor(() => expect(hook.result.current.data?.attempt.id).toBe("attempt-a"));
-    expect(gatewayMocks.bootstrap).toHaveBeenCalledWith("schedule", "attempt-a", '"etag-1"');
+    // A seed scopes the call to one identity; it never turns the read into a
+    // conditional one, because the payload is live attempt state (module
+    // attempts, adaptive route, responses) that an exam-version validator
+    // cannot speak for.
+    expect(gatewayMocks.bootstrap).toHaveBeenCalledWith("schedule", "attempt-a");
 
     gatewayMocks.bootstrap.mockClear();
     gatewayMocks.bootstrap.mockResolvedValue(bootstrap("attempt-a"));
@@ -229,17 +253,17 @@ describe("useSatExamController attempt identity", () => {
       }),
     );
     await waitFor(() => expect(hook2.result.current.data?.attempt.id).toBe("attempt-a"));
-    // No cross-identity ETag reuse: third arg is null.
-    expect(gatewayMocks.bootstrap).toHaveBeenCalledWith("schedule", "attempt-a", null);
+    expect(gatewayMocks.bootstrap).toHaveBeenCalledWith("schedule", "attempt-a");
   });
 
   it("refires exactly once on staticVersionId republish; late old-version resolution does not clobber", async () => {
     const oldGate = deferred<AssessmentDeliveryBootstrap>();
     const newGate = deferred<AssessmentDeliveryBootstrap>();
-    gatewayMocks.bootstrap.mockImplementation(
-      (_: string, __: string, etag?: string | null) =>
-        etag === '"new"' ? newGate.promise : oldGate.promise,
-    );
+    let calls = 0;
+    gatewayMocks.bootstrap.mockImplementation(() => {
+      calls += 1;
+      return calls === 1 ? oldGate.promise : newGate.promise;
+    });
     const base = {
       scheduleId: "schedule",
       attemptId: "attempt-a",
@@ -257,7 +281,7 @@ describe("useSatExamController attempt identity", () => {
           scheduleId: "schedule",
           attemptId: "attempt-a",
           candidateId: "candidate",
-          bootstrapSeed: { ...base, staticVersionId: version, deliveryEtag: version === "ver-2" ? '"new"' : null },
+          bootstrapSeed: { ...base, staticVersionId: version },
         }),
       { initialProps: { version: "ver-1" } },
     );
@@ -279,7 +303,7 @@ describe("useSatExamController attempt identity", () => {
     expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the error surface reachable on initial failure but silent on 304", async () => {
+  it("keeps the error surface reachable on any bootstrap failure (no conditional-read 304 exists)", async () => {
     gatewayMocks.bootstrap.mockRejectedValueOnce(Object.assign(new Error("boom"), { statusCode: 500 }));
     const hook = renderHook(() =>
       useSatExamController({
@@ -292,6 +316,9 @@ describe("useSatExamController attempt identity", () => {
     expect(hook.result.current.data).toBeNull();
 
     gatewayMocks.bootstrap.mockReset();
+    // A conditional-read 304 is no longer part of this contract: bootstrap is an
+    // unconditional attempt-state read, so a 304-shaped rejection now reports a
+    // real contract break instead of quietly reusing a stale module snapshot.
     gatewayMocks.bootstrap.mockRejectedValueOnce(
       Object.assign(new Error("not modified"), { statusCode: 304 }),
     );
@@ -306,10 +333,7 @@ describe("useSatExamController attempt identity", () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(1));
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(hook2.result.current.error).toBeNull();
+    await waitFor(() => expect(hook2.result.current.error).not.toBeNull());
     expect(hook2.result.current.data).toBeNull();
   });
 

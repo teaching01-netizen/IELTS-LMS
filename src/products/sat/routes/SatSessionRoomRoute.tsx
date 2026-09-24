@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { SatPageError, SatPageLoading } from '../ui/SatPage';
 import { logError, logInfo } from '../../../shared/observability/errorLogger';
 import { useAuthSession } from '../../../features/auth/authSession';
-import { resolveRoomClock, useAuthoritativeDeadlineClock, useRoomClockMs } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
+import { useAuthoritativeDeadlineClock, useRoomClockMs } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { useProctorRouteController } from '../../../features/proctor/hooks/useProctorRouteController';
 import { examDeliveryService } from '../../../features/proctor/infrastructure/proctorGateway';
 import { SatStatusPill } from '../ui/SatPage';
@@ -16,6 +16,7 @@ import { SatSessionRoomRoster } from '../ui/SatSessionRoomRoster';
 import { SatSessionRoomTimeline } from '../ui/SatSessionRoomTimeline';
 import { StudentDetail } from '../ui/SatSessionRoomStudents';
 import { buildSatRunSheet, formatRunSheetRemaining, satRunSheetCurrentRows } from '../ui/sessionRunSheet';
+import { isSatStageLive } from '../ui/satStage';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import '../ui/sat-session-room.css';
 
@@ -54,22 +55,17 @@ export function SatSessionRoomRoute() {
     });
   }, [attentionFilter, search, students]);
   const selectedStudent = students.find((student) => student.id === selectedStudentId) ?? students[0] ?? null;
-  const currentStageStatus = runtime?.sections.find((section) => section.sectionKey === runtime?.currentSectionKey)?.status ?? null;
-  // The room's own clock: ONE accepted server instant (the freshest read of the
-  // refresh, paired with the instant it landed) plus the shared 1s tick. The
-  // hero clock, the run sheet, every roster row and the inspector all read the
-  // same instant, so no two windows on this page can count the same deadline
-  // seconds apart.
-  const roomClock = useMemo(
-    () => resolveRoomClock(controller.roomClock, runtime?.serverNow ?? null),
-    [controller.roomClock, runtime?.serverNow],
-  );
+  // The room's own clock, resolved by the controller: ONE server instant plus the
+  // shared 1s tick. The hero clock, the run sheet, every roster row and the
+  // inspector all read this same instant, so no two windows on this page can
+  // count the same deadline seconds apart.
+  const roomClock = controller.roomClock;
   const serverNowMs = useRoomClockMs(roomClock);
   const stageRemainingSeconds = useAuthoritativeDeadlineClock({
     deadlineAt: runtime?.currentSectionDeadlineAt ?? null,
     serverNow: runtime?.serverNow ?? null,
     fallbackSeconds: runtime?.currentSectionRemainingSeconds ?? 0,
-    running: runtime?.status === 'live' && currentStageStatus === 'live',
+    running: isSatStageLive(runtime),
     roomClock,
   });
   // ONE projection for the header and the table: the room builds the run sheet

@@ -45,12 +45,12 @@ describe('useSatInteractionController (only public mutation surface)', () => {
     // A Math selection is refused by the same capability, and so is arming: no
     // path to the annotation mode exists without the surface behind it.
     act(() => result.current.selectionCaptured({ nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' }));
-    expect(result.current.state.annotation.selection).toBeNull();
+    expect(result.current.state.annotation.selectionToolsAnchor).toBeNull();
     act(() => result.current.toggleAnnotationMode());
     expect(result.current.annotationModeEnabled).toBe(false);
   });
 
-  it('captures a selection only once the mode is armed, and clears it on demand', () => {
+  it('stores a toolbar anchor only while armed and distinguishes toolbar dismissal from range end', () => {
     const anchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' };
     const { result } = renderHook(({ ctx }: { ctx: SatInteractionContext }) => useSatInteractionController(ctx), {
       initialProps: { ctx: { ...mathCtx(), toolPolicy: resolveSatExamToolPolicy('reading-writing', []), sectionKey: 'reading-writing' } },
@@ -60,19 +60,24 @@ describe('useSatInteractionController (only public mutation surface)', () => {
 
     // Unarmed: the selection is discarded, so no toolbar can exist anywhere.
     act(() => result.current.selectionCaptured(anchor));
-    expect(result.current.state.annotation.selection).toBeNull();
-    expect(result.current.view.annotation.hasSelection).toBe(false);
+    expect(result.current.state.annotation.selectionToolsAnchor).toBeNull();
+    expect(result.current.view.annotation.selectionToolsAnchor).toBeNull();
 
     // The one press that changes that.
     act(() => result.current.toggleAnnotationMode());
     expect(result.current.annotationModeEnabled).toBe(true);
     act(() => result.current.selectionCaptured(anchor));
-    expect(result.current.state.annotation.selection).toEqual(anchor);
-    expect(result.current.view.annotation.hasSelection).toBe(true);
+    expect(result.current.state.annotation.selectionToolsAnchor).toEqual(anchor);
+    expect(result.current.view.annotation.selectionToolsAnchor).toEqual(anchor);
 
-    // Dismissing the tools leaves the mode armed: Escape is not a disarm.
+    // Dismissing the tools leaves the mode armed and does not disarm Selection v2.
+    act(() => result.current.selectionToolsDismissed());
+    expect(result.current.state.annotation.selectionToolsAnchor).toBeNull();
+    expect(result.current.annotationModeEnabled).toBe(true);
+
+    act(() => result.current.selectionCaptured(anchor));
     act(() => result.current.selectionCleared());
-    expect(result.current.state.annotation.selection).toBeNull();
+    expect(result.current.state.annotation.selectionToolsAnchor).toBeNull();
     expect(result.current.annotationModeEnabled).toBe(true);
 
     act(() => result.current.toggleAnnotationMode());
@@ -100,7 +105,7 @@ describe('useSatInteractionController (only public mutation surface)', () => {
     );
     act(() => result.current.toggleAnnotationMode());
     act(() => result.current.selectionCaptured({ nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' }));
-    expect(result.current.state.annotation.selection).not.toBeNull();
+    expect(result.current.state.annotation.selectionToolsAnchor).not.toBeNull();
     expect(result.current.annotationModeEnabled).toBe(true);
     rerender({
       ctx: {
@@ -110,7 +115,7 @@ describe('useSatInteractionController (only public mutation surface)', () => {
         moduleKey: 'math-m1',
       },
     });
-    expect(result.current.state.annotation.selection).toBeNull();
+    expect(result.current.state.annotation.selectionToolsAnchor).toBeNull();
     // A Math question can never inherit an armed R&W mode either.
     expect(result.current.annotationModeEnabled).toBe(false);
   });
@@ -132,14 +137,14 @@ describe('useSatInteractionController (only public mutation surface)', () => {
     const anchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' };
     act(() => result.current.toggleAnnotationMode());
     act(() => result.current.selectionCaptured(anchor));
-    expect(result.current.state.annotation.selection).toEqual(anchor);
+    expect(result.current.state.annotation.selectionToolsAnchor).toEqual(anchor);
     let acted = false;
     // 1) The selection is the innermost annotation state: Escape clears it.
     act(() => {
       acted = result.current.handleEscape();
     });
     expect(acted).toBe(true);
-    expect(result.current.state.annotation.selection).toBeNull();
+    expect(result.current.state.annotation.selectionToolsAnchor).toBeNull();
     // 2) Nothing left to clear.
     act(() => {
       acted = result.current.handleEscape();
@@ -150,7 +155,7 @@ describe('useSatInteractionController (only public mutation surface)', () => {
     act(() => result.current.selectionCaptured(anchor));
     act(() => result.current.openNavigator());
     expect(result.current.is.navigatorOpen).toBe(true);
-    expect(result.current.state.annotation.selection).toBeNull();
+    expect(result.current.state.annotation.selectionToolsAnchor).toBeNull();
     act(() => {
       acted = result.current.handleEscape();
     });

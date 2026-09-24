@@ -25,8 +25,8 @@ func submitAttemptRows() *sqlmock.Rows {
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
 		"response_revision", "deadline_at", "closing_grace_until",
-		"submitted_at", "final_submission", "proctor_status",
-	}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 3, 7, 9, nil, nil, nil, nil, "active")
+		"submitted_at", "final_submission", "proctor_status", "provider_key",
+	}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 3, 7, 9, nil, nil, nil, nil, "active", "")
 }
 
 func submitBearer(t *testing.T) string {

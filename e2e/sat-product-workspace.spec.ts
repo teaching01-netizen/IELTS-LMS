@@ -1,16 +1,35 @@
 import { createHash } from "node:crypto";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { ADMIN_STORAGE_STATE_PATH } from "./support/backendE2e";
-import { executeUpdate, queryDb } from "./support/db";
+import { executeTransaction, executeUpdate, queryDb } from "./support/db";
 
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
 type SatBootstrapSummary = {
   attemptId: string;
   sectionKey: string;
-  submittedModuleIds: string[];
+  timedOutModuleIds: string[];
   answeredCount: number;
   branchRole: string | null;
+};
+
+type SatDeliveryFrame = {
+  sections: Array<{
+    id: string;
+    sectionKey: string;
+    modules: Array<{ id: string; adaptiveRole: string }>;
+  }>;
+  attempt: {
+    id: string;
+    moduleAttempts: Array<{
+      id: string;
+      moduleId: string;
+      state: string;
+      completionReason: string | null;
+      rawCorrect: number | null;
+    }>;
+  };
+  result: { id: string } | null;
 };
 
 type SatRuntime = {
@@ -27,18 +46,18 @@ type SatRuntime = {
  * only the serializable {examQuestionId, correctAnswer} plan crosses into
  * the browser (page.evaluate closures cannot touch Node imports or DB).
  */
-async function correctAnswerPlan(moduleId: string): Promise<Array<{ examQuestionId: string; correctAnswer: string }>> {
+async function correctAnswerPlan(moduleId: string): Promise<Array<{ examQuestionId: string; questionId: string; kind: string; correctAnswer: string }>> {
   // Pretest rows are excluded from operational scoring/routing, so answering
   // them would inflate answeredCount beyond rawCorrect and break the
   // rawCorrect >= answeredCount assertion.
-  const keyRows = await queryDb<{ exam_question_id: string; answer_definition: string }>(
-    `SELECT eq.id AS exam_question_id, CAST(qr.answer_definition AS CHAR) AS answer_definition
+  const keyRows = await queryDb<{ exam_question_id: string; question_id: string; answer_definition: string }>(
+    `SELECT eq.id AS exam_question_id, eq.question_id, CAST(qr.answer_definition AS CHAR) AS answer_definition
        FROM assessment_exam_questions eq
        JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id
       WHERE eq.module_id = ? AND eq.is_pretest = FALSE`,
     [moduleId],
   );
-  const plan: Array<{ examQuestionId: string; correctAnswer: string }> = [];
+  const plan: Array<{ examQuestionId: string; questionId: string; kind: string; correctAnswer: string }> = [];
   for (const row of keyRows) {
     let parsed: { kind?: string; correctOptionId?: unknown; acceptedResponses?: unknown } = {};
     try {
@@ -47,13 +66,13 @@ async function correctAnswerPlan(moduleId: string): Promise<Array<{ examQuestion
       continue;
     }
     if (parsed.kind === "single_choice" && typeof parsed.correctOptionId === "string") {
-      plan.push({ examQuestionId: row.exam_question_id, correctAnswer: parsed.correctOptionId });
+      plan.push({ examQuestionId: row.exam_question_id, questionId: row.question_id, kind: parsed.kind, correctAnswer: parsed.correctOptionId });
     } else if (
       parsed.kind === "student_produced_response"
       && Array.isArray(parsed.acceptedResponses)
       && typeof parsed.acceptedResponses[0] === "string"
     ) {
-      plan.push({ examQuestionId: row.exam_question_id, correctAnswer: parsed.acceptedResponses[0] as string });
+      plan.push({ examQuestionId: row.exam_question_id, questionId: row.question_id, kind: parsed.kind, correctAnswer: parsed.acceptedResponses[0] as string });
     }
   }
   return plan;
@@ -98,10 +117,8 @@ async function finishCurrentSatSection(
   candidateId: string,
   options: { answerQuestions?: boolean } = {}
 ): Promise<SatBootstrapSummary> {
-  // Audit finding 1: answerQuestions=false drives the SAME journey a student
-  // who answered nothing takes — start and submit every module with an empty
-  // response set — so the terminal V2 submit has to accept it rather than
-  // 400ing into a finalization loop that no retry can repair.
+  // answerQuestions=false drives the same timeout journey with an empty
+  // response set; the server still scores and completes the attempt.
   const answerQuestions = options.answerQuestions ?? true;
   // Resolve the live section + base module in the browser, then answer in
   // Node-resolved key order via the real V2 transport inside the browser.
@@ -137,7 +154,7 @@ async function finishCurrentSatSection(
   if (answerQuestions && answerPlan.length < 1) {
     throw new Error(`No answerable base questions for ${live.sectionKey}`);
   }
-  return page.evaluate(
+  const prepared = await page.evaluate(
     async ({ scheduleId, attemptId, candidateId, baseModuleId, answerPlan, answerQuestions: shouldAnswer }) => {
       const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
       delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
@@ -148,24 +165,6 @@ async function finishCurrentSatSection(
       if (!section) throw new Error("Base module missing from bootstrap");
       const base = section.modules.find((module) => module.id === baseModuleId);
       if (!base) throw new Error("Base module missing from bootstrap");
-
-      const submittedModuleIds: string[] = [];
-      const submitModule = async (moduleId: string) => {
-        const attempt = snapshot.attempt.moduleAttempts.find((item) => item.moduleId === moduleId);
-        if (!attempt) throw new Error(`No module attempt for ${moduleId}`);
-        if (attempt.state === "not_started") {
-          snapshot = await delivery.assessmentDeliveryApi.startModule(scheduleId, attemptId, {
-            moduleId,
-          });
-        }
-        const current = snapshot.attempt.moduleAttempts.find((item) => item.moduleId === moduleId);
-        if (current && !["submitted", "locked"].includes(current.state)) {
-          snapshot = await delivery.assessmentDeliveryApi.submitModule(scheduleId, attemptId, {
-            moduleId,
-          });
-        }
-        submittedModuleIds.push(moduleId);
-      };
 
       // The strict module gate rejects writes for not_started modules, so
       // the base attempt must be started before V2 answers are accepted.
@@ -214,36 +213,127 @@ async function finishCurrentSatSection(
         engine.destroy();
         if (answeredCount < 1) throw new Error(`No answerable base questions for ${section.sectionKey}`);
       }
-      await submitModule(base.id);
-
-      const selectedBranchAttempt = snapshot.attempt.moduleAttempts.find((attempt) => {
-        if (!["not_started", "active", "review"].includes(attempt.state)) return false;
-        return section.modules.some(
-          (module) => module.id === attempt.moduleId && module.adaptiveRole !== "base"
-        );
-      });
-      if (!selectedBranchAttempt)
-        throw new Error(`No adaptive branch selected for ${section.sectionKey}`);
-      const branchModule = section.modules.find((module) => module.id === selectedBranchAttempt.moduleId);
-      await submitModule(selectedBranchAttempt.moduleId);
-
+      const baseAttempt = snapshot.attempt.moduleAttempts.find((item) => item.moduleId === base.id);
+      if (!baseAttempt || !["active", "review"].includes(baseAttempt.state)) {
+        throw new Error(`Base module did not become active for ${section.sectionKey}`);
+      }
       return {
         attemptId: snapshot.attempt.id,
         sectionKey: section.sectionKey,
-        submittedModuleIds,
+        baseModuleAttemptId: baseAttempt.id,
         answeredCount,
-        branchRole: branchModule?.adaptiveRole ?? null,
       };
     },
     { scheduleId, attemptId, candidateId, baseModuleId: live.baseModuleId, answerPlan, answerQuestions },
   );
+
+  await expireSatModuleAttempt(prepared.baseModuleAttemptId);
+  let branchFrame: SatDeliveryFrame | null = null;
+  await expect.poll(async () => {
+    const frame = await readSatDeliveryFrame(page, scheduleId, prepared.attemptId, candidateId);
+    const base = frame.attempt.moduleAttempts.find((item) => item.id === prepared.baseModuleAttemptId);
+    const branch = frame.attempt.moduleAttempts.find((item) => {
+      const module = frame.sections
+        .find((section) => section.sectionKey === prepared.sectionKey)
+        ?.modules.find((candidate) => candidate.id === item.moduleId);
+      return module !== undefined && module.adaptiveRole !== "base";
+    });
+    if (base && ["submitted", "locked"].includes(base.state) && branch?.state === "active") {
+      branchFrame = frame;
+      return "active";
+    }
+    return branch?.state ?? base?.state ?? "missing";
+  }, { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }).toBe("active");
+  const openedBranchFrame = branchFrame as SatDeliveryFrame | null;
+  if (!openedBranchFrame) throw new Error(`The server did not open the adaptive module for ${prepared.sectionKey}`);
+
+  const branchAttempt = openedBranchFrame.attempt.moduleAttempts.find((item) => {
+    const module = openedBranchFrame.sections
+      .find((section) => section.sectionKey === prepared.sectionKey)
+      ?.modules.find((candidate) => candidate.id === item.moduleId);
+    return module !== undefined && module.adaptiveRole !== "base" && item.state === "active";
+  });
+  if (!branchAttempt) throw new Error(`No active adaptive module for ${prepared.sectionKey}`);
+  await expireSatModuleAttempt(branchAttempt.id);
+
+  let terminalFrame: SatDeliveryFrame | null = null;
+  await expect.poll(async () => {
+    const frame = await readSatDeliveryFrame(page, scheduleId, prepared.attemptId, candidateId);
+    const branch = frame.attempt.moduleAttempts.find((item) => item.id === branchAttempt.id);
+    if (branch && ["submitted", "locked"].includes(branch.state)) {
+      terminalFrame = frame;
+      return "terminal";
+    }
+    return branch?.state ?? "missing";
+  }, { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }).toBe("terminal");
+  const closedBranchFrame = terminalFrame as SatDeliveryFrame | null;
+  if (!closedBranchFrame) throw new Error(`The server did not close the adaptive module for ${prepared.sectionKey}`);
+
+  const sectionModules = closedBranchFrame.sections.find(
+    (section) => section.sectionKey === prepared.sectionKey,
+  )?.modules ?? [];
+  const branchModule = sectionModules.find((module) => module.id === branchAttempt.moduleId);
+  const timedOutModuleIds = closedBranchFrame.attempt.moduleAttempts
+    .filter((item) => [prepared.baseModuleAttemptId, branchAttempt.id].includes(item.id))
+    .filter((item) => ["submitted", "locked"].includes(item.state))
+    .map((item) => item.moduleId);
+  return {
+    attemptId: prepared.attemptId,
+    sectionKey: prepared.sectionKey,
+    timedOutModuleIds,
+    answeredCount: prepared.answeredCount,
+    branchRole: branchModule?.adaptiveRole ?? null,
+  };
+}
+
+async function expireSatModuleAttempt(moduleAttemptId: string): Promise<void> {
+  const changed = await executeUpdate(
+    `UPDATE assessment_module_attempts
+        SET started_at = NOW(6) - INTERVAL 1 HOUR,
+            updated_at = NOW(6)
+      WHERE id = ?
+        AND state IN ('active', 'review')`,
+    [moduleAttemptId],
+  );
+  if (changed !== 1) throw new Error(`Expected active SAT module attempt ${moduleAttemptId} to expire`);
+}
+
+async function readSatDeliveryFrame(
+  page: Page,
+  scheduleId: string,
+  attemptId: string,
+  candidateId: string,
+): Promise<SatDeliveryFrame> {
+  return page.evaluate(async ({ scheduleId, attemptId, candidateId }) => {
+    const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+    delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
+    const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
+    return {
+      sections: snapshot.sections.map((section) => ({
+        id: section.id,
+        sectionKey: section.sectionKey,
+        modules: section.modules.map((module) => ({ id: module.id, adaptiveRole: module.adaptiveRole })),
+      })),
+      attempt: {
+        id: snapshot.attempt.id,
+        moduleAttempts: snapshot.attempt.moduleAttempts.map((item) => ({
+          id: item.id,
+          moduleId: item.moduleId,
+          state: item.state,
+          completionReason: item.completionReason,
+          rawCorrect: item.rawCorrect,
+        })),
+      },
+      result: snapshot.result ? { id: snapshot.result.id } : null,
+    };
+  }, { scheduleId, attemptId, candidateId });
 }
 
 // Pause leg — freeze the live cohort stage mid-module, ASSERT the
 // freeze is observable while paused (status + frozen countdown), then
 // resume. Answers saved across the pause must survive and routing must
 // still reflect them (personal clock freezes with the cohort stage, so no
-// spurious auto-submit fires mid-pause).
+// spurious timeout reconciliation fires mid-pause).
 async function pauseAndResumeCurrentSatSection(page: Page, scheduleId: string) {
   const paused = await executeUpdate(
     "UPDATE exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id " +
@@ -278,22 +368,43 @@ async function pauseAndResumeCurrentSatSection(page: Page, scheduleId: string) {
     .toBe("live");
 }
 
-async function expireCurrentSatSection(scheduleId: string) {
-  const affected = await executeUpdate(
-    `
-      UPDATE exam_session_runtime_sections rs
-      JOIN exam_session_runtimes r ON r.id = rs.runtime_id
-      SET rs.actual_start_at = DATE_SUB(NOW(6), INTERVAL 2 MINUTE),
-          rs.planned_duration_minutes = 1,
-          rs.extension_minutes = 0,
-          rs.accumulated_paused_seconds = 0
-      WHERE r.schedule_id = ?
-        AND rs.section_key = r.active_section_key
-        AND rs.status = 'live'
-    `,
-    [scheduleId]
-  );
-  if (affected !== 1) {
+async function expireCurrentSatSection(scheduleId: string, attemptId: string) {
+  const affected = await executeTransaction(async (connection) => {
+    const [attemptRows] = await connection.execute(
+      "SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? AND protocol_version = 2 FOR UPDATE",
+      [attemptId, scheduleId],
+    );
+    if ((attemptRows as Array<Record<string, unknown>>).length === 0) return 0;
+    const [runtimeRows] = await connection.execute(
+      "SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+      [scheduleId],
+    );
+    const runtime = (runtimeRows as Array<{ id: string; active_section_key: string | null }>)[0];
+    if (!runtime?.active_section_key) return 0;
+    const [sectionRows] = await connection.execute(
+      "SELECT section_key FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? AND status = 'live' FOR UPDATE",
+      [runtime.id, runtime.active_section_key],
+    );
+    if ((sectionRows as Array<Record<string, unknown>>).length === 0) return 0;
+    await connection.execute(
+      `UPDATE exam_session_runtime_sections
+          SET actual_start_at = DATE_SUB(NOW(6), INTERVAL 2 MINUTE),
+              planned_duration_minutes = 1,
+              extension_minutes = 0,
+              accumulated_paused_seconds = 0
+        WHERE runtime_id = ? AND section_key = ? AND status = 'live'`,
+      [runtime.id, runtime.active_section_key],
+    );
+    const [attemptUpdate] = await connection.execute(
+      `UPDATE student_attempts
+          SET deadline_at = DATE_SUB(NOW(6), INTERVAL 1 MINUTE),
+              closing_grace_until = DATE_SUB(NOW(6), INTERVAL 30 SECOND)
+        WHERE id = ? AND schedule_id = ? AND protocol_version = 2`,
+      [attemptId, scheduleId],
+    );
+    return Number((attemptUpdate as { affectedRows?: number }).affectedRows ?? 0);
+  });
+  if (affected < 1) {
     throw new Error(`Expected one live SAT section to expire, changed ${affected} rows`);
   }
 }
@@ -353,7 +464,7 @@ async function startSatAttempt(
   await page.getByRole("menuitem", { name: /Load sample exam/ }).click();
   await expect(page.getByRole("dialog", { name: "Load sample SAT" })).toBeVisible();
   await page.getByRole("button", { name: "Load 147 questions" }).click();
-  await expect(page.getByText("147 of 147 authored")).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText("147 of 147 questions authored")).toBeVisible({ timeout: 90_000 });
 
   if (options.leaveMathIncomplete) {
     await leaveMathBaseModuleIncomplete(examId);
@@ -649,7 +760,7 @@ test.describe("Digital SAT product workspace", () => {
     }
   });
 
-  test("creates, publishes, joins, proctors, submits, and surfaces a SAT result without IELTS leakage", async ({
+  test("creates, publishes, joins, times out, and surfaces a SAT result without IELTS leakage", async ({
     page,
     browser,
   }) => {
@@ -673,11 +784,11 @@ test.describe("Digital SAT product workspace", () => {
       );
       expect(reading.sectionKey).toBe("reading-writing");
 
-      // Pause leg: freeze + resume the live stage after reading submits.
+      // Pause leg: freeze + resume the live stage after reading times out.
       // The math section must still open and route on V2-saved answers.
       await pauseAndResumeCurrentSatSection(page, scheduleId);
 
-      await expireCurrentSatSection(scheduleId);
+      await expireCurrentSatSection(scheduleId, attemptId);
       await expect
         .poll(async () => (await readSatRuntime(page, scheduleId)).currentSectionKey, {
           timeout: 30_000,
@@ -699,9 +810,8 @@ test.describe("Digital SAT product workspace", () => {
         .poll(async () => studentPage.evaluate(() => window.navigator.onLine), { timeout: 15_000 })
         .toBe(true);
 
-      // Takeover leg: rotate the writer lease, ASSERT the epoch
-      // increments, and adopt the new session for the final submit —
-      // fire-and-forget would prove nothing about adoption.
+      // Takeover leg: rotate the writer lease, ASSERT the epoch increments,
+      // and adopt the new session after automatic completion.
       const takeoverEpoch = await studentPage.evaluate(
         async ({ scheduleId, attemptId }) => {
           const durable = await import("/src/features/student/infrastructure/responseDurabilityTransport.ts");
@@ -716,11 +826,8 @@ test.describe("Digital SAT product workspace", () => {
       );
       expect(takeoverEpoch).toBeGreaterThan(1);
 
-      // Exam-day re-audit defect 8: the app finalizes with the STABLE
-      // submissionId=attemptId (singleflight + server replay), so the E2E
-      // must too — a random UUID would never exercise the duplicate-finalize
-      // idempotency the release depends on. Submit twice with the stable id
-      // and require one identical result.
+      // Completion is server-owned. Replaying the stable finalization id after
+      // the automatic result exists must return the identical result.
       const submitStable = () => studentPage.evaluate(
         async ({ scheduleId, attemptId, candidateId }) => {
           const delivery =
@@ -741,8 +848,8 @@ test.describe("Digital SAT product workspace", () => {
       // Idempotent replay must return the IDENTICAL result (not just the
       // same id): a re-score with a stable id would pass an id-only
       // check while double-scoring. Timestamps excluded.
-      const { submittedAt: _a, ...resultCore } = result as Record<string, unknown>;
-      const { submittedAt: _b, ...replayCore } = replay as Record<string, unknown>;
+      const { submittedAt: _a, ...resultCore } = result as unknown as Record<string, unknown>;
+      const { submittedAt: _b, ...replayCore } = replay as unknown as Record<string, unknown>;
       expect(replayCore).toEqual(resultCore);
       // Exam-day P0 assertions: V2-saved correct answers must score, route
       // the adaptive branch, and appear in the released review.
@@ -785,6 +892,171 @@ test.describe("Digital SAT product workspace", () => {
     }
   });
 
+  test("keeps an acknowledged V2 answer in the result after the student tab closes", async ({
+    page,
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const harness = await startSatAttempt(page, browser, {
+      titlePrefix: "SAT Disconnected Answer",
+      linkPrefix: "SAT Disconnected Link",
+      studentPrefix: "SAT Disconnected Student",
+      publishScope: "reading-writing",
+      leaveMathIncomplete: true,
+    });
+    const { studentPage, studentContext, scheduleId, candidateId, attemptId } = harness;
+    try {
+      const base = await studentPage.evaluate(async ({ scheduleId, attemptId, candidateId }) => {
+        const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+        delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
+        const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
+        const section = snapshot.sections.find((item) => item.sectionKey === "reading-writing");
+        const module = section?.modules.find((item) => item.adaptiveRole === "base");
+        const moduleAttempt = module && snapshot.attempt.moduleAttempts.find((item) => item.moduleId === module.id);
+        if (!module || moduleAttempt?.state !== "active") {
+          throw new Error("The base module must be active before testing disconnected answer durability.");
+        }
+        return { id: module.id, key: module.moduleKey };
+      }, { scheduleId, attemptId, candidateId });
+      const answer = (await correctAnswerPlan(base.id)).find((candidate) => candidate.kind === "single_choice");
+      if (!answer) throw new Error("No keyed operational question was available for the disconnected save.");
+
+      // flush() returns only after the server ACK; close the student context
+      // before advancing authoritative time so no browser request can rescue it.
+      await studentPage.evaluate(async ({ scheduleId, attemptId, candidateId, baseModuleId, answer }) => {
+        const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+        delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
+        const durable = await import("/src/features/student/infrastructure/responseDurabilityTransport.ts");
+        const engineMod = await import("/src/shared/durability/DurableResponseEngine.ts");
+        const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
+        const module = snapshot.sections.flatMap((section) => section.modules).find((item) => item.id === baseModuleId);
+        if (!module?.questions.some((question) => question.examQuestionId === answer.examQuestionId)) {
+          throw new Error("The selected question was missing from the active base module.");
+        }
+        const engine = new engineMod.DurableResponseEngine({
+          scheduleId,
+          attemptId,
+          leaseEpoch: 1,
+          controlEpoch: 1,
+          drainDebounceMs: 0,
+          transport: durable.createResponseDurabilityV2Transport(scheduleId, undefined),
+        });
+        try {
+          await engine.recover();
+          await engine.acceptResponse(answer.examQuestionId, {
+            answer: answer.correctAnswer,
+            markedForReview: false,
+            eliminatedOptions: [],
+            annotations: [],
+          });
+          await engine.flush();
+          if (engine.getPendingCount() !== 0) {
+            throw new Error(engine.getLastError() ?? "The answer did not receive a durable server ACK.");
+          }
+        } finally {
+          engine.destroy();
+        }
+      }, { scheduleId, attemptId, candidateId, baseModuleId: base.id, answer });
+
+      const persisted = await queryDb<{ response: string }>(
+        "SELECT CAST(response AS CHAR) AS response FROM attempt_responses_v2 WHERE attempt_id = ? AND module_id = ? AND question_id = ?",
+        [attemptId, base.id, answer.examQuestionId],
+      );
+      expect(persisted).toHaveLength(1);
+      expect(JSON.parse(persisted[0]!.response).answer).toBe(answer.correctAnswer);
+
+      const responseBatchRequest = studentPage.waitForRequest((request) =>
+        request.url().includes(`/v2/student/attempts/${attemptId}/responses:batch`),
+      );
+      const racingWrite = studentPage.evaluate(async ({ scheduleId, attemptId, candidateId, baseModuleId, answer }) => {
+        const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+        delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
+        const durable = await import("/src/features/student/infrastructure/responseDurabilityTransport.ts");
+        const engineMod = await import("/src/shared/durability/DurableResponseEngine.ts");
+        const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
+        const question = snapshot.sections
+          .flatMap((section) => section.modules)
+          .find((module) => module.id === baseModuleId)
+          ?.questions.find((item) => item.examQuestionId === answer.examQuestionId);
+        if (!question || question.answer.kind !== "single_choice") {
+          throw new Error("The selected single-choice question was missing from the active base module.");
+        }
+        const alternative = question.answer.options.find((option) => option.id !== answer.correctAnswer);
+        if (!alternative) throw new Error("The selected question did not have an alternative answer option.");
+        const engine = new engineMod.DurableResponseEngine({
+          scheduleId,
+          attemptId,
+          leaseEpoch: 1,
+          controlEpoch: 1,
+          drainDebounceMs: 0,
+          transport: durable.createResponseDurabilityV2Transport(scheduleId, undefined),
+        });
+        try {
+          await engine.recover();
+          await engine.acceptResponse(answer.examQuestionId, {
+            answer: alternative.id,
+            markedForReview: false,
+            eliminatedOptions: [],
+            annotations: [],
+          });
+          await engine.flush();
+          return {
+            acknowledged: engine.getPendingCount() === 0,
+            error: engine.getLastError(),
+            alternativeAnswer: alternative.id,
+          };
+        } finally {
+          engine.destroy();
+        }
+      }, { scheduleId, attemptId, candidateId, baseModuleId: base.id, answer });
+      // Begin the expiry update only after the answer batch has left the
+      // browser, so the V2 transaction and timeout boundary genuinely race.
+      await responseBatchRequest;
+      await expireCurrentSatSection(scheduleId, attemptId);
+      const raced = await racingWrite;
+      if (!raced.acknowledged && !/deadline|expired|not writable/i.test(raced.error ?? "")) {
+        throw new Error(`The racing response was neither acknowledged nor rejected by the timeout gate: ${raced.error ?? "no server error"}`);
+      }
+      const expectedAnswer = raced.acknowledged ? raced.alternativeAnswer : answer.correctAnswer;
+      const afterRace = await queryDb<{ response: string }>(
+        "SELECT CAST(response AS CHAR) AS response FROM attempt_responses_v2 WHERE attempt_id = ? AND module_id = ? AND question_id = ?",
+        [attemptId, base.id, answer.examQuestionId],
+      );
+      expect(afterRace).toHaveLength(1);
+      expect(JSON.parse(afterRace[0]!.response).answer).toBe(expectedAnswer);
+
+      await studentContext.close();
+      let resultId: string | null = null;
+      await expect.poll(async () => {
+        const rows = await queryDb<{ id: string }>(
+          "SELECT id FROM assessment_results WHERE attempt_id = ?",
+          [attemptId],
+        );
+        resultId = rows[0]?.id ?? null;
+        return resultId;
+      }, { timeout: 90_000, intervals: [500, 1_000, 2_000, 5_000] }).not.toBeNull();
+
+      if (!resultId) throw new Error("The timeout worker did not produce a SAT result.");
+      const detailResponse = await page.request.get(`/api/v1/results/sat/${resultId}`);
+      expect(detailResponse.ok(), `SAT result detail returned ${detailResponse.status()}`).toBe(true);
+      type ResultQuestion = {
+        questionId?: string;
+        moduleKey?: string;
+        response?: unknown;
+        isCorrect?: boolean;
+      };
+      const payload = await detailResponse.json() as { data?: { questions?: ResultQuestion[] }; questions?: ResultQuestion[] };
+      const detail = payload.data ?? payload;
+      const question = detail.questions?.find((item) =>
+        item.questionId === answer.questionId && item.moduleKey === base.key,
+      );
+      expect(question?.response).toBe(expectedAnswer);
+      expect(question?.isCorrect).toBe(expectedAnswer === answer.correctAnswer);
+    } finally {
+      await studentContext.close();
+    }
+  });
+
   test("delivers a pinned Reading & Writing release through the complete student journey", async ({
     page,
     browser,
@@ -821,7 +1093,7 @@ test.describe("Digital SAT product workspace", () => {
 
       const finished = await finishCurrentSatSection(studentPage, scheduleId, attemptId, candidateId);
       expect(finished.sectionKey).toBe("reading-writing");
-      expect(finished.submittedModuleIds).toHaveLength(2);
+      expect(finished.timedOutModuleIds).toHaveLength(2);
       expect(finished.branchRole).toMatch(/^(lower|higher)_branch$/);
 
       const result = await studentPage.evaluate(
@@ -847,12 +1119,8 @@ test.describe("Digital SAT product workspace", () => {
     }
   });
 
-  // Audit finding 1 (release blocker): a student who answers NOTHING may submit
-  // every module — the product allows unanswered questions — but the terminal
-  // V2 submit used to reject the empty response set with a bare 400, so the
-  // attempt could never reach a result and every retry failed the same way.
-  // This leg is the whole point of the fix: zero responses in, real result out.
-  test("finalizes a SAT attempt the student left completely unanswered", async ({
+  // An unanswered attempt still reaches a result after server-owned timeouts.
+  test("finalizes a completely unanswered SAT attempt automatically", async ({
     page,
     browser,
   }) => {
@@ -865,7 +1133,7 @@ test.describe("Digital SAT product workspace", () => {
     const { studentPage, studentContext, scheduleId, candidateId, attemptId, studentName, examTitle } =
       harness;
     try {
-      for (const sectionKey of ["reading-writing", "math"] as const) {
+      for (const [index, sectionKey] of (["reading-writing", "math"] as const).entries()) {
         const finished = await finishCurrentSatSection(
           studentPage,
           scheduleId,
@@ -876,13 +1144,16 @@ test.describe("Digital SAT product workspace", () => {
         expect(finished.sectionKey).toBe(sectionKey);
         // The journey is only meaningful if the student truly answered nothing.
         expect(finished.answeredCount).toBe(0);
+        if (index === 0) {
+          await expireCurrentSatSection(scheduleId, attemptId);
+          await expect.poll(async () => (await readSatRuntime(page, scheduleId)).currentSectionKey, {
+            timeout: 30_000,
+          }).toBe("math");
+        }
       }
 
-      // The app's OWN finalization must produce the result — this test never
-      // calls the completion endpoint directly, because the broken path was
-      // exactly persistence.submit() 400ing before completion was ever reached.
-      // Zero raw is a legitimate score, not a transport failure: the practice
-      // table's floor is 200 per section, so both sections at zero = 400.
+      // Zero raw is a legitimate score: the practice table's floor is 200 per
+      // section, so both sections at zero = 400.
       await expect
         .poll(
           async () => {

@@ -52,10 +52,12 @@ func TestReconcileFastPathFallsThrough(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM student_attempts WHERE id").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", "live", "legacy_section_v1", nil))
+	mock.ExpectQuery("SELECT UTC_TIMESTAMP").
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery("state IN").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}))
 	mock.ExpectQuery("state IN").
@@ -63,6 +65,43 @@ func TestReconcileFastPathFallsThrough(t *testing.T) {
 	mock.ExpectCommit()
 	if _, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", time.Now().UTC()); err != nil {
 		t.Fatalf("reconcile: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSATTimeoutWaitsForSaveOnlyGraceBeforeScoring(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := NewService(db, tx.NewRunner(db))
+	deadline := time.Now().UTC()
+	started := deadline.Add(-time.Minute)
+	mock.ExpectQuery("FROM assessment_module_attempts WHERE attempt_id").
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"open_modules", "terminal_modules"}).AddRow(1, 0))
+	mock.ExpectBegin()
+	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("FROM student_attempts WHERE id").
+		WithArgs("att-1", "sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
+	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
+			AddRow("rt-1", "live", "legacy_section_v1", nil))
+	mock.ExpectQuery("SELECT UTC_TIMESTAMP").
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(deadline.Add(time.Second)))
+	mock.ExpectQuery("state IN").
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}).
+			AddRow("ma-1", "mod-1", "active", 60, started, started, nil, 0, 0, nil))
+	mock.ExpectCommit()
+	changed, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", deadline.Add(time.Second))
+	if err != nil || changed {
+		t.Fatalf("SAT module must remain open for queued saves, changed=%v err=%v", changed, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

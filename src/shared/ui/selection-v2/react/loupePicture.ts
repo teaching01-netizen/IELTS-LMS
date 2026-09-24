@@ -238,6 +238,15 @@ function dressPicture(copy: HTMLElement): void {
     // they honour it, and a magnified copy of a button must never be a tab stop
     // even then.
     if (node.matches('button, a, input, textarea, select, [tabindex]')) node.setAttribute('tabindex', '-1');
+    // Sterile paint: the clone is a second rendered copy of protected prose
+    // whose `data-*` identity was just stripped, so the source's
+    // `[data-sat-selection-protected][data-student-selection-owner]` rule no
+    // longer covers it. Do not rely on stylesheet inheritance alone — Safari
+    // must never treat this as a selection anchor even if the CSS is late.
+    node.style.setProperty('-webkit-user-select', 'none', 'important');
+    node.style.setProperty('user-select', 'none', 'important');
+    node.style.setProperty('-webkit-touch-callout', 'none', 'important');
+    node.style.setProperty('pointer-events', 'none', 'important');
   }
   // The loupe's own markers are stamped AFTER sanitising, so they are the only
   // attributes on the picture that belong to anybody.

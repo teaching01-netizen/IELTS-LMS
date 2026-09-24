@@ -12,10 +12,13 @@ import { SatQuestionHeader } from "./SatQuestionHeader";
 import { SatQuestionWorkspace } from "./SatQuestionWorkspace";
 import { SatSingleChoiceAnswer } from "./SatSingleChoiceAnswer";
 import { SatStudentProducedAnswer } from "./SatStudentProducedAnswer";
+import { satChoiceAnnotationRegion, type SatAnnotationRegion } from '../../domain/satAnnotationIdentity';
 
 export interface SatQuestionRendererProps {
   sectionKey: SatSectionKey;
   questionNumber: number;
+  /** Stable scope identity for transient app-owned selection state. */
+  selectionScopeKey?: string | undefined;
   question: DeliveredQuestion;
   response: SatQuestionResponseDraft;
   eliminationMode: boolean;
@@ -23,6 +26,7 @@ export interface SatQuestionRendererProps {
   readingPreferences: SatReadingPreferences;
   onReadingSplitRatioChange: (ratio: number) => void;
   onAnswerChange: (answer: string) => void;
+  onAnswerBlur?: (() => void) | undefined;
   onToggleReview: () => void;
   onToggleEliminationMode: () => void;
   onToggleEliminatedOption: (optionId: string) => void;
@@ -47,10 +51,12 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
   const eliminationAvailable = props.question.answer.kind === "single_choice";
   const eliminated = new Set(props.response.eliminatedOptionIds);
   const policy = resolveSatExamToolPolicy(props.sectionKey, []);
-  const renderContent = (content: StructuredContent, region: 'stimulus' | 'prompt') => (
+  const selectionScopeKey = props.selectionScopeKey ?? `${props.sectionKey}::${props.question.examQuestionId}`;
+  const renderContent = (content: StructuredContent, region: SatAnnotationRegion) => (
     <SatAnnotatedContent
       content={content}
       region={region}
+      selectionScopeKey={selectionScopeKey}
       annotations={props.response.annotations}
       enabled={policy.highlight || policy.underline}
       // Figure inspection follows the same policy shape as annotation: a module
@@ -97,7 +103,11 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
                 eliminationMode={props.eliminationMode}
                 disabled={props.disabled}
                 onChange={props.onAnswerChange}
+                onBlur={props.onAnswerBlur}
                 onToggleElimination={props.onToggleEliminatedOption}
+                renderOptionContent={(option) =>
+                  renderContent(option.content, satChoiceAnnotationRegion(option.id))
+                }
               />
             ) : (
               <SatStudentProducedAnswer

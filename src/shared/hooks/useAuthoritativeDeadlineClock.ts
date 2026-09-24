@@ -122,8 +122,12 @@ export function resolveRoomClock(
 /**
  * The room's clock: one corrected instant every countdown on a page reads, so
  * the hero clock, the run sheet, each roster row and the inspector cannot
- * disagree about "now". Surfaces that hand a deadline to
- * `useAuthoritativeDeadlineClock` pass this instead of their own `serverNow`.
+ * disagree about "now". A surface that has to show several windows at once (the
+ * staff run sheet, whose section, module and break rows all count down together)
+ * reads this once and derives each row from that one instant instead of pairing
+ * one deadline per hook call; a surface showing a single window hands this to
+ * `useAuthoritativeDeadlineClock` as `roomClock` rather than its own
+ * `serverNow`.
  */
 export function useRoomClockMs(
   clock?: ServerClockSnapshot | null,
@@ -144,28 +148,6 @@ export function useRoomClockMs(
       ),
     [acceptedServerNow, acceptedReceivedAt],
   );
-  return nowMs + clockOffsetMs;
-}
-
-/**
- * The room's `now` in ms for a surface that only has a `serverNow` string: the
- * shared tick plus the server-vs-device correction. A surface that has to show
- * several windows at once (the staff run sheet, whose section, module and break
- * rows all count down together) reads `useRoomClockMs` and derives each row from
- * the one instant, instead of pairing one deadline per hook call.
- */
-export function useServerClockNowMs(
-  serverNow?: string | null,
-  options?: { coarse?: boolean }
-): number {
-  const subscribe = options?.coarse ? subscribeCoarseClock : subscribePreciseClock;
-  const getNow = options?.coarse ? getCoarseNow : getPreciseNow;
-  const nowMs = useSyncExternalStore(subscribe, getNow, getNow);
-  const clockOffsetMs = useMemo(() => {
-    if (!serverNow) return 0;
-    const serverNowMs = Date.parse(serverNow);
-    return Number.isFinite(serverNowMs) ? serverNowMs - Date.now() : 0;
-  }, [serverNow]);
   return nowMs + clockOffsetMs;
 }
 

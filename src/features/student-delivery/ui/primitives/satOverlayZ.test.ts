@@ -7,17 +7,11 @@ describe("satOverlayZ contract", () => {
     expect(SAT_OVERLAY_Z.submissionVeil).toBeGreaterThan(SAT_OVERLAY_Z.leaseNotice);
     expect(SAT_OVERLAY_Z.leaseNotice).toBeGreaterThan(SAT_OVERLAY_Z.routeAlert);
     expect(SAT_OVERLAY_Z.routeAlert).toBeGreaterThan(SAT_OVERLAY_Z.toolSheet);
-    // No routine save layers remain: only the failure/superseded alert does.
     expect(SAT_OVERLAY_Z.routeAlert).toBeGreaterThan(SAT_OVERLAY_Z.moreMenu);
   });
 
-  it("keeps the save alert above tools so failures stay visible", () => {
-    expect(SAT_OVERLAY_Z.saveAlert).toBeGreaterThan(SAT_OVERLAY_Z.toolSheet);
-  });
-
-  it("orders Bluebook parity layers: blocking > timer warning > submission > lease > viewer > help > break > alerts > more > tools", () => {
-    expect(SAT_OVERLAY_Z.blockingVeil).toBeGreaterThan(SAT_OVERLAY_Z.timerWarning);
-    expect(SAT_OVERLAY_Z.timerWarning).toBeGreaterThan(SAT_OVERLAY_Z.submissionVeil);
+  it("orders Bluebook parity layers: blocking > submission > lease > viewer > help > break > alerts > more > tools", () => {
+    expect(SAT_OVERLAY_Z.blockingVeil).toBeGreaterThan(SAT_OVERLAY_Z.submissionVeil);
     expect(SAT_OVERLAY_Z.submissionVeil).toBeGreaterThan(SAT_OVERLAY_Z.breakVeil);
     expect(SAT_OVERLAY_Z.breakVeil).toBeGreaterThan(SAT_OVERLAY_Z.leaseNotice);
     expect(SAT_OVERLAY_Z.leaseNotice).toBeGreaterThan(SAT_OVERLAY_Z.imageViewer);
@@ -33,7 +27,6 @@ describe("satOverlayZ contract", () => {
     expect(satOverlayZClass("helpModal")).toBe("z-[88]");
     expect(satOverlayZClass("imageViewer")).toBe("z-[89]");
     expect(satOverlayZClass("breakVeil")).toBe("z-[94]");
-    expect(satOverlayZClass("timerWarning")).toBe("z-[96]");
   });
 
   it("emits tailwind z classes and enforces the single-modal rule", () => {

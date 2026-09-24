@@ -269,6 +269,22 @@ describe('SAT Results product', () => {
     expect(screen.getByRole('button', { name: 'Back to SAT results' })).toBeInTheDocument();
   });
 
+  it('shows a retryable detail error instead of treating a failed response query as empty', () => {
+    const refetch = vi.fn();
+    useSatResultQueryMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('load SAT question responses: database unavailable'),
+      isFetching: false,
+      refetch,
+    });
+    render(<MemoryRouter initialEntries={['/sat/results/result-1']}><Routes><Route path="/sat/results/:resultId" element={<SatResultDetailRoute />} /></Routes></MemoryRouter>);
+    expect(screen.getByText('Could not load response details. Retry to try again.')).toBeInTheDocument();
+    expect(screen.queryByText('No question-level responses recorded for this result.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(refetch).toHaveBeenCalledOnce();
+  });
+
   it('shows the hero basis caption with release status on the detail page', () => {
     useSatResultQueryMock.mockReturnValue({
       data: { summary, scorePayload: {}, sections: [], questions: [] },

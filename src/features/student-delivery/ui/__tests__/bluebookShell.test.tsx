@@ -6,8 +6,9 @@ import { createSatReadingPreferences } from "../../domain/satReadingPreferences"
 import { SatExamShell } from "../SatExamShell";
 
 /**
- * Bluebook shell contract — Phase 3 (TDD red first).
- * Pale-blue chrome brackets a white document; rigid shell grid;
+ * Bluebook shell contract — Phase 3.
+ * Pale-blue chrome brackets a white document; the shell reserves rows for
+ * topbar, notices, exam content, save status, and footer;
  * 3-anchor header (context | timer | tools); footer chrome + navigator.
  */
 describe("bluebook shell (Phase 3)", () => {
@@ -17,7 +18,7 @@ describe("bluebook shell (Phase 3)", () => {
   const footerSrc = readFileSync(resolve(__dirname, "../shell/SatExamFooter.tsx"), "utf8");
   const workspaceSrc = readFileSync(
     resolve(__dirname, "../question/SatQuestionWorkspace.tsx"),
-    "utf8",
+    "utf8"
   );
 
   it("wires chrome regions to the shell token (body stays white)", () => {
@@ -26,8 +27,10 @@ describe("bluebook shell (Phase 3)", () => {
     expect(shellSrc).toContain("var(--sat-body-bg)");
   });
 
-  it("keeps the rigid auto/minmax/auto shell grid", () => {
-    expect(shellSrc).toMatch(/grid-rows-\[auto_minmax\(0,1fr\)_auto\]/);
+  it("keeps dedicated notice and save-status rows around exam content", () => {
+    expect(shellSrc).toMatch(/grid-rows-\[auto_auto_minmax\(0,1fr\)_auto_auto\]/);
+    expect(shellSrc).toContain('data-testid="sat-exam-notices"');
+    expect(shellSrc).toContain('className="relative row-start-3 min-h-0 min-w-0 overflow-hidden');
   });
 
   it("structures the topbar as context | timer | tools with chrome bg", () => {
@@ -48,7 +51,7 @@ describe("bluebook shell (Phase 3)", () => {
     expect(workspaceSrc).toContain("2px minmax(0,");
     const handleSrc = readFileSync(
       resolve(__dirname, "../question/SatReadingSplitHandle.tsx"),
-      "utf8",
+      "utf8"
     );
     expect(handleSrc).toContain("var(--sat-split-divider)");
   });
@@ -63,9 +66,30 @@ describe("bluebook shell (Phase 3)", () => {
         questionIndex={0}
         questionCount={3}
         navigationItems={[
-          { id: "q1", index: 0, number: 1, status: "answered", current: true, markedForReview: false },
-          { id: "q2", index: 1, number: 2, status: "unanswered", current: false, markedForReview: false },
-          { id: "q3", index: 2, number: 3, status: "unanswered", current: false, markedForReview: false },
+          {
+            id: "q1",
+            index: 0,
+            number: 1,
+            status: "answered",
+            current: true,
+            markedForReview: false,
+          },
+          {
+            id: "q2",
+            index: 1,
+            number: 2,
+            status: "unanswered",
+            current: false,
+            markedForReview: false,
+          },
+          {
+            id: "q3",
+            index: 2,
+            number: 3,
+            status: "unanswered",
+            current: false,
+            markedForReview: false,
+          },
         ]}
         calculatorAvailable={false}
         calculatorOpen={false}
@@ -85,7 +109,7 @@ describe("bluebook shell (Phase 3)", () => {
         onReadingPreferencesChange={() => undefined}
       >
         <div>Question body</div>
-      </SatExamShell>,
+      </SatExamShell>
     );
     expect(screen.getByRole("banner")).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();

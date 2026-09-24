@@ -128,13 +128,17 @@ BACKGROUND_RUNTIME_MODE="$(/app/normalize-background-runtime-mode.sh "${BACKGROU
 export BACKGROUND_RUNTIME_MODE
 
 if [ "$BACKGROUND_RUNTIME_MODE" = "activity_driven" ]; then
-  trap 'kill "$API_PID" "$COEDIT_PID" 2>/dev/null || true' INT TERM EXIT
+  # Activity-driven deployments still need the server-owned timeout finalizer:
+  # a disconnected SAT candidate must progress without another API request.
+  /app/worker --sat-timeouts-only &
+  TIMEOUT_WORKER_PID=$!
+  trap 'kill "$API_PID" "$COEDIT_PID" "$TIMEOUT_WORKER_PID" 2>/dev/null || true' INT TERM EXIT
   set +e
-  wait -n "$API_PID" "$COEDIT_PID"
+  wait -n "$API_PID" "$COEDIT_PID" "$TIMEOUT_WORKER_PID"
   STATUS=$?
   set -e
   echo "One process exited, shutting down..."
-  kill "$API_PID" "$COEDIT_PID" 2>/dev/null || true
+  kill "$API_PID" "$COEDIT_PID" "$TIMEOUT_WORKER_PID" 2>/dev/null || true
   wait || true
   exit "$STATUS"
 fi

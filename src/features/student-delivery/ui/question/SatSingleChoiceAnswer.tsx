@@ -2,6 +2,7 @@ import { CircleSlash2 } from "lucide-react";
 import type { ChoiceOption } from "../../../exam-rendering/api/assessmentContracts";
 import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import { isSatSelectionGestureEcho } from "../annotations/satSelectionDragGuard";
+import type { ReactNode } from "react";
 
 export interface SatSingleChoiceAnswerProps {
   questionId: string;
@@ -11,7 +12,11 @@ export interface SatSingleChoiceAnswerProps {
   eliminationMode: boolean;
   disabled: boolean;
   onChange: (optionId: string) => void;
+  /** Flush the latest local answer draft when focus leaves the choices. */
+  onBlur?: (() => void) | undefined;
   onToggleElimination: (optionId: string) => void;
+  /** Reuse the question's text surface while keeping radio controls outside it. */
+  renderOptionContent?: ((option: ChoiceOption) => ReactNode) | undefined;
 }
 
 export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
@@ -63,6 +68,7 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 // never on this visually hidden input, so arming from a
                 // pointerdown here would never happen.
                 onChange={() => { if (isSatSelectionGestureEcho()) return; props.onChange(option.id); }}
+                onBlur={props.onBlur}
                 aria-labelledby={`${optionLetterId} ${optionContentId}`}
                 aria-describedby={eliminated ? eliminatedStatusId : undefined}
                 className="sr-only"
@@ -85,7 +91,9 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 // strike lists, equations, and mixed content — not just <p>.
                 className={`min-w-0 flex-1 sat-type-body text-[var(--sat-text)] ${eliminated ? "line-through decoration-[1.5px]" : ""}`}
               >
-                <StructuredContentRenderer content={option.content} />
+                {props.renderOptionContent
+                  ? props.renderOptionContent(option)
+                  : <StructuredContentRenderer content={option.content} />}
               </div>
             </label>
             {eliminated ? (

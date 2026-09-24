@@ -35,13 +35,17 @@ function result(overrides: Partial<AssessmentResult> = {}): AssessmentResult {
 }
 
 describe("SatCompleteScreen", () => {
-  it("shows the composite total for a full sitting", () => {
+  it("shows completion messaging without scores for a full sitting", () => {
     render(<SatCompleteScreen result={result()} onExit={vi.fn()} />);
-    expect(screen.getByText("1180")).toBeInTheDocument();
-    expect(screen.queryByText(SAT_COPY.transitions.sectionScoreHeading)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: SAT_COPY.transitions.completeTitle })).toBeInTheDocument();
+    expect(screen.getByText(SAT_COPY.transitions.completeSubtitle)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: SAT_COPY.transitions.backToDashboard })).toBeInTheDocument();
+    expect(screen.queryByText("1180")).not.toBeInTheDocument();
+    expect(screen.queryByText("560")).not.toBeInTheDocument();
+    expect(screen.queryByText("620")).not.toBeInTheDocument();
   });
 
-  it("shows the section score and no total for a one-section Student Link", () => {
+  it("shows completion messaging without a score for a one-section Student Link", () => {
     render(
       <SatCompleteScreen
         result={result({
@@ -61,22 +65,22 @@ describe("SatCompleteScreen", () => {
       />,
     );
 
-    expect(screen.getByText(SAT_COPY.transitions.sectionScoreHeading)).toBeInTheDocument();
-    expect(screen.getByText(SAT_COPY.transitions.sectionLabelReadingWriting)).toBeInTheDocument();
-    expect(screen.getByText("560")).toBeInTheDocument();
-    expect(screen.getByText(SAT_COPY.transitions.sectionScoreOnlyNote)).toBeInTheDocument();
-    // The section count comes from the payload: no Math row for a verbal-only run.
-    expect(screen.queryByText(SAT_COPY.transitions.sectionLabelMath)).not.toBeInTheDocument();
+    expect(screen.getByText(SAT_COPY.transitions.completeSubtitle)).toBeInTheDocument();
+    expect(screen.queryByText("560")).not.toBeInTheDocument();
+    expect(screen.queryByText(/section score|practice result/i)).not.toBeInTheDocument();
   });
 
-  it("renders nothing score-shaped when neither a total nor a section score exists", () => {
+  it("shows completion messaging without scores when no result is available", () => {
     render(
-      <SatCompleteScreen
-        result={result({ totalScore: null, sections: [] })}
-        onExit={vi.fn()}
-      />,
+      <SatCompleteScreen result={null} onExit={vi.fn()} />,
     );
-    expect(screen.queryByText(SAT_COPY.transitions.sectionScoreHeading)).not.toBeInTheDocument();
     expect(screen.getByText(SAT_COPY.transitions.completeTitle)).toBeInTheDocument();
+    expect(screen.getByText(SAT_COPY.transitions.completeSubtitle)).toBeInTheDocument();
+    expect(screen.queryByText(/score/i)).not.toBeInTheDocument();
+  });
+
+  it("warns when a final answer was not confirmed before scoring", () => {
+    render(<SatCompleteScreen result={result()} onExit={vi.fn()} saveIssue="A final answer was not confirmed. Contact your proctor." />);
+    expect(screen.getByRole("alert")).toHaveTextContent("A final answer was not confirmed. Contact your proctor.");
   });
 });

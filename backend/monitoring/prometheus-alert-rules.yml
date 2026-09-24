@@ -204,6 +204,20 @@ groups:
           description: "SAT CompleteAssessment rejected terminal finalize calls over the last 10 minutes. Break down sat_finalize_total by outcome (completed/replayed/rejected); a nonzero rejected rate means finalize failures need the directions-phase retry path and the reconcile watchdog."
           runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
 
+      # A result-detail read failure must remain an API error rather than
+      # looking like a legitimate empty answer list. Page on any enrichment
+      # query failure so staff do not mistake unavailable detail for no work.
+      - alert: SATResultQuestionDetailFailure
+        expr: increase(sat_result_question_detail_failure_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: page
+          slo: answer-integrity
+        annotations:
+          summary: "SAT result response details failed to load"
+          description: "SAT question-level response enrichment failed over the last 10 minutes. The result API now returns an error instead of an empty list; check MySQL query health and retry the result detail request."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
       # WS-10a: server-error burn across all routes (AccessLog status class).
       - alert: HTTP5xxRateHigh
         expr: increase(http_requests_total{status="5xx"}[5m]) >= 50

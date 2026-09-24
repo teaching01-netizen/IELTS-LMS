@@ -46,6 +46,8 @@ export function configureAssessmentDeliveryAttempt(
   if (candidateId.trim()) attemptCandidates.set(attemptKey(scheduleId, attemptId), candidateId);
   if (typeof preferredClientSessionId === 'string' && preferredClientSessionId.trim()) {
     attemptPreferredSessions.set(attemptKey(scheduleId, attemptId), preferredClientSessionId.trim());
+  } else {
+    attemptPreferredSessions.delete(attemptKey(scheduleId, attemptId));
   }
 }
 
@@ -56,9 +58,13 @@ function studentKeyFor(scheduleId: string, candidateId: string): string {
 
 function removeLegacySatSessionKeys(scheduleId: string, attemptId: string): void {
   // One-way migration: the split `sat-client-session:` identity is retired.
-  // Best-effort — storage may be unavailable; resolution never depends on it.
+  // The `sat-bootstrap-etag:` entry is retired with it — an ETag derived from
+  // the static exam version was never a validator for live attempt state, so
+  // the cached payload must not survive a reload either. Best-effort — storage
+  // may be unavailable; nothing reads either key any more.
   try {
     window.sessionStorage.removeItem(`${LEGACY_SAT_SESSION_KEY_PREFIX}${scheduleId}:${attemptId}`);
+    window.sessionStorage.removeItem(`sat-bootstrap-etag:${scheduleId}:${attemptId}`);
   } catch {
     // ignore
   }
@@ -173,21 +179,21 @@ export const assessmentDeliveryApi = {
     ));
   },
 
-  // Plan C4: conditional bootstrap — If-None-Match makes reconnects a 304
-  // (zero bytes) instead of a full version re-fetch. Pass the cached ETag
-  // from createBootstrapCache; null = first fetch.
+  // Unconditional bootstrap. The payload is LIVE attempt state — module
+  // attempts, the adaptive Higher/Lower route, responses, timers, result —
+  // while the only cache validator the endpoint used to accept is the
+  // published exam version. Routing a candidate into Module 2 Higher does not
+  // move the version, so a version-scoped If-None-Match answered 304 and the
+  // runner kept the pre-routing module. No attempt-state read is conditional
+  // now; client-side equivalent-payload skipping is where no-change lives.
   bootstrap(
     scheduleId: string,
     attemptId: string,
-    ifNoneMatch?: string | null,
   ): Promise<AssessmentDeliveryBootstrap> {
     return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
       `/v1/assessment-delivery/schedules/${scheduleId}/bootstrap`,
       undefined,
-      {
-        ...config,
-        ...(ifNoneMatch ? { headers: { ...config.headers, 'If-None-Match': ifNoneMatch } } : {}),
-      },
+      config,
     ));
   },
 

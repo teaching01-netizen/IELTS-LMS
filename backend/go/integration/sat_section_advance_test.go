@@ -177,24 +177,21 @@ func newSATAdvanceFixture(t *testing.T) *satAdvanceFixture {
 	f.examID = exam.ID
 
 	// The real blueprint: two sections with Module 1 + both Module 2 branches.
+	// Publish enforces full-size modules (27 RW / 22 Math), so load a
+	// complete valid sample through the real replacement path instead of a
+	// single-question stub.
 	shell, err := authoring.NewService(db, runner).Shell(ctx, exam.ID)
 	if err != nil {
 		t.Fatalf("authoring shell: %v", err)
 	}
 	authors := authoring.NewService(db, runner)
-	// Publishing now enforces the SAT blueprint's target question counts. The
-	// runtime-clock assertions below do not depend on question content, so fill
-	// every module with the smallest valid question shape before publishing.
-	for _, section := range shell.Sections {
-		for _, module := range section.Modules {
-			drafts := make([]authoring.QuestionDraft, module.TargetQuestionCount)
-			for index := range drafts {
-				drafts[index] = satAdvanceQuestionDraft(index)
-			}
-			if _, err := authors.BatchCreateQuestions(ctx, module.ID, actor, drafts); err != nil {
-				t.Fatalf("create questions for %s.%s: %v", section.SectionKey, module.ModuleKey, err)
-			}
-		}
+	sample := buildSectionAdvanceSample(shell)
+	if _, err := authors.LoadSampleExam(ctx, exam.ID, authoring.LoadSampleExamRequest{
+		ExpectedVersionID:       shell.VersionID,
+		ExpectedVersionRevision: shell.VersionRevision,
+		Modules:                 sample,
+	}, actor); err != nil {
+		t.Fatalf("load full-size SAT sample: %v", err)
 	}
 	current, err := authors.Shell(ctx, exam.ID)
 	if err != nil {
@@ -213,19 +210,61 @@ func newSATAdvanceFixture(t *testing.T) *satAdvanceFixture {
 	return f
 }
 
-func satAdvanceQuestionDraft(index int) authoring.QuestionDraft {
-	return authoring.QuestionDraft{
-		QuestionType: "single_choice",
-		Prompt: json.RawMessage(fmt.Sprintf(
-			`{"version":1,"nodes":[{"type":"paragraph","text":"Clock verification question %d."}]}`,
-			index+1,
-		)),
-		Answer: json.RawMessage(`{"kind":"single_choice","options":[` +
-			`{"id":"A","content":{"version":1,"nodes":[{"type":"paragraph","text":"Choice A"}]}},` +
-			`{"id":"B","content":{"version":1,"nodes":[{"type":"paragraph","text":"Choice B"}]}},` +
-			`{"id":"C","content":{"version":1,"nodes":[{"type":"paragraph","text":"Choice C"}]}},` +
-			`{"id":"D","content":{"version":1,"nodes":[{"type":"paragraph","text":"Choice D"}]}}],"correctOptionId":"A"}`),
+// buildSectionAdvanceSample generates a full-size, publish-valid SAT sample:
+// every module carries exactly its blueprint target count with two pretests.
+// Minimal but valid content (visible prompt, four-option single-choice
+// answer, matching section metadata) through the real LoadSampleExam path,
+// mirroring the frontend buildCompleteSatSample.
+func buildSectionAdvanceSample(shell authoring.Shell) []authoring.SampleExamModuleDraft {
+	textContent := func(text string) json.RawMessage {
+		raw, _ := json.Marshal(map[string]any{
+			"version": 1,
+			"nodes":   []any{map[string]any{"type": "text", "text": text}},
+		})
+		return raw
 	}
+	option := func(id string) any {
+		return map[string]any{"id": id, "content": map[string]any{
+			"version": 1,
+			"nodes":   []any{map[string]any{"type": "text", "text": "Option " + id}},
+		}}
+	}
+	answer, _ := json.Marshal(map[string]any{
+		"kind":            "single_choice",
+		"options":         []any{option("A"), option("B"), option("C"), option("D")},
+		"correctOptionId": "A",
+	})
+	empty := json.RawMessage(`{"version":1,"nodes":[]}`)
+	modules := make([]authoring.SampleExamModuleDraft, 0, 6)
+	for _, section := range shell.Sections {
+		domain, skill := "information-and-ideas", "Central Ideas and Details"
+		if section.SectionKey == "math" {
+			domain, skill = "algebra", "Linear Equations in One Variable"
+		}
+		metadata, _ := json.Marshal(map[string]any{
+			"sectionKey": section.SectionKey, "domain": domain, "skill": skill, "difficulty": "medium",
+		})
+		for _, module := range section.Modules {
+			questions := make([]authoring.QuestionDraft, 0, module.TargetQuestionCount)
+			for i := 0; i < module.TargetQuestionCount; i++ {
+				questions = append(questions, authoring.QuestionDraft{
+					QuestionType:  "single_choice",
+					Stimulus:      empty,
+					Prompt:        textContent(fmt.Sprintf("%s question %d", module.ModuleKey, i+1)),
+					Answer:        answer,
+					Rationale:     empty,
+					Metadata:      metadata,
+					Accessibility: json.RawMessage(`{}`),
+					IsPretest:     i < 2,
+				})
+			}
+			modules = append(modules, authoring.SampleExamModuleDraft{
+				ModuleID:  module.ID,
+				Questions: questions,
+			})
+		}
+	}
+	return modules
 }
 
 func (f *satAdvanceFixture) cleanup() {

@@ -30,7 +30,6 @@ import {
   configureSatDeliveryAttempt,
   satDeliveryGateway,
 } from "../infrastructure/satDeliveryGateway";
-import { hasBackendStatusCode } from "../infrastructure/assessmentDeliveryBackendGateway";
 import {
   calculatorWorkspaceKey,
   clearCalculatorWorkspace,
@@ -38,8 +37,8 @@ import {
 } from "../infrastructure/satCalculatorWorkspace";
 import { clearSatReadingPreferences } from "../infrastructure/satReadingPreferencesStore";
 import { createSatRunnerState, satRunnerReducer } from "../application/satRunnerReducer";
-// SAT-005/007: commit-to-phase routing and submit-conflict policy live in
-// application/ (pure); the hook only wires them to state and the gateway.
+// SAT-005/007: commit-to-phase routing and conflict policy live in application/
+// (pure); the hook only wires them to state and the gateway.
 import {
   decideSatCommitRoute,
   startModuleRouteAction,
@@ -141,11 +140,12 @@ export function useSatExamController({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const timeoutSubmissionKeyRef = useRef<string | null>(null);
+  const timeoutTransitionKeyRef = useRef<string | null>(null);
+  const [timeoutTransitionKey, setTimeoutTransitionKey] = useState<string | null>(null);
+  const [timeoutTransitionStarted, setTimeoutTransitionStarted] = useState(false);
   // SAT-002: one owner for "which revision may finalize, and is one already
   // running" — the claim / single-flight / release rules live in
-  // application/satFinalizationGate.ts so both drivers (the module-submit
-  // commit path and the recovery effect) apply them identically.
+  // application/satFinalizationGate.ts and protect the automatic result path.
   const finalizationGateRef = useRef(
     createSatFinalizationGate<AssessmentResult | null>()
   );
@@ -186,9 +186,10 @@ export function useSatExamController({
     setError(null);
     setIsSubmitting(false);
     setIsStarting(false);
-    setAutoSubmitted(false);
+    setTimeoutTransitionStarted(false);
+    setTimeoutTransitionKey(null);
     setAnswersRecorded(false);
-    timeoutSubmissionKeyRef.current = null;
+    timeoutTransitionKeyRef.current = null;
     dataRef.current = null;
     // A rotated identity must not inherit the previous attempt's finalization
     // claim (the revision key already scopes by attempt, this keeps the
@@ -203,14 +204,13 @@ export function useSatExamController({
   }, [attemptId, candidateId, identityKey, scheduleId]);
 
   useEffect(() => {
-    // Preferred writer id comes from the attempt snapshot when the backend
-    // has bound one (recovery/integrity), so SAT heartbeat/refresh present
-    // the same identity the bearer was issued for — never a second id.
+    // Writer identity is browser-owned. A server attempt projection can carry
+    // the active writer's id, but using it as a fallback here would let a
+    // fresh device impersonate that writer before lease checks run.
     configureSatDeliveryAttempt(
       scheduleId,
       attemptId,
       candidateId,
-      attemptSnapshot?.recovery?.clientSessionId ?? attemptSnapshot?.integrity?.clientSessionId ?? null,
     );
   }, [attemptId, attemptSnapshot?.integrity?.clientSessionId, attemptSnapshot?.recovery?.clientSessionId, candidateId, scheduleId]);
 
@@ -229,6 +229,9 @@ export function useSatExamController({
   });
   const persistenceRef = useRef(persistence);
   persistenceRef.current = persistence;
+  const flushBeforeNavigation = useCallback(() => {
+    void persistenceRef.current.flush().catch(() => undefined);
+  }, []);
   const hydrateBootstrap = persistence.hydrateBootstrap;
 
   // Identity the pure route table needs for a result-carrying payload;
@@ -243,9 +246,8 @@ export function useSatExamController({
   // payload was accepted (boolean; 304 stays null at the refresh layer) and
   // runs setData + the at-most-one phase dispatch in the same synchronous
   // tick so React 18+ batches them into one render. The hint selects the
-  // route decision; startModule/submitModule hints commit data here and
-  // dispatch via their existing call-site logic in the same tick (see
-  // startPendingModule/submitModule below).
+  // route decision; startModule hints commit data here and dispatch the route
+  // in the same tick (see startPendingModule below).
   const acceptPayloadAndRoute = useCallback(
     (
       payload: AssessmentDeliveryBootstrap,
@@ -274,10 +276,10 @@ export function useSatExamController({
         // mutation responses — a poll may have committed the server's advance
         // first, and skipping the decision would strand the runner. Data
         // writes stay skipped; only the phase action and hydration run.
-        if (hint.kind === "startModule" || hint.kind === "submitModule") {
+        if (hint.kind === "startModule") {
           const action = decideSatCommitRoute(stateRef.current, current, hint, commitIdentity);
           if (action) dispatch(action);
-          if (hint.kind === "startModule" && action?.type === "routeToModule") {
+          if (action?.type === "routeToModule") {
             const activeModule = moduleForAttempt(current, findActiveAttempt(current));
             if (activeModule) hydrateModuleResponsesRef.current?.(current, activeModule);
           }
@@ -354,7 +356,6 @@ export function useSatExamController({
   const refresh = useCallback(
     async (
       surfaceError = false,
-      ifNoneMatch?: string | null,
       /**
        * Transport-outcome probe. `refresh` resolves for a failed fetch (every
        * other caller, including `void refresh(...)`, depends on that), so the
@@ -364,17 +365,21 @@ export function useSatExamController({
       onTransportOutcome?: (ok: boolean) => void,
     ) => {
       try {
-        const payload = await satDeliveryGateway.bootstrap(scheduleId, attemptId, ifNoneMatch ?? null);
+        // Unconditional read: the bootstrap payload is LIVE attempt state
+        // (module attempts, the adaptive route, responses, timers, result), so
+        // there is no attempt-state validator to send. A version-scoped
+        // If-None-Match answered 304 soon after Module 1 ended — the published
+        // exam version had not moved even though the server had just routed the
+        // candidate to a different Module 2 — and the runner kept the stale
+        // module. Equivalent-payload skipping stays client-side
+        // (isEquivalentBootstrap), where it cannot hide a server-side routing
+        // decision.
+        const payload = await satDeliveryGateway.bootstrap(scheduleId, attemptId);
         onTransportOutcome?.(true);
-        // Phase 04: poll-hint commit — 304, stale, and equivalent payloads
-        // all surface as null (no-change), exactly like the 304 path below.
+        // Phase 04: poll-hint commit — stale and equivalent payloads surface
+        // as null (no-change).
         return acceptPayloadAndRoute(payload, { kind: "poll" }) ? payload : null;
       } catch (loadError) {
-        // A 304 (not modified) is not a failure: no new payload, no error.
-        if (hasBackendStatusCode(loadError, 304)) {
-          onTransportOutcome?.(true);
-          return null;
-        }
         onTransportOutcome?.(false);
         if (surfaceError && identityGenerationRef.current === renderIdentityGeneration) {
           setError(
@@ -389,18 +394,17 @@ export function useSatExamController({
 
   // Phase 02 bootstrap effect (singleflight per identity+version): the only
   // new-import is the pure seed matcher (no React, no fetch). Rules: one
-  // network call per (identityKey, staticVersionId); ETag passed only from a
-  // matching seed; 304 silent; superseded-generation failures silent; initial
-  // failure still setError so error && !data stays reachable; success path
-  // identical to before (acceptPayloadAndRoute bootstrap-hint + its
-  // internal bootstrapLoaded dispatch, committed atomically).
+  // network call per (identityKey, staticVersionId); superseded-generation
+  // failures silent; initial failure still setError so error && !data stays
+  // reachable; success path identical to before (acceptPayloadAndRoute
+  // bootstrap-hint + its internal bootstrapLoaded dispatch, committed
+  // atomically).
   // StrictMode note: React mounts, unmounts (cleanup sets cancelled = true
   // for that run only), then re-runs the effect. The second run JOINS the
-  // still-in-flight shared promise (same map key + same ETag) instead of
-  // firing a second gateway call — so StrictMode double-effects cost one
-  // network call. Parent re-renders without dep changes do not re-run the
-  // effect at all; only an identity rotation or a seed staticVersionId /
-  // deliveryEtag scalar change starts a new request.
+  // still-in-flight shared promise (same map key) instead of firing a second
+  // gateway call — so StrictMode double-effects cost one network call. Parent
+  // re-renders without dep changes do not re-run the effect at all; only an
+  // identity rotation or a seed staticVersionId change starts a new request.
   const bootstrapSeedRef = useRef(bootstrapSeed);
   bootstrapSeedRef.current = bootstrapSeed;
   // Singleflight per (identity, version): StrictMode double-invoke + parent
@@ -409,11 +413,8 @@ export function useSatExamController({
   // NOTE: the promise is stored WITHOUT a .then tap attached at set time —
   // taps attach per-effect-run below — so the map never triggers
   // unhandledrejection on failure paths.
-  // The entry also records the ETag it was sent with: a re-run that would
-  // send a DIFFERENT If-None-Match must not join the in-flight request (the
-  // server answer is scoped to the ETag sent), it starts its own call.
   const bootstrapInflightRef = useRef(
-    new Map<string, { etag: string | null; run: Promise<AssessmentDeliveryBootstrap> }>(),
+    new Map<string, Promise<AssessmentDeliveryBootstrap>>(),
   );
 
   useEffect(() => {
@@ -422,20 +423,16 @@ export function useSatExamController({
     // rotated while the parent re-rendered) must never scope the fetch.
     const seed = bootstrapSeedRef.current;
     const seedOk = seedMatchesIdentity(seed, { scheduleId, attemptId, candidateId });
-    const ifNoneMatch = seedOk ? (seed?.deliveryEtag ?? null) : null;
     const requestKey = identityKey + "::" + (seedOk ? (seed?.staticVersionId ?? "") : "");
 
     let cancelled = false;
-    const inFlight = bootstrapInflightRef.current.get(requestKey);
-    // Join the in-flight request ONLY when it was sent with the same ETag;
-    // a changed ETag scopes a different conditional request and must fire.
-    const joinable = inFlight && inFlight.etag === ifNoneMatch ? inFlight.run : null;
-    const run = joinable ?? satDeliveryGateway.bootstrap(scheduleId, attemptId, ifNoneMatch);
-    if (!joinable) bootstrapInflightRef.current.set(requestKey, { etag: ifNoneMatch, run });
+    const run = bootstrapInflightRef.current.get(requestKey)
+      ?? satDeliveryGateway.bootstrap(scheduleId, attemptId);
+    bootstrapInflightRef.current.set(requestKey, run);
 
     void run.then(
       (payload) => {
-        if (bootstrapInflightRef.current.get(requestKey)?.run === run) {
+        if (bootstrapInflightRef.current.get(requestKey) === run) {
           bootstrapInflightRef.current.delete(requestKey);
         }
         if (cancelled || identityGenerationRef.current !== generationAtCall) return; // superseded: silent
@@ -445,11 +442,10 @@ export function useSatExamController({
         acceptPayloadAndRoute(payload, { kind: "bootstrap" });
       },
       (loadError: unknown) => {
-        if (bootstrapInflightRef.current.get(requestKey)?.run === run) {
+        if (bootstrapInflightRef.current.get(requestKey) === run) {
           bootstrapInflightRef.current.delete(requestKey);
         }
         if (cancelled || identityGenerationRef.current !== generationAtCall) return;
-        if (hasBackendStatusCode(loadError, 304)) return; // not-modified: not a failure
         setError(loadError instanceof Error ? loadError.message : "Unable to load the SAT attempt.");
       },
     );
@@ -457,12 +453,12 @@ export function useSatExamController({
       cancelled = true;
     };
     // Deps: identityKey (covers schedule/attempt/candidate rotation) + seed
-    // staticVersionId (republish rebootstrap) + seed ETag scalar — NOT the
-    // whole seed object (it churns with runtimeSnapshot). candidateId is read
-    // via identityKey/seed-match only (kept out of deps to avoid refire on
-    // unrelated prop churn). acceptPayloadAndRoute stays: stable per identity.
+    // staticVersionId (republish rebootstrap) — NOT the whole seed object (it
+    // churns with runtimeSnapshot). candidateId is read via identityKey/
+    // seed-match only (kept out of deps to avoid refire on unrelated prop
+    // churn). acceptPayloadAndRoute stays: stable per identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acceptPayloadAndRoute, identityKey, scheduleId, attemptId, bootstrapSeed?.staticVersionId, bootstrapSeed?.deliveryEtag]);
+  }, [acceptPayloadAndRoute, identityKey, scheduleId, attemptId, bootstrapSeed?.staticVersionId]);
 
   useEffect(() => {
     // Exam-day P1: the local `now` must advance in every timing model. The
@@ -480,7 +476,6 @@ export function useSatExamController({
   // The offline listener is always cleaned up — a one-shot addEventListener
   // without removeEventListener leaks a stale closure per poll cycle.
   const pollFailuresRef = useRef(0);
-  const pollEtagRef = useRef<string | null>(null);
   useEffect(() => {
     // Keep recovery polling alive while finalization is in flight. A
     // bootstrap that carries `result` recovers submitting → complete via
@@ -515,7 +510,7 @@ export function useSatExamController({
         // refresh; reschedule the cadence after reconnect.
         onOnline = () => {
           pollFailuresRef.current = 0;
-          void refresh(false, null, recordTransportOutcome).finally(schedule);
+          void refresh(false, recordTransportOutcome).finally(schedule);
         };
         // One-shot: exactly one reconnect per outage. A handler that stays
         // registered after firing would make every later reconnect poll once
@@ -523,16 +518,7 @@ export function useSatExamController({
         window.addEventListener("online", onOnline, { once: true });
         return;
       }
-      void refresh(false, pollEtagRef.current, recordTransportOutcome).then(
-        (payload) => {
-          // Phase 04 dead-store note (documented, not fixed): the typed
-          // AssessmentDeliveryBootstrap payload carries no `etag` field, so
-          // this read is always undefined and pollEtagRef stays null. The
-          // poll-skip layer (isEquivalentBootstrap) is the real no-change
-          // path; fetch/ETag plumbing stays owned by Phase 02.
-          const etag = (payload as { etag?: unknown } | null)?.etag;
-          if (typeof etag === "string" && etag) pollEtagRef.current = etag;
-        },
+      void refresh(false, recordTransportOutcome).catch(
         // Safety net for an unexpected throw; transport failures arrive through
         // recordTransportOutcome, which owns the backoff counter.
         () => { recordTransportOutcome(false); },
@@ -623,16 +609,17 @@ export function useSatExamController({
   );
 
   // Phase 04 commit-first / reconciler-second: the primary paths commit
-  // data+phase atomically, so this directions auto-route is a safety net for
-  // externally-driven data changes (e.g. a Phase-02 seed swap). Dedupe-keyed
+  // data+phase atomically, so this route reconciliation is a safety net for
+  // externally-driven data changes (e.g. a resumed page whose server module
+  // already started, or a break whose next module opened in another tab). Dedupe-keyed
   // so StrictMode double-invoke cannot double-dispatch; at most one action
-  // per (versionId, runtimeRevision, phase, moduleKey).
+  // per (versionId, runtimeRevision, phase, active module id).
   useEffect(() => {
-    if (!data || state.phase !== "directions") return;
+    if (!data || (state.phase !== "directions" && state.phase !== "break")) return;
     const activeAttempt = findActiveAttempt(data);
     const activeModule = moduleForAttempt(data, activeAttempt);
     if (!activeAttempt?.startedAt || !activeModule) return;
-    const key = `${data.versionId}:${data.timing.runtimeRevision}:directions:${activeModule.id}`;
+    const key = `${data.versionId}:${data.timing.runtimeRevision}:${state.phase}:${activeModule.id}`;
     if (safetyReconcileKeyRef.current === key) return;
     safetyReconcileKeyRef.current = key;
     startModuleFrom(data, activeModule);
@@ -775,9 +762,28 @@ export function useSatExamController({
         })
       : 0;
 
+  /**
+   * The shared section clock the student is still on while the next module
+   * opens, or null when this frame has no authority to quote one.
+   *
+   * `remainingSeconds` is derived from the ACTIVE module's section, so during a
+   * handoff (no active module) a section-keyed cohort frame resolves it to 0 —
+   * which is why the retained exam frame used to show a dead countdown. The
+   * section clock is the honest number there: it is the clock that governs the
+   * section the student is still inside, and no module clock may be invented for
+   * a module that has not started. Null (never 0) when the published stage names
+   * some other section, so a surface can leave the number out instead of faking
+   * one.
+   */
+  const handoffSeconds =
+    pendingSection && effectiveTiming?.stageKey &&
+    (effectiveTiming.stageKey === pendingSection.sectionKey ||
+      effectiveTiming.stageKey.startsWith(`${pendingSection.sectionKey}:`))
+      ? authoritativeRemainingSeconds
+      : null;
+
   // Keep the predecessor's timeout attribution for the module-advance metric.
-  // It describes how Module 1 ended; server routing and automatic Module 2
-  // entry work the same way for early submit and timeout.
+  // Routing and automatic entry follow the server's selected next module.
   const previousModuleTimedOut = useMemo(
     () => (data && pendingModule ? previousModuleEndedByClock(data, pendingModule) : false),
     [data, pendingModule],
@@ -820,7 +826,7 @@ export function useSatExamController({
       // mid-module. One event per confirmed open makes "Module 1 timed out,
       // Module 2 never opened" a queryable funnel step.
       emitStudentObservabilityMetric("sat_module_advance", {
-        reason: previousModuleTimedOut ? "timeout" : "student",
+        reason: previousModuleTimedOut ? "timeout" : "server",
         sectionKey: pendingSection?.sectionKey ?? null,
         adaptiveRole: pendingModule.adaptiveRole,
       });
@@ -995,160 +1001,6 @@ export function useSatExamController({
     });
   }, [attemptId, data, finalizeAssessment, state.phase]);
 
-  const submitModule = useCallback(
-    async (moduleId: string) => {
-      if (isSubmitting) return;
-      const generation = identityGenerationRef.current;
-      const isCurrent = () => identityGenerationRef.current === generation;
-      const submittedModuleAttemptId = data ? findAttemptForModule(data, moduleId)?.id : undefined;
-      setIsSubmitting(true);
-      setError(null);
-      // SAT-007 slice 2: a control-epoch or durability conflict means our local
-      // view is stale, not that the request is illegal. Refresh the authoritative
-      // epoch/revision and send exactly ONE more attempt before treating it as a
-      // real failure. Section closures and writer supersession are deliberately
-      // excluded: the module is genuinely gone, or another window owns the
-      // attempt and retrying here cannot help.
-      const submitModuleRequest = async () => {
-        try {
-          return await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
-        } catch (conflict) {
-          if (!isStaleConflictRejection(conflict)) throw conflict;
-          await refresh(false);
-          return await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
-        }
-      };
-      try {
-        await persistence.flush();
-        if (!isCurrent()) return;
-        // SAT-004: module submission is a boundary too. flush() only proves
-        // the queue drained — a blocked draft can be visible outside the
-        // queue — so refuse to finalize the module while any visible answer
-        // is unsettled. The shared barrier is the same one the terminal
-        // submit uses.
-        await persistence.assertBoundarySettled?.();
-        if (!isCurrent()) return;
-        const next = await submitModuleRequest();
-        if (!isCurrent()) return;
-        if (next.scheduleId !== scheduleId || next.attempt.id !== attemptId) return;
-        // SAT-005: the submitModule hint commits data AND dispatches the
-        // post-submit route action (submit / break / directions) in one
-        // monotonic commit — mutation responses no longer have a privileged
-        // bypass around the stale-revision guard. A rejected payload reports
-        // false; the newer committed state (or the poll/recovery safety nets)
-        // owns the route from there.
-        if (!acceptPayloadAndRoute(next, { kind: "submitModule", moduleId })) return;
-        if (submittedModuleAttemptId) {
-          clearCalculatorWorkspace(
-            calculatorWorkspaceKey(scheduleId, attemptId, submittedModuleAttemptId)
-          );
-        }
-        const committed = dataRef.current;
-        const nextAttempt = committed ? findPendingAttempt(committed) : undefined;
-        const nextModule = committed ? moduleForAttempt(committed, nextAttempt) : null;
-        if (!nextModule) {
-          // SAT-002: claim the finalization identity for this revision before
-          // the data-driven recovery effect can see the same terminal
-          // projection — one completion attempt, one error to report. The
-          // effect clears it on failure so retries (manual or from a later
-          // revision) still work.
-          if (committed) {
-            finalizationGateRef.current.claim(
-              finalizationGateRef.current.revisionKey(attemptId, committed)
-            );
-          }
-          const finalResult = await finalizeAssessment(
-            generation,
-            committed?.versionId ?? next.versionId
-          );
-          if (!finalResult || !isCurrent()) return;
-          clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
-          clearSatReadingPreferences(scheduleId, attemptId);
-          return;
-        }
-        return;
-      } catch (submitError) {
-        if (!isCurrent()) return;
-        const refreshed = await refresh(false);
-        if (!isCurrent()) return;
-        if (refreshed?.result) {
-          clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
-          clearSatReadingPreferences(scheduleId, attemptId);
-          setResult(refreshed.result);
-          dispatch({
-            type: "recover",
-            state: {
-              phase: "complete",
-              scheduleId,
-              candidateId,
-              assessmentId: refreshed.versionId,
-              resultId: refreshed.result.id,
-            },
-          });
-          return;
-        }
-
-        if (refreshed) {
-          const nextAttempt = findPendingAttempt(refreshed);
-          const nextModule = moduleForAttempt(refreshed, nextAttempt);
-          if (nextModule && nextModule.id !== moduleId) {
-            if (submittedModuleAttemptId) {
-              clearCalculatorWorkspace(
-                calculatorWorkspaceKey(scheduleId, attemptId, submittedModuleAttemptId)
-              );
-            }
-            dispatch({ type: "showDirections" });
-            return;
-          }
-        }
-        // SAT-007: writer supersession is not a section transition. The
-        // attempt is live somewhere else; the correct instruction is to
-        // continue there (or take the attempt over), never to wait for a
-        // module close that will not arrive on this client.
-        if (isWriterSupersededRejection(submitError)) {
-          setError(
-            "This attempt is now active in another window. Your saved answers are safe — continue there, or use Take over to resume here."
-          );
-          return;
-        }
-        // Phase 4: the server's clock has moved past ours — the section clock
-        // closed underneath the submit, the runtime paused, or the reconciler
-        // already finalized this module. Not a student error and not a
-        // timeout (a timeout keeps the attribution the zero-remaining path
-        // already set): say what is happening and let the poll loop, or
-        // reconnect when this ran offline, move the student on.
-        if (isSectionClosingRejection(submitError)) {
-          setError(
-            "The exam is finalizing this module — your answers are safe. Keep this screen open."
-          );
-          return;
-        }
-        // The retry already refetched once. Say what is actually true — the
-        // module is NOT closed and the last answers were not lost — instead of
-        // the backend's raw code, which reads like an exam error to a student.
-        if (isStaleConflictRejection(submitError)) {
-          setError(
-            "This device and the server disagreed about the latest revision, so the module was not submitted. Your answers are saved — submit the module again."
-          );
-          return;
-        }
-        setError(submitError instanceof Error ? submitError.message : "Module submission failed.");
-      } finally {
-        if (isCurrent()) setIsSubmitting(false);
-      }
-    },
-    [
-      acceptPayloadAndRoute,
-      attemptId,
-      data,
-      isSubmitting,
-      persistence,
-      refresh,
-      finalizeAssessment,
-      scheduleId,
-    ]
-  );
-
   // All modules are finalized but no result exists: the finalize call failed
   // and polling alone cannot create a result. Eligibility is derived from
   // authoritative data, never from the UI phase (SAT-002), so a timeout that
@@ -1194,12 +1046,18 @@ export function useSatExamController({
     }
   }, [attemptId, data?.versionId, finalizeAssessment, isSubmitting, recoveryNeedsRetry, refresh, scheduleId, state.phase]);
 
+  // Identity lookup, never a key lookup: the module the runner is sitting is
+  // the id the server selected (route decision -> module attempt -> bootstrap).
+  // A moduleKey match could resolve the other adaptive branch, a same-key
+  // module in another section, or a stale duplicate — and an empty moduleId
+  // (recovered legacy snapshot) resolves nothing rather than guessing.
   const stateModule = useMemo(() => {
     if (!data || (state.phase !== "module" && state.phase !== "review")) return null;
+    if (!state.moduleId) return null;
     return (
       data.sections
         .flatMap((section) => section.modules)
-        .find((candidate) => candidate.moduleKey === state.moduleKey) ?? null
+        .find((candidate) => candidate.id === state.moduleId) ?? null
     );
   }, [data, state]);
 
@@ -1330,6 +1188,17 @@ export function useSatExamController({
     personalSeconds: personalModuleRemainingSeconds,
     authoritativeSeconds: authoritativeRemainingSeconds,
   });
+  const activeModuleAttemptKey =
+    stateModule && stateModuleAttempt
+      ? `${stateModule.id}:${stateModuleAttempt.id}`
+      : null;
+  const timeoutTransitionPending =
+    activeModuleAttemptKey !== null && timeoutTransitionKey === activeModuleAttemptKey;
+  const answerInteractionBlocked =
+    timeoutTransitionPending ||
+    (activeModuleAttemptKey !== null &&
+      expiryRemainingSeconds !== null &&
+      expiryRemainingSeconds <= 0);
 
   const saveContext = useCallback(
     (interactionType: "typing" | "discrete") => {
@@ -1358,30 +1227,42 @@ export function useSatExamController({
     ) {
       return;
     }
-    // Phase 04 skew guard: a skew frame that looks like 0 (a missing attempt
-    // resolves through the section-clock fallback) must neither submit
-    // nor consume timeoutSubmissionKeyRef — submit fires only from a
-    // resolved frame. Key stays moduleId:attemptId-scoped, exactly once.
+    // Phase 04 skew guard: a skew frame with no resolved attempt must not
+    // consume the timeout transition key. The timer only freezes the client;
+    // the server reconciler owns module completion.
     if (!data || !findAttemptForModule(data, stateModule.id)) return;
     const key = `${stateModule.id}:${stateModuleAttempt.id}`;
     // SAT-003: expiry is judged on the authoritative clock only. A null
     // expiry means this frame has no authority for the module yet (mismatched
     // cohort stage) — keep the timeout inert rather than trusting the
     // student-facing allotment.
-    if (expiryRemainingSeconds === null || expiryRemainingSeconds > 0) {
-      if (timeoutSubmissionKeyRef.current !== key) timeoutSubmissionKeyRef.current = null;
+    if (expiryRemainingSeconds === null) return;
+    if (expiryRemainingSeconds > 0) {
+      if (timeoutTransitionKeyRef.current === key) {
+        timeoutTransitionKeyRef.current = null;
+        setTimeoutTransitionKey((current) => current === key ? null : current);
+      }
       return;
     }
-    if (stateModuleAttempt.pausedAt || timeoutSubmissionKeyRef.current === key) return;
-    timeoutSubmissionKeyRef.current = key;
-    setAutoSubmitted(true);
-    void submitModule(stateModule.id);
-  }, [data, expiryRemainingSeconds, state.phase, stateModule, stateModuleAttempt, submitModule]);
+    if (stateModuleAttempt.pausedAt || timeoutTransitionKeyRef.current === key) return;
+    timeoutTransitionKeyRef.current = key;
+    setTimeoutTransitionKey(key);
+    setTimeoutTransitionStarted(true);
+    const generation = identityGenerationRef.current;
+    void persistenceRef.current.flush().catch(() => undefined).then(() => {
+      if (identityGenerationRef.current !== generation) return;
+      // This read is a recovery nudge only. The periodic worker and bootstrap
+      // reconciliation finalize the module from authoritative server time.
+      void refresh(true);
+    });
+  }, [data, expiryRemainingSeconds, refresh, state.phase, stateModule, stateModuleAttempt]);
 
   // Phase 04 commit-first / reconciler-second: the poll commit dispatches
   // showDirections synchronously when it carries the finalized predicate;
   // this stays as the idempotent safety net for externally-driven data
-  // changes, dedupe-keyed on (versionId, runtimeRevision, phase, moduleKey).
+  // changes, dedupe-keyed on (versionId, runtimeRevision, moduleId,
+  // moduleAttemptId) — never the business moduleKey, which the Lower and
+  // Higher branch of one section can share.
   useEffect(() => {
     if (!data || (state.phase !== "module" && state.phase !== "review") || !stateModule) return;
     const attempt = findAttemptForModule(data, stateModule.id);
@@ -1389,8 +1270,7 @@ export function useSatExamController({
       const nextAttempt = findPendingAttempt(data);
       const nextModule = moduleForAttempt(data, nextAttempt);
       if (nextModule && nextModule.id !== stateModule.id) {
-        const moduleKey = "moduleKey" in state ? state.moduleKey : stateModule.moduleKey;
-        const key = `${data.versionId}:${data.timing.runtimeRevision}:${state.phase}:${moduleKey}`;
+        const key = `${data.versionId}:${data.timing.runtimeRevision}:${stateModule.id}:${attempt.id}`;
         if (pollReconcileKeyRef.current === key) return;
         pollReconcileKeyRef.current = key;
         dispatch({ type: "showDirections" });
@@ -1416,6 +1296,7 @@ export function useSatExamController({
       change: SatResponseDraftChange,
       interactionType: "typing" | "discrete"
     ): SatQuestionResponseDraft | null => {
+      if (answerInteractionBlocked) return null;
       const current = currentResponse(questionId);
       if (!current) return null;
       const next = applySatResponseDraftChange(current, change);
@@ -1423,7 +1304,7 @@ export function useSatExamController({
       persistence.save(next, saveContext(interactionType));
       return next;
     },
-    [currentResponse, persistence, saveContext]
+    [answerInteractionBlocked, currentResponse, persistence, saveContext]
   );
 
   const setAnswer = useCallback(
@@ -1475,26 +1356,24 @@ export function useSatExamController({
   );
 
   const setAnnotations = useCallback((questionId: string, annotations: SatQuestionAnnotations) => {
+    if (answerInteractionBlocked) return;
     const current = currentResponse(questionId);
     if (!current || (state.phase !== 'module' && state.phase !== 'review') || !resolveSatExamToolPolicy(state.sectionKey, []).highlight) return;
     dispatch({ type: 'setAnnotations', questionId, annotations });
     persistence.save({ ...current, annotations }, saveContext('discrete'));
-  }, [currentResponse, persistence, saveContext, state]);
+  }, [answerInteractionBlocked, currentResponse, persistence, saveContext, state]);
 
   const returnToQuestion = useCallback((questionIndex: number) => {
+    if (answerInteractionBlocked) return;
+    flushBeforeNavigation();
     dispatch({ type: "selectQuestion", questionIndex });
     dispatch({ type: "returnToModule" });
-  }, []);
+  }, [answerInteractionBlocked, flushBeforeNavigation]);
 
   const blocked = Boolean(
     data && (data.proctorStatus === "paused" || data.scheduleRuntimeStatus === "paused")
   );
   const warning = data?.proctorStatus === "warned" ? data.proctorNote : null;
-  // Timeout attribution (Phase 1): distinguishes the auto-submit overlay copy
-  // ("Time expired — submitting…") from a manual submit. Set when the
-  // zero-remaining effect fires; cleared on identity change and once the
-  // phase leaves module/review (submit pipeline consumed it).
-  const [autoSubmitted, setAutoSubmitted] = useState(false);
   // Exam-day P1: distinguishes "answers recorded, generating result" from
   // "submission failed, answers safe locally — retry". Set once flush +
   // V2 submit ack inside finalizeAssessment; cleared on identity change.
@@ -1512,6 +1391,7 @@ export function useSatExamController({
     pendingModuleWindow,
     pendingBreakSeconds,
     pendingSectionWaitSeconds,
+    handoffSeconds,
     pendingStageReady,
     autoEntryRecoverable: entrySurface.recoverable,
     retryModuleEntry: entrySurface.retry,
@@ -1527,7 +1407,9 @@ export function useSatExamController({
     remainingSeconds,
     blocked,
     warning,
-    autoSubmitted,
+    answerInteractionBlocked,
+    timeoutTransitionPending,
+    timeoutTransitionStarted,
     answersRecorded,
     // Exam-screen integrity hold: present once the student returns from a
     // visibility excursion, cleared only by acknowledging it.
@@ -1539,7 +1421,6 @@ export function useSatExamController({
     commitForTest,
     commands: {
       startPendingModule,
-      submitModule,
       retryFinalization,
       takeOverDurabilityLease: persistence.takeOverLease,
       setAnswer,
@@ -1547,21 +1428,38 @@ export function useSatExamController({
       toggleEliminatedOption,
       setAnnotationNote,
       setAnnotations,
-      selectQuestion: (questionIndex: number) =>
-        dispatch({ type: "selectQuestion", questionIndex }),
+      selectQuestion: (questionIndex: number) => {
+        if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
+        dispatch({ type: "selectQuestion", questionIndex });
+      },
       returnToQuestion,
-      previousQuestion: () =>
+      previousQuestion: () => {
+        if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
         dispatch({
           type: "selectQuestion",
           questionIndex: state.phase === "module" ? state.questionIndex - 1 : 0,
-        }),
-      nextQuestion: () =>
+        });
+      },
+      nextQuestion: () => {
+        if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
         dispatch({
           type: "selectQuestion",
           questionIndex: state.phase === "module" ? state.questionIndex + 1 : 0,
-        }),
-      reviewModule: () => dispatch({ type: "reviewModule" }),
-      returnToModule: () => dispatch({ type: "returnToModule" }),
+        });
+      },
+      reviewModule: () => {
+        if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
+        dispatch({ type: "reviewModule" });
+      },
+      returnToModule: () => {
+        if (answerInteractionBlocked) return;
+        flushBeforeNavigation();
+        dispatch({ type: "returnToModule" });
+      },
       showDirections: () => dispatch({ type: "showDirections" }),
       toggleCalculator: () => dispatch({ type: "toggleTool", tool: "calculator" }),
       toggleReference: () => dispatch({ type: "toggleTool", tool: "reference_sheet" }),

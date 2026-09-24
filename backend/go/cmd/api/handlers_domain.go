@@ -118,8 +118,19 @@ func v1SessionHandler(app *App) http.HandlerFunc {
 }
 
 func v1SessionInner(app *App, w http.ResponseWriter, r *http.Request) {
+	resumeProbe := r.URL.Query().Get("refreshAttemptCredential") == "true" && strings.TrimSpace(r.URL.Query().Get("candidateId")) == ""
+	startedAt := time.Now()
+	if resumeProbe {
+		telemetry.IncCounter(telemetry.MStudentResumeProbeTotal)
+		defer func() {
+			telemetry.SetGauge(telemetry.MStudentResumeRecoveryMS, float64(time.Since(startedAt).Milliseconds()))
+		}()
+	}
 	sess := requireStudentDeps(w, r, app)
 	if sess == nil {
+		if resumeProbe {
+			telemetry.IncCounter(telemetry.MStudentResumeFailureTotal, "reason", "unauthenticated")
+		}
 		return
 	}
 	out, err := studentSessionContext(
@@ -128,11 +139,24 @@ func v1SessionInner(app *App, w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			if resumeProbe {
+				telemetry.IncCounter(telemetry.MStudentResumeFailureTotal, "reason", "no_active_attempt")
+			}
 			writeStudentNotFound(w, r)
 			return
 		}
+		if resumeProbe {
+			telemetry.IncCounter(telemetry.MStudentResumeFailureTotal, "reason", "server_error")
+		}
 		httpx.WriteError(w, r, MapDBError(err))
 		return
+	}
+	if resumeProbe {
+		if out["attempt"] == nil {
+			telemetry.IncCounter(telemetry.MStudentResumeFailureTotal, "reason", "no_active_attempt")
+		} else {
+			telemetry.IncCounter(telemetry.MStudentResumeSuccessTotal)
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

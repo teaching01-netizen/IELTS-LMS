@@ -34,10 +34,7 @@
  * the documented "needs CI/Go+MySQL" signal, not a product defect.
  */
 import { expect, test } from "@playwright/test";
-import {
-  ADMIN_STORAGE_STATE_PATH,
-  readBackendE2EManifest,
-} from "./support/backendE2e";
+import { ADMIN_STORAGE_STATE_PATH, readBackendE2EManifest } from "./support/backendE2e";
 import { closeDb, queryDb } from "./support/db";
 import {
   actDbProbes,
@@ -56,11 +53,11 @@ test.describe("ACT Science full chain (Phase 05 AT-01…AT-12)", () => {
   });
 
   test("AT-12: migration ledger carries the ACT lineage incl. 0059 fencing", async () => {
-    // Invariant: 59-file lineage with the ACT chain present; 0059 additive
+    // Invariant: current migration lineage includes the ACT chain; 0059 additive
     // columns exist on student_attempts. Owner on failure: Phase 02
     // (migrations) — Phase 05 only probes.
     const ledger = await queryDb<{ n: number }>(actDbProbes.migrationLedger);
-    expect(ledger[0]?.n).toBe(59);
+    expect(ledger[0]?.n).toBe(68);
     const actFiles = await queryDb<{ filename: string }>(actDbProbes.actMigrations);
     expect(actFiles.map((r) => r.filename)).toEqual([
       "0050_act_science_support.sql",
@@ -71,7 +68,7 @@ test.describe("ACT Science full chain (Phase 05 AT-01…AT-12)", () => {
     const cols = await queryDb<{ COLUMN_NAME: string; COLUMN_TYPE: string }>(
       `SELECT COLUMN_NAME, COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'student_attempts'
-       AND COLUMN_NAME IN ('answer_write_revision','answer_client_write_id')`,
+       AND COLUMN_NAME IN ('answer_write_revision','answer_client_write_id')`
     );
     expect(cols.map((c) => c.COLUMN_NAME).sort()).toEqual([
       "answer_client_write_id",
@@ -83,14 +80,14 @@ test.describe("ACT Science full chain (Phase 05 AT-01…AT-12)", () => {
     // Invariant: 0054 heals ONLY exam_type='ACT' rows; genuine IELTS rows
     // keep provider ielts. Owner on failure: Phase 02 (identity).
     const legacy = await queryDb<{ provider_key: string; exam_type: string }>(
-      `SELECT provider_key, exam_type FROM exam_entities WHERE exam_type = 'ACT' LIMIT 25`,
+      `SELECT provider_key, exam_type FROM exam_entities WHERE exam_type = 'ACT' LIMIT 25`
     );
     expect(legacy.length).toBeGreaterThan(0);
     for (const row of legacy) {
       expect(row.provider_key).toBe("act");
     }
     const ielts = await queryDb<{ provider_key: string }>(
-      `SELECT provider_key FROM exam_entities WHERE exam_type IN ('Academic','General Training') AND provider_key = 'ielts' LIMIT 5`,
+      `SELECT provider_key FROM exam_entities WHERE exam_type IN ('Academic','General Training') AND provider_key = 'ielts' LIMIT 5`
     );
     expect(ielts.length).toBeGreaterThan(0);
   });
@@ -106,14 +103,16 @@ test.describe("ACT Science full chain (Phase 05 AT-01…AT-12)", () => {
     const { scheduleId } = manifest.act;
     expect(scheduleId).toBeTruthy();
     const list = await page.request.get(
-      `/api/v1/results/act-science?scheduleId=${encodeURIComponent(scheduleId)}`,
+      `/api/v1/results/act-science?scheduleId=${encodeURIComponent(scheduleId)}`
     );
     // Before any student submission the list may be empty (no sealed rows
     // yet); the shape assertion below still pins the wire contract.
     expect([200, 404]).toContain(list.status());
     if (list.ok()) {
       const payload = (await list.json()) as unknown;
-      const rows = (Array.isArray(payload) ? payload : (payload as { data?: unknown[] }).data ?? []) as Array<{
+      const rows = (
+        Array.isArray(payload) ? payload : ((payload as { data?: unknown[] }).data ?? [])
+      ) as Array<{
         attemptId: string;
         totalScore: number;
         maxScore: number;
@@ -127,7 +126,7 @@ test.describe("ACT Science full chain (Phase 05 AT-01…AT-12)", () => {
             totalScore: expect.any(Number),
             maxScore: expect.any(Number),
             percentage: expect.any(Number),
-          }),
+          })
         );
         // Legacy TS shape must NOT appear on the wire.
         expect(row).not.toHaveProperty("correctCount");
@@ -154,7 +153,7 @@ test.describe("ACT Science full chain (Phase 05 AT-01…AT-12)", () => {
     const bare = await browser.newContext();
     try {
       const res = await bare.request.get(
-        `/api/v1/results/act-science?scheduleId=${encodeURIComponent(scheduleId)}`,
+        `/api/v1/results/act-science?scheduleId=${encodeURIComponent(scheduleId)}`
       );
       expect([401, 403, 404]).toContain(res.status());
       const detail = await bare.request.get(`/api/v1/results/act-science/no-such-attempt`);
@@ -182,14 +181,17 @@ test.describe("ACT Science full chain (Phase 05 AT-01…AT-12)", () => {
     }>(
       `SELECT answer_write_revision, answer_client_write_id, final_submission, phase
        FROM student_attempts WHERE schedule_id = ? AND candidate_id = ?`,
-      [scheduleId, candidateId],
+      [scheduleId, candidateId]
     );
     expect(rows.length).toBeGreaterThanOrEqual(0);
     if (rows.length > 0) {
       expect(typeof rows[0]!.answer_write_revision).toBe("number");
       const sub = rows[0]!.final_submission;
       if (rows[0]!.phase === "post-exam" && sub) {
-        const parsed = typeof sub === "string" ? (JSON.parse(sub) as Record<string, unknown>) : (sub as Record<string, unknown>);
+        const parsed =
+          typeof sub === "string"
+            ? (JSON.parse(sub) as Record<string, unknown>)
+            : (sub as Record<string, unknown>);
         expect(parsed["providerKey"] ?? parsed["provider_key"] ?? "act").toBeDefined();
         const score = parsed["score"] as { totalScore?: unknown; maxScore?: unknown } | undefined;
         if (score) {

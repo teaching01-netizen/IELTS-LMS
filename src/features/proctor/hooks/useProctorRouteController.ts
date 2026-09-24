@@ -2,7 +2,10 @@ import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useLiveUpdates, type LiveUpdateEvent } from "@shared/hooks/useLiveUpdates";
-import type { ServerClockSnapshot } from "@shared/hooks/useAuthoritativeDeadlineClock";
+import {
+  resolveRoomClock,
+  type ServerClockSnapshot,
+} from "@shared/hooks/useAuthoritativeDeadlineClock";
 import {
   fetchProctorSessionDetail,
   liveQueryPolicy,
@@ -21,7 +24,11 @@ import type {
 import type { ExamSchedule, ExamSessionRuntime } from "../../../types/domain";
 import type { ProctorPresence } from "../../../types/domain";
 import type { ProctorScheduleMetrics } from "../contracts";
-import { mergeProctorRuntime, runtimeProjectionSupersedes } from "../domain/mergeProctorRuntime";
+import {
+  mergeProctorRuntime,
+  mergeSessionProjection,
+  runtimeProjectionSupersedes,
+} from "../domain/mergeProctorRuntime";
 
 function mapBackendSessionSummary(payload: {
   attemptId: string;
@@ -42,6 +49,10 @@ function mapBackendSessionSummary(payload: {
   runtimeModuleDeadlineAt?: string | null | undefined;
   runtimeModuleRemainingSeconds?: number | null | undefined;
   runtimeSectionStatus?: StudentSession["runtimeSectionStatus"] | null | undefined;
+  attemptRevision?: number | null | undefined;
+  runtimeCurrentModuleId?: string | null | undefined;
+  runtimeModuleAttemptId?: string | null | undefined;
+  runtimeModuleAttemptRevision?: number | null | undefined;
   runtimeWaiting: boolean;
   violations: StudentSession["violations"];
   warnings: number;
@@ -71,6 +82,13 @@ function mapBackendSessionSummary(payload: {
     runtimeModuleRole: payload.runtimeModuleRole ?? payload.runtimeCurrentModuleRole ?? null,
     runtimeModuleDeadlineAt: payload.runtimeModuleDeadlineAt ?? null,
     runtimeModuleRemainingSeconds: payload.runtimeModuleRemainingSeconds ?? null,
+    // Runtime identity fence: the module the candidate is actually sitting is
+    // carried by these three fields (attempt revision + active module attempt),
+    // not by the presence heartbeat.
+    attemptRevision: payload.attemptRevision ?? null,
+    runtimeCurrentModuleId: payload.runtimeCurrentModuleId ?? null,
+    runtimeModuleAttemptId: payload.runtimeModuleAttemptId ?? null,
+    runtimeModuleAttemptRevision: payload.runtimeModuleAttemptRevision ?? null,
     runtimeSectionStatus: payload.runtimeSectionStatus ?? undefined,
     runtimeWaiting: payload.runtimeWaiting,
     violations: payload.violations ?? [],
@@ -243,7 +261,12 @@ export interface ProctorRouteController {
   wsConnected: boolean | null;
   notes: SessionNote[];
   runtimeSnapshots: ExamSessionRuntime[];
-  roomClock: ServerClockSnapshot;
+  /**
+   * The room's clock, already resolved: the accepted server instant when one has
+   * landed, otherwise the selected runtime's own stamp. Consumers pass this
+   * straight to the clocks they render.
+   */
+  roomClock: ServerClockSnapshot | null;
   schedules: ExamSchedule[];
   scheduleMetrics: Record<string, ProctorScheduleMetrics>;
   sessions: StudentSession[];
@@ -278,7 +301,11 @@ export function useProctorRouteController(
   // One accepted server instant for the whole room: the stamp of the freshest
   // payload plus the local instant it arrived. See mergeProctorRuntime for why
   // the runtime projection alone cannot be trusted to be the freshest read.
-  const [roomClock, setRoomClock] = useState<ServerClockSnapshot>({ serverNow: null, receivedAt: 0 });
+  // The resolved room clock consumers read is derived from it just below.
+  const [acceptedRoomClock, setAcceptedRoomClock] = useState<ServerClockSnapshot>({
+    serverNow: null,
+    receivedAt: 0,
+  });
   const [sessions, setSessions] = useState<StudentSession[]>([]);
   const [alerts, setAlerts] = useState<ProctorAlert[]>([]);
   const [auditLogs, setAuditLogs] = useState<SessionAuditLog[]>([]);
@@ -301,6 +328,23 @@ export function useProctorRouteController(
   const [summaryPollIntervalMs, setSummaryPollIntervalMs] = useState(10_000);
   const [detailPollIntervalMs, setDetailPollIntervalMs] = useState(15_000);
   const scheduleStudentIdsRef = useRef<Map<string, Set<string>>>(new Map());
+
+  /**
+   * The room's clock, resolved HERE and only here: the accepted server instant
+   * when one has landed, otherwise the selected runtime's own stamp (a
+   * projection that reached the room outside the accepted-clock path). Every
+   * consumer reads a clock; none of them decides where "now" comes from, so no
+   * surface can drift onto its own correction.
+   */
+  const roomClock = useMemo(
+    () =>
+      resolveRoomClock(
+        acceptedRoomClock,
+        runtimeSnapshots.find((runtime) => runtime.scheduleId === selectedScheduleId)?.serverNow ??
+          null,
+      ),
+    [acceptedRoomClock, runtimeSnapshots, selectedScheduleId],
+  );
 
   const summariesQuery = useProctorSessionSummaries(summaryPollIntervalMs, options.providerKey);
   const summaries = useMemo(() => summariesQuery.data ?? [], [summariesQuery.data]);
@@ -354,9 +398,19 @@ export function useProctorRouteController(
   const acceptRoomClock = useCallback((candidates: Array<string | null | undefined>) => {
     const serverNow = newestServerNow(candidates);
     if (!serverNow) return;
-    setRoomClock((current) =>
-      current.serverNow === serverNow ? current : { serverNow, receivedAt: Date.now() }
-    );
+    const serverNowMs = Date.parse(serverNow);
+    if (!Number.isFinite(serverNowMs)) return;
+    setAcceptedRoomClock((current) => {
+      const heldMs = current.serverNow ? Date.parse(current.serverNow) : Number.NaN;
+      // A read older than the accepted instant must not rewind the room: a
+      // slow or out-of-order response would otherwise step every countdown on
+      // the page backwards while the runtime projection (ordered by the same
+      // stamp rule) stayed put. A duplicate stamp keeps the existing anchor so
+      // the clock keeps ticking forward from it instead of rewinding to the
+      // same instant.
+      if (Number.isFinite(heldMs) && serverNowMs <= heldMs) return current;
+      return { serverNow, receivedAt: Date.now() };
+    });
   }, []);
 
   const applyMonitoringState = useCallback(
@@ -372,7 +426,7 @@ export function useProctorRouteController(
         scheduleStudentIdsRef.current.clear();
         setSchedules([]);
         setRuntimeSnapshots([]);
-        setRoomClock({ serverNow: null, receivedAt: 0 });
+        setAcceptedRoomClock({ serverNow: null, receivedAt: 0 });
         setScheduleMetrics({});
         setSessions([]);
         setAlerts([]);
@@ -457,10 +511,13 @@ export function useProctorRouteController(
         return [...bySchedule.values()];
       });
 
-      // Revision-guarded session merge: a WS runtime_snapshot arriving
-      // between poll and apply must not be clobbered by older poll data.
-      // Merge by id, keeping the entry with the newer lastActivity; the WS
-      // path only ever advances revisions (see handleRuntimeSnapshot).
+      // Identity- and revision-guarded session merge: a WS runtime_snapshot
+      // arriving between poll and apply must not be clobbered by older poll
+      // data, and an older poll response must never regress the adaptive module
+      // the newer one reported. Precedence is attempt revision -> active module
+      // attempt revision -> read stamp (see sessionProjectionSupersedes);
+      // `lastActivity` decides nothing here — two projections of one candidate
+      // can share a heartbeat instant and still describe different modules.
       setSessions((current) => {
         const incoming = filteredDetails
           .flatMap((detail) => detail.sessions)
@@ -476,7 +533,7 @@ export function useProctorRouteController(
             return existing;
           }
           incomingById.delete(existing.id);
-          return next.lastActivity >= existing.lastActivity ? next : existing;
+          return mergeSessionProjection(existing, next);
         });
         return [...merged, ...incomingById.values()].sort(sortSessionsByLastActivity);
       });

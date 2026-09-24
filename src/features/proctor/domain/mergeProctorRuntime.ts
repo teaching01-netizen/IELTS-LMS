@@ -1,4 +1,5 @@
 import type { ExamSessionRuntime, ProctorPresence } from "../../../types/domain";
+import type { StudentSession } from "../../../types";
 
 /**
  * Merge one runtime projection at the proctor boundary.
@@ -84,6 +85,115 @@ export function runtimeProjectionSupersedes(
   const existingStamp = readProjectionStamp(existing);
   if (existingStamp === null) return true;
   return incomingStamp > existingStamp;
+}
+
+/**
+ * Which of two roster projections of one candidate owns the adaptive exam state.
+ *
+ * `lastActivity` is the student's presence heartbeat: it answers "when did we
+ * last hear from this candidate?" and must never answer "which SAT adaptive
+ * module is authoritative?". Both facts ride the same roster row, and two
+ * responses stamped with the same heartbeat can describe different modules
+ * (Module 1 vs Module 2 Higher), so ordering by heartbeat let an older
+ * projection replace a newer routing decision. Order instead:
+ *
+ *   1. attempt revision (`attemptRevision`) — the server's monotonic attempt
+ *      revision: newer wins, older can never overwrite;
+ *   2. the active module attempt (`runtimeModuleAttemptRevision`): the module a
+ *      candidate is sitting has its own revision, and a higher one is a later
+ *      module in the same attempt;
+ *   3. a different module attempt id: a genuinely different module, ordered by
+ *      the server's read stamp (`runtimeServerNow`);
+ *   4. same identity: the newer read wins by that stamp;
+ *   5. everything tied: keep what is already held.
+ *
+ * A missing revision never regresses a known one: unknown is not newer.
+ */
+export function sessionProjectionSupersedes(
+  existing: StudentSession,
+  incoming: StudentSession,
+): boolean {
+  // Equal revisions fall THROUGH to the next fence: "same attempt revision"
+  // usually means the same attempt mid-advance (Module 1 -> Module 2), not a
+  // dead heat — the module attempt decides that step.
+  const attemptOrder = compareOptionalRevision(
+    existing.attemptRevision,
+    incoming.attemptRevision,
+  );
+  if (attemptOrder !== null && attemptOrder !== 0) return attemptOrder > 0;
+
+  const moduleAttemptOrder = compareOptionalRevision(
+    existing.runtimeModuleAttemptRevision,
+    incoming.runtimeModuleAttemptRevision,
+  );
+  if (moduleAttemptOrder !== null && moduleAttemptOrder !== 0) return moduleAttemptOrder > 0;
+
+  const stampOrder = compareProjectionStamp(existing, incoming);
+  const existingModuleAttempt = existing.runtimeModuleAttemptId ?? null;
+  const incomingModuleAttempt = incoming.runtimeModuleAttemptId ?? null;
+  if (existingModuleAttempt !== incomingModuleAttempt) {
+    // A different module attempt is a different module even at equal
+    // revisions; the read stamp decides which description is newer. With no
+    // stamp at all the incoming row is the only new information, so it is
+    // still the projection that describes the module the server opened.
+    return stampOrder === 0 ? incomingModuleAttempt !== null : stampOrder > 0;
+  }
+  return stampOrder > 0;
+}
+
+/**
+ * Merge one roster projection into the held one. The runtime identity fields
+ * follow `sessionProjectionSupersedes`; presence (`lastActivity`) is monotonic
+ * and independent of exam state, so the newest heartbeat seen is kept either
+ * way — an older exam-state projection must not roll "last seen" backwards.
+ */
+export function mergeSessionProjection(
+  existing: StudentSession,
+  incoming: StudentSession,
+): StudentSession {
+  const winner = sessionProjectionSupersedes(existing, incoming) ? incoming : existing;
+  const loser = winner === incoming ? existing : incoming;
+  const lastActivity = newestInstant(loser.lastActivity, winner.lastActivity) ?? winner.lastActivity;
+  return lastActivity === winner.lastActivity ? winner : { ...winner, lastActivity };
+}
+
+function compareOptionalRevision(
+  existing: number | null | undefined,
+  incoming: number | null | undefined,
+): number | null {
+  const a = typeof existing === "number" && Number.isFinite(existing) ? existing : null;
+  const b = typeof incoming === "number" && Number.isFinite(incoming) ? incoming : null;
+  if (a === null && b === null) return null;
+  if (a === null) return 1; // incoming is the first revision we know: it wins
+  if (b === null) return -1; // unknown incoming must not overwrite a known revision
+  return a === b ? 0 : b > a ? 1 : -1;
+}
+
+/** The server's read stamp for a roster projection (`runtimeServerNow`). */
+function projectionStamp(session: StudentSession): number | null {
+  const parsed = session.runtimeServerNow ? Date.parse(session.runtimeServerNow) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function compareProjectionStamp(existing: StudentSession, incoming: StudentSession): number {
+  const a = projectionStamp(existing);
+  const b = projectionStamp(incoming);
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a === b ? 0 : b > a ? 1 : -1;
+}
+
+function newestInstant(...candidates: string[]): string | null {
+  let best: string | null = null;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  for (const candidate of candidates) {
+    const parsed = Date.parse(candidate);
+    if (!Number.isFinite(parsed) || parsed <= bestMs) continue;
+    best = candidate;
+    bestMs = parsed;
+  }
+  return best;
 }
 
 function readProjectionStamp(runtime: ExamSessionRuntime): number | null {

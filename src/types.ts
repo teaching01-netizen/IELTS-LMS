@@ -805,6 +805,18 @@ export interface StudentSession {
   runtimeModuleRole?: SatAdaptiveRole | null | undefined;
   runtimeModuleDeadlineAt?: string | null | undefined;
   runtimeModuleRemainingSeconds?: number | null | undefined;
+  /**
+   * Runtime identity fence (SAT adaptive routing). These order two projections
+   * of one candidate: `lastActivity` is presence only ("when did we last hear
+   * from this student?") and must never decide which adaptive module is
+   * authoritative, because two responses can share a heartbeat instant while
+   * describing different modules. `attemptRevision` is the server's monotonic
+   * attempt revision; the remaining three identify the active module attempt.
+   */
+  attemptRevision?: number | null | undefined;
+  runtimeCurrentModuleId?: string | null | undefined;
+  runtimeModuleAttemptId?: string | null | undefined;
+  runtimeModuleAttemptRevision?: number | null | undefined;
   runtimeSectionStatus?: SectionRuntimeStatus | undefined;
   runtimeWaiting?: boolean | undefined;
   violations: Violation[];

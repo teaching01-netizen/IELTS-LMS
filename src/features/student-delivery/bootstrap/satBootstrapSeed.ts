@@ -18,12 +18,11 @@ export interface SatBootstrapSeed {
       without refetching static itself. */
   readonly staticVersionId: string | null;
   /** Attempt/runtime revisions at seed time — lets the child skip a redundant bootstrap
-      when nothing moved (dedupe fast-path is ETag/304, NOT byte reuse). */
+      when nothing moved. The fast path is the client-side equivalent-payload check;
+      it is never a conditional HTTP read, because a validator built from the static
+      exam version cannot speak for live attempt state. */
   readonly attemptRevision: number | null;
   readonly runtimeRevision: number | null;
-  /** Cached delivery ETag for If-None-Match, when the session cache already holds one.
-      Null = first fetch (full bytes). */
-  readonly deliveryEtag: string | null;
   /** Parent load epoch at seed time; child echoes it for observability correlation only. */
   readonly seedGeneration: number;
 }
@@ -48,7 +47,6 @@ export function buildSatBootstrapSeed(input: {
   runtimeSnapshot: ExamSessionRuntime | null;
   liveSnapshotReceivedAt: number | null;
   staticVersionId: string | null;
-  deliveryEtag: string | null;
   seedGeneration: number;
 }): SatBootstrapSeed {
   return {
@@ -61,28 +59,6 @@ export function buildSatBootstrapSeed(input: {
     staticVersionId: input.staticVersionId,
     attemptRevision: input.attemptSnapshot?.revision ?? null,
     runtimeRevision: input.runtimeSnapshot?.revision ?? null,
-    deliveryEtag: input.deliveryEtag,
     seedGeneration: input.seedGeneration,
   };
-}
-
-/** Read the cached delivery ETag for If-None-Match without importing gateway
- * internals into the student feature. Returns null on first fetch, missing or
- * corrupt storage (fail-open to a full fetch — never a bad exam).
- * Key must match bootstrapEtag.ts storageKey: sat-bootstrap-etag:scheduleId:attemptId. */
-export function getCachedDeliveryEtag(
-  scheduleId: string,
-  attemptId: string,
-): string | null {
-  try {
-    if (typeof window === "undefined" || !window.sessionStorage) return null;
-    const raw = window.sessionStorage.getItem(
-      `sat-bootstrap-etag:${scheduleId}:${attemptId}`,
-    );
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { etag?: unknown } | null;
-    return typeof parsed?.etag === "string" ? parsed.etag : null;
-  } catch {
-    return null;
-  }
 }

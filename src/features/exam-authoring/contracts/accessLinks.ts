@@ -208,6 +208,10 @@ export interface SetAccessLinkLifecycleRequest {
   state: AccessLinkLifecycleState;
 }
 
+export interface DeleteAssessmentAccessLinkRequest {
+  revision: number;
+}
+
 export interface DuplicateAssessmentAccessLinkRequest {
   revision: number;
   name?: string | undefined;

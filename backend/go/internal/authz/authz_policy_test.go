@@ -59,7 +59,7 @@ var expectedAnnotated = []string{
 	"GET /{id}/events", "GET /{id}/validation", "GET /{id}/versions", "GET /{id}/versions/summary",
 	"GET /exams/{examID}/overview", "GET /exams/{examID}/links", "POST /exams/{examID}/links",
 	"POST /exams/{examID}/sat-workbook-preview", "POST /exams/{examID}/sat-workbook-commit",
-	"GET /links/{linkID}", "PATCH /links/{linkID}",
+	"GET /links/{linkID}", "PATCH /links/{linkID}", "DELETE /links/{linkID}",
 	"POST /links/{linkID}/lifecycle", "POST /links/{linkID}/duplicate",
 	"GET /links/{linkID}/members", "GET /links/{linkID}/activity",
 	"GET /public/access-links/{linkID}",
@@ -240,6 +240,23 @@ func TestAllowMatrix(t *testing.T) {
 	}
 	if Allow("", anySession) {
 		t.Error("any-session must deny anon")
+	}
+}
+
+func TestAssessmentAccessDeleteIsWriterOnly(t *testing.T) {
+	policy, ok := LookupKey(Table, "DELETE /links/{linkID}")
+	if !ok {
+		t.Fatal("DELETE /links/{linkID} must have an explicit authorization policy")
+	}
+	for _, role := range []string{RoleAdmin, RoleBuilder} {
+		if !Allow(role, policy) {
+			t.Errorf("%s must be able to delete a Student Link", role)
+		}
+	}
+	for _, role := range []string{RoleAdminObserver, RoleProctor, RoleGrader, RoleStudent, ""} {
+		if Allow(role, policy) {
+			t.Errorf("%s must not be able to delete a Student Link", role)
+		}
 	}
 }
 

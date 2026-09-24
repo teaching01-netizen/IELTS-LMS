@@ -885,76 +885,46 @@
     user-select: text;
   }
 
-  /* Long-press callout suppression for exam CONTENT, scoped to an active
-     student exam — `useStudentExamPageLock` puts `student-exam-active` on
-     html/body for exactly the exam phases, so authoring and staff preview keep
-     their native callouts.
-
-     Selection stays `text` on purpose: Highlights & Notes and the SAT
-     annotations are built on the browser's own selection, so this removes the
-     OS action bar (Copy / Look Up / Search / Share) without removing the
-     student's ability to select. Notice this says nothing about `user-select:
-     none` — that would delete the feature it is meant to protect.
-
-     `.sat-exam-prose` is the SAT passage/question prose wrapper and is a
-     deliberate boundary: the answer controls are rendered OUTSIDE it, so they
-     keep their native behaviour. */
-  .student-exam-active .sat-exam-prose,
-  .student-exam-active .sat-exam-prose *,
+  /* SAT roots retain ordinary browser selection until annotation mode arms.
+     IELTS keeps its existing callout guard on its highlightable boundary. */
+  .student-exam-active [data-sat-selection-protected="true"],
+  .student-exam-active [data-sat-selection-protected="true"] *,
   .student-exam-active [data-student-highlightable="true"],
   .student-exam-active [data-student-highlightable="true"] * {
-    -webkit-touch-callout: none;
     -webkit-user-select: text;
     user-select: text;
   }
 
-  /* ON A TOUCH DEVICE THE SELECTION ITSELF IS THE LEAK.
+  .student-exam-active [data-student-highlightable="true"],
+  .student-exam-active [data-student-highlightable="true"] * {
+    -webkit-touch-callout: none;
+  }
 
-     The rule above keeps the platform's long-press callout off the passage
-     while leaving text selectable. An iPad showed that is not enough: Apple's
-     Copy / Find / Look Up bar is attached to the SELECTION, not to the callout,
-     so it appeared over the passage anyway — with the exam's own Highlights
-     toolbar beside it, two menus fighting over one gesture.
+  /* Armed SAT annotation surfaces are owned before contact. This stable marker
+     suppresses native ranges for touch, mouse, and pen while Selection v2 owns
+     the same text for every pointer type. Editable controls opt back into text. */
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"],
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] *,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"],
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 
-     There is no property that keeps a selection and drops the menu; the menu is
-     the platform's response to the selection existing. So under a coarse
-     pointer the selection is removed here, and the exam supplies its own
-     (`useStudentSelectionGesture`): a long press then a drag builds a range
-     the platform never learns about, and it paints its own selection and the
-     student's own Highlight / Underline / Note toolbar.
-
-     Both content surfaces are named here, and both must stay paired with a
-     gesture that replaces what this removes: SAT prose, and IELTS's highlightable
-     passages and transcripts. A selector listed without a gesture behind it
-     deletes a feature instead of protecting it.
-
-     The SAT boundary holds because the answer controls are rendered as a
-     SIBLING of `.sat-exam-prose`, never its descendant (see `SatQuestionBody`
-     and `SatQuestionWorkspace`), so answer fields, the note editor, and the
-     calculator keep every native behavior. Nothing here is `selectstart`,
-     `touchstart`, or a document-wide `user-select: none`.
-
-     Scoped to `pointer: coarse` (the PRIMARY input) rather than `any-pointer`,
-     so a touchscreen laptop with a mouse keeps the desktop behavior. An iPad
-     reports `coarse` even with a trackpad attached, which is why the owned
-     gesture handles mouse drags there too — the JS and this query agree.
-
-     `html.student-exam-active` rather than `.student-exam-active`, which is not
-     decoration: the class is put on `html` AND `body` by `useStudentExamPageLock`,
-     so `html.` matches while adding specificity. Without it this rule TIES with
-     the translation guard's rule over the same attribute — the guard pins its
-     class to `html` for the whole session — and a tie is decided by file order.
-     Losing that tie would put the platform's own selection, and its Copy / Look
-     Up bar, back on an iPad mid-exam. Now nothing scoped to these surfaces is
-     more specific, so the removal holds wherever in the sheet a rule lands. */
-  @media (pointer: coarse) {
-    html.student-exam-active .sat-exam-prose,
-    html.student-exam-active .sat-exam-prose *,
-    html.student-exam-active [data-student-highlightable="true"],
-    html.student-exam-active [data-student-highlightable="true"] * {
-      -webkit-user-select: none;
-      user-select: none;
-    }
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] input,
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] textarea,
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] select,
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] [contenteditable]:not([contenteditable="false"]),
+  html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"] [contenteditable]:not([contenteditable="false"]) *,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] input,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] textarea,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] select,
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] [contenteditable]:not([contenteditable="false"]),
+  html.student-exam-active [data-student-highlightable="true"][data-student-selection-owner="app"] [contenteditable]:not([contenteditable="false"]) * {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
   }
 
   /* THE OTHER HALF OF THAT OWNERSHIP: the browser must be told not to PAN, and
@@ -967,28 +937,18 @@
      that left a student on an iPad with nothing selecting at all — and no jsdom
      test can catch it, because jsdom never runs a real scrolling gesture.
 
-     `touch-action: none` is the only declaration that settles ownership in
-     advance. It applies to touches that begin on this element or anywhere inside
-     it — the used value is taken from the whole ancestor chain — so the prose
-     needs no `*` rule of its own.
-
-     The marker is set by `useStudentSelectionGesture` only when an armed tool
-     can select on a coarse pointer, and it is ALSO gated on the exam class here,
-     so a marker left on a lobby or preview surface is inert. That gate is not
-     cosmetic: those phases render the same surfaces, and taking their scroll
-     away would be a real regression. `html.student-exam-active` rather than
-     `.student-exam-active` for the same reason as the rule above — it outranks
-     `.student-reading-passage-pane { touch-action: auto }` (0,2,1 against
-     0,1,0) instead of tying with it and being decided by file order. */
-  @media (pointer: coarse) {
-    html.student-exam-active [data-student-owned-touch-selection="true"] {
-      touch-action: none;
-    }
+     `touch-action: none` is the only declaration that settles touch ownership
+     in advance. The adapter marks only its enabled exam surface. Pointer type,
+     not the primary-pointer media query, decides whether a physical gesture is
+     touch-owned. `html.student-exam-active` keeps this inert in previews and
+     lobbies and outranks the reading pane's default touch action. */
+  html.student-exam-active [data-student-owned-touch-selection="true"] {
+    touch-action: none;
   }
 
   /* Exam content is not a drag source: dragging an image or a link would carry
      what the student is reading out of the exam. This is element dragging, not
-     text selection — a text drag inside the passage still behaves natively. */
+     text selection; selection follows the exam ownership rules above. */
   .student-exam-active img,
   .student-exam-active a {
     -webkit-user-drag: none;
@@ -1464,15 +1424,15 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   /* Annotation chrome motion (C4: exam TSX carries no duration literals). */
   --sat-motion-annotation: 140ms;
   /* Annotation surface placement (Highlights & Notes). BUDGETS, not guesses:
-   * `native-ui-zone` is the height the native selection menu needs, which is
-   * what decides WHICH LANE it will take on a coarse pointer (above, unless it
-   * does not fit there) — and that lane is never ours, because the browser
-   * paints its menu over our surface. `comfort` is why a surface that
-   * technically fits by 2px asks for the roomier side instead, and
-   * `comfort-fine` is the same idea for a mouse, which has no native menu and
-   * therefore no lane to give up. There is no "does not fit at all" token on
-   * purpose: the surface floats either way, and a placement with no comfortable
-   * room is clamped inside the visible region rather than presented differently.
+   * `native-ui-zone` is the height reserved only when the browser owns a native
+   * selection surface. When present, that budget decides which lane it takes
+   * (above, unless it does not fit there), and that lane is unavailable because
+   * the browser paints its menu over our surface. `comfort` provides a larger
+   * buffer for coarse pointers; it does not imply native selection UI.
+   * `comfort-fine` is the tighter buffer for fine pointers. There is no "does
+   * not fit at all" token on purpose: the surface floats either way, and a
+   * placement with no comfortable room is clamped inside the visible region
+   * rather than presented differently.
    * Every value has a compiled-in fallback in the shared rule
    * (`SELECTION_MENU_BUDGET_DEFAULTS`, surfaced by satAnnotationBudgets.ts),
    * used only where a token is missing or unreadable — jsdom reads none. */

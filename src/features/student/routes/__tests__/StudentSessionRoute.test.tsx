@@ -338,7 +338,6 @@ describe('StudentSessionRoute', () => {
       staticVersionId: 'ver-1',
       attemptRevision: 1,
       runtimeRevision: null,
-      deliveryEtag: null,
       seedGeneration: 1,
     };
     useStudentSessionRouteDataMock.mockReturnValue({

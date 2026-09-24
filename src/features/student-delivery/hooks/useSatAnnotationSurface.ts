@@ -103,7 +103,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
    * column is open", and the three must never be allowed to imply each other.
    */
   const annotationModeEnabled = interaction.state.annotation.modeEnabled;
-  const selection = writable ? interaction.state.annotation.selection : null;
+  const selectionToolsAnchor = writable ? interaction.state.annotation.selectionToolsAnchor : null;
   const education = useSatAnnotationEducation(options.educationKey ?? null);
 
   /** Mark whose edit controls are open (presentation state, not exam truth). */
@@ -152,7 +152,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       // first. The mark's own ink is the confirmation; nothing else pops up.
       setEditingMarkId(result.annotation.id);
       setAnnouncement(satHighlightedAnnouncement(satHighlightInk(color).label.toLowerCase()));
-      interaction.selectionCleared();
+      interaction.selectionToolsDismissed();
     },
     [annotations, education, interaction, writable, write],
   );
@@ -163,7 +163,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       const result = applySatUnderlineRange(annotations, anchor);
       if (result.annotations !== annotations) write(result.annotations);
       setAnnouncement(SAT_COPY.annotations.underlinedAnnouncement);
-      interaction.selectionCleared();
+      interaction.selectionToolsDismissed();
     },
     [annotations, interaction, writable, write],
   );
@@ -174,7 +174,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       const result = attachSatNoteToAnchor(annotations, anchor);
       if (result.annotations !== annotations) write(result.annotations);
       education.markFirstNote();
-      interaction.selectionCleared();
+      interaction.selectionToolsDismissed();
       // The note opens where notes live: the pane, on this note's card, with the
       // caret already in the field. The mark's own controls close on the way, so
       // there is never a floating editor over a pane editor for the same note.
@@ -213,8 +213,8 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
    * is active, which field is open", so nothing downstream has to derive it again.
    */
   const notesState = useMemo<SatNotesUiState>(
-    () => satNotesUiFromSurface(interaction.state.surface, editingMarkId, selection !== null),
-    [editingMarkId, interaction.state.surface, selection],
+    () => satNotesUiFromSurface(interaction.state.surface, editingMarkId, selectionToolsAnchor !== null),
+    [editingMarkId, interaction.state.surface, selectionToolsAnchor],
   );
 
   /**
@@ -409,7 +409,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   }, [dismissMarkControls, editingMarkId]);
 
   /** Dismiss the selection tools without touching the selection or the marks. */
-  const closeSelectionTools = useCallback(() => interaction.selectionCleared(), [interaction]);
+  const closeSelectionTools = useCallback(() => interaction.selectionToolsDismissed(), [interaction]);
 
   /**
    * Arm or disarm annotation — the single meaning of the top-bar control.
@@ -441,10 +441,10 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   // A fresh selection closes a mark's edit controls (they are two answers to
   // "what am I working on?"), and demonstrating the gesture retires the cue.
   useEffect(() => {
-    if (!selection) return;
+    if (!selectionToolsAnchor) return;
     dismissMarkControls();
     education.markHintSeen();
-  }, [dismissMarkControls, education, selection]);
+  }, [dismissMarkControls, education, selectionToolsAnchor]);
 
   // Question changes discard annotation chrome: a mark editor belongs to one
   // question and must never follow the student to the next one.
@@ -463,7 +463,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     annotationsAvailable: options.annotationsAvailable,
     blocked: options.blocked,
     modeEnabled: annotationModeEnabled,
-    hasSelection: selection !== null,
+    hasSelection: selectionToolsAnchor !== null,
     answered: options.answered,
     hasAnnotations: lessonOver,
   });
@@ -507,11 +507,14 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
         // consistent in both directions.
         if (!annotationModeEnabled) return;
         setEditingMarkId(annotation.id);
-        interaction.selectionCleared();
+        interaction.selectionToolsDismissed();
       },
       onSelectionCaptured: (anchor: SatTextAnchor) => interaction.selectionCaptured(anchor),
+      selectionToolsVisible: selectionToolsAnchor !== null,
+      onSelectionToolsDismissed: () => interaction.selectionToolsDismissed(),
+      onSelectionCleared: () => interaction.selectionCleared(),
     }),
-    [annotationModeEnabled, editingMarkId, interaction, noteEditorId, writable],
+    [annotationModeEnabled, editingMarkId, interaction, noteEditorId, selectionToolsAnchor, writable],
   );
 
   return {
@@ -521,7 +524,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     annotationModeEnabled,
     /** Arm or disarm annotation; disarming closes the mark's controls only. */
     toggleAnnotationMode,
-    selection,
+    selectionToolsAnchor,
     selectionActions,
     annotationView,
     /** Ink the toolbar offers as current (the student's last choice). */

@@ -9,7 +9,13 @@ import type {
 } from '../../contracts/assessmentDelivery';
 
 export interface SatDeliveryGateway {
-  bootstrap(scheduleId: string, attemptId: string, ifNoneMatch?: string | null): Promise<AssessmentDeliveryBootstrap>;
+  /**
+   * Unconditional read of LIVE attempt state. There is deliberately no
+   * conditional variant: the published exam version cannot validate module
+   * attempts, the adaptive route, responses or the result, so a version-scoped
+   * 304 could keep a student on the module the server already routed away from.
+   */
+  bootstrap(scheduleId: string, attemptId: string): Promise<AssessmentDeliveryBootstrap>;
   saveResponse(
     scheduleId: string,
     attemptId: string,

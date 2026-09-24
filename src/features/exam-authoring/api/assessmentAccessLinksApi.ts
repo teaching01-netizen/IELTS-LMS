@@ -1,10 +1,11 @@
-import { backendGet, backendPatch, backendPost } from "../infrastructure/examAuthoringBackendGateway";
+import { backendDeleteWithBody, backendGet, backendPatch, backendPost } from "../infrastructure/examAuthoringBackendGateway";
 import type {
   AccessDistributionOverview,
   AccessLinkActivity,
   AccessLinkMember,
   AssessmentAccessLink,
   CreateAssessmentAccessLinkRequest,
+  DeleteAssessmentAccessLinkRequest,
   DuplicateAssessmentAccessLinkRequest,
   PublicAssessmentAccessLink,
   SetAccessLinkLifecycleRequest,
@@ -33,6 +34,12 @@ export const assessmentAccessLinksApi = {
   setLifecycle(linkId: string, request: SetAccessLinkLifecycleRequest): Promise<AssessmentAccessLink> {
     return backendPost<AssessmentAccessLink, SetAccessLinkLifecycleRequest>(
       `/v1/assessment-access/links/${linkId}/lifecycle`,
+      request
+    );
+  },
+  delete(linkId: string, request: DeleteAssessmentAccessLinkRequest): Promise<{ ok: boolean }> {
+    return backendDeleteWithBody<{ ok: boolean }, DeleteAssessmentAccessLinkRequest>(
+      `/v1/assessment-access/links/${linkId}`,
       request
     );
   },

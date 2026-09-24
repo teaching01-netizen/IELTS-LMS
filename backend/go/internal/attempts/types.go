@@ -120,6 +120,7 @@ type AttemptState struct {
 	SubmittedAt       *time.Time
 	FinalSubmission   *string
 	ProctorStatus     string
+	ProviderKey       string
 }
 
 // Provider identifies completion policy owner (plan 4.1, 28-32).

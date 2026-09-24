@@ -289,6 +289,32 @@ describe("authoring effect vocabulary", () => {
     );
   });
 
+  it("accessDeleted removes the link from the cached overview and drops link-specific projections", async () => {
+    const { queryClient, invalidateSpy, removeSpy } = makeClient();
+    queryClient.setQueryData(accessLinkKeys.overview("exam-1"), {
+      currentPublishedVersion: null,
+      links: [{ id: "link-1" }, { id: "link-2" }],
+    });
+
+    await authoringEffects.accessDeleted(queryClient, "exam-1", "link-1");
+
+    expect(queryClient.getQueryData(accessLinkKeys.overview("exam-1"))).toEqual({
+      currentPublishedVersion: null,
+      links: [{ id: "link-2" }],
+    });
+    expect(removedKeys(removeSpy)).toEqual(
+      keysOf(
+        accessLinkKeys.link("link-1"),
+        accessLinkKeys.members("link-1"),
+        accessLinkKeys.activity("link-1"),
+        accessLinkKeys.public("link-1")
+      )
+    );
+    expect(invalidatedKeys(invalidateSpy)).toEqual(
+      keysOf(accessLinkKeys.overview("exam-1"), RELEASE)
+    );
+  });
+
   it("an effect never touches an unrelated question's cache", async () => {
     const { queryClient, invalidateSpy, removeSpy } = makeClient();
 
