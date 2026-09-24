@@ -36,7 +36,7 @@ describe('useSatInteractionController (only public mutation surface)', () => {
   // all interaction state untouched.
   it('refuses the calculator toggle while refusing annotation without R&W capability', () => {
     const { result } = renderHook(({ ctx }: { ctx: SatInteractionContext }) => useSatInteractionController(ctx), {
-      initialProps: { ctx: mathCtx() },
+      initialProps: { ctx: { ...mathCtx(), toolPolicy: { ...mathCtx().toolPolicy, highlight: false, underline: false, notes: false } } },
     });
     const before = result.current.state;
     act(() => result.current.toggleCalculator());
@@ -110,7 +110,7 @@ describe('useSatInteractionController (only public mutation surface)', () => {
     rerender({
       ctx: {
         ...mathCtx(),
-        toolPolicy: resolveSatExamToolPolicy('math', ['calculator']),
+        toolPolicy: { ...resolveSatExamToolPolicy('math', ['calculator']), highlight: false, underline: false, notes: false },
         sectionKey: 'math',
         moduleKey: 'math-m1',
       },

@@ -1644,15 +1644,12 @@ export function useSatExamController({
       }
       return;
     }
-    const liveExpirySeconds = deriveSatTemporalSnapshot(temporalModelRef.current, Date.now()).expirySeconds;
     if (
       (state.phase !== "module" && state.phase !== "review") ||
       !stateModule ||
       !stateModuleAttempt ||
       !data ||
       !findAttemptForModule(data, stateModule.id) ||
-      liveExpirySeconds === null ||
-      liveExpirySeconds > 0 ||
       stateModuleAttempt.pausedAt ||
       timeoutTransitionKeyRef.current === key
     ) return;
@@ -1666,6 +1663,17 @@ export function useSatExamController({
       void refresh(true);
     });
   }, [data, refresh, state.phase, stateModule, stateModuleAttempt]);
+
+  // The controller also owns the local expiry safety net. The route's
+  // SatTemporalRuntime reports the same boundary for UI clocks, but hooks and
+  // recovery surfaces can run without that presentation component mounted.
+  useEffect(() => {
+    if (!stateModule || !stateModuleAttempt || stateModuleAttempt.pausedAt) return;
+    const expiry = deriveSatTemporalSnapshot(temporalModelRef.current, Date.now()).expirySeconds;
+    if (expiry !== null && expiry <= 0) {
+      onTemporalBoundary("expiry", `${stateModule.id}:${stateModuleAttempt.id}`);
+    }
+  }, [onTemporalBoundary, stateModule, stateModuleAttempt, now]);
 
   // Phase 04 commit-first / reconciler-second: the poll commit dispatches
   // showDirections synchronously when it carries the finalized predicate;
