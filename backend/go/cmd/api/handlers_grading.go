@@ -24,7 +24,7 @@ import (
 // Grading policy: reads, SaveDraft, OverrideObjectiveQuestion and
 // GradeObjective serve Admin|Grader; MarkComplete, MarkReadyToRelease,
 // ReleaseNow and ReopenReview are Admin-only. Results reads serve
-// Admin|Grader|Proctor; fetching one result additionally allows Student.
+// Admin|AdminObserver|Grader|Proctor; fetching one result additionally allows Student.
 
 // latestSubmissionForSchedule resolves the newest student_submissions row
 // for a schedule (WS-05: thin shim over grading.Service; the SQL lives in
@@ -1003,7 +1003,7 @@ func gradingProfileExportHandler(app *App) http.HandlerFunc {
 // resultsSATListHandler is retained as a compatibility list for older clients.
 func resultsSATListHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader, auth.RoleProctor) == nil {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
 			return
 		}
 		if app.Results == nil {
@@ -1025,7 +1025,7 @@ func resultsSATListHandler(app *App) http.HandlerFunc {
 
 func resultsSATAccessGroupsHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader, auth.RoleProctor) == nil {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
 			return
 		}
 		if app.Results == nil {
@@ -1046,7 +1046,7 @@ func resultsSATAccessGroupsHandler(app *App) http.HandlerFunc {
 
 func resultsSATAttemptsHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader, auth.RoleProctor) == nil {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
 			return
 		}
 		if app.Results == nil {
@@ -1143,7 +1143,7 @@ func resultsACTScienceDetailHandler(app *App) http.HandlerFunc {
 // resultsSATGetHandler returns one SAT result with section detail.
 func resultsSATGetHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader, auth.RoleProctor) == nil {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
 			return
 		}
 		if app.Results == nil {

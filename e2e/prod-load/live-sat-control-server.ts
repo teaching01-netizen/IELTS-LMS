@@ -73,29 +73,33 @@ main{display:grid;grid-template-columns:minmax(320px,390px) minmax(0,1fr);gap:16
 <form id="settings-form" method="post" action="/api/start" novalidate aria-describedby="state-message">
 <div class="field"><label for="join-url">SAT Student Link URL</label><input id="join-url" name="joinUrl" type="url" required value="https://ielts-warwick-institute.up.railway.app/join/623c75cf-f380-4ae1-b54c-f55b77af53ec" placeholder="https://host/join/accessLinkId" autocomplete="url" aria-describedby="join-url-help"><small id="join-url-help">Use the shared /join/:accessLinkId URL. You can change this value.</small></div>
 <div class="field"><label for="users-file">Student roster file</label><input id="users-file" name="usersFile" required value="e2e/prod-load/live-users.500.csv"><small>CSV columns: userId,email,password,candidateId.</small></div>
-<div class="row"><div class="field"><label for="user-count">Total students</label><input id="user-count" name="userCount" type="number" min="1" max="500" value="100" required></div><div class="field"><label for="user-offset">Roster offset</label><input id="user-offset" name="userOffset" type="number" min="0" value="0" required></div></div>
-<div class="field"><label for="concurrency">Concurrent headless browsers</label><input id="concurrency" name="maxConcurrentUsers" type="number" min="1" max="100" value="15" required><small>Higher concurrency increases local memory use and production admission pressure.</small></div>
+<div class="field"><label for="run-mode">Run mode</label><select id="run-mode" name="runMode" style="width:100%;min-height:40px;border:1px solid #3a4962;border-radius:7px;background:#0a1222;color:var(--text);padding:8px 10px;font:inherit;font-size:13px"><option value="headless">Headless browser UI</option><option value="headed">Chrome UI (visible browsers)</option><option value="k6">k6 API load</option></select></div>
+<div id="browser-settings"><div class="row"><div class="field"><label for="user-count">Browser students</label><input id="user-count" name="userCount" type="number" min="1" max="500" value="100" required></div><div class="field"><label for="user-offset">Browser roster offset</label><input id="user-offset" name="userOffset" type="number" min="0" value="0" required></div></div>
+<div class="field"><label for="concurrency">Concurrent browsers</label><input id="concurrency" name="maxConcurrentUsers" type="number" min="1" max="100" value="15" required><small>Higher concurrency increases local memory use and production admission pressure.</small></div></div>
+<div id="k6-settings" hidden><div class="row"><div class="field"><label for="k6-students">k6 students</label><input id="k6-students" name="k6Students" type="number" min="1" max="10000" value="100" required disabled></div><div class="field"><label for="k6-offset">k6 student offset</label><input id="k6-offset" name="k6StudentOffset" type="number" min="0" value="0" required disabled></div></div><label style="display:flex;gap:8px;align-items:center;color:#ffd6d6;font-size:12px"><input id="confirm-k6" name="confirmK6Sat" type="checkbox" value="true" disabled> I confirm this is an isolated staging SAT schedule</label></div>
 <div class="row"><div class="field"><label for="screenshot-ms">Screenshot interval (ms)</label><input id="screenshot-ms" name="screenshotIntervalMs" type="number" min="250" max="60000" step="250" value="5000" required></div><div class="field"><label for="jpeg-quality">JPEG quality</label><input id="jpeg-quality" name="jpegQuality" type="number" min="10" max="90" value="30" required></div></div>
 <div class="row"><div class="field"><label for="start-timeout">Wait for proctor (minutes)</label><input id="start-timeout" name="startTimeoutMinutes" type="number" min="1" max="60" value="20" required></div><div class="field"><label for="exam-timeout">Exam timeout (minutes)</label><input id="exam-timeout" name="examTimeoutMinutes" type="number" min="1" max="240" value="150" required></div></div>
-<p class="hint">Browsers always run headless. The monitor appears after starting. Start the SAT session from the proctor UI; bots wait until it is live.</p>
+<p class="hint" id="mode-hint">Headless browsers join the SAT link and wait until the proctor starts the session.</p>
 <div class="actions"><button id="start-button" type="submit">Start students</button><button id="stop-button" class="stop" type="button" disabled>Stop all</button></div>
 <p id="state-message" class="state" role="status" aria-live="polite"></p>
 </form></section>
 <section class="panel monitor-wrap" aria-label="Live student monitor"><div class="monitor-head"><strong>Live monitor</strong><a id="open-monitor" href="#" target="_blank" rel="noreferrer" hidden>Open monitor in new tab</a></div><div class="empty" id="monitor-empty">Set the run options, then choose <strong>Start students</strong>.</div><iframe id="monitor" title="SAT bot browser monitor" hidden></iframe><pre class="logs" id="logs" aria-label="Runner log"></pre></section>
 </main>
 <script>
-const form=document.getElementById('settings-form'),startButton=document.getElementById('start-button'),stopButton=document.getElementById('stop-button'),statusBadge=document.getElementById('run-status'),message=document.getElementById('state-message'),monitor=document.getElementById('monitor'),empty=document.getElementById('monitor-empty'),openMonitor=document.getElementById('open-monitor'),logs=document.getElementById('logs');
+const form=document.getElementById('settings-form'),startButton=document.getElementById('start-button'),stopButton=document.getElementById('stop-button'),statusBadge=document.getElementById('run-status'),message=document.getElementById('state-message'),monitor=document.getElementById('monitor'),empty=document.getElementById('monitor-empty'),openMonitor=document.getElementById('open-monitor'),logs=document.getElementById('logs'),mode=form.elements.namedItem('runMode'),browserSettings=document.getElementById('browser-settings'),k6Settings=document.getElementById('k6-settings'),modeHint=document.getElementById('mode-hint');
+function updateMode(){const k6=mode.value==='k6',headed=mode.value==='headed';browserSettings.hidden=k6;k6Settings.hidden=!k6;for(const el of browserSettings.querySelectorAll('input'))el.disabled=k6;for(const id of ['join-url','users-file']){const el=document.getElementById(id);el.disabled=k6;el.required=!k6;el.closest('.field').hidden=k6}modeHint.textContent=k6?'k6 drives SAT API traffic using the isolated staging schedule in the target configuration.':headed?'Chrome windows stay visible while students join and wait until the proctor starts the session.':'Headless browsers join the SAT link and wait until the proctor starts the session.'}
+mode.addEventListener('change',updateMode);updateMode();
 function monitorUrl(port){return location.protocol+'//'+location.hostname+':'+port}
 function renderState(s){statusBadge.textContent=String(s.status||'idle').toUpperCase();statusBadge.dataset.status=s.status||'idle';startButton.disabled=Boolean(s.running);stopButton.disabled=!s.running;message.textContent=s.error||'';message.setAttribute('role',s.error?'alert':'status');if(s.running||s.status==='finished'||s.status==='failed'){const url=monitorUrl(s.monitorPort);if(monitor.src!==url)monitor.src=url;monitor.hidden=false;empty.hidden=true;openMonitor.href=url;openMonitor.hidden=false}}
 async function refresh(){try{const response=await fetch('/api/state');if(response.ok)renderState(await response.json())}catch{}}
 try{const saved=JSON.parse(localStorage.getItem('sat-live-test-settings')||'null');if(saved&&typeof saved==='object')for(const [key,value] of Object.entries(saved)){const control=form.elements.namedItem(key);if(control&&typeof value==='string')control.value=value}}catch{}
 // A bookmarked control URL may carry the run settings (?joinUrl=…&userCount=…).
 // Query values are explicit, so they win over whatever this browser saved last.
-const queryKeys=['joinUrl','usersFile','userCount','userOffset','maxConcurrentUsers','screenshotIntervalMs','jpegQuality','startTimeoutMinutes','examTimeoutMinutes'];
+const queryKeys=['joinUrl','usersFile','runMode','userCount','userOffset','maxConcurrentUsers','k6Students','k6StudentOffset','screenshotIntervalMs','jpegQuality','startTimeoutMinutes','examTimeoutMinutes'];
 let queryApplied=0;
 for(const [key,value] of new URLSearchParams(location.search)){if(!queryKeys.includes(key))continue;const control=form.elements.namedItem(key);if(!control)continue;const next=String(value||'').trim();if(!next)continue;if(control.type==='number'){const numeric=Number(next);if(!Number.isFinite(numeric))continue;const min=Number(control.min||'0'),max=Number(control.max||'100000');if(numeric<min||numeric>max)continue;control.value=String(numeric)}else{control.value=next}queryApplied+=1}
-if(queryApplied>0){message.textContent='Loaded '+queryApplied+' setting'+(queryApplied===1?'':'s')+' from the link. Review them, then choose Start students.'}
-form.addEventListener('submit',async(event)=>{event.preventDefault();const invalid=form.querySelector(':invalid');if(invalid){message.textContent=invalid.name==='joinUrl'&&!invalid.value.trim()?'Enter the SAT Student Link URL before starting.':invalid.validationMessage||'Check the highlighted setting.';message.setAttribute('role','alert');invalid.focus();invalid.reportValidity();return}const data=Object.fromEntries(new FormData(form));data.userCount=Number(data.userCount);data.userOffset=Number(data.userOffset);data.maxConcurrentUsers=Number(data.maxConcurrentUsers);data.screenshotIntervalMs=Number(data.screenshotIntervalMs);data.jpegQuality=Number(data.jpegQuality);data.startTimeoutMs=Number(data.startTimeoutMinutes)*60000;data.examTimeoutMs=Number(data.examTimeoutMinutes)*60000;delete data.startTimeoutMinutes;delete data.examTimeoutMinutes;try{localStorage.setItem('sat-live-test-settings',JSON.stringify(Object.fromEntries(new FormData(form))))}catch{}message.textContent='Starting headless students…';message.setAttribute('role','status');try{const response=await fetch('/api/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)});const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not start the run.');renderState(result.state);message.textContent='Runner started. Students will join and wait for the proctor.'}catch(error){message.textContent=error instanceof Error?error.message:String(error);message.setAttribute('role','alert')}});
+if(queryApplied>0){message.textContent='Loaded '+queryApplied+' setting'+(queryApplied===1?'':'s')+' from the link. Review them, then choose Start students.'}updateMode();
+form.addEventListener('submit',async(event)=>{event.preventDefault();updateMode();const invalid=form.querySelector(':invalid');if(invalid){message.textContent=invalid.name==='joinUrl'&&!invalid.value.trim()?'Enter the SAT Student Link URL before starting.':invalid.validationMessage||'Check the highlighted setting.';message.setAttribute('role','alert');invalid.focus();invalid.reportValidity();return}const data=Object.fromEntries(new FormData(form));for(const key of ['userCount','userOffset','maxConcurrentUsers','k6Students','k6StudentOffset','screenshotIntervalMs','jpegQuality'])if(data[key]!==undefined)data[key]=Number(data[key]);data.confirmK6Sat=form.elements.namedItem('confirmK6Sat').checked;data.startTimeoutMs=Number(data.startTimeoutMinutes)*60000;data.examTimeoutMs=Number(data.examTimeoutMinutes)*60000;delete data.startTimeoutMinutes;delete data.examTimeoutMinutes;try{localStorage.setItem('sat-live-test-settings',JSON.stringify(Object.fromEntries(new FormData(form))))}catch{}message.textContent='Starting '+(data.runMode==='k6'?'k6 students…':data.runMode==='headed'?'Chrome UI students…':'headless students…');message.setAttribute('role','status');try{const response=await fetch('/api/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)});const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not start the run.');renderState(result.state);message.textContent='Runner started.'}catch(error){message.textContent=error instanceof Error?error.message:String(error);message.setAttribute('role','alert')}});
 stopButton.addEventListener('click',async()=>{if(!confirm('Stop all SAT test students and close their browser sessions?'))return;try{const response=await fetch('/api/stop',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not stop the run.');renderState(result.state);message.textContent='Stop requested.'}catch(error){message.textContent=error instanceof Error?error.message:String(error);message.setAttribute('role','alert')}});
 const events=new EventSource('/api/logs');events.onmessage=(event)=>{const item=JSON.parse(event.data);logs.textContent+=(logs.textContent?'\\n':'')+item.line;logs.scrollTop=logs.scrollHeight};refresh();setInterval(refresh,2000);
 </script></body></html>`;
@@ -118,7 +122,7 @@ app.post('/api/start', (req, res) => {
 
   try {
     const config = parseLiveSatControlConfig(req.body, ROOT);
-    if (!fs.existsSync(config.usersFile) || !fs.statSync(config.usersFile).isFile()) {
+    if (config.runMode !== 'k6' && (!fs.existsSync(config.usersFile) || !fs.statSync(config.usersFile).isFile())) {
       return res.status(400).json({ error: `USERS_FILE not found: ${path.relative(ROOT, config.usersFile)}` });
     }
     const env = {
@@ -133,14 +137,20 @@ app.post('/api/start', (req, res) => {
       JPEG_QUALITY: String(config.jpegQuality),
       START_TIMEOUT_MS: String(config.startTimeoutMs),
       EXAM_TIMEOUT_MS: String(config.examTimeoutMs),
-      HEADLESS: 'true',
-      HEADED_USERS: '0',
+      HEADLESS: config.runMode === 'headed' ? 'false' : 'true',
+      HEADED_USERS: config.runMode === 'headed' ? String(config.userCount) : '0',
+      K6_STUDENTS: String(config.k6Students),
+      K6_STUDENT_OFFSET: String(config.k6StudentOffset),
+      K6_CONFIRM_SAT: config.confirmK6Sat ? 'true' : 'false',
+      K6_TARGET_PATH: process.env['K6_TARGET_PATH'] || 'e2e/prod-data/prod-target.json',
+      K6_CREDS_PATH: process.env['K6_CREDS_PATH'] || 'e2e/prod-data/prod-creds.json',
       OUTPUT_DIR: 'e2e/.generated/live-sat-runner',
       DELETE_ARTIFACTS_ON_FINISH: 'false',
     };
 
     const bun = process.env['BUN_BIN'] || 'bun';
-    const spawned = spawn(bun, ['run', 'e2e:live-sat-runner'], {
+    const command = config.runMode === 'k6' ? ['k6', 'run', 'k6/sat-exam-day.js'] : [bun, 'run', 'e2e:live-sat-runner'];
+    const spawned = spawn(command[0], command.slice(1), {
       cwd: ROOT,
       env,
       detached: process.platform !== 'win32',
@@ -159,7 +169,7 @@ app.post('/api/start', (req, res) => {
       error: null,
     };
     logLines.length = 0;
-    pushLog(`[control] starting ${config.userCount} headless students (${config.maxConcurrentUsers} concurrent)`);
+    pushLog(config.runMode === 'k6' ? `[control] starting ${config.k6Students} k6 SAT students (offset ${config.k6StudentOffset})` : `[control] starting ${config.userCount} ${config.runMode === 'headed' ? 'Chrome UI' : 'headless'} students (${config.maxConcurrentUsers} concurrent)`);
     spawned.stdout?.on('data', (chunk: Buffer) => pushLog(chunk.toString()));
     spawned.stderr?.on('data', (chunk: Buffer) => pushLog(`[stderr] ${chunk.toString()}`));
     spawned.once('spawn', () => {
