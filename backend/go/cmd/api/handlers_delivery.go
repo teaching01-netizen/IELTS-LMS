@@ -7,6 +7,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/sat"
 )
@@ -145,13 +146,135 @@ func deliveryStartModuleHandler(app *App) http.HandlerFunc {
 		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx
 		// re-checks token revocation + writer session in-tx); no separate
 		// pre-tx round trip.
-		out, err := app.Delivery.StartModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, claims.ClientSessionID, claims.TokenID)
+		out, err := app.Delivery.StartModuleOffer(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, req.Generation, req.ControlEpoch, claims.ClientSessionID, claims.TokenID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
+}
+
+func deliveryEnterModuleHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+		if !ok {
+			return
+		}
+		var req delivery.ModuleEntryRequest
+		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Delivery.EnterModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+func deliveryMarkStageVisibleHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+		if !ok {
+			return
+		}
+		var req delivery.ModuleEntryRequest
+		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Delivery.MarkStageVisible(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+func deliveryStartBreakHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+		if !ok {
+			return
+		}
+		// The optional body carries the control epoch the client believed it
+		// held, so a break armed across a pause/resume boundary is refused
+		// instead of entering under a frozen clock (mirrors EnterBreak).
+		var req delivery.BreakEntryRequest
+		if err := httpx.DecodeLimitedOptional(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Delivery.StartBreak(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "breakID"), req.ControlEpoch, claims.ClientSessionID, claims.TokenID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+func deliveryEnterBreakHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+		if !ok {
+			return
+		}
+		var req delivery.BreakEntryRequest
+		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Delivery.EnterBreak(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+func deliveryMarkBreakVisibleHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+		if !ok {
+			return
+		}
+		var req delivery.BreakEntryRequest
+		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Delivery.MarkBreakVisible(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+// verifiedDeliveryWriterClaims shares the session-bound bearer and writer
+// identity gates used by delivery mutations.
+func verifiedDeliveryWriterClaims(app *App, w http.ResponseWriter, r *http.Request) (crypto.AttemptClaims, bool) {
+	bearer, ok := requireBearer(w, r)
+	if !ok {
+		return crypto.AttemptClaims{}, false
+	}
+	claims, err := verifyAttemptReadBearer(app, r, bearer)
+	if err != nil || claims.ClientSessionID == "" {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+		return crypto.AttemptClaims{}, false
+	}
+	if app.Delivery == nil || app.DB == nil {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Delivery service is unavailable."))
+		return crypto.AttemptClaims{}, false
+	}
+	return claims, true
 }
 
 // deliverySubmitModuleHandler submits one SAT module attempt

@@ -31,10 +31,10 @@ func TestCreateScheduleAttemptReplayEmitsCounter(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	now := time.Now().UTC()
-	cols := []string{"id", "exam_id", "provider_key", "organization_id", "exam_title", "proctor_display_name", "grading_display_name", "published_version_id", "cohort_name", "institution", "start_time", "end_time", "planned_duration_minutes", "delivery_mode", "status", "revision", "recurrence_type", "recurrence_interval", "recurrence_end_date", "buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop", "created_at", "created_by", "updated_at"}
+	cols := []string{"id", "exam_id", "provider_key", "organization_id", "exam_title", "proctor_display_name", "grading_display_name", "published_version_id", "cohort_name", "institution", "start_time", "end_time", "planned_duration_minutes", "delivery_mode", "status", "revision", "recurrence_type", "recurrence_interval", "recurrence_end_date", "buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop", "created_at", "created_by", "updated_at", "sat_timing_model"}
 	mock.ExpectQuery("FROM exam_schedules WHERE id").
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows(cols).AddRow("sched-1", "exam-1", "ielts", nil, "T", "T", "T", "v-1", "C", nil, now, now, 60, "cohort", "live", 1, "", 0, nil, nil, nil, false, false, now, "u", now))
+		WillReturnRows(sqlmock.NewRows(cols).AddRow("sched-1", "exam-1", "ielts", nil, "T", "T", "T", "v-1", "C", nil, now, now, 60, "cohort", "live", 1, "", 0, nil, nil, nil, false, false, now, "u", now, nil))
 	mock.ExpectQuery("FROM schedule_registrations WHERE id").
 		WithArgs("reg-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "wcode", "user_id"}).AddRow("reg-1", "W1", "u-1"))

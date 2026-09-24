@@ -258,6 +258,9 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Student bundle isolation
+        run: node scripts/assert-student-bundle-isolation.mjs
+
       - name: Analyze Bundle Size
         run: |
           entry_assets=()

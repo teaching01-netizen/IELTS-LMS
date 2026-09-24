@@ -267,14 +267,21 @@ export type RuntimeStatus = "not_started" | "live" | "paused" | "completed" | "c
 /**
  * Runtime status for a single section
  */
-export type SectionRuntimeStatus = "locked" | "live" | "paused" | "completed";
+// "break" is a real SAT stage: an attempt-owned break reports it while the
+// candidate's break is pending, armed or running, so the staff room can label
+// the stage instead of falling back to "locked".
+export type SectionRuntimeStatus = "locked" | "live" | "paused" | "completed" | "break";
 
 /**
  * Timing model an exam runtime is scheduled under. `legacy_section_v1` runs a
  * per-module clock; the two cohort models run a server-owned section clock and
  * an authored gap between sections.
  */
-export type TimingModel = "legacy_section_v1" | "cohort_stage_v2" | "cohort_section_v3";
+export type TimingModel =
+  | "legacy_section_v1"
+  | "cohort_stage_v2"
+  | "cohort_section_v3"
+  | "sat_personal_v1";
 
 /**
  * The single test for "this runtime is on the cohort section clock". Every
@@ -296,6 +303,17 @@ export function isSectionKeyedCohortModel(
   model: TimingModel | string | null | undefined
 ): boolean {
   return model === "cohort_section_v3";
+}
+
+/**
+ * The attempt-owned SAT timing model: module and break deadlines belong to
+ * each attempt. A server-issued future start lets the browser load the next
+ * surface before its clock begins. Null/empty (old rows) never matches.
+ */
+export function isSatPersonalTimingModel(
+  model: TimingModel | string | null | undefined
+): boolean {
+  return model === "sat_personal_v1";
 }
 
 /**

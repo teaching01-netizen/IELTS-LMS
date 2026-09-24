@@ -121,6 +121,27 @@ test.describe("SAT adaptive identity in the browser", () => {
         expect(sectionDecision.route).toBe("lower");
         expect(sectionDecision.moduleId).toBe(branch.moduleId);
 
+        // Observe staff projection while this branch is active; once its
+        // timeout closes it the roster correctly has no active module to name.
+        await expect
+          .poll(
+            async () => (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleId,
+            { timeout: 45_000, intervals: [500, 1_000, 2_000] },
+          )
+          .toBe(branch.moduleId);
+        const branchProjection = await staffProjection(page, scheduleId, studentName);
+        expect(branchProjection.runtimeCurrentModuleRole).toBe("lower_branch");
+
+        await page.goto(`/sat/sessions/${scheduleId}`);
+        const studentOption = page.getByRole("option", { name: `Open ${studentName}` });
+        await expect(studentOption).toBeVisible({ timeout: 30_000 });
+        await studentOption.click();
+        const dialog = page.getByRole("dialog", { name: "Selected student inspector" });
+        await expect(dialog).toBeVisible();
+        await expect(
+          dialog.locator("[data-sat-room-student-detail]").getByText("Module 2 · Lower"),
+        ).toBeVisible();
+
         await expireModuleAttempt(branch.attemptId);
         await waitForTerminalBranch(studentPage, scheduleId, attemptId, candidateId, branch.attemptId);
         if (sectionKey === "reading-writing") {
@@ -132,24 +153,6 @@ test.describe("SAT adaptive identity in the browser", () => {
             .toBe("math");
         }
       }
-
-      // Staff projection agrees on the Lower branch.
-      await expect
-        .poll(async () => (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleRole, {
-          timeout: 45_000,
-          intervals: [500, 1_000, 2_000],
-        })
-        .toBe("lower_branch");
-
-      await page.goto(`/sat/sessions/${scheduleId}`);
-      const studentOption = page.getByRole("option", { name: `Open ${studentName}` });
-      await expect(studentOption).toBeVisible({ timeout: 30_000 });
-      await studentOption.click();
-      const dialog = page.getByRole("dialog", { name: "Selected student inspector" });
-      await expect(dialog).toBeVisible();
-      await expect(
-        dialog.locator("[data-sat-room-student-detail]").getByText("Module 2 · Lower"),
-      ).toBeVisible();
 
       // The attempt completes and both section routes read lower.
       const result = await studentPage.evaluate(
@@ -401,7 +404,14 @@ async function startSatAttempt(
   await page.getByRole("menuitem", { name: /Load sample exam/ }).click();
   await expect(page.getByRole("dialog", { name: "Load sample SAT" })).toBeVisible();
   await page.getByRole("button", { name: "Load 147 questions" }).click();
-  await expect(page.getByText("147 of 147 questions authored")).toBeVisible({ timeout: 90_000 });
+  // Both the load dialog and the section panel report the authored count;
+  // match either surface — the load is done when all 147 are authored.
+  await expect(page.getByText(/147 of 147 (questions )?authored/).first()).toBeVisible({
+    timeout: 90_000,
+  });
+  // Release reads the committed Go projection, not the optimistic editor
+  // view. Wait for the co-edit acknowledgement before crossing that barrier.
+  await expect(page.getByText("Saved", { exact: true }).last()).toBeVisible({ timeout: 90_000 });
 
   await page.getByRole("button", { name: "Release" }).click();
   await expect(page).toHaveURL(`/sat/exams/${examId}/release`);
@@ -452,9 +462,15 @@ async function startSatAttempt(
   await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
 
   // The proctor's Start is the ONLY action taken: refresh (never click) and
-  // the module must be OPEN by itself.
+  // the module must be OPEN by itself. One reload retry absorbs a first load
+  // that raced the runtime start; entry itself is still asserted below.
   await studentPage.reload();
-  await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+  try {
+    await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+  } catch {
+    await studentPage.reload();
+    await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+  }
   await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
   const attemptId = await studentPage.evaluate(
     async ({ scheduleId: id, candidateId: candidate }) => {
@@ -778,9 +794,13 @@ async function expireCurrentSatSection(scheduleId: string, attemptId: string): P
     );
     if ((sectionRows as Array<Record<string, unknown>>).length === 0) return 0;
     await connection.execute(
+      // The authored break gap is zeroed: section advance (not break
+      // behavior) is what this spec exercises, and a multi-minute gap
+      // would park the run between sections past every sane poll budget.
       `UPDATE exam_session_runtime_sections
           SET actual_start_at = DATE_SUB(NOW(6), INTERVAL 2 MINUTE),
               planned_duration_minutes = 1,
+              gap_after_minutes = 0,
               extension_minutes = 0,
               accumulated_paused_seconds = 0
         WHERE runtime_id = ? AND section_key = ? AND status = 'live'`,

@@ -13,6 +13,8 @@ import {
 } from '../infrastructure/assessmentDeliveryBackendGateway';
 import type {
   AssessmentDeliveryBootstrap,
+  AssessmentBreakEntryRequest,
+  AssessmentModuleEntryRequest,
   AssessmentModuleStartRequest,
   AssessmentModuleSubmitRequest,
   AssessmentResponseRequest,
@@ -217,6 +219,71 @@ export const assessmentDeliveryApi = {
   ): Promise<AssessmentDeliveryBootstrap> {
     return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
       `/v1/assessment-delivery/schedules/${scheduleId}/modules/start`,
+      request,
+      config,
+    ));
+  },
+
+  enterModule(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentModuleEntryRequest,
+  ): Promise<AssessmentDeliveryBootstrap> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/modules/enter`,
+      request,
+      config,
+    ));
+  },
+
+  markStageVisible(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentModuleEntryRequest,
+  ): Promise<AssessmentDeliveryBootstrap> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/modules/visible`,
+      request,
+      config,
+    ));
+  },
+
+  startBreak(
+    scheduleId: string,
+    attemptId: string,
+    breakId: string,
+    request?: AssessmentBreakEntryRequest,
+  ): Promise<AssessmentDeliveryBootstrap> {
+    // Only the control-epoch fence is meaningful here (the server ignores the
+    // rest of the entry shape); an undefined epoch is omitted so legacy
+    // clients keep the pre-existing un-fenced behavior.
+    const body = request?.controlEpoch === undefined ? undefined : { controlEpoch: request.controlEpoch };
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/breaks/${breakId}/start`,
+      body,
+      config,
+    ));
+  },
+
+  enterBreak(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentBreakEntryRequest,
+  ): Promise<AssessmentDeliveryBootstrap> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/breaks/enter`,
+      request,
+      config,
+    ));
+  },
+
+  markBreakVisible(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentBreakEntryRequest,
+  ): Promise<AssessmentDeliveryBootstrap> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/breaks/visible`,
       request,
       config,
     ));

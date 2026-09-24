@@ -73,9 +73,10 @@ func TestFinalizeModuleScoresV2AnswersWithoutLegacyRows(t *testing.T) {
 		WithArgs("mod-higher").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_id", "section_key", "module_key", "duration_seconds", "adaptive_role", "tool_policy"}).
 			AddRow("mod-higher", "sec-1", "reading-writing", "rw-hard", 3600, "higher_branch", nil))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes")).
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(0))
+		WithArgs("att-1", "att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"cohort", "personal"}).AddRow(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "mod-higher", 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -139,9 +140,10 @@ func TestFinalizeModuleLegacyFallbackWithoutV2Rows(t *testing.T) {
 		WithArgs("mod-higher").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_id", "section_key", "module_key", "duration_seconds", "adaptive_role", "tool_policy"}).
 			AddRow("mod-higher", "sec-1", "reading-writing", "rw-hard", 3600, "higher_branch", nil))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes")).
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(0))
+		WithArgs("att-1", "att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"cohort", "personal"}).AddRow(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "mod-higher", 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -210,9 +212,10 @@ func TestFinalizeModuleDedupsDualV2IdentityRows(t *testing.T) {
 		WithArgs("mod-higher").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_id", "section_key", "module_key", "duration_seconds", "adaptive_role", "tool_policy"}).
 			AddRow("mod-higher", "sec-1", "reading-writing", "rw-hard", 3600, "higher_branch", nil))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes")).
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(0))
+		WithArgs("att-1", "att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"cohort", "personal"}).AddRow(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "mod-higher", 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -279,9 +282,10 @@ func TestFinalizeModuleZeroAnswerPassRoutesLower(t *testing.T) {
 		WithArgs("mod-lower").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_id", "section_key", "module_key", "duration_seconds", "adaptive_role", "tool_policy"}).
 			AddRow("mod-lower", "sec-1", "reading-writing", "rw-easy", 3600, "lower_branch", nil))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes")).
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(0))
+		WithArgs("att-1", "att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"cohort", "personal"}).AddRow(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "mod-lower", 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))

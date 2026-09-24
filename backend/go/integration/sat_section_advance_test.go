@@ -31,8 +31,23 @@ package integration
 // browser-side projection check.
 //
 // Nothing here changes production behavior: the only writes are fixture rows in
-// the test database plus the timestamps a test must backdate to decide "before"
+// the test database plus the timestamps a test must stage to decide "before"
 // and "after" a boundary.
+//
+// Two clock facts shape the fixture. First, the SAT branch of the reconciler
+// takes its decision instant from the database clock (UTC_TIMESTAMP(6)) rather
+// than from the caller's asOf, so a section close cannot race the save grace;
+// "just inside the boundary" therefore cannot be chosen by passing an asOf in
+// the past — it is chosen by moving the section's start relative to the clock the
+// decision is taken on (see stage). Second, a SAT section closes at its authored
+// boundary plus attempts.SATSaveGrace, so every boundary asserted below is the
+// start the subtest staged plus that grace.
+//
+// Timeline model: this file verifies the deployed cohort_section_v3 advance —
+// section clocks expire and the room then waits out the authored gap. Newly
+// created SAT schedules opt into the attempt-owned model, where a section clock
+// never expires, so the fixture pins its schedules to the cohort model before
+// starting them.
 
 import (
 	"context"
@@ -45,6 +60,7 @@ import (
 	"testing"
 	"time"
 
+	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/authoring"
 	"example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -305,6 +321,10 @@ func (f *satAdvanceFixture) newSchedule(start time.Time) string {
 		f.t.Fatalf("create schedule: %v", err)
 	}
 	f.created = append(f.created, sch.ID)
+	// This file verifies the deployed cohort advance, so pin the schedule to it:
+	// a newly created SAT schedule selects sat_personal_v1 (attempt-owned timing,
+	// where section clocks never expire), which is a different state machine.
+	f.exec(`UPDATE exam_schedules SET sat_timing_model = NULL WHERE id = ?`, sch.ID)
 	return sch.ID
 }
 
@@ -320,24 +340,46 @@ func (f *satAdvanceFixture) start(scheduleID string) {
 	}
 }
 
-// backdate moves the run's start into the past so a test can choose the instant
-// "before" and "after" a boundary without sleeping. It is the only fixture
-// manipulation of the clock (the advance decisions themselves are real).
-func (f *satAdvanceFixture) backdate(scheduleID string, start time.Time) {
+// dbNow reads the clock the SAT reconciler decides with.
+func (f *satAdvanceFixture) dbNow() time.Time {
 	f.t.Helper()
-	ctx := context.Background()
-	if _, err := f.db.ExecContext(ctx,
-		"UPDATE exam_session_runtimes SET actual_start_at = ?, updated_at = ? WHERE schedule_id = ?",
-		start, start, scheduleID); err != nil {
-		f.t.Fatalf("backdate runtime: %v", err)
+	var now time.Time
+	if err := f.db.QueryRowContext(context.Background(), "SELECT UTC_TIMESTAMP(6)").Scan(&now); err != nil {
+		f.t.Fatalf("read database clock: %v", err)
 	}
-	if _, err := f.db.ExecContext(ctx, `
-		UPDATE exam_session_runtime_sections rs
+	return now.UTC()
+}
+
+// stage rewinds the room to a fresh session with `elapsed` on section 1's clock —
+// measured against the database clock, because that is the clock the SAT branch
+// decides on — and returns the start instant it wrote. Every boundary this file
+// asserts is that start plus the authored length plus attempts.SATSaveGrace.
+//
+// The rewind is what lets one schedule walk the whole timeline: sections go back
+// to locked/live and the runtime back to live on section 1, after which the plan
+// derives each later boundary from the start this step staged (section 1 ends at
+// start + 64m + grace, Math starts at that end + the authored 10-minute gap, and
+// Math ends at its own start + 70m + grace). Staging is the only fixture
+// manipulation of the clock; the advance decisions themselves are real.
+func (f *satAdvanceFixture) stage(scheduleID string, elapsed time.Duration) time.Time {
+	f.t.Helper()
+	start := f.dbNow().Add(-elapsed)
+	f.exec(`UPDATE exam_session_runtime_sections rs
 		JOIN exam_session_runtimes r ON r.id = rs.runtime_id
-		SET rs.actual_start_at = ?, rs.available_at = ?
-		WHERE r.schedule_id = ? AND rs.status = 'live'`, start, start, scheduleID); err != nil {
-		f.t.Fatalf("backdate live section: %v", err)
-	}
+		SET rs.status = 'locked', rs.actual_start_at = NULL, rs.actual_end_at = NULL,
+		    rs.completion_reason = NULL, rs.paused_at = NULL, rs.available_at = NULL
+		WHERE r.schedule_id = ?`, scheduleID)
+	f.exec(`UPDATE exam_session_runtime_sections rs
+		JOIN exam_session_runtimes r ON r.id = rs.runtime_id
+		SET rs.status = 'live', rs.actual_start_at = ?, rs.available_at = ?
+		WHERE r.schedule_id = ? AND rs.section_key = 'reading-writing'`, start, start, scheduleID)
+	f.exec(`UPDATE exam_session_runtimes
+		SET status = 'live', active_section_key = 'reading-writing', current_section_key = 'reading-writing',
+		    waiting_for_next_section = false, is_overrun = false,
+		    actual_start_at = ?, actual_end_at = NULL, updated_at = ?
+		WHERE schedule_id = ?`, start, start, scheduleID)
+	f.exec(`UPDATE exam_schedules SET status = 'live' WHERE id = ?`, scheduleID)
+	return start
 }
 
 func (f *satAdvanceFixture) exec(query string, args ...any) {
@@ -400,21 +442,25 @@ func (f *satAdvanceFixture) detail(scheduleID string) proctor.SessionRuntime {
 	return detail.Runtime
 }
 
-// sweep runs the real reconciler at asOf and reports what the room holds.
-func (f *satAdvanceFixture) sweep(label string, scheduleID string, asOf time.Time, anchor time.Time) satRoomState {
+// sweep runs the real reconciler the way the worker does — its own clock as
+// asOf, while the SAT branch decides on the database clock — and reports what the
+// room holds. `elapsed` is what the subtest staged on section 1's clock, logged
+// beside what the database clock then held relative to the staged start.
+func (f *satAdvanceFixture) sweep(label string, scheduleID string, elapsed time.Duration, start time.Time) satRoomState {
 	f.t.Helper()
+	asOf := time.Now().UTC()
 	outcomes, err := f.proctor.ReconcileExpiredSections(context.Background(), asOf, 50, "integration-verify")
 	if err != nil {
 		f.t.Fatalf("%s: reconcile at %s: %v", label, asOf, err)
 	}
 	st := f.state(scheduleID)
-	f.t.Logf("%-28s asOf=+%6s  runtime=%-6s waiting=%-5v active=%-15s  %s",
-		label, asOf.Sub(anchor).Round(time.Second), st.RuntimeStatus, st.Waiting, st.ActiveKey,
-		describeSections(st))
+	f.t.Logf("%-32s clk=+%-7s db=+%-7s runtime=%-9s waiting=%-5v active=%-15s  %s",
+		label, elapsed.Round(time.Second), asOf.Sub(start).Round(time.Second),
+		st.RuntimeStatus, st.Waiting, st.ActiveKey, describeSections(st))
 	for _, section := range st.Sections {
-		f.t.Logf("%-28s   %s", "", section)
+		f.t.Logf("%-32s   %s", "", section)
 	}
-	f.t.Logf("%-28s   reconcile outcomes: %d", "", len(outcomes))
+	f.t.Logf("%-32s   reconcile outcomes: %d", "", len(outcomes))
 	return st
 }
 
@@ -431,10 +477,13 @@ func describeSections(st satRoomState) string {
 func TestSATSectionAdvanceOpensTheBreakAtTheRuntimeClock(t *testing.T) {
 	f := newSATAdvanceFixture(t)
 	ctx := context.Background()
-	anchor := time.Now().UTC().Truncate(time.Second).Add(-6 * time.Hour)
+	// The schedule's own window, long enough that admission never closes while a
+	// subtest walks a section clock. The boundaries under test are staged against
+	// the database clock (see stage), not against this instant.
+	window := time.Now().UTC().Truncate(time.Second).Add(-6 * time.Hour)
 
 	t.Run("real start derives the candidate-length clock", func(t *testing.T) {
-		scheduleID := f.newSchedule(anchor)
+		scheduleID := f.newSchedule(window)
 		f.start(scheduleID)
 		st := f.state(scheduleID)
 		for _, s := range st.Sections {
@@ -456,49 +505,62 @@ func TestSATSectionAdvanceOpensTheBreakAtTheRuntimeClock(t *testing.T) {
 	})
 
 	t.Run("candidate-length clock opens the break at the authored boundary", func(t *testing.T) {
-		scheduleID := f.newSchedule(anchor)
+		scheduleID := f.newSchedule(window)
 		f.start(scheduleID)
-		f.backdate(scheduleID, anchor)
 
-		before := f.sweep("grace not elapsed", scheduleID, anchor.Add(64*time.Minute+29*time.Second), anchor)
+		// Five seconds inside the clock: section 1 is live, no break is open, and
+		// the read publishes the authored 64-minute boundary the client counts to.
+		insideElapsed := 64*time.Minute - 5*time.Second
+		insideStart := f.stage(scheduleID, insideElapsed)
+		before := f.sweep("5s inside the clock", scheduleID, insideElapsed, insideStart)
 		if before.section("reading-writing").Status != "live" || before.Waiting {
-			t.Errorf("29s before the deadline+grace the section must still be live and no break open, got %s waiting=%v",
+			t.Errorf("inside the clock the section must still be live and no break open, got %s waiting=%v",
 				before.section("reading-writing").Status, before.Waiting)
 		}
 		// The read the room and the student both use publishes the deadline the
-		// client counts to: 09:00 + the authored 64 minutes.
+		// client counts to: the staged start + the authored 64 minutes.
 		read := f.detail(scheduleID)
-		if read.CurrentSectionDeadlineAt == nil || !read.CurrentSectionDeadlineAt.UTC().Equal(anchor.Add(64*time.Minute)) {
+		if read.CurrentSectionDeadlineAt == nil || !read.CurrentSectionDeadlineAt.UTC().Equal(insideStart.Add(64*time.Minute)) {
 			t.Errorf("the published deadline must be the authored 64-minute boundary, got %v", read.CurrentSectionDeadlineAt)
 		}
 		if read.NextSectionStartAt != nil {
 			t.Errorf("no break may be announced before the boundary, got next start %v", read.NextSectionStartAt)
 		}
 
-		at := f.sweep("deadline + 30s grace", scheduleID, anchor.Add(64*time.Minute+30*time.Second), anchor)
+		// The authored boundary plus the SAT save grace: the section completes and
+		// the room enters the authored 10-minute break.
+		closeElapsed := 64*time.Minute + attempts.SATSaveGrace + 10*time.Second
+		closedStart := f.stage(scheduleID, closeElapsed)
+		at := f.sweep("boundary + save grace", scheduleID, closeElapsed, closedStart)
 		rw := at.section("reading-writing")
 		if rw.Status != "completed" {
-			t.Fatalf("at the authored boundary + grace the section must complete, got %s", rw.Status)
+			t.Fatalf("at the authored boundary + save grace the section must complete, got %s", rw.Status)
 		}
 		if !at.Waiting {
 			t.Fatal("the break must be open for the room (waiting_for_next_section) at the authored boundary")
 		}
-		if rw.EndAt == nil || !rw.EndAt.UTC().Equal(anchor.Add(64*time.Minute)) {
-			t.Errorf("section 1 must end at its authored 64-minute boundary, got %v", rw.EndAt)
+		if wantEnd := closedStart.Add(64*time.Minute + attempts.SATSaveGrace); rw.EndAt == nil || !rw.EndAt.UTC().Equal(wantEnd) {
+			t.Errorf("section 1 must end at its authored 64-minute boundary + the save grace, want %v, got %v", wantEnd, rw.EndAt)
 		}
 
-		during := f.sweep("inside the 10-minute break", scheduleID, anchor.Add(64*time.Minute+5*time.Minute), anchor)
+		// The window holds through the authored gap: the next section's start is
+		// still in the future.
+		during := f.sweep("inside the 10-minute break", scheduleID, closeElapsed, closedStart)
 		if !during.Waiting {
 			t.Error("the break must stay open through the authored gap")
 		}
 
-		after := f.sweep("gap elapsed", scheduleID, anchor.Add(74*time.Minute), anchor)
+		// Once the gap elapses Math goes live, on the timeline the plan preserved
+		// rather than at the instant of the sweep.
+		mathElapsed := 64*time.Minute + attempts.SATSaveGrace + 10*time.Minute + 10*time.Second
+		mathStart := f.stage(scheduleID, mathElapsed)
+		after := f.sweep("gap elapsed", scheduleID, mathElapsed, mathStart)
 		math := after.section("math")
 		if math.Status != "live" {
 			t.Fatalf("Math must go live when the authored gap elapses, got %s", math.Status)
 		}
-		if math.StartAt == nil || !math.StartAt.UTC().Equal(anchor.Add(74*time.Minute)) {
-			t.Errorf("Math must start at section 1's end + the authored gap (09:00 + 64 + 10), got %v", math.StartAt)
+		if want := mathStart.Add(64*time.Minute + attempts.SATSaveGrace + 10*time.Minute); math.StartAt == nil || !math.StartAt.UTC().Equal(want) {
+			t.Errorf("Math must start at section 1's end + the authored gap, want %v, got %v", want, math.StartAt)
 		}
 		if after.Waiting {
 			t.Error("the break must close when the next section starts")
@@ -506,16 +568,20 @@ func TestSATSectionAdvanceOpensTheBreakAtTheRuntimeClock(t *testing.T) {
 	})
 
 	t.Run("pre-repair snapshot reproduces the reported symptom", func(t *testing.T) {
-		scheduleID := f.newSchedule(anchor)
+		scheduleID := f.newSchedule(window)
 		f.start(scheduleID)
-		f.backdate(scheduleID, anchor)
 		// The production state: the session was started while the authored row
 		// still summed Module 1 + BOTH branches. 0065 repaired the authored row;
 		// this session's runtime snapshot keeps what it started with.
 		f.exec(`UPDATE exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id
 			SET rs.planned_duration_minutes = 96 WHERE r.schedule_id = ? AND rs.section_key = 'reading-writing'`, scheduleID)
 
-		at := f.sweep("authored 64-minute boundary", scheduleID, anchor.Add(64*time.Minute+30*time.Second), anchor)
+		// The authored 64-minute boundary plus the save grace, and the inflated
+		// 96-minute clock is still running, so the room shows no break: the
+		// reported symptom.
+		boundaryElapsed := 64*time.Minute + attempts.SATSaveGrace
+		boundaryStart := f.stage(scheduleID, boundaryElapsed)
+		at := f.sweep("authored 64-minute boundary", scheduleID, boundaryElapsed, boundaryStart)
 		rw := at.section("reading-writing")
 		if rw.Status != "live" {
 			t.Fatalf("the inflated snapshot must still hold section 1 live at 64 minutes, got %s", rw.Status)
@@ -525,70 +591,89 @@ func TestSATSectionAdvanceOpensTheBreakAtTheRuntimeClock(t *testing.T) {
 		}
 		// current_section_remaining_seconds on the row is a cache written at the
 		// last transition; the read recomputes from the deadline, which is what
-		// the client counts. 09:00 + 96 minutes = 10:36, so at 10:04 the board
-		// still shows 32 minutes of Reading & Writing and no break.
+		// the client counts. The inflated row publishes 96 minutes from the
+		// section's start, so at the authored boundary the board still shows 32
+		// minutes of Reading & Writing and no break.
 		read := f.detail(scheduleID)
-		if read.CurrentSectionDeadlineAt == nil || !read.CurrentSectionDeadlineAt.UTC().Equal(anchor.Add(96*time.Minute)) {
+		if read.CurrentSectionDeadlineAt == nil || !read.CurrentSectionDeadlineAt.UTC().Equal(boundaryStart.Add(96*time.Minute)) {
 			t.Errorf("the inflated snapshot must publish its 96-minute deadline, got %v", read.CurrentSectionDeadlineAt)
 		}
-		impliedRemaining := read.CurrentSectionDeadlineAt.Sub(anchor.Add(64 * time.Minute)).Round(time.Second)
+		impliedRemaining := read.CurrentSectionDeadlineAt.Sub(boundaryStart.Add(64 * time.Minute)).Round(time.Second)
 		t.Logf("at the authored boundary the room still counts %s of Reading & Writing (waiting=%v, next=%v); the row cache reads %ds",
 			impliedRemaining, read.WaitingForNextSection, read.NextSectionStartAt, at.Remaining)
 		if impliedRemaining != 32*time.Minute {
 			t.Errorf("the inflated clock must leave 32 minutes where the authored clock leaves none, got %s", impliedRemaining)
 		}
 
-		late := f.sweep("inflated 96-minute boundary", scheduleID, anchor.Add(96*time.Minute+30*time.Second), anchor)
+		// The inflated clock only opens the break 32 minutes late.
+		inflatedElapsed := 96*time.Minute + attempts.SATSaveGrace + 10*time.Second
+		inflatedStart := f.stage(scheduleID, inflatedElapsed)
+		late := f.sweep("inflated 96-minute boundary", scheduleID, inflatedElapsed, inflatedStart)
 		if late.section("reading-writing").Status != "completed" || !late.Waiting {
 			t.Fatalf("the inflated clock only opens the break 32 minutes late, got section=%s waiting=%v",
 				late.section("reading-writing").Status, late.Waiting)
 		}
-		if late.section("reading-writing").EndAt == nil ||
-			!late.section("reading-writing").EndAt.UTC().Equal(anchor.Add(96*time.Minute)) {
-			t.Errorf("the break opens from the inflated end, got %v", late.section("reading-writing").EndAt)
+		if end := late.section("reading-writing").EndAt; end == nil ||
+			!end.UTC().Equal(inflatedStart.Add(96*time.Minute+attempts.SATSaveGrace)) {
+			t.Errorf("the break opens from the inflated end, got %v", end)
 		}
 	})
 
 	t.Run("pause and extension move the boundary with the clock", func(t *testing.T) {
-		paused := f.newSchedule(anchor)
+		// The 5-minute pause moves section 1's boundary from 64 to 69 minutes; the
+		// unpublished boundary and the moved one are probed on the same schedule.
+		paused := f.newSchedule(window)
 		f.start(paused)
-		f.backdate(paused, anchor)
 		f.exec(`UPDATE exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id
 			SET rs.accumulated_paused_seconds = 300 WHERE r.schedule_id = ? AND rs.section_key = 'reading-writing'`, paused)
 
-		at := f.sweep("pause: 64m+30s (too early)", paused, anchor.Add(64*time.Minute+30*time.Second), anchor)
+		pausedEarlyElapsed := 64*time.Minute + attempts.SATSaveGrace + 10*time.Second
+		pausedEarly := f.stage(paused, pausedEarlyElapsed)
+		at := f.sweep("pause: unpaused boundary + grace", paused, pausedEarlyElapsed, pausedEarly)
 		if at.section("reading-writing").Status != "live" || at.Waiting {
 			t.Errorf("a 5-minute pause must hold section 1 open past its unpaused boundary, got %s waiting=%v",
 				at.section("reading-writing").Status, at.Waiting)
 		}
-		pausedBoundary := f.sweep("pause: 69m+30s", paused, anchor.Add(69*time.Minute+30*time.Second), anchor)
+		pausedElapsed := 69*time.Minute + attempts.SATSaveGrace + 10*time.Second
+		pausedStart := f.stage(paused, pausedElapsed)
+		pausedBoundary := f.sweep("pause: 5m past the boundary", paused, pausedElapsed, pausedStart)
 		if pausedBoundary.section("reading-writing").Status != "completed" || !pausedBoundary.Waiting {
-			t.Errorf("the paused clock must open the break at 5 minutes past the boundary, got %s waiting=%v",
+			t.Errorf("the paused clock must open the break 5 minutes past the boundary, got %s waiting=%v",
 				pausedBoundary.section("reading-writing").Status, pausedBoundary.Waiting)
 		}
+		if end := pausedBoundary.section("reading-writing").EndAt; end == nil ||
+			!end.UTC().Equal(pausedStart.Add(69*time.Minute+attempts.SATSaveGrace)) {
+			t.Errorf("the paused section must end 5 minutes past its authored boundary, got %v", end)
+		}
 
-		extended := f.newSchedule(anchor)
+		extended := f.newSchedule(window)
 		f.start(extended)
-		f.backdate(extended, anchor)
 		f.exec(`UPDATE exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id
 			SET rs.extension_minutes = 5 WHERE r.schedule_id = ? AND rs.section_key = 'reading-writing'`, extended)
 
-		atExt := f.sweep("extension: 64m+30s (too early)", extended, anchor.Add(64*time.Minute+30*time.Second), anchor)
+		extEarlyElapsed := 64*time.Minute + attempts.SATSaveGrace + 10*time.Second
+		extEarly := f.stage(extended, extEarlyElapsed)
+		atExt := f.sweep("extension: authored boundary + grace", extended, extEarlyElapsed, extEarly)
 		if atExt.section("reading-writing").Status != "live" || atExt.Waiting {
 			t.Errorf("a proctor extension must hold section 1 open, got %s waiting=%v",
 				atExt.section("reading-writing").Status, atExt.Waiting)
 		}
-		extBoundary := f.sweep("extension: 69m+30s", extended, anchor.Add(69*time.Minute+30*time.Second), anchor)
+		extElapsed := 69*time.Minute + attempts.SATSaveGrace + 10*time.Second
+		extStart := f.stage(extended, extElapsed)
+		extBoundary := f.sweep("extension: 5m past the boundary", extended, extElapsed, extStart)
 		if extBoundary.section("reading-writing").Status != "completed" || !extBoundary.Waiting {
 			t.Errorf("the extended clock must open the break at the extension's boundary, got %s waiting=%v",
 				extBoundary.section("reading-writing").Status, extBoundary.Waiting)
 		}
+		if end := extBoundary.section("reading-writing").EndAt; end == nil ||
+			!end.UTC().Equal(extStart.Add(69*time.Minute+attempts.SATSaveGrace)) {
+			t.Errorf("the extended section must end 5 minutes past its authored boundary, got %v", end)
+		}
 	})
 
 	t.Run("migration 0067 repairs a not-yet-started inflated section", func(t *testing.T) {
-		scheduleID := f.newSchedule(anchor)
+		scheduleID := f.newSchedule(window)
 		f.start(scheduleID)
-		f.backdate(scheduleID, anchor)
 		// Math has not started: the pre-repair snapshot overstates it.
 		f.exec(`UPDATE exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id
 			SET rs.planned_duration_minutes = 105 WHERE r.schedule_id = ? AND rs.section_key = 'math'`, scheduleID)
@@ -604,34 +689,48 @@ func TestSATSectionAdvanceOpensTheBreakAtTheRuntimeClock(t *testing.T) {
 		}
 		t.Logf("0067 repair: locked Math clock %d -> %d minutes", inflated.Planned, repaired.Planned)
 
-		// The repaired clock is the one the room then runs: section 1 ends at
-		// 64, the break opens, and Math's own 70-minute clock governs.
-		f.sweep("section 1 at its boundary", scheduleID, anchor.Add(64*time.Minute+30*time.Second), anchor)
-		f.sweep("break elapsed, Math opens", scheduleID, anchor.Add(74*time.Minute), anchor)
-		mathStart := anchor.Add(74 * time.Minute)
+		// Walking the room forward, the repaired clock is the one Math then runs:
+		// section 1 ends at 64 plus the save grace, the break elapses, and Math
+		// opens on the timeline the plan preserved.
+		breakElapsed := 64*time.Minute + attempts.SATSaveGrace + 10*time.Minute + 10*time.Second
+		breakStart := f.stage(scheduleID, breakElapsed)
+		f.sweep("break elapsed, Math opens", scheduleID, breakElapsed, breakStart)
+		mathStart := breakStart.Add(64*time.Minute + attempts.SATSaveGrace + 10*time.Minute)
+		if got := f.state(scheduleID).section("math").StartAt; got == nil || !got.UTC().Equal(mathStart) {
+			t.Fatalf("Math must open after the break, want %v, got %v", mathStart, got)
+		}
 
-		early := f.sweep("Math: 70m+29s (too early)", scheduleID, mathStart.Add(70*time.Minute+29*time.Second), anchor)
+		// Five seconds inside Math's own 70 minutes it is still running...
+		earlyElapsed := 64*time.Minute + attempts.SATSaveGrace + 10*time.Minute + 70*time.Minute - 5*time.Second
+		earlyStart := f.stage(scheduleID, earlyElapsed)
+		early := f.sweep("Math: 5s inside its 70 minutes", scheduleID, earlyElapsed, earlyStart)
 		if early.section("math").Status != "live" {
 			t.Errorf("the repaired Math clock must run its full 70 minutes, got %s", early.section("math").Status)
 		}
-		end := f.sweep("Math: 70m+30s (runtime ends)", scheduleID, mathStart.Add(70*time.Minute+30*time.Second), anchor)
+
+		// ...and only completes at its boundary plus the save grace.
+		endElapsed := 64*time.Minute + attempts.SATSaveGrace + 10*time.Minute + 70*time.Minute + attempts.SATSaveGrace + 10*time.Second
+		endStart := f.stage(scheduleID, endElapsed)
+		end := f.sweep("Math: boundary + save grace", scheduleID, endElapsed, endStart)
 		math := end.section("math")
 		if math.Status != "completed" {
 			t.Errorf("Math must complete on its 70-minute clock, got %s", math.Status)
 		}
-		if math.EndAt == nil || !math.EndAt.UTC().Equal(mathStart.Add(70*time.Minute)) {
-			t.Errorf("Math must end exactly 70 minutes after it started, got %v", math.EndAt)
+		wantEnd := endStart.Add(64*time.Minute + attempts.SATSaveGrace + 10*time.Minute + 70*time.Minute + attempts.SATSaveGrace)
+		if math.EndAt == nil || !math.EndAt.UTC().Equal(wantEnd) {
+			t.Errorf("Math must end exactly 70 minutes (plus the save grace) after it started, want %v, got %v", wantEnd, math.EndAt)
 		}
 	})
 
 	t.Run("staff session detail carries the room's own clock", func(t *testing.T) {
-		scheduleID := f.newSchedule(anchor)
+		scheduleID := f.newSchedule(window)
 		f.start(scheduleID)
-		f.backdate(scheduleID, anchor)
 		f.exec(`UPDATE exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id
 			SET rs.planned_duration_minutes = 96 WHERE r.schedule_id = ? AND rs.section_key = 'reading-writing'`, scheduleID)
 		// Mid-way through the inflated section, exactly where the panel was read.
-		f.sweep("panel read instant", scheduleID, anchor.Add(70*time.Minute), anchor)
+		panelElapsed := 70 * time.Minute
+		panelStart := f.stage(scheduleID, panelElapsed)
+		f.sweep("panel read instant", scheduleID, panelElapsed, panelStart)
 
 		detail, err := f.proctor.GetSessionDetail(ctx, proctor.Actor{
 			ID: f.actor, Role: proctor.RoleAdmin, CSRFVerified: true,
@@ -677,12 +776,13 @@ func TestSATSectionAdvanceOpensTheBreakAtTheRuntimeClock(t *testing.T) {
 	})
 
 	t.Run("the same read inside the break window", func(t *testing.T) {
-		scheduleID := f.newSchedule(anchor)
+		scheduleID := f.newSchedule(window)
 		f.start(scheduleID)
-		f.backdate(scheduleID, anchor)
 		// The candidate-length session at its own boundary: the section
 		// completes and the between-sections window opens.
-		st := f.sweep("break window opens", scheduleID, anchor.Add(64*time.Minute+30*time.Second), anchor)
+		windowElapsed := 64*time.Minute + attempts.SATSaveGrace + 10*time.Second
+		windowStart := f.stage(scheduleID, windowElapsed)
+		st := f.sweep("break window opens", scheduleID, windowElapsed, windowStart)
 		if !st.Waiting {
 			t.Fatal("the break must be open in the between-sections window")
 		}
@@ -691,8 +791,8 @@ func TestSATSectionAdvanceOpensTheBreakAtTheRuntimeClock(t *testing.T) {
 			t.Fatalf("the read must announce the break: waiting=%v next=%v",
 				runtime.WaitingForNextSection, runtime.NextSectionStartAt)
 		}
-		if !runtime.NextSectionStartAt.UTC().Equal(anchor.Add(74 * time.Minute)) {
-			t.Errorf("the announced start must be section 1's end + the authored gap, got %v", runtime.NextSectionStartAt)
+		if want := windowStart.Add(64*time.Minute + attempts.SATSaveGrace + 10*time.Minute); !runtime.NextSectionStartAt.UTC().Equal(want) {
+			t.Errorf("the announced start must be section 1's end + the authored gap, want %v, got %v", want, runtime.NextSectionStartAt)
 		}
 		t.Logf("break window: waiting=%v next section starts=%v (section 1 ended %v)",
 			runtime.WaitingForNextSection, runtime.NextSectionStartAt, runtime.Sections[0].ActualEndAt)

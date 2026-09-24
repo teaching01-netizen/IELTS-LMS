@@ -41,6 +41,11 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, sel
     onLimitReached,
   });
 
+  const dismissTouchSelection = touchSelection.dismiss;
+  useLayoutEffect(() => {
+    if (view.activeAnnotationId !== null) dismissTouchSelection();
+  }, [dismissTouchSelection, view.activeAnnotationId]);
+
   const contentKey = JSON.stringify(content);
 
   /**
@@ -160,6 +165,14 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, sel
                     // editor, otherwise the toolbar would vanish under their finger
                     // and that mark's edit controls would open instead.
                     if (isSatDragRelease(event.clientX, event.clientY)) return;
+                    view.openEditor(match);
+                  },
+                  onPointerUp: (event: React.PointerEvent) => {
+                    // WebKit on touch may deliver pointerup/touchend without a
+                    // synthesized click for an inline span with button semantics.
+                    // Treat a stationary touch release as the same tap; a drag
+                    // through a saved mark remains a new selection.
+                    if (event.pointerType !== 'touch' || isSatDragRelease(event.clientX, event.clientY)) return;
                     view.openEditor(match);
                   },
                   onKeyDown: (event: React.KeyboardEvent) => {

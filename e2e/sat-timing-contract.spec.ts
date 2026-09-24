@@ -539,4 +539,369 @@ test.describe('SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       await closeDb();
     }
   });
+
+  // SAT full-entry-time (plan 2026-09-24, tasks 1.2 / 7.1): the release gate.
+  // Under the attempt-owned model (sat_personal_v1) a candidate must SEE and
+  // RECEIVE the full authored duration on the first active frame of every
+  // module, even when the transition response is delayed; a reload mid-module
+  // must resume the original deadline; and a candidate who joins later must get
+  // their own full window instead of the remainder a room-anchored clock would
+  // hand them.
+  test('grants the full authored duration on the first active frame under sat_personal_v1', async ({
+    page,
+    browser,
+  }) => {
+    let examId: string | undefined;
+    let scheduleId: string | undefined;
+    const studentContexts: Array<Awaited<ReturnType<Browser['newContext']>>> = [];
+
+    interface HeldStudent {
+      studentPage: Page;
+      /** Resolves once the first module-start response has been fetched and held. */
+      startDelayed: Promise<void>;
+      /** Lets the held response through. */
+      release: () => void;
+    }
+
+    const joinStudent = async (
+      link: AccessLinkSnapshot,
+      heading: string,
+      name: string,
+      email: string,
+      delayFirstModuleStartMs: number,
+    ): Promise<HeldStudent> => {
+      const context = await browser.newContext();
+      studentContexts.push(context);
+      await stubScreenDetails(context);
+      let delayedResolve!: () => void;
+      const startDelayed = new Promise<void>((resolve) => { delayedResolve = resolve; });
+      let alreadyHeld = false;
+      let releaseResolve!: () => void;
+      const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+      if (delayFirstModuleStartMs > 0) {
+        // Installed on the CONTEXT, before the page exists, so the very first
+        // module-start request cannot slip past the hold.
+        await context.route('**/v1/assessment-delivery/schedules/*/modules/start', async (route) => {
+          if (alreadyHeld) {
+            await route.continue();
+            return;
+          }
+          alreadyHeld = true;
+          const response = await route.fetch();
+          delayedResolve();
+          // The delay is what a slow device/network cannot avoid: the response
+          // is correct, it just arrives five seconds late.
+          await new Promise<void>((resolve) => setTimeout(resolve, delayFirstModuleStartMs));
+          await release;
+          await route.fulfill({ response });
+        });
+      }
+      const studentPage = await context.newPage();
+      await studentPage.goto(new URL(`/join/${link.id}`, page.url()).toString());
+      await expect(studentPage.getByRole('heading', { name: heading })).toBeVisible({ timeout: 30_000 });
+      await studentPage.getByLabel('Full name').fill(name);
+      await studentPage.getByLabel('Email').fill(email);
+      await studentPage.getByRole('button', { name: /Continue/i }).click();
+      await expect(studentPage).toHaveURL(new RegExp(`/student/${scheduleId}/[^/]+$`), { timeout: 30_000 });
+      return { studentPage, startDelayed, release: releaseResolve };
+    };
+
+    const examTimer = async (studentPage: Page): Promise<string> => {
+      const timer = studentPage.getByRole('timer').first();
+      await expect(timer).toBeVisible({ timeout: 45_000 });
+      return timer.innerText();
+    };
+
+    try {
+      const stamp = Date.now().toString(36);
+      const examTitle = `SAT personal timing ${stamp}`;
+      const linkName = `SAT personal timing link ${stamp}`;
+
+      await page.goto('/sat/sessions');
+      const createResponse = await writeApi(page, 'POST', '/api/v1/exams', {
+        slug: `e2e-sat-personal-timing-${stamp}`,
+        title: examTitle,
+        examType: 'Academic',
+        visibility: 'organization',
+        providerKey: 'sat',
+      });
+      expect(createResponse.status, JSON.stringify(createResponse.payload)).toBe(201);
+      const createdExam = unwrap<ExamSnapshot>(createResponse.payload as ApiPayload<ExamSnapshot>);
+      examId = createdExam.id;
+
+      const shellResponse = await readApi(page, `/api/v1/assessment-authoring/exams/${examId}/shell`);
+      expect(shellResponse.status, JSON.stringify(shellResponse.payload)).toBe(200);
+      const shellLifecycle = unwrap<AssessmentAuthoringShellResult>(
+        shellResponse.payload as ApiPayload<AssessmentAuthoringShellResult>,
+      );
+      if (!shellLifecycle.shell) throw new Error('New SAT did not expose an editable authoring shell.');
+      const sampleResponse = await writeApi(
+        page,
+        'POST',
+        `/api/v1/assessment-authoring/exams/${examId}/load-sample`,
+        buildCompleteSatSample(shellLifecycle.shell) as unknown as Record<string, unknown>,
+      );
+      expect(sampleResponse.status, JSON.stringify(sampleResponse.payload)).toBe(200);
+
+      // Two-minute modules and a two-minute break: the authored duration the
+      // first active frame must show in full.
+      await configureDeliveryThroughApi(page, examId, 'Reading & Writing', { base: 2, lower: 2, higher: 2, breakMinutes: 2 });
+      await configureDeliveryThroughApi(page, examId, 'Math', { base: 2, lower: 2, higher: 2, breakMinutes: 0 });
+      const validationResponse = await writeApi(page, 'POST', `/api/v1/assessment-authoring/exams/${examId}/validate`);
+      expect(validationResponse.status, JSON.stringify(validationResponse.payload)).toBe(200);
+      const examResponse = await readApi(page, `/api/v1/exams/${examId}`);
+      expect(examResponse.status, JSON.stringify(examResponse.payload)).toBe(200);
+      const exam = unwrap<ExamSnapshot>(examResponse.payload as ApiPayload<ExamSnapshot>);
+      const finalShellResponse = await readApi(page, `/api/v1/assessment-authoring/exams/${examId}/shell`);
+      expect(finalShellResponse.status, JSON.stringify(finalShellResponse.payload)).toBe(200);
+      const finalShellLifecycle = unwrap<AssessmentAuthoringShellResult>(
+        finalShellResponse.payload as ApiPayload<AssessmentAuthoringShellResult>,
+      );
+      if (!finalShellLifecycle.shell) throw new Error('Final SAT draft shell was unavailable before publish.');
+      const publishResponse = await writeApi(page, 'POST', `/api/v1/exams/${examId}/publish`, {
+        publishNotes: 'Published by the SAT personal timing contract.',
+        revision: exam.revision,
+        expectedDraftVersionId: exam.currentDraftVersionId,
+        expectedDraftRevision: finalShellLifecycle.shell.versionRevision,
+        operationKey: `sat-personal-timing-${stamp}`,
+      });
+      expect(publishResponse.status, JSON.stringify(publishResponse.payload)).toBe(200);
+      const publishedExamResponse = await readApi(page, `/api/v1/exams/${examId}`);
+      const publishedExam = unwrap<ExamSnapshot>(publishedExamResponse.payload as ApiPayload<ExamSnapshot>);
+      expect(publishedExam.currentPublishedVersionId).toBeTruthy();
+
+      const linkResponse = await writeApi(page, 'POST', `/api/v1/assessment-access/exams/${examId}/links`, {
+        publishedVersionId: publishedExam.currentPublishedVersionId,
+        name: linkName,
+        enabledSections: [],
+        audienceType: 'anyone',
+        audienceLabel: null,
+        accessMode: 'open',
+        availabilityType: 'anytime',
+        selectedStudents: [],
+      });
+      expect(linkResponse.status, JSON.stringify(linkResponse.payload)).toBe(201);
+      const link = unwrap<AccessLinkSnapshot>(linkResponse.payload as ApiPayload<AccessLinkSnapshot>);
+      scheduleId = link.scheduleId;
+
+      // A newly created SAT schedule selects the attempt-owned model, and the
+      // schedule read now projects it. This is the premise of every assertion
+      // below, so fail here rather than silently testing the cohort model.
+      const scheduleResponse = await readApi(page, `/api/v1/schedules/${scheduleId}`);
+      expect(scheduleResponse.status, JSON.stringify(scheduleResponse.payload)).toBe(200);
+      const schedule = unwrap<{ satTimingModel?: string | null }>(
+        scheduleResponse.payload as ApiPayload<{ satTimingModel?: string | null }>,
+      );
+      expect(schedule.satTimingModel).toBe('sat_personal_v1');
+
+      const startResponse = await writeApi(page, 'POST', `/api/v1/schedules/${scheduleId}/runtime/commands`, {
+        action: 'start_runtime',
+        reason: 'SAT personal timing contract',
+      });
+      expect(startResponse.status, JSON.stringify(startResponse.payload)).toBe(200);
+      await waitForRuntime(page, scheduleId, (runtime) => runtime.status === 'live');
+
+      // The slow transition: the module-start response is held for five
+      // seconds. The attempt-owned model still owes the candidate 2:00, so the
+      // held window must be a transition surface, not consumed module time.
+      const first = await joinStudent(link, linkName, `Personal A ${stamp}`, `sat-personal-a-${stamp}@example.com`, 5_000);
+      await first.startDelayed;
+      await expect
+        .poll(async () => (await first.studentPage.locator('h1').first().innerText()).trim(), { timeout: 30_000 })
+        .toMatch(/Preparing|Waiting|will open|ready/i);
+      expect(await first.studentPage.locator('[data-sat-stage="exam"]').count()).toBe(0);
+      first.release();
+
+      await expect(first.studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
+      expect(await examTimer(first.studentPage)).toBe('2:00');
+      await expect.poll(() => examTimer(first.studentPage), { timeout: 10_000, intervals: [250, 500] }).toBe('1:59');
+
+      // Reload ~30s in: the original deadline resumes. It must never read 2:00
+      // again — a reset would hand the candidate time the exam does not have.
+      await first.studentPage.waitForTimeout(30_000);
+      await first.studentPage.reload({ waitUntil: 'domcontentloaded' });
+      const resumed = timerSeconds(await examTimer(first.studentPage));
+      expect(resumed).toBeLessThanOrEqual(95);
+      expect(resumed).toBeGreaterThanOrEqual(80);
+
+      // A later candidate gets their OWN full window: the room-anchored cohort
+      // model would clamp this module to what is left of the section.
+      const second = await joinStudent(link, linkName, `Personal B ${stamp}`, `sat-personal-b-${stamp}@example.com`, 0);
+      await expect(second.studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
+      expect(await examTimer(second.studentPage)).toBe('2:00');
+    } finally {
+      await Promise.all(studentContexts.map((context) => context.close().catch(() => undefined)));
+      if (examId) {
+        let deleted = await writeApi(page, 'DELETE', `/api/v1/exams/${examId}`);
+        if (deleted.status !== 200 && scheduleId) {
+          await removeStartedStudentArtifacts(scheduleId);
+          deleted = await writeApi(page, 'DELETE', `/api/v1/exams/${examId}`);
+        }
+        expect(deleted.status, JSON.stringify(deleted.payload)).toBe(200);
+      }
+      await closeDb();
+    }
+  });
+
+  // SAT full-entry-time (plan 2026-09-24, task 1.1): two candidates who join FIVE
+  // MINUTES APART each receive their own authored window. This is the property a
+  // room-anchored clock cannot have — candidate B would inherit whatever the
+  // room had left, and a cohort session five minutes into a seven-minute module
+  // would hand them 2:00 — so the assertion is that B reads the full 7:00 while A,
+  // five minutes in, reads the ~2:00 that is left of THEIR window.
+  test('gives two candidates who join five minutes apart their own authored windows', async ({
+    page,
+    browser,
+  }) => {
+    let examId: string | undefined;
+    let scheduleId: string | undefined;
+    const studentContexts: Array<Awaited<ReturnType<Browser['newContext']>>> = [];
+
+    const joinStudent = async (
+      link: AccessLinkSnapshot,
+      heading: string,
+      name: string,
+      email: string,
+    ): Promise<Page> => {
+      const context = await browser.newContext();
+      studentContexts.push(context);
+      await stubScreenDetails(context);
+      const studentPage = await context.newPage();
+      await studentPage.goto(new URL(`/join/${link.id}`, page.url()).toString());
+      await expect(studentPage.getByRole('heading', { name: heading })).toBeVisible({ timeout: 30_000 });
+      await studentPage.getByLabel('Full name').fill(name);
+      await studentPage.getByLabel('Email').fill(email);
+      await studentPage.getByRole('button', { name: /Continue/i }).click();
+      await expect(studentPage).toHaveURL(new RegExp(`/student/${scheduleId}/[^/]+$`), { timeout: 30_000 });
+      return studentPage;
+    };
+
+    const examTimer = async (studentPage: Page): Promise<string> => {
+      const timer = studentPage.getByRole('timer').first();
+      await expect(timer).toBeVisible({ timeout: 60_000 });
+      return timer.innerText();
+    };
+
+    const secondsOf = (value: string): number => {
+      const match = /^(\d+):(\d{2})$/.exec(value.trim());
+      if (!match) throw new Error(`unexpected timer text: ${value}`);
+      return Number(match[1]) * 60 + Number(match[2]);
+    };
+
+    try {
+      const stamp = Date.now().toString(36);
+      const examTitle = `SAT personal five minutes ${stamp}`;
+      const linkName = `SAT personal five minutes link ${stamp}`;
+
+      await page.goto('/sat/sessions');
+      const createResponse = await writeApi(page, 'POST', '/api/v1/exams', {
+        slug: `e2e-sat-personal-five-${stamp}`,
+        title: examTitle,
+        examType: 'Academic',
+        visibility: 'organization',
+        providerKey: 'sat',
+      });
+      expect(createResponse.status, JSON.stringify(createResponse.payload)).toBe(201);
+      const createdExam = unwrap<ExamSnapshot>(createResponse.payload as ApiPayload<ExamSnapshot>);
+      examId = createdExam.id;
+
+      const shellResponse = await readApi(page, `/api/v1/assessment-authoring/exams/${examId}/shell`);
+      expect(shellResponse.status, JSON.stringify(shellResponse.payload)).toBe(200);
+      const shellLifecycle = unwrap<AssessmentAuthoringShellResult>(
+        shellResponse.payload as ApiPayload<AssessmentAuthoringShellResult>,
+      );
+      if (!shellLifecycle.shell) throw new Error('New SAT did not expose an editable authoring shell.');
+      const sampleResponse = await writeApi(
+        page,
+        'POST',
+        `/api/v1/assessment-authoring/exams/${examId}/load-sample`,
+        buildCompleteSatSample(shellLifecycle.shell) as unknown as Record<string, unknown>,
+      );
+      expect(sampleResponse.status, JSON.stringify(sampleResponse.payload)).toBe(200);
+
+      // Seven-minute modules: long enough that the first candidate is still
+      // inside their window when the second one joins five minutes later, which
+      // is what makes the two clocks comparable at one instant.
+      await configureDeliveryThroughApi(page, examId, 'Reading & Writing', { base: 7, lower: 7, higher: 7, breakMinutes: 2 });
+      await configureDeliveryThroughApi(page, examId, 'Math', { base: 7, lower: 7, higher: 7, breakMinutes: 0 });
+      const validationResponse = await writeApi(page, 'POST', `/api/v1/assessment-authoring/exams/${examId}/validate`);
+      expect(validationResponse.status, JSON.stringify(validationResponse.payload)).toBe(200);
+      const examResponse = await readApi(page, `/api/v1/exams/${examId}`);
+      expect(examResponse.status, JSON.stringify(examResponse.payload)).toBe(200);
+      const exam = unwrap<ExamSnapshot>(examResponse.payload as ApiPayload<ExamSnapshot>);
+      const finalShellResponse = await readApi(page, `/api/v1/assessment-authoring/exams/${examId}/shell`);
+      expect(finalShellResponse.status, JSON.stringify(finalShellResponse.payload)).toBe(200);
+      const finalShellLifecycle = unwrap<AssessmentAuthoringShellResult>(
+        finalShellResponse.payload as ApiPayload<AssessmentAuthoringShellResult>,
+      );
+      if (!finalShellLifecycle.shell) throw new Error('Final SAT draft shell was unavailable before publish.');
+      const publishResponse = await writeApi(page, 'POST', `/api/v1/exams/${examId}/publish`, {
+        publishNotes: 'Published by the SAT five-minute entry contract.',
+        revision: exam.revision,
+        expectedDraftVersionId: exam.currentDraftVersionId,
+        expectedDraftRevision: finalShellLifecycle.shell.versionRevision,
+        operationKey: `sat-personal-five-${stamp}`,
+      });
+      expect(publishResponse.status, JSON.stringify(publishResponse.payload)).toBe(200);
+      const publishedExamResponse = await readApi(page, `/api/v1/exams/${examId}`);
+      const publishedExam = unwrap<ExamSnapshot>(publishedExamResponse.payload as ApiPayload<ExamSnapshot>);
+      expect(publishedExam.currentPublishedVersionId).toBeTruthy();
+
+      const linkResponse = await writeApi(page, 'POST', `/api/v1/assessment-access/exams/${examId}/links`, {
+        publishedVersionId: publishedExam.currentPublishedVersionId,
+        name: linkName,
+        enabledSections: [],
+        audienceType: 'anyone',
+        audienceLabel: null,
+        accessMode: 'open',
+        availabilityType: 'anytime',
+        selectedStudents: [],
+      });
+      expect(linkResponse.status, JSON.stringify(linkResponse.payload)).toBe(201);
+      const link = unwrap<AccessLinkSnapshot>(linkResponse.payload as ApiPayload<AccessLinkSnapshot>);
+      scheduleId = link.scheduleId;
+
+      const startResponse = await writeApi(page, 'POST', `/api/v1/schedules/${scheduleId}/runtime/commands`, {
+        action: 'start_runtime',
+        reason: 'SAT personal five-minute contract',
+      });
+      expect(startResponse.status, JSON.stringify(startResponse.payload)).toBe(200);
+      await waitForRuntime(page, scheduleId, (runtime) => runtime.status === 'live');
+
+      // Candidate A enters at T0 and holds the full authored window.
+      const firstPage = await joinStudent(link, linkName, `Five A ${stamp}`, `sat-personal-five-a-${stamp}@example.com`);
+      await expect(firstPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 60_000 });
+      const firstStart = secondsOf(await examTimer(firstPage));
+      expect(firstStart).toBeGreaterThanOrEqual(415);
+      expect(firstStart).toBeLessThanOrEqual(420);
+
+      // Candidate B joins five minutes later — inside A's window, and in a
+      // cohort session deep inside the room's own module window.
+      await page.waitForTimeout(5 * 60_000);
+      const secondPage = await joinStudent(link, linkName, `Five B ${stamp}`, `sat-personal-five-b-${stamp}@example.com`);
+      await expect(secondPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 60_000 });
+
+      const secondStart = secondsOf(await examTimer(secondPage));
+      const firstNow = secondsOf(await examTimer(firstPage));
+      // B's offer was issued for B: the full authored window, not A's remainder.
+      expect(secondStart).toBeGreaterThanOrEqual(415);
+      expect(secondStart).toBeLessThanOrEqual(420);
+      // A has consumed five minutes of their own window and is unaffected by
+      // B's arrival.
+      expect(firstNow).toBeLessThanOrEqual(125);
+      expect(firstNow).toBeGreaterThanOrEqual(105);
+      expect(firstNow).toBeLessThan(secondStart);
+    } finally {
+      await Promise.all(studentContexts.map((context) => context.close().catch(() => undefined)));
+      if (examId) {
+        let deleted = await writeApi(page, 'DELETE', `/api/v1/exams/${examId}`);
+        if (deleted.status !== 200 && scheduleId) {
+          await removeStartedStudentArtifacts(scheduleId);
+          deleted = await writeApi(page, 'DELETE', `/api/v1/exams/${examId}`);
+        }
+        expect(deleted.status, JSON.stringify(deleted.payload)).toBe(200);
+      }
+      await closeDb();
+    }
+  });
 });

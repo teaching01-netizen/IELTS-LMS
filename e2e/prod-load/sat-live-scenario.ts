@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import { satJoinErrorFromText } from './sat-join-failure';
 import type { VirtualUser } from './user-source';
 
 export interface SatScenarioContext {
@@ -33,12 +34,23 @@ async function fillByLabel(page: Page, label: RegExp, value: string): Promise<bo
   return current.trim().length > 0;
 }
 
+/** Server-side rejections render in role="alert" above the entry form. */
+async function joinAlertText(page: Page): Promise<string> {
+  const alerts = await page.locator('[role="alert"]').allInnerTexts().catch(() => []);
+  return alerts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function summarize(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 220);
+}
+
 /**
  * SAT entry via Student Link join URL (/join/:accessLinkId).
  * Form is Full name + Email (+ Student code when accessMode=student_code).
  * Lands on /student/<scheduleId>/<code> after admission (queue-aware).
  */
 export async function satJoinViaAccessLink(page: Page, user: VirtualUser, joinUrl: string): Promise<void> {
+  page.setDefaultNavigationTimeout(90_000);
   await page.goto(joinUrl, { waitUntil: 'domcontentloaded' });
   await page
     .waitForSelector('input#student-link-name, input#student-link-email, input#student-link-code', {
@@ -74,28 +86,41 @@ export async function satJoinViaAccessLink(page: Page, user: VirtualUser, joinUr
     await page.keyboard.press('Enter').catch(() => {});
   }
 
-  // Admission queue: "You're in the admission queue" polls server-side; just wait it out.
-  const admitted = await Promise.race([
-    page
-      .waitForURL(/\/student\/[^/]+\/[^/]+/i, { timeout: 120000 })
-      .then(() => true)
-      .catch(() => false),
-    (async () => {
-      for (let i = 0; i < 240; i += 1) {
-        const text = (await page.locator('body').innerText().catch(() => '')).toLowerCase();
-        if (/no longer active|has ended|temporarily paused|isn't open yet|isn’t open yet/.test(text)) {
-          throw new Error(`SAT_LINK_NOT_LIVE: ${text.slice(0, 200)}`);
-        }
-        await page.waitForTimeout(2000);
-        if (page.url().match(/\/student\/[^/]+\/[^/]+/i)) return true;
-      }
-      return false;
-    })(),
-  ]);
+  // Admission: direct admit lands on /student/<schedule>/<code> in seconds,
+  // but under burst load the server parks entries in an admission queue
+  // ("You're in the admission queue … keep this tab open") that polls
+  // server-side. Wait it out instead of failing fast.
+  //
+  // Decisive server verdicts (registration closed, link ended/paused, roster
+  // conflict) never heal by waiting, so they throw a SatJoinError immediately
+  // with the scope the runner needs to abort or skip instead of burning the
+  // full admission window on every bot.
+  const deadline = Date.now() + 8 * 60 * 1000;
+  let resubmitted = false;
+  while (Date.now() < deadline) {
+    if (page.url().match(/\/student\/[^/]+\/[^/]+/i)) return;
 
-  if (!admitted) {
-    throw new Error('SAT_JOIN_NOT_ADMITTED: still on join page after submit (link not live or queue stuck).');
+    const alertText = await joinAlertText(page);
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const failure =
+      satJoinErrorFromText(alertText, summarize(alertText)) ??
+      satJoinErrorFromText(bodyText, summarize(bodyText));
+    if (failure) throw failure;
+
+    // Still on the form with no server verdict and no queue: retry the submit once.
+    if (!resubmitted && !alertText && !/admission queue|waiting|checking/i.test(bodyText)) {
+      const retryButton = page.getByRole('button', { name: /continue/i }).first();
+      if ((await retryButton.count()) && (await retryButton.isEnabled().catch(() => false))) {
+        await retryButton.click().catch(() => {});
+        resubmitted = true;
+      }
+    }
+
+    await page.waitForTimeout(2000);
   }
+
+  const tail = (await page.locator('body').innerText().catch(() => '')).slice(0, 300);
+  throw new Error(`SAT_JOIN_NOT_ADMITTED: still on join page after submit. url=${page.url()} text=${tail}`);
 }
 
 export async function satWaitForExamLive(page: Page, ctx: SatScenarioContext): Promise<void> {
@@ -122,14 +147,33 @@ export async function satWaitForExamLive(page: Page, ctx: SatScenarioContext): P
  * - produced-response: fill textbox "Enter your answer"
  * - Next question after each answer; never submits modules (server-owned).
  */
-export async function satAnswerUntilComplete(page: Page, user: VirtualUser, ctx: SatScenarioContext): Promise<{ answered: number }> {
+export async function satAnswerUntilComplete(
+  page: Page,
+  user: VirtualUser,
+  ctx: SatScenarioContext,
+  onProgress?: (answered: number) => void,
+): Promise<{ answered: number }> {
   const started = Date.now();
   let answered = 0;
   let optionCursor = Math.abs(hashString(user.userId)) % 4;
+  let lastProgressAt = Date.now();
+  let lastReported = 0;
+  const report = () => {
+    lastReported = answered;
+    lastProgressAt = Date.now();
+    onProgress?.(answered);
+  };
 
   while (Date.now() - started < ctx.examTimeoutMs) {
+    // Heartbeat so the run log + dashboard prove answering is progressing.
+    // First answer reports immediately; afterwards at most every 30s.
+    if (answered > lastReported && (lastReported === 0 || Date.now() - lastProgressAt > 30_000)) report();
+
     const completeHeading = page.getByRole('heading', { name: /SAT Complete/i }).first();
-    if (await completeHeading.isVisible().catch(() => false)) return { answered };
+    if (await completeHeading.isVisible().catch(() => false)) {
+      if (answered > lastReported) report();
+      return { answered };
+    }
 
     const shell = page.getByTestId('sat-exam-shell').first();
     const onBreak = page.getByTestId('sat-scheduled-break').first();

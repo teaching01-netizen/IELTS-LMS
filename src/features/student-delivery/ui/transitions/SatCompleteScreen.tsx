@@ -4,11 +4,9 @@ import type { AssessmentResult } from "../../contracts/assessmentDelivery";
 /** Confirms that the SAT exam is complete without revealing student scores. */
 export function SatCompleteScreen({
   onExit,
-  saveIssue,
 }: {
   result: AssessmentResult | null;
   onExit: () => void | Promise<void>;
-  saveIssue?: string | null;
 }) {
   return (
     <div className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] pl-[calc(1.25rem+var(--student-safe-left))] pr-[calc(1.25rem+var(--student-safe-right))] pt-[var(--student-safe-top)] pb-[var(--student-safe-bottom)] text-center text-[var(--sat-text)]">
@@ -18,11 +16,6 @@ export function SatCompleteScreen({
         <p className="mt-3 text-[14px] leading-6 text-[var(--sat-text-secondary)]">
           {SAT_COPY.transitions.completeSubtitle}
         </p>
-        {saveIssue ? (
-          <p className="mt-4 border border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] px-4 py-3 text-left text-[14px] text-[var(--sat-danger)]" role="alert">
-            {saveIssue}
-          </p>
-        ) : null}
         <button
           type="button"
           onClick={() => void onExit()}

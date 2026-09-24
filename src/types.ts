@@ -806,6 +806,20 @@ export interface StudentSession {
   runtimeModuleDeadlineAt?: string | null | undefined;
   runtimeModuleRemainingSeconds?: number | null | undefined;
   /**
+   * What stage the candidate is on right now: `module` while a module is open,
+   * `break` while their scheduled break is the thing they are waiting on. A
+   * candidate on a break sits no module, so the module clock above is empty —
+   * without this the staff room showed them as a clockless locked row, exactly
+   * like someone who never started.
+   */
+  runtimeStage?: 'module' | 'break' | null | undefined;
+  /** The break's own identity and clock (`runtimeBreakId` is what a proctor re-arms). */
+  runtimeBreakId?: string | null | undefined;
+  runtimeBreakState?: 'pending' | 'armed' | 'active' | null | undefined;
+  runtimeBreakEntryStartsAt?: string | null | undefined;
+  runtimeBreakDeadlineAt?: string | null | undefined;
+  runtimeBreakRemainingSeconds?: number | null | undefined;
+  /**
    * Runtime identity fence (SAT adaptive routing). These order two projections
    * of one candidate: `lastActivity` is presence only ("when did we last hear
    * from this student?") and must never decide which adaptive module is

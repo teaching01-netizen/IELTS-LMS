@@ -193,6 +193,24 @@ describe("SAT commit route table", () => {
     ).toBeNull();
   });
 
+  it("holds personal entry until the server-issued startsAt", () => {
+    const offer = payload([{
+      id: "m-1",
+      sectionKey: "reading-writing",
+      state: "active",
+      startedAt: "2026-09-10T08:00:03.000Z",
+    }]);
+    offer.timing.timingModel = "sat_personal_v1";
+    offer.attempt.moduleAttempts[0]!.entryGeneration = 1;
+    offer.attempt.moduleAttempts[0]!.entryStartsAt = "2026-09-10T08:00:03.000Z";
+    expect(decideSatCommitRoute(
+      state("directions"),
+      offer,
+      { kind: "startModule", moduleId: "m-1" },
+      IDENTITY,
+    )).toBeNull();
+  });
+
   // A Student Access link scoped to Reading & Writing: the run's payload holds
   // ONE section (no Math module attempt anywhere), and the exam must end after
   // it with no new end-of-exam logic. The route table only ever reads the

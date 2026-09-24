@@ -2,6 +2,7 @@ import { useRef } from "react";
 import type { SatBreakEntryProgress, SatBreakPhase } from "../../application/satStudentSurface";
 import { formatSatTime } from "../../domain/satTiming";
 import { SatPresenceSurface } from "../motion/SatPresenceSurface";
+import { useSatTemporalSnapshot } from "../../timing/SatTemporalRuntime";
 
 // The three break phases are one stage, so their names live with the stage
 // selector; the screen re-exports them for the surfaces that only know the
@@ -20,6 +21,14 @@ export function SatScheduledBreakScreen({
   remainingSeconds: number | null;
   entryProgress?: SatBreakEntryProgress;
 }) {
+  const temporal = useSatTemporalSnapshot();
+  const liveRemainingSeconds = temporal
+    ? phase === "waiting-for-break"
+      ? temporal.pendingSectionWaitSeconds
+      : phase === "on-break"
+        ? temporal.pendingBreakSeconds
+        : remainingSeconds
+    : remainingSeconds;
   const nextSection = nextSectionKey === "math" ? "Math" : "Reading and Writing";
   // The countdown slot NEVER unmounts while the break is on screen: waiting for
   // the break, taking the break and opening the next section are one surface,
@@ -28,19 +37,23 @@ export function SatScheduledBreakScreen({
   // so the slot keeps the last value but is hidden — never a 0:00 the student
   // could read as remaining time, and never a hole where the clock was.
   const lastSecondsRef = useRef<number | null>(null);
-  if (remainingSeconds !== null) lastSecondsRef.current = remainingSeconds;
-  const heldSeconds = remainingSeconds ?? lastSecondsRef.current;
+  if (liveRemainingSeconds !== null) lastSecondsRef.current = liveRemainingSeconds;
+  const heldSeconds = liveRemainingSeconds ?? lastSecondsRef.current;
   const displayedTime = heldSeconds === null ? null : formatSatTime(Math.max(0, heldSeconds));
-  const timerReserved = remainingSeconds === null && displayedTime !== null;
+  const timerReserved = liveRemainingSeconds === null && displayedTime !== null;
   const contextLabel =
     phase === "waiting-for-break"
       ? "Section complete"
+      : phase === "starting-break"
+        ? "Scheduled break"
       : phase === "opening-next-section"
         ? "Next section"
         : "Scheduled break";
   const headline =
     phase === "waiting-for-break"
       ? "Your break begins in"
+      : phase === "starting-break"
+        ? "Your break is starting…"
       : phase === "opening-next-section"
         ? entryProgress === "retrying"
           ? `Still opening ${nextSection}…`
@@ -49,6 +62,8 @@ export function SatScheduledBreakScreen({
   const supportingCopy =
     phase === "waiting-for-break"
       ? `${nextSection} is next after your scheduled break.`
+      : phase === "starting-break"
+        ? "Your full scheduled break will begin shortly."
       : entryProgress === "retrying"
         ? "Your saved answers are safe. This section will open automatically."
         : "Your next section starts automatically.";
@@ -76,7 +91,7 @@ export function SatScheduledBreakScreen({
           </p>
         ) : null}
         <h1 className="mt-6 text-2xl font-semibold tracking-tight">{headline}</h1>
-        {phase !== "waiting-for-break" ? (
+        {phase !== "waiting-for-break" && phase !== "starting-break" ? (
           <p className="mt-2 sat-type-control-primary font-medium text-[var(--sat-text)]">
             {nextSection} is next
           </p>
@@ -87,6 +102,8 @@ export function SatScheduledBreakScreen({
         <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {phase === "waiting-for-break"
             ? "Section complete. Your scheduled break begins when the section clock ends."
+            : phase === "starting-break"
+              ? "Your scheduled break is starting. The full break time begins when the break starts."
             : phase === "on-break"
               ? "Break started."
               : entryProgress === "retrying"

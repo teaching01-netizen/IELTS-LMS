@@ -82,6 +82,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 	}
 
 	candidates := make([]sectionReconcileCandidate, 0)
+	personalCandidates := make([]string, 0)
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		rows, err := q.QueryContext(ctx, `
 		SELECT r.schedule_id, `+autoSubmitExpr+` = 'true', COALESCE(r.provider_key, '')
@@ -92,6 +93,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 			JOIN exam_schedules sch ON sch.id = r.schedule_id
 			JOIN exam_versions v ON v.id = sch.published_version_id
 			WHERE r.status = 'live'
+			  AND COALESCE(r.timing_model, '') <> 'sat_personal_v1'
 			  AND r.active_section_key IS NOT NULL
 			  AND (
 					-- The planner applies SATSaveGrace before advancing SAT; this
@@ -129,7 +131,6 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var candidate sectionReconcileCandidate
 			if err := rows.Scan(&candidate.scheduleID, &candidate.autoSubmit, &candidate.providerKey); err != nil {
@@ -137,7 +138,38 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 			}
 			candidates = append(candidates, candidate)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		personalRows, err := q.QueryContext(ctx, `
+			SELECT r.schedule_id
+			FROM exam_session_runtimes r
+			JOIN exam_schedules sch ON sch.id = r.schedule_id
+			WHERE r.timing_model = 'sat_personal_v1'
+			  AND r.status IN ('live', 'paused')
+			  AND sch.end_time <= ?
+			  AND NOT EXISTS (
+			    SELECT 1 FROM student_attempts a
+			    WHERE a.schedule_id = r.schedule_id
+			      AND a.submitted_at IS NULL
+			      AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			  )
+			ORDER BY sch.end_time, r.schedule_id
+			LIMIT ?`, asOf, limit)
+		if err != nil {
+			return err
+		}
+		defer personalRows.Close()
+		for personalRows.Next() {
+			var scheduleID string
+			if err := personalRows.Scan(&scheduleID); err != nil {
+				return err
+			}
+			personalCandidates = append(personalCandidates, scheduleID)
+		}
+		return personalRows.Err()
 	})
 	if err != nil {
 		return nil, err
@@ -153,7 +185,87 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 			outcomes = append(outcomes, AutoAdvanceOutcome{ScheduleID: candidate.scheduleID, RuntimeRevision: *revision})
 		}
 	}
+	for _, scheduleID := range personalCandidates {
+		revision, err := s.completeOneDrainedPersonalRuntime(ctx, scheduleID, origin)
+		if err != nil {
+			return outcomes, err
+		}
+		if revision != nil {
+			outcomes = append(outcomes, AutoAdvanceOutcome{ScheduleID: scheduleID, RuntimeRevision: *revision})
+		}
+	}
 	return outcomes, nil
+}
+
+// completeDrainedPersonalRuntimes completes a personal SAT runtime only after
+// admission is closed and every admitted attempt is terminal. Section clocks
+// never expire or terminalize these attempts.
+func (s *Service) completeOneDrainedPersonalRuntime(ctx context.Context, scheduleID, origin string) (*int64, error) {
+	var revision *int64
+	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if _, err := examruntime.LockScheduleRow(ctx, q, scheduleID); err != nil {
+			if appErr, ok := apperrors.As(err); ok && appErr.Code == apperrors.CodeNotFound {
+				return nil
+			}
+			return err
+		}
+		if _, err := lockAllScheduleAttempts(ctx, q, scheduleID); err != nil {
+			return err
+		}
+		runtimeRow, err := lockReconcileRuntime(ctx, q, scheduleID)
+		if err != nil {
+			return err
+		}
+		var timingModel string
+		if err := q.QueryRowContext(ctx, "SELECT timing_model FROM exam_session_runtimes WHERE id = ?", runtimeRow.id).Scan(&timingModel); err != nil {
+			return err
+		}
+		if timingModel != examruntime.TimingModelPersonal || (runtimeRow.status != "live" && runtimeRow.status != "paused") {
+			return nil
+		}
+		var endTime, dbNow time.Time
+		if err := q.QueryRowContext(ctx, "SELECT end_time FROM exam_schedules WHERE id = ?", scheduleID).Scan(&endTime); err != nil {
+			return err
+		}
+		if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&dbNow); err != nil {
+			return err
+		}
+		if dbNow.Before(endTime) {
+			return nil
+		}
+		var open bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1 FROM student_attempts
+			WHERE schedule_id = ? AND submitted_at IS NULL
+			  AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+		)`, scheduleID).Scan(&open); err != nil {
+			return err
+		}
+		if open {
+			return nil
+		}
+		if err := examruntime.CompleteInTx(ctx, q, scheduleID, runtimeRow.id, "admission_closed_attempts_terminal"); err != nil {
+			return err
+		}
+		if err := examruntime.InsertControlEvent(ctx, q, runtimeRow.id, scheduleID, systemActor, "complete_runtime", nil, nil, strptr("admission_closed_attempts_terminal")); err != nil {
+			return err
+		}
+		if err := insertAuditLog(ctx, q, scheduleID, systemActor, "SESSION_END", nil, map[string]any{
+			"reason": "admission_closed_attempts_terminal", "effectiveAt": dbNow,
+		}); err != nil {
+			return err
+		}
+		value, err := currentRuntimeRevision(ctx, q, runtimeRow.id)
+		if err != nil {
+			return err
+		}
+		if err := s.enqueueRuntimeWakeup(ctx, q, scheduleID, "complete_personal_runtime", origin, value); err != nil {
+			return err
+		}
+		revision = &value
+		return nil
+	})
+	return revision, err
 }
 
 func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID string, autoSubmit bool, providerKey string, asOf time.Time, origin string) (*int64, error) {

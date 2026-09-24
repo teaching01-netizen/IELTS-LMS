@@ -26,6 +26,7 @@ function Harness() {
       saveState="idle"
       questionNote=""
       readingPreferences={createSatReadingPreferences()}
+      moreAvailable
       helpOpen={helpOpen}
       onOpenHelp={() => setHelpOpen(true)}
       onCloseHelp={() => setHelpOpen(false)}
@@ -82,6 +83,7 @@ describe("SatMoreHelpFlow", () => {
         saveState="idle"
         questionNote=""
         readingPreferences={createSatReadingPreferences()}
+        moreAvailable
         onSelectQuestion={() => undefined}
         onToggleCalculator={() => undefined}
         onToggleReference={() => undefined}

@@ -1,5 +1,7 @@
 import type {
   AssessmentDeliveryBootstrap,
+  AssessmentBreakEntryRequest,
+  AssessmentModuleEntryRequest,
   AssessmentModuleStartRequest,
   AssessmentModuleSubmitRequest,
   AssessmentResponseRequest,
@@ -26,6 +28,33 @@ export interface SatDeliveryGateway {
     scheduleId: string,
     attemptId: string,
     request: AssessmentModuleStartRequest,
+  ): Promise<AssessmentDeliveryBootstrap>;
+  enterModule?(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentModuleEntryRequest,
+  ): Promise<AssessmentDeliveryBootstrap>;
+  markStageVisible?(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentModuleEntryRequest,
+  ): Promise<AssessmentDeliveryBootstrap>;
+  startBreak?(
+    scheduleId: string,
+    attemptId: string,
+    breakId: string,
+    /** Optional control-epoch fence (see AssessmentBreakEntryRequest). */
+    request?: AssessmentBreakEntryRequest,
+  ): Promise<AssessmentDeliveryBootstrap>;
+  enterBreak?(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentBreakEntryRequest,
+  ): Promise<AssessmentDeliveryBootstrap>;
+  markBreakVisible?(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentBreakEntryRequest,
   ): Promise<AssessmentDeliveryBootstrap>;
   submitModule(
     scheduleId: string,

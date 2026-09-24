@@ -406,7 +406,10 @@ func (s *Service) takeoverInTx(ctx context.Context, q tx.Tx, claims crypto.Attem
 	if attempt.Phase == "post-exam" || attempt.SubmittedAt != nil {
 		return TakeoverResult{}, &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Attempt is closed.", HTTPStatus: 422}
 	}
-	if attempt.ClosingGraceUntil != nil && now.After(*attempt.ClosingGraceUntil) {
+	// The attempt-level closing grace rides the cohort section clock; a
+	// personal SAT attempt owns its module deadline instead, so takeover must
+	// not be refused for a section clock its candidate is no longer on.
+	if attempt.TimingModel != personalTimingModel && attempt.ClosingGraceUntil != nil && now.After(*attempt.ClosingGraceUntil) {
 		return TakeoverResult{}, &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
 	newLease := attempt.LeaseEpoch

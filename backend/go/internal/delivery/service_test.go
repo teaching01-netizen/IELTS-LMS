@@ -493,8 +493,8 @@ func TestDeliveryReconcileLegacyExpiryFinalizes(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(now))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN")).
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}).
-			AddRow("ma-1", "mod-1", "active", 3600, started, started, nil, 0, 0, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason", "entry_confirmed_at", "entry_entered_at"}).
+			AddRow("ma-1", "mod-1", "active", 3600, started, started, nil, 0, 0, nil, nil, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions")).
 		WithArgs("ma-1", "ma-1", "mod-1").
 		WillReturnRows(sqlmock.NewRows([]string{"is_pretest", "answer_definition", "response", "response_v2"}))

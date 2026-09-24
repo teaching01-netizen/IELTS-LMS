@@ -10,6 +10,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
 // deliveryReconcileDrained stages StartModule's reconcile-then-write prologue:
@@ -29,7 +30,7 @@ func deliveryReconcileDrained(mock sqlmock.Sqlmock) {
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN")).
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason", "entry_confirmed_at", "entry_entered_at"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('submitted', 'locked')")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
@@ -52,7 +53,7 @@ func deliveryReconcileDrainedStranded(mock sqlmock.Sqlmock) {
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN")).
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason", "entry_confirmed_at", "entry_entered_at"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('submitted', 'locked')")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(2))
@@ -123,6 +124,14 @@ func deliveryUnscopedAttemptLink(mock sqlmock.Sqlmock) {
 }
 
 func deliveryBootstrapLoads(mock sqlmock.Sqlmock, at time.Time, moduleState ...string) {
+	deliveryBootstrapLoadsForModel(mock, at, nil, moduleState...)
+}
+
+// deliveryBootstrapLoadsForModel stages the post-commit bootstrap assembly and
+// additionally the personal-only projections when the stored schedule choice is
+// sat_personal_v1 (loadPersonalEntryOffers then loadPersonalBreaks, in the order
+// assembleBootstrap reads them).
+func deliveryBootstrapLoadsForModel(mock sqlmock.Sqlmock, at time.Time, model any, moduleState ...string) {
 	state := "active"
 	if len(moduleState) > 0 {
 		state = moduleState[0]
@@ -162,6 +171,18 @@ func deliveryBootstrapLoads(mock sqlmock.Sqlmock, at time.Time, moduleState ...s
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ?")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_timing_model FROM exam_schedules WHERE id = ?")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"sat_timing_model"}).AddRow(model))
+	if choice, ok := model.(string); ok && choice == examruntime.TimingModelPersonal {
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT id, entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at FROM assessment_module_attempts WHERE attempt_id = ?")).
+			WithArgs("att-1").
+			WillReturnRows(sqlmock.NewRows([]string{"id", "entry_generation", "entry_starts_at", "entry_confirmed_at", "entry_entered_at"}).
+				AddRow("ma-1", 1, at, nil, nil))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_attempt_breaks")).
+			WithArgs("att-1").
+			WillReturnRows(sqlmock.NewRows([]string{"id", "after_section_id", "duration_seconds", "state", "starts_at", "deadline_at", "entered_at", "paused_at", "accumulated_paused_seconds", "entry_generation", "entry_starts_at", "entry_confirmed_at", "entry_entered_at", "revision"}))
+	}
 }
 
 // An already-active started module short-circuits idempotently: no state

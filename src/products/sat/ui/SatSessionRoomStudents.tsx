@@ -5,7 +5,7 @@ import { useAuthoritativeDeadlineClock, type ServerClockSnapshot } from '../../.
 import { SatEyebrow } from './SatPage';
 import { SatMenu } from './Menu';
 import { formatRunSheetRemaining, satModuleSlotLabel } from './sessionRunSheet';
-import { isSatAttemptLive, isSatStageLive } from './satStage';
+import { isSatAttemptLive, isSatBreakLive, isSatStageLive } from './satStage';
 
 type StudentSessionWithModuleRole = StudentSession & {
   /** The server's own name for the SAT adaptive module slot. */
@@ -47,9 +47,23 @@ export function SatRoomStudentRow({
     roomClock,
     coarse: running && !selected && fallbackSeconds > 300,
   });
+  // The break is its own stage: while the candidate is on one they sit no
+  // module, so the module clock above is empty and the row would read as a
+  // clockless locked candidate. The break clock is what their own screen is
+  // counting, and it can end before the room's section does.
+  const onBreak = student.runtimeStage === 'break';
+  const breakRemaining = useAuthoritativeDeadlineClock({
+    deadlineAt: student.runtimeBreakDeadlineAt ?? student.runtimeBreakEntryStartsAt ?? null,
+    serverNow: student.runtimeServerNow ?? runtime?.serverNow ?? null,
+    fallbackSeconds: student.runtimeBreakRemainingSeconds ?? fallbackSeconds,
+    running: isSatBreakLive(runtime, student),
+    roomClock,
+    coarse: running && !selected && fallbackSeconds > 300,
+  });
   const rowMeta = [
+    onBreak ? 'On break' : null,
     sectionLabelFor(runtime, student.runtimeCurrentSection ?? student.currentSection),
-    satModuleSlotLabel(moduleRoleFor(student)),
+    onBreak ? null : satModuleSlotLabel(moduleRoleFor(student)),
     student.status,
   ].filter(Boolean).join(' · ');
   const needsAttention = student.warnings > 0 || student.violations.length > 0;
@@ -78,9 +92,13 @@ export function SatRoomStudentRow({
       </span>
       <span className="text-right">
         <span className="sat-room__row-time">
-          {formatRunSheetRemaining(moduleKnown ? moduleRemaining : remaining)}
+          {formatRunSheetRemaining(onBreak ? breakRemaining : moduleKnown ? moduleRemaining : remaining)}
         </span>
-        {moduleKnown ? (
+        {onBreak ? (
+          <span className="sat-room__row-sub">
+            {student.runtimeBreakState === 'active' ? 'Break clock' : 'Break entry'}
+          </span>
+        ) : moduleKnown ? (
           <span className="sat-room__row-sub">Section clock {formatRunSheetRemaining(remaining)}</span>
         ) : null}
       </span>
@@ -145,6 +163,16 @@ export function StudentDetail({
     running: moduleRunning && student.runtimeModuleDeadlineAt != null,
     roomClock,
   });
+  const onBreak = student.runtimeStage === 'break';
+  const breakRemaining = useAuthoritativeDeadlineClock({
+    deadlineAt: student.runtimeBreakDeadlineAt ?? student.runtimeBreakEntryStartsAt ?? null,
+    serverNow: student.runtimeServerNow ?? runtime?.serverNow ?? null,
+    fallbackSeconds: student.runtimeBreakRemainingSeconds
+      ?? student.runtimeTimeRemainingSeconds
+      ?? student.timeRemaining,
+    running: isSatBreakLive(runtime, student),
+    roomClock,
+  });
   const sectionLabel = sectionLabelFor(runtime, student.runtimeCurrentSection);
   const moduleSlot = satModuleSlotLabel(moduleRoleFor(student));
   const actionDisabled = anyStudentPending || blocked;
@@ -205,11 +233,17 @@ export function StudentDetail({
           </div>
           <div>
             <dt className="sat-room__eyebrow">Current module</dt>
-            <dd>{moduleSlot ?? student.currentSection ?? '—'}</dd>
+            <dd>{onBreak ? 'Break' : moduleSlot ?? student.currentSection ?? '—'}</dd>
           </div>
           <div>
-            <dt className="sat-room__eyebrow">Module clock</dt>
-            <dd className="is-clock">{moduleKnown ? formatRunSheetRemaining(moduleRemaining) : '—'}</dd>
+            <dt className="sat-room__eyebrow">{onBreak ? 'Break clock' : 'Module clock'}</dt>
+            <dd className="is-clock">
+              {onBreak
+                ? formatRunSheetRemaining(breakRemaining)
+                : moduleKnown
+                  ? formatRunSheetRemaining(moduleRemaining)
+                  : '—'}
+            </dd>
           </div>
           <div>
             <dt className="sat-room__eyebrow">Section clock</dt>

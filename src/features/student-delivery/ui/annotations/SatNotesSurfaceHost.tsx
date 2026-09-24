@@ -27,7 +27,7 @@ export interface SatNotesSurfaceHostProps {
   questionNote: string;
   /** True when the question carries marks, so an empty column can say so. */
   hasHighlights: boolean;
-  /** R&W-only: without the surface there is no pane and no handle for it. */
+  /** When false there is no pane and no handle for it. */
   notesAvailable: boolean;
   disabled: boolean;
   hintVisible: boolean;

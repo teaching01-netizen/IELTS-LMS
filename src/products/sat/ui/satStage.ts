@@ -60,3 +60,18 @@ export function isSatStageLive(
 ): boolean {
   return isSatAttemptLive(runtime, student) && satStageStatus(runtime, student) === 'live';
 }
+
+/**
+ * Is the candidate's break clock running? A break is a stage the attempt itself
+ * owns (its own row, deadline and pause), so it does not ride the section
+ * clock's status: the stage status reads `break` while it runs. A paused break
+ * publishes no deadline — only the frozen remainder — so nothing ticks.
+ */
+export function isSatBreakLive(
+  runtime: ExamSessionRuntime | null | undefined,
+  student?: StudentSession | null,
+): boolean {
+  if (!isSatAttemptLive(runtime, student)) return false;
+  if (student?.runtimeStage !== 'break') return false;
+  return student.runtimeBreakDeadlineAt != null || student.runtimeBreakEntryStartsAt != null;
+}

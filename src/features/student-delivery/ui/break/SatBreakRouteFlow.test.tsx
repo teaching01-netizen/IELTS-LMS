@@ -36,6 +36,7 @@ function Harness() {
       onSaveNote={() => undefined}
       onReadingPreferencesChange={() => undefined}
       onOpenBreakConfirm={() => setConfirm(true)}
+      moreAvailable
       breakAvailable
       breakConfirmOpen={confirm}
       onCloseBreakConfirm={() => setConfirm(false)}

@@ -24,7 +24,7 @@ const OPTIONS = [
   { value: 'iv', label: 'iv. Disabled option', disabled: true },
 ] as const;
 
-interface HarnessOptions extends Partial<Parameters<typeof ProtectedExamSelect>[0]> {}
+type HarnessOptions = Partial<Parameters<typeof ProtectedExamSelect>[0]>;
 
 /**
  * Renders the select inside a stateful parent that mirrors the real answer

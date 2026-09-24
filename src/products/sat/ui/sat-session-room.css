@@ -426,6 +426,23 @@ button.sat-room__attention-filter:hover {
   color: var(--sat-staff-text-tertiary, #6e6e73);
 }
 
+/* Which timing plan the rows describe: a personal-model session's windows are
+   per candidate, a cohort one's are capped by the shared section clock. */
+.sat-run-sheet__plan {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 8px 0 0;
+  color: var(--sat-staff-text-secondary, #515154);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sat-run-sheet__plan strong {
+  color: var(--sat-staff-text-primary, #1d1d1f);
+  font-weight: 600;
+}
+
 .sat-run-sheet__delta {
   margin: 8px 0 0;
   color: var(--sat-staff-warning-text, #92400e);

@@ -72,8 +72,8 @@ func TestCompleteExamCustomReasonKeepsVocabularyPayload(t *testing.T) {
 	// waiting for the runtime. Ordered expectations pin that order.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id = ? FOR UPDATE")).
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "published_version_id", "status", "revision", "planned_duration_minutes"}).
-			AddRow("sched-1", "exam-1", "sat", "ver-1", "live", 4, 154))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "published_version_id", "status", "revision", "planned_duration_minutes"}).
+			AddRow("sched-1", "exam-1", "sat", "", "ver-1", "live", 4, 154))
 	// lockScheduleScope (B2 narrowed): runtime id + sections only — no
 	// schedule-wide attempt sweep.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).

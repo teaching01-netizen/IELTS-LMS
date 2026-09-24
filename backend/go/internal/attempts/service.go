@@ -71,6 +71,9 @@ type QuestionOwner struct {
 	SectionKey       string
 	ModuleState      string // must be active|review for writes
 	ModuleDeadlineAt *time.Time
+	TimingModel      string
+	ModuleStartedAt  *time.Time
+	EntryConfirmedAt *time.Time
 }
 
 // QuestionResolver maps question IDs to ownership within the attempt.
@@ -105,6 +108,7 @@ type BulkQuestionResolver interface {
 // can silently go unenforced.
 type RuntimeGate struct {
 	Status                string
+	TimingModel           string
 	WaitingForNextSection bool
 	ActiveSectionKey      string
 	SectionLive           bool
@@ -380,6 +384,17 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 			}); err != nil {
 				return SaveResult{}, err
 			}
+			if isPersonalTimingModel(owner.TimingModel) {
+				if _, err := q.ExecContext(ctx, `
+					UPDATE assessment_module_attempts
+					SET entry_entered_at = COALESCE(entry_entered_at, UTC_TIMESTAMP(6)), revision = revision + 1
+					WHERE attempt_id = ? AND module_id = ? AND state IN ('active', 'review')
+					  AND entry_confirmed_at IS NOT NULL AND entry_entered_at IS NULL
+					  AND started_at <= UTC_TIMESTAMP(6)`,
+					cmd.AttemptID, owner.ModuleID); err != nil {
+					return SaveResult{}, err
+				}
+			}
 		}
 		canonical, err := CanonicalJSON(commandToAny(cmd.LeaseEpoch, c))
 		_ = canonical
@@ -435,12 +450,12 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 func lockAttempt(ctx context.Context, q tx.Tx, id string) (AttemptState, error) {
 	var a AttemptState
 	var deadline, grace, submitted sql.NullTime
-	var finalSub, providerKey sql.NullString
+	var finalSub, providerKey, timingModel sql.NullString
 	// Round 166: fresh entry-minted attempts carry NULL organization_id
 	// (game-day: 5 submit-path 500s `converting NULL to string`). Scan
 	// nullable and default to "" so NULL orgs submit cleanly.
 	var org sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT id, schedule_id, user_id, organization_id, protocol_version, delivery_status, phase, lease_epoch, control_epoch, response_revision, deadline_at, closing_grace_until, submitted_at, final_submission, proctor_status, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), '') FROM student_attempts WHERE id=? FOR UPDATE`, id).Scan(&a.ID, &a.ScheduleID, &a.UserID, &org, &a.ProtocolVersion, &a.DeliveryStatus, &a.Phase, &a.LeaseEpoch, &a.ControlEpoch, &a.ResponseRevision, &deadline, &grace, &submitted, &finalSub, &a.ProctorStatus, &providerKey)
+	err := q.QueryRowContext(ctx, `SELECT id, schedule_id, user_id, organization_id, protocol_version, delivery_status, phase, lease_epoch, control_epoch, response_revision, deadline_at, closing_grace_until, submitted_at, final_submission, proctor_status, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), ''), COALESCE((SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = student_attempts.schedule_id), '') FROM student_attempts WHERE id=? FOR UPDATE`, id).Scan(&a.ID, &a.ScheduleID, &a.UserID, &org, &a.ProtocolVersion, &a.DeliveryStatus, &a.Phase, &a.LeaseEpoch, &a.ControlEpoch, &a.ResponseRevision, &deadline, &grace, &submitted, &finalSub, &a.ProctorStatus, &providerKey, &timingModel)
 	if org.Valid {
 		a.OrganizationID = org.String
 	}
@@ -468,6 +483,9 @@ func lockAttempt(ctx context.Context, q tx.Tx, id string) (AttemptState, error) 
 	}
 	if providerKey.Valid {
 		a.ProviderKey = providerKey.String
+	}
+	if timingModel.Valid {
+		a.TimingModel = timingModel.String
 	}
 	return a, nil
 }
@@ -580,11 +598,15 @@ func exactReplay(ctx context.Context, q tx.Tx, io saveIO, cmd SaveResponsesComma
 
 // ensureWritable enforces terminal/pause/deadline/grace/proctor gates.
 func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
+	// Either the runtime gate or the locked attempt row may carry the model
+	// (the attempt row is the durable one: a schedule whose runtime row is
+	// missing mid-transition must still read as personal).
+	personalSAT := isPersonalTimingModel(gate.TimingModel) || isPersonalTimingModel(a.TimingModel)
 	// The student clock freezes at the SAT deadline. The runtime waits for the
 	// short save window before advancing, while other providers retain their
 	// existing closing grace.
 	closingGraceActive := a.ClosingGraceUntil != nil && !now.After(*a.ClosingGraceUntil)
-	satClosing := a.ProviderKey == string(ProviderSAT) && a.DeadlineAt != nil &&
+	satClosing := !personalSAT && a.ProviderKey == string(ProviderSAT) && a.DeadlineAt != nil &&
 		!now.Before(*a.DeadlineAt) && now.Before(a.DeadlineAt.Add(SATSaveGrace)) && closingGraceActive
 	switch a.DeliveryStatus {
 	case "submitted", "terminated", "locked", "cancelled":
@@ -604,11 +626,11 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	}
 	// SAT may drain already-visible responses briefly after the display clock
 	// ends. The module gate below applies the same cap to shorter module clocks.
-	if a.ProviderKey == string(ProviderSAT) && a.DeadlineAt != nil && !now.Before(*a.DeadlineAt) && !satClosing {
+	if !personalSAT && a.ProviderKey == string(ProviderSAT) && a.DeadlineAt != nil && !now.Before(*a.DeadlineAt) && !satClosing {
 		telemetry.IncCounter(telemetry.MSATResponseWriteAfterTerminal)
 		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
-	if gate.WaitingForNextSection && !closingGraceActive && !satClosing {
+	if !personalSAT && gate.WaitingForNextSection && !closingGraceActive && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is waiting.", HTTPStatus: 422}
 	}
 	// Section liveness (audit finding 3). These flags used to be computed by both
@@ -616,16 +638,20 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	// snapshot pre-gate (and not at all with RUNTIME_SNAPSHOT off, where the
 	// FOR UPDATE path's SectionPaused had no consumer). The rule is enforced here
 	// — on the write's own transaction — so both modes reject the same writes.
-	if !gate.SectionStarted && !satClosing {
+	if !personalSAT && !gate.SectionStarted && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section has not started.", HTTPStatus: 422}
 	}
-	if gate.SectionPaused {
+	if !personalSAT && gate.SectionPaused {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is paused.", HTTPStatus: 422}
 	}
-	if !gate.SectionLive && !closingGraceActive && !satClosing {
+	if !personalSAT && !gate.SectionLive && !closingGraceActive && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is not live.", HTTPStatus: 422}
 	}
-	if a.ClosingGraceUntil != nil && now.After(*a.ClosingGraceUntil) {
+	// The attempt-level closing grace rides the cohort section clock. A
+	// personal SAT attempt owns its own module/break deadline instead, so the
+	// section-derived grace must never cut its answers short (plan 2026-09-24,
+	// full-entry-time).
+	if !personalSAT && a.ClosingGraceUntil != nil && now.After(*a.ClosingGraceUntil) {
 		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
 	return nil
@@ -649,6 +675,10 @@ func ensureQuestionAdmittedForProvider(owner QuestionOwner, gate RuntimeGate, qu
 	if provider == string(ProviderSAT) && owner.ModuleDeadlineAt == nil {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT module deadline is unavailable.", HTTPStatus: 422}
 	}
+	personalSAT := isPersonalTimingModel(owner.TimingModel)
+	if personalSAT && (owner.EntryConfirmedAt == nil || owner.ModuleStartedAt == nil || gate.Now.Before(*owner.ModuleStartedAt)) {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT module entry is not confirmed.", HTTPStatus: 422}
+	}
 	// The attempt deadline covers the shared SAT section clock. Module 1 can
 	// have a shorter personal clock, so enforce the effective module boundary
 	// here too; otherwise a fresh V2 write could slip in before the timeout
@@ -659,7 +689,7 @@ func ensureQuestionAdmittedForProvider(owner QuestionOwner, gate RuntimeGate, qu
 		telemetry.IncCounter(telemetry.MSATResponseWriteAfterTerminal)
 		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
-	if gate.ActiveSectionKey != "*" && gate.ActiveSectionKey != "" && owner.SectionKey != gate.ActiveSectionKey && !satClosing {
+	if !personalSAT && gate.ActiveSectionKey != "*" && gate.ActiveSectionKey != "" && owner.SectionKey != gate.ActiveSectionKey && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Question is not in the active section.", HTTPStatus: 400}
 	}
 	return nil

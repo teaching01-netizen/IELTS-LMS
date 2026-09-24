@@ -8,7 +8,7 @@ import {
 export type { SatToolCapabilities } from './satTools';
 
 export interface SatExamToolPolicy {
-  /** Per-question annotation tools: highlight, underline, anchored notes. R&W only. */
+  /** Per-question annotation tools: highlight, underline, anchored notes. */
   highlight: boolean;
   underline: boolean;
   notes: boolean;
@@ -53,12 +53,13 @@ export function emptySatExamToolPolicy(): SatExamToolPolicy {
 /**
  * Resolve the full student-facing tool policy for a section.
  *
- * Annotation tools are Reading and Writing only; Desmos and reference are
- * Math only and additionally require the module tool policy to advertise
- * them, so authored or legacy modules that omit the policy never gain a
- * calculator. Display and accessibility tools (display settings, content
- * zoom, contrast, image zoom) are universal. Mark for review and option
- * eliminator are universal navigation tools.
+ * Annotation tools (highlight, underline, notes) are available in both
+ * sections; line reader and passage expansion stay Reading and Writing only.
+ * Desmos and reference are Math only and additionally require the module
+ * tool policy to advertise them, so authored or legacy modules that omit
+ * the policy never gain a calculator. Display and accessibility tools
+ * (display settings, content zoom, contrast, image zoom) are universal.
+ * Mark for review and option eliminator are universal navigation tools.
  *
  * Components must gate on these flags instead of scattering section-key
  * checks through the tree.
@@ -70,9 +71,9 @@ export function resolveSatExamToolPolicy(
   const module = resolveSatToolCapabilities(toolPolicy);
   const readingWriting = sectionKey === 'reading-writing';
   return {
-    highlight: readingWriting,
-    underline: readingWriting,
-    notes: readingWriting,
+    highlight: true,
+    underline: true,
+    notes: true,
     lineReader: readingWriting,
     imageZoom: true,
     passageExpand: readingWriting,

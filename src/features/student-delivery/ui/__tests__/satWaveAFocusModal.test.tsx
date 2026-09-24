@@ -145,7 +145,7 @@ describe("Wave A R-03 focus return per surface (option A: mounted selectors)", (
   });
 
   it("more: open, Escape, focus returns to the More trigger", async () => {
-    render(<SatExamShell {...shellProps()} />);
+    render(<SatExamShell {...shellProps({ moreAvailable: true })} />);
     const trigger = screen.getByRole("button", { name: "More tools" });
     expect(trigger).toHaveAttribute("data-sat-focus", "topbar-more");
     fireEvent.click(trigger);

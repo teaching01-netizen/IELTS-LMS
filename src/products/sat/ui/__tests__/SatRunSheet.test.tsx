@@ -75,6 +75,44 @@ describe('SatRunSheet', () => {
     expect(screen.queryByText('Planned finish')).not.toBeInTheDocument();
   });
 
+  it('labels the timing plan the rows describe', () => {
+    const { unmount } = render(
+      <SatRunSheet
+        plan={plan}
+        runtime={{ ...preStartRuntime, timingModel: 'sat_personal_v1' }}
+        scheduledStartAt={START}
+        now={START}
+      />
+    );
+
+    // A proctor must be able to tell that these rows are a per-candidate plan
+    // (full entry time) and not the room's own section clock.
+    const pinned = document.querySelector('[data-sat-run-sheet-plan="sat_personal_v1"]');
+    expect(pinned).not.toBeNull();
+    expect(pinned).toHaveTextContent('Personal timing · full entry time');
+    unmount();
+
+    // A cohort runtime says so instead, and a runtime that does not state a plan
+    // at all renders no plan line rather than defaulting to one.
+    const cohort = render(
+      <SatRunSheet
+        plan={plan}
+        runtime={{ ...preStartRuntime, timingModel: 'cohort_section_v3' }}
+        scheduledStartAt={START}
+        now={START}
+      />
+    );
+    expect(
+      document.querySelector('[data-sat-run-sheet-plan="cohort_section_v3"]')
+    ).toHaveTextContent('Cohort timing · section clock');
+    cohort.unmount();
+
+    render(
+      <SatRunSheet plan={plan} runtime={preStartRuntime} scheduledStartAt={START} now={START} />
+    );
+    expect(document.querySelector('[data-sat-run-sheet-plan]')).toBeNull();
+  });
+
   it('keeps extension context while the run sheet presents stage rows', () => {
     render(
       <SatRunSheet

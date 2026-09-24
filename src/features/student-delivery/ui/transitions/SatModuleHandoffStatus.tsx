@@ -1,5 +1,6 @@
 import { formatSatTime } from "../../domain/satTiming";
 import { satOverlayZClass } from "../primitives/satOverlayZ";
+import { useSatTemporalSnapshot } from "../../timing/SatTemporalRuntime";
 
 export interface SatModuleHandoffStatusProps {
   /** Student-facing title of the module being opened (e.g. "Module 2"). */
@@ -32,6 +33,8 @@ export function SatModuleHandoffStatus({
   remainingSeconds,
   onRetry,
 }: SatModuleHandoffStatusProps) {
+  const temporal = useSatTemporalSnapshot();
+  const liveRemainingSeconds = temporal ? temporal.handoffSeconds : remainingSeconds;
   return (
     <div
       data-sat-handoff="true"
@@ -45,10 +48,10 @@ export function SatModuleHandoffStatus({
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">
           {retrying ? `Still opening ${moduleTitle}…` : `Opening ${moduleTitle}…`}
         </h1>
-        {remainingSeconds !== null ? (
+        {liveRemainingSeconds !== null ? (
           <>
             <p className="sat-tabular mt-4 text-3xl font-semibold" data-sat-handoff-clock="true">
-              {formatSatTime(Math.max(0, remainingSeconds))}
+              {formatSatTime(Math.max(0, liveRemainingSeconds))}
             </p>
             <p className="mt-1 sat-type-control-secondary text-[var(--sat-text-secondary)]">
               left in this section

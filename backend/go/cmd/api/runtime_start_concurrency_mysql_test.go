@@ -109,14 +109,11 @@ func newStartRaceHarness(t *testing.T) *startRaceHarness {
 		}
 	})
 
-	// V1: one authored question, published.
-	shell, err := authors.Shell(ctx, exam.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := authors.CreateQuestion(ctx, shell.Sections[0].Modules[0].ID, actor, authoring.QuestionDraft{}); err != nil {
-		t.Fatal(err)
-	}
+	// V1: a publishable SAT draft. This proof is about the schedule lock and the
+	// version fence, not question content, so every module carries one valid
+	// question at a matching target (makeSATDraftPublishable); the published
+	// version still holds the real SAT sections, modules and authored lengths.
+	makeSATDraftPublishable(t, ctx, db, authors, actor, exam.ID)
 	current, err := authors.Shell(ctx, exam.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -125,12 +122,18 @@ func newStartRaceHarness(t *testing.T) *startRaceHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// V2: reopen the draft, add a question, publish again.
+	// V2: reopen the draft (which clones the published version), add a second
+	// question to the first module and raise that module's target to match, then
+	// publish again. Only the fence is under test; the version must just differ.
 	reopened, err := authors.OpenShell(ctx, exam.ID, actor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := authors.CreateQuestion(ctx, reopened.Sections[0].Modules[0].ID, actor, authoring.QuestionDraft{}); err != nil {
+	reopenedModule := reopened.Sections[0].Modules[0].ID
+	if _, err := db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 2 WHERE id = ?", reopenedModule); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authors.CreateQuestion(ctx, reopenedModule, actor, validSATPublishSPR()); err != nil {
 		t.Fatal(err)
 	}
 	latest, err := authors.Shell(ctx, exam.ID)
@@ -165,6 +168,13 @@ func (h *startRaceHarness) newSchedule(t *testing.T, versionID string) schedules
 	h.createdMu.Lock()
 	h.created = append(h.created, sch.ID)
 	h.createdMu.Unlock()
+	// Both proofs here assert that the live runtime's clock governs every
+	// attempt, which is the cohort model. A newly created SAT schedule selects
+	// sat_personal_v1, where each attempt owns its own module and break deadline
+	// and no cohort deadline is written, so pin the deployed cohort model.
+	if _, err := h.db.ExecContext(context.Background(), "UPDATE exam_schedules SET sat_timing_model = NULL WHERE id = ?", sch.ID); err != nil {
+		t.Fatal(err)
+	}
 	return sch
 }
 
@@ -175,7 +185,8 @@ func (h *startRaceHarness) register(t *testing.T, scheduleID string) schedules.R
 		Wcode:       fmt.Sprintf("W%06d", 100000+n),
 		Email:       fmt.Sprintf("race-%d-%s@example.com", n, uuid.NewString()[:8]),
 		StudentName: "Race Student",
-		UserID:      "user-" + uuid.NewString(),
+		// user_id is varchar(36): the registration carries the bare uuid.
+		UserID: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -126,7 +126,7 @@ export function satNotesRailVisible(input: {
   open: boolean;
   /** True below the split breakpoint (stacked panes). */
   compact: boolean;
-  /** R&W-only: without the surface there is nothing to open. */
+  /** Without the surface there is nothing to open. */
   available: boolean;
   /** True once the question holds at least one written note (`satNotesCount`). */
   hasNotes: boolean;

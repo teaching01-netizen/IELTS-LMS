@@ -15,6 +15,7 @@ import {
 const LEGACY = "legacy_section_v1" as const;
 const STAGE = "cohort_stage_v2" as const;
 const SECTION = "cohort_section_v3" as const;
+const PERSONAL = "sat_personal_v1" as const;
 
 function pendingAttempt(
   overrides: Partial<AssessmentModuleAttemptSnapshot> = {},
@@ -194,6 +195,16 @@ describe("SAT countdown policy (SAT-003)", () => {
         authoritativeSeconds: 4000,
       }),
     ).toEqual({ displaySeconds: 4000, expirySeconds: 4000 });
+  });
+
+  it("uses only the attempt-owned clock for sat_personal_v1, independent of room stage", () => {
+    expect(satCountdown({
+      timingModel: PERSONAL,
+      stageKey: "math",
+      sectionKey: "reading-writing",
+      personalSeconds: 120,
+      authoritativeSeconds: 0,
+    })).toEqual({ displaySeconds: 120, expirySeconds: 120 });
   });
 
   // The module clock contract: a candidate sits Module 1 plus exactly one

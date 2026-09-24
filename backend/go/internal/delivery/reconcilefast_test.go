@@ -59,7 +59,7 @@ func TestReconcileFastPathFallsThrough(t *testing.T) {
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery("state IN").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason", "entry_confirmed_at", "entry_entered_at"}))
 	mock.ExpectQuery("state IN").
 		WillReturnRows(sqlmock.NewRows([]string{"COUNT"}).AddRow(0))
 	mock.ExpectCommit()
@@ -96,8 +96,8 @@ func TestSATTimeoutWaitsForSaveOnlyGraceBeforeScoring(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(deadline.Add(time.Second)))
 	mock.ExpectQuery("state IN").
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}).
-			AddRow("ma-1", "mod-1", "active", 60, started, started, nil, 0, 0, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason", "entry_confirmed_at", "entry_entered_at"}).
+			AddRow("ma-1", "mod-1", "active", 60, started, started, nil, 0, 0, nil, nil, nil))
 	mock.ExpectCommit()
 	changed, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", deadline.Add(time.Second))
 	if err != nil || changed {

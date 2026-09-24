@@ -41,8 +41,8 @@ func TestTakeoverUsesLiveSessionColumns(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 			"delivery_status", "phase", "lease_epoch", "control_epoch", "response_revision",
-			"deadline_at", "closing_grace_until", "submitted_at", "final_submission", "proctor_status", "provider_key",
-		}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 1, 2, 0, nil, nil, nil, nil, "active", ""))
+			"deadline_at", "closing_grace_until", "submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
+		}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 1, 2, 0, nil, nil, nil, nil, "active", "", ""))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id=? AND revoked_at IS NULL FOR UPDATE")).
 		WillReturnRows(sqlmock.NewRows([]string{"attempt_id", "client_session_id", "revoked_at", "expires_at"}).
 			AddRow("att-1", "cs-new", nil, time.Date(2026, 9, 8, 13, 0, 0, 0, time.UTC)))

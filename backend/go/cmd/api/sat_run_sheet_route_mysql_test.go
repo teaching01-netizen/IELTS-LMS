@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoring"
 	"example.com/ielts-proctoring/internal/exams"
@@ -116,13 +117,11 @@ func TestSATSessionDetailRouteCarriesTheRuntimeClock(t *testing.T) {
 		}
 	})
 	authors := authoring.NewService(db, runner)
-	shell, err := authors.Shell(ctx, exam.ID)
-	if err != nil {
-		t.Fatalf("authoring shell: %v", err)
-	}
-	if _, err := authors.CreateQuestion(ctx, shell.Sections[0].Modules[0].ID, actor, authoring.QuestionDraft{}); err != nil {
-		t.Fatalf("create question: %v", err)
-	}
+	// Publish validation requires each module's authored count to match its
+	// blueprint target, so the draft carries one valid question per module at a
+	// matching target (makeSATDraftPublishable). The published version keeps the
+	// real SAT sections, modules and authored lengths this route reports.
+	makeSATDraftPublishable(t, ctx, db, authors, actor, exam.ID)
 	current, err := authors.Shell(ctx, exam.ID)
 	if err != nil {
 		t.Fatalf("authoring shell (reopened): %v", err)
@@ -139,9 +138,9 @@ func TestSATSessionDetailRouteCarriesTheRuntimeClock(t *testing.T) {
 	schedulesService := schedules.NewService(db, runner)
 	// The fixture clock is placed so the live route read lands mid-section on
 	// the inflated clock: started 70 minutes ago, the 96-minute snapshot still
-	// has ~26 minutes left, while the authored 64-minute clock (plus its 30 s
-	// closing grace) ran out 5.5 minutes ago. Drift between this line and the
-	// route read only moves that remaining value by milliseconds.
+	// has ~26 minutes left, while the authored 64-minute clock (plus
+	// attempts.SATSaveGrace) ran out about 6 minutes ago. Drift between this line
+	// and the route read only moves that remaining value by milliseconds.
 	anchor := time.Now().UTC().Truncate(time.Second).Add(-70 * time.Minute)
 	sch, err := schedulesService.Create(ctx, schedules.CreateRequest{
 		ExamID: exam.ID, PublishedVersionID: published.ID,
@@ -149,6 +148,13 @@ func TestSATSessionDetailRouteCarriesTheRuntimeClock(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("create schedule: %v", err)
+	}
+	// This test asserts the cohort room clock the staff panel publishes, so pin
+	// the schedule to the deployed cohort model: a newly created SAT schedule
+	// selects sat_personal_v1, whose projection carries each student's own stage
+	// instead of one room deadline.
+	if _, err := db.ExecContext(ctx, "UPDATE exam_schedules SET sat_timing_model = NULL WHERE id = ?", sch.ID); err != nil {
+		t.Fatalf("pin cohort timing model: %v", err)
 	}
 	t.Cleanup(func() {
 		for _, stmt := range []string{
@@ -212,12 +218,14 @@ func TestSATSessionDetailRouteCarriesTheRuntimeClock(t *testing.T) {
 	t.Logf("fixture: anchor=%s raw row start=%s (equal=%v)", anchor.Format(time.RFC3339), rawStart.UTC().Format(time.RFC3339), rawStart.UTC().Equal(anchor))
 
 	// Two real reconciler sweeps, both no-ops for this room: one just after the
-	// authored 64-minute boundary + 30 s closing grace (the instant the
-	// candidates' clock ran out), one 5.5 minutes later. The snapshot says 96,
+	// authored 64-minute clock ran out, one minutes later. The snapshot says 96,
 	// so section 1 stays live and no break opens — the reported symptom,
-	// reproduced at the route's data source.
+	// reproduced at the route's data source. A SAT decision is taken on the
+	// database clock rather than on the instant passed here, so the inflated row
+	// is what protects the room; the authored clock would long since have closed
+	// it.
 	reconciler := proctor.NewService(runner, db, nil, nil, nil)
-	for _, asOf := range []time.Time{anchor.Add(64*time.Minute + 30*time.Second), anchor.Add(70 * time.Minute)} {
+	for _, asOf := range []time.Time{anchor.Add(64*time.Minute + attempts.SATSaveGrace), anchor.Add(70 * time.Minute)} {
 		if _, err := reconciler.ReconcileExpiredSections(ctx, asOf, 20, "route-verify"); err != nil {
 			t.Fatalf("reconcile at +%s: %v", asOf.Sub(anchor), err)
 		}

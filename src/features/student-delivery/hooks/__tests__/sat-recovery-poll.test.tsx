@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { useSatExamController } from "../useSatExamController";
+import { deriveSatTemporalSnapshot } from "../../timing/satTemporalModel";
 
 /**
  * Integration coverage for the recovery-poll cadence and the shared clock, both
@@ -365,7 +366,7 @@ describe("SAT shared clock under a cohort pause", () => {
     expect(startSeconds).toBeGreaterThan(0);
 
     await advance(90_000);
-    expect(hook.result.current.remainingSeconds).toBe(startSeconds);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(startSeconds);
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     hook.unmount();
   });
@@ -376,7 +377,122 @@ describe("SAT shared clock under a cohort pause", () => {
     await flush();
     const startSeconds = hook.result.current.remainingSeconds;
     await advance(10_000);
-    expect(hook.result.current.remainingSeconds).toBe(startSeconds - 10);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(startSeconds - 10);
+    hook.unmount();
+  });
+
+  // P0-2 acceptance (offline/reconnect): the display is deadline-anchored, so
+  // an outage neither freezes it nor jumps it — it keeps counting from server
+  // truth while the loop is parked, and the reconnect poll reconciles on a
+  // freshly paired (serverNow, receivedAt) observation.
+  //
+  // The mock emulates the server contract (backend/go): history fields
+  // (availableAt/startedAt/deadlineAt) are stable across polls, serverNow is
+  // fresh per read, and remainingSeconds is recomputed as of the server read
+  // instant — so a reconnect poll fully commits instead of hitting the
+  // clock-only patch path.
+  it("keeps the countdown correct while offline and reconciles on reconnect", async () => {
+    const polls = recordPollTimes();
+    polls.mock(() => {
+      const asOf = Date.now();
+      const nowIso = new Date(asOf).toISOString();
+      const base = deliveryPayload();
+      const remaining = Math.max(0, Math.ceil((Date.parse(SECTION_DEADLINE) - asOf) / 1_000));
+      return {
+        ...base,
+        serverNow: nowIso,
+        timing: { ...base.timing, serverNow: nowIso, remainingSeconds: remaining },
+        attempt: {
+          ...base.attempt,
+          moduleAttempts: base.attempt.moduleAttempts.map((attempt) => ({
+            ...attempt,
+            remainingSeconds: remaining,
+          })),
+        },
+      };
+    });
+    const hook = mount(true);
+    await flush();
+    const startSeconds = hook.result.current.remainingSeconds;
+    expect(startSeconds).toBe(1_800);
+
+    // Outage spanning the +20s tick: the tick parks on `online`, no poll fires,
+    // but the deadline-anchored display still advances from server truth.
+    setBrowserOnline(false);
+    await advance(25_000);
+    expect(polls.offsets()).toEqual([0]);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(
+      startSeconds - 25,
+    );
+
+    // Reconnect: exactly one poll, and the reconciled display is still on
+    // server truth (a stale receipt pairing would jump it back to 1800, a
+    // double-drain would read 1750).
+    setBrowserOnline(true);
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    await flush();
+    expect(polls.offsets().length).toBe(2);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(
+      startSeconds - 25,
+    );
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
+    hook.unmount();
+  });
+
+  // P0-2 acceptance (resume): a 60s pause freezes the display; when the
+  // server resumes with the pause credited to both the section and module
+  // deadlines (and remainingSeconds recomputed as of the read, per the
+  // server contract), the countdown continues from the freeze point minus
+  // only the genuinely-live gap — never the full wall gap.
+  it("resumes the countdown without jumping when the server credits the pause", async () => {
+    let live = false;
+    gatewayMocks.bootstrap.mockImplementation(async () => {
+      if (!live) return deliveryPayload({ stageStatus: "paused" });
+      const asOf = Date.now();
+      const nowIso = new Date(asOf).toISOString();
+      const base = deliveryPayload({ stageStatus: "live" });
+      const creditedDeadline = new Date(Date.parse(SECTION_DEADLINE) + 60_000).toISOString();
+      const remaining = Math.max(0, Math.ceil((Date.parse(creditedDeadline) - asOf) / 1_000));
+      return {
+        ...base,
+        serverNow: nowIso,
+        timing: {
+          ...base.timing,
+          serverNow: nowIso,
+          deadlineAt: creditedDeadline,
+          remainingSeconds: remaining,
+          runtimeRevision: 2,
+        },
+        attempt: {
+          ...base.attempt,
+          moduleAttempts: base.attempt.moduleAttempts.map((attempt) => ({
+            ...attempt,
+            deadlineAt: creditedDeadline,
+            remainingSeconds: remaining,
+          })),
+        },
+      };
+    });
+    const hook = mount(true);
+    await flush();
+    const frozen = deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds;
+    expect(frozen).toBe(1_800);
+
+    // 60s of pause: polls return the paused frame, display never moves.
+    await advance(60_000);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(frozen);
+
+    // Server resumes (credited) and the next poll commits it: 20s of live
+    // time elapsed unobserved, so the display reads frozen - 20 — not
+    // frozen - 80 (uncredited) and not a stale-pairing jump.
+    live = true;
+    await advance(20_000);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(
+      frozen - 20,
+    );
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     hook.unmount();
   });
 });

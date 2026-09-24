@@ -18,6 +18,11 @@ const (
 	TimingModelLegacy        = "legacy_section_v1"
 	TimingModelCohortStage   = "cohort_stage_v2"
 	TimingModelCohortSection = "cohort_section_v3"
+	// TimingModelPersonal is the attempt-owned SAT timing model: module and
+	// break deadlines belong to each attempt. An idempotent, server-issued
+	// future start lets the browser load the next surface before its clock
+	// begins; a missed start is rearmed before the surface becomes active.
+	TimingModelPersonal = "sat_personal_v1"
 )
 
 // CohortTimingModelsSQL is the IN-list matching [IsCohortTimed]. Interpolate it
@@ -37,11 +42,18 @@ func IsCohortTimed(model string) bool {
 // delivery.reconcileCohortSectionExpiredTx: cohort_section_v3 keeps a personal
 // module clock alongside the section clock; legacy has nothing else).
 func IsPersonalClockTimed(model string) bool {
-	return model == TimingModelLegacy || model == TimingModelCohortSection
+	return model == TimingModelLegacy || model == TimingModelCohortSection || model == TimingModelPersonal
 }
 
 // PersonalClockModelsSQL is the IN-list matching [IsPersonalClockTimed].
-const PersonalClockModelsSQL = "'" + TimingModelLegacy + "', '" + TimingModelCohortSection + "'"
+const PersonalClockModelsSQL = "'" + TimingModelLegacy + "', '" + TimingModelCohortSection + "', '" + TimingModelPersonal + "'"
+
+// IsSatPersonal reports whether the model is the attempt-owned SAT timing
+// model. Null/empty (old rows) never matches: existing schedules with no
+// choice remain on the deployed cohort model.
+func IsSatPersonal(model string) bool {
+	return model == TimingModelPersonal
+}
 
 // ProviderTimingModel resolves the timing model a schedule runs under BEFORE
 // any exam_session_runtimes row exists (the pre-start projection).
@@ -60,6 +72,24 @@ func ProviderTimingModel(providerKey string) string {
 		return TimingModelCohortSection
 	}
 	return TimingModelLegacy
+}
+
+// ResolveTimingModel applies a stored schedule choice over the provider
+// default. Empty/unknown choices keep the deployed model so old rows (NULL)
+// and existing runtime rows never change meaning in flight.
+func ResolveTimingModel(providerKey, scheduleChoice string) string {
+	choice := strings.TrimSpace(scheduleChoice)
+	switch choice {
+	case TimingModelPersonal, TimingModelCohortSection, TimingModelCohortStage, TimingModelLegacy:
+		// Only SAT may select the personal model; other providers keep their
+		// default even if a stale choice names it.
+		if choice == TimingModelPersonal && !strings.EqualFold(strings.TrimSpace(providerKey), "sat") {
+			return ProviderTimingModel(providerKey)
+		}
+		return choice
+	default:
+		return ProviderTimingModel(providerKey)
+	}
 }
 
 // IsPreStartCohort reports whether a schedule with no runtime row yet is

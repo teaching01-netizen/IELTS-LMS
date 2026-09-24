@@ -1,15 +1,17 @@
 import React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { StudentAppWrapper } from '@components/student/StudentAppWrapper';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { useAuthSession } from '../../auth/api/authSession';
 import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRouteData';
-import { SatStudentSessionRoute } from '../../student-delivery/routes/SatStudentSessionRoute';
 import { SatLoadingSurface } from '../../student-delivery/api/satStateSurfaces';
 import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 import { StudentTouchSelectionDiagnosticsProvider } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
-import { clearSatResumeLocator, loadSatResumeLocator, saveSatResumeLocator } from '../../student-delivery/infrastructure/satResumeLocator';
-import { getVerifiedTerminalState } from '../domain/exam-session/terminalState';
+const SatStudentDeliveryBranch = React.lazy(() =>
+  import('./SatStudentDeliveryBranch').then((module) => ({ default: module.SatStudentDeliveryBranch })),
+);
+const IeltsStudentDeliveryBranch = React.lazy(() =>
+  import('./IeltsStudentDeliveryBranch').then((module) => ({ default: module.IeltsStudentDeliveryBranch })),
+);
 
 /**
  * Student Session Route
@@ -49,26 +51,13 @@ export function StudentSessionRoute() {
   } =
     useStudentSessionRouteData(scheduleId, studentId);
 
-  React.useEffect(() => {
-    if (providerKey !== 'sat' || !scheduleId || !attemptSnapshot?.id || !attemptSnapshot.candidateId) return;
-    const terminal = getVerifiedTerminalState({ attempt: attemptSnapshot, runtime: runtimeSnapshot });
-    if (terminal !== 'not_terminal') {
-      clearSatResumeLocator();
-      return;
-    }
-    const prior = loadSatResumeLocator();
-    saveSatResumeLocator({
-      scheduleId,
-      candidateId: attemptSnapshot.candidateId,
-      attemptId: attemptSnapshot.id,
-      ...(prior?.scheduleId === scheduleId && prior.candidateId === attemptSnapshot.candidateId && prior.accessLinkId
-        ? { accessLinkId: prior.accessLinkId }
-        : {}),
-    });
-  }, [attemptSnapshot, providerKey, runtimeSnapshot, scheduleId]);
-
   const navigateToStudentCheckIn = async () => {
-    clearSatResumeLocator();
+    try {
+      const { clearSatResumeLocator } = await import('../../student-delivery/api/satResumeLocator');
+      clearSatResumeLocator();
+    } catch {
+      // The check-in route must stay reachable if a lazy SAT utility chunk fails to load.
+    }
     try {
       await logoutAll();
     } catch {
@@ -183,20 +172,17 @@ export function StudentSessionRoute() {
     return (
       <StudentExamInteractionScopeProvider ownedTouchSelection>
         <StudentTouchSelectionDiagnosticsProvider enabled={diagnosticsEnabled}>
-          <SatStudentSessionRoute
-            scheduleId={scheduleId}
-            attemptId={attemptSnapshot.id}
-            candidateId={attemptSnapshot.candidateId}
-            attemptSnapshot={attemptSnapshot}
-            runtimeSnapshot={runtimeSnapshot}
-            liveSocketConnected={liveSocketConnected}
-            attemptUpdateToken={satAttemptUpdateToken}
-            leaseEpoch={attemptSnapshot.leaseEpoch}
-            controlEpoch={attemptSnapshot.controlEpoch}
-            bootstrapSeed={satBootstrapSeed}
-            initialIsLoading={false}
-            onExit={navigateToStudentCheckIn}
-          />
+          <React.Suspense fallback={<SatLoadingSurface kind="initial" label="Loading Digital SAT…" />}>
+            <SatStudentDeliveryBranch
+              scheduleId={scheduleId}
+              attemptSnapshot={attemptSnapshot}
+              runtimeSnapshot={runtimeSnapshot}
+              liveSocketConnected={liveSocketConnected}
+              satAttemptUpdateToken={satAttemptUpdateToken}
+              satBootstrapSeed={satBootstrapSeed}
+              onExit={navigateToStudentCheckIn}
+            />
+          </React.Suspense>
         </StudentTouchSelectionDiagnosticsProvider>
       </StudentExamInteractionScopeProvider>
     );
@@ -205,20 +191,17 @@ export function StudentSessionRoute() {
   return (
     <StudentExamInteractionScopeProvider ownedTouchSelection>
       <StudentTouchSelectionDiagnosticsProvider enabled={diagnosticsEnabled}>
-        <StudentAppWrapper
-          state={state}
-          onExit={navigateToStudentCheckIn}
-          scheduleId={scheduleId}
-          attemptSnapshot={attemptSnapshot}
-          onRuntimeRefresh={refreshRuntime}
-          runtimeSnapshot={runtimeSnapshot}
-          answerInvariantRollout={answerInvariantRollout}
-          // Cohort/runtime-backed IELTS sessions are completed by the proctor or
-          // authoritative timeout. The student can save answers but must not
-          // locally advance or terminalize the shared runtime.
-          showSubmitControls={false}
-          allowExitDuringExam={false}
-        />
+        <React.Suspense fallback={<LoadingSurface label="Loading Exam…" />}>
+          <IeltsStudentDeliveryBranch
+            state={state}
+            onExit={navigateToStudentCheckIn}
+            scheduleId={scheduleId}
+            attemptSnapshot={attemptSnapshot}
+            refreshRuntime={refreshRuntime}
+            runtimeSnapshot={runtimeSnapshot}
+            answerInvariantRollout={answerInvariantRollout}
+          />
+        </React.Suspense>
       </StudentTouchSelectionDiagnosticsProvider>
     </StudentExamInteractionScopeProvider>
   );

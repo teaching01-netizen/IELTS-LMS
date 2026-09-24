@@ -60,6 +60,8 @@ func TestTimingContractSATWithoutRuntimeIsNotStartedCohort(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectQuery("SELECT status FROM exam_session_runtimes").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT sat_timing_model FROM exam_schedules").WithArgs("schedule").
+		WillReturnRows(sqlmock.NewRows([]string{"sat_timing_model"}).AddRow(nil))
 	now := time.Now().UTC()
 	timing, status, room, err := deliverySvc(db).loadTiming(context.Background(), "schedule", "sat", now)
 	if err != nil {
@@ -93,6 +95,31 @@ func TestTimingContractSATWithoutRuntimeIsNotStartedCohort(t *testing.T) {
 	}
 	if !timing.ServerNow.Equal(now) {
 		t.Fatalf("pre-start SAT serverNow = %v, want %v", timing.ServerNow, now)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTimingContractPersonalSATWithoutRuntimeUsesScheduleChoice(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT status FROM exam_session_runtimes").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT sat_timing_model FROM exam_schedules WHERE id = ?").WithArgs("schedule").
+		WillReturnRows(sqlmock.NewRows([]string{"sat_timing_model"}).AddRow("sat_personal_v1"))
+
+	timing, status, room, err := deliverySvc(db).loadTiming(context.Background(), "schedule", "sat", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("load personal pre-start timing: %v", err)
+	}
+	if status != "not_started" || timing.TimingModel != "sat_personal_v1" || timing.Authority != "cohort_runtime" {
+		t.Fatalf("personal pre-start projection = status %q, timing %+v", status, timing)
+	}
+	if len(room) != 0 || timing.DeadlineAt != nil {
+		t.Fatalf("pre-start personal runtime must have no shared room deadline: %+v %v", room, timing.DeadlineAt)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -141,9 +168,11 @@ func TestTimingContractPreStartAgreesWithProctorProjection(t *testing.T) {
 
 	// Student bootstrap probe: no runtime row.
 	mock.ExpectQuery("SELECT status FROM exam_session_runtimes").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT sat_timing_model FROM exam_schedules").WithArgs("schedule").
+		WillReturnRows(sqlmock.NewRows([]string{"sat_timing_model"}).AddRow(nil))
 	// Proctor detail path: schedule link, then the same absent runtime row.
 	mock.ExpectQuery("SELECT id, exam_id, provider_key").WithArgs("schedule").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key"}).AddRow("schedule", "exam-1", "sat"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model"}).AddRow("schedule", "exam-1", "sat", nil))
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
 
 	ctx := context.Background()

@@ -89,9 +89,9 @@ export interface SatInteractionState {
      * True while the student has armed annotation: selecting text may raise the
      * contextual toolbar, and existing marks may open their editor.
      *
-     * False is the default and the state after leaving R&W or entering a new
-     * module. It is NOT "hide the student's work": marks render either way, it
-     * only decides whether selection produces controls.
+     * False is the default and the state after entering a new module. It is
+     * NOT "hide the student's work": marks render either way, it only decides
+     * whether selection produces controls.
      */
     modeEnabled: boolean;
     /** Anchor for contextual tools. It does not own the Selection v2 Range. */
@@ -161,8 +161,8 @@ export function createSatInteractionState(
 }
 
 /**
- * Annotation capability, independent of the armed mode: R&W advertises the
- * annotation tools, Math does not. Used both by the capability selectors and
+ * Annotation capability, independent of the armed mode: both SAT sections
+ * advertise the annotation tools. Used both by the capability selectors and
  * by the reducer's defense-in-depth check.
  */
 export function isAnnotationAllowed(toolPolicy: SatExamToolPolicy): boolean {
@@ -179,9 +179,9 @@ export function normalizeSatInteractionState(
   state: SatInteractionState,
   ctx: SatInteractionContext,
 ): SatInteractionState {
-  // Annotation data regions (stimulus/prompt) only exist in R&W; leaving the
-  // capability drops a dangling toolbar anchor AND disarms the mode, so a Math
-  // question can never inherit controls (or an anchor) from a R&W one.
+  // Leaving the annotation capability drops a dangling toolbar anchor AND
+  // disarms the mode, so a question can never inherit controls (or an anchor)
+  // from another context.
   if (!isAnnotationAllowed(ctx.toolPolicy) && (state.annotation.selectionToolsAnchor !== null || state.annotation.modeEnabled)) {
     return { ...state, annotation: { modeEnabled: false, selectionToolsAnchor: null } };
   }

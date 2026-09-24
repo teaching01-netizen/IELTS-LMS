@@ -34,6 +34,13 @@ function rwCtx(): SatInteractionContext {
   };
 }
 
+function noCapabilityCtx(): SatInteractionContext {
+  return {
+    ...mathCtx(),
+    toolPolicy: { ...mathCtx().toolPolicy, highlight: false, underline: false, notes: false },
+  };
+}
+
 /** A captured selection anchor; the exact span is irrelevant to transitions. */
 function anchor(exact: string = 'tree'): Anchor {
   return { nodeId: 'stimulus:p1', startOffset: 0, endOffset: exact.length, exact };
@@ -168,7 +175,7 @@ describe('satInteractionReducer transition contracts', () => {
   });
 
   it('arms the mode without touching the surface or inventing a selection', () => {
-    let state = satInteractionReducer(
+    const state = satInteractionReducer(
       createSatInteractionState(),
       { type: 'QUESTION_NOTES_OPENED', returnFocus: { type: 'topbar', control: 'notes' } },
       rwCtx(),
@@ -243,17 +250,26 @@ describe('satInteractionReducer transition contracts', () => {
     expect(disarmed.surface.kind).toBe('question-notes');
   });
 
-  it('refuses a selection without annotation capability and normalizes one that policy revokes', () => {
-    const captured = satInteractionReducer(
+  it('arms and captures in Math, and refuses a selection without annotation capability', () => {
+    const mathCaptured = satInteractionReducer(
       arm(createSatInteractionState(), mathCtx()),
       { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() },
       mathCtx(),
     );
-    expect(captured.annotation.selectionToolsAnchor).toBeNull();
-    expect(captured.annotation.modeEnabled).toBe(false);
+    expect(mathCaptured.annotation.selectionToolsAnchor).not.toBeNull();
+    expect(mathCaptured.annotation.modeEnabled).toBe(true);
     // Capability asserted directly: the reducer and the selectors agree.
-    expect(isAnnotationAllowed(mathCtx().toolPolicy)).toBe(false);
+    expect(isAnnotationAllowed(mathCtx().toolPolicy)).toBe(true);
     expect(isAnnotationAllowed(rwCtx().toolPolicy)).toBe(true);
+    expect(isAnnotationAllowed(noCapabilityCtx().toolPolicy)).toBe(false);
+
+    const refused = satInteractionReducer(
+      arm(createSatInteractionState(), noCapabilityCtx()),
+      { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() },
+      noCapabilityCtx(),
+    );
+    expect(refused.annotation.selectionToolsAnchor).toBeNull();
+    expect(refused.annotation.modeEnabled).toBe(false);
 
     const rwState = satInteractionReducer(
       arm(createSatInteractionState()),
@@ -262,9 +278,9 @@ describe('satInteractionReducer transition contracts', () => {
     );
     expect(rwState.annotation.selectionToolsAnchor).not.toBeNull();
     expect(rwState.annotation.modeEnabled).toBe(true);
-    // Entering a section without annotation data regions drops the anchor and
-    // disarms the mode, so a Math question can never inherit a R&W toolbar.
-    const normalized = normalizeSatInteractionState(rwState, mathCtx()).annotation;
+    // Entering a context without annotation capability drops the anchor and
+    // disarms the mode, so a toolbar can never leak across the boundary.
+    const normalized = normalizeSatInteractionState(rwState, noCapabilityCtx()).annotation;
     expect(normalized.selectionToolsAnchor).toBeNull();
     expect(normalized.modeEnabled).toBe(false);
   });
@@ -304,10 +320,11 @@ describe('satInteractionReducer transition contracts', () => {
 });
 
 describe('armed annotation intents', () => {
-  it('resolves a captured selection in R&W and refuses it in Math', () => {
+  it('resolves a captured selection in R&W and Math, and refuses it without capability', () => {
     const intent = { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() } as const;
     expect(resolveSatInteractionIntent(createSatInteractionState(), rwCtx(), intent)).toEqual(intent);
-    expect(resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), intent)).toBeNull();
+    expect(resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), intent)).toEqual(intent);
+    expect(resolveSatInteractionIntent(createSatInteractionState(), noCapabilityCtx(), intent)).toBeNull();
   });
 
   it('maps one toggle request onto the mode the machine is actually in', () => {
@@ -319,8 +336,11 @@ describe('armed annotation intents', () => {
     expect(resolveSatInteractionIntent(on, rwCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toEqual({
       type: 'ANNOTATION_MODE_DISABLED',
     });
-    // No capability, no mode: Math cannot arm annotation through any path.
-    expect(resolveSatInteractionIntent(off, mathCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toBeNull();
+    // Math arms like R&W now; only a context without capability refuses.
+    expect(resolveSatInteractionIntent(off, mathCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toEqual({
+      type: 'ANNOTATION_MODE_ENABLED',
+    });
+    expect(resolveSatInteractionIntent(off, noCapabilityCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toBeNull();
   });
 
   it('dismisses only the toolbar anchor, then accepts recapture and actual range clearing', () => {

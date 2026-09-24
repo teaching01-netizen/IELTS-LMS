@@ -15,7 +15,7 @@ export interface SatAnnotationView {
    * False in read-only contexts (disabled exam, preview shells): marks render
    * as decoration instead of controls.
    *
-   * This is the CAPABILITY (R&W, unblocked, response wired). It is deliberately
+    * This is the CAPABILITY (section policy, unblocked, response wired). It is deliberately
    * not the armed mode: marks and their margin dots are the student's work and
    * stay on screen whether or not annotation is armed.
    */
@@ -34,6 +34,8 @@ export interface SatAnnotationView {
   openEditor: (annotation: SatTextAnnotation) => void;
   /** A completed text selection, reported upward for the toolbar. */
   onSelectionCaptured?: ((anchor: SatTextAnchor) => void) | undefined;
+  /** True when the anchor exactly matches a saved mark (bypasses the 200-cap). */
+  isExistingAnchor?: ((anchor: SatTextAnchor) => boolean) | undefined;
   /** Hide contextual tools while the Selection v2 range stays selected. */
   onSelectionToolsDismissed?: (() => void) | undefined;
   /** The visual Selection v2 range itself ended. */

@@ -259,7 +259,7 @@ func TestAssembleBootstrapPublishesTheLateArrivalsEntryWindow(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT status FROM exam_session_runtimes")).WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, exam_id, provider_key")).WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key"}).AddRow("sched-1", "exam-1", "sat"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model"}).AddRow("sched-1", "exam-1", "sat", nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id")).WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "schedule_id", "exam_id", "provider_key", "status",

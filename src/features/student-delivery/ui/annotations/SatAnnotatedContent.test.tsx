@@ -4,6 +4,7 @@ import { createSatTextAnnotation, emptySatAnnotations, SAT_ANNOTATION_LIMIT } fr
 import { clearSatGestureOrigin, clearSatSelectionGesture, isSatSelectionGestureEcho, markSatPointerDown } from './satSelectionDragGuard';
 import { SatAnnotatedContent } from './SatAnnotatedContent';
 import { SatAnnotationViewContext, type SatAnnotationView } from './SatAnnotationViewContext';
+import { captureSatTextRange } from './satTextSelection';
 import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 
 const content = (text = 'A tree grows.') => ({ version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text }] });
@@ -92,6 +93,23 @@ function selectText(container: HTMLElement, from: number, to: number) {
   window.getSelection()!.removeAllRanges();
   window.getSelection()!.addRange(range);
   fireEvent.pointerUp(container.querySelector('[data-sat-annotation-region]')!);
+}
+
+/** Select `value` wherever its text node currently lives (robust to mark splits). */
+function selectValue(container: HTMLElement, value: string) {
+  const root = container.querySelector('[data-sat-annotation-region]')!;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node: Node | null = walker.nextNode();
+  while (node && !(node.nodeValue ?? '').includes(value)) node = walker.nextNode();
+  if (!node) throw new Error(`Could not find text: ${value}`);
+  const textNode = node as Text;
+  const start = textNode.data.indexOf(value);
+  const range = document.createRange();
+  range.setStart(textNode, start);
+  range.setEnd(textNode, start + value.length);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  fireEvent.pointerUp(root);
 }
 
 describe('SAT annotation rendering', () => {
@@ -233,6 +251,91 @@ describe('SAT annotation rendering', () => {
       </SatAnnotationViewContext.Provider>,
     );
     expect(container.querySelector('[data-sat-highlight]')).toHaveTextContent('tree');
+  });
+
+  it('anchors Math prose beside inline equations as independent stable runs', () => {
+    const mixedContent = {
+      version: 2 as const,
+      nodes: [],
+      document: {
+        type: 'doc' as const,
+        content: [{
+          type: 'paragraph' as const,
+          attrs: { id: 'mixed-prompt' },
+          content: [
+            { type: 'text' as const, text: 'The graph of ' },
+            { type: 'inlineMath' as const, attrs: { latex: 'x^2' } },
+            { type: 'text' as const, text: ' has its minimum at which point?' },
+          ],
+        }],
+      },
+    };
+    const onSelectionCaptured = vi.fn();
+    const initialView = view({ onSelectionCaptured });
+    const { container, rerender } = render(
+      <StudentExamInteractionScopeProvider ownedTouchSelection={false}>
+        <SatAnnotationViewContext.Provider value={initialView}>
+          <SatAnnotatedContent content={mixedContent} annotations={emptySatAnnotations()} region="prompt" enabled />
+        </SatAnnotationViewContext.Provider>
+      </StudentExamInteractionScopeProvider>,
+    );
+    const roots = [...container.querySelectorAll<HTMLElement>('[data-content-text-node]')];
+    expect(roots.map((root) => root.dataset['contentTextNode'])).toEqual([
+      'mixed-prompt::text-run-0',
+      'mixed-prompt::text-run-2',
+    ]);
+    expect(container.querySelector('[role="math"]')?.closest('[data-content-text-node]')).toBeNull();
+
+    const phrase = 'minimum';
+    const phraseWalker = document.createTreeWalker(roots[1]!, NodeFilter.SHOW_TEXT);
+    let afterEquationText: Node | null = phraseWalker.nextNode();
+    while (afterEquationText && !(afterEquationText.nodeValue ?? '').includes(phrase)) afterEquationText = phraseWalker.nextNode();
+    expect(afterEquationText).not.toBeNull();
+    const phraseText = afterEquationText as Text;
+    const start = phraseText.data.indexOf(phrase);
+    const range = document.createRange();
+    range.setStart(phraseText, start);
+    range.setEnd(phraseText, start + phrase.length);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.pointerUp(container.querySelector('[data-sat-annotation-region="prompt"]')!);
+    const captured = onSelectionCaptured.mock.calls[0]?.[0];
+    expect(captured).toMatchObject({
+      nodeId: 'prompt:mixed-prompt::text-run-2',
+      exact: phrase,
+      startOffset: start,
+    });
+
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [createSatTextAnnotation({
+      kind: 'highlight',
+      nodeId: captured.nodeId,
+      startOffset: captured.startOffset,
+      endOffset: captured.endOffset,
+      exact: captured.exact,
+    })];
+    rerender(
+      <StudentExamInteractionScopeProvider ownedTouchSelection={false}>
+        <SatAnnotationViewContext.Provider value={view()}>
+          <SatAnnotatedContent content={mixedContent} annotations={annotations} region="prompt" enabled />
+        </SatAnnotationViewContext.Provider>
+      </StudentExamInteractionScopeProvider>,
+    );
+    expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('minimum');
+
+    const refreshedRoots = [...container.querySelectorAll<HTMLElement>('[data-content-text-node]')];
+    const crossEquation = document.createRange();
+    const firstTextWalker = document.createTreeWalker(refreshedRoots[0]!, NodeFilter.SHOW_TEXT);
+    const beforeEquation = firstTextWalker.nextNode()!;
+    const lastTextWalker = document.createTreeWalker(refreshedRoots[1]!, NodeFilter.SHOW_TEXT);
+    const afterEquation = lastTextWalker.nextNode()!;
+    crossEquation.setStart(beforeEquation, 0);
+    crossEquation.setEnd(afterEquation, 5);
+    expect(captureSatTextRange(
+      container.querySelector<HTMLElement>('[data-sat-annotation-region="prompt"]')!,
+      'prompt',
+      crossEquation,
+    )).toBeNull();
   });
 
   it('paints each ink with its own token and underlines with the text token', () => {
@@ -754,5 +857,105 @@ describe('SAT owned touch selection', () => {
     expect(onSelectionCaptured).toHaveBeenCalledWith(expect.objectContaining({ exact: 'tree' }));
     expect(container.querySelector('[data-sat-selection-protected="true"]')).toHaveAttribute('data-student-selection-owner', 'app');
     expect(window.getSelection()?.rangeCount).toBe(0);
+  });
+
+  it('still reports an exact saved span at the annotation cap', () => {
+    const exact = createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' });
+    const annotations = {
+      version: 2 as const,
+      legacyQuestionNote: '',
+      annotations: [
+        exact,
+        ...Array.from({ length: SAT_ANNOTATION_LIMIT - 1 }, () =>
+          createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 0, endOffset: 1, exact: 'A' }),
+        ),
+      ],
+    };
+    const onSelectionCaptured = vi.fn();
+    const onLimitReached = vi.fn();
+    const isExistingAnchor = (anchor: { nodeId: string; startOffset: number; endOffset: number; exact: string }) =>
+      anchor.nodeId === exact.anchor.nodeId &&
+      anchor.startOffset === exact.anchor.startOffset &&
+      anchor.endOffset === exact.anchor.endOffset &&
+      anchor.exact === exact.anchor.exact;
+    const { container } = renderContent(
+      { annotations, onLimitReached },
+      view({ onSelectionCaptured, isExistingAnchor }),
+    );
+    selectValue(container, 'tree');
+    expect(onSelectionCaptured).toHaveBeenCalledWith(expect.objectContaining({ exact: 'tree' }));
+    expect(onLimitReached).not.toHaveBeenCalled();
+  });
+
+  it('still rejects a new span at the annotation cap', () => {
+    const exact = createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' });
+    const annotations = {
+      version: 2 as const,
+      legacyQuestionNote: '',
+      annotations: [
+        exact,
+        ...Array.from({ length: SAT_ANNOTATION_LIMIT - 1 }, () =>
+          createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 0, endOffset: 1, exact: 'A' }),
+        ),
+      ],
+    };
+    const onSelectionCaptured = vi.fn();
+    const onLimitReached = vi.fn();
+    const { container } = renderContent(
+      { annotations, onLimitReached },
+      view({ onSelectionCaptured, isExistingAnchor: () => false }),
+    );
+    selectValue(container, 'grows');
+    expect(onSelectionCaptured).not.toHaveBeenCalled();
+    expect(onLimitReached).toHaveBeenCalledOnce();
+  });
+
+  it('keeps direct mark taps working at the annotation cap', () => {
+    const exact = createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' });
+    const annotations = {
+      version: 2 as const,
+      legacyQuestionNote: '',
+      annotations: [
+        exact,
+        ...Array.from({ length: SAT_ANNOTATION_LIMIT - 1 }, () =>
+          createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 0, endOffset: 1, exact: 'A' }),
+        ),
+      ],
+    };
+    const openEditor = vi.fn();
+    const { container } = render(
+      <StudentExamInteractionScopeProvider ownedTouchSelection={false}>
+        <SatAnnotationViewContext.Provider value={view({ openEditor, isExistingAnchor: () => true })}>
+          <SatAnnotatedContent content={content()} annotations={annotations} region="stimulus" enabled />
+        </SatAnnotationViewContext.Provider>
+      </StudentExamInteractionScopeProvider>,
+    );
+    const mark = container.querySelector<HTMLElement>('[data-sat-highlight="true"]')!;
+    fireEvent.click(mark);
+    expect(openEditor).toHaveBeenCalled();
+  });
+
+  it('opens the editor through the pointer path after the editor closed', () => {
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' })];
+    const openEditor = vi.fn();
+    const onSelectionCaptured = vi.fn();
+    const { container } = render(
+      <StudentExamInteractionScopeProvider ownedTouchSelection={false}>
+        <SatAnnotationViewContext.Provider value={view({ openEditor, onSelectionCaptured })}>
+          <SatAnnotatedContent content={content()} annotations={annotations} region="stimulus" enabled />
+        </SatAnnotationViewContext.Provider>
+      </StudentExamInteractionScopeProvider>,
+    );
+    const mark = container.querySelector<HTMLElement>('[data-sat-highlight="true"]')!;
+    markSatPointerDown(10, 200);
+    fireEvent.pointerDown(mark, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 200 });
+    fireEvent.pointerUp(mark, { pointerType: 'touch', pointerId: 1, clientX: 10, clientY: 200 });
+    fireEvent.click(mark, { clientX: 11, clientY: 201 });
+    expect(openEditor).toHaveBeenCalledWith(annotations.annotations[0]);
+
+    // A dragged gesture still reports a new selection rather than opening the mark.
+    selectValue(container, 'grows');
+    expect(onSelectionCaptured).toHaveBeenCalledWith(expect.objectContaining({ exact: 'grows' }));
   });
 });

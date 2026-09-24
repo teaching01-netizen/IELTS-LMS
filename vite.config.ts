@@ -43,6 +43,10 @@ export default defineConfig(({mode}) => {
       },
     },
     build: {
+      // Emits dist/.vite/manifest.json for the student provider bundle
+      // isolation gate (`bun run test:student-bundle`). Tiny JSON artifact;
+      // the bundle-size analysis reads dist/index.html and is unaffected.
+      manifest: true,
       rollupOptions: {
         output: {},
       },

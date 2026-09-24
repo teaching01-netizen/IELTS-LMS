@@ -6,8 +6,8 @@
  * pending answers, and request an authoritative refresh; it never closes a
  * module itself.
  *
- * Everything here is pure: the hook owns the ticking `now`, the authoritative
- * deadline hook, and the payload reads; this module owns the rules.
+ * Everything here is pure: the temporal runtime reads the shared clock, the
+ * controller owns payload facts and boundary effects, and this module owns the rules.
  */
 
 import type { AssessmentModuleAttemptSnapshot } from "../contracts/assessmentDelivery";
@@ -15,6 +15,7 @@ import { drainSinceSnapshot } from "../domain/satTiming";
 import {
   isCohortTimingModel,
   isSectionKeyedCohortModel,
+  isSatPersonalTimingModel,
 } from "../../../types/domain";
 
 /**
@@ -140,6 +141,15 @@ export function satCountdown(input: {
   personalSeconds: number | null;
   authoritativeSeconds: number;
 }): SatCountdown {
+  if (isSatPersonalTimingModel(input.timingModel)) {
+    // Personal SAT stages belong to this attempt. The cohort section clock
+    // remains a run-sheet projection only; it cannot cap or advance this
+    // student's module/break deadline.
+    return {
+      displaySeconds: input.personalSeconds ?? 0,
+      expirySeconds: input.personalSeconds ?? 0,
+    };
+  }
   if (!isCohortTimingModel(input.timingModel)) {
     // The legacy model has no shared clock at all; a missing attempt reads as
     // no time, exactly as it did before this rule existed.

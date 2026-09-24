@@ -189,6 +189,15 @@ describe('satRunnerReducer', () => {
     });
   });
 
+  it('keeps a Math annotation across question navigation', () => {
+    const module = startedMath();
+    const annotations = { version: 2 as const, annotations: [], legacyQuestionNote: 'Check this step' };
+    const annotated = satRunnerReducer(module, { type: 'setAnnotations', questionId: 'q1', annotations });
+    const away = satRunnerReducer(annotated, { type: 'selectQuestion', questionIndex: 1 });
+    const back = satRunnerReducer(away, { type: 'selectQuestion', questionIndex: 0 });
+    expect(back.phase === 'module' ? back.responses.q1?.annotations : undefined).toEqual(annotations);
+  });
+
   it('restores an eliminated choice when it is selected (no selected+eliminated contradiction)', () => {
     const module = startedMath();
     const eliminated = satRunnerReducer(module, { type: 'toggleEliminatedOption', questionId: 'q1', optionId: 'A' });
