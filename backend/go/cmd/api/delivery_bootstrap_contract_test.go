@@ -33,7 +33,7 @@ func TestDeliveryBootstrapNeverConditionalOnExamVersion(t *testing.T) {
 	var body string
 	ast.Inspect(src, func(n ast.Node) bool {
 		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "deliveryBootstrapInner" || fn.Body == nil {
+		if !ok || fn.Name.Name != "deliveryBootstrapInnerMode" || fn.Body == nil {
 			return true
 		}
 		start := fset.Position(fn.Body.Pos()).Offset
@@ -42,7 +42,7 @@ func TestDeliveryBootstrapNeverConditionalOnExamVersion(t *testing.T) {
 		return false
 	})
 	if body == "" {
-		t.Fatal("deliveryBootstrapInner not found in handlers_delivery.go")
+		t.Fatal("deliveryBootstrapInnerMode not found in handlers_delivery.go")
 	}
 
 	for _, forbidden := range []string{"writeETagOrNotModified", "VersionETag", "VersionTag", "If-None-Match"} {

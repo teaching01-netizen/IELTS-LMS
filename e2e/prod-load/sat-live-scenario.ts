@@ -10,6 +10,40 @@ export interface SatScenarioContext {
   startTimeoutMs: number;
 }
 
+export interface SatAnswerableFrame {
+  moduleId: string;
+  latencyMs: number;
+}
+
+/** Install before navigation so the first module's event cannot be missed. */
+export async function satCaptureAnswerableFrames(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const frames: { moduleId: string; latencyMs: number }[] = [];
+    Object.defineProperty(window, '__satAnswerableFrames', { value: frames });
+    window.addEventListener('student-observability-metric', (event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.name !== 'sat_first_answerable_frame_at') return;
+      if (typeof detail.moduleId !== 'string' || typeof detail.authorizedAt !== 'number') return;
+      const waitForControl = () => {
+        const shell = document.querySelector('[data-testid="sat-exam-shell"]');
+        const controls = shell?.querySelectorAll<HTMLInputElement>('input[type="radio"], input[type="text"]');
+        const answerable = Array.from(controls ?? []).some((input) => !input.disabled && input.getClientRects().length > 0);
+        if (!answerable) {
+          requestAnimationFrame(waitForControl);
+          return;
+        }
+        frames.push({ moduleId: detail.moduleId, latencyMs: Date.now() - detail.authorizedAt });
+      };
+      requestAnimationFrame(waitForControl);
+    });
+  });
+}
+
+export async function satReadAnswerableFrames(page: Page): Promise<SatAnswerableFrame[]> {
+  return page.evaluate(() =>
+    (window as Window & { __satAnswerableFrames?: SatAnswerableFrame[] }).__satAnswerableFrames ?? []);
+}
+
 function studentCodeFor(user: VirtualUser): string {
   return (user.candidateId ?? user.userId).trim();
 }
@@ -123,7 +157,7 @@ export async function satJoinViaAccessLink(page: Page, user: VirtualUser, joinUr
   throw new Error(`SAT_JOIN_NOT_ADMITTED: still on join page after submit. url=${page.url()} text=${tail}`);
 }
 
-export async function satWaitForExamLive(page: Page, ctx: SatScenarioContext): Promise<void> {
+export async function satWaitForExamLive(page: Page, ctx: SatScenarioContext, onRecoveryScreen?: () => void): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < ctx.startTimeoutMs) {
     const shell = page.getByTestId('sat-exam-shell').first();
@@ -134,6 +168,10 @@ export async function satWaitForExamLive(page: Page, ctx: SatScenarioContext): P
 
     const scheduledBreak = page.getByTestId('sat-scheduled-break').first();
     if (await scheduledBreak.isVisible().catch(() => false)) return;
+
+    if (await page.getByRole('button', { name: /retry now/i }).first().isVisible().catch(() => false)) {
+      onRecoveryScreen?.();
+    }
 
     // Pre-start lobby: waiting on proctor, keep polling.
     await page.waitForTimeout(ctx.startPollIntervalMs);
@@ -152,6 +190,7 @@ export async function satAnswerUntilComplete(
   user: VirtualUser,
   ctx: SatScenarioContext,
   onProgress?: (answered: number) => void,
+  onRecoveryScreen?: () => void,
 ): Promise<{ answered: number }> {
   const started = Date.now();
   let answered = 0;
@@ -191,6 +230,7 @@ export async function satAnswerUntilComplete(
     if (await handoff.isVisible().catch(() => false)) {
       const retry = page.getByRole('button', { name: /retry now/i }).first();
       if (await retry.isVisible().catch(() => false)) {
+        onRecoveryScreen?.();
         await retry.click().catch(() => {});
       }
       await page.waitForTimeout(1500);
@@ -237,7 +277,13 @@ export async function satAnswerUntilComplete(
           picked = true;
           break;
         }
-        await radio.check().catch(() => radio.click({ force: true }).catch(() => {}));
+        // SAT radios are visually hidden (`sr-only`) inside their visible labels.
+        // Clicking the label follows the same interaction path as a student and
+        // avoids Playwright treating the clipped input as the target.
+        const choiceLabel = radio.locator('xpath=ancestor::label[1]');
+        await choiceLabel.click().catch(async () => {
+          await radio.check({ force: true }).catch(() => {});
+        });
         const nowChecked = await radio.isChecked().catch(() => false);
         if (nowChecked) {
           answered += 1;

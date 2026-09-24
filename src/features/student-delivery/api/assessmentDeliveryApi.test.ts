@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../infrastructure/assessmentDeliveryBackendGateway', () => ({
+  backendGet: vi.fn(),
   backendPatch: vi.fn(),
   backendPost: vi.fn(),
   // Shared-owner fake: mirrors `ielts-student-client-session:v1:` keying so

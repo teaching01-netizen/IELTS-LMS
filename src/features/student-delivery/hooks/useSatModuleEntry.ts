@@ -25,8 +25,15 @@ export interface UseSatModuleEntryOptions {
   enabled: boolean;
   /** Dedupe key for this entry (attempt + module), or null when there is none. */
   entryKey: string | null;
-  /** Starts the pending module (the controller's startPendingModule). */
-  startModule: () => Promise<SatEntryOutcome>;
+  /**
+   * Starts the pending module (the controller's startPendingModule).
+   *
+   * `recover` is set when this is a retry of a target the client already failed
+   * to enter, so the controller consults the authoritative entry state before it
+   * replays the transition command: a committed entry whose response was lost
+   * must be discovered, not re-executed.
+   */
+  startModule: (options?: { recover?: boolean }) => Promise<SatEntryOutcome>;
 }
 
 /**
@@ -47,6 +54,9 @@ export function useSatModuleEntry({
   const attemptRef = useRef<SatEntryAttempt | null>(null);
   const retryTimerRef = useRef<number | null>(null);
   const generationRef = useRef(0);
+  // Set by the manual retry action, which clears the attempt record: the next
+  // entry for the same target is a recovery, not a first attempt.
+  const manualRetryRef = useRef(false);
   const [recoverable, setRecoverable] = useState(false);
   const [retrySequence, setRetrySequence] = useState(0);
 
@@ -73,7 +83,14 @@ export function useSatModuleEntry({
     retryTimerRef.current = null;
     // A different target re-arms recovery from scratch; a retry of the same
     // target keeps the button available while it is in flight.
-    const sameTarget = attemptRef.current?.key === entryKey;
+    const previous = attemptRef.current;
+    const sameTarget = previous?.key === entryKey;
+    // A retry of a target that has not opened yet is a recovery: the client
+    // already tried and failed, so it asks the server what committed before it
+    // replays the command. The first attempt of a target is never a recovery.
+    const recovering =
+      manualRetryRef.current || (sameTarget && previous?.succeededAt === null);
+    manualRetryRef.current = false;
     attemptRef.current = {
       key: entryKey,
       inFlight: true,
@@ -82,7 +99,7 @@ export function useSatModuleEntry({
     };
     const generation = generationRef.current;
     if (!sameTarget) setRecoverable(false);
-    void startModule().catch(() => "failed" as const).then((outcome) => {
+    void startModule({ recover: recovering }).catch(() => "failed" as const).then((outcome) => {
       if (generationRef.current !== generation) return;
       const record = attemptRef.current;
       if (!record || record.key !== entryKey) return;
@@ -92,7 +109,8 @@ export function useSatModuleEntry({
       // entry was in flight. Recheck that target after the record settles.
       setRetrySequence((sequence) => sequence + 1);
       if (outcome !== "opened") {
-        const delay = Math.max(0, record.attemptedAt + SAT_ENTRY_RETRY_WINDOW_MS - Date.now());
+        const delay = Math.max(0, record.attemptedAt + SAT_ENTRY_RETRY_WINDOW_MS - Date.now()) +
+          Math.floor(Math.random() * 500);
         retryTimerRef.current = window.setTimeout(() => {
           retryTimerRef.current = null;
           setRetrySequence((sequence) => sequence + 1);
@@ -106,6 +124,8 @@ export function useSatModuleEntry({
     if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
     retryTimerRef.current = null;
     attemptRef.current = null;
+    // "Retry now" is the manual recovery path: reconcile with the server first.
+    manualRetryRef.current = true;
     setRecoverable(false);
     setRetrySequence((sequence) => sequence + 1);
   }, []);

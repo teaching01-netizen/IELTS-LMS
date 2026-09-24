@@ -1,4 +1,4 @@
-export { backendPatch, backendPost, hasBackendStatusCode } from '@services/backendBridge';
+export { backendGet, backendPatch, backendPost, hasBackendStatusCode } from '@services/backendBridge';
 export {
   ensureClientSessionIdForStudentKey,
   satWriterStudentKey,

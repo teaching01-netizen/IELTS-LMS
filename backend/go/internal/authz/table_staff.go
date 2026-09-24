@@ -69,10 +69,12 @@ func init() {
 		"GET /versions/{versionID}":      {MinRoles: readStaff},
 		// assessment-delivery: attempt bearer credential (handler).
 		"POST /schedules/{scheduleID}/bootstrap":                   {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /schedules/{scheduleID}/state":                        {Bearer: true, Scope: ScopeAttemptOwner},
 		"PATCH /schedules/{scheduleID}/responses/{examQuestionID}": {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/start":               {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/enter":               {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/visible":             {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state": {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/breaks/{breakID}/start":      {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/breaks/enter":                {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/breaks/visible":              {Bearer: true, Scope: ScopeAttemptOwner},

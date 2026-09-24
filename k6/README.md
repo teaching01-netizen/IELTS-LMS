@@ -10,6 +10,53 @@ Important limits:
 
 ## Scenarios
 
+### SAT personal module entry, 2,000 candidates
+
+`k6/sat-module-entry-2000.js` exercises one synchronized module entry per
+candidate, including Start, Enter, visibility ACK, and the authoritative
+entry-state read. It checks branch uniqueness/correctness in adaptive mode and
+simulates a lost Start or Enter response in the recovery modes. Give each VU a
+different bearer credential in a local JSON array:
+
+```json
+[{"attemptId":"attempt-1","token":"bearer-token-1","expectedBranch":"higher","expectedModuleId":"module-higher-id","otherModuleId":"module-lower-id","expectedResponseCount":27}]
+```
+
+Use a fresh SAT personal schedule and 2,000 pre-admitted attempts for each run.
+For adaptive mode, prepare those attempts at the end of the preceding personal
+module; `K6_WAVE_AT_MS` must equal the expected expiry time in Unix milliseconds.
+The selected and alternate module IDs, expected branch, and number of saved
+Module 1 responses are required for every adaptive credential. Adaptive VUs
+poll the entry-state row until the worker creates the branch, then perform one
+Bootstrap to verify branch and response integrity. Run each mode on a
+fresh cohort, since entry changes attempt state.
+
+```bash
+k6 run \
+  -e K6_BASE_URL=https://staging.example.com \
+  -e K6_SCHEDULE_ID=<schedule-id> \
+  -e K6_ATTEMPT_TOKENS_PATH=/absolute/path/to/attempt-creds.json \
+  -e K6_VUS=2000 \
+  -e K6_MODE=initial \
+  -e K6_WAVE_DELAY_SECONDS=120 \
+  k6/sat-module-entry-2000.js
+```
+
+Set `K6_MODE` to `adaptive`, `lost-start`, or `lost-enter` for the other gates.
+This is a controlled staging load test that mutates attempts. The k6 latency
+metric ends at the visibility ACK and is a protocol proxy. To gate the actual
+first answerable browser frame, run `e2e:live-sat-runner` with
+`SAT_ASSERT_ENTRY_FRAME=true` and inspect `answerableFrameP95Ms`,
+`answerableFrameP99Ms`, and `answerableFrameMaxMs` in its summary. The browser
+runner collects each module's frame event, including adaptive modules.
+
+Before the 2,000 candidate run, set `SHED_MODE=exam` and `VERSION_CACHE=on` and size
+`DB_POOL_MAX_API`, `DB_POOL_MAX_WORKER`, and `DB_POOL_MAX_IDLE` from the actual
+database connection budget. Reserve worker capacity so expired personal
+modules can finalize without competing with entry writes. Record the deployed
+settings and database saturation alongside the k6 output; a local `k6 inspect`
+only checks script configuration and does not establish the latency gate.
+
 - `k6/prod-start-exam-200.js`
   - 200 students in the waiting room
   - measures propagation from `runtime.actualStartAt` to student visibility of `live`

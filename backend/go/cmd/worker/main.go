@@ -90,6 +90,7 @@ type worker struct {
 // substitute a fake.
 type deliveryService interface {
 	ReconcileTimeouts(ctx context.Context, asOf time.Time, batchSize int64) (int64, error)
+	ReconcilePersonalTimeouts(ctx context.Context, asOf time.Time, batchSize int64) (int64, error)
 	ReconcileAttemptTimeout(ctx context.Context, scheduleID, attemptID string, asOf time.Time) (bool, error)
 }
 
@@ -193,8 +194,9 @@ func main() {
 	slow := time.NewTicker(slowEvery)
 	defer slow.Stop()
 	go w.runTimeoutReconcileLoop(ctx)
+	go w.runPersonalTimeoutReconcileLoop(ctx)
 	if timeoutOnly {
-		log.Printf("worker: starting SAT-timeout-only mode interval=%s", satTimeoutReconcileInterval)
+		log.Printf("worker: starting SAT-timeout-only mode general_interval=%s personal_interval=1s", satTimeoutReconcileInterval)
 		<-ctx.Done()
 		log.Printf("worker: SAT-timeout-only mode stopped")
 		return
@@ -225,6 +227,26 @@ func (w *worker) runTimeoutReconcileLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			w.runTimeoutReconcileCycle(ctx, time.Now().UTC())
+		}
+	}
+}
+
+func (w *worker) runPersonalTimeoutReconcileLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case at := <-ticker.C:
+			started := time.Now()
+			n, err := w.delivery.ReconcilePersonalTimeouts(ctx, at.UTC(), maintenance.SATRepairBatch)
+			if err != nil {
+				log.Printf("worker: SATPersonalTimeoutReconcile failed error=%v duration=%s", err, time.Since(started))
+				telemetry.IncCounter(telemetry.MJobFailures, "job", "sat_personal_timeout_reconcile")
+			} else if n > 0 {
+				log.Printf("worker: SATPersonalTimeoutReconcile finalized=%d duration=%s", n, time.Since(started))
+			}
 		}
 	}
 }

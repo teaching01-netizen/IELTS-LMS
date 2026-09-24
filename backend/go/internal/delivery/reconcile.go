@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"sync"
 	"time"
 
 	"example.com/ielts-proctoring/internal/attempts"
@@ -57,8 +58,10 @@ type reconcileStage struct {
 
 // ReconcileAttemptTimeout finalizes modules whose authoritative window elapsed
 // while still open (Rust reconcile_attempt_timeout). Lock order:
-// student_attempts -> exam_session_runtimes -> module attempts -> runtime
-// sections, matching the schedule-wide proctor command order. Missing attempt
+// student_attempts -> exam_session_runtimes (shared read) -> module attempts ->
+// runtime sections, matching the schedule-wide proctor command order. The
+// shared runtime lock lets independent candidates finalize concurrently;
+// proctor commands first lock the attempts before changing the runtime. Missing attempt
 // or runtime commits a no-op (false); each expired module is finalized via
 // finalizeModuleTx("time_expired"); when the last open module is finalized,
 // the completer runs CompleteAssessment outside the tx.
@@ -96,7 +99,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		var runtimeID, runtimeStatus, timingModel string
 		var currentStageKey sql.NullString
 		if err := t.QueryRowContext(ctx,
-			"SELECT id, status, timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+			"SELECT id, status, timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE",
 			scheduleID).Scan(&runtimeID, &runtimeStatus, &timingModel, &currentStageKey); err != nil {
 			if err == sql.ErrNoRows {
 				return nil
@@ -287,6 +290,13 @@ func (s *Service) ReconcileTimeouts(ctx context.Context, asOf time.Time, batchSi
 	if batchSize < 1 {
 		batchSize = 250
 	}
+	// Personal deadlines can align across a whole cohort. Drain their due rows
+	// before the general repair sweep, which deliberately looks at only one
+	// maintenance batch and otherwise revisits the oldest attempts every tick.
+	personalSeen, personalChanged, err := s.reconcileExpiredPersonalModules(ctx, asOf, batchSize)
+	if err != nil || personalSeen > 0 {
+		return personalChanged, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT a.id, a.schedule_id
 		FROM student_attempts a
@@ -327,6 +337,118 @@ func (s *Service) ReconcileTimeouts(ctx context.Context, asOf time.Time, batchSi
 		}
 	}
 	return changed, nil
+}
+
+const personalTimeoutSweepLimit = 2500
+const personalTimeoutWorkers = 8
+
+// ReconcilePersonalTimeouts is the short-cadence worker lane for synchronized
+// personal deadlines. The general repair sweep can remain on its slower
+// maintenance cadence without making branch creation wait for that interval.
+func (s *Service) ReconcilePersonalTimeouts(ctx context.Context, asOf time.Time, batchSize int64) (int64, error) {
+	if s.db == nil {
+		return 0, nil
+	}
+	_, changed, err := s.reconcileExpiredPersonalModules(ctx, asOf, batchSize)
+	return changed, err
+}
+
+// reconcileExpiredPersonalModules uses an indexed started-at scan, then the
+// authoritative reconciler checks every candidate inside its normal lock-order
+// transaction. Keyset paging prevents the same save-grace row from occupying
+// every batch of a synchronized transition.
+func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time.Time, batchSize int64) (int64, int64, error) {
+	type candidate struct{ moduleID, attemptID, scheduleID string }
+	pageSize := batchSize
+	if pageSize > 250 {
+		pageSize = 250
+	}
+	if pageSize < 1 {
+		pageSize = 250
+	}
+	var candidates []candidate
+	cursor := ""
+	// A SAT module remains writable for the three-second save grace. Scanning
+	// before that boundary only locks thousands of attempts that cannot yet
+	// finalize and delays the next useful sweep.
+	closingAsOf := asOf.UTC().Add(-attempts.SATSaveGrace)
+	for len(candidates) < personalTimeoutSweepLimit {
+		limit := pageSize
+		if left := personalTimeoutSweepLimit - len(candidates); int64(left) < limit {
+			limit = int64(left)
+		}
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT m.id, a.id, a.schedule_id
+			FROM assessment_module_attempts m
+			JOIN student_attempts a ON a.id = m.attempt_id
+			JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
+			WHERE m.state IN ('active', 'review') AND m.paused_at IS NULL
+			  AND m.started_at IS NOT NULL AND m.started_at <= ?
+			  AND (m.entry_confirmed_at IS NULL OR m.entry_entered_at IS NOT NULL)
+			  AND DATE_ADD(m.started_at, INTERVAL (m.allocated_seconds + m.extension_seconds + m.accumulated_paused_seconds) SECOND) <= ?
+			  AND r.timing_model = 'sat_personal_v1'
+			  AND a.submitted_at IS NULL
+			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			  AND m.id > ?
+			ORDER BY m.id LIMIT ?`, closingAsOf, closingAsOf, cursor, limit)
+		if err != nil {
+			return 0, 0, err
+		}
+		count := 0
+		for rows.Next() {
+			var c candidate
+			if err := rows.Scan(&c.moduleID, &c.attemptID, &c.scheduleID); err != nil {
+				rows.Close()
+				return 0, 0, err
+			}
+			cursor = c.moduleID
+			candidates = append(candidates, c)
+			count++
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return 0, 0, err
+		}
+		rows.Close()
+		if count < int(limit) {
+			break
+		}
+	}
+	if len(candidates) == 0 {
+		return 0, 0, nil
+	}
+	jobs := make(chan candidate)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var changed int64
+	var firstErr error
+	workers := personalTimeoutWorkers
+	if workers > len(candidates) {
+		workers = len(candidates)
+	}
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for c := range jobs {
+				ok, err := s.ReconcileAttemptTimeout(ctx, c.scheduleID, c.attemptID, asOf.UTC())
+				mu.Lock()
+				if ok {
+					changed++
+				}
+				if err != nil && firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, c := range candidates {
+		jobs <- c
+	}
+	close(jobs)
+	wg.Wait()
+	return int64(len(candidates)), changed, firstErr
 }
 
 // lockReconcileRowTx locks the oldest open module attempt (Rust ORDER BY

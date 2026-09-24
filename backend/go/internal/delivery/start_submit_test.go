@@ -22,7 +22,7 @@ func deliveryReconcileDrained(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", "live", "legacy", nil))
@@ -45,7 +45,7 @@ func deliveryReconcileDrainedStranded(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", "live", "legacy", nil))
@@ -68,7 +68,7 @@ func deliveryModuleWorkableTx(mock sqlmock.Sqlmock) {
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase"}).
 			AddRow("active", "running", nil, "exam"))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
 	// ensureAttemptCanWorkTx completes before the writer fence.
@@ -83,7 +83,7 @@ func deliveryModuleRow(mock sqlmock.Sqlmock, state string, at time.Time) {
 }
 
 func deliveryLegacyGate(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
 	// SAT-006: the legacy gate reads the authoritative in-tx DB time after

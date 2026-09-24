@@ -220,7 +220,7 @@ func deliverySaveWorkableTx(mock sqlmock.Sqlmock, startedAt time.Time) {
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase"}).
 			AddRow("active", "running", nil, "exam"))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
 	// ensureAttemptCanWorkTx completes before the writer fence.
@@ -229,7 +229,7 @@ func deliverySaveWorkableTx(mock sqlmock.Sqlmock, startedAt time.Time) {
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}).
 			AddRow("ma-1", "mod-1", "active", 3600, startedAt, startedAt, nil, 0, 0, nil))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
 	// SAT-006: the legacy gate owns the authoritative in-tx time read.
@@ -485,7 +485,7 @@ func TestDeliveryReconcileLegacyExpiryFinalizes(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", "live", "legacy", nil))

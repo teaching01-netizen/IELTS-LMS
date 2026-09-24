@@ -37,6 +37,10 @@ func (c *captureDelivery) ReconcileTimeouts(_ context.Context, at time.Time, bat
 	return 0, nil
 }
 
+func (c *captureDelivery) ReconcilePersonalTimeouts(_ context.Context, _ time.Time, _ int64) (int64, error) {
+	return 0, nil
+}
+
 func (c *captureDelivery) ReconcileAttemptTimeout(_ context.Context, _, attemptID string, _ time.Time) (bool, error) {
 	c.reconciled = append(c.reconciled, attemptID)
 	if err, ok := c.fail[attemptID]; ok {

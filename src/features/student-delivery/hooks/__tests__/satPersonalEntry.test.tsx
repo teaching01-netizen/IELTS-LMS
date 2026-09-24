@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AssessmentDeliveryBootstrap,
   AssessmentModuleAttemptSnapshot,
+  AssessmentModuleEntryStateAck,
   AssessmentPersonalBreakSnapshot,
 } from "../../contracts/assessmentDelivery";
 import { useSatExamController } from "../useSatExamController";
@@ -33,9 +34,11 @@ import { useSatExamController } from "../useSatExamController";
 
 const gatewayMocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
+  state: vi.fn(),
   configureSatDeliveryAttempt: vi.fn(),
   startModule: vi.fn(),
   enterModule: vi.fn(),
+  entryState: vi.fn(),
   markStageVisible: vi.fn(),
   startBreak: vi.fn(),
   enterBreak: vi.fn(),
@@ -65,8 +68,10 @@ vi.mock("../../infrastructure/satDeliveryGateway", () => ({
   configureSatDeliveryAttempt: gatewayMocks.configureSatDeliveryAttempt,
   satDeliveryGateway: {
     bootstrap: gatewayMocks.bootstrap,
+    state: gatewayMocks.state,
     startModule: gatewayMocks.startModule,
     enterModule: gatewayMocks.enterModule,
+    entryState: gatewayMocks.entryState,
     markStageVisible: gatewayMocks.markStageVisible,
     startBreak: gatewayMocks.startBreak,
     enterBreak: gatewayMocks.enterBreak,
@@ -310,7 +315,7 @@ function attachBreak(
 /** The module the candidate is on when the break becomes due: Module 1 active,
  * its window long since run out — the server has scheduled the break after it. */
 function moduleOneFinished(attemptId: string, now: number): Bootstrap {
-  return enteredModule(attemptId, MODULE_RW, 1, now - AUTHORED_SECONDS * 1_000 - 1_000, now);
+  return moduleOneTerminal(attemptId, now - AUTHORED_SECONDS * 1_000 - 1_000, now);
 }
 
 /** The next section's module, seeded unstarted and waiting behind the break. */
@@ -587,6 +592,16 @@ function wire(routes: ServerRoute[]) {
   gatewayMocks.bootstrap.mockImplementation((_scheduleId: string, attemptId: string) =>
     forAttempt(attemptId).bootstrap(),
   );
+  gatewayMocks.state.mockImplementation(async (_scheduleId: string, attemptId: string) => {
+    const server = forAttempt(attemptId);
+    const payload = await server.bootstrap();
+    // The state endpoint is a mutable-only read: it must not count as a
+    // bootstrap in the entry-compactness assertions. Swap the log entry.
+    if (server.log[server.log.length - 1] === "bootstrap") server.log.pop();
+    server.log.push("state");
+    const { sections: _sections, ...state } = payload;
+    return state;
+  });
   gatewayMocks.startModule.mockImplementation(
     (scheduleId: string, attemptId: string, request: { generation?: number }) =>
       forAttempt(attemptId).startModule(scheduleId, attemptId, request),
@@ -596,7 +611,12 @@ function wire(routes: ServerRoute[]) {
       forAttempt(attemptId).enterModule(scheduleId, attemptId, request),
   );
   gatewayMocks.markStageVisible.mockImplementation((scheduleId: string, attemptId: string) =>
-    forAttempt(attemptId).markStageVisible(scheduleId, attemptId),
+    forAttempt(attemptId).markStageVisible(scheduleId, attemptId).then((payload) => ({
+      acknowledged: true,
+      moduleId: MODULE_RW,
+      entryGeneration: payload.attempt.moduleAttempts[0]?.entryGeneration ?? 0,
+      serverNow: payload.serverNow,
+    })),
   );
   gatewayMocks.startBreak.mockImplementation(
     (scheduleId: string, attemptId: string, breakId: string) =>
@@ -612,6 +632,30 @@ function wire(routes: ServerRoute[]) {
 }
 
 const ATTEMPT_ID = "attempt-a";
+
+function compactAck(payload: Bootstrap): AssessmentModuleEntryStateAck {
+  const module = payload.attempt.moduleAttempts[0]!;
+  return {
+    scheduleId: payload.scheduleId,
+    attemptId: payload.attempt.id,
+    moduleId: module.moduleId,
+    moduleAttemptId: module.id,
+    moduleRevision: module.revision,
+    state: module.state,
+    timingModel: payload.timing.timingModel,
+    entryState: module.entryEnteredAt ? "entered" : module.entryConfirmedAt ? "confirmed" : module.entryStartsAt ? "armed" : "none",
+    entryGeneration: module.entryGeneration ?? 0,
+    ...(module.entryStartsAt ? { entryStartsAt: module.entryStartsAt } : {}),
+    ...(module.entryConfirmedAt ? { entryConfirmedAt: module.entryConfirmedAt } : {}),
+    ...(module.entryEnteredAt ? { entryEnteredAt: module.entryEnteredAt } : {}),
+    ...(module.startedAt ? { startedAt: module.startedAt } : {}),
+    ...(module.deadlineAt ? { deadlineAt: module.deadlineAt } : {}),
+    ...(module.remainingSeconds != null ? { remainingSeconds: module.remainingSeconds } : {}),
+    serverNow: payload.serverNow,
+    controlEpoch: 1,
+    runtimeRevision: payload.timing.runtimeRevision,
+  };
+}
 
 function renderStudent(attemptId = ATTEMPT_ID, controlEpoch?: number) {
   return renderHook(
@@ -650,6 +694,111 @@ describe("SAT personal entry offers", () => {
     persistenceMock.submit.mockResolvedValue({} as never);
   });
 
+  it("opens from compact start and enter ACKs without another bootstrap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_NOW));
+    try {
+      const server = createPersonalServer(ATTEMPT_ID);
+      wire([{ attemptId: ATTEMPT_ID, server }]);
+      gatewayMocks.startModule.mockImplementation((_scheduleId, _attemptId, request) =>
+        server.startModule("schedule", ATTEMPT_ID, request).then(compactAck));
+      gatewayMocks.enterModule.mockImplementation((_scheduleId, _attemptId, request) =>
+        server.enterModule("schedule", ATTEMPT_ID, request).then(compactAck));
+      gatewayMocks.markStageVisible.mockImplementation(() =>
+        Promise.resolve({ acknowledged: true, moduleId: MODULE_RW, entryGeneration: 1, serverNow: new Date().toISOString() }));
+      const student = renderStudent();
+      await settle();
+      expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(1);
+      await advance(OFFER_LEAD_MS + 20);
+      await settle();
+      expect(student.result.current.state.phase).toBe("module");
+      expect(student.result.current.remainingSeconds).toBe(AUTHORED_SECONDS);
+      expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(1);
+      student.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recovers a committed offer whose StartModule response was lost", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_NOW));
+    try {
+      const server = createPersonalServer(ATTEMPT_ID);
+      wire([{ attemptId: ATTEMPT_ID, server }]);
+      gatewayMocks.startModule.mockImplementationOnce((_scheduleId, _attemptId, request) =>
+        server.startModule("schedule", ATTEMPT_ID, request).then(() => Promise.reject(new Error("response lost"))));
+      gatewayMocks.entryState.mockImplementation(async () => compactAck(await server.bootstrap()));
+      gatewayMocks.enterModule.mockImplementation((_scheduleId, _attemptId, request) =>
+        server.enterModule("schedule", ATTEMPT_ID, request).then(compactAck));
+      gatewayMocks.markStageVisible.mockImplementation(() =>
+        Promise.resolve({ acknowledged: true, moduleId: MODULE_RW, entryGeneration: 1, serverNow: new Date().toISOString() }));
+      const student = renderStudent();
+      await settle();
+      expect(student.result.current.state.phase).toBe("directions");
+      act(() => student.result.current.retryModuleEntry());
+      await settle();
+      expect(gatewayMocks.entryState).toHaveBeenCalledTimes(1);
+      expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1);
+      await advance(OFFER_LEAD_MS + 20);
+      await settle();
+      expect(student.result.current.state.phase).toBe("module");
+      expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(1);
+      student.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recovers a confirmed offer whose EnterModule response was lost", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_NOW));
+    try {
+      const server = createPersonalServer(ATTEMPT_ID);
+      wire([{ attemptId: ATTEMPT_ID, server }]);
+      gatewayMocks.startModule.mockImplementation((_scheduleId, _attemptId, request) =>
+        server.startModule("schedule", ATTEMPT_ID, request).then(compactAck));
+      gatewayMocks.enterModule.mockImplementationOnce((_scheduleId, _attemptId, request) =>
+        server.enterModule("schedule", ATTEMPT_ID, request).then(() => Promise.reject(new Error("response lost"))));
+      gatewayMocks.entryState.mockImplementation(async () => compactAck(await server.bootstrap()));
+      gatewayMocks.markStageVisible.mockImplementation(() =>
+        Promise.resolve({ acknowledged: true, moduleId: MODULE_RW, entryGeneration: 1, serverNow: new Date().toISOString() }));
+      const student = renderStudent();
+      await settle();
+      expect(student.result.current.state.phase).toBe("directions");
+      act(() => student.result.current.retryModuleEntry());
+      await settle();
+      expect(gatewayMocks.entryState).toHaveBeenCalledTimes(1);
+      expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1);
+      expect(gatewayMocks.enterModule).toHaveBeenCalledTimes(1);
+      await advance(OFFER_LEAD_MS + 20);
+      await settle();
+      expect(student.result.current.state.phase).toBe("module");
+      student.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the first frame answerable while its visibility ACK is delayed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_NOW));
+    try {
+      const server = createPersonalServer(ATTEMPT_ID);
+      wire([{ attemptId: ATTEMPT_ID, server }]);
+      gatewayMocks.markStageVisible.mockImplementation(() => new Promise(() => undefined));
+      const student = renderStudent();
+      await settle();
+      await advance(OFFER_LEAD_MS + 20);
+      await settle();
+      expect(student.result.current.state.phase).toBe("module");
+      expect(student.result.current.answerInteractionBlocked).toBe(false);
+      student.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("enters only at the server-issued offer start, and reads the full authored window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(SERVER_NOW));
@@ -685,6 +834,7 @@ describe("SAT personal entry offers", () => {
       // 1:5x here.
       expect(student.result.current.remainingSeconds).toBe(AUTHORED_SECONDS);
       await advance(1_000);
+      student.rerender({ token: 0 });
       expect(student.result.current.remainingSeconds).toBe(AUTHORED_SECONDS - 1);
 
       // The first-paint acknowledgment closes the server's re-arm window.
@@ -837,6 +987,9 @@ describe("SAT personal entry offers", () => {
       // own offer lead — holds what is left of theirs.
       const elapsedSeconds = Math.round((GAP_MS + OFFER_LEAD_MS) / 1_000);
       expect(lateStudent.result.current.remainingSeconds).toBe(AUTHORED_SECONDS);
+      // The controller wakes only at action boundaries; the clock surface
+      // reads the current instant on render.
+      earlyStudent.rerender({ token: 0 });
       expect(earlyStudent.result.current.remainingSeconds).toBe(
         AUTHORED_SECONDS - elapsedSeconds,
       );

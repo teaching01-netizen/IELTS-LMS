@@ -585,10 +585,12 @@ func BuildRouter(app *App) http.Handler {
 		})
 		r.With(limitTier(app, httpx.TierWrites, attemptKey())).With(studentLimit).Route("/assessment-delivery", func(r chi.Router) {
 			authzRoute(r, "POST", "/schedules/{scheduleID}/bootstrap", deliveryBootstrapHandler(app))
+			authzRoute(r, "GET", "/schedules/{scheduleID}/state", deliveryStateHandler(app))
 			authzRoute(r, "PATCH", "/schedules/{scheduleID}/responses/{examQuestionID}", deliverySaveResponseHandler(app))
 			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/start", deliveryStartModuleHandler(app))
 			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/enter", deliveryEnterModuleHandler(app))
 			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/visible", deliveryMarkStageVisibleHandler(app))
+			authzRoute(r, "GET", "/schedules/{scheduleID}/modules/{moduleID}/entry-state", deliveryModuleEntryStateHandler(app))
 			authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/{breakID}/start", deliveryStartBreakHandler(app))
 			authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/enter", deliveryEnterBreakHandler(app))
 			authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/visible", deliveryMarkBreakVisibleHandler(app))

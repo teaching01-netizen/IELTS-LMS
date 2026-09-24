@@ -1,12 +1,15 @@
 import type {
   AssessmentDeliveryBootstrap,
+  AssessmentDeliveryState,
   AssessmentBreakEntryRequest,
   AssessmentModuleEntryRequest,
+  AssessmentModuleEntryStateAck,
   AssessmentModuleStartRequest,
   AssessmentModuleSubmitRequest,
   AssessmentResponseRequest,
   AssessmentResponseSnapshot,
   AssessmentResult,
+  AssessmentStageVisibleAck,
   AssessmentSubmitRequest,
 } from '../../contracts/assessmentDelivery';
 
@@ -18,6 +21,7 @@ export interface SatDeliveryGateway {
    * 304 could keep a student on the module the server already routed away from.
    */
   bootstrap(scheduleId: string, attemptId: string): Promise<AssessmentDeliveryBootstrap>;
+  state?(scheduleId: string, attemptId: string): Promise<AssessmentDeliveryState>;
   saveResponse(
     scheduleId: string,
     attemptId: string,
@@ -28,17 +32,31 @@ export interface SatDeliveryGateway {
     scheduleId: string,
     attemptId: string,
     request: AssessmentModuleStartRequest,
-  ): Promise<AssessmentDeliveryBootstrap>;
+  ): Promise<AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck>;
   enterModule?(
     scheduleId: string,
     attemptId: string,
     request: AssessmentModuleEntryRequest,
-  ): Promise<AssessmentDeliveryBootstrap>;
+  ): Promise<AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck>;
+  /**
+   * Authoritative, cheap entry read (no mutation). "Retry now" asks this before
+   * it replays a transition command, so a committed entry whose response was
+   * lost is discovered instead of re-executed against a saturated database.
+   */
+  entryState?(
+    scheduleId: string,
+    attemptId: string,
+    moduleId: string,
+  ): Promise<AssessmentModuleEntryStateAck>;
+  /**
+   * First-active-paint acknowledgment. It answers with a compact ack, never a
+   * second attempt projection.
+   */
   markStageVisible?(
     scheduleId: string,
     attemptId: string,
     request: AssessmentModuleEntryRequest,
-  ): Promise<AssessmentDeliveryBootstrap>;
+  ): Promise<AssessmentStageVisibleAck>;
   startBreak?(
     scheduleId: string,
     attemptId: string,

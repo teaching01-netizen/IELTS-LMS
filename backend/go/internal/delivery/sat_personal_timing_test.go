@@ -58,7 +58,7 @@ func personalReconcileDrained(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", "live", examruntime.TimingModelPersonal, nil))
@@ -78,7 +78,7 @@ func personalReconcileDrained(mock sqlmock.Sqlmock) {
 // personalTimingGate stages moduleTimingGateTx on a live personal runtime: the
 // model and the in-tx instant, with no stage/room window.
 func personalTimingGate(mock sqlmock.Sqlmock, now time.Time) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key"}).
 			AddRow(examruntime.TimingModelPersonal, nil))
@@ -135,10 +135,35 @@ func personalResponseProbe(mock sqlmock.Sqlmock, hasResponse bool) {
 		WillReturnRows(sqlmock.NewRows([]string{"has_response"}).AddRow(hasResponse))
 }
 
+// personalModuleAwaitingStartProbe stages the entry-seed probe: the state of
+// the module attempt a transition was asked for.
+func personalModuleAwaitingStartProbe(mock sqlmock.Sqlmock, state string) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT state FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ?")).
+		WithArgs("att-1", "mod-1").
+		WillReturnRows(sqlmock.NewRows([]string{"state"}).AddRow(state))
+}
+
 // personalStartModulePrologue stages everything up to (not including) the timing
-// gate for a personal StartModule/EnterModule call.
+// gate for a personal StartModule/EnterModule call on an unstarted (seeded)
+// module.
+//
+// The seeded row means entry has no timeout work to do, so NO reconciliation is
+// staged: sqlmock fails on an unexpected statement, which is what pins the
+// entry-reliability fast path — a transition that pays for attempt + runtime +
+// module FOR UPDATE locks on every entry (plan 2026-09-24) fails here.
 func personalStartModulePrologue(mock sqlmock.Sqlmock) {
 	deliverySaveBinding(mock)
+	personalModuleAwaitingStartProbe(mock, "not_started")
+	deliverySaveBegin(mock)
+	deliveryModuleWorkableTx(mock)
+}
+
+// personalStartModulePrologueReconciling is the same prologue for a module that
+// is already active: a reload whose expired clock may still need finalizing, so
+// reconciliation must run before the transition transaction.
+func personalStartModulePrologueReconciling(mock sqlmock.Sqlmock) {
+	deliverySaveBinding(mock)
+	personalModuleAwaitingStartProbe(mock, "active")
 	personalReconcileDrained(mock)
 	deliverySaveBegin(mock)
 	deliveryModuleWorkableTx(mock)
@@ -186,6 +211,76 @@ func TestStartModulePersonalArmsTheOfferAtDatabaseTimePlusTheLead(t *testing.T) 
 	}
 }
 
+func TestStartModuleOfferAckAvoidsAttemptProjection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := deliverySvc(db)
+	now := time.Now().UTC()
+	startsAt := now.Add(3 * time.Second)
+	personalStartModulePrologue(mock)
+	personalModuleRow(mock, "not_started", 120, nil)
+	personalTimingGate(mock, now)
+	personalBreakPendingLookup(mock, false)
+	personalEntryArmRow(mock, 0, nil, nil, nil, nil)
+	mock.ExpectExec(personalArmAnchorsDatabaseTimeAndLead).
+		WithArgs(personalOfferLeadSeconds, "ma-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	entryStateRow(mock, "not_started", 1, startsAt, nil, nil, nil, examruntime.TimingModelPersonal, now)
+	ack, err := svc.StartModuleOfferAck(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", nil, nil, false, "sess-test", "tok-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.EntryState != "armed" || ack.ModuleRevision != 4 {
+		t.Fatalf("unexpected compact offer: %+v", ack)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnterModuleAckAvoidsAttemptProjection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := deliverySvc(db)
+	now := time.Now().UTC()
+	startsAt := now.Add(2 * time.Second)
+	deliverySaveBinding(mock)
+	deliverySaveBegin(mock)
+	deliveryModuleWorkableTx(mock)
+	personalModuleRow(mock, "not_started", 120, nil)
+	personalTimingGate(mock, now)
+	personalEntryRow(mock, 1, startsAt, nil, nil)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(now))
+	mock.ExpectExec(personalEnterAnchorsStartedAtToTheOffer).
+		WithArgs("ma-1", 1, startsAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET phase = 'exam'")).
+		WithArgs("att-1").WillReturnResult(sqlmock.NewResult(0, 1))
+	deliveryMaxRevision(mock, 7)
+	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
+	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+	mock.ExpectCommit()
+	entryStateRow(mock, "active", 1, startsAt, now, nil, startsAt, examruntime.TimingModelPersonal, now)
+	ack, err := svc.EnterModuleAck(context.Background(), "sched-1", "att-1", "sched-1", ModuleEntryRequest{ModuleID: "mod-1", Generation: 1}, "sess-test", "tok-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.EntryState != "confirmed" || ack.StartedAt == nil || !ack.StartedAt.Equal(startsAt) {
+		t.Fatalf("unexpected compact confirmation: %+v", ack)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A reload mid-module resumes the SAME offer: the module is already active and
 // its start is in the future, so no second allocation may be written.
 func TestStartModulePersonalReloadKeepsTheSameOffer(t *testing.T) {
@@ -198,7 +293,7 @@ func TestStartModulePersonalReloadKeepsTheSameOffer(t *testing.T) {
 	now := time.Now().UTC()
 	startsAt := now.Add(2 * time.Second)
 
-	personalStartModulePrologue(mock)
+	personalStartModulePrologueReconciling(mock)
 	personalModuleRow(mock, "active", 120, startsAt)
 	personalTimingGate(mock, now)
 	personalBreakPendingLookup(mock, false)
@@ -503,11 +598,16 @@ func TestMarkStageVisibleIsIdempotentAfterTheFirstPaint(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(now))
 	mock.ExpectCommit()
-	deliveryBootstrapLoadsForModel(mock, startsAt, examruntime.TimingModelPersonal, "active")
 
-	if _, err := svc.MarkStageVisible(context.Background(), "sched-1", "att-1", "sched-1",
-		ModuleEntryRequest{ModuleID: "mod-1", Generation: 1}, "sess-test", "tok-1"); err != nil {
+	// Entry reliability: the acknowledgment answers with a compact ack, not an
+	// attempt projection — no bootstrap load may run here.
+	ack, err := svc.MarkStageVisible(context.Background(), "sched-1", "att-1", "sched-1",
+		ModuleEntryRequest{ModuleID: "mod-1", Generation: 1}, "sess-test", "tok-1")
+	if err != nil {
 		t.Fatalf("repeated acknowledgment must be a no-op, got %v", err)
+	}
+	if ack == nil || !ack.Acknowledged || ack.EntryGeneration != 1 || ack.ModuleID != "mod-1" {
+		t.Fatalf("acknowledgment must report the idempotent entry, got %+v", ack)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
