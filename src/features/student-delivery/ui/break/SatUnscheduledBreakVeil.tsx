@@ -1,7 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { Coffee } from "lucide-react";
 import { SAT_COPY } from "../../domain/satCopy";
 import { satOverlayZClass } from "../primitives/satOverlayZ";
+import { formatSatTime } from "../../domain/satTiming";
+import { useSatTemporalSnapshot } from "../../timing/SatTemporalRuntime";
 
 export interface SatUnscheduledBreakVeilProps {
   open: boolean;
@@ -31,6 +33,12 @@ export function SatUnscheduledBreakVeil(props: SatUnscheduledBreakVeilProps) {
     return () => window.cancelAnimationFrame(frame);
   }, [props.open]);
   if (!props.open) return null;
+  return <ActiveSatUnscheduledBreakVeil {...props} returnRef={returnRef} />;
+}
+
+function ActiveSatUnscheduledBreakVeil(props: SatUnscheduledBreakVeilProps & { returnRef: RefObject<HTMLButtonElement | null> }) {
+  const temporal = useSatTemporalSnapshot();
+  const remainingLabel = temporal ? formatSatTime(temporal.displaySeconds) : props.remainingLabel;
   return (
     <div
       role="alertdialog"
@@ -50,12 +58,12 @@ export function SatUnscheduledBreakVeil(props: SatUnscheduledBreakVeilProps) {
         <p
           className="sat-tabular mt-4 text-[34px] font-semibold text-[var(--sat-text)]"
           role="timer"
-          aria-label={"Time remaining " + props.remainingLabel}
+          aria-label={"Time remaining " + remainingLabel}
         >
-          {props.remainingLabel}
+          {remainingLabel}
         </p>
         <button
-          ref={returnRef}
+          ref={props.returnRef}
           type="button"
           onClick={props.onReturn}
           className="sat-touch-target sat-pressable mt-6 rounded-full bg-[var(--sat-accent)] px-8 text-[15px] font-semibold text-[var(--sat-accent-text)] hover:bg-[var(--sat-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"

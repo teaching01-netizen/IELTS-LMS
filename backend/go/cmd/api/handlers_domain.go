@@ -750,6 +750,41 @@ func proctorExtendAttemptHandler(app *App) http.HandlerFunc {
 	}
 }
 
+// proctorReArmStageHandler grants the SAT module or scheduled break the
+// candidate is waiting on a fresh entry window. The automatic path names this
+// action in its own failures (ADMISSION_CLOSED / ENTRY_RETRY_EXHAUSTED: "ask
+// the proctor to re-arm"), which used to have no implementation anywhere — a
+// candidate who missed every offer was stranded for the rest of the room.
+func proctorReArmStageHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, actor := requireProctorDeps(w, r, app)
+		if actor == nil {
+			return
+		}
+		if !requireProctorAttemptScope(w, r, app, sess, chi.URLParam(r, "scheduleID")) {
+			return
+		}
+		var body struct {
+			// ActorID is a legacy client field; the session remains authoritative.
+			ActorID  *string `json:"actorId"`
+			ModuleID string  `json:"moduleId"`
+			BreakID  string  `json:"breakId"`
+			Reason   *string `json:"reason"`
+			Message  *string `json:"message"`
+		}
+		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &body); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		cmd := proctor.AttemptCommand{Message: body.Message, Reason: body.Reason}
+		if err := app.Proctor.ReArmAttemptStage(r.Context(), *actor, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "attemptID"), body.ModuleID, body.BreakID, cmd); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	}
+}
+
 // proctorTerminateHandler seals an attempt via terminalization.
 func proctorTerminateHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

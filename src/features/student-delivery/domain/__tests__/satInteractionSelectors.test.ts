@@ -22,7 +22,7 @@ describe('selectSatInteraction (dumb UI contract)', () => {
   it('exposes capabilities without leaking raw state comparisons into JSX', () => {
     const view = selectSatInteraction(createSatInteractionState(), ctx());
     expect(view.can.openCalculator).toBe(true);
-    expect(view.can.annotate).toBe(false);
+    expect(view.can.annotate).toBe(true);
     // Tool visibility is runner-owned (activeTools) — the view exposes
     // only capability (can.open*), never visibility.
     expect(view).not.toHaveProperty('tools');

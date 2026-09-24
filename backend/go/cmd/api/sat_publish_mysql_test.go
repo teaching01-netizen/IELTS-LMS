@@ -122,6 +122,68 @@ func validSATPublishSPR() authoring.QuestionDraft {
 	}
 }
 
+// makeSATDraftPublishable gives every module in the draft one valid question and
+// lowers that module's target to the count it now carries, so the exam can be
+// published without authoring the blueprint's full 27/22 questions per module.
+//
+// This is what lets a proof that is not about question content — lock order, a
+// route projection — publish a real SAT version at all: SAT publish validation
+// requires each module's authored count to match its target
+// (satpublish.ValidateModule), and the targets are draft metadata. The published
+// version keeps the real SAT sections, their authored lengths, gaps and module
+// rows, so the plan and the room clock a caller reads are production values.
+//
+// Same approach as newSATPublishFixture. The returned modules carry their
+// published-draft ids, so a caller that needs a second distinct version can
+// reopen the draft and add a question to one of them (raising that module's
+// target to match).
+func makeSATDraftPublishable(t *testing.T, ctx context.Context, db *sql.DB, authors *authoring.Service, actorID, examID string) []satPublishModuleFixture {
+	t.Helper()
+	shell, err := authors.Shell(ctx, examID)
+	if err != nil {
+		t.Fatalf("authoring shell: %v", err)
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT m.id, s.section_key, m.module_key
+		FROM assessment_modules m
+		JOIN assessment_sections s ON s.id = m.section_id
+		WHERE s.exam_version_id = ?
+		ORDER BY s.display_order, m.display_order, m.id`, shell.VersionID)
+	if err != nil {
+		t.Fatalf("list draft modules: %v", err)
+	}
+	modules := make([]satPublishModuleFixture, 0, 6)
+	for rows.Next() {
+		var module satPublishModuleFixture
+		if err := rows.Scan(&module.id, &module.sectionKey, &module.moduleKey); err != nil {
+			rows.Close()
+			t.Fatalf("scan draft module: %v", err)
+		}
+		modules = append(modules, module)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("read draft modules: %v", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close draft modules: %v", err)
+	}
+	if len(modules) == 0 {
+		t.Fatal("SAT draft has no normalized modules")
+	}
+	for index := range modules {
+		if _, err := db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 1 WHERE id = ?", modules[index].id); err != nil {
+			t.Fatalf("lower %s.%s target: %v", modules[index].sectionKey, modules[index].moduleKey, err)
+		}
+		created, err := authors.CreateQuestion(ctx, modules[index].id, actorID, validSATPublishQuestion())
+		if err != nil {
+			t.Fatalf("create valid SAT question in %s.%s: %v", modules[index].sectionKey, modules[index].moduleKey, err)
+		}
+		modules[index].questions = append(modules[index].questions, created.ExamQuestionID)
+	}
+	return modules
+}
+
 func (f *satPublishFixture) publishRequest() exams.PublishRequest {
 	draftID := f.draftID
 	draftRevision := f.draftRevision

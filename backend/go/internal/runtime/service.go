@@ -17,7 +17,7 @@
 //	pause/resume/extend/sync bump control_epoch+1 so in-flight writers fence.
 //	Grace is server-side: server_now <= closing_grace_until is inclusive.
 //	sync_v2 re-projects deadline=actual_start+(planned+extension)*60+paused and
-//	 grace=+5s, only for protocol 2 non-terminal attempts.
+//	 grace=+30s, only for protocol 2 non-terminal attempts.
 //
 // Lock order everywhere: attempt -> runtime -> section.
 // Every mutating method locks schedule attempt rows BEFORE the runtime row
@@ -48,13 +48,6 @@ const (
 	StatusCompleted  = "completed"
 	StatusCancelled  = "cancelled"
 )
-
-// SectionClosingGrace is the bounded window after the authored section
-// deadline in which in-flight student writes may still arrive. The worker's
-// section reconciler and the V2 write projection both use this value so a
-// section cannot close before the write gate closes, or remain open for an
-// unexpectedly long time after the timer reaches zero.
-const SectionClosingGrace = 5 * time.Second
 
 // Section statuses.
 const (
@@ -221,6 +214,7 @@ type StartSchedule struct {
 	ID                     string
 	ExamID                 string
 	ProviderKey            string
+	SatTimingModel         string
 	PublishedVersionID     string
 	Status                 string
 	Revision               int64
@@ -247,9 +241,9 @@ type StartPlanner func(ctx context.Context, q tx.Tx, sch StartSchedule) (plan []
 // breaks that by failing one of the two user actions, most likely exactly when
 // a cohort is checking in and the proctor presses Start.
 func LockScheduleRow(ctx context.Context, q tx.Tx, scheduleID string) (*StartSchedule, error) {
-	const sel = "SELECT id, exam_id, provider_key, published_version_id, status, revision, planned_duration_minutes FROM exam_schedules WHERE id = ? FOR UPDATE"
+	const sel = "SELECT id, exam_id, provider_key, COALESCE(sat_timing_model, ''), published_version_id, status, revision, planned_duration_minutes FROM exam_schedules WHERE id = ? FOR UPDATE"
 	var sch StartSchedule
-	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&sch.ID, &sch.ExamID, &sch.ProviderKey, &sch.PublishedVersionID, &sch.Status, &sch.Revision, &sch.PlannedDurationMinutes); err != nil {
+	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&sch.ID, &sch.ExamID, &sch.ProviderKey, &sch.SatTimingModel, &sch.PublishedVersionID, &sch.Status, &sch.Revision, &sch.PlannedDurationMinutes); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Schedule not found.", HTTPStatus: 404}
 		}
@@ -640,7 +634,7 @@ func (s *Service) SyncV2Timing(ctx context.Context, scheduleID, runtimeID, secti
 }
 
 // SyncV2TimingInTx re-projects deadline=actual_start+(planned+extension)*60+paused,
-// grace=+5s, only for protocol 2 non-terminal attempts. control_epoch+1 fences
+// grace=+30s, only for protocol 2 non-terminal attempts. control_epoch+1 fences
 // in-flight V2 writers. lifecycle nil leaves delivery/phase untouched.
 func SyncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey string, lifecycle *string) error {
 	return syncV2TimingInTx(ctx, q, scheduleID, runtimeID, sectionKey, "", lifecycle)
@@ -674,19 +668,27 @@ func syncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, secti
 	default:
 		lifecycleAssign = ""
 	}
-	graceSeconds := int(SectionClosingGrace / time.Second)
-	stmt := fmt.Sprintf("UPDATE student_attempts sa "+
-		"JOIN exam_session_runtime_sections rs ON rs.runtime_id = ? AND rs.section_key = ? "+
-		"SET "+lifecycleAssign+
-		" deadline_at = CASE WHEN rs.actual_start_at IS NULL THEN sa.deadline_at ELSE DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND) END,"+
-		" closing_grace_until = CASE WHEN rs.actual_start_at IS NULL THEN sa.closing_grace_until ELSE DATE_ADD(DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND), INTERVAL %d SECOND) END,"+
-		" control_epoch = sa.control_epoch + 1,"+
-		" revision = sa.revision + 1,"+
-		" updated_at = UTC_TIMESTAMP(6) "+
-		"WHERE sa.schedule_id = ? "+
-		"AND sa.protocol_version = 2 "+
-		"AND sa.submitted_at IS NULL "+
-		"AND COALESCE(sa.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')", graceSeconds)
+	// The attempt-level deadline/grace is the ROOM's section clock. A personal
+	// SAT attempt (sat_personal_v1) owns its module and break deadlines, and its
+	// runtime's section never advances on the section clock, so projecting the
+	// section boundary onto that attempt would freeze its answers once the first
+	// section's room clock ran out — long before its own module ends (plan
+	// 2026-09-24, full-entry-time). Clear both columns for that model instead;
+	// the module/break deadlines in assessment_module_attempts /
+	// assessment_attempt_breaks are the only anchors there.
+	stmt := "UPDATE student_attempts sa " +
+		"JOIN exam_session_runtime_sections rs ON rs.runtime_id = ? AND rs.section_key = ? " +
+		"JOIN exam_session_runtimes rt ON rt.id = rs.runtime_id " +
+		"SET " + lifecycleAssign +
+		" sa.deadline_at = CASE WHEN rt.timing_model = '" + TimingModelPersonal + "' THEN NULL WHEN rs.actual_start_at IS NULL THEN sa.deadline_at ELSE DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND) END," +
+		" sa.closing_grace_until = CASE WHEN rt.timing_model = '" + TimingModelPersonal + "' THEN NULL WHEN rs.actual_start_at IS NULL THEN sa.closing_grace_until ELSE DATE_ADD(DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND), INTERVAL 30 SECOND) END," +
+		" sa.control_epoch = sa.control_epoch + 1," +
+		" sa.revision = sa.revision + 1," +
+		" sa.updated_at = UTC_TIMESTAMP(6) " +
+		"WHERE sa.schedule_id = ? " +
+		"AND sa.protocol_version = 2 " +
+		"AND sa.submitted_at IS NULL " +
+		"AND COALESCE(sa.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')"
 	args := []any{runtimeID, sectionKey, scheduleID}
 	if attemptID != "" {
 		stmt += " AND sa.id = ?"
@@ -741,13 +743,29 @@ func insertControlEvent(ctx context.Context, q tx.Tx, runtimeID, scheduleID, act
 
 func pauseSATModules(ctx context.Context, q tx.Tx, scheduleID string) error {
 	const stmt = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_entities e ON e.id = sa.exam_id SET ma.paused_at = COALESCE(ma.paused_at, UTC_TIMESTAMP(6)), ma.revision = ma.revision + 1 WHERE sa.schedule_id = ? AND e.provider_key = 'sat' AND ma.state = 'active' AND ma.started_at IS NOT NULL AND ma.paused_at IS NULL"
-	_, err := q.ExecContext(ctx, stmt, scheduleID)
+	if _, err := q.ExecContext(ctx, stmt, scheduleID); err != nil {
+		return err
+	}
+	const breaks = `UPDATE assessment_attempt_breaks b
+		JOIN student_attempts sa ON sa.id = b.attempt_id
+		SET b.paused_at = UTC_TIMESTAMP(6), b.revision = b.revision + 1
+		WHERE sa.schedule_id = ? AND b.state = 'active' AND b.paused_at IS NULL`
+	_, err := q.ExecContext(ctx, breaks, scheduleID)
 	return err
 }
 
 func resumeSATModules(ctx context.Context, q tx.Tx, scheduleID string) error {
 	const stmt = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_entities e ON e.id = sa.exam_id SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, UTC_TIMESTAMP(6)), 0), ma.paused_at = NULL, ma.revision = ma.revision + 1 WHERE sa.schedule_id = ? AND e.provider_key = 'sat' AND ma.state = 'active' AND ma.paused_at IS NOT NULL"
-	_, err := q.ExecContext(ctx, stmt, scheduleID)
+	if _, err := q.ExecContext(ctx, stmt, scheduleID); err != nil {
+		return err
+	}
+	const breaks = `UPDATE assessment_attempt_breaks b
+		JOIN student_attempts sa ON sa.id = b.attempt_id
+		SET b.accumulated_paused_seconds = b.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, b.paused_at, UTC_TIMESTAMP(6)), 0),
+		    b.deadline_at = DATE_ADD(b.deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) SECOND),
+		    b.paused_at = NULL, b.revision = b.revision + 1
+		WHERE sa.schedule_id = ? AND b.state = 'active' AND b.paused_at IS NOT NULL`
+	_, err := q.ExecContext(ctx, breaks, scheduleID)
 	return err
 }
 
@@ -759,8 +777,133 @@ func ExtendSATModulesInTx(ctx context.Context, q tx.Tx, scheduleID string, minut
 
 func extendSATModules(ctx context.Context, q tx.Tx, scheduleID string, minutes int64) error {
 	const stmt = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_entities e ON e.id = sa.exam_id SET ma.extension_seconds = ma.extension_seconds + (? * 60), ma.revision = ma.revision + 1 WHERE sa.schedule_id = ? AND e.provider_key = 'sat' AND ma.state = 'active' AND ma.started_at IS NOT NULL"
-	_, err := q.ExecContext(ctx, stmt, minutes, scheduleID)
+	if _, err := q.ExecContext(ctx, stmt, minutes, scheduleID); err != nil {
+		return err
+	}
+	// A personal-model break owns its own deadline, so extending the room must
+	// move that deadline too — otherwise a proctor extension would not reach the
+	// candidate who is on a break when it is granted. Only an already-active break
+	// has a deadline to move; a pending/armed offer is armed later at DB time and
+	// therefore already includes the extension.
+	const breaks = `UPDATE assessment_attempt_breaks b
+		JOIN student_attempts sa ON sa.id = b.attempt_id
+		SET b.deadline_at = DATE_ADD(b.deadline_at, INTERVAL (? * 60) SECOND),
+		    b.revision = b.revision + 1
+		WHERE sa.schedule_id = ? AND b.state = 'active' AND b.deadline_at IS NOT NULL`
+	_, err := q.ExecContext(ctx, breaks, minutes, scheduleID)
 	return err
+}
+
+// RearmPersonalStageInTx grants one attempt-owned stage — a module or a
+// scheduled break — a fresh entry window on behalf of an authorized proctor.
+//
+// The automatic path (delivery.armPersonalModuleOfferTx / StartBreak) bounds
+// rearming by schedule admission closure and a small retry budget. That bound is
+// also what makes a candidate who keeps missing the offer lead, or who loses the
+// offer once exam_schedules.end_time has passed, unrecoverable: the room is
+// still live but no offer can be armed any more. This is the way back, and it is
+// deliberately narrow:
+//
+//   - only the attempt's own stage row is touched, under FOR UPDATE;
+//   - a stage the candidate has already seen (entry_entered_at) is refused: the
+//     clock belongs to them from that moment, and resetting it would hand out
+//     time they already spent;
+//   - a finalized stage (locked / submitted / completed) is refused;
+//   - a module with an accepted response is refused, exactly as the automatic
+//     rearm refuses it;
+//   - allocated / extension / paused seconds are never touched, so the authored
+//     window the candidate receives is unchanged.
+//
+// entry_proctor_rearm_at records the grant: while it is set the arm path does not
+// refuse an offer for admission closure, and entry_generation = 0 restarts the
+// retry budget. The caller owns the audit row and the roster emit.
+func RearmPersonalStageInTx(ctx context.Context, q tx.Tx, attemptID, moduleID, breakID string) error {
+	if moduleID != "" {
+		return rearmPersonalModuleInTx(ctx, q, attemptID, moduleID)
+	}
+	return rearmPersonalBreakInTx(ctx, q, attemptID, breakID)
+}
+
+func rearmPersonalModuleInTx(ctx context.Context, q tx.Tx, attemptID, moduleID string) error {
+	var state, examModuleID string
+	var enteredAt sql.NullTime
+	if err := q.QueryRowContext(ctx,
+		"SELECT state, module_id, entry_entered_at FROM assessment_module_attempts WHERE id = ? AND attempt_id = ? FOR UPDATE",
+		moduleID, attemptID).Scan(&state, &examModuleID, &enteredAt); err != nil {
+		if err == sql.ErrNoRows {
+			return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "SAT module attempt not found for this candidate.", HTTPStatus: 404}
+		}
+		return err
+	}
+	if state == "locked" || state == "submitted" {
+		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "This SAT module is finished and cannot be re-armed.", HTTPStatus: 409}
+	}
+	if enteredAt.Valid {
+		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "The candidate has already entered this SAT module; its clock cannot be reset.", HTTPStatus: 409}
+	}
+	var hasResponse bool
+	if err := q.QueryRowContext(ctx, `
+		SELECT EXISTS(SELECT 1 FROM assessment_question_responses WHERE module_attempt_id = ?)
+		    OR EXISTS(SELECT 1 FROM attempt_responses_v2 WHERE attempt_id = ? AND module_id = ?)`,
+		moduleID, attemptID, examModuleID).Scan(&hasResponse); err != nil {
+		return err
+	}
+	if hasResponse {
+		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "A response was already accepted for this SAT module; the timer cannot be reset.", HTTPStatus: 409}
+	}
+	res, err := q.ExecContext(ctx, `
+		UPDATE assessment_module_attempts
+		SET state = 'not_started', started_at = NULL, paused_at = NULL,
+		    entry_starts_at = NULL, entry_confirmed_at = NULL, entry_entered_at = NULL,
+		    entry_generation = 0, entry_proctor_rearm_at = UTC_TIMESTAMP(6),
+		    revision = revision + 1
+		WHERE id = ? AND attempt_id = ? AND state IN ('not_started', 'active') AND entry_entered_at IS NULL`,
+		moduleID, attemptID)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "This SAT module changed while it was being re-armed. Refresh and try again.", HTTPStatus: 409}
+	}
+	return nil
+}
+
+func rearmPersonalBreakInTx(ctx context.Context, q tx.Tx, attemptID, breakID string) error {
+	var state string
+	var enteredAt sql.NullTime
+	if err := q.QueryRowContext(ctx,
+		"SELECT state, entry_entered_at FROM assessment_attempt_breaks WHERE id = ? AND attempt_id = ? FOR UPDATE",
+		breakID, attemptID).Scan(&state, &enteredAt); err != nil {
+		if err == sql.ErrNoRows {
+			return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Scheduled break not found for this candidate.", HTTPStatus: 404}
+		}
+		return err
+	}
+	if state == "completed" {
+		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "This scheduled break is finished and cannot be re-armed.", HTTPStatus: 409}
+	}
+	if enteredAt.Valid {
+		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "The candidate has already entered this scheduled break; its clock cannot be reset.", HTTPStatus: 409}
+	}
+	res, err := q.ExecContext(ctx, `
+		UPDATE assessment_attempt_breaks
+		SET state = 'pending', starts_at = NULL, deadline_at = NULL, entered_at = NULL, paused_at = NULL,
+		    entry_starts_at = NULL, entry_confirmed_at = NULL, entry_entered_at = NULL,
+		    entry_generation = 0, entry_proctor_rearm_at = UTC_TIMESTAMP(6),
+		    revision = revision + 1
+		WHERE id = ? AND attempt_id = ? AND state <> 'completed' AND entry_entered_at IS NULL`,
+		breakID, attemptID)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "This scheduled break changed while it was being re-armed. Refresh and try again.", HTTPStatus: 409}
+	}
+	return nil
 }
 
 func eventWithReason(event string, reason *string) string {

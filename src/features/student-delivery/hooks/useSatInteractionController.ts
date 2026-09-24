@@ -110,7 +110,7 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
   // Tool-policy revocation normalizes centrally (spec §Q): a Math tool can
   // never linger open after entering R&W for more than one transition.
   const policyRef = useRef(ctx.toolPolicy);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (policyRef.current === ctx.toolPolicy) return;
     policyRef.current = ctx.toolPolicy;
     dispatch({ type: 'TOOL_POLICY_CHANGED' });

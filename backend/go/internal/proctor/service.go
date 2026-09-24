@@ -508,6 +508,65 @@ func (s *Service) ExtendAttempt(ctx context.Context, actor Actor, scheduleID, at
 	})
 }
 
+// ReArmAttemptStage grants one attempt-owned SAT stage — the module or the
+// scheduled break the candidate is waiting on — a fresh entry window. Exactly
+// one of moduleID/breakID must be named.
+//
+// The automatic path bounds rearming by schedule admission closure and a small
+// retry budget, and both of those failures tell the candidate to "ask the
+// proctor to re-arm" (ADMISSION_CLOSED / ENTRY_RETRY_EXHAUSTED). This is that
+// action: it clears the stage's offer, resets its generation, and stamps
+// entry_proctor_rearm_at, which lifts both bounds for that stage until the
+// candidate enters it. A stage the candidate already entered, or one with an
+// accepted response, is refused — a grant must never hand out time twice.
+func (s *Service) ReArmAttemptStage(ctx context.Context, actor Actor, scheduleID, attemptID, moduleID, breakID string, cmd AttemptCommand) error {
+	if (strings.TrimSpace(moduleID) == "") == (strings.TrimSpace(breakID) == "") {
+		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Re-arm exactly one stage: a module or a scheduled break.", HTTPStatus: 400}
+	}
+	stage, stageID := "module", moduleID
+	if strings.TrimSpace(breakID) != "" {
+		stage, stageID = "break", breakID
+	}
+	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
+			return err
+		}
+		if err := lockAttemptScope(ctx, q, scheduleID, attemptID); err != nil {
+			return err
+		}
+		const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
+		var submittedAny any
+		var proctorStatus, delivery string
+		if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &proctorStatus, &delivery); err != nil {
+			if err == sql.ErrNoRows {
+				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
+			}
+			return err
+		}
+		if isNonNullTime(submittedAny) || proctorStatus == "terminated" || delivery == "submitted" || delivery == "terminated" || delivery == "locked" || delivery == "cancelled" {
+			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Post-submit attempts cannot be re-armed; the attempt is already terminal.", HTTPStatus: 409}
+		}
+		pk, err := providerKeyOfSchedule(ctx, q, scheduleID)
+		if err != nil {
+			return err
+		}
+		if pk != "sat" {
+			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Entry offers exist for adaptive SAT attempts only.", HTTPStatus: 400}
+		}
+		if tm := timingModelOfSchedule(ctx, q, scheduleID); examruntime.IsCohortTimed(tm) {
+			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Shared-clock SAT sessions have no per-candidate entry offer; re-open the section instead.", HTTPStatus: 400}
+		}
+		if err := examruntime.RearmPersonalStageInTx(ctx, q, attemptID, strings.TrimSpace(moduleID), strings.TrimSpace(breakID)); err != nil {
+			return err
+		}
+		payload := map[string]any{"stage": stage, "stageId": stageID, "reason": cmd.Reason}
+		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "STAGE_REARMED", &attemptID, payload); err != nil {
+			return err
+		}
+		return s.emitRoster(ctx, q, scheduleID, "rearm_stage", &attemptID, map[string]any{"stage": stage, "stageId": stageID})
+	})
+}
+
 // Terminate seals the attempt ONLY via the terminalization service as
 // terminated/proctor_terminate/proctor — never a direct status write.
 func (s *Service) Terminate(ctx context.Context, actor Actor, scheduleID, attemptID string, cmd AttemptCommand) error {

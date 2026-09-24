@@ -94,7 +94,7 @@ describe('resolveSatInteractionIntent (intent, not mutation)', () => {
     ).toBeNull();
   });
 
-  it('refuses text-selection capture outside R&W capability', () => {
+  it('refuses text-selection capture only when annotation capability is absent', () => {
     // The intent layer resolves DATA, not session policy: whether the mode is
     // armed is the reducer's guard (see satInteractionReducer), because an
     // in-flight selection must still be discarded by the state machine that
@@ -105,14 +105,17 @@ describe('resolveSatInteractionIntent (intent, not mutation)', () => {
         type: 'TEXT_SELECTION_CAPTURED',
         anchor,
       }),
-    ).toBeNull();
-    const rw = { ...mathCtx(), toolPolicy: { ...mathCtx().toolPolicy, highlight: true, underline: true, notes: true } };
+    ).toEqual({ type: 'TEXT_SELECTION_CAPTURED', anchor });
+    const noAnnotation = {
+      ...mathCtx(),
+      toolPolicy: { ...mathCtx().toolPolicy, highlight: false, underline: false, notes: false },
+    };
     expect(
-      resolveSatInteractionIntent(createSatInteractionState(), rw, {
+      resolveSatInteractionIntent(createSatInteractionState(), noAnnotation, {
         type: 'TEXT_SELECTION_CAPTURED',
         anchor,
       }),
-    ).toEqual({ type: 'TEXT_SELECTION_CAPTURED', anchor });
+    ).toBeNull();
   });
 
   it('maps question navigation intent to an explicit scope transition', () => {

@@ -28,6 +28,7 @@ import (
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/schedules"
 )
 
 // Field limits mirrored from the Rust service.
@@ -856,7 +857,10 @@ func insertBackingScheduleTx(ctx context.Context, q tx.Tx, scheduleID, examID st
 		"INSERT INTO exam_schedules (id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, auto_start, auto_stop, status, created_at, created_by, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'proctor_start', 'none', 1, false, false, 'scheduled', NOW(), ?, NOW(), 0)",
 		scheduleID, examID, pin.providerKey, nullableOrg(pin.orgID), pin.title, pin.title, pin.title, pin.versionID,
 		cohort, start, end, planned, createdBy)
-	return err
+	if err != nil {
+		return err
+	}
+	return schedules.PersistSatTimingChoice(ctx, q, scheduleID, pin.providerKey)
 }
 
 func insertLinkTx(ctx context.Context, q tx.Tx, linkID, examID, versionID, scheduleID, name string, enabledSections []string, audience AudienceType, label *string, mode Mode, availability AvailabilityType, opensAt, closesAt *time.Time, createdBy string) error {

@@ -81,9 +81,11 @@ func boundaryBranchExpectations(mock sqlmock.Sqlmock, moduleID, route, moduleKey
 		WithArgs(moduleID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_id", "section_key", "module_key", "duration_seconds", "adaptive_role", "tool_policy"}).
 			AddRow(moduleID, "sec-1", "reading-writing", moduleKey, 3600, role, nil))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes")).
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(0))
+		WithArgs("att-1", "att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"cohort", "personal"}).AddRow(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", moduleID, 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))

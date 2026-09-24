@@ -78,17 +78,18 @@ export function useSatAnnotationSelection({
 
   const reportSelection = useRef<((anchor: SatTextAnchor) => void) | null>(null);
   reportSelection.current = view.onSelectionCaptured ?? null;
+  const isExistingAnchor = view.isExistingAnchor;
   const modeEnabled = useRef(view.annotationModeEnabled);
   modeEnabled.current = view.annotationModeEnabled;
   const ownedTouchPointers = useRef(new Set<number>());
 
   const reportAnchor = useCallback((anchor: SatTextAnchor) => {
-    if (annotationCount >= SAT_ANNOTATION_LIMIT) {
+    if (annotationCount >= SAT_ANNOTATION_LIMIT && !isExistingAnchor?.(anchor)) {
       flashLimitNotice();
       return;
     }
     reportSelection.current?.(anchor);
-  }, [annotationCount, flashLimitNotice]);
+  }, [annotationCount, flashLimitNotice, isExistingAnchor]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -157,9 +158,11 @@ export function useSatAnnotationSelection({
     if (!anchor) return;
     reportAnchor(anchor);
     diagnostics?.record('reportAnchor', {
-      anchorReported: !!reportSelection.current && annotationCount < SAT_ANNOTATION_LIMIT,
+      anchorReported:
+        !!reportSelection.current &&
+        (annotationCount < SAT_ANNOTATION_LIMIT || isExistingAnchor?.(anchor) === true),
     });
-  }, [annotationCount, diagnostics, region, reportAnchor, rootRef]);
+  }, [annotationCount, diagnostics, region, reportAnchor, rootRef, isExistingAnchor]);
 
   const wouldStartOwnedSelection = useCallback((event: Event): boolean => {
     const pointer = event as PointerEvent;

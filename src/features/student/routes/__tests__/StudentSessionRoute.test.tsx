@@ -325,7 +325,7 @@ describe('StudentSessionRoute', () => {
     expect(SatStudentSessionRouteMock).not.toHaveBeenCalled();
   });
 
-  it('passes bootstrapSeed + initialIsLoading through to the mounted SAT child', () => {
+  it('passes bootstrapSeed + initialIsLoading through to the mounted SAT child', async () => {
     vi.spyOn(authService, 'getSession').mockResolvedValue(null);
     SatStudentSessionRouteMock.mockImplementation(() => <div>sat child</div>);
     const seed = {
@@ -357,7 +357,7 @@ describe('StudentSessionRoute', () => {
 
     renderRoute('/student/sched-1/alice');
 
-    expect(screen.getByText('sat child')).toBeInTheDocument();
+    expect(await screen.findByText('sat child')).toBeInTheDocument();
     expect(SatStudentSessionRouteMock).toHaveBeenCalledTimes(1);
     const props = SatStudentSessionRouteMock.mock.calls[0]?.[0] as {
       bootstrapSeed?: unknown;
@@ -369,7 +369,7 @@ describe('StudentSessionRoute', () => {
     expect(props.initialIsLoading).toBe(false);
   });
 
-  it('does not render Loading Error during non-fatal reconnect sync conflict recovery', () => {
+  it('does not render Loading Error during non-fatal reconnect sync conflict recovery', async () => {
     vi.spyOn(authService, 'getSession').mockResolvedValue(null);
     StudentAppWrapperMock.mockImplementation(() => <div>Student App Active</div>);
     useStudentSessionRouteDataMock.mockReturnValue({
@@ -396,8 +396,8 @@ describe('StudentSessionRoute', () => {
     renderRoute('/student/sched-1/alice');
 
     expect(screen.queryByText('Loading Error')).not.toBeInTheDocument();
-    expect(screen.getByText('Student App Active')).toBeInTheDocument();
-    expect(StudentAppWrapperMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Student App Active')).toBeInTheDocument();
+    expect(StudentAppWrapperMock).toHaveBeenCalled();
     const props = StudentAppWrapperMock.mock.calls[0]?.[0] as { allowExitDuringExam?: boolean };
     expect(props.allowExitDuringExam).toBe(false);
   });

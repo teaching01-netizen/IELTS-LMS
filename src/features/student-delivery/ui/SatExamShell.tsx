@@ -3,6 +3,7 @@ import { SAT_TIMER_AUTO_REVEAL_SECONDS, shouldAutoRevealTimer } from "../domain/
 import type { StructuredContent } from "../../exam-authoring/api/assessmentContracts";
 import type { SatQuestionNavigationItem } from "../domain/satSelectors";
 import type { SatReadingPreferences } from "../domain/satReadingPreferences";
+import type { SatSectionKey } from "../application/satRunnerReducer";
 import { emptySatExamToolPolicy } from "../domain/satToolPolicy";
 import type { SatInteractionContext } from "../domain/satInteractionState";
 import { useSatInteractionController } from "../hooks/useSatInteractionController";
@@ -36,6 +37,8 @@ import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/Stude
 export interface SatExamShellProps {
   moduleIdentity?: string;
   sectionLabel: string;
+  /** Truthful section identity; R&W-only aids derive from this, never from notesAvailable. */
+  sectionKey: SatSectionKey;
   directions: StructuredContent | null;
   remainingLabel: string;
   remainingSeconds?: number | undefined;
@@ -51,7 +54,7 @@ export interface SatExamShellProps {
   calculatorOpen: boolean;
   referenceAvailable: boolean;
   referenceOpen: boolean;
-  /** R&W-only annotation surface (highlight/underline/notes). Hidden in Math. */
+  /** Annotation surface (highlight/underline/notes). Hidden when false. */
   notesAvailable?: boolean | undefined;
   blocked: boolean;
   saveState: "idle" | "saving" | "offline" | "retrying" | "failed" | "superseded";
@@ -124,6 +127,8 @@ export interface SatExamShellProps {
   onScreenZoomDecided?: (() => void) | undefined;
   onOpenBreakConfirm?: (() => void) | undefined;
   breakAvailable?: boolean | undefined;
+  /** When true the More utility center (button + menu + its shortcuts) is enabled. Defaults to false (excluded for now). */
+  moreAvailable?: boolean | undefined;
   onReadingPreferencesChange: (preferences: SatReadingPreferences) => void;
   onRetrySave?: () => void;
   onTakeOver?: (() => void) | undefined;
@@ -140,7 +145,10 @@ export function SatExamShell(props: SatExamShellProps) {
   // props.blocked folds pause/submission/lease into the gate (inert +
   // BlockingOverlay already cover input; the gate converges guards too).
   // Tool flags mirror the runner/policy props: notesAvailable IS policy.notes
-  // (R&W-only), calculator/reference mirror the module tool policy.
+  // (annotations), calculator/reference mirror the module tool policy.
+  // Section identity is explicit: R&W-only aids derive from sectionKey, never
+  // from annotation availability.
+  const readingWriting = props.sectionKey === 'reading-writing';
   const notesAvailable = props.notesAvailable ?? true;
   // One identity for "which question this is": the interaction machine, the
   // annotation surface, and the Notes column keyed by it all read the same
@@ -157,8 +165,8 @@ export function SatExamShell(props: SatExamShellProps) {
       highlight: notesAvailable,
       underline: notesAvailable,
       notes: notesAvailable,
-      lineReader: notesAvailable,
-      passageExpand: notesAvailable,
+      lineReader: readingWriting,
+      passageExpand: readingWriting,
       imageZoom: true,
       contentZoom: true,
       contrast: true,
@@ -168,10 +176,10 @@ export function SatExamShell(props: SatExamShellProps) {
       markForReview: true,
       optionEliminator: true,
     },
-    sectionKey: notesAvailable ? 'reading-writing' : 'math',
+    sectionKey: props.sectionKey,
     moduleKey: props.moduleIdentity ?? '',
     questionId: questionKey,
-  }), [questionKey, props.blocked, props.calculatorAvailable, props.moduleIdentity, props.referenceAvailable, notesAvailable]);
+  }), [questionKey, props.blocked, props.calculatorAvailable, props.moduleIdentity, props.referenceAvailable, notesAvailable, props.sectionKey, readingWriting]);
   const interaction = useSatInteractionController(interactionCtx);
   const coarsePointer = useSatMediaQuery('(pointer: coarse)');
   const examScope = useStudentExamInteractionScope();
@@ -215,11 +223,12 @@ export function SatExamShell(props: SatExamShellProps) {
     probing: fit.zoom,
     stored: props.readingPreferences.examZoom ?? null,
   });
+  const moreAvailable = props.moreAvailable === true;
   const activeOverlay: "directions" | "navigator" | "notes" | "reading" | "more" | null =
     interaction.state.surface.kind === 'reading-settings' ? 'reading'
     : interaction.state.surface.kind === 'question-notes' ? 'notes'
     : interaction.state.surface.kind === 'navigator' ? 'navigator'
-    : interaction.state.surface.kind === 'more-menu' ? 'more'
+    : interaction.state.surface.kind === 'more-menu' ? (moreAvailable ? 'more' : null)
     : interaction.state.surface.kind === 'directions' ? 'directions'
     // Both note editors live in the inline Notes column, which is part of the
     // layout rather than a top-bar popover, so nothing aliases here for them.
@@ -355,7 +364,7 @@ export function SatExamShell(props: SatExamShellProps) {
   const shortcutBinding = useMemo<SatToolActionBinding>(() => ({
     calculator: () => props.onToggleCalculator(),
     reference: () => props.onToggleReference(),
-    lineReader: () => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !(props.readingPreferences.lineReaderEnabled ?? false) }),
+    lineReader: () => { if (moreAvailable && readingWriting) props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !(props.readingPreferences.lineReaderEnabled ?? false) }); },
     // The shortcut is the same single meaning as the control: arm or disarm
     // annotation. It does not open notes, it does not create anything, and it
     // is not a "focus the toolbar" gesture — those would give the key a second
@@ -368,17 +377,17 @@ export function SatExamShell(props: SatExamShellProps) {
     // Opening the Notes column is its own action, from its own control.
     notes: () => toggleNotesColumn(),
     timerVisibility: () => setTimerVisible((visible) => !visible),
-    help: () => props.onOpenHelp?.(),
-    shortcuts: () => props.onOpenShortcuts?.(),
-    breakConfirm: () => props.onOpenBreakConfirm?.(),
+    help: () => { if (moreAvailable) props.onOpenHelp?.(); },
+    shortcuts: () => { if (moreAvailable) props.onOpenShortcuts?.(); },
+    breakConfirm: () => { if (moreAvailable) props.onOpenBreakConfirm?.(); },
     nextQuestion: () => props.onNextQuestion?.() ?? props.onNext(),
     previousQuestion: () => props.onPreviousQuestion?.() ?? props.onPrevious(),
     zoomIn: () => props.onZoomIn?.(),
     zoomOut: () => props.onZoomOut?.(),
     zoomReset: () => props.onZoomReset?.(),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toggleOverlay/closeSurface are stable-by-contract per render; prefs snapshot is intentional.
-  }), [props.onToggleCalculator, props.onToggleReference, props.readingPreferences, props.onOpenHelp, props.onOpenShortcuts, props.onOpenBreakConfirm, props.onNext, props.onPrevious, props.onNextQuestion, props.onPreviousQuestion, props.onToggleEliminationMode, props.onToggleMarkForReview, props.onZoomIn, props.onZoomOut, props.onZoomReset, interaction]);
-  useSatShortcuts(!props.blocked, shortcutBinding);
+  }), [props.onToggleCalculator, props.onToggleReference, props.readingPreferences, props.onOpenHelp, props.onOpenShortcuts, props.onOpenBreakConfirm, props.onNext, props.onPrevious, props.onNextQuestion, props.onPreviousQuestion, props.onToggleEliminationMode, props.onToggleMarkForReview, props.onZoomIn, props.onZoomOut, props.onZoomReset, interaction, moreAvailable, readingWriting]);
+  useSatShortcuts(!props.blocked, shortcutBinding, { disableLineReaderShortcut: !moreAvailable || !readingWriting });
 
   // One tool truth (Phase 9): the runner's activeTools flags (calculatorOpen /
   // referenceOpen props) are the ONLY mount/open state for floating tools.
@@ -394,7 +403,7 @@ export function SatExamShell(props: SatExamShellProps) {
     if (overlay === 'directions') interaction.toggleSurface('directions');
     else if (overlay === 'navigator') interaction.toggleSurface('navigator');
     else if (overlay === 'reading') interaction.toggleSurface('reading-settings');
-    else if (overlay === 'more') interaction.toggleSurface('more-menu');
+    else if (overlay === 'more') { if (moreAvailable) interaction.toggleSurface('more-menu'); }
     else interaction.toggleSurface('question-notes');
   };
   const closeOverlay = () => interaction.closeSurface();
@@ -464,6 +473,12 @@ export function SatExamShell(props: SatExamShellProps) {
         remainingSeconds={props.remainingSeconds}
         timerVisible={timerVisible}
         timerRevealAnnouncement={timerRevealAnnounced ? "Timer shown — under 5 minutes left. You can hide it again." : null}
+        onAutoRevealTimer={() => {
+          if (timerRevealFiredRef.current) return;
+          timerRevealFiredRef.current = true;
+          setTimerVisible(true);
+          setTimerRevealAnnounced(true);
+        }}
         calculatorAvailable={props.calculatorAvailable}
         calculatorOpen={props.calculatorOpen}
         referenceAvailable={props.referenceAvailable}
@@ -484,8 +499,9 @@ export function SatExamShell(props: SatExamShellProps) {
         onToggleCalculator={toggleCalculator}
         onToggleReference={toggleReference}
         onToggleNotes={toggleNotesColumn}
-        moreOpen={activeOverlay === "more"}
-        onToggleMore={() => toggleOverlay("more")}
+        moreAvailable={moreAvailable}
+        moreOpen={moreAvailable && activeOverlay === "more"}
+        onToggleMore={moreAvailable ? () => toggleOverlay("more") : undefined}
         onToggleReading={() => toggleOverlay("reading")}
         onCloseReading={closeOverlay}
         onReadingPreferencesChange={props.onReadingPreferencesChange}
@@ -499,11 +515,12 @@ export function SatExamShell(props: SatExamShellProps) {
           delegates to route-level modal owners via optional props (no-op when
           unbound, e.g. preview). Toggling Line Reader here is the same action
           as the shortcut. */}
+      {moreAvailable ? (
       <SatMoreMenu
         open={activeOverlay === "more"}
         blocked={props.blocked}
         lineReaderOn={props.readingPreferences.lineReaderEnabled ?? false}
-        lineReaderAvailable={notesAvailable}
+        lineReaderAvailable={readingWriting}
         breakAvailable={props.breakAvailable ?? props.onOpenBreakConfirm !== undefined}
         onSelectHelp={() => { closeOverlay(); props.onOpenHelp?.(); }}
         onSelectShortcuts={() => { closeOverlay(); props.onOpenShortcuts?.(); }}
@@ -511,6 +528,7 @@ export function SatExamShell(props: SatExamShellProps) {
         onSelectBreak={() => { closeOverlay(); props.onOpenBreakConfirm?.(); }}
         onClose={closeOverlay}
       />
+      ) : null}
 
       {/* Bluebook document: the exam body stays white inside pale-blue chrome.
           Annotation geometry starts in viewport space and converts back into
@@ -537,7 +555,7 @@ export function SatExamShell(props: SatExamShellProps) {
             // when marks exist: the notes list the column sees cannot answer that,
             // and a migrated freeform note is not a mark on the passage.
             hasHighlights={(props.annotations?.annotations.length ?? 0) > 0}
-            // Without the surface (Math) there is no pane to hide, so there is no
+            // Without the surface there is no pane to hide, so there is no
             // handle left behind either: the layout is handed nothing to place.
             notesAvailable={notesAvailable}
             disabled={props.blocked || !annotationsWritable}
@@ -648,7 +666,7 @@ export function SatExamShell(props: SatExamShellProps) {
         <span className="sr-only" role="status" aria-live="polite" data-testid="sat-annotation-announcement">
           {announcement}
         </span>
-        {notesAvailable && props.readingPreferences.lineReaderEnabled && !props.blocked ? (
+        {moreAvailable && readingWriting && props.readingPreferences.lineReaderEnabled && !props.blocked ? (
           <SatLineReader position={props.readingPreferences.lineReaderPosition ?? 0.5}
             onPositionChange={(lineReaderPosition) => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderPosition })}
             onDisable={() => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: false })} />
@@ -690,14 +708,14 @@ export function SatExamShell(props: SatExamShellProps) {
         <SatHelpModal
           open={props.helpOpen}
           onClose={props.onCloseHelp}
-          returnFocusSelector='[data-sat-focus="topbar-more"]'
+          returnFocusSelector={moreAvailable ? '[data-sat-focus="topbar-more"]' : undefined}
         />
       ) : null}
       {props.shortcutsOpen !== undefined && props.onCloseShortcuts ? (
         <SatShortcutsModal
           open={props.shortcutsOpen}
           onClose={props.onCloseShortcuts}
-          returnFocusSelector='[data-sat-focus="topbar-more"]'
+          returnFocusSelector={moreAvailable ? '[data-sat-focus="topbar-more"]' : undefined}
         />
       ) : null}
       {/* Bluebook Unscheduled Break (Phase 8): confirm first (dangerous
@@ -708,7 +726,7 @@ export function SatExamShell(props: SatExamShellProps) {
           open={props.breakConfirmOpen}
           onCancel={props.onCloseBreakConfirm}
           onTakeBreak={props.onTakeBreak}
-          returnFocusSelector='[data-sat-focus="topbar-more"]'
+          returnFocusSelector={moreAvailable ? '[data-sat-focus="topbar-more"]' : undefined}
         />
       ) : null}
     </div>

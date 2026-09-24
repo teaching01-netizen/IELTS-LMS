@@ -190,7 +190,14 @@ type ModuleAttempt struct {
 	// late arrival is told the room's remainder instead of a fresh module. Nil
 	// everywhere else: a started module's deadlineAt/remainingSeconds are the
 	// truth, and a module in a section that has not opened has no room window yet.
-	EntryWindowSeconds       *int            `json:"entryWindowSeconds"`
+	EntryWindowSeconds *int `json:"entryWindowSeconds"`
+	// Personal-model future-start offer. Generation fences stale start/enter
+	// requests; the offer is accepted only before startsAt, and enteredAt is
+	// acknowledged after the first active frame paints.
+	EntryGeneration          *int            `json:"entryGeneration,omitempty"`
+	EntryStartsAt            *time.Time      `json:"entryStartsAt,omitempty"`
+	EntryConfirmedAt         *time.Time      `json:"entryConfirmedAt,omitempty"`
+	EntryEnteredAt           *time.Time      `json:"entryEnteredAt,omitempty"`
 	CompletionReason         *string         `json:"completionReason"`
 	RawCorrect               *int64          `json:"rawCorrect"`
 	OperationalQuestionCount *int64          `json:"operationalQuestionCount"`
@@ -215,11 +222,33 @@ type AttemptSnapshot struct {
 	ID             string             `json:"id"`
 	ModuleAttempts []ModuleAttempt    `json:"moduleAttempts"`
 	Responses      []ResponseSnapshot `json:"responses"`
+	PersonalBreaks []PersonalBreak    `json:"personalBreaks,omitempty"`
 	// ProvisionalSubmitted is true while the SAT attempt holds the V2
 	// provisional terminal claim (delivery_status='submitted', submitted_at
 	// still NULL) without a scoring result yet. The client uses it to skip
 	// response resubmission and drive straight to result completion (SAT-001).
 	ProvisionalSubmitted bool `json:"provisionalSubmitted"`
+}
+
+// PersonalBreak is one attempt-owned scheduled break. Its countdown runs only
+// from the confirmed future start; delayed reconciliation/rendering cannot
+// consume the authored duration.
+type PersonalBreak struct {
+	ID                       string     `json:"id"`
+	AfterSectionID           string     `json:"afterSectionId"`
+	DurationSeconds          int        `json:"durationSeconds"`
+	State                    string     `json:"state"`
+	StartsAt                 *time.Time `json:"startsAt"`
+	DeadlineAt               *time.Time `json:"deadlineAt"`
+	EnteredAt                *time.Time `json:"enteredAt"`
+	PausedAt                 *time.Time `json:"pausedAt"`
+	AccumulatedPausedSeconds int        `json:"accumulatedPausedSeconds"`
+	EntryGeneration          int        `json:"entryGeneration"`
+	EntryStartsAt            *time.Time `json:"entryStartsAt"`
+	EntryConfirmedAt         *time.Time `json:"entryConfirmedAt"`
+	EntryEnteredAt           *time.Time `json:"entryEnteredAt"`
+	RemainingSeconds         int64      `json:"remainingSeconds"`
+	Revision                 int        `json:"revision"`
 }
 
 // TimingSnapshot is the cohort/legacy timing projection.
@@ -357,6 +386,18 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
+	if examruntime.IsSatPersonal(timing.TimingModel) {
+		if err := s.loadPersonalEntryOffers(ctx, attemptID, moduleAttempts); err != nil {
+			return nil, err
+		}
+	}
+	var personalBreaks []PersonalBreak
+	if examruntime.IsSatPersonal(timing.TimingModel) {
+		personalBreaks, err = s.loadPersonalBreaks(ctx, attemptID, now)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Tell a candidate what entering each module would actually grant them, on
 	// the same room clock the write path clamps to. Non-SAT/legacy payloads and
 	// modules with no running section window keep their authored length.
@@ -379,6 +420,7 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 			ID:                   attemptID,
 			ModuleAttempts:       moduleAttempts,
 			Responses:            responses,
+			PersonalBreaks:       personalBreaks,
 			ProvisionalSubmitted: control.deliveryStatus == "submitted" && control.submittedAt == nil,
 		},
 		Result: result,
@@ -781,6 +823,81 @@ func (s *Service) loadModuleAttempts(ctx context.Context, attemptID string, now 
 	return out, rows.Err()
 }
 
+// loadPersonalEntryOffers projects future-start metadata only for the new SAT
+// personal model. Older cohort bootstraps retain their existing query shape.
+func (s *Service) loadPersonalEntryOffers(ctx context.Context, attemptID string, attempts []ModuleAttempt) error {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at FROM assessment_module_attempts WHERE attempt_id = ?",
+		attemptID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	byID := make(map[string]int, len(attempts))
+	for i := range attempts {
+		byID[attempts[i].ID] = i
+	}
+	for rows.Next() {
+		var id string
+		var generation int
+		var startsAt, confirmedAt, enteredAt sql.NullTime
+		if err := rows.Scan(&id, &generation, &startsAt, &confirmedAt, &enteredAt); err != nil {
+			return err
+		}
+		index, ok := byID[id]
+		if !ok {
+			continue
+		}
+		attempts[index].EntryGeneration = &generation
+		attempts[index].EntryStartsAt = nullTime(startsAt)
+		attempts[index].EntryConfirmedAt = nullTime(confirmedAt)
+		attempts[index].EntryEnteredAt = nullTime(enteredAt)
+	}
+	return rows.Err()
+}
+
+func (s *Service) loadPersonalBreaks(ctx context.Context, attemptID string, now time.Time) ([]PersonalBreak, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, after_section_id, duration_seconds, state, starts_at, deadline_at,
+		       entered_at, paused_at, accumulated_paused_seconds, entry_generation,
+		       entry_starts_at, entry_confirmed_at, entry_entered_at, revision
+		FROM assessment_attempt_breaks
+		WHERE attempt_id = ? ORDER BY created_at, id`, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PersonalBreak
+	for rows.Next() {
+		var b PersonalBreak
+		var startsAt, deadlineAt, enteredAt, pausedAt, entryStartsAt, entryConfirmedAt, entryEnteredAt sql.NullTime
+		if err := rows.Scan(&b.ID, &b.AfterSectionID, &b.DurationSeconds, &b.State,
+			&startsAt, &deadlineAt, &enteredAt, &pausedAt, &b.AccumulatedPausedSeconds,
+			&b.EntryGeneration, &entryStartsAt, &entryConfirmedAt, &entryEnteredAt, &b.Revision); err != nil {
+			return nil, err
+		}
+		b.StartsAt = nullTime(startsAt)
+		b.DeadlineAt = nullTime(deadlineAt)
+		b.EnteredAt = nullTime(enteredAt)
+		b.PausedAt = nullTime(pausedAt)
+		b.EntryStartsAt = nullTime(entryStartsAt)
+		b.EntryConfirmedAt = nullTime(entryConfirmedAt)
+		b.EntryEnteredAt = nullTime(entryEnteredAt)
+		if b.DeadlineAt != nil && (b.State == "active" || b.State == "completed") {
+			ref := now
+			if b.PausedAt != nil {
+				ref = *b.PausedAt
+			}
+			b.RemainingSeconds = int64(b.DeadlineAt.Sub(ref) / time.Second)
+			if b.RemainingSeconds < 0 {
+				b.RemainingSeconds = 0
+			}
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // loadResponses loads persisted question responses for the attempt.
 //
 // V2-first read (exam-day P0): SAT answers written through the V2 durability
@@ -996,12 +1113,42 @@ func (s *Service) loadAttemptControl(ctx context.Context, attemptID string, boun
 // publishEntryWindows reads to tell a candidate what entering a module will
 // actually grant them — the same rows the write path's gate reads, so the
 // promise and the grant cannot drift.
+// scheduleTimingChoice reads exam_schedules.sat_timing_model. NULL/missing
+// column (pre-migration DB) means the deployed model: fail open to "".
+func (s *Service) scheduleTimingChoice(ctx context.Context, scheduleID string) (string, error) {
+	var raw sql.NullString
+	if err := s.db.QueryRowContext(ctx, "SELECT sat_timing_model FROM exam_schedules WHERE id = ?", scheduleID).Scan(&raw); err != nil {
+		if err == sql.ErrNoRows {
+			return "", apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
+		}
+		return "", err
+	}
+	if !raw.Valid {
+		return "", nil
+	}
+	return raw.String, nil
+}
+
 func (s *Service) loadTiming(ctx context.Context, scheduleID, providerKey string, now time.Time) (TimingSnapshot, string, []proctor.SessionRuntimeSection, error) {
 	var status string
 	err := s.db.QueryRowContext(ctx, "SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&status)
 	if err == sql.ErrNoRows {
-		if examruntime.IsPreStartCohort(providerKey) {
-			runtime := proctor.NotStartedRuntimeForProvider(scheduleID, "", providerKey, now)
+		// Pre-start reads the stored schedule choice rather than inferring
+		// all SAT schedules are cohort-timed. NULL keeps the deployed model.
+		choice := ""
+		if strings.EqualFold(strings.TrimSpace(providerKey), "sat") {
+			choice, err = s.scheduleTimingChoice(ctx, scheduleID)
+			if err != nil {
+				return TimingSnapshot{}, "", nil, err
+			}
+		}
+		model := examruntime.ResolveTimingModel(providerKey, choice)
+		if examruntime.IsCohortTimed(model) {
+			runtime := proctor.NotStartedRuntimeWithChoice(scheduleID, "", providerKey, choice, now)
+			return timingFromRuntime(runtime), runtime.Status, runtime.Sections, nil
+		}
+		if examruntime.IsSatPersonal(model) {
+			runtime := proctor.NotStartedRuntimeWithChoice(scheduleID, "", providerKey, choice, now)
 			return timingFromRuntime(runtime), runtime.Status, runtime.Sections, nil
 		}
 		return TimingSnapshot{Authority: "legacy_attempt", TimingModel: examruntime.TimingModelLegacy, StageStatus: "live", ServerNow: now}, "live", nil, nil
@@ -1564,6 +1711,7 @@ const (
 	timingGateLegacy timingGate = iota
 	timingGateCohortStage
 	timingGateCohortSection
+	timingGatePersonal
 )
 
 // moduleTimingGateResult is what moduleTimingGateTx hands back: the model-narrowed
@@ -1616,6 +1764,19 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		return moduleTimingGateResult{}, err
 	}
 	switch timingModel.String {
+	case examruntime.TimingModelPersonal:
+		now, nerr := dbTimeTx(ctx, t)
+		if nerr != nil {
+			return moduleTimingGateResult{}, nerr
+		}
+		var runtimeStatus string
+		if err := t.QueryRowContext(ctx, "SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&runtimeStatus); err != nil {
+			return moduleTimingGateResult{}, err
+		}
+		if runtimeStatus != "live" {
+			return moduleTimingGateResult{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT runtime is not live.")
+		}
+		return moduleTimingGateResult{gate: timingGatePersonal, now: now}, nil
 	case examruntime.TimingModelCohortStage:
 	case examruntime.TimingModelCohortSection:
 	default:
@@ -2219,6 +2380,38 @@ func enforceWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID 
 		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 	}
 	return claimWriterSessionTx(ctx, t, scheduleID, attemptID, writerBinding[0], writerBinding[1])
+}
+
+// enforceControlEpochTx fences an entry/arm command against the attempt control
+// epoch the client believed it held. `student_attempts.control_epoch` is bumped
+// by pause/resume (and by final submission), so a command that crossed a
+// control boundary must not arm or confirm a module offer under a frozen clock:
+// the candidate would enter with a stale timing projection. A nil/zero expected
+// epoch means the caller opted out (legacy clients), which is exactly the
+// pre-existing behaviour for those paths.
+//
+// The caller must already hold the attempt row lock (ensureAttemptCanWorkTx),
+// which makes the comparison stable for the rest of the transaction.
+func enforceControlEpochTx(ctx context.Context, t tx.Tx, attemptID string, expected *int) error {
+	if expected == nil || *expected <= 0 {
+		return nil
+	}
+	var current int
+	if err := t.QueryRowContext(ctx, "SELECT control_epoch FROM student_attempts WHERE id = ?", attemptID).Scan(&current); err != nil {
+		if err == sql.ErrNoRows {
+			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+		}
+		return err
+	}
+	if current != *expected {
+		return &apperrors.Error{
+			Code:       apperrors.CodeControlEpochStale,
+			Message:    "Command crossed a pause/resume control boundary.",
+			HTTPStatus: 409,
+			Details:    map[string]any{"requestControlEpoch": uint64(*expected), "currentControlEpoch": uint64(current)},
+		}
+	}
+	return nil
 }
 
 // Only fields in DeliveredAnswerDefinition may cross the candidate boundary.

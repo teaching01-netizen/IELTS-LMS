@@ -55,8 +55,8 @@ func durabilityAttemptRowsAs(status string) *sqlmock.Rows {
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
 		"response_revision", "deadline_at", "closing_grace_until",
-		"submitted_at", "final_submission", "proctor_status", "provider_key",
-	}).AddRow("att-1", "sched-1", "u-1", "", 2, status, "exam", 3, 7, 9, nil, nil, nil, nil, "active", "")
+		"submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
+	}).AddRow("att-1", "sched-1", "u-1", "", 2, status, "exam", 3, 7, 9, nil, nil, nil, nil, "active", "", "")
 }
 
 func durabilitySATAttemptRows(deadline, grace time.Time) *sqlmock.Rows {
@@ -64,9 +64,9 @@ func durabilitySATAttemptRows(deadline, grace time.Time) *sqlmock.Rows {
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
 		"response_revision", "deadline_at", "closing_grace_until",
-		"submitted_at", "final_submission", "proctor_status", "provider_key",
+		"submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
 	}).AddRow("att-1", "sched-1", "u-1", "", 2, "running", "exam", 3, 7, 9,
-		deadline, grace, nil, nil, "active", "sat")
+		deadline, grace, nil, nil, "active", "sat", "")
 }
 
 // durabilityReplayRaw is the stored canonical response backing every replay

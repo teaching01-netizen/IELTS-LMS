@@ -352,6 +352,51 @@ describe('SAT shell annotation flow (armed mode)', () => {
     );
   });
 
+  it('reopens an exact saved span in its editor, removes it, and restores it with Undo', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    highlight(container, 'Several', 'Yellow');
+    // Close the edit toolbar the highlight lands in, so the next gesture is a fresh capture.
+    fireEvent.click(screen.getByRole('button', { name: 'Close text tools' }));
+    expect(screen.queryByRole('toolbar', { name: 'Edit annotation' })).not.toBeInTheDocument();
+
+    // Selecting exactly the same saved span reopens that mark's editor.
+    selectStimulusText(container, 'Several');
+    expect(screen.getByRole('toolbar', { name: 'Edit annotation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove highlight' })).toBeInTheDocument();
+    expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove highlight' }));
+    expect(container.querySelector('[data-sat-highlight="true"]')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
+  });
+
+  it('treats a partial overlap as a new selection without a Remove action', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    highlight(container, 'Several', 'Yellow');
+    fireEvent.click(screen.getByRole('button', { name: 'Close text tools' }));
+
+    // A partial overlap stays a new selection and never removes another mark implicitly.
+    selectStimulusText(container, 'Several', 4);
+    expect(screen.getByRole('toolbar', { name: 'Selected text actions' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove highlight' })).not.toBeInTheDocument();
+    expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
+  });
+
+  it('keeps an unarmed saved mark decorative on reselect', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    highlight(container, 'Several', 'Yellow');
+    fireEvent.click(screen.getByRole('button', { name: 'Close text tools' }));
+    fireEvent.click(highlightsToggle());
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'false');
+
+    selectStimulusText(container, 'Several');
+    expect(screen.queryByRole('toolbar', { name: 'Edit annotation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
+    const mark = container.querySelector('[data-sat-highlight="true"]')!;
+    expect(mark).toHaveTextContent('Several');
+  });
+
   it('recolors an existing mark in one tap and forgives removal with Undo', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     highlight(container, 'Several', 'Yellow');
@@ -428,7 +473,8 @@ describe('SAT shell annotation flow (armed mode)', () => {
   it('clears the tools on Escape without touching the mark or the mode', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     highlight(container, 'Several', 'Yellow');
-    selectStimulusText(container, 'Several');
+    // A different span stays a fresh selection (an exact reselect would reopen the mark's editor).
+    selectStimulusText(container, 'researchers');
     expect(screen.getByRole('toolbar', { name: 'Selected text actions' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();

@@ -101,11 +101,86 @@ export interface SatRunSheet {
   rows: SatRunSheetRow[];
   /** Planned end of the run (breaks included); null when it cannot be known. */
   plannedEndAt: string | null;
+  /**
+   * Which timing plan this session runs, in the words staff use. Null when the
+   * runtime does not say (a summary read, a row from before the field existed),
+   * so the sheet omits the line rather than guessing a model.
+   */
+  timingPlan: SatRunSheetTimingPlan | null;
+}
+
+/**
+ * The timing plan a run sheet is describing. The staff-facing distinction is not
+ * which model constant is stored but what a proctor must know to read the sheet:
+ * a personal-model session has per-candidate windows (so a section row is a
+ * projection and no section clock cuts anybody off), while a cohort-model
+ * session's section clock is the cap that closes modules for the room.
+ */
+export interface SatRunSheetTimingPlan {
+  model: string;
+  label: string;
+  /** One sentence on what the rows mean for this plan. */
+  note: string;
+  /**
+   * True when each candidate's window is their own: the section rows are the
+   * run sheet's projection, not a clock any candidate is cut off by.
+   */
+  perCandidate: boolean;
+}
+
+/**
+ * The staff label for one stored timing model. Unknown models are labelled as
+ * unknown rather than silently described as a cohort run: a proctor reading the
+ * sheet must be able to see that the session is on a plan this build does not
+ * know how to describe.
+ */
+export function satRunSheetTimingPlan(
+  timingModel: string | null | undefined
+): SatRunSheetTimingPlan | null {
+  const model = typeof timingModel === "string" ? timingModel.trim() : "";
+  if (model === "") return null;
+  switch (model) {
+    case "sat_personal_v1":
+      return {
+        model,
+        label: "Personal timing · full entry time",
+        note: "Each candidate receives a server-issued entry offer and the full authored window; module and break clocks are per candidate, and the section rows below are projections only.",
+        perCandidate: true,
+      };
+    case "cohort_section_v3":
+      return {
+        model,
+        label: "Cohort timing · section clock",
+        note: "The room shares one section clock: it caps every module window, so a late arrival is handed what is left of the room's window.",
+        perCandidate: false,
+      };
+    case "cohort_stage_v2":
+      return {
+        model,
+        label: "Cohort timing · stage clock",
+        note: "The room shares one stage clock per section and module slot; it caps every module window.",
+        perCandidate: false,
+      };
+    case "legacy_section_v1":
+      return {
+        model,
+        label: "Legacy timing · per attempt",
+        note: "Each candidate's window is measured from their own entry; there is no shared clock cutting the room off.",
+        perCandidate: true,
+      };
+    default:
+      return {
+        model,
+        label: `Timing plan ${model}`,
+        note: "This session is on a timing model this build does not describe; read the rows as the runtime reports them.",
+        perCandidate: false,
+      };
+  }
 }
 
 export type SatRunSheetRuntime = Pick<
   ExamSessionRuntime,
-  "sections" | "actualStartAt" | "actualEndAt" | "status" | "serverNow"
+  "sections" | "actualStartAt" | "actualEndAt" | "status" | "serverNow" | "timingModel"
 > & {
   /**
    * `currentSectionDeadlineAt` is the server's own end for the section the room
@@ -126,6 +201,12 @@ export interface SatRunSheetInput {
   scheduledStartAt?: string | null | undefined;
   /** Server-clock "now" as an ISO instant; the only clock rows are read against. */
   now?: string | null | undefined;
+  /**
+   * The session's stored timing plan (`runtime.timingModel`). The rows mean
+   * different things per plan, so the sheet labels the plan rather than letting
+   * staff infer it from the numbers.
+   */
+  timingModel?: string | null | undefined;
 }
 
 const MINUTE_MS = 60_000;
@@ -831,6 +912,7 @@ export function buildSatRunSheet(input: SatRunSheetInput): SatRunSheet {
     anchorAt: toIso(anchorAt),
     rows,
     plannedEndAt: toIso(plannedEndMs),
+    timingPlan: satRunSheetTimingPlan(input.timingModel),
   };
 }
 

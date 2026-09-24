@@ -11,7 +11,19 @@ export interface DashboardEvent {
   metrics?: Record<string, number | string | boolean | null>;
 }
 
-export function startLiveDashboardServer(port: number): { broadcast: (event: DashboardEvent) => void } {
+export interface LiveDashboardServer {
+  broadcast: (event: DashboardEvent) => void;
+  /**
+   * Stops the monitor server. The runner MUST call this when the queue drains:
+   * a listening HTTP/WebSocket server keeps the Node event loop alive, so the
+   * child process never exits and the control panel shows a run stuck at
+   * "running" forever (the browser side is already finished and its summary
+   * written).
+   */
+  close: () => Promise<void>;
+}
+
+export function startLiveDashboardServer(port: number): LiveDashboardServer {
   const app = express();
 
   app.get('/', (_req, res) => {
@@ -104,5 +116,14 @@ ws.onmessage = (event) => {
     }
   };
 
-  return { broadcast };
+  const settleWithin = (promise: Promise<void>, ms: number) =>
+    Promise.race([promise, new Promise<void>((resolve) => setTimeout(resolve, ms))]);
+
+  const close = async (): Promise<void> => {
+    for (const client of wss.clients) client.terminate();
+    await settleWithin(new Promise<void>((resolve) => wss.close(() => resolve())), 1000);
+    await settleWithin(new Promise<void>((resolve) => server.close(() => resolve())), 1000);
+  };
+
+  return { broadcast, close };
 }

@@ -48,8 +48,8 @@ func TestReconcileCompleterFailureEmitsAndRetries(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	// One active expired module (runtime completed expires everything).
 	mock.ExpectQuery("FROM assessment_module_attempts WHERE attempt_id = ").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}).
-			AddRow("mrow-1", "mod-1", "active", 60, nil, startedAt, nil, 0, 0, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason", "entry_confirmed_at", "entry_entered_at"}).
+			AddRow("mrow-1", "mod-1", "active", 60, nil, startedAt, nil, 0, 0, nil, nil, nil))
 	// finalizeModuleTx: scoring rows (none), UPDATE 1 row, section lookup,
 	// next module none (last open -> arms completion).
 	mock.ExpectQuery("FROM assessment_exam_questions eq").

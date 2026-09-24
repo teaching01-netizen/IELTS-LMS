@@ -39,7 +39,7 @@ export interface SatAnnotationSurfaceOptions {
   onAnnotationsChange?: ((annotations: SatQuestionAnnotations) => void) | undefined;
   onFlushAnnotations?: (() => void) | undefined;
   blocked: boolean;
-  /** R&W-only: the whole surface is absent in Math, not disabled. */
+  /** False in read-only contexts: the whole surface is absent, not disabled. */
   annotationsAvailable: boolean;
   /** Attempt-scoped (or preview-scoped) teaching memory key. */
   educationKey?: string | null | undefined;
@@ -495,6 +495,21 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     [annotations, noteEditorId],
   );
 
+  const findExactMark = useCallback(
+    (anchor: SatTextAnchor): SatTextAnnotation | null => {
+      const matches =
+        annotations?.annotations.filter(
+          (item) =>
+            item.anchor.nodeId === anchor.nodeId &&
+            item.anchor.startOffset === anchor.startOffset &&
+            item.anchor.endOffset === anchor.endOffset &&
+            item.anchor.exact === anchor.exact,
+        ) ?? [];
+      return matches.find((item) => item.kind === 'highlight') ?? matches[0] ?? null;
+    },
+    [annotations],
+  );
+
   const annotationView = useMemo<SatAnnotationView>(
     () => ({
       activeAnnotationId: noteEditorId ?? editingMarkId,
@@ -509,16 +524,26 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
         setEditingMarkId(annotation.id);
         interaction.selectionToolsDismissed();
       },
-      onSelectionCaptured: (anchor: SatTextAnchor) => interaction.selectionCaptured(anchor),
+      onSelectionCaptured: (anchor: SatTextAnchor) => {
+        if (!annotationModeEnabled || !writable) return;
+        const matching = findExactMark(anchor);
+        if (matching) {
+          setEditingMarkId(matching.id);
+          interaction.selectionToolsDismissed();
+          return;
+        }
+        interaction.selectionCaptured(anchor);
+      },
+      isExistingAnchor: (anchor: SatTextAnchor) => findExactMark(anchor) !== null,
       selectionToolsVisible: selectionToolsAnchor !== null,
       onSelectionToolsDismissed: () => interaction.selectionToolsDismissed(),
       onSelectionCleared: () => interaction.selectionCleared(),
     }),
-    [annotationModeEnabled, editingMarkId, interaction, noteEditorId, selectionToolsAnchor, writable],
+    [annotationModeEnabled, editingMarkId, findExactMark, interaction, noteEditorId, selectionToolsAnchor, writable],
   );
 
   return {
-    /** True when a mark can be painted (R&W, not blocked, response wired). */
+    /** True when a mark can be painted (capability, not blocked, response wired). */
     writable,
     /** True while the student has armed annotation (the top-bar toggle's state). */
     annotationModeEnabled,

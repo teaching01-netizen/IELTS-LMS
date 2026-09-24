@@ -152,6 +152,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
       <SatExamShell
         moduleIdentity={preview.module.id}
         sectionLabel={label}
+        sectionKey={sectionKey(preview.section.sectionKey)}
         directions={directions}
         remainingLabel={remainingLabel}
         candidateName="Staff Preview"

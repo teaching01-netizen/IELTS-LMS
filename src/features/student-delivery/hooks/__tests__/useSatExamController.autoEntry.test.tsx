@@ -1,8 +1,10 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../../shared/api-client/errors";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
+import { createSatTextAnnotation } from "../../domain/satResponses";
 import { useSatExamController } from "../useSatExamController";
+import { SatTemporalRuntime } from "../../timing/SatTemporalRuntime";
 
 /**
  * Auto-entry coverage for the SAT controller.
@@ -123,6 +125,24 @@ function mathSection(): DeliveredSection {
   };
 }
 
+function mathBootstrapWithQuestions(): AssessmentDeliveryBootstrap {
+  const bootstrap = postBreakBootstrap(9);
+  const mathModule = bootstrap.sections.find((section) => section.sectionKey === "math")!.modules[0]!;
+  mathModule.questions = ["math-q1", "math-q2"].map((examQuestionId, displayOrder) => ({
+    examQuestionId,
+    questionId: examQuestionId,
+    displayOrder,
+    isPretest: false,
+    questionType: "single_choice",
+    stimulus: { version: 1, nodes: [] },
+    prompt: { version: 1, nodes: [] },
+    answer: { kind: "single_choice", options: [] },
+    metadata: { sectionKey: "math", domain: null, skill: null, difficulty: "medium", tags: [] },
+    accessibility: { longDescription: null },
+  }));
+  return bootstrap;
+}
+
 function notStarted(moduleId: string): ModuleAttempt {
   return {
     id: `ma-${moduleId}`,
@@ -177,9 +197,7 @@ function submitted(moduleId: string): ModuleAttempt {
  */
 const MODULE_RW_M2 = "module-rw-m2";
 
-function rwBranchModule(
-  role: "lower_branch" | "higher_branch"
-): DeliveredSection["modules"][number] {
+function rwBranchModule(role: "lower_branch" | "higher_branch"): DeliveredSection["modules"][number] {
   return {
     id: MODULE_RW_M2,
     moduleKey: MODULE_RW_M2,
@@ -229,7 +247,7 @@ function activeExpired(moduleId: string): ModuleAttempt {
 /** Module 1 timed out; the routed Module 2 waits to be opened. */
 function timedOutBranchBootstrap(
   role: "lower_branch" | "higher_branch",
-  revision = 3
+  revision = 3,
 ): AssessmentDeliveryBootstrap {
   const base = liveFirstModuleBootstrap(revision);
   return {
@@ -384,7 +402,7 @@ function postBreakBootstrap(runtimeRevision: number): AssessmentDeliveryBootstra
 function openedModule(
   base: AssessmentDeliveryBootstrap,
   moduleId: string,
-  runtimeRevision: number
+  runtimeRevision: number,
 ): AssessmentDeliveryBootstrap {
   return {
     ...base,
@@ -405,7 +423,7 @@ function openedModule(
  */
 function waitingBreakBootstrap(
   runtimeRevision: number,
-  nextSectionStartAt: string
+  nextSectionStartAt: string,
 ): AssessmentDeliveryBootstrap {
   return {
     ...postBreakBootstrap(runtimeRevision),
@@ -426,17 +444,27 @@ function waitingBreakBootstrap(
 
 function renderController(initialToken = 0, options: { liveSocketConnected?: boolean } = {}) {
   const liveSocketConnected = options.liveSocketConnected ?? false;
-  return renderHook(
-    ({ token }: { token: number }) =>
-      useSatExamController({
+  let current: ReturnType<typeof useSatExamController>;
+  function Harness({ token }: { token: number }) {
+    current = useSatExamController({
         scheduleId: "schedule",
         attemptId: ATTEMPT_ID,
         candidateId: "candidate",
         attemptUpdateToken: token,
         liveSocketConnected,
-      }),
-    { initialProps: { token: initialToken } }
-  );
+    });
+    return (
+      <SatTemporalRuntime model={current.temporalModel ?? null} onBoundary={current.onTemporalBoundary}>
+        <div />
+      </SatTemporalRuntime>
+    );
+  }
+  const view = render(<Harness token={initialToken} />);
+  return {
+    result: { get current() { return current; } },
+    rerender: (props = { token: initialToken }) => view.rerender(<Harness token={props.token} />),
+    unmount: view.unmount,
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -455,17 +483,49 @@ describe("useSatExamController auto-entry", () => {
     persistenceMock.submit.mockResolvedValue({} as never);
   });
 
+  it("persists Math annotations through setAnnotations and retains them across question navigation", async () => {
+    const bootstrap = mathBootstrapWithQuestions();
+    gatewayMocks.bootstrap.mockResolvedValue(bootstrap);
+    gatewayMocks.startModule.mockResolvedValue(openedModule(bootstrap, MODULE_MATH, 10));
+
+    const hook = renderController();
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+
+    const annotations = {
+      version: 2 as const,
+      legacyQuestionNote: "Check this step",
+      annotations: [createSatTextAnnotation({
+        kind: "highlight",
+        nodeId: "prompt:math-prompt",
+        startOffset: 0,
+        endOffset: 4,
+        exact: "Find",
+      })],
+    };
+    act(() => hook.result.current.commands.setAnnotations("math-q1", annotations));
+
+    expect(persistenceMock.save).toHaveBeenCalledWith(
+      expect.objectContaining({ questionId: "math-q1", annotations }),
+      expect.anything(),
+    );
+    expect(hook.result.current.state.phase === "module" ? hook.result.current.state.responses["math-q1"]?.annotations : null).toEqual(annotations);
+
+    act(() => hook.result.current.commands.selectQuestion(1));
+    act(() => hook.result.current.commands.selectQuestion(0));
+    expect(hook.result.current.state.phase === "module" ? hook.result.current.state.responses["math-q1"]?.annotations : null).toEqual(annotations);
+  });
+
   it("enters the first module with no student action once the proctor starts the session", async () => {
     gatewayMocks.bootstrap.mockResolvedValueOnce(notStartedCohortBootstrap());
     gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(2));
     gatewayMocks.startModule.mockResolvedValue(
-      openedModule(liveFirstModuleBootstrap(2), MODULE_RW, 3)
+      openedModule(liveFirstModuleBootstrap(2), MODULE_RW, 3),
     );
 
     const hook = renderController();
 
     await waitFor(() =>
-      expect(hook.result.current.data?.scheduleRuntimeStatus).toBe("not_started")
+      expect(hook.result.current.data?.scheduleRuntimeStatus).toBe("not_started"),
     );
     // Nothing may start while the proctor has not made the runtime live.
     expect(gatewayMocks.startModule).not.toHaveBeenCalled();
@@ -519,7 +579,7 @@ describe("useSatExamController auto-entry", () => {
       // The proctor starts; one live payload is enough for automatic entry.
       gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(2));
       gatewayMocks.startModule.mockResolvedValue(
-        openedModule(liveFirstModuleBootstrap(2), MODULE_RW, 3)
+        openedModule(liveFirstModuleBootstrap(2), MODULE_RW, 3),
       );
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
@@ -559,7 +619,7 @@ describe("useSatExamController auto-entry", () => {
   it("enters the next section with no student action once the authoritative break has ended", async () => {
     gatewayMocks.bootstrap.mockResolvedValue(postBreakBootstrap(9));
     gatewayMocks.startModule.mockResolvedValue(
-      openedModule(postBreakBootstrap(9), MODULE_MATH, 10)
+      openedModule(postBreakBootstrap(9), MODULE_MATH, 10),
     );
 
     const hook = renderController();
@@ -580,21 +640,21 @@ describe("useSatExamController auto-entry", () => {
     gatewayMocks.bootstrap.mockResolvedValueOnce(waitingBreakBootstrap(9, expired));
     gatewayMocks.bootstrap.mockResolvedValue(postBreakBootstrap(10));
     gatewayMocks.startModule.mockResolvedValue(
-      openedModule(postBreakBootstrap(10), MODULE_MATH, 11)
+      openedModule(postBreakBootstrap(10), MODULE_MATH, 11),
     );
 
     const hook = renderController(0, { liveSocketConnected: true });
 
     await waitFor(
       () => expect(gatewayMocks.bootstrap.mock.calls.length).toBeGreaterThanOrEqual(2),
-      { timeout: 3_000 }
+      { timeout: 3_000 },
     );
     await waitFor(
       () =>
         expect(gatewayMocks.startModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {
           moduleId: MODULE_MATH,
         }),
-      { timeout: 3_000 }
+      { timeout: 3_000 },
     );
     await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
   });
@@ -612,10 +672,10 @@ describe("useSatExamController auto-entry", () => {
         message: "Section is not active.",
         status: 409,
         details: { reason: "SECTION_NOT_ACTIVE" },
-      })
+      }),
     );
     gatewayMocks.startModule.mockResolvedValue(
-      openedModule(postBreakBootstrap(10), MODULE_MATH, 11)
+      openedModule(postBreakBootstrap(10), MODULE_MATH, 11),
     );
 
     const hook = renderController(0, { liveSocketConnected: true });
@@ -654,56 +714,66 @@ describe("useSatExamController auto-entry", () => {
     expect(gatewayMocks.startModule).not.toHaveBeenCalled();
   });
 
-  it("retries the first-module start after a failed attempt instead of stranding the student", async () => {
-    gatewayMocks.bootstrap.mockResolvedValueOnce(liveFirstModuleBootstrap(2));
-    gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(3));
-    gatewayMocks.startModule.mockRejectedValueOnce(new Error("network down"));
-    gatewayMocks.startModule.mockResolvedValue(
-      openedModule(liveFirstModuleBootstrap(3), MODULE_RW, 4)
-    );
+  it(
+    "retries the first-module start after a failed attempt instead of stranding the student",
+    async () => {
+      gatewayMocks.bootstrap.mockResolvedValueOnce(liveFirstModuleBootstrap(2));
+      gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(3));
+      gatewayMocks.startModule.mockRejectedValueOnce(new Error("network down"));
+      gatewayMocks.startModule.mockResolvedValue(
+        openedModule(liveFirstModuleBootstrap(3), MODULE_RW, 4),
+      );
 
-    const hook = renderController();
+      const hook = renderController();
 
-    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
-    // The first attempt failed: the student is still waiting on directions.
-    expect(hook.result.current.state.phase).toBe("directions");
+      await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
+      // The first attempt failed: the student is still waiting on directions.
+      expect(hook.result.current.state.phase).toBe("directions");
 
-    // A later authoritative payload (or the entry retry window) must be able
-    // to start the module again without the student pressing anything.
-    hook.rerender({ token: 1 });
+      // A later authoritative payload (or the entry retry window) must be able
+      // to start the module again without the student pressing anything.
+      hook.rerender({ token: 1 });
 
-    // Guard against a vacuous pass: the refresh must actually commit, so the
-    // ONLY remaining blocker is the consumed entry key.
-    await waitFor(() => expect(hook.result.current.data?.timing.runtimeRevision).toBe(3));
+      // Guard against a vacuous pass: the refresh must actually commit, so the
+      // ONLY remaining blocker is the consumed entry key.
+      await waitFor(() =>
+        expect(hook.result.current.data?.timing.runtimeRevision).toBe(3),
+      );
 
-    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(2), {
-      timeout: 4_000,
-    });
-    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
-  });
+      await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(2), {
+        timeout: 4_000,
+      });
+      await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    },
+  );
 
-  it("retries when the start call resolves but does not open the module", async () => {
-    gatewayMocks.bootstrap.mockResolvedValueOnce(liveFirstModuleBootstrap(2));
-    gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(3));
-    // The call resolved, but the module is still not_started: nothing opened,
-    // so the entry attempt must not be recorded as complete.
-    gatewayMocks.startModule.mockResolvedValue(liveFirstModuleBootstrap(3));
+  it(
+    "retries when the start call resolves but does not open the module",
+    async () => {
+      gatewayMocks.bootstrap.mockResolvedValueOnce(liveFirstModuleBootstrap(2));
+      gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(3));
+      // The call resolved, but the module is still not_started: nothing opened,
+      // so the entry attempt must not be recorded as complete.
+      gatewayMocks.startModule.mockResolvedValue(liveFirstModuleBootstrap(3));
 
-    const hook = renderController();
+      const hook = renderController();
 
-    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
-    expect(hook.result.current.state.phase).toBe("directions");
+      await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
+      expect(hook.result.current.state.phase).toBe("directions");
 
-    hook.rerender({ token: 1 });
+      hook.rerender({ token: 1 });
 
-    // Guard against a vacuous pass: the refresh must actually commit, so the
-    // ONLY remaining blocker is the consumed entry key.
-    await waitFor(() => expect(hook.result.current.data?.timing.runtimeRevision).toBe(3));
+      // Guard against a vacuous pass: the refresh must actually commit, so the
+      // ONLY remaining blocker is the consumed entry key.
+      await waitFor(() =>
+        expect(hook.result.current.data?.timing.runtimeRevision).toBe(3),
+      );
 
-    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(2), {
-      timeout: 4_000,
-    });
-  });
+      await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(2), {
+        timeout: 4_000,
+      });
+    },
+  );
 
   // Bug 1 (pre-entry half): the directions screen used to quote the authored
   // module length, so a late arrival was promised the full module and then
@@ -720,7 +790,9 @@ describe("useSatExamController auto-entry", () => {
 
     const hook = renderController();
 
-    await waitFor(() => expect(hook.result.current.pendingModuleWindow?.source).toBe("granted"));
+    await waitFor(() =>
+      expect(hook.result.current.pendingModuleWindow?.source).toBe("granted"),
+    );
     expect(hook.result.current.state.phase).toBe("directions");
     // 45 seconds, less the second or two this frame took: the authored 60 in the
     // fixture is NOT what the screen would claim.
@@ -738,7 +810,7 @@ describe("useSatExamController auto-entry", () => {
     const hook = renderController();
 
     await waitFor(() =>
-      expect(hook.result.current.data?.attempt.moduleAttempts[0]?.entryWindowSeconds).toBe(0)
+      expect(hook.result.current.data?.attempt.moduleAttempts[0]?.entryWindowSeconds).toBe(0),
     );
     expect(hook.result.current.pendingModuleWindow).toEqual({ seconds: 0, source: "granted" });
   });
@@ -753,7 +825,9 @@ describe("useSatExamController auto-entry", () => {
 
     const hook = renderController();
 
-    await waitFor(() => expect(hook.result.current.pendingModuleWindow?.source).toBe("authored"));
+    await waitFor(() =>
+      expect(hook.result.current.pendingModuleWindow?.source).toBe("authored"),
+    );
     expect(hook.result.current.pendingModuleWindow?.seconds).toBe(60);
   });
 
@@ -780,14 +854,14 @@ describe("useSatExamController auto-entry", () => {
         () =>
           new Promise<AssessmentDeliveryBootstrap>((resolve) => {
             releaseStart = resolve;
-          })
+          }),
       )
       .mockResolvedValue(openedModule(routed, MODULE_RW_M2, 4));
 
     const hook = renderController();
 
     await waitFor(() =>
-      expect(hook.result.current.pendingModuleWindow).toEqual({ seconds: 0, source: "granted" })
+      expect(hook.result.current.pendingModuleWindow).toEqual({ seconds: 0, source: "granted" }),
     );
     // Still entered: the claim is honest and the flow moves, rather than parking
     // the candidate on a screen for a module that will never open.
@@ -804,7 +878,7 @@ describe("useSatExamController auto-entry", () => {
     // action — the payload a reload or a reconnect would see.
     await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
     expect(
-      hook.result.current.state.phase === "module" && hook.result.current.state.moduleKey
+      hook.result.current.state.phase === "module" && hook.result.current.state.moduleKey,
     ).toBe(MODULE_RW_M2);
     expect(gatewayMocks.startModule).toHaveBeenLastCalledWith("schedule", ATTEMPT_ID, {
       moduleId: MODULE_RW_M2,
@@ -828,7 +902,7 @@ describe("useSatExamController auto-entry", () => {
     async (role) => {
       gatewayMocks.bootstrap.mockResolvedValue(timedOutBranchBootstrap(role));
       gatewayMocks.startModule.mockResolvedValue(
-        openedModule(timedOutBranchBootstrap(role), MODULE_RW_M2, 4)
+        openedModule(timedOutBranchBootstrap(role), MODULE_RW_M2, 4),
       );
 
       const hook = renderController();
@@ -838,10 +912,10 @@ describe("useSatExamController auto-entry", () => {
         moduleId: MODULE_RW_M2,
       });
       await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
-      expect(
-        hook.result.current.state.phase === "module" && hook.result.current.state.moduleKey
-      ).toBe(MODULE_RW_M2);
-    }
+      expect(hook.result.current.state.phase === "module" && hook.result.current.state.moduleKey).toBe(
+        MODULE_RW_M2,
+      );
+    },
   );
 
   // Historical attempts may contain a student_submit terminal reason. They
@@ -859,7 +933,7 @@ describe("useSatExamController auto-entry", () => {
     });
     await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
     expect(
-      hook.result.current.state.phase === "module" && hook.result.current.state.moduleKey
+      hook.result.current.state.phase === "module" && hook.result.current.state.moduleKey,
     ).toBe(MODULE_RW_M2);
   });
 
@@ -872,13 +946,18 @@ describe("useSatExamController auto-entry", () => {
 
     const hook = renderController();
 
-    await waitFor(() => expect(hook.result.current.pendingSectionWaitSeconds).toBeGreaterThan(0));
+    // Between sections the student holds on the directions surface with the
+    // next section's countdown; `phase: break` is unreachable here because the
+    // cohort runner has no break screen (only the personal model's attempt-owned
+    // break is entered through the server's entry offer).
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("directions"));
     await waitFor(() => expect(persistenceMock.flush).toHaveBeenCalled());
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     expect(gatewayMocks.submitAssessment).not.toHaveBeenCalled();
     // The next section is not live yet, so its Module 1 waits: the wait is what
     // holds the student, not a premature result screen.
     expect(gatewayMocks.startModule).not.toHaveBeenCalled();
+    expect(hook.result.current.pendingSectionWaitSeconds).toBeGreaterThan(0);
   });
 
   it("never finalizes an attempt whose next section module is still waiting", async () => {
@@ -886,12 +965,57 @@ describe("useSatExamController auto-entry", () => {
 
     const hook = renderController();
 
-    await waitFor(() => expect(hook.result.current.data?.attempt.moduleAttempts.length).toBe(3));
+    await waitFor(() =>
+      expect(hook.result.current.data?.attempt.moduleAttempts.length).toBe(3),
+    );
     await act(async () => {
       await sleep(600);
     });
 
     expect(gatewayMocks.submitAssessment).not.toHaveBeenCalled();
     expect(hook.result.current.state.phase).toBe("directions");
+  });
+
+  // P0-2 acceptance: the failed attempt must retry on its own scheduled
+  // wakeup (SAT_ENTRY_RETRY_WINDOW_MS), with no new server payload and no
+  // student action. Every poll in the window returns the identical payload,
+  // so a second startModule call can only come from the entry retry timer.
+  it("retries a failed entry when the scheduled retry window elapses, with no new payload", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_NOW));
+    try {
+      gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(2));
+      gatewayMocks.startModule.mockRejectedValueOnce(new Error("network down"));
+      gatewayMocks.startModule.mockResolvedValue(
+        openedModule(liveFirstModuleBootstrap(2), MODULE_RW, 3),
+      );
+
+      const hook = renderController();
+      await act(async () => {
+        for (let i = 0; i < 12; i++) await Promise.resolve();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1);
+      expect(hook.result.current.state.phase).toBe("directions");
+      expect(hook.result.current.autoEntryRecoverable).toBe(true);
+
+      // Past the 2s retry window: polls keep returning the identical
+      // revision-2 payload (no commit), so the retry is timer-driven.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_500);
+      });
+      await act(async () => {
+        for (let i = 0; i < 12; i++) await Promise.resolve();
+      });
+      expect(gatewayMocks.startModule).toHaveBeenCalledTimes(2);
+      expect(hook.result.current.data?.timing.runtimeRevision).toBe(3);
+      expect(hook.result.current.state.phase).toBe("module");
+      expect(hook.result.current.autoEntryRecoverable).toBe(false);
+      hook.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

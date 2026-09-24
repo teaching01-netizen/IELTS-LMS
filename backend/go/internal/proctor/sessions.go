@@ -74,6 +74,7 @@ type SessionSchedule struct {
 	ID                     string                     `json:"id"`
 	ExamID                 string                     `json:"examId"`
 	ProviderKey            string                     `json:"providerKey"`
+	SatTimingModel         *string                    `json:"satTimingModel,omitempty"`
 	OrganizationID         *string                    `json:"organizationId"`
 	ExamTitle              string                     `json:"examTitle"`
 	ProctorDisplayName     string                     `json:"proctorDisplayName"`
@@ -218,6 +219,34 @@ type StudentSessionSummary struct {
 	// publishes neither.
 	RuntimeModuleDeadlineAt       *time.Time `json:"runtimeModuleDeadlineAt"`
 	RuntimeModuleRemainingSeconds *int       `json:"runtimeModuleRemainingSeconds"`
+	// RuntimeStage names the stage the candidate is actually on. An attempt-owned
+	// SAT break is its own stage: while one is pending, armed or running the
+	// candidate sits no module, so the module clock above is empty and the row
+	// would read as a clockless locked candidate — indistinguishable from someone
+	// who never started. "module" while a module is open, "break" while their
+	// break is the thing they are waiting on, absent otherwise.
+	RuntimeStage *string `json:"runtimeStage"`
+	// RuntimeBreakID/State/EntryStartsAt/DeadlineAt/RemainingSeconds are the
+	// break's own identity and clock. `RuntimeBreakID` is what a proctor re-arms;
+	// the deadline is the instant the candidate's own countdown ticks to, and
+	// `RuntimeBreakEntryStartsAt` is the armed offer's instant while the break is
+	// still waiting to be entered (the candidate's clock has not started yet).
+	RuntimeBreakID               *string    `json:"runtimeBreakId"`
+	RuntimeBreakState            *string    `json:"runtimeBreakState"`
+	RuntimeBreakEntryStartsAt    *time.Time `json:"runtimeBreakEntryStartsAt"`
+	RuntimeBreakDeadlineAt       *time.Time `json:"runtimeBreakDeadlineAt"`
+	RuntimeBreakRemainingSeconds *int       `json:"runtimeBreakRemainingSeconds"`
+	// RuntimeEntryModuleAttemptID/Title/State are the stage a candidate who is
+	// sitting nothing is waiting to be given: their next unentered module and the
+	// state of its entry offer. `RuntimeEntryState` is the server's own verdict —
+	// "armed" (the offer is still in the future), "missed" (its start has passed
+	// without an entry), "exhausted" (the automatic retry budget is spent) or
+	// "granted" (a proctor already re-armed it) — because both failures the
+	// candidate sees tell them to "ask the proctor to re-arm", and the proctor can
+	// only act on a stage they can see and name.
+	RuntimeEntryModuleAttemptID *string `json:"runtimeEntryModuleAttemptId"`
+	RuntimeEntryModuleTitle     *string `json:"runtimeEntryModuleTitle"`
+	RuntimeEntryState           *string `json:"runtimeEntryState"`
 	// Runtime identity fence (SAT adaptive routing). Heartbeat/`lastActivity`
 	// orders presence, not exam state: two projections of one candidate can
 	// share a heartbeat instant while describing different adaptive modules, so
@@ -362,7 +391,7 @@ func requireSessionReader(actor Actor) error {
 
 // sessionScheduleColumns is the explicit exam_schedules projection (never
 // SELECT *), mirroring the Rust ExamSchedule field set.
-const sessionScheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, status, created_at, created_by, updated_at, revision, (SELECT sat_publish_scope FROM exam_versions WHERE id = exam_schedules.published_version_id)"
+const sessionScheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, status, created_at, created_by, updated_at, revision, (SELECT sat_publish_scope FROM exam_versions WHERE id = exam_schedules.published_version_id), sat_timing_model"
 
 func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSchedule, error) {
 	var s SessionSchedule
@@ -371,13 +400,13 @@ func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSched
 	var bufBefore, bufAfter sql.NullInt64
 	var autoStart, autoStop sql.NullBool
 	var planned, recInterval, revision int64
-	var publishScope sql.NullString
+	var publishScope, satTimingModel sql.NullString
 	if err := row.Scan(
 		&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle,
 		&s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName,
 		&institution, &s.StartTime, &s.EndTime, &planned, &s.DeliveryMode,
 		&s.RecurrenceType, &recInterval, &recEnd, &bufBefore, &bufAfter,
-		&autoStart, &autoStop, &s.Status, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &revision, &publishScope,
+		&autoStart, &autoStop, &s.Status, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &revision, &publishScope, &satTimingModel,
 	); err != nil {
 		return SessionSchedule{}, err
 	}
@@ -392,6 +421,7 @@ func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSched
 	s.AutoStop = autoStop.Valid && autoStop.Bool
 	s.Revision = revision
 	s.PublishScope = examdomain.SATPublishScope(publishScope.String)
+	s.SatTimingModel = nullStringPtr(satTimingModel)
 	if s.PublishScope != examdomain.SATPublishScopeFull && s.PublishScope != examdomain.SATPublishScopeReadingWriting && s.PublishScope != examdomain.SATPublishScopeMath {
 		s.PublishScope = examdomain.SATPublishScopeFull
 	}
@@ -645,7 +675,11 @@ func hydrateSessionRuntime(row sessionRuntimeRow, sections []SessionRuntimeSecti
 // Rust build_not_started_runtime minus the version-plan load (see package
 // doc): empty plan/sections arrays keep the wire shape.
 func notStartedSessionRuntime(schedule SessionSchedule, now time.Time) SessionRuntime {
-	return NotStartedRuntimeForProvider(schedule.ID, schedule.ExamID, schedule.ProviderKey, now)
+	choice := ""
+	if schedule.SatTimingModel != nil {
+		choice = *schedule.SatTimingModel
+	}
+	return NotStartedRuntimeWithChoice(schedule.ID, schedule.ExamID, schedule.ProviderKey, choice, now)
 }
 
 // NotStartedRuntimeForProvider is the ONE pre-start projection for a schedule
@@ -663,6 +697,13 @@ func notStartedSessionRuntime(schedule SessionSchedule, now time.Time) SessionRu
 // examID may be empty when the caller keyed off a schedule id it did not
 // re-read; the wire projection only needs it for the id echo.
 func NotStartedRuntimeForProvider(scheduleID, examID, providerKey string, now time.Time) SessionRuntime {
+	return NotStartedRuntimeWithChoice(scheduleID, examID, providerKey, "", now)
+}
+
+// NotStartedRuntimeWithChoice applies a stored schedule choice over the
+// provider default. Empty/unknown keeps the deployed model so old rows (NULL)
+// and existing runtime rows never change meaning in flight.
+func NotStartedRuntimeWithChoice(scheduleID, examID, providerKey, scheduleChoice string, now time.Time) SessionRuntime {
 	return SessionRuntime{
 		ID:                             nilUUID,
 		ScheduleID:                     scheduleID,
@@ -670,7 +711,7 @@ func NotStartedRuntimeForProvider(scheduleID, examID, providerKey string, now ti
 		ProviderKey:                    providerKey,
 		Status:                         examruntime.StatusNotStarted,
 		PlanSnapshot:                   []SessionPlanEntry{},
-		TimingModel:                    examruntime.ProviderTimingModel(providerKey),
+		TimingModel:                    examruntime.ResolveTimingModel(providerKey, scheduleChoice),
 		CurrentSectionRemainingSeconds: 0,
 		ServerNow:                      now,
 		CreatedAt:                      now,
@@ -738,7 +779,8 @@ func loadSessionRuntimes(ctx context.Context, q sessionQuerier, schedules []Sess
 	for _, id := range ids {
 		row, ok := bySchedule[id]
 		if !ok {
-			out[id] = notStartedSessionRuntime(byID[id], now)
+			sch := byID[id]
+			out[id] = notStartedSessionRuntime(sch, now)
 			continue
 		}
 		out[id] = hydrateSessionRuntime(row, sectionsByRuntime[row.id], now)
@@ -947,12 +989,14 @@ func filterSessionPlanScope(plan []SessionPlanSection, scope map[string]bool) []
 // persisted remaining-seconds value instead of the live clock/deadline.
 func LoadSessionRuntimeBySchedule(ctx context.Context, db *sql.DB, scheduleID string) (SessionRuntime, error) {
 	var schedule SessionSchedule
+	var satTimingModel sql.NullString
 	if err := db.QueryRowContext(ctx, `
-		SELECT id, exam_id, provider_key
+		SELECT id, exam_id, provider_key, sat_timing_model
 		FROM exam_schedules
-		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey); err != nil {
+		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel); err != nil {
 		return SessionRuntime{}, err
 	}
+	schedule.SatTimingModel = nullStringPtr(satTimingModel)
 	return loadSessionRuntime(ctx, db, schedule, time.Now().UTC())
 }
 
@@ -982,12 +1026,14 @@ func LoadExamPlanBySchedule(ctx context.Context, db *sql.DB, scheduleID string) 
 // status comes from the pre-probed row the caller already holds.
 func LoadSessionRuntimeByStatus(ctx context.Context, db *sql.DB, scheduleID, status string) (SessionRuntime, error) {
 	var schedule SessionSchedule
+	var satTimingModel sql.NullString
 	if err := db.QueryRowContext(ctx, `
-		SELECT id, exam_id, provider_key
+		SELECT id, exam_id, provider_key, sat_timing_model
 		FROM exam_schedules
-		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey); err != nil {
+		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel); err != nil {
 		return SessionRuntime{}, err
 	}
+	schedule.SatTimingModel = nullStringPtr(satTimingModel)
 	now := time.Now().UTC()
 	var row sessionRuntimeRow
 	if err := db.QueryRowContext(ctx,
@@ -1037,6 +1083,13 @@ type studentSessionRow struct {
 	attemptRevision                                            int64
 	satModuleAttemptID, satModuleID                            sql.NullString
 	satModuleAttemptRevision                                   sql.NullInt64
+	satBreakID, satBreakState                                  sql.NullString
+	satBreakDuration, satBreakAccum                            sql.NullInt64
+	satBreakStartsAt, satBreakPausedAt                         sql.NullTime
+	satBreakEntryStartsAt, satBreakDeadlineAt                  sql.NullTime
+	satEntryModuleAttemptID, satEntryModuleID, satEntryTitle   sql.NullString
+	satEntryGeneration                                         sql.NullInt64
+	satEntryStartsAt, satEntryProctorRearmAt                   sql.NullTime
 }
 
 // studentSessionColumns mirrors Rust load_student_sessions (explicit list).
@@ -1049,7 +1102,11 @@ const studentSessionColumns = "sa.id, sa.candidate_id, sa.candidate_name, sa.can
 	"sat_module.title, sat_module.module_key, sat_module.adaptive_role, " +
 	"sat_attempt.started_at, sat_attempt.paused_at, " +
 	"sat_attempt.allocated_seconds, sat_attempt.extension_seconds, sat_attempt.accumulated_paused_seconds, " +
-	"sa.revision, sat_attempt.id, sat_attempt.module_id, sat_attempt.revision"
+	"sa.revision, sat_attempt.id, sat_attempt.module_id, sat_attempt.revision, " +
+	"sat_break.id, sat_break.state, sat_break.duration_seconds, sat_break.accumulated_paused_seconds, " +
+	"sat_break.starts_at, sat_break.paused_at, sat_break.entry_starts_at, sat_break.deadline_at, " +
+	"sat_entry.id, sat_entry.module_id, sat_entry_module.title, sat_entry.entry_generation, " +
+	"sat_entry.entry_starts_at, sat_entry.entry_proctor_rearm_at"
 
 const studentSessionFrom = "FROM student_attempts sa " +
 	"JOIN exam_entities e ON e.id = sa.exam_id " +
@@ -1059,7 +1116,25 @@ const studentSessionFrom = "FROM student_attempts sa " +
 	"WHERE ma2.attempt_id = sa.id AND ma2.state = 'active' " +
 	"ORDER BY ma2.created_at DESC, ma2.id DESC LIMIT 1" +
 	") " +
-	"LEFT JOIN assessment_modules sat_module ON sat_module.id = sat_attempt.module_id"
+	"LEFT JOIN assessment_modules sat_module ON sat_module.id = sat_attempt.module_id " +
+	// The attempt-owned SAT break stage, oldest unfinished row only: a break is
+	// created when the section before it finalizes, so an unfinished one is what
+	// the candidate is waiting on right now (and the row the module arm path
+	// refuses to start a module behind).
+	"LEFT JOIN assessment_attempt_breaks sat_break ON sat_break.id = (" +
+	"SELECT b2.id FROM assessment_attempt_breaks b2 " +
+	"WHERE b2.attempt_id = sa.id AND b2.state <> 'completed' " +
+	"ORDER BY b2.created_at ASC, b2.id ASC LIMIT 1" +
+	") " +
+	// The stage a candidate is waiting to be given: their next unentered module
+	// attempt. Its entry offer is what the candidate's own screen retries, and the
+	// id is what a proctor re-arms once those retries run out.
+	"LEFT JOIN assessment_module_attempts sat_entry ON sat_entry.id = (" +
+	"SELECT ma3.id FROM assessment_module_attempts ma3 " +
+	"WHERE ma3.attempt_id = sa.id AND ma3.state = 'not_started' AND ma3.entry_entered_at IS NULL " +
+	"ORDER BY ma3.created_at ASC, ma3.id ASC LIMIT 1" +
+	") " +
+	"LEFT JOIN assessment_modules sat_entry_module ON sat_entry_module.id = sat_entry.module_id"
 
 func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSessionRow, error) {
 	var r studentSessionRow
@@ -1074,6 +1149,10 @@ func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSes
 		&r.satStartedAt, &r.satPausedAt,
 		&r.satAllocated, &r.satExtension, &r.satAccum,
 		&r.attemptRevision, &r.satModuleAttemptID, &r.satModuleID, &r.satModuleAttemptRevision,
+		&r.satBreakID, &r.satBreakState, &r.satBreakDuration, &r.satBreakAccum,
+		&r.satBreakStartsAt, &r.satBreakPausedAt, &r.satBreakEntryStartsAt, &r.satBreakDeadlineAt,
+		&r.satEntryModuleAttemptID, &r.satEntryModuleID, &r.satEntryTitle, &r.satEntryGeneration,
+		&r.satEntryStartsAt, &r.satEntryProctorRearmAt,
 	); err != nil {
 		return studentSessionRow{}, err
 	}
@@ -1286,6 +1365,99 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 			timeRemaining = satAttemptRemaining(nullTimePtr(row.satStartedAt), nullTimePtr(row.satPausedAt), alloc, ext, acc, runtime.ServerNow)
 		}
 	}
+	// What stage the candidate is on. A break row is created when the section
+	// before it finalizes, so an unfinished one IS the stage between two modules;
+	// without it the candidate published an empty module clock and the locked
+	// fallback below, which is what a never-started candidate looks like.
+	breakState := ""
+	if isSAT && row.satBreakID.Valid {
+		breakState = strings.TrimSpace(row.satBreakState.String)
+	}
+	onBreak := breakState == "pending" || breakState == "armed" || breakState == "active"
+	// The stage a candidate who sits nothing is waiting to be given: the state of
+	// their next unentered module's entry offer. "missed" and "exhausted" are the
+	// two verdicts whose refusal tells the candidate to ask for a proctor re-arm,
+	// so the room must name them instead of leaving a silent locked row.
+	var entryModuleAttemptID, entryModuleTitle, entryState *string
+	if isSAT && row.satEntryModuleAttemptID.Valid {
+		id := strings.TrimSpace(row.satEntryModuleAttemptID.String)
+		entryModuleAttemptID = &id
+		if row.satEntryTitle.Valid && strings.TrimSpace(row.satEntryTitle.String) != "" {
+			title := strings.TrimSpace(row.satEntryTitle.String)
+			entryModuleTitle = &title
+		}
+		generation := 0
+		if row.satEntryGeneration.Valid {
+			generation = int(row.satEntryGeneration.Int64)
+		}
+		switch {
+		case row.satEntryProctorRearmAt.Valid:
+			v := "granted"
+			entryState = &v
+		case generation >= 4:
+			v := "exhausted"
+			entryState = &v
+		case row.satEntryStartsAt.Valid && !row.satEntryStartsAt.Time.After(runtime.ServerNow):
+			v := "missed"
+			entryState = &v
+		case row.satEntryStartsAt.Valid:
+			v := "armed"
+			entryState = &v
+		}
+	}
+	var runtimeStage *string
+	var runtimeBreakID, runtimeBreakState *string
+	var runtimeBreakEntryStartsAt, runtimeBreakDeadline *time.Time
+	var runtimeBreakRemaining *int
+	switch {
+	case onBreak:
+		v := "break"
+		runtimeStage = &v
+		id, state := strings.TrimSpace(row.satBreakID.String), breakState
+		runtimeBreakID, runtimeBreakState = &id, &state
+		if state == "active" {
+			duration, acc := 0, 0
+			if row.satBreakDuration.Valid {
+				duration = int(row.satBreakDuration.Int64)
+			}
+			if row.satBreakAccum.Valid {
+				acc = int(row.satBreakAccum.Int64)
+			}
+			// The break's own clock, from the same projection the module clock
+			// uses: a paused break publishes its frozen remainder only.
+			deadline, remaining := satModuleClock(nullTimePtr(row.satBreakStartsAt), nullTimePtr(row.satBreakPausedAt), duration, 0, acc, runtime.ServerNow)
+			runtimeBreakDeadline, runtimeBreakRemaining = deadline, remaining
+			if row.satBreakDeadlineAt.Valid {
+				// The stored deadline is authoritative once the break is running
+				// (a proctor extension moves it).
+				stored := row.satBreakDeadlineAt.Time.UTC()
+				runtimeBreakDeadline = &stored
+				if remaining := int(stored.Sub(runtime.ServerNow) / time.Second); remaining > 0 {
+					runtimeBreakRemaining = &remaining
+				}
+			}
+		} else if row.satBreakEntryStartsAt.Valid {
+			// Armed, not entered: the candidate's break clock has not started, so
+			// the meaningful countdown is the entry lead they must paint inside.
+			// Past it the arm path re-arms, and a proctor can re-arm by id.
+			at := row.satBreakEntryStartsAt.Time.UTC()
+			runtimeBreakEntryStartsAt = &at
+			lead := int(at.Sub(runtime.ServerNow) / time.Second)
+			if lead < 0 {
+				lead = 0
+			}
+			runtimeBreakRemaining = &lead
+		}
+	case isSAT && row.satModuleAttemptID.Valid:
+		v := "module"
+		runtimeStage = &v
+	case isSAT && entryState != nil:
+		// Nothing open, nothing entered, but their next module is on the table:
+		// that is the stage the room calls "waiting for entry", and a missed or
+		// exhausted one is a proctor action.
+		v := "entry"
+		runtimeStage = &v
+	}
 	currentSection := row.currentModule
 	if isSAT {
 		if row.satModuleTitle.Valid && strings.TrimSpace(row.satModuleTitle.String) != "" {
@@ -1315,6 +1487,11 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		switch {
 		case row.proctorStatus == "paused" || row.satPausedAt.Valid:
 			v = "paused"
+		case onBreak:
+			// The break is a real stage, not a locked section: reporting
+			// "locked" here stopped the candidate's clock in the staff room and
+			// made a candidate on a break look like one who never started.
+			v = "break"
 		case row.satStartedAt.Valid:
 			v = "live"
 		default:
@@ -1354,6 +1531,15 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		RuntimeCurrentModuleRole:      moduleRole,
 		RuntimeModuleDeadlineAt:       moduleDeadline,
 		RuntimeModuleRemainingSeconds: moduleRemaining,
+		RuntimeStage:                  runtimeStage,
+		RuntimeBreakID:                runtimeBreakID,
+		RuntimeBreakState:             runtimeBreakState,
+		RuntimeBreakEntryStartsAt:     runtimeBreakEntryStartsAt,
+		RuntimeBreakDeadlineAt:        runtimeBreakDeadline,
+		RuntimeBreakRemainingSeconds:  runtimeBreakRemaining,
+		RuntimeEntryModuleAttemptID:   entryModuleAttemptID,
+		RuntimeEntryModuleTitle:       entryModuleTitle,
+		RuntimeEntryState:             entryState,
 		RuntimeAttemptRevision:        &attemptRevision,
 		RuntimeCurrentModuleID:        runtimeCurrentModuleID,
 		RuntimeModuleAttemptID:        runtimeModuleAttemptID,

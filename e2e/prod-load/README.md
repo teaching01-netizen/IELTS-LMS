@@ -152,4 +152,70 @@ Required envs:
 - `SAT_JOIN_URL` (`REGISTER_URL` accepted as fallback)
 - `USERS_FILE` (`userId,email,password,candidateId` — `candidateId` is the student code on `student_code` links)
 
-Optional envs: same as IELTS runner, plus `EXAM_TIMEOUT_MS` (default `9000000` = 150 min for a full SAT).
+Optional envs: same as IELTS runner, plus `EXAM_TIMEOUT_MS` (default `9000000` = 150 min for a full SAT),
+`CONTEXTS_PER_BROWSER` (default `5`), `ABORT_ON_FATAL_JOIN` (default `true`), and
+`JOIN_FAILURE_ABORT_THRESHOLD` (default `8`).
+
+### Browsers
+
+Contexts are spread across a small pool of Chromium instances
+(`ceil(MAX_CONCURRENT_USERS / CONTEXTS_PER_BROWSER)`). A crashed instance is
+replaced automatically and only costs its own contexts — one shared browser
+used to fail every in-flight bot at the same instant.
+
+### Prerequisite: the exam window must be open
+
+Bots can only join while the **schedule** is `scheduled` or `live`. The moment
+the proctor (or the SAT clock) completes the run, `exam_schedules.status`
+becomes `completed` and every entry attempt is rejected with
+`409 Registration is closed for this schedule.` — which the entry page renders
+as *"Registration is closed for this schedule."* The Student Link itself can
+still look `live`, and the join form still renders, so this is easy to misread
+as a bot bug.
+
+Before every load run:
+
+1. Create/open a schedule for the exam (or bootstrap a fresh one) so it is
+   `scheduled`.
+2. Publish (or reuse) the Student Link and start the SAT session from the
+   proctor UI.
+3. Point the runner at that link's `/join/<accessLinkId>` URL, then start the bots.
+
+When entry is refused for a run-scoped reason (registration closed, link ended,
+paused, not open yet) the runner now aborts instead of grinding through 100
+two-minute retry loops:
+
+- the operator log/control panel prints `ABORTING RUN — <code>: <reason> Fix: <hint>`,
+- remaining students are reported as `skipped` on the monitor,
+- the summary JSON gains `aborted`, `abortReason`, and `skipped`,
+- the process exits with code `3` (the control badge turns red).
+
+Set `ABORT_ON_FATAL_JOIN=false` to keep running the rest of the roster anyway.
+A run where nothing at all is admitted also aborts once
+`JOIN_FAILURE_ABORT_THRESHOLD` students have failed.
+
+## SAT Settings UI
+
+Start the local control panel, set the Student Link URL, roster, student count,
+concurrency, screenshot frequency, and timeouts in the form, then choose
+**Start students**. All browsers are headless. **Stop all** terminates the
+runner and its browser process group.
+
+```bash
+bun run e2e:live-sat-control
+```
+
+Open `http://localhost:3333`. The student screenshot grid is embedded in the
+page and also runs on `3334`. The controller binds to localhost by default.
+
+Run settings can be prefilled from the control URL (query values override the
+settings this browser saved last):
+
+```txt
+http://localhost:3333/?joinUrl=https%3A%2F%2Fhost%2Fjoin%2F<accessLinkId>&usersFile=e2e%2Fprod-load%2Flive-users.500.csv&userCount=100&userOffset=0&maxConcurrentUsers=15&screenshotIntervalMs=5000&jpegQuality=30&startTimeoutMinutes=20&examTimeoutMinutes=150
+```
+
+Recognised keys: `joinUrl`, `usersFile`, `userCount`, `userOffset`,
+`maxConcurrentUsers`, `screenshotIntervalMs`, `jpegQuality`,
+`startTimeoutMinutes`, `examTimeoutMinutes`. Unknown or out-of-range values are
+ignored and the form keeps its previous/default setting.

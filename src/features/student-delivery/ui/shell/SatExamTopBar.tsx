@@ -1,4 +1,4 @@
-import { useId, useRef, type Ref } from "react";
+import { useEffect, useId, useRef, type Ref } from "react";
 import { BookOpen, Calculator, ChevronDown, EllipsisVertical, Highlighter } from "lucide-react";
 import { SAT_COPY, satNotesToolLabel } from "../../domain/satCopy";
 import type { StructuredContent } from "../../../exam-authoring/api/assessmentContracts";
@@ -6,6 +6,8 @@ import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
 import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
 import { SatDirectionsPopover } from "./SatDirectionsPopover";
 import { SatReadingPopover } from "./SatReadingPopover";
+import { formatSatTime, shouldAutoRevealTimer } from "../../domain/satTiming";
+import { useSatTemporalSnapshot } from "../../timing/SatTemporalRuntime";
 
 export interface SatExamTopBarProps {
   sectionLabel: string;
@@ -16,11 +18,12 @@ export interface SatExamTopBarProps {
   timerVisible: boolean;
   /** Announced once when a hidden timer auto-reveals at the 5-minute mark. */
   timerRevealAnnouncement?: string | null | undefined;
+  onAutoRevealTimer?: (() => void) | undefined;
   calculatorAvailable: boolean;
   calculatorOpen: boolean;
   referenceAvailable: boolean;
   referenceOpen: boolean;
-  /** R&W-only. When false both Highlights & Notes controls are hidden, not disabled. */
+  /** When false both Highlights & Notes controls are hidden, not disabled. */
   notesAvailable: boolean;
   /**
    * The armed annotation mode: selecting text may raise annotation controls.
@@ -37,7 +40,9 @@ export interface SatExamTopBarProps {
   notesOpen: boolean;
   notesButtonId: string;
   onToggleAnnotationMode: () => void;
-  moreOpen: boolean;
+  /** When false the More utility center is excluded (button + menu). Defaults to false for now. */
+  moreAvailable?: boolean | undefined;
+  moreOpen?: boolean | undefined;
   readingOpen: boolean;
   readingPreferences: SatReadingPreferences;
   blocked: boolean;
@@ -47,7 +52,7 @@ export interface SatExamTopBarProps {
   onToggleCalculator: () => void;
   onToggleReference: () => void;
   onToggleNotes: () => void;
-  onToggleMore: () => void;
+  onToggleMore?: (() => void) | undefined;
   onToggleReading: () => void;
   onCloseReading: () => void;
   onReadingPreferencesChange: (preferences: SatReadingPreferences) => void;
@@ -60,13 +65,49 @@ export interface SatExamTopBarProps {
   onFitToScreen?: (() => void) | undefined;
 }
 
+function SatTimer({ remainingLabel: fallbackLabel, remainingSeconds: fallbackSeconds, timerVisible, onAutoRevealTimer }: Pick<SatExamTopBarProps, 'remainingLabel' | 'remainingSeconds' | 'timerVisible' | 'onAutoRevealTimer'>) {
+  // T2.5: shared threshold announcer (5-min / 1-min, never per-second),
+  // mirroring the IELTS headers. Per-tick label keeps no live region.
+  const temporal = useSatTemporalSnapshot();
+  const remainingSeconds = temporal?.displaySeconds ?? fallbackSeconds;
+  const remainingLabel = temporal ? formatSatTime(temporal.displaySeconds) : fallbackLabel;
+  const timerAnnouncement = useStudentTimerAnnouncement(remainingSeconds);
+  const previousRemainingRef = useRef<number | null>(null);
+  const revealFiredRef = useRef(false);
+  useEffect(() => {
+    if (shouldAutoRevealTimer({
+      previousSeconds: previousRemainingRef.current,
+      remainingSeconds,
+      alreadyRevealed: revealFiredRef.current,
+    })) {
+      revealFiredRef.current = true;
+      onAutoRevealTimer?.();
+    } else if (remainingSeconds != null && remainingSeconds > 300) {
+      revealFiredRef.current = false;
+    }
+    previousRemainingRef.current = remainingSeconds ?? null;
+  }, [remainingSeconds, onAutoRevealTimer]);
+
+  return (
+    <>
+      <span
+        className="sat-tabular sat-type-timer font-semibold text-[var(--sat-text)]"
+        role="timer"
+        aria-label={timerVisible ? `Time remaining ${remainingLabel}` : "Timer hidden. Reappears at 5:00."}
+      >
+        {timerVisible ? remainingLabel : "Hidden"}
+      </span>
+      <span className="sr-only" aria-live="polite" data-testid="sat-timer-announcement">
+        {timerAnnouncement}
+      </span>
+    </>
+  );
+}
+
 export function SatExamTopBar(props: SatExamTopBarProps) {
   const directionsId = useId();
   const directionsButtonRef = useRef<HTMLButtonElement>(null);
   const readingButtonRef = useRef<HTMLButtonElement>(null);
-  // T2.5: shared threshold announcer (5-min / 1-min, never per-second),
-  // mirroring the IELTS headers. Per-tick label keeps no live region.
-  const timerAnnouncement = useStudentTimerAnnouncement(props.remainingSeconds);
 
   return (
     <header
@@ -104,22 +145,14 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
         </div>
 
         <div className="col-start-2 row-start-1 flex min-w-[84px] flex-col items-center justify-center self-stretch text-center lg:col-auto lg:row-auto lg:min-w-[96px]">
-          <span
-            className="sat-tabular sat-type-timer font-semibold text-[var(--sat-text)]"
-            role="timer"
-            aria-label={
-              props.timerVisible
-                ? `Time remaining ${props.remainingLabel}`
-                : "Timer hidden. Reappears at 5:00."
-            }
-          >
-            {props.timerVisible ? props.remainingLabel : "Hidden"}
-          </span>
+          <SatTimer
+            remainingLabel={props.remainingLabel}
+            remainingSeconds={props.remainingSeconds}
+            timerVisible={props.timerVisible}
+            onAutoRevealTimer={props.onAutoRevealTimer}
+          />
           {/* T2.5: polite threshold announcements only (5-min / 1-min), plus
               the one-shot auto-reveal notice when a hidden timer reappears. */}
-          <span className="sr-only" aria-live="polite" data-testid="sat-timer-announcement">
-            {timerAnnouncement}
-          </span>
           {props.timerRevealAnnouncement ? (
             <span className="sr-only" aria-live="polite" data-testid="sat-timer-reveal-announcement">
               {props.timerRevealAnnouncement}
@@ -243,9 +276,9 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
               icon={<BookOpen className="h-5 w-5" aria-hidden="true" />}
             />
           ) : null}
-          {/* Bluebook More utility center (Phase 1): tiny subordinate trigger at
-              the extreme top-right. Never disabled — Help/Shortcuts stay
-              reachable read-only while blocked. */}
+          {/* More utility center excluded for now (moreAvailable !== true):
+              button + menu hidden, shortcuts disabled in the shell. */}
+          {props.moreAvailable === true ? (
           <div className="sat-popover-anchor relative shrink-0">
             <button
               type="button"
@@ -260,6 +293,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
               <span className="hidden max-w-[80px] truncate min-[420px]:inline">{SAT_COPY.more.trigger}</span>
             </button>
           </div>
+          ) : null}
         </div>
       </div>
     </header>

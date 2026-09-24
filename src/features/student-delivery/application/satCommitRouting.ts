@@ -28,6 +28,7 @@ import {
 } from "./satRuntimeSelectors";
 import { timingForAttempt } from "../domain/satTiming";
 import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satToolPolicy";
+import { isSatPersonalTimingModel } from "../../../types/domain";
 
 export type SatCommitHint =
   | { kind: "bootstrap" }
@@ -52,6 +53,11 @@ export function startModuleRouteAction(
   const section = sectionForModule(payload, module.id);
   const attempt = findAttemptForModule(payload, module.id);
   if (!section || !attempt?.startedAt) return null;
+  if (
+    isSatPersonalTimingModel(payload.timing.timingModel) &&
+    attempt.entryStartsAt &&
+    Date.parse(payload.serverNow) < Date.parse(attempt.entryStartsAt)
+  ) return null;
   const timing = timingForAttempt(payload, attempt);
   const sectionKey = section.sectionKey === "math" ? "math" : "reading-writing";
   return {

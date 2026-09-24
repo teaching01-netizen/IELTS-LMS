@@ -438,6 +438,40 @@ function RichNode({ node, renderText, enlarge }: { node: RichTextNode; renderTex
   const annotatable = Boolean(renderText && nodeId && (node.content ?? []).every((child) => child.type === 'text' || child.type === 'hardBreak'));
   const textAttributes = annotatable ? { 'data-content-text-node': nodeId } : {};
   const textChildren = () => {
+    if (renderText && nodeId && !annotatable) {
+      const inline = node.content ?? [];
+      const parts: ReactNode[] = [];
+      let index = 0;
+      while (index < inline.length) {
+        const first = index;
+        const child = inline[index]!;
+        if (child.type !== 'text' && child.type !== 'hardBreak') {
+          parts.push(<RichNode key={`mixed-${first}`} node={child} renderText={renderText} enlarge={enlarge} />);
+          index += 1;
+          continue;
+        }
+        const run: RichTextNode[] = [];
+        while (index < inline.length && (inline[index]!.type === 'text' || inline[index]!.type === 'hardBreak')) {
+          run.push(inline[index]!);
+          index += 1;
+        }
+        const runId = `${nodeId}::text-run-${first}`;
+        const blockText = textFromNodes(run);
+        let offset = 0;
+        parts.push(
+          <span key={`mixed-${first}`} data-content-text-node={runId}>
+            {run.map((part, partIndex) => {
+              if (part.type === 'hardBreak') return <br key={partIndex} />;
+              const text = part.text ?? '';
+              const startOffset = offset;
+              offset += text.length;
+              return <span key={partIndex}>{applyMarks(part, renderText({ nodeId: runId, blockText, text, startOffset }))}</span>;
+            })}
+          </span>,
+        );
+      }
+      return parts;
+    }
     if (!annotatable || !renderText) return children('text-block');
     const blockText = textFromNodes(node.content);
     let offset = 0;

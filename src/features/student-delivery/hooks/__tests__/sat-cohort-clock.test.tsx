@@ -1,7 +1,28 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { useSatExamController } from "../useSatExamController";
+import { deriveSatTemporalSnapshot } from "../../timing/satTemporalModel";
+import { SatTemporalRuntime } from "../../timing/SatTemporalRuntime";
+
+function renderWithTemporalRuntime<T>(useHook: (props: any) => T, options?: { initialProps?: any }) {
+  let current: any;
+  function Harness({ hookProps }: { hookProps: any }) {
+    current = useHook(hookProps);
+    return (
+      <SatTemporalRuntime model={current.temporalModel ?? null} onBoundary={current.onTemporalBoundary}>
+        <div />
+      </SatTemporalRuntime>
+    );
+  }
+  const initialProps = options?.initialProps;
+  const view = render(<Harness hookProps={initialProps} />);
+  return {
+    result: { get current() { return current; } },
+    rerender: (props = initialProps) => view.rerender(<Harness hookProps={props} />),
+    unmount: view.unmount,
+  };
+}
 
 const gatewayMocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
@@ -201,7 +222,7 @@ describe("SAT cohort module clock", () => {
   // from the deadlines between bootstraps.
   it("ticks the module countdown between bootstraps (60 -> 50 after 10s)", async () => {
     gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
-    const hook = renderHook(() =>
+    const hook = renderWithTemporalRuntime(() =>
       useSatExamController({
         scheduleId: "schedule",
         attemptId: "attempt-a",
@@ -219,7 +240,7 @@ describe("SAT cohort module clock", () => {
     });
     // No new bootstrap: the countdown must still advance from the deadline.
     expect(gatewayMocks.bootstrap.mock.calls.length).toBe(bootstrapCalls);
-    expect(hook.result.current.remainingSeconds).toBe(50);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(50);
     vi.useRealTimers();
   });
 
@@ -229,7 +250,7 @@ describe("SAT cohort module clock", () => {
     gatewayMocks.bootstrap.mockImplementation(() =>
       Promise.resolve(cohortBootstrapAt(new Date().toISOString())),
     );
-    const hook = renderHook(() =>
+    const hook = renderWithTemporalRuntime(() =>
       useSatExamController({
         scheduleId: "schedule",
         attemptId: "attempt-a",
@@ -249,7 +270,7 @@ describe("SAT cohort module clock", () => {
       await vi.advanceTimersByTimeAsync(59_000);
     });
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
-    expect(hook.result.current.remainingSeconds).toBe(1);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(1);
 
     // +1s: the local module timer reaches zero while the section clock still
     // reads 60s. The client freezes and flushes; only server reconciliation
@@ -277,7 +298,7 @@ describe("SAT cohort module clock", () => {
     gatewayMocks.bootstrap.mockImplementation(() =>
       Promise.resolve(cohortBootstrapAt(new Date(serverNowMs).toISOString())),
     );
-    const hook = renderHook(
+    const hook = renderWithTemporalRuntime(
       ({ token }: { token: number }) =>
         useSatExamController({
           scheduleId: "schedule",
@@ -324,7 +345,7 @@ describe("SAT cohort module clock", () => {
     gatewayMocks.bootstrap.mockImplementation(() =>
       Promise.resolve(cohortBootstrapAt(new Date(serverNowMs).toISOString())),
     );
-    const hook = renderHook(
+    const hook = renderWithTemporalRuntime(
       ({ token }: { token: number }) =>
         useSatExamController({
           scheduleId: "schedule",
@@ -342,7 +363,7 @@ describe("SAT cohort module clock", () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
     serverNowMs += 10_000;
-    expect(hook.result.current.remainingSeconds).toBe(50);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(50);
 
     // The student's device clock jumps +4 minutes; the SERVER clock does not.
     vi.setSystemTime(new Date(Date.now() + 240_000));
@@ -363,7 +384,7 @@ describe("SAT cohort module clock", () => {
     await act(async () => {
       vi.advanceTimersByTime(1_000);
     });
-    expect(hook.result.current.remainingSeconds).toBe(49);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(49);
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     hook.unmount();
     vi.useRealTimers();
@@ -371,7 +392,7 @@ describe("SAT cohort module clock", () => {
 
   it("counts the authored break down to the next section's start", async () => {
     gatewayMocks.bootstrap.mockResolvedValue(breakBootstrap());
-    const hook = renderHook(() =>
+    const hook = renderWithTemporalRuntime(() =>
       useSatExamController({
         scheduleId: "schedule",
         attemptId: "attempt-a",
@@ -393,7 +414,108 @@ describe("SAT cohort module clock", () => {
       vi.advanceTimersByTime(10_000);
     });
     expect(gatewayMocks.bootstrap.mock.calls.length).toBe(bootstrapCalls);
-    expect(hook.result.current.pendingBreakSeconds).toBe(breakSeconds - 10);
+    expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).pendingBreakSeconds).toBe(breakSeconds - 10);
+    vi.useRealTimers();
+  });
+
+  it("requests one recovery snapshot when the scheduled break reaches zero", async () => {
+    const payload = breakBootstrap();
+    payload.timing.nextSectionStartAt = new Date('2026-09-10T08:00:01.000Z').toISOString();
+    gatewayMocks.bootstrap.mockResolvedValue(payload);
+    const hook = renderWithTemporalRuntime(() => useSatExamController({
+      scheduleId: 'schedule', attemptId: 'attempt-a', candidateId: 'candidate', liveSocketConnected: true,
+    }));
+    await act(async () => {
+      for (let i = 0; i < 12; i += 1) await Promise.resolve();
+    });
+    const before = gatewayMocks.bootstrap.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(gatewayMocks.bootstrap.mock.calls.length).toBe(before + 1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(gatewayMocks.bootstrap.mock.calls.length).toBe(before + 1);
+    hook.unmount();
+  });
+
+  // Exactly-once timeout boundary: crossing the module deadline must block
+  // interaction, flush once, and fire one recovery refresh — and staying past
+  // the deadline must not refire any of them. Math.random is pinned so the
+  // live-socket poll lands exactly on +20/+40/+60/+80, making the recovery
+  // nudge countable apart from the scheduled polls.
+  it("fires the timeout transition exactly once: one flush, one recovery refresh", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(1);
+    try {
+      gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
+      const hook = renderWithTemporalRuntime(() =>
+        useSatExamController({
+          scheduleId: "schedule",
+          attemptId: "attempt-a",
+          candidateId: "candidate",
+          liveSocketConnected: true,
+        }),
+      );
+      await act(async () => {
+        for (let i = 0; i < 12; i++) await Promise.resolve();
+      });
+      expect(hook.result.current.state.phase).toBe("module");
+
+      // +59s: inside the allotment — polls fired at +20/+40, nothing closed.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(59_000);
+      });
+      expect(hook.result.current.answerInteractionBlocked).toBe(false);
+      gatewayMocks.bootstrap.mockClear();
+      persistenceMock.flush.mockClear();
+
+      // Cross T0+60: the +60 poll and the boundary wakeup fire together, so
+      // the recovery nudge is exactly one bootstrap on top of the poll.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(hook.result.current.answerInteractionBlocked).toBe(true);
+      expect(hook.result.current.timeoutTransitionStarted).toBe(true);
+      expect(persistenceMock.flush).toHaveBeenCalledTimes(1);
+      expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(2);
+      expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
+
+      // Stay past the deadline (next poll due at +80): no refire.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(persistenceMock.flush).toHaveBeenCalledTimes(1);
+      expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(2);
+      expect(hook.result.current.answerInteractionBlocked).toBe(true);
+      expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
+      hook.unmount();
+    } finally {
+      randomSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  // The memoized temporal model keeps a stable identity while authoritative
+  // facts are unchanged: a parent re-render alone must not publish a new
+  // context value and re-render every per-second temporal consumer.
+  it("keeps the temporal model identical across re-renders with unchanged facts", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
+    const hook = renderWithTemporalRuntime(() =>
+      useSatExamController({
+        scheduleId: "schedule",
+        attemptId: "attempt-a",
+        candidateId: "candidate",
+        liveSocketConnected: true,
+      }),
+    );
+    await act(async () => {
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    const before = hook.result.current.temporalModel;
+    hook.rerender();
+    expect(hook.result.current.temporalModel).toBe(before);
+    hook.unmount();
     vi.useRealTimers();
   });
 });

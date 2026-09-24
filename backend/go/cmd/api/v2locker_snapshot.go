@@ -16,6 +16,7 @@ import (
 func snapshotRuntimeGate(snap runtime.Snapshot, now time.Time) attempts.RuntimeGate {
 	gate := attempts.RuntimeGate{
 		Status:                snap.Status,
+		TimingModel:           snap.TimingModel,
 		ActiveSectionKey:      "*",
 		SectionLive:           snap.SectionLive,
 		SectionPaused:         snap.SectionPaused,

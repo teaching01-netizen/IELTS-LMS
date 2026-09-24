@@ -122,7 +122,22 @@ const mathQuestion: DeliveredQuestion = {
   examQuestionId: "debug-math-q1",
   questionId: "debug-math-question",
   stimulus: { version: 1, nodes: [] },
-  prompt: paragraph("math-prompt", "If 3x + 5 = 20, what is the value of x?"),
+  prompt: {
+    version: 2,
+    nodes: [],
+    document: {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        attrs: { id: "math-prompt" },
+        content: [
+          { type: "text", text: "The graph of " },
+          { type: "inlineMath", attrs: { latex: "x^2" } },
+          { type: "text", text: " has its minimum at which point?" },
+        ],
+      }],
+    },
+  },
   metadata: {
     sectionKey: "math",
     domain: "Algebra",
@@ -229,6 +244,7 @@ export function SatAccessibilityDebugRoute() {
       {paused ? <SatBlockingOverlay note="Accessibility harness pause" /> : null}
       <SatExamShell
         sectionLabel={math ? "Section 2: Math" : "Section 1: Reading and Writing"}
+        sectionKey={math ? "math" : "reading-writing"}
         directions={paragraph(
           "directions",
           "Answer every question. You may return to questions in this module before submitting it."
@@ -245,7 +261,7 @@ export function SatAccessibilityDebugRoute() {
         calculatorOpen={activeTools.calculator}
         referenceAvailable={math}
         referenceOpen={activeTools.referenceSheet}
-        notesAvailable={!math}
+        notesAvailable
         blocked={paused}
         saveState="idle"
         questionNote={response.annotations.legacyQuestionNote}

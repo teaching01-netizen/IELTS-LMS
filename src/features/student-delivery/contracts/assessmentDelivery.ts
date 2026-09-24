@@ -36,6 +36,11 @@ export interface AssessmentModuleAttemptSnapshot {
    * and absent on older payloads and on non-cohort providers.
    */
   entryWindowSeconds?: number | null;
+  /** Personal-model future-start offer (absent on cohort and legacy payloads). */
+  entryGeneration?: number | null;
+  entryStartsAt?: string | null;
+  entryConfirmedAt?: string | null;
+  entryEnteredAt?: string | null;
   completionReason: string | null;
   rawCorrect: number | null;
   operationalQuestionCount: number | null;
@@ -58,6 +63,7 @@ export interface AssessmentAttemptSnapshot {
   id: string;
   moduleAttempts: AssessmentModuleAttemptSnapshot[];
   responses: AssessmentResponseSnapshot[];
+  personalBreaks?: AssessmentPersonalBreakSnapshot[];
   /**
    * V2 provisional terminal claim already committed server-side
    * (delivery_status='submitted', submitted_at still NULL) while the scoring
@@ -65,6 +71,24 @@ export interface AssessmentAttemptSnapshot {
    * drive straight to result completion (SAT-001). Absent on older payloads.
    */
   provisionalSubmitted?: boolean;
+}
+
+export interface AssessmentPersonalBreakSnapshot {
+  id: string;
+  afterSectionId: string;
+  durationSeconds: number;
+  state: "pending" | "armed" | "active" | "completed" | string;
+  startsAt: string | null;
+  deadlineAt: string | null;
+  enteredAt: string | null;
+  pausedAt: string | null;
+  accumulatedPausedSeconds: number;
+  entryGeneration: number;
+  entryStartsAt: string | null;
+  entryConfirmedAt: string | null;
+  entryEnteredAt: string | null;
+  remainingSeconds: number;
+  revision: number;
 }
 
 export interface AssessmentTimingSnapshot {
@@ -136,6 +160,25 @@ export interface AssessmentResponseRequest {
 
 export interface AssessmentModuleStartRequest {
   moduleId: string;
+  generation?: number;
+  /**
+   * The control epoch the client believed it held when it issued the command.
+   * A pause/resume between belief and arrival bumps the attempt's epoch, so a
+   * stale command is refused instead of arming a module under a frozen clock.
+   */
+  controlEpoch?: number;
+}
+
+export interface AssessmentModuleEntryRequest {
+  moduleId: string;
+  generation: number;
+  controlEpoch?: number;
+}
+
+export interface AssessmentBreakEntryRequest {
+  breakId: string;
+  generation: number;
+  controlEpoch?: number;
 }
 
 export interface AssessmentModuleSubmitRequest {

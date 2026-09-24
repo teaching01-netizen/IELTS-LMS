@@ -66,6 +66,35 @@ describe("StructuredContentRenderer", () => {
     expect(container.querySelector('strong span')).toHaveAttribute('data-offset', '2');
     expect(container.querySelector('[data-content-text-node="evidence"]')).toHaveTextContent('A tree');
   });
+
+  it("anchors stable prose runs on either side of inline math", () => {
+    const source: StructuredContent = { version: 2, nodes: [], document: { type: 'doc', content: [
+      { type: 'paragraph', attrs: { id: 'mixed-prompt' }, content: [
+        { type: 'text', text: 'The graph of ' },
+        { type: 'inlineMath', attrs: { latex: 'x^2' } },
+        { type: 'text', text: ' has its minimum at which point?' },
+      ] },
+    ] } };
+    const received: Array<{ nodeId: string; blockText: string; text: string; startOffset: number }> = [];
+    const { container } = render(<StructuredContentRenderer content={source} renderText={(value) => {
+      received.push(value);
+      return <span data-rendered-run={`${value.nodeId}:${value.startOffset}`}>{value.text}</span>;
+    }} />);
+
+    const runs = [...container.querySelectorAll<HTMLElement>('[data-content-text-node]')];
+    expect(runs.map((run) => run.dataset['contentTextNode'])).toEqual([
+      'mixed-prompt::text-run-0',
+      'mixed-prompt::text-run-2',
+    ]);
+    expect(runs[0]).toHaveTextContent('The graph of');
+    expect(runs[1]).toHaveTextContent('has its minimum at which point?');
+    expect(container.querySelector('[role="math"]')?.closest('[data-content-text-node]')).toBeNull();
+    expect(received).toEqual([
+      { nodeId: 'mixed-prompt::text-run-0', blockText: 'The graph of ', text: 'The graph of ', startOffset: 0 },
+      { nodeId: 'mixed-prompt::text-run-2', blockText: ' has its minimum at which point?', text: ' has its minimum at which point?', startOffset: 0 },
+    ]);
+    expect(container.querySelector('[data-content-text-node="evidence"]')).toBeNull();
+  });
   it("renders rich content as semantic static markup without an editor instance", () => {
     const { container } = render(
       <StructuredContentRenderer content={content} className="content-surface" />

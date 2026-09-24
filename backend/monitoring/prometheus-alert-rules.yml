@@ -371,3 +371,39 @@ groups:
           summary: "Authoring delivery latency p95 above the 5s worst-case SLO"
           description: "Authoring event freshness p95 exceeded 5s. Check the forwarder poll cadence, event-table growth, and db_pool_wait before widening the latency budget."
           runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"
+
+  # SAT full-entry-time (plan 2026-09-24): the release gate for the
+  # attempt-owned timing model (sat_personal_v1). The promise is that the first
+  # active frame starts at the FULL authored duration; these rules are how that
+  # promise is watched in production rather than only in the Chromium contract.
+  - name: sat-personal-timing
+    rules:
+      # The release gate itself: a candidate's first active frame was
+      # acknowledged after its authored start, so the visible clock began below
+      # the authored duration. Any sustained rate means the offer lead or the
+      # transition surface is too short for real devices.
+      - alert: SATAuthoredTimeLostOnFirstFrame
+        expr: increase(sat_personal_frame_late_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: page
+          slo: sat-entry-time
+        annotations:
+          summary: "SAT candidate's first active frame started below the authored duration"
+          description: "sat_personal_frame_late_total moved: one or more students painted their first active SAT frame after the authored start and lost that time. Break down by stage (module vs break), then check sat_personal_frame_lead_seconds and the offer lead. Do NOT extend deadlines to compensate — find why the surface could not paint inside the lead."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+      # Repeated rearming is the leading indicator of the alert above: the
+      # client keeps missing its offer lead, so it asks for a fresh window
+      # instead of entering. A trickle is normal on slow devices; a sustained
+      # rate is a rollout stop.
+      - alert: SATPersonalOfferRearmRate
+        expr: rate(sat_personal_offer_total{event="rearmed"}[10m]) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          slo: sat-entry-time
+        annotations:
+          summary: "SAT entry offers are being repeatedly rearmed"
+          description: "sat_personal_offer_total{event=\"rearmed\"} is sustained above 0.5/s: clients repeatedly miss the offer lead and request a new one. Check sat_personal_entry_total{result=\"missed\"} and the network/CPU conditions of the affected cohort before enabling the model for more schedules."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"

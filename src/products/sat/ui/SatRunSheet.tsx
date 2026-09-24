@@ -55,18 +55,23 @@ export function SatRunSheet({
   runtime,
   scheduledStartAt,
   now,
+  timingModel,
   sheet: providedSheet,
 }: {
   plan?: ExamPlanSection[] | null | undefined;
   runtime?: SatRunSheetRuntime | null | undefined;
   scheduledStartAt?: string | null | undefined;
   now?: string | null | undefined;
+  /** The session's stored timing plan (`runtime.timingModel`). */
+  timingModel?: string | null | undefined;
   /** Precomputed projection (the session room builds one for its header too). */
   sheet?: SatRunSheetModel | null | undefined;
 }) {
   const sheet = useMemo(
-    () => providedSheet ?? buildSatRunSheet({ plan, runtime, scheduledStartAt, now }),
-    [now, plan, providedSheet, runtime, scheduledStartAt],
+    () =>
+      providedSheet ??
+      buildSatRunSheet({ plan, runtime, scheduledStartAt, now, timingModel: timingModel ?? runtime?.timingModel ?? null }),
+    [now, plan, providedSheet, runtime, scheduledStartAt, timingModel],
   );
 
   // Nothing to run: an exam version with no sections, or a schedule whose
@@ -90,6 +95,12 @@ export function SatRunSheet({
         <SatEyebrow id="sat-run-sheet-heading">Run sheet</SatEyebrow>
         <p>Thailand time · {SAT_RUN_SHEET_TIME_ZONE_LABEL}</p>
       </div>
+      {sheet.timingPlan ? (
+        <p className="sat-run-sheet__plan" data-sat-run-sheet-plan={sheet.timingPlan.model}>
+          <strong>{sheet.timingPlan.label}</strong>
+          <span>{sheet.timingPlan.note}</span>
+        </p>
+      ) : null}
       <p className="sat-run-sheet__anchor">{anchorNote}</p>
       {extensionMinutes > 0 || pausedSeconds > 0 ? (
         <p className="sat-run-sheet__delta">

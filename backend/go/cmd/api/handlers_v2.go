@@ -42,24 +42,28 @@ var _ attempts.QuestionResolver = v2Resolver{}
 
 func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID string) (attempts.QuestionOwner, error) {
 	const sel = `SELECT m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key,` +
-		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds` +
+		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds,` +
+		` COALESCE(r.timing_model, ''), ma.entry_confirmed_at, ma.entry_entered_at` +
 		` FROM assessment_exam_questions eq` +
 		` JOIN assessment_modules m ON m.id = eq.module_id` +
 		` JOIN assessment_sections s ON s.id = m.section_id` +
 		` JOIN exam_versions v ON v.id = s.exam_version_id` +
 		` JOIN exam_entities e ON e.id = v.exam_id` +
+		` JOIN student_attempts sa ON sa.id = ?` +
+		` LEFT JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id` +
 		` LEFT JOIN assessment_module_attempts ma ON ma.module_id = m.id AND ma.attempt_id = ?` +
 		` WHERE (eq.id = ? OR eq.question_id = ?)` +
-		` AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ?)` +
+		` AND s.exam_version_id = sa.published_version_id` +
 		` ORDER BY CASE WHEN eq.id = ? THEN 0 ELSE 1 END LIMIT 1`
 	var owner attempts.QuestionOwner
 	var state string
 	var providerKey sql.NullString
-	var startedAt sql.NullTime
+	var startedAt, entryConfirmedAt, entryEnteredAt sql.NullTime
 	var allocated, extension, accumulatedPaused sql.NullInt64
-	err := q.QueryRowContext(ctx, sel, attemptID, questionID, questionID, attemptID, questionID).Scan(
+	err := q.QueryRowContext(ctx, sel, attemptID, attemptID, questionID, questionID, questionID).Scan(
 		&owner.ModuleID, &owner.SectionKey, &state, &providerKey,
 		&startedAt, &allocated, &extension, &accumulatedPaused,
+		&owner.TimingModel, &entryConfirmedAt, &entryEnteredAt,
 	)
 	if err == sql.ErrNoRows {
 		owner, fallbackErr := resolveSnapshotQuestionForProvider(ctx, q, attemptID, questionID)
@@ -81,6 +85,15 @@ func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID st
 		return owner, nil
 	}
 	owner.ModuleState = state
+	if startedAt.Valid {
+		value := startedAt.Time.UTC()
+		owner.ModuleStartedAt = &value
+	}
+	if entryConfirmedAt.Valid {
+		value := entryConfirmedAt.Time.UTC()
+		owner.EntryConfirmedAt = &value
+	}
+	_ = entryEnteredAt // the first accepted response itself closes the rearm window below
 	owner.ModuleDeadlineAt = satModuleDeadline(providerKey, state, startedAt, allocated, extension, accumulatedPaused)
 	return owner, nil
 }
@@ -420,9 +433,10 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 	var gate attempts.RuntimeGate
 	var id string
 	var status sql.NullString
+	var timingModel sql.NullString
 	var active sql.NullString
 	var waiting sql.NullBool
-	err := q.QueryRowContext(ctx, `SELECT id, status, active_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE`, scheduleID).Scan(&id, &status, &active, &waiting)
+	err := q.QueryRowContext(ctx, `SELECT id, status, timing_model, active_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE`, scheduleID).Scan(&id, &status, &timingModel, &active, &waiting)
 	now, terr := dbNow(ctx, q)
 	if terr != nil {
 		return attempts.RuntimeGate{}, terr
@@ -434,6 +448,9 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 		return attempts.RuntimeGate{}, err
 	}
 	gate.Now = now
+	if timingModel.Valid {
+		gate.TimingModel = timingModel.String
+	}
 	if status.Valid {
 		gate.Status = status.String
 	}

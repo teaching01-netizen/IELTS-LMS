@@ -2,7 +2,7 @@ package main
 
 // SAT exam-day route pin: k6/sat-exam-day.js is exam-day code — a rename
 // that 404s the SAT walk must fail the build, not the rehearsal. Pins the
-// SAT delivery matrix (bootstrap / responses / modules/start / submit) plus
+// SAT delivery matrix (bootstrap / responses / modules/start / enter / visible / submit) plus
 // the V2 response batch/submit and the SAT result-detail read used by the
 // answer comparator, against the real chi router.
 import (
@@ -26,6 +26,11 @@ func TestK6SATExamDayRoutesExist(t *testing.T) {
 		{"sat-delivery-bootstrap", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/bootstrap"},
 		{"sat-save-response", "PATCH", "/api/v1/assessment-delivery/schedules/sched-1/responses/q-1"},
 		{"sat-start-module", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/modules/start"},
+		{"sat-enter-module", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/modules/enter"},
+		{"sat-mark-stage-visible", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/modules/visible"},
+		{"sat-start-break", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/breaks/br-1/start"},
+		{"sat-enter-break", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/breaks/enter"},
+		{"sat-mark-break-visible", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/breaks/visible"},
 		{"sat-submit-module", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/modules/submit"},
 		{"sat-submit-assessment", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/submit"},
 		{"sat-v2-batch", http.MethodPost, "/api/v2/student/attempts/att-1/responses:batch"},

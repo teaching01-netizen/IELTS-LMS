@@ -57,11 +57,15 @@ func migDir(t *testing.T) string {
 // The SAT Student Access section toggles landed 0066 (link enabled_sections
 // scope) — count/max bumped 65->66. The SAT runtime section-clock repair landed
 // 0067 (candidate duration for not-yet-started sections) — count/max bumped
-// 66->67. SAT publish scope landed 0068 — count/max bumped 67->68.
+// 66->67. SAT publish scope landed 0068 (exam publish scope columns) and the
+// SAT full-entry-time personal timing model landed 0069 (sat_timing_model /
+// assessment_attempt_breaks) — count/max bumped 67->69. The proctor-authorized
+// entry re-arm for that model landed 0070 (entry_proctor_rearm_at) — count/max
+// bumped 69->70.
 // Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 68
-	pinnedMigrationMax   = 68
+	pinnedMigrationFiles = 70
+	pinnedMigrationMax   = 70
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

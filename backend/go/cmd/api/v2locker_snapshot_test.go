@@ -173,8 +173,8 @@ func lockWithV2Locker(t *testing.T, sectionStatus *string) attempts.RuntimeGate 
 	defer db.Close()
 	mock.ExpectBegin()
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "waiting_for_next_section"}).
-			AddRow("rt-1", "live", "rw", false))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key", "waiting_for_next_section"}).
+			AddRow("rt-1", "live", "legacy_section_v1", "rw", false))
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now().UTC()))
 	sectionRow(mock, sectionStatus)
 	mock.ExpectRollback()

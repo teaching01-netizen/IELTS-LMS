@@ -53,7 +53,7 @@ func TestLoadTimingRuntimeRowReadOnce(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, exam_id, provider_key")).
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key"}).AddRow("sched-1", "exam-1", "sat"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model"}).AddRow("sched-1", "exam-1", "sat", nil))
 	now := time.Now().UTC()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id")).
 		WithArgs("sched-1").

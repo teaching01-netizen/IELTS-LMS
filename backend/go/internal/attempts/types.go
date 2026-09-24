@@ -121,6 +121,22 @@ type AttemptState struct {
 	FinalSubmission   *string
 	ProctorStatus     string
 	ProviderKey       string
+	// TimingModel is the schedule runtime's timing model (empty when the
+	// schedule has no runtime row yet). The attempt-level deadline/grace
+	// columns belong to the cohort section clock, so the personal SAT model
+	// (sat_personal_v1) must not be bound by them.
+	TimingModel string
+}
+
+// personalTimingModel is the attempt-owned SAT timing model. It is spelled
+// once here (and mirrored in delivery/runtime) so the write gate, the resolver,
+// and the takeover path cannot drift on the literal.
+const personalTimingModel = "sat_personal_v1"
+
+// isPersonalTimingModel reports whether a timing model is the attempt-owned
+// SAT model. Empty/unknown (no runtime row, cohort, legacy) is false.
+func isPersonalTimingModel(model string) bool {
+	return model == personalTimingModel
 }
 
 // Provider identifies completion policy owner (plan 4.1, 28-32).

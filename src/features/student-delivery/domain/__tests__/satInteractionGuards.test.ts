@@ -77,13 +77,13 @@ describe('satInteraction guards (production-hostile)', () => {
     ).toBe(false);
   });
 
-  it('gates annotation on R&W capability, not on section string', () => {
+  it('gates annotation on capability, not on section string', () => {
     expect(
       satInteractionCan.annotate(createSatInteractionState(), ctx({ toolPolicy: rwTools(), sectionKey: 'reading-writing' })),
     ).toBe(true);
-    expect(satInteractionCan.annotate(createSatInteractionState(), ctx({ toolPolicy: mathTools() }))).toBe(
-      false,
-    );
+    expect(satInteractionCan.annotate(createSatInteractionState(), ctx({ toolPolicy: mathTools() }))).toBe(true);
+    const noAnnotation = { ...mathTools(), highlight: false, underline: false, notes: false };
+    expect(satInteractionCan.annotate(createSatInteractionState(), ctx({ toolPolicy: noAnnotation }))).toBe(false);
   });
 
   it('forbids answering while the annotation note editor owns the surface', () => {

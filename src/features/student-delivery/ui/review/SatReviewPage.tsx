@@ -4,6 +4,8 @@ import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
 import { SAT_COPY } from "../../domain/satCopy";
 import { SatQuestionStatusGrid } from "./SatQuestionStatusGrid";
 import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
+import { formatSatTime } from "../../domain/satTiming";
+import { useSatTemporalSnapshot } from "../../timing/SatTemporalRuntime";
 
 export interface SatReviewPageProps {
   sectionLabel: string;
@@ -30,13 +32,50 @@ export interface SatReviewPageProps {
   notices?: ReactNode | undefined;
 }
 
+function SatReviewTimer({
+  remainingLabel,
+  remainingSeconds,
+  timerVisible,
+  onToggleTimer,
+}: Pick<SatReviewPageProps, "remainingLabel" | "remainingSeconds" | "onToggleTimer"> & { timerVisible: boolean }) {
+  const temporal = useSatTemporalSnapshot();
+  const seconds = temporal?.displaySeconds ?? remainingSeconds;
+  const label = temporal ? formatSatTime(temporal.displaySeconds) : remainingLabel;
+  const timerAnnouncement = useStudentTimerAnnouncement(seconds);
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className="sat-tabular text-[18px] font-semibold"
+        role="timer"
+        aria-label={timerVisible ? "Time remaining " + label : "Timer hidden"}
+      >
+        {timerVisible ? label : SAT_COPY.timer.hidden}
+      </span>
+      {onToggleTimer ? (
+        <button
+          type="button"
+          onClick={onToggleTimer}
+          aria-label={timerVisible ? SAT_COPY.timer.hideTimer : SAT_COPY.timer.showTimer}
+          className="sat-touch-target sat-pressable mt-0.5 inline-flex items-center justify-center underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+        >
+          <span className="sat-type-control-secondary font-semibold text-[var(--sat-text)]">
+            {timerVisible ? "Hide" : "Show"}
+          </span>
+        </button>
+      ) : null}
+      <span className="sr-only" aria-live="polite" data-testid="sat-review-timer-announcement">
+        {timerAnnouncement}
+      </span>
+    </div>
+  );
+}
+
 /** Review answers and return to a question; module completion stays server-owned. */
 export function SatReviewPage(props: SatReviewPageProps) {
   const unanswered = Math.max(0, props.items.length - props.answeredCount);
   const flagged = props.items.filter((item) => item.markedForReview).length;
   const reasonId = useId();
   const timerVisible = props.timerVisible ?? true;
-  const timerAnnouncement = useStudentTimerAnnouncement(props.remainingSeconds);
 
   const backLabel =
     props.currentQuestionIndex !== undefined
@@ -76,30 +115,12 @@ export function SatReviewPage(props: SatReviewPageProps) {
               {props.moduleTitle}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span
-              className="sat-tabular text-[18px] font-semibold"
-              role="timer"
-              aria-label={timerVisible ? "Time remaining " + props.remainingLabel : "Timer hidden"}
-            >
-              {timerVisible ? props.remainingLabel : SAT_COPY.timer.hidden}
-            </span>
-            {props.onToggleTimer ? (
-              <button
-                type="button"
-                onClick={props.onToggleTimer}
-                aria-label={timerVisible ? SAT_COPY.timer.hideTimer : SAT_COPY.timer.showTimer}
-                className="sat-touch-target sat-pressable mt-0.5 inline-flex items-center justify-center underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-              >
-                <span className="sat-type-control-secondary font-semibold text-[var(--sat-text)]">
-                  {timerVisible ? "Hide" : "Show"}
-                </span>
-              </button>
-            ) : null}
-            <span className="sr-only" aria-live="polite" data-testid="sat-review-timer-announcement">
-              {timerAnnouncement}
-            </span>
-          </div>
+          <SatReviewTimer
+            remainingLabel={props.remainingLabel}
+            remainingSeconds={props.remainingSeconds}
+            timerVisible={timerVisible}
+            onToggleTimer={props.onToggleTimer}
+          />
         </div>
       </header>
       <div className="min-w-0 px-4 sm:px-6" data-testid="sat-review-notices">

@@ -48,7 +48,7 @@ export interface SatExamStage extends SatStudentStageBase {
   readonly pendingModuleTitle: string | null;
 }
 
-export type SatBreakPhase = "waiting-for-break" | "on-break" | "opening-next-section";
+export type SatBreakPhase = "waiting-for-break" | "starting-break" | "on-break" | "opening-next-section";
 
 /** What the automatic entry into the next section is doing (break copy). */
 export type SatBreakEntryProgress = "idle" | "starting" | "retrying";
@@ -143,6 +143,7 @@ export interface DeriveSatStudentStageInput {
   entryBlocked: boolean;
   entryHoldExpired: boolean;
   pendingBreakSeconds: number;
+  personalBreakStarting?: boolean;
   pendingSectionWaitSeconds: number;
   entryInFlight: boolean;
   /** Identity of the attempt; every presence key is scoped by it. */
@@ -186,6 +187,7 @@ export function deriveSatStudentStage({
   entryBlocked,
   entryHoldExpired,
   pendingBreakSeconds,
+  personalBreakStarting = false,
   pendingSectionWaitSeconds,
   entryInFlight,
   attemptKey,
@@ -237,6 +239,8 @@ export function deriveSatStudentStage({
     const phase: SatBreakPhase =
       pendingSectionWaitSeconds > 0
         ? "waiting-for-break"
+        : personalBreakStarting
+          ? "starting-break"
         : pendingBreakSeconds > 0
           ? "on-break"
           : "opening-next-section";
@@ -247,6 +251,8 @@ export function deriveSatStudentStage({
       remainingSeconds:
         phase === "waiting-for-break"
           ? pendingSectionWaitSeconds
+          : phase === "starting-break"
+            ? null
           : phase === "on-break"
             ? pendingBreakSeconds
             : null,

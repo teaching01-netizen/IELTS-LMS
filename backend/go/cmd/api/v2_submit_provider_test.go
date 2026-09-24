@@ -19,14 +19,15 @@ import (
 
 const submitTestSecret = "test-secret-32-bytes-long--------"
 
-// submitAttemptRows is the 15-column attempt lock projection lockAttempt scans.
+// submitAttemptRows is the attempt lock projection lockAttempt scans
+// (16 columns + the runtime timing model).
 func submitAttemptRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
 		"response_revision", "deadline_at", "closing_grace_until",
-		"submitted_at", "final_submission", "proctor_status", "provider_key",
-	}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 3, 7, 9, nil, nil, nil, nil, "active", "")
+		"submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
+	}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 3, 7, 9, nil, nil, nil, nil, "active", "", "")
 }
 
 func submitBearer(t *testing.T) string {

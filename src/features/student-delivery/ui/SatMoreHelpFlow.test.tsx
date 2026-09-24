@@ -10,6 +10,7 @@ function Harness() {
   const [helpOpen, setHelpOpen] = useState(false);
   return (
     <SatExamShell
+      sectionKey="reading-writing"
       sectionLabel="Section 1: Reading and Writing"
       directions={null}
       remainingLabel="28:33"
@@ -26,6 +27,7 @@ function Harness() {
       saveState="idle"
       questionNote=""
       readingPreferences={createSatReadingPreferences()}
+      moreAvailable
       helpOpen={helpOpen}
       onOpenHelp={() => setHelpOpen(true)}
       onCloseHelp={() => setHelpOpen(false)}
@@ -67,6 +69,7 @@ describe("SatMoreHelpFlow", () => {
     const onReadingPreferencesChange = vi.fn();
     render(
       <SatExamShell
+        sectionKey="reading-writing"
         sectionLabel="Section 1: Reading and Writing"
         directions={null}
         remainingLabel="28:33"
@@ -82,6 +85,7 @@ describe("SatMoreHelpFlow", () => {
         saveState="idle"
         questionNote=""
         readingPreferences={createSatReadingPreferences()}
+        moreAvailable
         onSelectQuestion={() => undefined}
         onToggleCalculator={() => undefined}
         onToggleReference={() => undefined}

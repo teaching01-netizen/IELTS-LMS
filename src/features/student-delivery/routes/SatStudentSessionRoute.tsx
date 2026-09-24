@@ -62,6 +62,7 @@ import {
   SatTimeoutOverlay,
 } from "../ui/feedback/SatControlFeedback";
 import { SatIntegrityWarning } from "../ui/feedback/SatIntegrityWarning";
+import { SatTemporalRuntime } from "../timing/SatTemporalRuntime";
 
 export interface SatStudentSessionRouteProps {
   scheduleId: string;
@@ -208,9 +209,11 @@ export function SatStudentSessionRoute({
    * every case, which is what keeps the exam frame mounted across a handoff.
    */
   const stageHost = (target: SatStudentStage, children: ReactNode) => (
-    <SatStudentStageHost stage={target} instant={attemptChanged}>
-      {children}
-    </SatStudentStageHost>
+    <SatTemporalRuntime model={exam.temporalModel ?? null} onBoundary={exam.onTemporalBoundary}>
+      <SatStudentStageHost stage={target} instant={attemptChanged}>
+        {children}
+      </SatStudentStageHost>
+    </SatTemporalRuntime>
   );
   useEffect(() => {
     lastValidFrameRef.current = null;
@@ -329,6 +332,7 @@ export function SatStudentSessionRoute({
     entryBlocked,
     entryHoldExpired,
     pendingBreakSeconds: exam.pendingBreakSeconds,
+    personalBreakStarting: exam.personalBreakStarting,
     pendingSectionWaitSeconds: exam.pendingSectionWaitSeconds,
     entryInFlight: exam.isStarting,
     attemptKey: identityKey,
@@ -360,17 +364,14 @@ export function SatStudentSessionRoute({
 
   if (stage.kind === "complete") {
     lastValidFrameRef.current = null;
+    // The finished screen carries no unsynced-draft banner. Quarantine records
+    // are written routinely by finalize/ack-supersede reconciliation, so a
+    // quarantined or still-pending draft could decorate a clean sitting with a
+    // proctor-contact warning. The durability engine still holds and retries
+    // those drafts; that signal is not part of the student's terminal surface.
     return stageHost(
       stage,
-      <SatCompleteScreen
-        result={data.result ?? result}
-        onExit={onExit}
-        saveIssue={
-          persistence.failureKind || persistence.pendingCount > 0 || persistence.tombstoneCount > 0
-            ? "Some answers on this device were not confirmed by the server before the result was produced. Please contact your proctor."
-            : null
-        }
-      />,
+      <SatCompleteScreen result={data.result ?? result} onExit={onExit} />,
     );
   }
   if (stage.kind === "terminated") {
@@ -795,6 +796,7 @@ export function SatStudentSessionRoute({
       <SatExamShell
         moduleIdentity={stateModule.id}
         sectionLabel={activeSectionLabel}
+        sectionKey={state.sectionKey}
         directions={directions}
         remainingLabel={formatSatTime(exam.remainingSeconds)}
         remainingSeconds={exam.remainingSeconds}

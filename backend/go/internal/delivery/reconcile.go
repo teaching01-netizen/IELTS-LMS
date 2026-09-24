@@ -36,6 +36,12 @@ type reconcileRow struct {
 	accumulatedPausedSeconds int
 	extensionSeconds         int
 	completionReason         *string
+	// Personal-model entry fence. A confirmed offer whose first active frame
+	// was never acknowledged (entry_confirmed_at set, entry_entered_at NULL) is
+	// a module the candidate has never seen: it must stay rearmable instead of
+	// being expired by the timeout sweep (plan 2026-09-24, full-entry-time).
+	entryConfirmedAt *time.Time
+	entryEnteredAt   *time.Time
 }
 
 // reconcileStage is one authoritative runtime-section row locked FOR UPDATE.
@@ -130,6 +136,24 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				return err
 			}
 			closingAsOf = dbNow.UTC().Add(-attempts.SATSaveGrace)
+		}
+		if examruntime.IsSatPersonal(timingModel) && runtimeStatus == "live" {
+			// Personal breaks own their deadline. They are completed at that
+			// exact instant (no cohort section clock and no module save grace);
+			// a delayed worker cannot consume the next module's authored time.
+			res, err := t.ExecContext(ctx, `
+				UPDATE assessment_attempt_breaks
+				SET state = 'completed', revision = revision + 1
+				WHERE attempt_id = ? AND state = 'active' AND paused_at IS NULL
+				  AND deadline_at IS NOT NULL AND deadline_at <= UTC_TIMESTAMP(6)`, attemptID)
+			if err != nil {
+				return err
+			}
+			if n, err := res.RowsAffected(); err != nil {
+				return err
+			} else if n > 0 {
+				changed = true
+			}
 		}
 		for i := 0; i < reconcileCap; i++ {
 			mod, err := lockReconcileRowTx(ctx, t, attemptID)
@@ -311,8 +335,9 @@ func lockReconcileRowTx(ctx context.Context, t tx.Tx, attemptID string) (*reconc
 	var m reconcileRow
 	var availableAt, startedAt, pausedAt sql.NullTime
 	var completionReason sql.NullString
-	const q = `SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review') ORDER BY created_at, id LIMIT 1 FOR UPDATE`
-	if err := t.QueryRowContext(ctx, q, attemptID).Scan(&m.id, &m.moduleID, &m.state, &m.allocatedSeconds, &availableAt, &startedAt, &pausedAt, &m.accumulatedPausedSeconds, &m.extensionSeconds, &completionReason); err != nil {
+	const q = `SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason, entry_confirmed_at, entry_entered_at FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review') ORDER BY created_at, id LIMIT 1 FOR UPDATE`
+	var entryConfirmedAt, entryEnteredAt sql.NullTime
+	if err := t.QueryRowContext(ctx, q, attemptID).Scan(&m.id, &m.moduleID, &m.state, &m.allocatedSeconds, &availableAt, &startedAt, &pausedAt, &m.accumulatedPausedSeconds, &m.extensionSeconds, &completionReason, &entryConfirmedAt, &entryEnteredAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -322,6 +347,8 @@ func lockReconcileRowTx(ctx context.Context, t tx.Tx, attemptID string) (*reconc
 	m.startedAt = nullTime(startedAt)
 	m.pausedAt = nullTime(pausedAt)
 	m.completionReason = nullString(completionReason)
+	m.entryConfirmedAt = nullTime(entryConfirmedAt)
+	m.entryEnteredAt = nullTime(entryEnteredAt)
 	return &m, nil
 }
 
@@ -337,17 +364,35 @@ func reconcileModuleExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeSt
 	case examruntime.TimingModelCohortSection:
 		return reconcileCohortSectionExpiredTx(ctx, t, runtimeID, runtimeStatus, currentStageKey, currentStageOrder, mod, asOf, closing)
 	default:
-		if runtimeStatus == "cancelled" || (runtimeStatus == "completed" && !closing) {
-			return true, nil
-		}
-		if runtimeStatus == "completed" && mod.startedAt == nil {
-			return true, nil
-		}
-		if closing && runtimeStatus == "completed" && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf.Add(attempts.SATSaveGrace)) > 0 {
-			return true, nil // A proctor closed the room before this module's clock ended.
-		}
-		return (mod.state == "active" || (closing && runtimeStatus == "completed" && mod.state == "review")) && mod.pausedAt == nil && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf) <= 0, nil
+		return reconcilePersonalOrLegacyExpiredTx(runtimeStatus, timingModel, mod, asOf, closing), nil
 	}
+}
+
+// reconcilePersonalOrLegacyExpiredTx is the per-module clock branch shared by
+// the legacy model and the attempt-owned personal SAT model.
+//
+// A personal offer that was confirmed but never painted is NOT expired: the
+// candidate has never seen the module, so the honest recovery is a rearm (the
+// client requests a new offer; the arm path allows it while entry_entered_at IS
+// NULL and no response was accepted), not a silent finalization of a clock the
+// candidate never watched. Once entry is acknowledged (entry_entered_at set —
+// either by markStageVisible or by the first accepted response) the module
+// expires on its own deadline plus the existing save-only grace, exactly like
+// every other model.
+func reconcilePersonalOrLegacyExpiredTx(runtimeStatus, timingModel string, mod *reconcileRow, asOf time.Time, closing bool) bool {
+	if runtimeStatus == "cancelled" || (runtimeStatus == "completed" && !closing) {
+		return true
+	}
+	if runtimeStatus == "completed" && mod.startedAt == nil {
+		return true
+	}
+	if examruntime.IsSatPersonal(timingModel) && mod.entryConfirmedAt != nil && mod.entryEnteredAt == nil {
+		return false
+	}
+	if closing && runtimeStatus == "completed" && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf.Add(attempts.SATSaveGrace)) > 0 {
+		return true // A proctor closed the room before this module's clock ended.
+	}
+	return (mod.state == "active" || (closing && runtimeStatus == "completed" && mod.state == "review")) && mod.pausedAt == nil && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf) <= 0
 }
 
 // reconcileCohortStageExpiredTx mirrors the cohort_stage_v2 branch: terminal

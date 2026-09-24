@@ -7,6 +7,7 @@ import {
 } from "../domain/satReadingPreferences";
 import { createSatTextAnnotation, emptySatAnnotations } from "../domain/satResponses";
 import { SatExamShell, type SatExamShellProps } from "./SatExamShell";
+import { SatAnnotatedContent } from "./annotations/SatAnnotatedContent";
 import { useSatNotesSurface } from "./annotations/SatNotesSurfaceContext";
 
 /**
@@ -23,6 +24,7 @@ function NotesWorkspace() {
 function props(overrides: Partial<SatExamShellProps> = {}): SatExamShellProps {
   return {
     sectionLabel: "Section 2: Math",
+    sectionKey: "math",
     directions: null,
     remainingLabel: "34:58",
     candidateName: "Ada Candidate",
@@ -122,7 +124,7 @@ describe("SatExamShell", () => {
   });
 
   it("exposes dialog controls only while open, always pointing at the dialog root", () => {
-    const { container } = render(<SatExamShell {...props()} />);
+    const { container } = render(<SatExamShell {...props({ moreAvailable: true })} />);
 
     const directions = screen.getByRole("button", { name: "Directions" });
     expect(directions).not.toHaveAttribute("aria-controls");
@@ -256,8 +258,13 @@ describe("SatExamShell", () => {
     rerender(<SatExamShell {...props({ notesAvailable: true, annotations: emptySatAnnotations(), onAnnotationsChange: vi.fn() })} />);
     expect(screen.getByRole('button', { name: 'Notes' })).toBeInTheDocument();
   });
-  it("pins Display and More to the top bar, and keeps Notes out of the overlay layer entirely", () => {
+  it("excludes More from the top bar for now", () => {
     render(<SatExamShell {...props({ notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
+    expect(screen.queryByRole("button", { name: "More tools" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu", { name: "More tools" })).not.toBeInTheDocument();
+  });
+  it("pins Display and More to the top bar when More is available, and keeps Notes out of the overlay layer entirely", () => {
+    render(<SatExamShell {...props({ notesAvailable: true, moreAvailable: true })}><NotesWorkspace /></SatExamShell>);
     fireEvent.click(screen.getByRole("button", { name: "Display" }));
     const display = screen.getByRole("dialog", { name: "Display" });
     expect(display).toHaveAttribute("data-sat-popover-panel", "anchored");
@@ -276,19 +283,104 @@ describe("SatExamShell", () => {
     expect(menu).toHaveAttribute("data-sat-popover-panel", "anchored");
     expect(menu.className).toMatch(/fixed/);
   });
-  it("shows both annotation controls in Reading and Writing and hides them in Math", () => {
-    const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
+  it("shows both annotation controls when available and hides them when unavailable", () => {
+    const { rerender } = render(<SatExamShell {...props({ sectionKey: "reading-writing", notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Notes/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Notes/ }));
     expect(screen.getByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    rerender(<SatExamShell {...props({ notesAvailable: false })}><NotesWorkspace /></SatExamShell>);
+    rerender(<SatExamShell {...props({ sectionKey: "reading-writing", notesAvailable: false })}><NotesWorkspace /></SatExamShell>);
     // Hidden, not disabled: with no annotation surface there is nothing behind
     // either control, and a disabled control would promise one.
     expect(screen.queryByRole('button', { name: /^Highlights & Notes/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Notes/ })).not.toBeInTheDocument();
   });
+
+  it("shows annotation controls in Math with calculator/reference and without line reader", () => {
+    render(
+      <SatExamShell
+        {...props({
+          sectionKey: "math",
+          sectionLabel: "Section 2: Math",
+          notesAvailable: true,
+          moreAvailable: true,
+          calculatorAvailable: true,
+          referenceAvailable: true,
+          readingPreferences: { ...createSatReadingPreferences(), lineReaderEnabled: true },
+        })}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Notes/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Calculator' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reference' })).toBeInTheDocument();
+    // R&W-only aid stays off in Math even when the preference is enabled.
+    expect(document.querySelector('[data-sat-line-reader]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    const lineReader = screen.getByRole('menuitemcheckbox', { name: /Line Reader/ });
+    expect(lineReader).toBeDisabled();
+  });
+
+  it("opens the actual saved mark at the annotation cap when that exact span is reselected", () => {
+    const saved = createSatTextAnnotation({
+      id: "saved-at-cap",
+      kind: "highlight",
+      nodeId: "stimulus:p",
+      startOffset: 2,
+      endOffset: 6,
+      exact: "tree",
+    });
+    const annotations = {
+      ...emptySatAnnotations(),
+      annotations: [
+        saved,
+        ...Array.from({ length: 199 }, (_, index) => createSatTextAnnotation({
+          id: `cap-${index}`,
+          kind: "highlight",
+          nodeId: "stimulus:other",
+          startOffset: 0,
+          endOffset: 1,
+          exact: "x",
+        })),
+      ],
+    };
+    const onAnnotationsChange = vi.fn();
+    const content = { version: 1 as const, nodes: [{ type: "paragraph" as const, id: "p", text: "A tree grows." }] };
+    const { container } = render(
+      <SatExamShell {...props({
+        sectionKey: "reading-writing",
+        notesAvailable: true,
+        annotations,
+        onAnnotationsChange,
+      })}>
+        <>
+          <NotesWorkspace />
+          <SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled />
+        </>
+      </SatExamShell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Highlights & Notes/ }));
+    const root = container.querySelector<HTMLElement>('[data-sat-annotation-region="stimulus"]')!;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let textNode: Node | null = walker.nextNode();
+    while (textNode && !(textNode.nodeValue ?? "").includes("tree")) textNode = walker.nextNode();
+    expect(textNode).not.toBeNull();
+    const text = textNode as Text;
+    const range = document.createRange();
+    range.setStart(text, text.data.indexOf("tree"));
+    range.setEnd(text, text.data.indexOf("tree") + "tree".length);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.pointerUp(root);
+
+    expect(screen.getByRole("toolbar", { name: "Edit annotation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove highlight" })).toBeInTheDocument();
+    expect(container.querySelector('[data-sat-annotation-active="true"]')).toHaveAttribute("data-sat-annotation-id", saved.id);
+    expect(screen.queryByTestId("sat-annotation-limit-stimulus")).not.toBeInTheDocument();
+  });
+
   it("disables both annotation controls while the exam is blocked", () => {
     render(<SatExamShell {...props({ notesAvailable: true, blocked: true })} />);
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toBeDisabled();
@@ -390,11 +482,14 @@ describe("SatExamShell", () => {
     expect(screen.queryByRole("button", { name: "Calculator" })).not.toBeInTheDocument();
   });
 
-  it("keeps the annotation controls out of Math and present in Reading and Writing", () => {
-    const { rerender } = render(<SatExamShell {...props({ notesAvailable: false })} />);
+  it("keeps annotation controls section-independent and hides them only when unavailable", () => {
+    const { rerender } = render(<SatExamShell {...props({ sectionKey: "math", notesAvailable: false })} />);
     expect(screen.queryByRole("button", { name: /^Highlights & Notes/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Notes/ })).not.toBeInTheDocument();
-    rerender(<SatExamShell {...props({ notesAvailable: true })} />);
+    rerender(<SatExamShell {...props({ sectionKey: "math", notesAvailable: true })} />);
+    expect(screen.getByRole("button", { name: /^Highlights & Notes/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Notes/ })).toBeInTheDocument();
+    rerender(<SatExamShell {...props({ sectionKey: "reading-writing", notesAvailable: true })} />);
     expect(screen.getByRole("button", { name: /^Highlights & Notes/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Notes/ })).toBeInTheDocument();
   });
@@ -506,7 +601,9 @@ describe("SatExamShell", () => {
     render(
       <SatExamShell
         {...props({
+          sectionKey: "reading-writing",
           notesAvailable: true,
+          moreAvailable: true,
           readingPreferences,
           onReadingPreferencesChange,
           helpOpen: true,
@@ -533,7 +630,9 @@ describe("SatExamShell", () => {
     render(
       <SatExamShell
         {...props({
+          sectionKey: "reading-writing",
           notesAvailable: true,
+          moreAvailable: true,
           readingPreferences,
           onReadingPreferencesChange,
           shortcutsOpen: true,

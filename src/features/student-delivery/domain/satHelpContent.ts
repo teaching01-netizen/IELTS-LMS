@@ -41,7 +41,7 @@ export const SAT_HELP_ENTRIES: readonly SatHelpEntry[] = [
     id: "highlights",
     title: "Highlights & Notes",
     body: "Turn on Highlights & Notes, then select passage or question text to highlight it. Attach a note to any highlight to revisit your thinking. Highlights stay with the question when you navigate.",
-    whereToFind: "Where to find it: Highlights & Notes in the top bar during Reading and Writing.",
+    whereToFind: "Where to find it: Highlights & Notes in the top bar.",
   },
   {
     id: "lineReader",

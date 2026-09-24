@@ -24,7 +24,21 @@ import (
 // Rust start_module flow
 // (backend/crates/application/src/assessment_delivery.rs:394-461).
 type ModuleStartRequest struct {
-	ModuleID string `json:"moduleId"`
+	ModuleID   string `json:"moduleId"`
+	Generation *int   `json:"generation,omitempty"`
+	// ControlEpoch is the attempt control epoch the client believes it holds.
+	// A pause/resume or runtime bump that crossed this request bumps the
+	// server's epoch, and the entry is refused with CONTROL_EPOCH_STALE so the
+	// client refetches instead of arming an offer under a frozen clock.
+	ControlEpoch *int `json:"controlEpoch,omitempty"`
+}
+
+// ModuleEntryRequest confirms a future-start offer before startsAt.
+type ModuleEntryRequest struct {
+	ModuleID   string `json:"moduleId"`
+	Generation int    `json:"generation"`
+	// ControlEpoch fences a confirmation that crossed a pause/resume.
+	ControlEpoch *int `json:"controlEpoch,omitempty"`
 }
 
 // ModuleSubmitRequest mirrors AssessmentModuleSubmitRequest (camelCase) on the
@@ -51,6 +65,17 @@ const (
 // StartModule/SubmitModule take writerBinding [clientSessionID, tokenID]
 // (see SaveResponse). Handlers forward both from verified claims.
 func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, writerBinding ...string) (*Bootstrap, error) {
+	return s.startModule(ctx, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID, nil, nil, writerBinding...)
+}
+
+// StartModuleOffer is the generation-aware module entry point. A supplied
+// generation fences retries/rearms against stale offers; the legacy wrapper
+// above remains for cohort clients.
+func (s *Service) StartModuleOffer(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, generation, controlEpoch *int, writerBinding ...string) (*Bootstrap, error) {
+	return s.startModule(ctx, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID, generation, controlEpoch, writerBinding...)
+}
+
+func (s *Service) startModule(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, generation, controlEpoch *int, writerBinding ...string) (*Bootstrap, error) {
 	if urlScheduleID != bearerScheduleID {
 		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
 	}
@@ -76,6 +101,9 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, writerBinding...); err != nil {
 			return err
 		}
+		if err := enforceControlEpochTx(ctx, t, bearerAttemptID, controlEpoch); err != nil {
+			return err
+		}
 		module, err := lockModuleAttemptTx(ctx, t, bearerAttemptID, moduleID)
 		if err != nil {
 			return err
@@ -88,6 +116,9 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 			return err
 		}
 		gateNow := gated.now
+		if gated.gate == timingGatePersonal {
+			return s.armPersonalModuleOfferTx(ctx, t, bearerAttemptID, module, gateNow, generation)
+		}
 		if module.state == "active" && module.startedAt != nil {
 			rev, err := s.appendModuleEventsTx(ctx, t, scheduleID, bearerAttemptID, liveEventModuleStarted)
 			if err != nil {
@@ -148,6 +179,287 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 	}
 	s.publishHubEvents(hubEvents)
 	return out, nil
+}
+
+// armPersonalModuleOfferTx idempotently arms a selected module at DB time plus
+// the short lead. A missed offer is rearmed only before visibility and before
+// any response was accepted; generation and a small retry budget fence stale
+// or repeatedly delayed clients. started_at remains NULL until enterModule.
+func (s *Service) armPersonalModuleOfferTx(ctx context.Context, t tx.Tx, attemptID string, module saveActiveModule, now time.Time, requestedGeneration *int) error {
+	var pendingBreak bool
+	if err := t.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM assessment_attempt_breaks WHERE attempt_id = ? AND state <> 'completed')",
+		attemptID).Scan(&pendingBreak); err != nil {
+		return err
+	}
+	if pendingBreak {
+		return assessmentConflict("PERSONAL_BREAK_PENDING", "The scheduled break must finish before the next SAT module can start.")
+	}
+	if module.availableAt != nil && now.Before(*module.availableAt) {
+		return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module is not available until the scheduled break ends.")
+	}
+	var generation int
+	var startsAt, confirmedAt, enteredAt, proctorRearmAt sql.NullTime
+	if err := t.QueryRowContext(ctx,
+		"SELECT entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at, entry_proctor_rearm_at FROM assessment_module_attempts WHERE id = ? FOR UPDATE",
+		module.id).Scan(&generation, &startsAt, &confirmedAt, &enteredAt, &proctorRearmAt); err != nil {
+		return err
+	}
+	if requestedGeneration != nil && *requestedGeneration != generation {
+		return assessmentConflict("STALE_ENTRY_GENERATION", "This SAT module offer is no longer current. Refresh and continue.")
+	}
+	if module.state == "active" && module.startedAt != nil && (!startsAt.Valid || startsAt.Time.After(now)) {
+		return nil // Reload resumes the immutable deadline; never reallocate.
+	}
+	if module.state != "not_started" && module.state != "active" {
+		return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module cannot be started in its current state.")
+	}
+	if startsAt.Valid && startsAt.Time.After(now) {
+		return nil // Idempotent retry returns the existing future offer.
+	}
+	// An offer that existed but whose start has passed is a REARM, not a fresh
+	// arm: the funnel counts them apart so a client that cannot paint inside the
+	// lead becomes visible as an event instead of only as lost time.
+	rearming := startsAt.Valid
+	if startsAt.Valid {
+		if enteredAt.Valid {
+			return assessmentConflict("ENTRY_ALREADY_VISIBLE", "This SAT module offer has already been entered.")
+		}
+		// Rearming is bounded by schedule admission closure: once
+		// exam_schedules.end_time has passed the room no longer admits a
+		// candidate, so a missed offer must surface as a recoverable
+		// proctor-action state instead of arming a fresh window the room would
+		// not honor. An offer already armed in the future returned above, and an
+		// entered module has its own immutable deadline, so this bound only ever
+		// refuses a NEW window.
+		//
+		// entry_proctor_rearm_at is that proctor action: both refusals below name
+		// it ("ask the proctor to re-arm"), so a stage the proctor granted keeps
+		// arming until the candidate is actually in it. The candidate never gets
+		// time twice — "entered" and "has a response" are refused above and
+		// inside the grant — only another chance to receive their authored
+		// window in a room that is still live.
+		var endTime sql.NullTime
+		if err := t.QueryRowContext(ctx,
+			"SELECT s.end_time FROM exam_schedules s JOIN student_attempts sa ON sa.schedule_id = s.id WHERE sa.id = ?",
+			attemptID).Scan(&endTime); err != nil {
+			return err
+		}
+		if endTime.Valid && !now.Before(endTime.Time) && !proctorRearmAt.Valid {
+			return assessmentConflict("ADMISSION_CLOSED", "Admission for this SAT session has closed; ask the proctor to re-arm the module.")
+		}
+		if generation >= 4 && !proctorRearmAt.Valid {
+			recordPersonalOffer(personalStageModule, "exhausted")
+			return assessmentConflict("ENTRY_RETRY_EXHAUSTED", "The SAT module could not be prepared. Ask the proctor to re-arm it.")
+		}
+		var hasResponse bool
+		if err := t.QueryRowContext(ctx, `
+			SELECT EXISTS(SELECT 1 FROM assessment_question_responses WHERE module_attempt_id = ?)
+			    OR EXISTS(SELECT 1 FROM attempt_responses_v2 WHERE attempt_id = ? AND module_id = ?)`,
+			module.id, attemptID, module.moduleID).Scan(&hasResponse); err != nil {
+			return err
+		}
+		if hasResponse {
+			return assessmentConflict("ENTRY_ALREADY_USED", "A response was already accepted for this SAT module; the timer cannot be reset.")
+		}
+	}
+	res, err := t.ExecContext(ctx, `
+		UPDATE assessment_module_attempts
+		SET state = 'not_started', started_at = NULL, paused_at = NULL,
+		    entry_starts_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND),
+		    entry_confirmed_at = NULL, entry_entered_at = NULL,
+		    entry_generation = entry_generation + 1, revision = revision + 1
+		WHERE id = ? AND state IN ('not_started', 'active') AND entry_entered_at IS NULL`, personalOfferLeadSeconds, module.id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return assessmentConflict("STALE_ENTRY_GENERATION", "This SAT module offer is no longer current. Refresh and continue.")
+	}
+	if rearming {
+		recordPersonalOffer(personalStageModule, "rearmed")
+	} else {
+		recordPersonalOffer(personalStageModule, "armed")
+	}
+	return nil
+}
+
+// EnterModule confirms an armed personal-model offer before its startsAt.
+// Confirmation sets started_at to the server-issued instant, not request or
+// render time, preserving the authored duration. A generation mismatch or a
+// late confirmation conflicts and leaves the offer rearmable.
+func (s *Service) EnterModule(ctx context.Context, scheduleID, attemptID, urlScheduleID string, req ModuleEntryRequest, writerBinding ...string) (*Bootstrap, error) {
+	if urlScheduleID != scheduleID {
+		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
+	}
+	boundSchedule, examID, providerKey, versionID, err := s.startScheduleBinding(ctx, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	if providerKey != "sat" {
+		return nil, apperrors.New(apperrors.CodeUnsupportedProvider, "The assessment provider is not supported.")
+	}
+	if err := s.saveAttemptBinding(ctx, boundSchedule, attemptID, examID); err != nil {
+		return nil, err
+	}
+	var hubEvents []liveupdates.Event
+	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
+		if err := s.ensureAttemptCanWorkTx(ctx, t, boundSchedule, attemptID); err != nil {
+			return err
+		}
+		if err := enforceWriterSessionTx(ctx, t, boundSchedule, attemptID, writerBinding...); err != nil {
+			return err
+		}
+		if err := enforceControlEpochTx(ctx, t, attemptID, req.ControlEpoch); err != nil {
+			return err
+		}
+		module, err := lockModuleAttemptTx(ctx, t, attemptID, req.ModuleID)
+		if err != nil {
+			return err
+		}
+		gated, err := s.moduleTimingGateTx(ctx, t, boundSchedule, module.moduleID)
+		if err != nil {
+			return err
+		}
+		if gated.gate != timingGatePersonal {
+			return assessmentConflict("TIMING_MODEL_MISMATCH", "This SAT module does not use personal entry offers.")
+		}
+		var generation int
+		var startsAt, confirmedAt, enteredAt sql.NullTime
+		if err := t.QueryRowContext(ctx,
+			"SELECT entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at FROM assessment_module_attempts WHERE id = ? FOR UPDATE",
+			module.id).Scan(&generation, &startsAt, &confirmedAt, &enteredAt); err != nil {
+			return err
+		}
+		if generation != req.Generation || !startsAt.Valid {
+			return assessmentConflict("STALE_ENTRY_GENERATION", "This SAT module offer is no longer current. Refresh and continue.")
+		}
+		if module.startedAt != nil && module.state == "active" && confirmedAt.Valid {
+			rev, err := s.appendModuleEventsTx(ctx, t, boundSchedule, attemptID, liveEventModuleStarted)
+			if err != nil {
+				return err
+			}
+			hubEvents = dualModuleEvents(boundSchedule, attemptID, rev, liveEventModuleStarted)
+			return nil
+		}
+		if enteredAt.Valid || confirmedAt.Valid || module.state != "not_started" {
+			return assessmentConflict("ENTRY_ALREADY_USED", "This SAT module entry offer has already been used.")
+		}
+		now, err := dbTimeTx(ctx, t)
+		if err != nil {
+			return err
+		}
+		if !now.Before(startsAt.Time) {
+			recordPersonalEntry(personalStageModule, "missed")
+			return assessmentConflict("ENTRY_OFFER_MISSED", "This SAT module offer started before the surface was ready. Request a new offer.")
+		}
+		res, err := t.ExecContext(ctx, `
+			UPDATE assessment_module_attempts
+			SET state = 'active', started_at = entry_starts_at,
+			    entry_confirmed_at = UTC_TIMESTAMP(6), available_at = COALESCE(available_at, entry_starts_at),
+			    paused_at = NULL, revision = revision + 1
+			WHERE id = ? AND state = 'not_started' AND entry_generation = ?
+			  AND entry_starts_at = ? AND entry_confirmed_at IS NULL AND entry_entered_at IS NULL`,
+			module.id, generation, startsAt.Time)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n != 1 {
+			return assessmentConflict("STALE_ENTRY_GENERATION", "This SAT module offer is no longer current. Refresh and continue.")
+		}
+		if err := markProviderAttemptExamPhaseInTx(ctx, t, attemptID); err != nil {
+			return err
+		}
+		recordPersonalEntry(personalStageModule, "confirmed")
+		rev, err := s.appendModuleEventsTx(ctx, t, boundSchedule, attemptID, liveEventModuleStarted)
+		if err != nil {
+			return err
+		}
+		hubEvents = dualModuleEvents(boundSchedule, attemptID, rev, liveEventModuleStarted)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	out, err := s.assembleBootstrap(ctx, boundSchedule, examID, providerKey, versionID, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	s.publishHubEvents(hubEvents)
+	return out, nil
+}
+
+// MarkStageVisible is the first-active-paint acknowledgment. It is idempotent,
+// generation-fenced, and cannot make an unconfirmed or not-yet-started offer
+// visible.
+func (s *Service) MarkStageVisible(ctx context.Context, scheduleID, attemptID, urlScheduleID string, req ModuleEntryRequest, writerBinding ...string) (*Bootstrap, error) {
+	if urlScheduleID != scheduleID {
+		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
+	}
+	boundSchedule, examID, providerKey, versionID, err := s.startScheduleBinding(ctx, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.saveAttemptBinding(ctx, boundSchedule, attemptID, examID); err != nil {
+		return nil, err
+	}
+	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
+		if err := s.ensureAttemptCanWorkTx(ctx, t, boundSchedule, attemptID); err != nil {
+			return err
+		}
+		if err := enforceWriterSessionTx(ctx, t, boundSchedule, attemptID, writerBinding...); err != nil {
+			return err
+		}
+		if err := enforceControlEpochTx(ctx, t, attemptID, req.ControlEpoch); err != nil {
+			return err
+		}
+		module, err := lockModuleAttemptTx(ctx, t, attemptID, req.ModuleID)
+		if err != nil {
+			return err
+		}
+		gated, err := s.moduleTimingGateTx(ctx, t, boundSchedule, module.moduleID)
+		if err != nil {
+			return err
+		}
+		if gated.gate != timingGatePersonal {
+			return assessmentConflict("TIMING_MODEL_MISMATCH", "This SAT module does not use personal entry offers.")
+		}
+		var generation int
+		var startsAt, confirmedAt, enteredAt sql.NullTime
+		if err := t.QueryRowContext(ctx,
+			"SELECT entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at FROM assessment_module_attempts WHERE id = ? FOR UPDATE",
+			module.id).Scan(&generation, &startsAt, &confirmedAt, &enteredAt); err != nil {
+			return err
+		}
+		if generation != req.Generation || !startsAt.Valid || !confirmedAt.Valid || module.state != "active" || module.startedAt == nil {
+			return assessmentConflict("ENTRY_NOT_CONFIRMED", "The SAT module entry was not confirmed.")
+		}
+		now, err := dbTimeTx(ctx, t)
+		if err != nil {
+			return err
+		}
+		if now.Before(startsAt.Time) {
+			return assessmentConflict("ENTRY_NOT_STARTED", "The SAT module is not active yet.")
+		}
+		if enteredAt.Valid {
+			return nil
+		}
+		if _, err = t.ExecContext(ctx, `
+			UPDATE assessment_module_attempts
+			SET entry_entered_at = UTC_TIMESTAMP(6), revision = revision + 1
+			WHERE id = ? AND entry_generation = ? AND entry_entered_at IS NULL`,
+			module.id, generation); err != nil {
+			return err
+		}
+		recordPersonalFrameLead(personalStageModule, startsAt.Time, now)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return s.assembleBootstrap(ctx, boundSchedule, examID, providerKey, versionID, attemptID)
 }
 
 // SubmitModule is retained for old clients. It may return an already-terminal
@@ -404,6 +716,18 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
+	if examruntime.IsSatPersonal(timing.TimingModel) {
+		if err := s.loadPersonalEntryOffers(ctx, attemptID, moduleAttempts); err != nil {
+			return nil, err
+		}
+	}
+	var personalBreaks []PersonalBreak
+	if examruntime.IsSatPersonal(timing.TimingModel) {
+		personalBreaks, err = s.loadPersonalBreaks(ctx, attemptID, now)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Write-then-read: this response is built after the write committed, so the
 	// entry windows it publishes already reflect it (a module that just started
 	// carries its own window, and nothing else is promised).
@@ -425,6 +749,7 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 			ID:                   attemptID,
 			ModuleAttempts:       moduleAttempts,
 			Responses:            responses,
+			PersonalBreaks:       personalBreaks,
 			ProvisionalSubmitted: control.deliveryStatus == "submitted" && control.submittedAt == nil,
 		},
 		Result: result,
@@ -490,22 +815,52 @@ func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID strin
 	if next == nil {
 		return nil, nil
 	}
-	now := time.Now().UTC()
-	var cohortTimed int
+	now, err := dbTimeTx(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	var cohortTimed, personalTimed int
 	if err := t.QueryRowContext(ctx,
-		"SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model IN ("+examruntime.CohortTimingModelsSQL+"))",
-		attemptID).Scan(&cohortTimed); err != nil {
+		"SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model IN ("+examruntime.CohortTimingModelsSQL+")), EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model = '"+examruntime.TimingModelPersonal+"')",
+		attemptID, attemptID).Scan(&cohortTimed, &personalTimed); err != nil {
 		return nil, err
 	}
 	availableAt := nextModuleAvailableAt(now, currentSectionID, next.sectionID, breakAfterSeconds)
 	if cohortTimed != 0 {
 		availableAt = now
 	}
+	if personalTimed != 0 {
+		// A scheduled break is attempt-owned and pending until its own future
+		// start is confirmed. Reconciliation and handoff time therefore do not
+		// consume the candidate's authored break duration.
+		availableAt = now
+		if currentSectionID != next.sectionID && breakAfterSeconds > 0 {
+			if err := createPersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err := insertModuleAttemptTx(ctx, t, attemptID, next, availableAt); err != nil {
 		return nil, err
 	}
 	telemetry.IncCounter(telemetry.MSATAdaptiveModuleOpenTotal, "role", next.adaptiveRole)
 	return next, nil
+}
+
+// createPersonalBreakTx records the attempt-owned pending break after a
+// section. The unique (attempt_id, after_section_id) key makes reconciliation
+// and repeated module finalization idempotent.
+func createPersonalBreakTx(ctx context.Context, t tx.Tx, attemptID, afterSectionID string, durationSeconds int) error {
+	if durationSeconds <= 0 {
+		return nil
+	}
+	_, err := t.ExecContext(ctx, `
+		INSERT INTO assessment_attempt_breaks
+		(id, attempt_id, after_section_id, duration_seconds, state, revision)
+		VALUES (?, ?, ?, ?, 'pending', 0)
+		ON DUPLICATE KEY UPDATE id = id`,
+		uuid.NewString(), attemptID, afterSectionID, durationSeconds)
+	return err
 }
 
 // scoringRow is one response joined to its answer definition for scoring.

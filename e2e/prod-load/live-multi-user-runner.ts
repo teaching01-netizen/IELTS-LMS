@@ -637,6 +637,11 @@ async function run(): Promise<void> {
     }
     console.log('[live-runner] artifacts deleted (DELETE_ARTIFACTS_ON_FINISH=true)');
   }
+
+  // Otherwise the monitor server holds the event loop open and the run looks
+  // stuck in the control panel even though every student is done.
+  await dashboard.close();
+  console.log('[live-runner] done');
 }
 
 void run().catch((error) => {

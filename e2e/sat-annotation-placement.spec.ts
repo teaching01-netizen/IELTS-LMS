@@ -76,7 +76,11 @@ async function armHighlights(page: Page): Promise<void> {
  */
 async function selectStimulusText(page: Page, requested: string): Promise<void> {
   await armHighlights(page);
-  await page.locator('[data-sat-annotation-region="stimulus"]').evaluate((root, value) => {
+  await selectTextInRegion(page, '[data-sat-annotation-region="stimulus"]', requested);
+}
+
+async function selectTextInRegion(page: Page, selector: string, requested: string): Promise<void> {
+  await page.locator(selector).evaluate((root, value) => {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node: Node | null = walker.nextNode();
     while (node && !(node.nodeValue ?? '').includes(value)) node = walker.nextNode();
@@ -547,5 +551,77 @@ test.describe('annotation surface placement', () => {
     // words, so the anchor survived the trip rather than being re-derived.
     await toolbar.getByRole('button', { name: 'Highlight Yellow' }).click();
     await expect(page.locator('[data-sat-highlight="true"]')).toHaveText(phrase);
+  });
+
+  test('reopens and removes a saved highlight with a real iPad tap', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'webkit-ipad', 'real touch tap regression runs in iPad WebKit');
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openHarness(page, '?ownedTouchSelection=1');
+    await selectStimulusText(page, 'Several');
+    const selectedActions = page.getByRole('toolbar', { name: 'Selected text actions' });
+    await selectedActions.getByRole('button', { name: 'Highlight Yellow' }).click();
+    const edit = page.getByRole('toolbar', { name: 'Edit annotation' });
+    await edit.getByRole('button', { name: 'Close text tools' }).click({ force: true });
+    const mark = page.locator('[data-sat-highlight="true"]').filter({ hasText: 'Several' });
+    await mark.tap();
+    await expect(page.getByRole('toolbar', { name: 'Edit annotation' })).toBeVisible();
+    await page.getByRole('button', { name: 'Remove highlight' }).click();
+    await expect(page.locator('[data-sat-highlight="true"]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(page.locator('[data-sat-highlight="true"]')).toHaveText('Several');
+  });
+
+  test('owns Math prose selections beside inline equations without selecting the equation', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'webkit-ipad', 'owned-selection contract runs in iPad WebKit');
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openHarness(page, '?mode=math&ownedTouchSelection=1');
+    await expect(page.getByRole('button', { name: 'Calculator' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reference' })).toBeVisible();
+
+    const prompt = page.locator('[data-sat-annotation-region="prompt"]');
+    await armHighlights(page);
+    await selectTextInRegion(page, '[data-sat-annotation-region="prompt"]', 'graph');
+    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible();
+    await expect(prompt.locator('[data-content-text-node="math-prompt::text-run-0"]')).toBeVisible();
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
+    await page.getByRole('toolbar', { name: 'Selected text actions' }).getByRole('button', { name: 'Close text tools' }).click();
+
+    await selectTextInRegion(page, '[data-sat-annotation-region="prompt"]', 'minimum');
+    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible();
+    await expect.poll(() => prompt.getAttribute('data-student-selection-owner')).toBe('app');
+    await expect.poll(() => prompt.getAttribute('data-student-owned-touch-selection')).toBe('true');
+    await expect(prompt.locator('[data-content-text-node="math-prompt::text-run-2"]')).toBeVisible();
+    expect(await prompt.evaluate((root) => getComputedStyle(root).getPropertyValue('-webkit-user-select'))).toBe('none');
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
+    expect(await prompt.locator('[role="math"]').evaluate((math) => math.closest('[data-content-text-node]'))).toBeNull();
+
+    await page.getByRole('button', { name: 'Highlight Yellow' }).click();
+    const mark = prompt.locator('[data-sat-highlight="true"]').filter({ hasText: 'minimum' });
+    await expect(mark).toBeVisible();
+    await page.getByRole('toolbar', { name: 'Edit annotation' }).getByRole('button', { name: 'Close text tools' }).click();
+    await mark.tap();
+    await expect(page.getByRole('button', { name: 'Remove highlight' })).toBeVisible();
+    await page.getByRole('button', { name: 'Remove highlight' }).click();
+    await expect(prompt.locator('[data-sat-highlight="true"]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(prompt.locator('[data-sat-highlight="true"]')).toHaveText('minimum');
+
+    await prompt.locator('[role="math"]').evaluate((math) => {
+      const walker = document.createTreeWalker(math, NodeFilter.SHOW_TEXT);
+      const text = walker.nextNode();
+      if (!text) throw new Error('Equation has no rendered text');
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      text.parentElement?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    });
+    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toHaveCount(0);
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+
+    await page.goto('/__dev/sat-accessibility?mode=spr&ownedTouchSelection=1');
+    const answer = page.getByRole('textbox');
+    await expect(answer).toBeEditable();
   });
 });

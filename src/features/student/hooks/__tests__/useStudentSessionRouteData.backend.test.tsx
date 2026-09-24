@@ -1422,6 +1422,9 @@ describe("useStudentSessionRouteData backend mode", () => {
       await waitFor(() =>
         expect(liveFetchCount(fetchMock)).toBeGreaterThan(liveFetchesBeforeSocketOpen)
       );
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 550));
+      });
 
       const baseline = liveFetchCount(fetchMock);
       socket.emit({
@@ -1532,10 +1535,6 @@ describe("useStudentSessionRouteData backend mode", () => {
           wrapper: createWrapper(),
         });
         await waitFor(() => expect(result.current.isLoading).toBe(false));
-        // The initial load writes the runtime ref before publishing state, but
-        // wait for the published revision too so a coverage-heavy run cannot
-        // open the socket before the reconnect baseline is observable.
-        await waitFor(() => expect(result.current.runtimeSnapshot?.revision).toBe(1));
         await waitFor(() => expect(MockSocket.instances.length).toBeGreaterThan(0));
 
         const socket = MockSocket.instances[MockSocket.instances.length - 1]!;

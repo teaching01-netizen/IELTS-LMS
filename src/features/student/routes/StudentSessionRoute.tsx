@@ -1,19 +1,17 @@
-import React from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { StudentAppWrapper } from "@components/student/StudentAppWrapper";
-import { ErrorSurface, LoadingSurface } from "@components/ui";
-import { useAuthSession } from "../../auth/api/authSession";
-import { useStudentSessionRouteData } from "@student/hooks/useStudentSessionRouteData";
-import { SatStudentSessionRoute } from "../../student-delivery/routes/SatStudentSessionRoute";
-import { SatLoadingSurface } from "../../student-delivery/api/satStateSurfaces";
-import { StudentExamInteractionScopeProvider } from "@shared/ui/touch-selection/StudentExamInteractionScope";
-import { StudentTouchSelectionDiagnosticsProvider } from "@shared/ui/touch-selection/StudentTouchSelectionDiagnostics";
-import {
-  clearSatResumeLocator,
-  loadSatResumeLocator,
-  saveSatResumeLocator,
-} from "../../student-delivery/api/satResume";
-import { getVerifiedTerminalState } from "../domain/exam-session/terminalState";
+import React from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { ErrorSurface, LoadingSurface } from '@components/ui';
+import { useAuthSession } from '../../auth/api/authSession';
+import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRouteData';
+import { SatLoadingSurface } from '../../student-delivery/api/satStateSurfaces';
+import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
+import { StudentTouchSelectionDiagnosticsProvider } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
+const SatStudentDeliveryBranch = React.lazy(() =>
+  import('./SatStudentDeliveryBranch').then((module) => ({ default: module.SatStudentDeliveryBranch })),
+);
+const IeltsStudentDeliveryBranch = React.lazy(() =>
+  import('./IeltsStudentDeliveryBranch').then((module) => ({ default: module.IeltsStudentDeliveryBranch })),
+);
 
 /**
  * Student Session Route
@@ -33,8 +31,7 @@ import { getVerifiedTerminalState } from "../domain/exam-session/terminalState";
  * conservative default and keeps the platform's own selection.
  */
 export function StudentSessionRoute() {
-  const diagnosticsEnabled =
-    new URLSearchParams(useLocation().search).get("touchSelectionDebug") === "1";
+  const diagnosticsEnabled = new URLSearchParams(useLocation().search).get('touchSelectionDebug') === '1';
   const { scheduleId, studentId } = useParams<{ scheduleId: string; studentId?: string }>();
   const navigate = useNavigate();
   const { logoutAll, status: authStatus } = useAuthSession();
@@ -51,43 +48,19 @@ export function StudentSessionRoute() {
     state,
     refreshRuntime,
     satBootstrapSeed,
-  } = useStudentSessionRouteData(scheduleId, studentId);
-
-  React.useEffect(() => {
-    if (
-      providerKey !== "sat" ||
-      !scheduleId ||
-      !attemptSnapshot?.id ||
-      !attemptSnapshot.candidateId
-    )
-      return;
-    const terminal = getVerifiedTerminalState({
-      attempt: attemptSnapshot,
-      runtime: runtimeSnapshot,
-    });
-    if (terminal !== "not_terminal") {
-      clearSatResumeLocator();
-      return;
-    }
-    const prior = loadSatResumeLocator();
-    saveSatResumeLocator({
-      scheduleId,
-      candidateId: attemptSnapshot.candidateId,
-      attemptId: attemptSnapshot.id,
-      ...(prior?.scheduleId === scheduleId &&
-      prior.candidateId === attemptSnapshot.candidateId &&
-      prior.accessLinkId
-        ? { accessLinkId: prior.accessLinkId }
-        : {}),
-    });
-  }, [attemptSnapshot, providerKey, runtimeSnapshot, scheduleId]);
+  } =
+    useStudentSessionRouteData(scheduleId, studentId);
 
   const navigateToStudentCheckIn = () => {
-    clearSatResumeLocator();
+    void import('../../student-delivery/api/satResumeLocator')
+      .then(({ clearSatResumeLocator }) => clearSatResumeLocator())
+      .catch(() => {
+        // The check-in route must stay reachable if a lazy SAT utility chunk fails to load.
+      });
     if (scheduleId) {
       navigate(`/student/${scheduleId}`);
     } else {
-      navigate("/");
+      navigate('/');
     }
     void logoutAll().catch(() => {
       // Route transition is already complete; auth cleanup is best-effort.
@@ -99,7 +72,7 @@ export function StudentSessionRoute() {
     // check-in route after logout would immediately reload this route without
     // auth and show a misleading "Session expired" error. Keep the completed
     // surface visible so the user can close the tab after exiting.
-    if (providerKey === "act") {
+    if (providerKey === 'act') {
       void logoutAll().catch(() => {
         // Completion is already settled; auth cleanup is best-effort.
       });
@@ -109,13 +82,13 @@ export function StudentSessionRoute() {
   };
 
   // Auth window stays provider-agnostic (excluded from the flicker assertion).
-  if (authStatus === "loading" && isLoading) {
+  if (authStatus === 'loading' && isLoading) {
     return <LoadingSurface label="Loading Exam…" />;
   }
 
   // SAT-known window: NEVER the admin skeleton again (single-surface rule).
   // Static resolving OR live/attempt pending (Option A): single SAT skin.
-  if (isLoading && providerKey === "sat") {
+  if (isLoading && providerKey === 'sat') {
     return <SatLoadingSurface kind="initial" label="Loading Digital SAT…" />;
   }
 
@@ -123,7 +96,7 @@ export function StudentSessionRoute() {
   // skin may claim this window. A neutral blank holds the frame — no admin
   // skeleton grey, no SAT spinner — until the provider resolves, so a SAT
   // cold open can never flash IELTS chrome. Single sr-only live region.
-  if (isLoading && providerKey === "unknown") {
+  if (isLoading && providerKey === 'unknown') {
     return (
       <div role="status" aria-live="polite" aria-label="Loading">
         <p className="sr-only">Loading…</p>
@@ -138,23 +111,25 @@ export function StudentSessionRoute() {
   if (error) {
     const loweredError = error.toLowerCase();
     const isInvalidAccessCode =
-      loweredError.includes("invalid wcode") || loweredError.includes("invalid access code");
+      loweredError.includes('invalid wcode') || loweredError.includes('invalid access code');
     const isSessionExpired =
-      error.toLowerCase().includes("authentication is required") ||
-      error.toLowerCase().includes("unauthorized");
+      error.toLowerCase().includes('authentication is required') ||
+      error.toLowerCase().includes('unauthorized');
     return (
       <ErrorSurface
         title={
           isInvalidAccessCode
-            ? "Access code invalid"
+            ? 'Access code invalid'
             : isSessionExpired
-              ? "Session expired"
-              : "Loading Error"
+              ? 'Session expired'
+              : 'Loading Error'
         }
         description={error}
-        actionLabel={isInvalidAccessCode || isSessionExpired ? "Back to Check-in" : "Retry"}
+        actionLabel={isInvalidAccessCode || isSessionExpired ? 'Back to Check-in' : 'Retry'}
         onAction={
-          isInvalidAccessCode || isSessionExpired ? navigateToStudentCheckIn : () => void retry()
+          isInvalidAccessCode || isSessionExpired
+            ? navigateToStudentCheckIn
+            : () => void retry()
         }
       />
     );
@@ -163,7 +138,7 @@ export function StudentSessionRoute() {
   // Settled with an unrecognized provider: the load path normally throws the
   // unsupported-provider error first (error branch above), but never fall
   // through to the IELTS shell on an unknown provider.
-  if (providerKey === "unknown") {
+  if (providerKey === 'unknown') {
     return (
       <ErrorSurface
         title="Exam Not Found"
@@ -185,7 +160,7 @@ export function StudentSessionRoute() {
     );
   }
 
-  if (providerKey === "sat") {
+  if (providerKey === 'sat') {
     // Option A: attempt id is the mount gate. While live is still pending we
     // already returned the SAT loader above, so reaching here with no attempt
     // id means the load settled with no attempt -> Back to Check-in.
@@ -206,20 +181,17 @@ export function StudentSessionRoute() {
     return (
       <StudentExamInteractionScopeProvider ownedTouchSelection>
         <StudentTouchSelectionDiagnosticsProvider enabled={diagnosticsEnabled}>
-          <SatStudentSessionRoute
-            scheduleId={scheduleId}
-            attemptId={attemptSnapshot.id}
-            candidateId={attemptSnapshot.candidateId}
-            attemptSnapshot={attemptSnapshot}
-            runtimeSnapshot={runtimeSnapshot}
-            liveSocketConnected={liveSocketConnected}
-            attemptUpdateToken={satAttemptUpdateToken}
-            leaseEpoch={attemptSnapshot.leaseEpoch}
-            controlEpoch={attemptSnapshot.controlEpoch}
-            bootstrapSeed={satBootstrapSeed}
-            initialIsLoading={false}
-            onExit={navigateToStudentCheckIn}
-          />
+          <React.Suspense fallback={<SatLoadingSurface kind="initial" label="Loading Digital SAT…" />}>
+            <SatStudentDeliveryBranch
+              scheduleId={scheduleId}
+              attemptSnapshot={attemptSnapshot}
+              runtimeSnapshot={runtimeSnapshot}
+              liveSocketConnected={liveSocketConnected}
+              satAttemptUpdateToken={satAttemptUpdateToken}
+              satBootstrapSeed={satBootstrapSeed}
+              onExit={navigateToStudentCheckIn}
+            />
+          </React.Suspense>
         </StudentTouchSelectionDiagnosticsProvider>
       </StudentExamInteractionScopeProvider>
     );
@@ -228,20 +200,17 @@ export function StudentSessionRoute() {
   return (
     <StudentExamInteractionScopeProvider ownedTouchSelection>
       <StudentTouchSelectionDiagnosticsProvider enabled={diagnosticsEnabled}>
-        <StudentAppWrapper
-          state={state}
-          onExit={handleCompletedExit}
-          scheduleId={scheduleId}
-          attemptSnapshot={attemptSnapshot}
-          onRuntimeRefresh={refreshRuntime}
-          runtimeSnapshot={runtimeSnapshot}
-          answerInvariantRollout={answerInvariantRollout}
-          // Cohort/runtime-backed IELTS sessions are completed by the proctor or
-          // authoritative timeout. The student can save answers but must not
-          // locally advance or terminalize the shared runtime.
-          showSubmitControls={false}
-          allowExitDuringExam={false}
-        />
+        <React.Suspense fallback={<LoadingSurface label="Loading Exam…" />}>
+          <IeltsStudentDeliveryBranch
+            state={state}
+            onExit={handleCompletedExit}
+            scheduleId={scheduleId}
+            attemptSnapshot={attemptSnapshot}
+            refreshRuntime={refreshRuntime}
+            runtimeSnapshot={runtimeSnapshot}
+            answerInvariantRollout={answerInvariantRollout}
+          />
+        </React.Suspense>
       </StudentTouchSelectionDiagnosticsProvider>
     </StudentExamInteractionScopeProvider>
   );

@@ -26,6 +26,11 @@ var metricHelpText = map[string]string{
 	MSATAdaptiveIntegrityViolation:  "Total SAT adaptive-routing integrity violations where the recorded route decision and the administered module disagreed.",
 	MSATAdaptiveRouteTotal:          "Total SAT adaptive-routing decisions by section and selected route (higher vs lower).",
 	MSATAdaptiveModuleOpenTotal:     "Total SAT adaptive follow-up modules opened by adaptive role (higher_branch vs lower_branch).",
+	MSATPersonalOfferTotal:          "Total attempt-owned SAT entry offers by event (armed, rearmed, exhausted) and stage (module, break).",
+	MSATPersonalEntryTotal:          "Total attempt-owned SAT entry confirmations by stage and result (confirmed, missed).",
+	MSATPersonalFrameLateTotal:      "Total first active SAT frames acknowledged after their authored start, by stage. Non-zero means the candidate's visible clock began below the authored duration.",
+	MSATPersonalFrameLeadSeconds:    "Seconds between the authored start and the first acknowledged active SAT frame, by stage. Negative is late (time the candidate lost).",
+	MRuntimePersonalCompleteTotal:   "Total personal SAT runtimes completed because admission closed and all admitted attempts were terminal.",
 	MV1MutationTotal:                "Total v1 mutation requests by outcome.",
 	MV1SubmitTotal:                  "Total v1 submit requests by outcome.",
 	MLeaseFencedTotal:               "Total v2 responses rejected by lease fencing.",
@@ -135,12 +140,25 @@ const (
 	// MSATAdaptiveModuleOpenTotal counts every adaptive follow-up module the
 	// router opens. Label is the authored adaptive role only (role).
 	MSATAdaptiveModuleOpenTotal = "sat_adaptive_module_open_total"
-	MV1MutationTotal            = "v1_mutation_requests_total"
-	MV1SubmitTotal              = "v1_submit_requests_total"
-	MLeaseFencedTotal           = "v2_lease_fenced_total"
-	MControlStaleTotal          = "v2_control_epoch_stale_total"
-	MVersionCollTotal           = "v2_version_collision_total"
-	MSubmitReplayTotal          = "v2_submit_replay_total"
+	// SAT full-entry-time (plan 2026-09-24, 7.2): the attempt-owned offer and
+	// first-active-frame funnel. Labels are the closed stage vocabulary
+	// (module|break) and event/result; never a candidate, attempt, or schedule
+	// id, so the series stay bounded through an exam-day spike. Read together:
+	// offer{event="rearmed"} rising means clients cannot paint inside the lead,
+	// and frame_late/lead_seconds measure the time candidates actually lost.
+	MSATPersonalOfferTotal       = "sat_personal_offer_total"
+	MSATPersonalEntryTotal       = "sat_personal_entry_total"
+	MSATPersonalFrameLateTotal   = "sat_personal_frame_late_total"
+	MSATPersonalFrameLeadSeconds = "sat_personal_frame_lead_seconds"
+	// MRuntimePersonalCompleteTotal counts personal runtimes the completion sweep
+	// closed (admission closed + every admitted attempt terminal).
+	MRuntimePersonalCompleteTotal = "runtime_personal_complete_total"
+	MV1MutationTotal              = "v1_mutation_requests_total"
+	MV1SubmitTotal                = "v1_submit_requests_total"
+	MLeaseFencedTotal             = "v2_lease_fenced_total"
+	MControlStaleTotal            = "v2_control_epoch_stale_total"
+	MVersionCollTotal             = "v2_version_collision_total"
+	MSubmitReplayTotal            = "v2_submit_replay_total"
 
 	MTerminalCreated  = "terminalization_created_total"
 	MTerminalReplay   = "terminalization_replay_total"
@@ -357,6 +375,11 @@ func Names() []string {
 		MSATAdaptiveIntegrityViolation,
 		MSATAdaptiveRouteTotal,
 		MSATAdaptiveModuleOpenTotal,
+		MSATPersonalOfferTotal,
+		MSATPersonalEntryTotal,
+		MSATPersonalFrameLateTotal,
+		MSATPersonalFrameLeadSeconds,
+		MRuntimePersonalCompleteTotal,
 		MV1MutationTotal,
 		MV1SubmitTotal,
 		MLeaseFencedTotal,

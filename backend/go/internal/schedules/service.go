@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -109,6 +110,7 @@ type Schedule struct {
 	ID                     string     `json:"id"`
 	ExamID                 string     `json:"examId"`
 	ProviderKey            string     `json:"providerKey"`
+	SatTimingModel         *string    `json:"satTimingModel,omitempty"`
 	OrganizationID         *string    `json:"organizationId,omitempty"`
 	ExamTitle              string     `json:"examTitle"`
 	ProctorDisplayName     string     `json:"proctorDisplayName"`
@@ -225,14 +227,14 @@ func conflictError(msg string) *apperrors.Error {
 	return apperrors.New(apperrors.CodeConflict, msg)
 }
 
-const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, created_at, created_by, updated_at"
+const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, created_at, created_by, updated_at, sat_timing_model"
 
 func scanSchedule(row interface {
 	Scan(dest ...any) error
 }) (Schedule, error) {
 	var s Schedule
-	var orgID, institution sql.NullString
-	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision, &s.RecurrenceType, &s.RecurrenceInterval, &s.RecurrenceEndDate, &s.BufferBeforeMinutes, &s.BufferAfterMinutes, &s.AutoStart, &s.AutoStop, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt); err != nil {
+	var orgID, institution, timingModel sql.NullString
+	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision, &s.RecurrenceType, &s.RecurrenceInterval, &s.RecurrenceEndDate, &s.BufferBeforeMinutes, &s.BufferAfterMinutes, &s.AutoStart, &s.AutoStop, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &timingModel); err != nil {
 		return Schedule{}, err
 	}
 	if orgID.Valid {
@@ -243,7 +245,60 @@ func scanSchedule(row interface {
 		v := institution.String
 		s.Institution = &v
 	}
+	// scanSchedule is the single projection reader, so the stored timing choice
+	// rides along on every Get/List (and on the Create/Update echo) instead of
+	// only on the Create path that set it explicitly.
+	if timingModel.Valid && strings.TrimSpace(timingModel.String) != "" {
+		v := timingModel.String
+		s.SatTimingModel = &v
+	}
 	return s, nil
+}
+
+// satTimingChoiceForSchedule reads the stored timing choice for one schedule.
+// NULL means the deployed model (old rows). Query failures propagate; timing
+// selection must not silently fall back when the database cannot be read.
+func satTimingChoiceForSchedule(ctx context.Context, q planQuerier, scheduleID string) (string, error) {
+	var raw sql.NullString
+	if err := q.QueryRowContext(ctx, "SELECT sat_timing_model FROM exam_schedules WHERE id = ?", scheduleID).Scan(&raw); err != nil {
+		return "", err
+	}
+	if !raw.Valid {
+		return "", nil
+	}
+	return raw.String, nil
+}
+
+// satPersonalTimingEnv is the rollout switch for the personal (full-entry-time)
+// timing model. It is default-on with an explicit off switch: the choice is
+// stored per schedule in exam_schedules.sat_timing_model, so turning it off
+// stops new schedules from opting in without rewriting any live session.
+const satPersonalTimingEnv = "SAT_PERSONAL_TIMING"
+
+// satPersonalTimingEnabled reports whether newly created SAT schedules opt into
+// sat_personal_v1. A variable so tests can pin both sides of the rollout.
+var satPersonalTimingEnabled = func() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(satPersonalTimingEnv))) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+// PersistSatTimingChoice stores sat_personal_v1 for newly created SAT
+// schedules. Null (no choice) keeps the deployed cohort model for old rows, and
+// an off switch (or a non-SAT provider) leaves the choice null.
+// Access-link backing schedules call this from their own creation transaction.
+func PersistSatTimingChoice(ctx context.Context, q tx.Tx, scheduleID, providerKey string) error {
+	if !strings.EqualFold(strings.TrimSpace(providerKey), "sat") {
+		return nil
+	}
+	if !satPersonalTimingEnabled() {
+		return nil
+	}
+	_, err := q.ExecContext(ctx, "UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?", examruntime.TimingModelPersonal, scheduleID)
+	return err
 }
 
 // List returns schedules ordered by start time (mirrors list_schedules).
@@ -328,6 +383,13 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Schedule, erro
 		if _, err := q.ExecContext(ctx, "INSERT INTO exam_schedules (id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, auto_start, auto_stop, status, created_at, created_by, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proctor_start', 'none', 1, ?, ?, 'scheduled', NOW(), ?, NOW(), 0)", id, req.ExamID, providerKey, nullableString(orgID), title, proctorName, gradingName, req.PublishedVersionID, strings.TrimSpace(req.CohortName), nullableStrPtr(req.Institution), req.StartTime, req.EndTime, planned, req.AutoStart, req.AutoStop, req.CreatedBy); err != nil {
 			return err
 		}
+		// New SAT schedules select the attempt-owned timing model. Old rows
+		// (NULL) keep the deployed cohort model; never rewrite in flight.
+		if err := PersistSatTimingChoice(ctx, q, id, providerKey); err != nil {
+			return err
+		}
+		// scanSchedule is the single projection reader, so the timing choice just
+		// persisted rides along on the created row without a second read.
 		sch, err := scanSchedule(q.QueryRowContext(ctx, "SELECT "+scheduleColumns+" FROM exam_schedules WHERE id = ?", id))
 		if err != nil {
 			return err
@@ -527,6 +589,7 @@ func (s *Service) startPlanner() examruntime.StartPlanner {
 		return runtimePlanIn(ctx, q, Schedule{
 			ID:                     sch.ID,
 			ProviderKey:            sch.ProviderKey,
+			SatTimingModel:         optionalScheduleModel(sch.SatTimingModel),
 			PublishedVersionID:     sch.PublishedVersionID,
 			PlannedDurationMinutes: sch.PlannedDurationMinutes,
 		})
@@ -626,11 +689,30 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 		// The final delivered section has no cross-section break after it.
 		plan[len(plan)-1].GapAfterMinutes = 0
 	}
-	timingModel := examruntime.TimingModelLegacy
-	if strings.EqualFold(sch.ProviderKey, examdomain.ProviderSAT) {
-		timingModel = examruntime.TimingModelCohortSection
+	// Timing model: the stored schedule choice wins; NULL keeps the deployed
+	// model (cohort_section_v3 for SAT, legacy otherwise). Never reinterpret
+	// an in-progress attempt's model here — this runs only at Start.
+	choice := ""
+	if sch.SatTimingModel != nil {
+		choice = *sch.SatTimingModel
+	}
+	timingModel := examruntime.ResolveTimingModel(sch.ProviderKey, choice)
+	// Legacy fallback: when the schedule has no stored choice, preserve the
+	// historical provider default explicitly.
+	if choice == "" {
+		timingModel = examruntime.TimingModelLegacy
+		if strings.EqualFold(sch.ProviderKey, examdomain.ProviderSAT) {
+			timingModel = examruntime.TimingModelCohortSection
+		}
 	}
 	return plan, timingModel, nil
+}
+
+func optionalScheduleModel(model string) *string {
+	if model == "" {
+		return nil
+	}
+	return &model
 }
 
 // candidateSectionSecondsByKey reads the candidate-facing length of every
@@ -903,8 +985,10 @@ func (s *Service) CreateRegistration(ctx context.Context, scheduleID string, req
 	err2 := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		// Locked schedule gate first: rejects missing/cancelled/completed/deleted
 		// rows inside the tx so the check cannot race the registration write.
-		var schStatus string
-		if err := q.QueryRowContext(ctx, "SELECT status FROM exam_schedules WHERE id = ? FOR UPDATE", scheduleID).Scan(&schStatus); err != nil {
+		var schStatus, providerKey string
+		var schEndTime time.Time
+		var model sql.NullString
+		if err := q.QueryRowContext(ctx, "SELECT status, provider_key, end_time, sat_timing_model FROM exam_schedules WHERE id = ? FOR UPDATE", scheduleID).Scan(&schStatus, &providerKey, &schEndTime, &model); err != nil {
 			if err == sql.ErrNoRows {
 				return notFoundError("Schedule not found.")
 			}
@@ -914,6 +998,15 @@ func (s *Service) CreateRegistration(ctx context.Context, scheduleID string, req
 		case StatusScheduled, StatusLive:
 		default:
 			return conflictError("Registration is closed for this schedule.")
+		}
+		if examruntime.IsSatPersonal(examruntime.ResolveTimingModel(providerKey, model.String)) {
+			var dbNow time.Time
+			if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&dbNow); err != nil {
+				return err
+			}
+			if !dbNow.Before(schEndTime) {
+				return conflictError("Admission is closed for this schedule.")
+			}
 		}
 		// SELECT ... FOR UPDATE on the existing registration serializes replays.
 		var id, studentKey, studentName, accessState string
@@ -1044,6 +1137,19 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 			return nil
 		} else if err != sql.ErrNoRows {
 			return err
+		}
+		choice, err := satTimingChoiceForSchedule(ctx, q, scheduleID)
+		if err != nil {
+			return err
+		}
+		if examruntime.IsSatPersonal(examruntime.ResolveTimingModel(sch.ProviderKey, choice)) {
+			var dbNow time.Time
+			if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&dbNow); err != nil {
+				return err
+			}
+			if !dbNow.Before(sch.EndTime) {
+				return conflictError("Admission is closed for this schedule.")
+			}
 		}
 		var userID any
 		if regUserID.Valid {

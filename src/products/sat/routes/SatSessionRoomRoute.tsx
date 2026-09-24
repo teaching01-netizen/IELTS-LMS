@@ -77,6 +77,10 @@ export function SatSessionRoomRoute() {
       runtime: runtime ?? null,
       scheduledStartAt: schedule?.startTime ?? null,
       now: new Date(serverNowMs).toISOString(),
+      // The stored timing plan decides what the rows MEAN: a personal-model
+      // session is handed a per-candidate window (the section rows are this
+      // sheet's projection), a cohort one is capped by the shared section clock.
+      timingModel: runtime?.timingModel ?? null,
     }),
     [runtime, schedule?.startTime, serverNowMs],
   );

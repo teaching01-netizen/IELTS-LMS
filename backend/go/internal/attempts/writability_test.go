@@ -125,6 +125,77 @@ func TestEnsureQuestionAdmittedEnforcesSATPersonalModuleDeadline(t *testing.T) {
 	}
 }
 
+func TestEnsureWritablePersonalSATIgnoresCohortSectionState(t *testing.T) {
+	now := time.Date(2026, 9, 24, 2, 0, 0, 0, time.UTC)
+	attempt := openAttempt()
+	gate := RuntimeGate{TimingModel: "sat_personal_v1", Status: "live", WaitingForNextSection: true, SectionStarted: false, SectionLive: false, Now: now}
+	if err := ensureWritable(attempt, gate, now); err != nil {
+		t.Fatalf("personal attempt should not be restricted by the cohort section cursor: %v", err)
+	}
+	gate.Status = "paused"
+	if err := ensureWritable(attempt, gate, now); err == nil {
+		t.Fatal("personal attempt must still be frozen when the room is paused")
+	}
+}
+
+func TestEnsurePersonalQuestionRequiresConfirmedStartedOffer(t *testing.T) {
+	now := time.Date(2026, 9, 24, 2, 0, 10, 0, time.UTC)
+	started := now.Add(-time.Second)
+	deadline := now.Add(time.Minute)
+	gate := RuntimeGate{TimingModel: "sat_personal_v1", Status: "live", ActiveSectionKey: "math", SectionLive: false, Now: now}
+	owner := QuestionOwner{
+		ModuleState: "active", SectionKey: "reading-writing", TimingModel: "sat_personal_v1",
+		ModuleStartedAt: &started, ModuleDeadlineAt: &deadline, EntryConfirmedAt: &started,
+	}
+	if err := ensureQuestionAdmittedForProvider(owner, gate, "q-1", string(ProviderSAT)); err != nil {
+		t.Fatalf("personal question should not be restricted by the cohort section cursor: %v", err)
+	}
+	owner.EntryConfirmedAt = nil
+	if err := ensureQuestionAdmittedForProvider(owner, gate, "q-1", string(ProviderSAT)); err == nil {
+		t.Fatal("unconfirmed personal offer must not accept a response")
+	}
+}
+
+// The attempt-level closing grace is the ROOM's section clock. A personal SAT
+// attempt owns its module deadline, so a past room grace must not freeze its
+// answers — while a cohort attempt keeps the existing refusal (plan 2026-09-24
+// full-entry-time: Student B's second subject runs long after the room's first
+// section clock has expired).
+func TestEnsureWritablePersonalSATHasNoRoomClosingGrace(t *testing.T) {
+	now := time.Date(2026, 9, 24, 2, 0, 0, 0, time.UTC)
+	roomGraceOver := now.Add(-time.Minute)
+
+	personal := openAttempt()
+	personal.ProviderKey = string(ProviderSAT)
+	personal.TimingModel = personalTimingModel
+	personal.ClosingGraceUntil = &roomGraceOver
+	personalGate := RuntimeGate{TimingModel: personalTimingModel, Status: "live", SectionLive: true, SectionStarted: true, Now: now}
+	if err := ensureWritable(personal, personalGate, now); err != nil {
+		t.Fatalf("personal SAT attempt must ignore the room section grace: %v", err)
+	}
+
+	// The row is the durable carrier: a gate that lost the model mid-transition
+	// still reads personal from the locked attempt.
+	runtimeGate := RuntimeGate{Status: "live", SectionLive: true, SectionStarted: true, Now: now}
+	if err := ensureWritable(personal, runtimeGate, now); err != nil {
+		t.Fatalf("personal SAT attempt must ignore the room section grace from the row alone: %v", err)
+	}
+
+	cohort := openAttempt()
+	cohort.ProviderKey = string(ProviderSAT)
+	cohort.TimingModel = "cohort_section_v3"
+	cohort.ClosingGraceUntil = &roomGraceOver
+	cohortGate := liveGate(now)
+	cohortGate.TimingModel = "cohort_section_v3"
+	err := ensureWritable(cohort, cohortGate, now)
+	if err == nil {
+		t.Fatal("cohort attempt past its section grace must stay refused")
+	}
+	if appErr, ok := apperrors.As(err); !ok || appErr.Code != apperrors.CodeDeadlineExpired {
+		t.Fatalf("cohort past-grace refusal = %v, want DEADLINE_EXPIRED", err)
+	}
+}
+
 // Between sections: the runtime is live but waiting for the next section. The
 // gate must refuse with the explicit waiting message (not a generic liveness
 // refusal) so the client can tell "the room is on its break" from "your exam

@@ -8,6 +8,7 @@ import {
   SAT_RUN_SHEET_TIME_ZONE,
   satModuleSlotLabel,
   satRunSheetCurrentRows,
+  satRunSheetTimingPlan,
   type SatRunSheetRow,
   type SatRunSheetRuntime,
 } from "../sessionRunSheet";
@@ -1170,6 +1171,61 @@ describe("satModuleSlotLabel", () => {
     expect(satModuleSlotLabel("none")).toBeNull();
     expect(satModuleSlotLabel(null)).toBeNull();
     expect(satModuleSlotLabel(undefined)).toBeNull();
+  });
+});
+
+// The run sheet must say which timing PLAN its rows describe. The same rows mean
+// different things per plan: a personal-model session hands each candidate their
+// own window (so a section row is this sheet's projection and no section clock
+// cuts anybody off), while a cohort session is capped by the shared section
+// clock. A proctor reading the table cannot infer that from the numbers.
+describe("run sheet timing plan label", () => {
+  it("describes the personal model as a per-candidate plan", () => {
+    const plan = satRunSheetTimingPlan("sat_personal_v1");
+    expect(plan).not.toBeNull();
+    expect(plan?.model).toBe("sat_personal_v1");
+    expect(plan?.perCandidate).toBe(true);
+    expect(plan?.label).toMatch(/personal/i);
+    expect(plan?.note).toMatch(/author(ed|ing)/i);
+  });
+
+  it("describes the cohort models as a shared-clock plan", () => {
+    for (const model of ["cohort_section_v3", "cohort_stage_v2"]) {
+      const plan = satRunSheetTimingPlan(model);
+      expect(plan?.perCandidate).toBe(false);
+      expect(plan?.label).toMatch(/cohort/i);
+      expect(plan?.note).toMatch(/cap/i);
+    }
+  });
+
+  it("carries the plan onto the sheet, and omits it when the runtime does not say", () => {
+    const liveRuntime = runtime([
+      runtimeSection("reading-writing", 0, { status: "live", actualStartAt: SCHEDULED_START }),
+    ]);
+    const withModel = buildSatRunSheet({
+      plan: [readingWritingPlan],
+      runtime: liveRuntime,
+      scheduledStartAt: SCHEDULED_START,
+      now: SCHEDULED_START,
+      timingModel: "sat_personal_v1",
+    });
+    expect(withModel.timingPlan?.model).toBe("sat_personal_v1");
+
+    // A read that does not carry the field (summary/pre-field rows) must leave
+    // the line out rather than assume a cohort run.
+    const withoutModel = buildSatRunSheet({
+      plan: [readingWritingPlan],
+      runtime: liveRuntime,
+      scheduledStartAt: SCHEDULED_START,
+      now: SCHEDULED_START,
+    });
+    expect(withoutModel.timingPlan).toBeNull();
+  });
+
+  it("labels a timing model this build does not describe instead of guessing", () => {
+    const plan = satRunSheetTimingPlan("some_future_model_v9");
+    expect(plan?.label).toContain("some_future_model_v9");
+    expect(plan?.perCandidate).toBe(false);
   });
 });
 

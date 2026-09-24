@@ -42,10 +42,10 @@ func sectionGateModes() []sectionGateQuerier {
 			name:   "snapshot off (v2Locker, FOR UPDATE)",
 			locker: v2Locker{},
 			stage: func(mock sqlmock.Sqlmock, sectionStatus *string) {
-				mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, active_section_key, waiting_for_next_section FROM exam_session_runtimes")).
+				mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, timing_model, active_section_key, waiting_for_next_section FROM exam_session_runtimes")).
 					WithArgs("sched-1").
-					WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "waiting_for_next_section"}).
-						AddRow("rt-1", "live", "rw", false))
+					WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key", "waiting_for_next_section"}).
+						AddRow("rt-1", "live", "legacy_section_v1", "rw", false))
 				mock.ExpectQuery("SELECT UTC_TIMESTAMP").
 					WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now().UTC()))
 				sectionRow(mock, sectionStatus)

@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
+import { createBrowserPool, type BrowserPool, type BrowserPoolLease } from './browser-pool';
+import { isSatJoinError, type SatJoinError } from './sat-join-failure';
 import { parseSatJoinUrl } from './sat-join-url';
 import { loadUsersFromFile, type VirtualUser } from './user-source';
 import { startLiveDashboardServer, type DashboardEvent } from './live-dashboard-server';
@@ -20,10 +22,26 @@ interface RunnerConfig {
   examTimeoutMs: number;
   headedUsers: number;
   maxConcurrentUsers: number;
+  contextsPerBrowser: number;
+  abortOnFatalJoin: boolean;
+  joinFailureAbortThreshold: number;
   logFile: string;
   userOffset: number;
   deleteArtifactsOnFinish: boolean;
 }
+
+// Load-runner Chromium flags: no /dev/shm dependency, no GPU compositing for a
+// dozen-plus hidden contexts, no timer throttling (SAT clocks must keep ticking
+// in background tabs or modules never hand off), and no first-run dialogs.
+const CHROMIUM_LOAD_ARGS = [
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
+];
 
 type Phase = 'booting' | 'joining' | 'waiting_start' | 'in_exam' | 'done' | 'failed';
 
@@ -72,8 +90,7 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function computeMedian(values: number[]): number {
-  if (values.length === 0) return 0;
+function computeMedian(values: number[]): number {  if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   if (sorted.length % 2 === 0) {
@@ -99,6 +116,54 @@ function eventBase(
   };
 }
 
+function launchBrowser(headless: boolean) {
+  return chromium.launch({ headless, args: CHROMIUM_LOAD_ARGS });
+}
+
+/**
+ * Opens one context, tolerating a browser that died between acquire and use:
+ * the lease is dropped and the next attempt lands on a replacement instance.
+ */
+async function openContext(
+  pool: BrowserPool,
+  userId: string,
+  onEvent: (message: string) => void,
+): Promise<{ lease: BrowserPoolLease; context: BrowserContext }> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const lease = await pool.acquire();
+    try {
+      const context = await lease.browser.newContext({ viewport: { width: 1280, height: 720 } });
+      return { lease, context };
+    } catch (error) {
+      lease.release();
+      lastError = error;
+      onEvent(
+        `BROWSER_RETRY: ${userId} could not open a context (attempt ${attempt}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function saveFailureArtifact(
+  page: Page,
+  outputDir: string,
+  userId: string,
+  phase: string,
+): Promise<void> {
+  const dir = path.resolve(process.cwd(), outputDir, 'failures');
+  fs.mkdirSync(dir, { recursive: true });
+  const safe = userId.replace(/[^a-z0-9_-]+/gi, '-');
+  const stamp = Date.now();
+  await page.screenshot({ path: path.join(dir, `${safe}-${phase}-${stamp}.png`) }).catch(() => {});
+  const text = await page.locator('body').innerText().catch(() => '');
+  fs.writeFileSync(
+    path.join(dir, `${safe}-${phase}-${stamp}.txt`),
+    `url=${page.url()}\n\n${text.slice(0, 2000)}`,
+  );
+}
+
 async function run(): Promise<void> {
   const liveMode = resolveLiveMode();
   const joinUrl = process.env['SAT_JOIN_URL'] ?? process.env['REGISTER_URL'] ?? '';
@@ -119,6 +184,9 @@ async function run(): Promise<void> {
     examTimeoutMs: num('EXAM_TIMEOUT_MS', 150 * 60 * 1000),
     headedUsers: Math.max(0, num('HEADED_USERS', 0)),
     maxConcurrentUsers: Math.max(1, num('MAX_CONCURRENT_USERS', 20)),
+    contextsPerBrowser: Math.max(1, num('CONTEXTS_PER_BROWSER', 5)),
+    abortOnFatalJoin: bool('ABORT_ON_FATAL_JOIN', true),
+    joinFailureAbortThreshold: Math.max(1, num('JOIN_FAILURE_ABORT_THRESHOLD', 8)),
     logFile: process.env['LIVE_RUN_LOG_FILE'] ?? '',
     userOffset: Math.max(0, num('USER_OFFSET', 0)),
     deleteArtifactsOnFinish: bool('DELETE_ARTIFACTS_ON_FINISH', false),
@@ -148,11 +216,45 @@ async function run(): Promise<void> {
   console.log(`[live-sat-runner] events: ${liveLogFile}`);
 
   const dashboard = startLiveDashboardServer(config.dashboardPort);
-  const headlessBrowser =
-    config.headless || config.headedUsers < users.length ? await chromium.launch({ headless: true }) : null;
-  const headedBrowser =
-    !config.headless || config.headedUsers > 0 ? await chromium.launch({ headless: false }) : null;
+  const poolEvent = (message: string) => {
+    console.log(`[live-sat-runner] ${message}`);
+    appendLog(JSON.stringify({ ts: new Date().toISOString(), event: 'browser_pool', message }));
+  };
+  const browsersPerKind = Math.max(1, Math.ceil(config.maxConcurrentUsers / config.contextsPerBrowser));
+  const headlessPool = createBrowserPool({
+    launch: () => launchBrowser(true),
+    maxContextsPerBrowser: config.contextsPerBrowser,
+    maxBrowsers: browsersPerKind,
+    onEvent: poolEvent,
+  });
+  const headedPool = createBrowserPool({
+    launch: () => launchBrowser(false),
+    maxContextsPerBrowser: config.contextsPerBrowser,
+    maxBrowsers: browsersPerKind,
+    onEvent: poolEvent,
+  });
   const results: UserResult[] = [];
+  const skipped: UserResult[] = [];
+  // A dead exam window must not cost 100 browsers: the first run-scoped
+  // verdict (or a total failure to admit anyone) stops the queue.
+  const abort: { reason: string | null } = { reason: null };
+  let admitted = 0;
+  let joinFailures = 0;
+
+  const abortRun = (reason: string) => {
+    if (!config.abortOnFatalJoin || abort.reason) return;
+    abort.reason = reason;
+    console.error(`\n[live-sat-runner] ABORTING RUN — ${reason}\n`);
+    appendLog(JSON.stringify({ ts: new Date().toISOString(), event: 'live_sat_runner_abort', reason }));
+  };
+
+  const noteJoinFailure = (userId: string, joinError: string) => {
+    joinFailures += 1;
+    if (admitted > 0 || joinFailures < config.joinFailureAbortThreshold) return;
+    abortRun(
+      `SAT_NO_USERS_ADMITTED: ${joinFailures} students failed to join before anyone was admitted. Last error (${userId}): ${joinError}`,
+    );
+  };
 
   for (const user of users) {
     dashboard.broadcast(eventBase(user.userId, 'queued', 'booting'));
@@ -164,6 +266,7 @@ async function run(): Promise<void> {
     let phase: Phase = 'booting';
     let context: BrowserContext | null = null;
     let page: Page | null = null;
+    let lease: BrowserPoolLease | null = null;
     let frameInFlight = false;
     let stopCapture = false;
     let answered = 0;
@@ -186,16 +289,50 @@ async function run(): Promise<void> {
 
     try {
       const useHeaded = !config.headless || index < config.headedUsers;
-      const selectedBrowser = useHeaded ? headedBrowser : headlessBrowser;
-      if (!selectedBrowser) {
-        throw new Error(`BROWSER_MODE_UNAVAILABLE: useHeaded=${String(useHeaded)}`);
-      }
-
-      context = await selectedBrowser.newContext({ viewport: { width: 1280, height: 720 } });
+      const pool = useHeaded ? headedPool : headlessPool;
+      const opened = await openContext(pool, user.userId, poolEvent);
+      lease = opened.lease;
+      context = opened.context;
       page = await context.newPage();
 
       setPhase('joining', 'starting');
-      await satJoinViaAccessLink(page, user, config.joinUrl);
+      let joined = false;
+      let joinError = '';
+      for (let attempt = 1; attempt <= 3 && !joined; attempt += 1) {
+        try {
+          await satJoinViaAccessLink(page, user, config.joinUrl);
+          joined = true;
+        } catch (error) {
+          joinError = error instanceof Error ? error.message : String(error);
+          const failure: SatJoinError | null = isSatJoinError(error) ? error : null;
+          if (failure && failure.scope === 'run') {
+            abortRun(`${failure.message} Fix: ${failure.hint}`);
+            throw error;
+          }
+          const retryable = failure === null || failure.scope === 'transient';
+          if (attempt < 3 && retryable) {
+            appendLog(
+              JSON.stringify({
+                ts: new Date().toISOString(),
+                userId: user.userId,
+                phase: 'joining',
+                status: 'retrying',
+                attempt,
+                errorCode: joinError,
+              }),
+            );
+            await page.waitForTimeout(5000);
+          } else {
+            break;
+          }
+        }
+      }
+      if (!joined) {
+        noteJoinFailure(user.userId, joinError);
+        await saveFailureArtifact(page, config.outputDir, user.userId, 'join').catch(() => {});
+        throw new Error(joinError || 'SAT_JOIN_FAILED');
+      }
+      admitted += 1;
       joinedAt = Date.now();
 
       setPhase('waiting_start', 'waiting_start');
@@ -230,13 +367,31 @@ async function run(): Promise<void> {
       });
       setPhase('in_exam', 'live');
 
-      const outcome = await satAnswerUntilComplete(page, user, {
-        origin: parsed.origin,
-        accessLinkId: parsed.accessLinkId,
-        examTimeoutMs: config.examTimeoutMs,
-        startPollIntervalMs: config.startPollIntervalMs,
-        startTimeoutMs: config.startTimeoutMs,
-      });
+      const outcome = await satAnswerUntilComplete(
+        page,
+        user,
+        {
+          origin: parsed.origin,
+          accessLinkId: parsed.accessLinkId,
+          examTimeoutMs: config.examTimeoutMs,
+          startPollIntervalMs: config.startPollIntervalMs,
+          startTimeoutMs: config.startTimeoutMs,
+        },
+        (progressAnswered) => {
+          answered = progressAnswered;
+          dashboard.broadcast(eventBase(user.userId, 'running', phase, undefined, { answered }));
+          const line = JSON.stringify({
+            ts: new Date().toISOString(),
+            userId: user.userId,
+            accessLinkId: parsed.accessLinkId,
+            phase,
+            status: 'answering',
+            answered,
+          });
+          console.log(line);
+          appendLog(line);
+        },
+      );
       answered = outcome.answered;
 
       setPhase('done', 'done');
@@ -252,6 +407,9 @@ async function run(): Promise<void> {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (page && !page.isClosed() && phase === 'in_exam') {
+        await saveFailureArtifact(page, config.outputDir, user.userId, phase).catch(() => {});
+      }
       setPhase('failed', 'failed', message);
       results.push({
         userId: user.userId,
@@ -265,6 +423,7 @@ async function run(): Promise<void> {
       stopCapture = true;
       if (page) await page.close().catch(() => {});
       if (context) await context.close().catch(() => {});
+      lease?.release();
     }
   };
 
@@ -274,34 +433,67 @@ async function run(): Promise<void> {
       while (true) {
         const next = queue.shift();
         if (!next) return;
+        if (abort.reason) {
+          // Aborted: report the reason on each remaining card instead of
+          // spending a browser on a link that cannot admit anyone.
+          const message = `SKIPPED: run aborted — ${abort.reason}`;
+          skipped.push({
+            userId: next.user.userId,
+            phase: 'failed',
+            ok: false,
+            joinMs: 0,
+            answered: 0,
+            error: message,
+          });
+          dashboard.broadcast(eventBase(next.user.userId, 'skipped', 'failed', message));
+          appendLog(
+            JSON.stringify({
+              ts: new Date().toISOString(),
+              userId: next.user.userId,
+              phase: 'failed',
+              status: 'skipped',
+              reason: abort.reason,
+            }),
+          );
+          continue;
+        }
         await runner(next.user, next.index);
       }
     });
     await Promise.all(workers);
   } finally {
-    if (headedBrowser) await headedBrowser.close();
-    if (headlessBrowser) await headlessBrowser.close();
+    await headedPool.closeAll();
+    await headlessPool.closeAll();
   }
 
   const ok = results.filter((r) => r.ok);
   const fail = results.filter((r) => !r.ok);
+  const failures = [...fail, ...skipped];
   const summary = {
     accessLinkId: parsed.accessLinkId,
     joinUrl: config.joinUrl,
     liveMode,
     userCount: users.length,
     passed: ok.length,
-    failed: fail.length,
+    failed: failures.length,
+    skipped: skipped.length,
+    ...(abort.reason ? { aborted: true, abortReason: abort.reason } : {}),
     medianJoinMs: computeMedian(ok.map((r) => r.joinMs)),
     medianAnswered: computeMedian(ok.map((r) => r.answered)),
     generatedAt: new Date().toISOString(),
-    failures: fail,
+    failures,
   };
 
   const summaryPath = path.resolve(process.cwd(), config.outputDir, `live-sat-summary-${Date.now()}.json`);
   fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
   console.log(`[live-sat-runner] summary: ${summaryPath}`);
   appendLog(JSON.stringify({ ts: new Date().toISOString(), event: 'live_sat_runner_summary', summaryPath, liveLogFile }));
+  if (abort.reason) {
+    // Distinct exit code so the control panel turns red instead of reporting a
+    // clean finish for a run where nobody could join.
+    console.error(`[live-sat-runner] aborted before admitting the roster: ${abort.reason}`);
+    process.exitCode = 3;
+  }
   if (config.deleteArtifactsOnFinish) {
     try {
       fs.unlinkSync(summaryPath);
@@ -315,6 +507,11 @@ async function run(): Promise<void> {
     }
     console.log('[live-sat-runner] artifacts deleted (DELETE_ARTIFACTS_ON_FINISH=true)');
   }
+
+  // Otherwise the monitor server holds the event loop open and the run looks
+  // stuck in the control panel even though every student is done.
+  await dashboard.close();
+  console.log('[live-sat-runner] done');
 }
 
 void run().catch((error) => {
