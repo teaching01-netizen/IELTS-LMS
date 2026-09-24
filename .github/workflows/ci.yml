@@ -301,22 +301,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - shard: "1/8"
-            label: 1-of-8
-          - shard: "2/8"
-            label: 2-of-8
-          - shard: "3/8"
-            label: 3-of-8
-          - shard: "4/8"
-            label: 4-of-8
-          - shard: "5/8"
-            label: 5-of-8
-          - shard: "6/8"
-            label: 6-of-8
-          - shard: "7/8"
-            label: 7-of-8
-          - shard: "8/8"
-            label: 8-of-8
+          - shard: "1/16"
+            label: 1-of-16
+          - shard: "2/16"
+            label: 2-of-16
+          - shard: "3/16"
+            label: 3-of-16
+          - shard: "4/16"
+            label: 4-of-16
+          - shard: "5/16"
+            label: 5-of-16
+          - shard: "6/16"
+            label: 6-of-16
+          - shard: "7/16"
+            label: 7-of-16
+          - shard: "8/16"
+            label: 8-of-16
+          - shard: "9/16"
+            label: 9-of-16
+          - shard: "10/16"
+            label: 10-of-16
+          - shard: "11/16"
+            label: 11-of-16
+          - shard: "12/16"
+            label: 12-of-16
+          - shard: "13/16"
+            label: 13-of-16
+          - shard: "14/16"
+            label: 14-of-16
+          - shard: "15/16"
+            label: 15-of-16
+          - shard: "16/16"
+            label: 16-of-16
     runs-on: ubuntu-latest
     timeout-minutes: 120
     services:
