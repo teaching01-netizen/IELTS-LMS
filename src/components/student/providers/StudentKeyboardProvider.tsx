@@ -71,6 +71,18 @@ function isWithinHighlightableContainer(target: EventTarget | null) {
   return false;
 }
 
+function isWithinSatSelectionProtectedText(target: EventTarget | null) {
+  const element = target instanceof HTMLElement
+    ? target
+    : target instanceof Node
+      ? target.parentElement
+      : null;
+
+  return Boolean(
+    element?.closest('[data-sat-selection-protected="true"]'),
+  );
+}
+
 function isWithinQuestionCalloutProtectedText(target: EventTarget | null) {
   const element = target instanceof HTMLElement
     ? target
@@ -495,7 +507,15 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       // platform's Copy / Look Up / Search / Share menu goes away. Handing that
       // menu back to the browser here is what let a long-press on the reading
       // pane expose it mid-exam, which blocking `contextmenu` alone cannot fix.
-      if (isWithinHighlightableContainer(event.target)) {
+      //
+      // SAT passage, prompt, and choice copy is the same situation under a
+      // different marker: `[data-sat-selection-protected]` (it never carries
+      // `data-student-highlightable`). Left unrecognized it fell through to the
+      // generic branch below, so a student got a CONTEXT_MENU_BLOCKED violation
+      // merely for resting a finger on the text they were reading. Block it
+      // silently here; the CSS callout guard is what actually removes the
+      // platform menu.
+      if (isWithinHighlightableContainer(event.target) || isWithinSatSelectionProtectedText(event.target)) {
         if (runtimeStateRef.current.phase === 'exam') {
           event.preventDefault();
         }

@@ -885,8 +885,7 @@
     user-select: text;
   }
 
-  /* SAT roots retain ordinary browser selection until annotation mode arms.
-     IELTS keeps its existing callout guard on its highlightable boundary. */
+  /* SAT roots retain ordinary browser selection until annotation mode arms. */
   .student-exam-active [data-sat-selection-protected="true"],
   .student-exam-active [data-sat-selection-protected="true"] *,
   .student-exam-active [data-student-highlightable="true"],
@@ -895,6 +894,21 @@
     user-select: text;
   }
 
+  /* The platform's long-press menu (Look Up / Copy / Translate / Search) is
+     not part of the selection model, so the guard below is PERMANENT for the
+     locked exam — it does not wait for annotation mode to arm. It used to
+     cover only the IELTS `[data-student-highlightable]` boundary, which left
+     unarmed SAT text (`[data-sat-selection-protected]` without its
+     `data-student-selection-owner` marker) handing the native callout back to
+     Safari on a two-second press. Blocking `contextmenu` in JS cannot fix that
+     — by the time the event exists, the platform has already built its menu —
+     so suppression belongs here, next to the selection rules it complements.
+
+     Selection itself is untouched: the rule above keeps `user-select: text`,
+     so drag-select works exactly as before, and no form controls live inside
+     these text roots (answer inputs and radios are siblings, not descendants). */
+  .student-exam-active [data-sat-selection-protected="true"],
+  .student-exam-active [data-sat-selection-protected="true"] *,
   .student-exam-active [data-student-highlightable="true"],
   .student-exam-active [data-student-highlightable="true"] * {
     -webkit-touch-callout: none;

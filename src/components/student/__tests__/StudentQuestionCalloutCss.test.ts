@@ -53,6 +53,26 @@ describe('student exam content selection CSS', () => {
     expect(highlightable!.selectors).toContain('.student-exam-active [data-student-highlightable="true"] *');
   });
 
+  it('suppresses the platform callout on SAT protected text whether or not annotation mode is armed', () => {
+    // The long-press menu must not depend on `data-student-selection-owner`:
+    // that marker only exists while Highlights & Notes is armed, and the iPad
+    // regression was exactly the unarmed window — Safari handing back Look Up /
+    // Copy / Translate over a passage the student was simply reading.
+    const guard = rulesWith(
+      '.student-exam-active [data-sat-selection-protected="true"]',
+      '-webkit-touch-callout: none',
+    ).find((rule) => !rule.selectors.includes('data-student-selection-owner'));
+
+    expect(guard).toBeDefined();
+    expect(guard!.selectors).toContain('.student-exam-active [data-sat-selection-protected="true"] *');
+    expect(guard!.selectors.split(',').every((selector) => selector.trim().startsWith('.student-exam-active'))).toBe(true);
+    expect(guard!.selectors).not.toMatch(/\b(?:input|textarea|select|button|contenteditable)\b/);
+    // It complements the selection rules rather than replacing them: the
+    // unarmed root keeps native drag-selection and only loses the menu.
+    expect(guard!.body).not.toMatch(/user-select:\s*none/);
+    expect(rulesWith('.student-exam-active [data-sat-selection-protected="true"]', '-webkit-user-select: text')[0]!.body).toContain('user-select: text');
+  });
+
   it('scopes the IELTS callout guard to an active exam and away from form controls', () => {
     const highlightable = rulesWith('.student-exam-active [data-student-highlightable="true"]', '-webkit-touch-callout: none')
       .find((rule) => !rule.selectors.includes('data-student-selection-owner'));

@@ -278,6 +278,32 @@ test('SAT: armed text ownership is active before the first pointer', async ({ pa
   expect(await surface.evaluate((root) => getComputedStyle(root).userSelect)).toBe('text');
 });
 
+test('SAT: the platform callout guard holds with annotation mode armed and disarmed', async ({ page }) => {
+  await page.goto(`${fixture}?product=sat&ownedTouchSelection=1`);
+  const toggle = page.getByRole('button', { name: /^Highlights & Notes/ });
+  const surface = page.locator('[data-sat-annotation-region="stimulus"]');
+  const touchCallout = () =>
+    surface.evaluate((root) => getComputedStyle(root).getPropertyValue('-webkit-touch-callout').trim());
+
+  // Blink never implemented `-webkit-touch-callout`, so its computed value is
+  // the empty string — there is no menu to suppress there to begin with.
+  const disarmed = await touchCallout();
+  test.skip(disarmed === '', 'This engine does not report -webkit-touch-callout.');
+
+  // Disarmed: this is the exact iPad regression — Highlight mode off, root
+  // without its owner marker, long-press handing Look Up / Copy / Translate
+  // back over the passage.
+  expect(disarmed).toBe('none');
+
+  await toggle.click();
+  await expect(surface).toHaveAttribute('data-student-selection-owner', 'app');
+  expect(await touchCallout()).toBe('none');
+
+  await toggle.click();
+  await expect(surface).not.toHaveAttribute('data-student-selection-owner', 'app');
+  expect(await touchCallout()).toBe('none');
+});
+
 test('SAT: keyboard navigation clears the old owned session and the next touch can select', async ({ page, browserName, isMobile }) => {
   test.skip(!isMobile, 'Owned touch input is exercised in the mobile browser projects.');
   await startNativeSelectionAudit(page);
