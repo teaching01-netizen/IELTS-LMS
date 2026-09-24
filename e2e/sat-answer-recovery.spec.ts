@@ -66,7 +66,8 @@ test.describe('SAT answer durability recovery', () => {
       await expect(page).toHaveURL(/\/sat\/results\/attempts\/[0-9a-f-]+$/i);
       await expect(page.getByText('1 server-saved answers')).toBeVisible();
       await expect(page.getByText(/Revision [1-9]\d*/)).toBeVisible();
-      await expect(page.getByRole('heading', { name: 'Student responses' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: /Question-level responses/ })).toBeVisible();
+      await expect(page.getByRole('columnheader', { name: 'Student raw' })).toBeVisible();
       await expect(page.getByText('Unanswered').first()).toBeVisible();
     } finally {
       await studentContext.close();

@@ -90,9 +90,18 @@ describe('SAT Results hierarchy', () => {
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results/attempts/attempt-2');
     expect(screen.getByText('1 server-saved answers')).toBeInTheDocument();
     expect(screen.getByText(/Revision 4/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Question-level responses (2)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Reading & Writing' })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Reading & Writing question responses' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Student raw' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Key' })).toBeInTheDocument();
+    expect(screen.getAllByText('Not scored')).toHaveLength(2);
     expect(screen.getByText('B')).toBeInTheDocument();
     expect(screen.getByText('Unanswered')).toBeInTheDocument();
     expect(screen.queryByText('Correct answer')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Only incorrect')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search questions' }), { target: { value: 'q1' } });
+    expect(screen.getByText('1 of 2 shown')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Back to SAT results' }));
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-1&access=schedule-1');
   });

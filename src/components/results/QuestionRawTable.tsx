@@ -39,7 +39,7 @@ function verdictLabel(row: QuestionRawRow): { text: string; className: string } 
   return { text: "Not scored", className: "bg-slate-100 text-slate-500" };
 }
 
-export function QuestionRawTable({ rows, caption }: { rows: QuestionRawRow[]; caption?: string | undefined }) {
+export function QuestionRawTable({ rows, caption, showVerdictFilters = true }: { rows: QuestionRawRow[]; caption?: string | undefined; showVerdictFilters?: boolean | undefined }) {
   const [search, setSearch] = useState("");
   const [onlyIncorrect, setOnlyIncorrect] = useState(false);
   const [onlyOverrides, setOnlyOverrides] = useState(false);
@@ -73,7 +73,7 @@ export function QuestionRawTable({ rows, caption }: { rows: QuestionRawRow[]; ca
           onChange={(event) => setSearch(event.target.value)}
           className="h-9 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:max-w-xs"
         />
-        <div className="flex flex-wrap gap-2 text-xs">
+        {showVerdictFilters ? <div className="flex flex-wrap gap-2 text-xs">
           <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-gray-300 px-2.5 py-1 font-medium text-gray-600 has-[:checked]:border-blue-400 has-[:checked]:bg-blue-50 has-[:checked]:text-blue-700">
             <input type="checkbox" checked={onlyIncorrect} onChange={(event) => setOnlyIncorrect(event.target.checked)} className="sr-only" />
             Only incorrect
@@ -82,7 +82,7 @@ export function QuestionRawTable({ rows, caption }: { rows: QuestionRawRow[]; ca
             <input type="checkbox" checked={onlyOverrides} onChange={(event) => setOnlyOverrides(event.target.checked)} className="sr-only" />
             Only overrides
           </label>
-        </div>
+        </div> : null}
         <p className="text-xs text-gray-400 sm:ml-auto" role="status">
           {filtered.length} of {rows.length} shown
         </p>

@@ -1,7 +1,8 @@
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useSatAttemptAnswersQuery } from '../../../features/results/api/satResultsQueries';
-import { SatPageError, SatPageLoading } from '../ui/SatPage';
+import { QuestionRawTable } from '../../../components/results/QuestionRawTable';
+import { SatPageError, SatPageLoading, SatSectionCard } from '../ui/SatPage';
 
 function formatSavedAt(value: string | null): string {
   if (!value) return 'No server save yet';
@@ -21,10 +22,11 @@ function statusLabel(status: string): string {
   }
 }
 
-function formatAnswer(value: unknown): string {
-  if (value === null || value === undefined) return 'Unanswered';
-  if (typeof value === 'string') return value === '' ? 'Unanswered' : value;
-  return JSON.stringify(value);
+function sectionTitle(key: string): string {
+  const normalized = key.toLocaleLowerCase().replace(/[-_]/g, ' ');
+  if (normalized.includes('reading') || normalized.includes('writing')) return 'Reading & Writing';
+  if (normalized.includes('math')) return 'Math';
+  return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 export function SatAttemptAnswersRoute() {
@@ -40,6 +42,12 @@ export function SatAttemptAnswersRoute() {
     return <SatPageError title="Saved answers could not load" description="The server could not load this attempt. Retry to check its saved answers." retryLabel="Retry" onRetry={() => void query.refetch()} />;
   }
   const detail = query.data;
+  const questionsBySection = new Map<string, typeof detail.questions>();
+  for (const question of detail.questions) {
+    const section = questionsBySection.get(question.sectionKey) ?? [];
+    section.push(question);
+    questionsBySection.set(question.sectionKey, section);
+  }
   return (
     <div className="mx-auto w-full max-w-[900px] px-4 pb-16 pt-6 sm:px-6 md:pt-9 lg:px-10">
       <button type="button" onClick={() => navigate(backTarget)} aria-label="Back to SAT results" className="-ml-2 flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-[12px] font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"><ArrowLeft size={15} aria-hidden="true" />Results</button>
@@ -56,19 +64,33 @@ export function SatAttemptAnswersRoute() {
           <button type="button" onClick={() => void query.refetch()} disabled={query.isFetching} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-50"><RefreshCw size={14} aria-hidden="true" />{query.isFetching ? 'Refreshing…' : 'Refresh answers'}</button>
         </div>
       </header>
-      <section aria-labelledby="saved-answers-heading" className="py-6">
-        <h2 id="saved-answers-heading" className="text-[18px] font-semibold text-slate-900">Student responses</h2>
-        {detail.questions.length === 0 ? <p className="mt-4 text-[13px] text-slate-600">No administered questions are available for this attempt.</p> : (
-          <ol className="mt-4 space-y-3">
-            {detail.questions.map((question, index) => (
-              <li key={`${question.sectionKey}:${question.moduleKey}:${question.questionId}`} className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-[11px] font-semibold text-slate-500">{question.sectionKey} · {question.moduleKey} · Question {index + 1}</p>
-                <p className="mt-1 text-[13px] font-semibold text-slate-900">{question.questionId}</p>
-                <p className="mt-3 whitespace-pre-wrap break-words text-[13px] text-slate-700">{formatAnswer(question.response)}</p>
-                {question.markedForReview ? <p className="mt-2 text-[11px] font-medium text-amber-700">Marked for review</p> : null}
-              </li>
-            ))}
-          </ol>
+      <section aria-labelledby="saved-answers-heading" className="border-t border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] py-7">
+        <h2 id="saved-answers-heading" className="text-[17px] font-semibold tracking-[-0.025em]">Question-level responses ({detail.questions.length})</h2>
+        {detail.questions.length === 0 ? <p className="mt-3 text-[13px] text-slate-500">No administered questions are available for this attempt.</p> : (
+          <div className="mt-4 space-y-8">
+            {Array.from(questionsBySection, ([sectionKey, questions]) => {
+              const title = sectionTitle(sectionKey);
+              const rows = questions.map((question, index) => ({
+                key: `${question.sectionKey}:${question.moduleKey}:${question.questionId}`,
+                index: index + 1,
+                question: `${question.questionId} · ${question.moduleKey}`,
+                section: title,
+                studentAnswer: question.response === '' ? null : question.response,
+                correctAnswer: null,
+                isCorrect: null,
+                badges: [
+                  ...(question.response === null || question.response === undefined || question.response === '' ? ['Unanswered'] : []),
+                  ...(question.markedForReview ? ['Marked for review'] : []),
+                ],
+              }));
+              return (
+                <SatSectionCard key={sectionKey}>
+                  <h3 className="mb-3 text-[13px] font-semibold text-slate-800">{title}</h3>
+                  <QuestionRawTable rows={rows} caption={`${title} question responses`} showVerdictFilters={false} />
+                </SatSectionCard>
+              );
+            })}
+          </div>
         )}
       </section>
     </div>
