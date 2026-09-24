@@ -31,16 +31,6 @@ func completedSection(key string, order int64, planned, gap int64, startedAt, en
 	}
 }
 
-func sectionKeys(steps []advanceStep, kind advanceStepKind) []string {
-	var keys []string
-	for _, step := range steps {
-		if step.kind == kind {
-			keys = append(keys, step.sectionKey)
-		}
-	}
-	return keys
-}
-
 func TestPlanSectionAdvance(t *testing.T) {
 	// reading-writing: 64 planned minutes starting at 09:00 -> deadline 10:04.
 	deadline := planBase.Add(64 * time.Minute)
