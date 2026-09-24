@@ -127,6 +127,28 @@ async function waitUntilPersonalStart(startsAt: string, serverOffsetMs: number):
   return !isDocumentHidden();
 }
 
+function waitForPersonalPaintOpportunity(): Promise<boolean> {
+  if (isDocumentHidden()) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let frame = 0;
+    const finish = (visible: boolean) => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (frame) window.cancelAnimationFrame(frame);
+      resolve(visible);
+    };
+    const onVisibilityChange = () => {
+      if (isDocumentHidden()) finish(false);
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    frame = window.requestAnimationFrame(() => finish(!isDocumentHidden()));
+  });
+}
+
+function personalStartHasFullDisplayedSecond(startsAt: string, serverOffsetMs: number): boolean {
+  const elapsed = Date.now() + serverOffsetMs - Date.parse(startsAt);
+  return Number.isFinite(elapsed) && elapsed >= 0 && elapsed < 1_000 && !isDocumentHidden();
+}
+
 /**
  * The control-epoch fence is optional on the wire: with
  * exactOptionalPropertyTypes an explicit `undefined` is not assignable, and an
@@ -322,9 +344,8 @@ export function useSatExamController({
       if (incomingRevision < currentRevision) return false;
       // Phase 04 C3 poll-skip: identical polls are no-ops — zero state
       // writes (no setData, no snapshotReceivedAt, no clock recompute).
-      // Clock-only drift past tolerance is accepted as a no-clock-touch
-      // patch (serverNow updated in place, snapshotReceivedAt preserved) so
-      // serverClockOffsetMs stays stable; anything else commits normally.
+      // Clock-only drift past tolerance skips routing and result work, but the
+      // new server timestamp must keep its own receipt timestamp.
       if (current && isEquivalentBootstrap(current, payload)) {
         // SAT-005: an unchanged projection still needs the route decision for
         // mutation responses — a poll may have committed the server's advance
@@ -365,7 +386,7 @@ export function useSatExamController({
             timing === payload.timing ? payload : { ...payload, timing };
           dataRef.current = merged;
           setData(merged);
-          // Deliberately no setSnapshotReceivedAt / setResult / dispatch.
+          setSnapshotReceivedAt(Date.now());
           return true;
         }
       }
@@ -374,9 +395,8 @@ export function useSatExamController({
       const preState = stateRef.current;
       dataRef.current = merged;
       setData(merged);
-      // snapshotReceivedAt advances ONLY on accepted+changed payloads, so
-      // serverClockOffsetMs and both countdowns hold still across no-change
-      // polls (C3 stable-clock invariant).
+      // The timestamp and its receipt always advance together on accepted
+      // payloads; equivalent polls above preserve both.
       setSnapshotReceivedAt(Date.now());
       setResult(payload.result);
       setError(null);
@@ -790,10 +810,7 @@ export function useSatExamController({
           if (!activeBreak || activeBreak.state !== "active" || !activeBreak.deadlineAt) return 0;
           if (activeBreak.pausedAt) return Math.max(0, activeBreak.remainingSeconds);
           const deadline = Date.parse(activeBreak.deadlineAt);
-          const breakOffset = satClockOffsetMs(
-            effectiveTiming?.serverNow ?? data.timing.serverNow,
-            snapshotReceivedAt,
-          );
+          const breakOffset = serverClockOffsetMs;
           const startsAt = activeBreak.startsAt ? Date.parse(activeBreak.startsAt) : Number.NaN;
           if (Number.isFinite(startsAt) && startsAt > now + breakOffset) return 0;
           return Number.isFinite(deadline)
@@ -945,7 +962,11 @@ export function useSatExamController({
             continue;
           }
           const visibleAtStart = await waitUntilPersonalStart(startsAt, confirmedOffset);
-          if (!visibleAtStart) {
+          if (
+            !visibleAtStart ||
+            !await waitForPersonalPaintOpportunity() ||
+            !personalStartHasFullDisplayedSecond(startsAt, confirmedOffset)
+          ) {
             payload = await satDeliveryGateway.startModule(scheduleId, attemptId, {
               moduleId: pendingModule.id,
               generation: offerGeneration,
@@ -1093,6 +1114,17 @@ export function useSatExamController({
           // Keep the break unentered while hidden. The next visible retry
           // reuses the offer or rearms it if its start was missed.
           return;
+        }
+        if (
+          !await waitForPersonalPaintOpportunity() ||
+          !personalStartHasFullDisplayedSecond(offer.entryStartsAt, confirmedOffset)
+        ) {
+          offerPayload = await satDeliveryGateway.startBreak(scheduleId, attemptId, personalBreak.id, {
+            breakId: personalBreak.id,
+            generation: offer.entryGeneration,
+            ...controlEpochField(controlEpoch),
+          });
+          continue;
         }
         const estimatedServerNow = new Date(Date.now() + confirmedOffset).toISOString();
         acceptedPayload = {

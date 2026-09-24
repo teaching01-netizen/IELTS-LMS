@@ -675,6 +675,7 @@ describe("SAT personal entry offers", () => {
 
       // At exactly the offer start the module opens.
       await advance(OFFER_LEAD_MS - 2_000);
+      await advance(20);
       await settle();
       expect(student.result.current.state.phase).toBe("module");
 
@@ -695,6 +696,34 @@ describe("SAT personal entry offers", () => {
     }
   });
 
+  it("rearms when a delayed browser wake misses the first displayed second", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_NOW));
+    try {
+      const server = createPersonalServer(ATTEMPT_ID);
+      wire([{ attemptId: ATTEMPT_ID, server }]);
+      const student = renderStudent();
+      await settle();
+      expect(server.log).toContain("enterModule");
+
+      // Move the wall clock past the offer while its timeout callback is
+      // pending, as happens when the page's main thread is blocked.
+      vi.setSystemTime(new Date(T0 + OFFER_LEAD_MS + 1_500));
+      await advance(OFFER_LEAD_MS);
+      await settle();
+      expect(student.result.current.state.phase).toBe("directions");
+      expect(server.log.filter((entry) => entry === "startModule").length).toBeGreaterThan(1);
+
+      await advance(Math.max(0, (server.moduleStartsAtMs ?? 0) - Date.now()) + 20);
+      await settle();
+      expect(student.result.current.state.phase).toBe("module");
+      expect(student.result.current.remainingSeconds).toBe(AUTHORED_SECONDS);
+      student.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("resumes the remaining window on a reload instead of reallocating a fresh one", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(SERVER_NOW));
@@ -704,6 +733,7 @@ describe("SAT personal entry offers", () => {
       const student = renderStudent();
       await settle();
       await advance(OFFER_LEAD_MS);
+      await advance(20);
       await settle();
       expect(student.result.current.state.phase).toBe("module");
       const startsAt = server.moduleStartsAtMs as number;
@@ -744,6 +774,7 @@ describe("SAT personal entry offers", () => {
       const earlyStudent = renderStudent("attempt-early");
       await settle();
       await advance(OFFER_LEAD_MS);
+      await advance(20);
       await settle();
       expect(earlyStudent.result.current.state.phase).toBe("module");
 
@@ -754,6 +785,7 @@ describe("SAT personal entry offers", () => {
       const lateStudent = renderStudent("attempt-late");
       await settle();
       await advance(OFFER_LEAD_MS);
+      await advance(20);
       await settle();
       expect(lateStudent.result.current.state.phase).toBe("module");
 
@@ -789,6 +821,7 @@ describe("SAT personal entry offers", () => {
       const student = renderStudent();
       await settle();
       await advance(OFFER_LEAD_MS);
+      await advance(20);
       await settle();
       expect(student.result.current.state.phase).toBe("module");
 

@@ -89,7 +89,7 @@ func TestPersistSatTimingChoiceIgnoresNonSatSchedules(t *testing.T) {
 func writeTimingChoice(t *testing.T, db *sql.DB, scheduleID, providerKey string) error {
 	t.Helper()
 	return tx.NewRunner(db).WithTx(context.Background(), func(ctx context.Context, q tx.Tx) error {
-		return persistSatTimingChoice(ctx, q, scheduleID, providerKey)
+		return PersistSatTimingChoice(ctx, q, scheduleID, providerKey)
 	})
 }
 

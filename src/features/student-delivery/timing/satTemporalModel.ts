@@ -74,9 +74,8 @@ export function deriveSatTemporalSnapshot(model: SatTemporalModel, now: number) 
           if (personalBreak.pausedAt) return Math.max(0, personalBreak.remainingSeconds);
           const deadline = Date.parse(personalBreak.deadlineAt);
           const startsAt = personalBreak.startsAt ? Date.parse(personalBreak.startsAt) : Number.NaN;
-          const breakOffset = satClockOffsetMs(effectiveTiming?.serverNow ?? data.timing.serverNow, snapshotReceivedAt);
-          if (Number.isFinite(startsAt) && startsAt > now + breakOffset) return 0;
-          return Number.isFinite(deadline) ? Math.max(0, Math.ceil((deadline - (now + breakOffset)) / 1_000)) : 0;
+          if (Number.isFinite(startsAt) && startsAt > now + offset) return 0;
+          return Number.isFinite(deadline) ? Math.max(0, Math.ceil((deadline - (now + offset)) / 1_000)) : 0;
         })()
       : satBreakCountdownSeconds({
           timingModel: effectiveTiming?.timingModel,

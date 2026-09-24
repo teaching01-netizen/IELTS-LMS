@@ -241,6 +241,30 @@ describe("useSatExamController convergence (Phase 04)", () => {
     persistenceMock.submit.mockResolvedValue({} as never);
   });
 
+  it("pairs a clock-only server timestamp with its own receipt time", async () => {
+    const first = payload();
+    gatewayMocks.bootstrap.mockResolvedValueOnce(first);
+    const hook = renderHook(() => useSatExamController({
+      scheduleId: "schedule",
+      attemptId: "attempt-a",
+      candidateId: "candidate",
+    }));
+    await waitFor(() => expect(hook.result.current.data).not.toBeNull());
+    const firstReceipt = hook.result.current.temporalModel.snapshotReceivedAt;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const next = structuredClone(first);
+    next.serverNow = new Date(Date.parse(first.serverNow) + 10_000).toISOString();
+    next.timing.serverNow = next.serverNow;
+    const receipt = Date.now();
+    await act(async () => {
+      expect(hook.result.current.commitForTest(next)).toBe(true);
+    });
+    expect(hook.result.current.temporalModel.snapshotReceivedAt).toBeGreaterThanOrEqual(receipt);
+    expect(hook.result.current.temporalModel.snapshotReceivedAt).toBeGreaterThan(firstReceipt);
+    expect(hook.result.current.temporalModel.effectiveTiming?.serverNow).toBe(next.serverNow);
+    hook.unmount();
+  });
+
   it("T2a: bootstrap commits data+directions in one update (no data-with-loading frame)", async () => {
     const gate = deferred<AssessmentDeliveryBootstrap>();
     gatewayMocks.bootstrap.mockImplementation(() => gate.promise);

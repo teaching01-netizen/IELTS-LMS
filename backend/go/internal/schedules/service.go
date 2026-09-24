@@ -286,10 +286,11 @@ var satPersonalTimingEnabled = func() bool {
 	}
 }
 
-// persistSatTimingChoice stores sat_personal_v1 for newly created SAT
+// PersistSatTimingChoice stores sat_personal_v1 for newly created SAT
 // schedules. Null (no choice) keeps the deployed cohort model for old rows, and
 // an off switch (or a non-SAT provider) leaves the choice null.
-func persistSatTimingChoice(ctx context.Context, q tx.Tx, scheduleID, providerKey string) error {
+// Access-link backing schedules call this from their own creation transaction.
+func PersistSatTimingChoice(ctx context.Context, q tx.Tx, scheduleID, providerKey string) error {
 	if !strings.EqualFold(strings.TrimSpace(providerKey), "sat") {
 		return nil
 	}
@@ -384,7 +385,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Schedule, erro
 		}
 		// New SAT schedules select the attempt-owned timing model. Old rows
 		// (NULL) keep the deployed cohort model; never rewrite in flight.
-		if err := persistSatTimingChoice(ctx, q, id, providerKey); err != nil {
+		if err := PersistSatTimingChoice(ctx, q, id, providerKey); err != nil {
 			return err
 		}
 		// scanSchedule is the single projection reader, so the timing choice just
