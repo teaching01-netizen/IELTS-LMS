@@ -89,6 +89,50 @@ type ResultSummary struct {
 	SubmittedAt   *time.Time `json:"submittedAt"`
 }
 
+// SATAccessGroup is one Student Access schedule in the SAT Results workspace.
+type SATAccessGroup struct {
+	ScheduleID       string     `json:"scheduleId"`
+	AccessLinkID     *string    `json:"accessLinkId"`
+	AccessLinkName   string     `json:"accessLinkName"`
+	AccessLinkState  *string    `json:"accessLinkState"`
+	ExamID           string     `json:"examId"`
+	ExamTitle        string     `json:"examTitle"`
+	VersionNumber    int        `json:"versionNumber"`
+	CohortName       string     `json:"cohortName"`
+	AttemptCount     int        `json:"attemptCount"`
+	SubmittedCount   int        `json:"submittedCount"`
+	ScoredCount      int        `json:"scoredCount"`
+	PendingCount     int        `json:"pendingCount"`
+	InvalidatedCount int        `json:"invalidatedCount"`
+	LatestSubmitted  *time.Time `json:"latestSubmittedAt"`
+}
+
+// SATAttemptRow includes attempts before an assessment result has been made.
+type SATAttemptRow struct {
+	ResultID      *string    `json:"resultId"`
+	AttemptID     string     `json:"attemptId"`
+	Outcome       string     `json:"outcomeStatus"`
+	ReleaseState  string     `json:"releaseStatus"`
+	TotalScore    *int       `json:"totalScore"`
+	ScheduleID    string     `json:"scheduleId"`
+	ExamID        string     `json:"examId"`
+	ExamTitle     string     `json:"examTitle"`
+	VersionNumber int        `json:"versionNumber"`
+	StudentID     string     `json:"studentId"`
+	StudentName   string     `json:"studentName"`
+	StudentEmail  *string    `json:"studentEmail"`
+	CohortName    string     `json:"cohortName"`
+	SubmittedAt   *time.Time `json:"submittedAt"`
+}
+
+type SATAttemptPage struct {
+	Items   []SATAttemptRow `json:"items"`
+	Total   int             `json:"total"`
+	Offset  int             `json:"offset"`
+	Limit   int             `json:"limit"`
+	HasMore bool            `json:"hasMore"`
+}
+
 // DashboardResult is the provider-neutral result row used by the admin
 // results surface. IELTS rows come from the immutable student_results
 // snapshot; SAT and ACT rows come from assessment_results.
@@ -571,6 +615,131 @@ func (s *Service) ListSATResults(ctx context.Context, actor auth.ActorContext) (
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ListSATAccessGroups returns one row per SAT schedule, including schedules
+// whose Student Access link was deleted. Schedule version and attempt version
+// are read from their immutable published-version references.
+func (s *Service) ListSATAccessGroups(ctx context.Context, actor auth.ActorContext) ([]SATAccessGroup, error) {
+	scope, scopeArgs := resultScope("sch", actor)
+	query := `
+		SELECT sch.id, access.id, access.name, access.lifecycle_state,
+			sch.exam_id, sch.exam_title, version.version_number, sch.cohort_name,
+			COUNT(a.id),
+			COALESCE(SUM(CASE WHEN a.submitted_at IS NOT NULL THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ar.outcome_status = 'scored' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ar.outcome_status = 'pending' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ar.outcome_status IN ('invalidated_proctor', 'invalidated_timeout') THEN 1 ELSE 0 END), 0),
+			MAX(a.submitted_at)
+		FROM exam_schedules sch
+		JOIN exam_entities exam ON exam.id = sch.exam_id AND exam.provider_key = 'sat'
+		JOIN exam_versions version ON version.id = sch.published_version_id
+		LEFT JOIN assessment_access_links access ON access.schedule_id = sch.id
+		LEFT JOIN student_attempts a ON a.schedule_id = sch.id
+		LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat'
+		WHERE 1 = 1` + scope + `
+		GROUP BY sch.id, access.id, access.name, access.lifecycle_state,
+			sch.exam_id, sch.exam_title, version.version_number, sch.cohort_name
+		ORDER BY MAX(a.submitted_at) DESC, sch.exam_title ASC, sch.id ASC`
+	rows, err := s.db.QueryContext(ctx, query, scopeArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SATAccessGroup
+	for rows.Next() {
+		var group SATAccessGroup
+		var linkID, linkName, linkState, cohort sql.NullString
+		var latest sql.NullTime
+		if err := rows.Scan(&group.ScheduleID, &linkID, &linkName, &linkState,
+			&group.ExamID, &group.ExamTitle, &group.VersionNumber, &cohort,
+			&group.AttemptCount, &group.SubmittedCount, &group.ScoredCount,
+			&group.PendingCount, &group.InvalidatedCount, &latest); err != nil {
+			return nil, err
+		}
+		group.AccessLinkID = nullableStringPtr(linkID)
+		group.AccessLinkState = nullableStringPtr(linkState)
+		group.CohortName = cohort.String
+		group.AccessLinkName = strings.TrimSpace(linkName.String)
+		if group.AccessLinkName == "" {
+			group.AccessLinkName = strings.TrimSpace(cohort.String)
+		}
+		if group.AccessLinkName == "" {
+			group.AccessLinkName = "Previous Student Access"
+		}
+		group.LatestSubmitted = nullableTimePtr(latest)
+		out = append(out, group)
+	}
+	return out, rows.Err()
+}
+
+// ListSATAttempts returns a page of attempts for one exam and schedule. It
+// starts from student_attempts so attempts without an assessment_results row
+// are retained and labeled unscored.
+func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, examID, scheduleID string, limit, offset int, needle, scoreFilter string) (*SATAttemptPage, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	scope, scopeArgs := resultScope("sch", actor)
+	from := ` FROM student_attempts a
+		JOIN exam_schedules sch ON sch.id = a.schedule_id
+		JOIN exam_entities exam ON exam.id = a.exam_id AND exam.provider_key = 'sat'
+		LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat'`
+	where := ` WHERE a.exam_id = ? AND a.schedule_id = ?` + scope
+	args := append([]any{examID, scheduleID}, scopeArgs...)
+	needle = strings.TrimSpace(needle)
+	if needle != "" {
+		where += ` AND (a.candidate_name LIKE ? OR a.candidate_id LIKE ? OR sch.cohort_name LIKE ?)`
+		pattern := "%" + needle + "%"
+		args = append(args, pattern, pattern, pattern)
+	}
+	switch scoreFilter {
+	case "available":
+		where += ` AND ar.outcome_status = 'scored' AND ar.total_score IS NOT NULL`
+	case "unavailable":
+		where += ` AND (ar.id IS NULL OR ar.outcome_status <> 'scored' OR ar.total_score IS NULL)`
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*)"+from+where, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+	query := `SELECT ar.id, a.id, COALESCE(ar.outcome_status, 'unscored'),
+		COALESCE(ar.release_status, ''), ar.total_score, a.schedule_id, a.exam_id,
+		sch.exam_title, version.version_number, a.candidate_id, a.candidate_name,
+		a.candidate_email, sch.cohort_name, a.submitted_at, a.created_at` + from + `
+		JOIN exam_versions version ON version.id = a.published_version_id` + where + `
+		ORDER BY COALESCE(a.submitted_at, a.created_at) DESC, a.id DESC LIMIT ? OFFSET ?`
+	pageArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := s.db.QueryContext(ctx, query, pageArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]SATAttemptRow, 0, limit)
+	for rows.Next() {
+		var item SATAttemptRow
+		var resultID, email sql.NullString
+		var score sql.NullInt64
+		var submitted sql.NullTime
+		var created time.Time
+		if err := rows.Scan(&resultID, &item.AttemptID, &item.Outcome, &item.ReleaseState,
+			&score, &item.ScheduleID, &item.ExamID, &item.ExamTitle, &item.VersionNumber,
+			&item.StudentID, &item.StudentName, &email, &item.CohortName, &submitted, &created); err != nil {
+			return nil, err
+		}
+		item.ResultID = nullableStringPtr(resultID)
+		item.TotalScore = nullableIntPtr(score)
+		item.StudentEmail = nullableStringPtr(email)
+		item.SubmittedAt = nullableTimePtr(submitted)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return &SATAttemptPage{Items: items, Total: total, Offset: offset, Limit: limit, HasMore: offset+len(items) < total}, nil
 }
 
 // GetSATResult loads one SAT result with its adaptive/scaled sections.

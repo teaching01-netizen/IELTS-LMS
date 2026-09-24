@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SatResultSummary } from '../../api/satResultsQueries';
 import type { SatExamGroup } from '../satResultsGroups';
-import { filterSatGroups, groupSatResults } from '../satResultsGroups';
+import { filterSatAttempts, filterSatGroups, groupSatAccessGroups, groupSatResults } from '../satResultsGroups';
 
 type RowOverrides = Partial<SatResultSummary>;
 
@@ -210,6 +210,27 @@ describe('groupSatResults', () => {
       }),
     ]);
     expect(mixed[0]).toMatchObject({ total: 3, scored: 1, avgScore: 1200 });
+  });
+});
+
+describe('groupSatAccessGroups', () => {
+  it('groups schedules under exams and keeps pinned versions separate', () => {
+    const groups = groupSatAccessGroups([
+      { scheduleId: 'schedule-20', accessLinkId: 'link-20', accessLinkName: 'New link', accessLinkState: 'active', examId: 'exam-A', examTitle: 'SAT', versionNumber: 20, cohortName: 'B', attemptCount: 2, submittedCount: 2, scoredCount: 1, pendingCount: 1, invalidatedCount: 0, latestSubmittedAt: '2026-09-02T00:00:00Z' },
+      { scheduleId: 'schedule-12', accessLinkId: null, accessLinkName: 'Previous Student Access', accessLinkState: null, examId: 'exam-A', examTitle: 'SAT', versionNumber: 12, cohortName: '', attemptCount: 1, submittedCount: 1, scoredCount: 0, pendingCount: 0, invalidatedCount: 1, latestSubmittedAt: '2026-09-01T00:00:00Z' },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ examId: 'exam-A', total: 3, scored: 1, pending: 1, invalidated: 1, versions: [12, 20] });
+    expect(groups[0]?.accessGroups?.map(({ scheduleId }) => scheduleId)).toEqual(['schedule-20', 'schedule-12']);
+  });
+
+  it('filters states within a schedule without moving attempts between groups', () => {
+    const attempts = [
+      { resultId: 'r-1', attemptId: 'a-1', outcomeStatus: 'scored' as const, releaseStatus: 'ready', totalScore: 1300, scheduleId: 'schedule-1', examId: 'exam-A', examTitle: 'SAT', versionNumber: 20, studentId: 'S1', studentName: 'A Student', studentEmail: null, cohortName: 'Group', submittedAt: null },
+      { resultId: null, attemptId: 'a-2', outcomeStatus: 'unscored' as const, releaseStatus: '', totalScore: null, scheduleId: 'schedule-1', examId: 'exam-A', examTitle: 'SAT', versionNumber: 20, studentId: 'S2', studentName: 'B Student', studentEmail: null, cohortName: 'Group', submittedAt: null },
+      { resultId: 'r-3', attemptId: 'a-3', outcomeStatus: 'invalidated_timeout' as const, releaseStatus: 'invalidated', totalScore: null, scheduleId: 'schedule-2', examId: 'exam-A', examTitle: 'SAT', versionNumber: 19, studentId: 'S3', studentName: 'C Student', studentEmail: null, cohortName: 'Other', submittedAt: null },
+    ];
+    expect(filterSatAttempts(attempts, { needle: 'student', scoreFilter: 'unavailable' }).map(({ attemptId }) => attemptId)).toEqual(['a-2', 'a-3']);
   });
 });
 

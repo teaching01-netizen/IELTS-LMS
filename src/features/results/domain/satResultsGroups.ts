@@ -1,4 +1,4 @@
-import type { SatResultSummary } from '../api/satResultsQueries';
+import type { SatAccessGroupSummary, SatAttemptRow, SatResultSummary } from '../api/satResultsQueries';
 
 export type SatScoreFilter = 'all' | 'available' | 'unavailable';
 
@@ -17,6 +17,14 @@ export interface SatExamGroup {
   avgScore: number | null;
   /** Original string of the max valid submittedAt; null when no valid dates. */
   latestSubmittedAt: string | null;
+  /** Populated by groupSatAccessGroups for the workspace drill-down. */
+  accessGroups?: SatAccessGroupSummary[];
+}
+
+export interface FilteredSatAccessGroup {
+  group: SatAccessGroupSummary;
+  visibleAttempts: SatAttemptRow[];
+  hiddenCount: number;
 }
 
 export interface FilteredSatExamGroup extends Omit<SatExamGroup, 'attempts'> {
@@ -185,6 +193,62 @@ export function groupSatResults(rows: SatResultSummary[]): SatExamGroup[] {
   });
 
   return groups;
+}
+
+export function groupSatAccessGroups(rows: SatAccessGroupSummary[]): SatExamGroup[] {
+  const buckets = new Map<string, SatAccessGroupSummary[]>();
+  for (const row of rows ?? []) {
+    const key = (row.examId ?? '').trim() || MISSING_EXAM_KEY;
+    const bucket = buckets.get(key) ?? [];
+    bucket.push(row);
+    buckets.set(key, bucket);
+  }
+  const groups: SatExamGroup[] = [];
+  for (const [examId, accessGroups] of buckets) {
+    const sortedAccess = [...accessGroups].sort((a, b) => {
+      const timeOrder = (timeOrNull(b.latestSubmittedAt) ?? 0) - (timeOrNull(a.latestSubmittedAt) ?? 0);
+      return timeOrder || a.accessLinkName.localeCompare(b.accessLinkName) || compareStringsAsc(a.scheduleId, b.scheduleId);
+    });
+    const first = sortedAccess[0];
+    if (!first) continue;
+    const total = sortedAccess.reduce((sum, group) => sum + group.attemptCount, 0);
+    const scored = sortedAccess.reduce((sum, group) => sum + group.scoredCount, 0);
+    const pending = sortedAccess.reduce((sum, group) => sum + group.pendingCount, 0);
+    const invalidated = sortedAccess.reduce((sum, group) => sum + group.invalidatedCount, 0);
+    const versions = [...new Set(sortedAccess.map((group) => group.versionNumber).filter(Number.isFinite))].sort((a, b) => a - b);
+    const latestSubmittedAt = sortedAccess.reduce<string | null>((latest, group) => {
+      const current = timeOrNull(group.latestSubmittedAt);
+      return current != null && (latest == null || current > (timeOrNull(latest) ?? -Infinity)) ? group.latestSubmittedAt : latest;
+    }, null);
+    groups.push({
+      examId,
+      examTitle: first.examTitle.trim() || UNTITLED_EXAM,
+      versions,
+      attempts: [],
+      total,
+      scored,
+      pending,
+      invalidated,
+      avgScore: null,
+      latestSubmittedAt,
+      accessGroups: sortedAccess,
+    });
+  }
+  return groups.sort((a, b) => {
+    const timeOrder = (timeOrNull(b.latestSubmittedAt) ?? 0) - (timeOrNull(a.latestSubmittedAt) ?? 0);
+    return timeOrder || a.examTitle.localeCompare(b.examTitle) || compareStringsAsc(a.examId, b.examId);
+  });
+}
+
+export function filterSatAttempts(rows: SatAttemptRow[], options: FilterSatGroupsOptions): FilteredSatAccessGroup['visibleAttempts'] {
+  const needle = (typeof options?.needle === 'string' ? options.needle : '').trim().toLocaleLowerCase();
+  const scoreFilter = options?.scoreFilter === 'available' || options?.scoreFilter === 'unavailable' ? options.scoreFilter : 'all';
+  return (rows ?? []).filter((row) => {
+    const available = row.outcomeStatus === 'scored' && row.totalScore != null;
+    if (scoreFilter === 'available' && !available) return false;
+    if (scoreFilter === 'unavailable' && available) return false;
+    return needle === '' || [row.studentName, row.studentId, row.cohortName].some((value) => (value ?? '').toLocaleLowerCase().includes(needle));
+  });
 }
 
 export function filterSatGroups(

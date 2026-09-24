@@ -216,11 +216,13 @@ export function SatList({ children }: { children: ReactNode }) {
 export function SatListRow({
   onOpen,
   ariaLabel,
+  disabled = false,
   children,
   index,
 }: {
   onOpen: () => void;
   ariaLabel?: string;
+  disabled?: boolean;
   children: ReactNode;
   /** Optional position for a capped stagger (first 6 rows). Omit for no entrance. */
   index?: number;
@@ -230,6 +232,7 @@ export function SatListRow({
       type="button"
       onClick={onOpen}
       aria-label={ariaLabel}
+      disabled={disabled}
       style={index !== undefined ? ({ '--sat-row-index': index } as CSSProperties) : undefined}
       className={
         'sat-list-row group flex min-h-[76px] w-full items-center rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-4 text-left shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sat-staff-canvas,#f5f5f7)]' +

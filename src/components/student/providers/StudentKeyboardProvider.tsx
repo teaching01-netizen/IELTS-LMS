@@ -502,11 +502,11 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       // exam, and like the protected question copy above it is blocked SILENTLY:
       // a long-press on a passage is how the student selects the text they are
       // about to highlight, so charging it as a violation would flag ordinary
-      // exam behavior. The menu is not what selection needs — the surface keeps
-      // `user-select: text`, so highlighting is untouched and only the
-      // platform's Copy / Look Up / Search / Share menu goes away. Handing that
-      // menu back to the browser here is what let a long-press on the reading
-      // pane expose it mid-exam, which blocking `contextmenu` alone cannot fix.
+      // exam behavior. Native selection itself is already off exam-wide
+      // (`user-select: none` in index.css) and returns only while the highlight
+      // tool is armed — so this branch has no menu worth showing and must never
+      // cost a violation. Blocking `contextmenu` alone was never enough: by the
+      // time the event exists, the platform has already built its menu.
       //
       // SAT passage, prompt, and choice copy is the same situation under a
       // different marker: `[data-sat-selection-protected]` (it never carries

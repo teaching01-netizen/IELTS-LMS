@@ -275,7 +275,9 @@ test('SAT: armed text ownership is active before the first pointer', async ({ pa
   await toggle.click();
   await expect(surface).not.toHaveAttribute('data-student-selection-owner', 'app');
   await expect(surface).not.toHaveAttribute('data-student-owned-touch-selection', 'true');
-  expect(await surface.evaluate((root) => getComputedStyle(root).userSelect)).toBe('text');
+  // Disarmed: the exam-wide disable applies — no native selection means no
+  // loupe, no handles, and no platform menu on a long-press.
+  expect(await surface.evaluate((root) => getComputedStyle(root).userSelect)).toBe('none');
 });
 
 test('SAT: the platform callout guard holds with annotation mode armed and disarmed', async ({ page }) => {

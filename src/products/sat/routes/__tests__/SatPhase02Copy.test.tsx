@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,9 +9,11 @@ import { SatSessionRoomRoute } from '../SatSessionRoomRoute';
 import { SatSessionsRoute } from '../SatSessionsRoute';
 
 const useSatResultsQueryMock = vi.hoisted(() => vi.fn());
+const useSatAttemptsQueryMock = vi.hoisted(() => vi.fn());
 const useSatResultQueryMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/results/api/satResultsQueries', () => ({
   useSatResultsQuery: useSatResultsQueryMock,
+  useSatAttemptsQuery: useSatAttemptsQueryMock,
   useSatResultQuery: useSatResultQueryMock,
 }));
 
@@ -77,6 +79,11 @@ const resultSummary = {
   scoreKind: 'practice',
   releaseStatus: 'ready_to_release',
   outcomeStatus: 'scored',
+};
+const accessGroupSummary = {
+  scheduleId: 'schedule-1', accessLinkId: 'link-1', accessLinkName: 'Morning Access', accessLinkState: 'active',
+  examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 3, cohortName: 'Morning',
+  attemptCount: 3, submittedCount: 3, scoredCount: 1, pendingCount: 1, invalidatedCount: 1, latestSubmittedAt: '2026-08-30T08:00:00Z',
 };
 
 const satExam = {
@@ -250,11 +257,18 @@ describe('SAT Phase 02 copy contracts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useSatResultsQueryMock.mockReturnValue({
-      data: [resultSummary],
+      data: [accessGroupSummary],
       isLoading: false,
       error: null,
       isFetching: false,
       refetch: vi.fn(),
+    });
+    useSatAttemptsQueryMock.mockReturnValue({
+      data: { items: [
+        { resultId: 'result-1', attemptId: 'attempt-1', ...resultSummary, outcomeStatus: 'scored' },
+        { resultId: 'result-pending', attemptId: 'attempt-2', ...resultSummary, studentName: 'Pending Student', outcomeStatus: 'pending', totalScore: null },
+        { resultId: 'result-terminated', attemptId: 'attempt-3', ...resultSummary, studentName: 'Terminated Student', outcomeStatus: 'invalidated_proctor', totalScore: null },
+      ], total: 3, offset: 0, limit: 50, hasMore: false }, isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
     });
     useExamListQueryMock.mockReturnValue({
       data: { entities: [satExam], exams: [] },
@@ -283,8 +297,7 @@ describe('SAT Phase 02 copy contracts', () => {
   });
 
   it('placeholders name their filter scope', () => {
-    // Drill-down design (group-by-exam): the list view searches exams only;
-    // student search lives on the inside page at /sat/results?exam=<id>.
+    // Search scope follows the hierarchy: exams, then access groups, then students.
     const { unmount: unmountResults } = render(
       <MemoryRouter>
         <SatResultsRoute />
@@ -299,8 +312,12 @@ describe('SAT Phase 02 copy contracts', () => {
         <SatResultsRoute />
       </MemoryRouter>,
     );
+    expect(screen.getByPlaceholderText('Search Student Access')).toBeInTheDocument();
+    cleanup();
+
+    render(<MemoryRouter initialEntries={['/sat/results?exam=sat-1&access=schedule-1']}><SatResultsRoute /></MemoryRouter>);
     expect(screen.getByPlaceholderText('Search name, ID, cohort')).toBeInTheDocument();
-    unmountResults();
+    cleanup();
 
     renderLibrary();
     expect(screen.getByPlaceholderText('Search exam title')).toBeInTheDocument();
@@ -350,11 +367,7 @@ describe('SAT Phase 02 copy contracts', () => {
 
   it('result rows expose a single status signal', () => {
     useSatResultsQueryMock.mockReturnValue({
-      data: [
-        resultSummary,
-        { ...resultSummary, id: 'result-pending', studentName: 'Pending Student', outcomeStatus: 'pending', totalScore: null },
-        { ...resultSummary, id: 'result-terminated', studentName: 'Terminated Student', outcomeStatus: 'invalidated_proctor', totalScore: null },
-      ],
+      data: [accessGroupSummary],
       isLoading: false,
       error: null,
       isFetching: false,
@@ -365,9 +378,7 @@ describe('SAT Phase 02 copy contracts', () => {
         <SatResultsRoute />
       </MemoryRouter>,
     );
-    // Drill-down design (group-by-exam): the list shows one exam-group row
-    // (all three attempts share examId sat-1) with one roll-up pill; student
-    // pills live on the inside page at ?exam=<id>. Both keep single-signal.
+    // The exam list has one exam row with one roll-up pill.
     const groupRows = container.querySelectorAll('.sat-list-row');
     expect(groupRows.length).toBe(1);
     // One pill per row: the pill is the inline-flex rounded-full tone element.
@@ -379,18 +390,14 @@ describe('SAT Phase 02 copy contracts', () => {
 
   it('inside-page attempt rows expose a single status signal', () => {
     useSatResultsQueryMock.mockReturnValue({
-      data: [
-        resultSummary,
-        { ...resultSummary, id: 'result-pending', studentName: 'Pending Student', outcomeStatus: 'pending', totalScore: null },
-        { ...resultSummary, id: 'result-terminated', studentName: 'Terminated Student', outcomeStatus: 'invalidated_proctor', totalScore: null },
-      ],
+      data: [accessGroupSummary],
       isLoading: false,
       error: null,
       isFetching: false,
       refetch: vi.fn(),
     });
     const { container } = render(
-      <MemoryRouter initialEntries={['/sat/results?exam=sat-1']}>
+      <MemoryRouter initialEntries={['/sat/results?exam=sat-1&access=schedule-1']}>
         <SatResultsRoute />
       </MemoryRouter>,
     );
@@ -399,7 +406,7 @@ describe('SAT Phase 02 copy contracts', () => {
     rows.forEach((row) => {
       expect(row.querySelectorAll('span[class*="rounded-full"][class*="inline-flex"]').length).toBe(1);
     });
-    // Mixed group: roll-up pill is pending (pending > 0) plus the pending row's
+    // Mixed schedule: roll-up pill is pending (pending > 0) plus the pending row's
     // own pill — two 'Scoring pending' nodes, one pill per row each.
     expect(screen.getAllByText('Scoring pending')).toHaveLength(2);
     expect(screen.getByText('Exam terminated by proctor')).toBeInTheDocument();

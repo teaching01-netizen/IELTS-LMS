@@ -74,19 +74,19 @@ iframe{width:100%;height:70vh;border:1px solid #334155;border-radius:8px;backgro
 <label>Users File</label><input id="usersFile" value="e2e/prod-load/live-users.500.csv" />
 <label>Test Mode</label>
 <select id="testMode" style="width:100%;padding:8px;border-radius:6px;border:1px solid #334155;background:#020617;color:#e5e7eb">
-  <option value="headed">headed test (browser UI)</option>
-  <option value="headless">headless test (browser API+UI without windows)</option>
+  <option value="headless">Headless browser UI</option>
+  <option value="headed">Chrome UI (visible browsers)</option>
   <option value="hybrid">hybrid (browser + k6)</option>
   <option value="k6">k6 test (API only)</option>
 </select>
-<div class="row"><div style="flex:1"><label>User Count</label><input id="userCount" value="100" /></div><div style="flex:1"><label>User Offset</label><input id="userOffset" value="0" /></div></div>
+<div class="row"><div style="flex:1"><label>Browser Students</label><input id="userCount" type="number" min="1" value="100" /></div><div style="flex:1"><label>Browser Student Offset</label><input id="userOffset" type="number" min="0" value="0" /></div></div>
 <div class="row"><div style="flex:1"><label>Headed Users</label><input id="headedUsers" value="3" /></div><div style="flex:1"><label>Max Concurrent</label><input id="maxConcurrent" value="10" /></div></div>
 <div class="row"><div style="flex:1"><label>Dashboard Port</label><input id="dashboardPort" value="3360" /></div><div style="flex:1"><label>Mode</label><input id="liveMode" value="balanced" /></div></div>
 <div class="row"><div style="flex:1"><label>Screenshot ms</label><input id="screenshotMs" value="1000" /></div><div style="flex:1"><label>JPEG Quality</label><input id="jpegQuality" value="45" /></div></div>
 <label>k6 Base URL (optional)</label><input id="k6BaseUrl" value="" placeholder="https://your-host" />
 <label><input type="checkbox" id="runWithK6" /> Run with k6</label>
 <label><input type="checkbox" id="deleteAfterFinish" checked /> Delete artifacts after finish</label>
-<label>K6 Students</label><input id="k6Students" value="195" />
+<label>K6 Students (separate count)</label><input id="k6Students" type="number" min="1" value="195" />
 <div class="row"><button id="startBtn">Start</button><button class="stop" id="stopBtn">Stop</button></div>
 <label>Logs</label><pre id="logs"></pre>
 </div>

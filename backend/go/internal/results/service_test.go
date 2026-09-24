@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -119,6 +120,59 @@ func TestListSATResultsIncludesVersionsBeyondLegacyLimitAndAllSupportedOutcomes(
 	}
 	if out[108].Outcome != OutcomePending || out[109].Outcome != OutcomeInvalidatedProctor || out[110].Outcome != OutcomeInvalidatedTimeout {
 		t.Fatalf("supported non-scored outcomes missing: %#v", out[108:])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListSATAccessGroupsRetainsDeletedLinkScheduleAndPinnedVersion(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules sch")).WillReturnRows(sqlmock.NewRows([]string{
+		"schedule_id", "link_id", "link_name", "link_state", "exam_id", "exam_title", "version_number", "cohort_name", "attempt_count", "submitted_count", "scored_count", "pending_count", "invalidated_count", "latest_submitted_at",
+	}).AddRow("schedule-live", "link-1", "Saturday 9 AM", "active", "exam-1", "SAT", 20, "Morning", 2, 2, 1, 1, 0, nil).
+		AddRow("schedule-deleted", nil, nil, nil, "exam-1", "SAT", 12, "Cohort A", 1, 1, 1, 0, 0, nil))
+	groups, err := NewService(db).ListSATAccessGroups(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 schedule groups, got %d", len(groups))
+	}
+	if groups[0].VersionNumber != 20 || groups[0].AccessLinkName != "Saturday 9 AM" || groups[0].ScoredCount != 1 {
+		t.Fatalf("unexpected live access group: %#v", groups[0])
+	}
+	if groups[1].ScheduleID != "schedule-deleted" || groups[1].VersionNumber != 12 || groups[1].AccessLinkName != "Cohort A" || groups[1].AccessLinkID != nil {
+		t.Fatalf("deleted access metadata should fall back to its durable schedule: %#v", groups[1])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListSATAttemptsPagesAndIncludesAttemptWithoutResult(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM student_attempts a")).WithArgs("exam-1", "schedule-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(51))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, COALESCE(ar.outcome_status, 'unscored')")).WithArgs("exam-1", "schedule-1", 50, 50).WillReturnRows(sqlmock.NewRows([]string{
+		"result_id", "attempt_id", "outcome_status", "release_status", "total_score", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at",
+	}).AddRow(nil, "attempt-51", "unscored", "", nil, "schedule-1", "exam-1", "SAT", 20, "student-51", "Student 51", nil, "Cohort", nil, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)))
+	page, err := NewService(db).ListSATAttempts(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1", 50, 50, "", "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 51 || page.Offset != 50 || page.HasMore {
+		t.Fatalf("unexpected page metadata: %#v", page)
+	}
+	if len(page.Items) != 1 || page.Items[0].ResultID != nil || page.Items[0].Outcome != "unscored" || page.Items[0].VersionNumber != 20 {
+		t.Fatalf("unscored administered attempt should remain visible with its attempt version: %#v", page.Items)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

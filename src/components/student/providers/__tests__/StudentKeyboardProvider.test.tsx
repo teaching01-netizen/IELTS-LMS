@@ -333,8 +333,10 @@ describe('StudentKeyboardProvider', () => {
   // The exemption these two cases used to assert WAS the bug: handing the
   // native menu back to the browser on passage text is exactly what let a
   // long-press on the reading pane expose Copy / Look Up / Search mid-exam.
-  // Blocking the menu costs the surface nothing, because selection is kept
-  // (`user-select: text`) and only the platform's menu goes away.
+  // Blocking the menu here costs the surface nothing: the stylesheet already
+  // owns selection policy in a locked exam (off exam-wide, restored while the
+  // highlight tool is armed), and this handler only guarantees that no menu —
+  // and no violation — comes of touching the passage.
   it('blocks the context menu on highlightable reading text with highlight mode armed', () => {
     const harness = renderHarness();
 

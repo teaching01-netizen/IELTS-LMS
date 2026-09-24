@@ -34,13 +34,39 @@ describe('student exam content selection CSS', () => {
       (rule) => rule.selectors.includes(fragment) && rule.body.includes(declaration),
     );
 
-  it('keeps ordinary browser selection available on unarmed SAT roots', () => {
-    const [prose] = rulesWith('.student-exam-active [data-sat-selection-protected="true"]', '-webkit-user-select: text');
-    expect(prose).toBeDefined();
-    expect(prose!.selectors).toContain('.student-exam-active [data-sat-selection-protected="true"] *');
-    expect(prose!.body).toContain('user-select: text');
-    expect(prose!.body).not.toContain('-webkit-touch-callout: none');
-    expect(prose!.body).not.toContain('user-select: none');
+  it('turns native selection and the platform callout off across the locked exam', () => {
+    // The menu is attached to the selection, so the disable has to BE the
+    // selection — scoped to the class `useStudentExamPageLock` only ever
+    // applies while an exam is running.
+    const disable = rules.find(
+      (rule) => rule.selectors.replace(/\s+/g, ' ') === 'html.student-exam-active, html.student-exam-active *',
+    );
+    expect(disable).toBeDefined();
+    expect(disable!.body).toContain('-webkit-user-select: none');
+    expect(disable!.body).toMatch(/;\s*user-select: none/);
+    expect(disable!.body).toContain('-webkit-touch-callout: none');
+
+    // Every exam-scoped rule that hands text selection back to a prose root
+    // must be an editable carve-out or the armed-highlight marker — never a
+    // default. A reintroduced "unarmed roots stay selectable" rule fails here.
+    const proseText = rules.filter(
+      (rule) =>
+        (rule.selectors.includes('.student-exam-active [data-sat-selection-protected="true"]')
+          || rule.selectors.includes('.student-exam-active [data-student-highlightable="true"]'))
+        && rule.body.includes('-webkit-user-select: text'),
+    );
+    expect(proseText.length).toBeGreaterThan(0);
+    for (const rule of proseText) {
+      expect(rule.selectors).toMatch(/input|textarea|select|\[contenteditable\]|data-student-owned-touch-selection/);
+    }
+
+    // Editable controls stay typable — and keep the edit menu they need for
+    // selecting and fixing their own answer text.
+    const editable = rules.find(
+      (rule) => rule.selectors.includes('html.student-exam-active input') && rule.body.includes('-webkit-user-select: text'),
+    );
+    expect(editable).toBeDefined();
+    expect(editable!.body).toContain('-webkit-touch-callout: default');
   });
 
   it('preserves the existing IELTS callout guard', () => {
@@ -67,10 +93,28 @@ describe('student exam content selection CSS', () => {
     expect(guard!.selectors).toContain('.student-exam-active [data-sat-selection-protected="true"] *');
     expect(guard!.selectors.split(',').every((selector) => selector.trim().startsWith('.student-exam-active'))).toBe(true);
     expect(guard!.selectors).not.toMatch(/\b(?:input|textarea|select|button|contenteditable)\b/);
-    // It complements the selection rules rather than replacing them: the
-    // unarmed root keeps native drag-selection and only loses the menu.
-    expect(guard!.body).not.toMatch(/user-select:\s*none/);
-    expect(rulesWith('.student-exam-active [data-sat-selection-protected="true"]', '-webkit-user-select: text')[0]!.body).toContain('user-select: text');
+    // The guard removes the menu only. Selection policy belongs to the
+    // exam-wide disable, so this rule must not re-declare either value.
+    expect(guard!.body).not.toContain('user-select');
+  });
+
+  it('gives text selection back only while the highlight tool is armed', () => {
+    const restore = rules.filter(
+      (rule) =>
+        rule.selectors.includes('[data-student-highlightable="true"][data-student-owned-touch-selection="true"]')
+        && rule.body.includes('user-select: text'),
+    );
+
+    expect(restore).toHaveLength(1);
+    expect(restore[0]!.selectors.replace(/\s+/g, ' ')).toBe(
+      'html.student-exam-active [data-student-highlightable="true"][data-student-owned-touch-selection="true"],'
+      + ' html.student-exam-active [data-student-highlightable="true"][data-student-owned-touch-selection="true"] *',
+    );
+    // The menu stays suppressed even while selection is available: the restore
+    // touches user-select and nothing else.
+    expect(restore[0]!.body).not.toContain('touch-callout');
+    // SAT roots are owned by the owner rule, never by this marker.
+    expect(restore[0]!.selectors).not.toContain('data-sat-selection-protected');
   });
 
   it('scopes the IELTS callout guard to an active exam and away from form controls', () => {
