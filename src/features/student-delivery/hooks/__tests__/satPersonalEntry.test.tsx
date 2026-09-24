@@ -613,7 +613,7 @@ function wire(routes: ServerRoute[]) {
 
 const ATTEMPT_ID = "attempt-a";
 
-function renderStudent(attemptId = ATTEMPT_ID) {
+function renderStudent(attemptId = ATTEMPT_ID, controlEpoch?: number) {
   return renderHook(
     ({ token }: { token: number }) =>
       useSatExamController({
@@ -622,6 +622,7 @@ function renderStudent(attemptId = ATTEMPT_ID) {
         candidateId: `candidate-${attemptId}`,
         attemptUpdateToken: token,
         liveSocketConnected: false,
+        controlEpoch,
       }),
     { initialProps: { token: 0 } },
   );
@@ -690,6 +691,44 @@ describe("SAT personal entry offers", () => {
       await advance(100);
       expect(server.log).toContain("markStageVisible");
 
+      student.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recovers a stale control epoch for module entry and first-paint acknowledgment", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_NOW));
+    try {
+      const server = createPersonalServer(ATTEMPT_ID);
+      wire([{ attemptId: ATTEMPT_ID, server }]);
+      const startModule = gatewayMocks.startModule.getMockImplementation()!;
+      const markStageVisible = gatewayMocks.markStageVisible.getMockImplementation()!;
+      gatewayMocks.startModule.mockImplementation((scheduleId, attemptId, request) =>
+        request.controlEpoch === 1
+          ? Promise.reject({ code: "CONTROL_EPOCH_STALE", backendDetails: { currentControlEpoch: 2 } })
+          : startModule(scheduleId, attemptId, request),
+      );
+      gatewayMocks.markStageVisible.mockImplementation((scheduleId, attemptId, request) =>
+        request.controlEpoch === 2
+          ? Promise.reject({ code: "CONTROL_EPOCH_STALE", backendDetails: { currentControlEpoch: 3 } })
+          : markStageVisible(scheduleId, attemptId, request),
+      );
+
+      const student = renderStudent(ATTEMPT_ID, 1);
+      await settle();
+      expect(gatewayMocks.startModule.mock.calls.map((call) => call[2].controlEpoch)).toEqual([1, 2]);
+      expect(gatewayMocks.enterModule.mock.calls[0]?.[2].controlEpoch).toBe(2);
+      await advance(OFFER_LEAD_MS);
+      await advance(20);
+      await settle();
+      expect(student.result.current.state.phase).toBe("module");
+      expect(student.result.current.remainingSeconds).toBe(AUTHORED_SECONDS);
+      await advance(100);
+      await settle();
+      expect(gatewayMocks.markStageVisible.mock.calls.map((call) => call[2].controlEpoch)).toEqual([2, 3]);
+      expect(server.log).toContain("markStageVisible");
       student.unmount();
     } finally {
       vi.useRealTimers();

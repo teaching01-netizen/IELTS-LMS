@@ -62,6 +62,7 @@ import {
 import { satPollDelayMs } from "../application/satPollCadence";
 import {
   isSectionClosingRejection,
+  isControlEpochStaleRejection,
   isStaleConflictRejection,
   isWriterSupersededRejection,
 } from "../application/satSubmitConflicts";
@@ -159,6 +160,15 @@ function controlEpochField(epoch: number | null | undefined): { controlEpoch?: n
   return epoch == null ? {} : { controlEpoch: epoch };
 }
 
+function currentControlEpochFromConflict(error: unknown): number | null {
+  if (!isControlEpochStaleRejection(error) || typeof error !== "object" || error === null) return null;
+  const record = error as { details?: unknown; backendDetails?: unknown };
+  const details = record.details ?? record.backendDetails;
+  if (typeof details !== "object" || details === null) return null;
+  const epoch = (details as { currentControlEpoch?: unknown }).currentControlEpoch;
+  return typeof epoch === "number" && Number.isSafeInteger(epoch) && epoch > 0 ? epoch : null;
+}
+
 export interface UseSatExamControllerOptions {
   scheduleId: string;
   attemptId: string;
@@ -222,13 +232,34 @@ export function useSatExamController({
     createSatFinalizationGate<AssessmentResult | null>()
   );
   const identityGenerationRef = useRef(0);
+  const entryControlEpochRef = useRef<number | null | undefined>(controlEpoch);
   const identityKey = `${scheduleId}:${attemptId}:${candidateId}`;
   const previousIdentityKeyRef = useRef<string | null>(null);
   if (previousIdentityKeyRef.current !== identityKey) {
     previousIdentityKeyRef.current = identityKey;
     identityGenerationRef.current += 1;
+    entryControlEpochRef.current = controlEpoch;
   }
   const renderIdentityGeneration = identityGenerationRef.current;
+  if (typeof controlEpoch === "number" && controlEpoch > (entryControlEpochRef.current ?? 0)) {
+    entryControlEpochRef.current = controlEpoch;
+  }
+  const withEntryControlEpoch = useCallback(async <T,>(
+    request: (epoch: number | null | undefined) => Promise<T>,
+  ): Promise<T> => {
+    const identityGeneration = identityGenerationRef.current;
+    const requested = entryControlEpochRef.current;
+    try {
+      return await request(requested);
+    } catch (error) {
+      const current = currentControlEpochFromConflict(error);
+      if (current === null || identityGenerationRef.current !== identityGeneration) throw error;
+      const next = Math.max(current, entryControlEpochRef.current ?? 0);
+      if (next <= (requested ?? 0)) throw error;
+      entryControlEpochRef.current = next;
+      return request(next);
+    }
+  }, []);
 
   // Phase 04 commit layer refs (declared before the identity-reset effect
   // so the reset can clear them). dataRef mirrors committed data and
@@ -906,10 +937,10 @@ export function useSatExamController({
     setIsStarting(true);
     setError(null);
     try {
-      let payload = await satDeliveryGateway.startModule(scheduleId, attemptId, {
+      let payload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
         moduleId: pendingModule.id,
-        ...controlEpochField(controlEpoch),
-      });
+        ...controlEpochField(epoch),
+      }));
       if (identityGenerationRef.current !== generation) return "noop";
       if (payload.scheduleId !== scheduleId || payload.attempt.id !== attemptId) return "noop";
       if (isSatPersonalTimingModel(payload.timing.timingModel)) {
@@ -932,19 +963,19 @@ export function useSatExamController({
             !Number.isFinite(offerLead) ||
             offerLead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS
           ) {
-            payload = await satDeliveryGateway.startModule(scheduleId, attemptId, {
+            payload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
               moduleId: pendingModule.id,
               generation: offerGeneration,
-              ...controlEpochField(controlEpoch),
-            });
+              ...controlEpochField(epoch),
+            }));
             continue;
           }
 
-          const confirmed = await satDeliveryGateway.enterModule(scheduleId, attemptId, {
-            moduleId: pendingModule.id,
-            generation: offerGeneration,
-            ...controlEpochField(controlEpoch),
-          });
+          const confirmed = await withEntryControlEpoch((epoch) => satDeliveryGateway.enterModule!(scheduleId, attemptId, {
+              moduleId: pendingModule.id,
+              generation: offerGeneration,
+              ...controlEpochField(epoch),
+          }));
           if (identityGenerationRef.current !== generation) return "noop";
           if (confirmed.scheduleId !== scheduleId || confirmed.attempt.id !== attemptId) return "noop";
           const confirmedAt = Date.now();
@@ -955,10 +986,11 @@ export function useSatExamController({
             !Number.isFinite(confirmedLead) ||
             confirmedLead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS
           ) {
-            payload = await satDeliveryGateway.startModule(scheduleId, attemptId, {
+            payload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
               moduleId: pendingModule.id,
               generation: offerGeneration,
-            });
+              ...controlEpochField(epoch),
+            }));
             continue;
           }
           const visibleAtStart = await waitUntilPersonalStart(startsAt, confirmedOffset);
@@ -967,10 +999,11 @@ export function useSatExamController({
             !await waitForPersonalPaintOpportunity() ||
             !personalStartHasFullDisplayedSecond(startsAt, confirmedOffset)
           ) {
-            payload = await satDeliveryGateway.startModule(scheduleId, attemptId, {
+            payload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
               moduleId: pendingModule.id,
               generation: offerGeneration,
-            });
+              ...controlEpochField(epoch),
+            }));
             continue;
           }
           const estimatedServerNow = new Date(Date.now() + confirmedOffset).toISOString();
@@ -1037,13 +1070,13 @@ export function useSatExamController({
   }, [
     acceptPayloadAndRoute,
     attemptId,
-    controlEpoch,
     data,
     isStarting,
     pendingModule,
     pendingSection,
     previousModuleTimedOut,
     scheduleId,
+    withEntryControlEpoch,
   ]);
 
   const startPersonalBreak = useCallback(async (): Promise<void> => {
@@ -1059,11 +1092,11 @@ export function useSatExamController({
     setIsStarting(true);
     setError(null);
     try {
-      let offerPayload = await satDeliveryGateway.startBreak(scheduleId, attemptId, personalBreak.id, {
+      let offerPayload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startBreak!(scheduleId, attemptId, personalBreak.id, {
         breakId: personalBreak.id,
         generation: personalBreak.entryGeneration,
-        ...controlEpochField(controlEpoch),
-      });
+        ...controlEpochField(epoch),
+      }));
       let acceptedPayload: AssessmentDeliveryBootstrap | null = null;
       for (let rearm = 0; rearm < 4; rearm += 1) {
         if (identityGenerationRef.current !== generationAtCall) return;
@@ -1080,18 +1113,18 @@ export function useSatExamController({
         const offerOffset = satClockOffsetMs(offerPayload.serverNow, offerReceivedAt);
         const lead = Date.parse(offer.entryStartsAt) - (Date.now() + offerOffset);
         if (!Number.isFinite(lead) || lead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS) {
-          offerPayload = await satDeliveryGateway.startBreak(scheduleId, attemptId, personalBreak.id, {
+          offerPayload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startBreak!(scheduleId, attemptId, personalBreak.id, {
             breakId: personalBreak.id,
             generation: offer.entryGeneration,
-            ...controlEpochField(controlEpoch),
-          });
+            ...controlEpochField(epoch),
+          }));
           continue;
         }
-        const confirmed = await satDeliveryGateway.enterBreak(scheduleId, attemptId, {
+        const confirmed = await withEntryControlEpoch((epoch) => satDeliveryGateway.enterBreak!(scheduleId, attemptId, {
           breakId: personalBreak.id,
           generation: offer.entryGeneration,
-          ...controlEpochField(controlEpoch),
-        });
+          ...controlEpochField(epoch),
+        }));
         if (identityGenerationRef.current !== generationAtCall) return;
         const confirmedAt = Date.now();
         const confirmedOffset = satClockOffsetMs(confirmed.serverNow, confirmedAt);
@@ -1103,11 +1136,11 @@ export function useSatExamController({
           !Number.isFinite(confirmedLead) ||
           confirmedLead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS
         ) {
-          offerPayload = await satDeliveryGateway.startBreak(scheduleId, attemptId, personalBreak.id, {
+          offerPayload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startBreak!(scheduleId, attemptId, personalBreak.id, {
             breakId: personalBreak.id,
             generation: offer.entryGeneration,
-            ...controlEpochField(controlEpoch),
-          });
+            ...controlEpochField(epoch),
+          }));
           continue;
         }
         if (!await waitUntilPersonalStart(offer.entryStartsAt, confirmedOffset)) {
@@ -1119,11 +1152,11 @@ export function useSatExamController({
           !await waitForPersonalPaintOpportunity() ||
           !personalStartHasFullDisplayedSecond(offer.entryStartsAt, confirmedOffset)
         ) {
-          offerPayload = await satDeliveryGateway.startBreak(scheduleId, attemptId, personalBreak.id, {
+          offerPayload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startBreak!(scheduleId, attemptId, personalBreak.id, {
             breakId: personalBreak.id,
             generation: offer.entryGeneration,
-            ...controlEpochField(controlEpoch),
-          });
+            ...controlEpochField(epoch),
+          }));
           continue;
         }
         const estimatedServerNow = new Date(Date.now() + confirmedOffset).toISOString();
@@ -1143,7 +1176,7 @@ export function useSatExamController({
     } finally {
       if (identityGenerationRef.current === generationAtCall) setIsStarting(false);
     }
-  }, [acceptPayloadAndRoute, attemptId, controlEpoch, isStarting, personalBreak, scheduleId]);
+  }, [acceptPayloadAndRoute, attemptId, isStarting, personalBreak, scheduleId, withEntryControlEpoch]);
 
   useEffect(() => {
     if (!data || !isSatPersonalTimingModel(data.timing.timingModel)) return;
@@ -1355,11 +1388,11 @@ export function useSatExamController({
         if (cancelled || document.visibilityState === "hidden") return;
         visibleEntryAckRef.current = key;
         if (!satDeliveryGateway.markStageVisible) return;
-        void satDeliveryGateway.markStageVisible(scheduleId, attemptId, {
+        void withEntryControlEpoch((epoch) => satDeliveryGateway.markStageVisible!(scheduleId, attemptId, {
           moduleId: stateModule.id,
           generation,
-          ...controlEpochField(controlEpoch),
-        }).then((payload) => {
+          ...controlEpochField(epoch),
+        })).then((payload) => {
           if (!cancelled && identityGenerationRef.current === renderIdentityGeneration) {
             acceptPayloadAndRoute(payload, { kind: "poll" });
           }
@@ -1378,13 +1411,13 @@ export function useSatExamController({
   }, [
     acceptPayloadAndRoute,
     attemptId,
-    controlEpoch,
     data,
     renderIdentityGeneration,
     scheduleId,
     state.phase,
     stateModule,
     stateModuleAttempt,
+    withEntryControlEpoch,
   ]);
 
   // The acknowledgment means "the candidate has seen the break's first ACTIVE
@@ -1414,11 +1447,11 @@ export function useSatExamController({
         frame = 0;
         if (cancelled || document.visibilityState === "hidden") return;
         visibleBreakAckRef.current = key;
-        void satDeliveryGateway.markBreakVisible!(scheduleId, attemptId, {
+        void withEntryControlEpoch((epoch) => satDeliveryGateway.markBreakVisible!(scheduleId, attemptId, {
           breakId: personalBreak.id,
           generation: personalBreak.entryGeneration,
-          ...controlEpochField(controlEpoch),
-        }).then((payload) => {
+          ...controlEpochField(epoch),
+        })).then((payload) => {
           if (!cancelled && identityGenerationRef.current === renderIdentityGeneration) {
             acceptPayloadAndRoute(payload, { kind: "poll" });
           }
@@ -1434,7 +1467,7 @@ export function useSatExamController({
       document.removeEventListener("visibilitychange", scheduleAckAfterPaint);
       if (frame !== 0) window.cancelAnimationFrame(frame);
     };
-  }, [acceptPayloadAndRoute, attemptId, controlEpoch, data, pendingBreakSeconds, personalBreak, renderIdentityGeneration, scheduleId]);
+  }, [acceptPayloadAndRoute, attemptId, data, pendingBreakSeconds, personalBreak, renderIdentityGeneration, scheduleId, withEntryControlEpoch]);
 
   const stateSection = useMemo(() => {
     if (!data || !stateModule) return null;
