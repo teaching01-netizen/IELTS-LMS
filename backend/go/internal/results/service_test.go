@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -75,6 +76,52 @@ func TestResultScopeBindsTenantAndAssignment(t *testing.T) {
 	}
 	if len(args) != 3 || args[0] != "org-1" || args[1] != "grader-1" || args[2] != auth.RoleGrader {
 		t.Fatalf("unexpected scope arguments: %#v", args)
+	}
+}
+
+func TestListSATResultsIncludesVersionsBeyondLegacyLimitAndAllSupportedOutcomes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	columns := []string{"id", "submission_id", "attempt_id", "provider_key", "outcome_status", "total_score", "release_status", "schedule_id", "exam_id", "exam_title", "version_number", "candidate_id", "candidate_name", "candidate_email", "cohort_name", "submitted_at"}
+	rows := sqlmock.NewRows(columns)
+	for i := 0; i < 100; i++ {
+		rows.AddRow("old-"+strconv.Itoa(i), nil, "attempt-old-"+strconv.Itoa(i), "sat", OutcomeScored, int64(1200), ReleaseReady, "schedule-old", "exam-1", "SAT", 12, "student", "Student", nil, "Cohort", nil)
+	}
+	for version := 13; version <= 20; version++ {
+		rows.AddRow("version-"+strconv.Itoa(version), nil, "attempt-"+strconv.Itoa(version), "sat", OutcomeScored, int64(1300), ReleaseReady, "schedule-"+strconv.Itoa(version), "exam-1", "SAT", version, "student", "Student", nil, "Cohort", nil)
+	}
+	rows.AddRow("pending", nil, "attempt-pending", "sat", OutcomePending, nil, ReleaseDraft, "schedule-20", "exam-1", "SAT", 20, "student", "Student", nil, "Cohort", nil)
+	rows.AddRow("invalid-proctor", nil, "attempt-invalid-proctor", "sat", OutcomeInvalidatedProctor, nil, ReleaseInvalidated, "schedule-20", "exam-1", "SAT", 20, "student", "Student", nil, "Cohort", nil)
+	rows.AddRow("invalid-timeout", nil, "attempt-invalid-timeout", "sat", OutcomeInvalidatedTimeout, nil, ReleaseInvalidated, "schedule-20", "exam-1", "SAT", 20, "student", "Student", nil, "Cohort", nil)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_results ar")).WillReturnRows(rows)
+
+	out, err := NewService(db).ListSATResults(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 111 {
+		t.Fatalf("expected all 111 SAT rows, got %d", len(out))
+	}
+	for version := 13; version <= 20; version++ {
+		found := false
+		for _, row := range out {
+			if row.VersionNumber == version {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("version %d missing from SAT results", version)
+		}
+	}
+	if out[108].Outcome != OutcomePending || out[109].Outcome != OutcomeInvalidatedProctor || out[110].Outcome != OutcomeInvalidatedTimeout {
+		t.Fatalf("supported non-scored outcomes missing: %#v", out[108:])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

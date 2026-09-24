@@ -529,6 +529,50 @@ func (s *Service) ListReadyToRelease(ctx context.Context, actor auth.ActorContex
 	return out, rows.Err()
 }
 
+// ListSATResults returns the complete SAT results workspace, including scored,
+// pending, and invalidated attempts. The Results page groups these rows by
+// exam and schedule, so applying a global row limit here would split groups
+// and hide older Student Access history. Version is read from the attempt's
+// immutable published version, never from the exam's current release.
+func (s *Service) ListSATResults(ctx context.Context, actor auth.ActorContext) ([]ResultSummary, error) {
+	query := `
+		SELECT ar.id, ar.submission_id, ar.attempt_id, ar.provider_key, ar.outcome_status, ar.total_score, ar.release_status,
+			a.schedule_id, a.exam_id, sch.exam_title, version.version_number,
+			a.candidate_id, a.candidate_name, a.candidate_email, sch.cohort_name, a.submitted_at
+		FROM assessment_results ar
+		JOIN student_attempts a ON a.id = ar.attempt_id
+		JOIN exam_schedules sch ON sch.id = a.schedule_id
+		JOIN exam_versions version ON version.id = a.published_version_id
+		WHERE ar.provider_key = 'sat'
+		  AND ar.outcome_status IN ('scored', 'pending', 'invalidated_proctor', 'invalidated_timeout')`
+	scope, args := resultScope("sch", actor)
+	query += scope + " ORDER BY a.submitted_at DESC, ar.created_at DESC, ar.id DESC"
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ResultSummary
+	for rows.Next() {
+		var r ResultSummary
+		var total sql.NullInt64
+		var sub, email sql.NullString
+		var submittedAt sql.NullTime
+		if err := rows.Scan(&r.ID, &sub, &r.AttemptID, &r.ProviderKey, &r.Outcome, &total, &r.ReleaseState,
+			&r.ScheduleID, &r.ExamID, &r.ExamTitle, &r.VersionNumber,
+			&r.StudentID, &r.StudentName, &email, &r.CohortName, &submittedAt); err != nil {
+			return nil, err
+		}
+		r.SubmissionID = nullableStringPtr(sub)
+		r.StudentEmail = nullableStringPtr(email)
+		r.SubmittedAt = nullableTimePtr(submittedAt)
+		r.TotalScore = nullableIntPtr(total)
+		r.ScoreKind = "practice"
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // GetSATResult loads one SAT result with its adaptive/scaled sections.
 // The actor scope mirrors ListDashboard/resultScope: platform readers see
 // all rows; tenant actors narrow to their organization plus a live staff

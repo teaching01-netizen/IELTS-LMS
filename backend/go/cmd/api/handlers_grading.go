@@ -1010,7 +1010,7 @@ func resultsSATListHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Results service not configured."))
 			return
 		}
-		out, err := app.Results.ListReadyToRelease(r.Context(), actorOf(r.Context()), "sat", gradingLimitParam(r))
+		out, err := app.Results.ListSATResults(r.Context(), actorOf(r.Context()))
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
