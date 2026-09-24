@@ -245,10 +245,10 @@ describe('SAT delivery domain', () => {
     expect(entry({ data: { ...data, proctorStatus: 'idle' } })).toMatchObject({
       shouldStart: false, reason: 'proctor-blocked',
     });
-    // Module 2 is selected by the server. Once its unstarted attempt exists,
-    // it opens automatically regardless of how Module 1 ended.
+    // Module 2 is server-driven: the server activates the selected branch
+    // atomically at Module 1 finalization, so the client never starts it.
     expect(entry({ module: { ...module, adaptiveRole: 'higher_branch' } })).toMatchObject({
-      shouldStart: true, reason: 'next-module-entry', autoStartPending: true,
+      shouldStart: false, reason: 'already-started', autoStartPending: true,
     });
     // The hand-off needs a module to enter: an already-started row is not it.
     expect(entry({
@@ -264,10 +264,10 @@ describe('SAT delivery domain', () => {
         attempt: { ...data.attempt, moduleAttempts: [{ ...pendingAttempt, startedAt: '2026-08-30T03:00:00Z', state: 'active' }] },
       },
     })).toMatchObject({ shouldStart: false, reason: 'already-started', autoStartPending: true });
-    // The branch is the section, not the phase: a later section reached from
-    // the directions screen is the next-section rule.
+    // Later sections are server-driven too (break expiry activates the next
+    // Module 1), so the client never starts them either.
     expect(entry({ sectionDisplayOrder: 1 })).toMatchObject({
-      shouldStart: true, reason: 'next-section-entry',
+      shouldStart: false, reason: 'already-started',
     });
   });
 
@@ -290,8 +290,10 @@ describe('SAT delivery domain', () => {
         breakSeconds: 0, sectionWaitSeconds: 0, phase: 'break', ...overrides,
       });
 
-    expect(entry()).toMatchObject({ shouldStart: true, reason: 'next-section-entry' });
-    expect(entry({ phase: 'directions' })).toMatchObject({ shouldStart: true });
+    // Break→next-section is server-driven: the client renders the break and
+    // swaps to the active Module 1 when state arrives (zero mutations).
+    expect(entry()).toMatchObject({ shouldStart: false, reason: 'already-started' });
+    expect(entry({ phase: 'directions' })).toMatchObject({ shouldStart: false });
     expect(entry({ breakSeconds: 600 })).toMatchObject({
       shouldStart: false, reason: 'break-active',
     });
@@ -308,7 +310,7 @@ describe('SAT delivery domain', () => {
       shouldStart: false, reason: 'proctor-blocked',
     });
     expect(entry({ module: { ...module, adaptiveRole: 'higher_branch' } })).toMatchObject({
-      shouldStart: true, reason: 'next-module-entry', autoStartPending: true,
+      shouldStart: false, reason: 'already-started', autoStartPending: true,
     });
     expect(entry({ sectionDisplayOrder: null })).toMatchObject({
       shouldStart: false, reason: 'unknown-section',

@@ -52,7 +52,8 @@ const personalBreakEnterSetsTheOwnedDeadline = "(?s)UPDATE assessment_attempt_br
 
 // personalReconcileDrained stages StartModule's reconcile-then-write prologue for
 // a sat_personal_v1 runtime: the break sweep runs first (its own deadline, no
-// save grace) and the open-module loop drains.
+// save grace), then the server-driven break→next-M1 activation check, and the
+// open-module loop drains.
 func personalReconcileDrained(mock sqlmock.Sqlmock) {
 	deliverySaveBegin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
@@ -65,6 +66,11 @@ func personalReconcileDrained(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_attempt_breaks")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM assessment_attempt_breaks")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN")).
 		WithArgs("att-1").
@@ -169,9 +175,9 @@ func personalStartModulePrologueReconciling(mock sqlmock.Sqlmock) {
 	deliveryModuleWorkableTx(mock)
 }
 
-// A personal StartModule arms the offer at DATABASE time plus the short lead,
-// leaves the authored allotment and started_at untouched, and publishes the
-// offer generation and start to the client.
+// A personal StartModule activates immediately at DATABASE time (single
+// operation): state=active with started_at=DB NOW. No future offer, no lead,
+// no Enter/Visible dance — the browser renders the exam on this response.
 func TestStartModulePersonalArmsTheOfferAtDatabaseTimePlusTheLead(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -185,26 +191,28 @@ func TestStartModulePersonalArmsTheOfferAtDatabaseTimePlusTheLead(t *testing.T) 
 	personalModuleRow(mock, "not_started", 120, nil)
 	personalTimingGate(mock, now)
 	personalBreakPendingLookup(mock, false)
-	personalEntryArmRow(mock, 0, nil, nil, nil, nil)
-	mock.ExpectExec(personalArmAnchorsDatabaseTimeAndLead).
-		WithArgs(personalOfferLeadSeconds, "ma-1").
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
+		WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET phase = 'exam'")).
+		WithArgs("att-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	deliveryMaxRevision(mock, 7)
+	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
+	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
-	deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "not_started")
+	deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "active")
 
 	out, err := svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
 	if err != nil {
 		t.Fatalf("personal start module: %v", err)
 	}
 	if out == nil || len(out.Attempt.ModuleAttempts) != 1 {
-		t.Fatalf("bootstrap missing the armed module attempt: %+v", out)
+		t.Fatalf("bootstrap missing the active module attempt: %+v", out)
 	}
-	armed := out.Attempt.ModuleAttempts[0]
-	if armed.State != "not_started" {
-		t.Fatalf("an armed offer must leave the module unstarted: %+v", armed)
-	}
-	if armed.EntryGeneration == nil || *armed.EntryGeneration != 1 || armed.EntryStartsAt == nil {
-		t.Fatalf("the offer generation and start must reach the client: %+v", armed)
+	active := out.Attempt.ModuleAttempts[0]
+	if active.State != "active" {
+		t.Fatalf("single-op start must leave the module active: %+v", active)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -219,23 +227,27 @@ func TestStartModuleOfferAckAvoidsAttemptProjection(t *testing.T) {
 	defer db.Close()
 	svc := deliverySvc(db)
 	now := time.Now().UTC()
-	startsAt := now.Add(3 * time.Second)
 	personalStartModulePrologue(mock)
 	personalModuleRow(mock, "not_started", 120, nil)
 	personalTimingGate(mock, now)
 	personalBreakPendingLookup(mock, false)
-	personalEntryArmRow(mock, 0, nil, nil, nil, nil)
-	mock.ExpectExec(personalArmAnchorsDatabaseTimeAndLead).
-		WithArgs(personalOfferLeadSeconds, "ma-1").
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
+		WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET phase = 'exam'")).
+		WithArgs("att-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	deliveryMaxRevision(mock, 7)
+	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
+	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
-	entryStateRow(mock, "not_started", 1, startsAt, nil, nil, nil, examruntime.TimingModelPersonal, now)
+	entryStateRow(mock, "active", 0, nil, nil, nil, now, examruntime.TimingModelPersonal, now)
 	ack, err := svc.StartModuleOfferAck(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", nil, nil, false, "sess-test", "tok-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ack.EntryState != "armed" || ack.ModuleRevision != 4 {
-		t.Fatalf("unexpected compact offer: %+v", ack)
+	if ack.State != "active" || ack.StartedAt == nil {
+		t.Fatalf("unexpected compact active ack: %+v", ack)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -281,8 +293,8 @@ func TestEnterModuleAckAvoidsAttemptProjection(t *testing.T) {
 	}
 }
 
-// A reload mid-module resumes the SAME offer: the module is already active and
-// its start is in the future, so no second allocation may be written.
+// A reload mid-module resumes the active module: no second allocation may be
+// written. StartModule is idempotent for already-active modules.
 func TestStartModulePersonalReloadKeepsTheSameOffer(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -291,13 +303,12 @@ func TestStartModulePersonalReloadKeepsTheSameOffer(t *testing.T) {
 	defer db.Close()
 	svc := deliverySvc(db)
 	now := time.Now().UTC()
-	startsAt := now.Add(2 * time.Second)
+	startedAt := now.Add(-time.Minute)
 
 	personalStartModulePrologueReconciling(mock)
-	personalModuleRow(mock, "active", 120, startsAt)
+	personalModuleRow(mock, "active", 120, startedAt)
 	personalTimingGate(mock, now)
 	personalBreakPendingLookup(mock, false)
-	personalEntryArmRow(mock, 1, startsAt, now, nil, nil)
 	// No UPDATE is staged: sqlmock fails on any unexpected statement, so a
 	// reallocation would surface as an error rather than a silent reset.
 	mock.ExpectCommit()
@@ -305,103 +316,61 @@ func TestStartModulePersonalReloadKeepsTheSameOffer(t *testing.T) {
 
 	out, err := svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
 	if err != nil {
-		t.Fatalf("reload must resume the offer, got %v", err)
+		t.Fatalf("reload must resume the active module, got %v", err)
 	}
 	if out == nil || len(out.Attempt.ModuleAttempts) != 1 {
 		t.Fatalf("bootstrap missing the resumed module attempt: %+v", out)
 	}
-	if got := out.Attempt.ModuleAttempts[0].EntryGeneration; got == nil || *got != 1 {
-		t.Fatalf("reload must keep the same offer generation, got %v", got)
+	if out.Attempt.ModuleAttempts[0].State != "active" {
+		t.Fatalf("reload must keep the module active, got %+v", out.Attempt.ModuleAttempts[0])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// Rearming a missed offer is bounded by admission closure.
-func TestStartModulePersonalRefusesToRearmAfterAdmissionClosure(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := deliverySvc(db)
-	now := time.Now().UTC()
+// Single-op entry ignores stale offer columns: a missed offer, an exhausted
+// retry budget, or a prior admission window never blocks the one immediate
+// activation. Rearm bounds now live only in the deprecated arm path (covered
+// by personal_offer_test.go); the normal StartModule is idempotent.
+func TestStartModulePersonalIgnoresStaleOfferColumnsAndActivates(t *testing.T) {
+	for _, name := range []string{"missed-offer", "exhausted-budget", "accepted-response"} {
+		t.Run(name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			svc := deliverySvc(db)
+			now := time.Now().UTC()
 
-	personalStartModulePrologue(mock)
-	personalModuleRow(mock, "not_started", 120, nil)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, false)
-	personalEntryArmRow(mock, 1, now.Add(-time.Second), nil, nil, nil)
-	personalAdmissionRow(mock, now.Add(-time.Minute))
-	mock.ExpectRollback()
+			personalStartModulePrologue(mock)
+			personalModuleRow(mock, "not_started", 120, nil)
+			personalTimingGate(mock, now)
+			personalBreakPendingLookup(mock, false)
+			mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
+				WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET phase = 'exam'")).
+				WithArgs("att-1").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			deliveryMaxRevision(mock, 7)
+			deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
+			deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+			mock.ExpectCommit()
+			deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "active")
 
-	_, err = svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
-	appErr, ok := apperrors.As(err)
-	if !ok || appErr.Details["reason"] != "ADMISSION_CLOSED" {
-		t.Fatalf("expected ADMISSION_CLOSED, got %v", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// The retry budget is server-enforced: an exhausted offer is a recoverable
-// proctor-action state, not another window and not a started clock.
-func TestStartModulePersonalRearmIsBoundedByTheRetryBudget(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := deliverySvc(db)
-	now := time.Now().UTC()
-
-	personalStartModulePrologue(mock)
-	personalModuleRow(mock, "not_started", 120, nil)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, false)
-	personalEntryArmRow(mock, 4, now.Add(-time.Second), nil, nil, nil)
-	personalAdmissionRow(mock, now.Add(time.Hour))
-	mock.ExpectRollback()
-
-	_, err = svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
-	appErr, ok := apperrors.As(err)
-	if !ok || appErr.Details["reason"] != "ENTRY_RETRY_EXHAUSTED" {
-		t.Fatalf("expected ENTRY_RETRY_EXHAUSTED, got %v", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// A module that already has an accepted response must never be re-armed: the
-// timer cannot be reset under answers the candidate has already given.
-func TestStartModulePersonalNeverRearmsAModuleWithAnAcceptedResponse(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := deliverySvc(db)
-	now := time.Now().UTC()
-
-	personalStartModulePrologue(mock)
-	personalModuleRow(mock, "not_started", 120, nil)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, false)
-	personalEntryArmRow(mock, 1, now.Add(-time.Second), nil, nil, nil)
-	personalAdmissionRow(mock, now.Add(time.Hour))
-	personalResponseProbe(mock, true)
-	mock.ExpectRollback()
-
-	_, err = svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
-	appErr, ok := apperrors.As(err)
-	if !ok || appErr.Details["reason"] != "ENTRY_ALREADY_USED" {
-		t.Fatalf("expected ENTRY_ALREADY_USED, got %v", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
+			out, err := svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
+			if err != nil {
+				t.Fatalf("stale offer columns must not block single-op start, got %v", err)
+			}
+			if out == nil || len(out.Attempt.ModuleAttempts) != 1 || out.Attempt.ModuleAttempts[0].State != "active" {
+				t.Fatalf("expected an active module, got %+v", out)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -803,75 +772,47 @@ func TestEnterBreakIsAnIdempotentReplayForAnActiveBreak(t *testing.T) {
 	}
 }
 
-// A proctor grant (entry_proctor_rearm_at) is the action both refusals above
-// name: once a proctor has re-armed the stage, admission closure no longer
-// stops the arm path. The candidate is re-armed an offer, not handed time — the
-// entered/response guards still decide that.
-func TestStartModulePersonalArmsAfterTheProctorGrantLiftsAdmissionClosure(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := deliverySvc(db)
-	now := time.Now().UTC()
-	granted := now.Add(-time.Minute)
+// Single-op entry needs no proctor grant: stale grants and budgets are ignored
+// and the module activates immediately. Grant-gated rearm lives only in the
+// deprecated arm path (personal_offer_test.go).
+func TestStartModulePersonalActivatesWithoutProctorGrant(t *testing.T) {
+	for _, name := range []string{"admission-closed", "spent-budget"} {
+		t.Run(name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			svc := deliverySvc(db)
+			now := time.Now().UTC()
 
-	personalStartModulePrologue(mock)
-	personalModuleRow(mock, "not_started", 120, nil)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, false)
-	personalEntryArmRow(mock, 0, now.Add(-time.Second), nil, nil, granted)
-	personalAdmissionRow(mock, now.Add(-time.Minute)) // the room's admission closed
-	personalResponseProbe(mock, false)
-	mock.ExpectExec(personalArmAnchorsDatabaseTimeAndLead).
-		WithArgs(personalOfferLeadSeconds, "ma-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-	deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "not_started")
+			personalStartModulePrologue(mock)
+			personalModuleRow(mock, "not_started", 120, nil)
+			personalTimingGate(mock, now)
+			personalBreakPendingLookup(mock, false)
+			mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
+				WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET phase = 'exam'")).
+				WithArgs("att-1").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			deliveryMaxRevision(mock, 7)
+			deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
+			deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+			mock.ExpectCommit()
+			deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "active")
 
-	out, err := svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
-	if err != nil {
-		t.Fatalf("a granted stage must still arm after admission closed, got %v", err)
-	}
-	if out == nil || len(out.Attempt.ModuleAttempts) != 1 || out.Attempt.ModuleAttempts[0].EntryStartsAt == nil {
-		t.Fatalf("the granted stage must be given a fresh offer: %+v", out)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// The retry budget starts over with the grant: a stage that burned all four
-// automatic attempts is exactly the one whose refusal sent the candidate to the
-// proctor, so the grant must not leave the budget spent.
-func TestStartModulePersonalArmsAfterTheProctorGrantRestartsTheRetryBudget(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := deliverySvc(db)
-	now := time.Now().UTC()
-
-	personalStartModulePrologue(mock)
-	personalModuleRow(mock, "not_started", 120, nil)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, false)
-	personalEntryArmRow(mock, 4, now.Add(-time.Second), nil, nil, now.Add(-time.Minute))
-	personalAdmissionRow(mock, now.Add(time.Hour))
-	personalResponseProbe(mock, false)
-	mock.ExpectExec(personalArmAnchorsDatabaseTimeAndLead).
-		WithArgs(personalOfferLeadSeconds, "ma-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-	deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "not_started")
-
-	if _, err := svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1"); err != nil {
-		t.Fatalf("a granted stage must not be refused by a spent retry budget, got %v", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
+			out, err := svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
+			if err != nil {
+				t.Fatalf("single-op start must not need a grant, got %v", err)
+			}
+			if out == nil || len(out.Attempt.ModuleAttempts) != 1 || out.Attempt.ModuleAttempts[0].State != "active" {
+				t.Fatalf("expected an active module, got %+v", out)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

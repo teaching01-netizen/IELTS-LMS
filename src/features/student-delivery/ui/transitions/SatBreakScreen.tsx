@@ -1,40 +1,25 @@
 import { formatSatTime } from "../../domain/satTiming";
 import { SAT_COPY } from "../../domain/satCopy";
-import type { SatBreakEntryProgress } from "../break/SatScheduledBreakScreen";
-
-export type { SatBreakEntryProgress } from "../break/SatScheduledBreakScreen";
 
 export function SatBreakScreen({
   nextSectionKey,
   remainingSeconds,
   onContinue,
   mode = "break",
-  entryProgress = "idle",
 }: {
   nextSectionKey: string;
   remainingSeconds: number | null;
   onContinue?: () => void;
   mode?: "waiting" | "break";
-  entryProgress?: SatBreakEntryProgress;
 }) {
   const waiting = mode === "waiting";
   const destination = nextSectionKey === "math" ? "Math is next" : "Reading and Writing is next";
-  const progressLabel =
-    entryProgress === "starting"
-      ? SAT_COPY.transitions.startingNextSection
-      : entryProgress === "retrying"
-        ? SAT_COPY.transitions.retryingNextSection
-        : null;
-  const body =
-    entryProgress === "starting"
-      ? SAT_COPY.transitions.startingNextSectionBody
-      : entryProgress === "retrying"
-        ? SAT_COPY.transitions.retryingNextSectionBody
-        : waiting
-          ? "You finished early. The shared section clock is still running, so the break has not started yet."
-          : remainingSeconds === null
-            ? "The shared break clock is synchronizing. You do not need to do anything."
-            : SAT_COPY.transitions.breakStartsAutomatically;
+  const progressLabel = null;
+  const body = waiting
+    ? "You finished early. The shared section clock is still running, so the break has not started yet."
+    : remainingSeconds === null
+      ? "The shared break clock is synchronizing. You do not need to do anything."
+      : SAT_COPY.transitions.breakStartsAutomatically;
   const displayedTime =
     remainingSeconds === null ? "—" : formatSatTime(Math.max(0, remainingSeconds));
   return (

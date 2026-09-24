@@ -128,28 +128,30 @@ describe("SatStudentSessionRoute skew hold (Phase 04 T3)", () => {
     expect(screen.queryByText("SAT state unavailable")).toBeNull();
   });
 
-  it("holds Module 1 inert while the server-routed Module 2 opens", async () => {
+  it("holds Module 1 internally while the server-routed Module 2 opens (no handoff surface)", async () => {
     const data = moduleData();
     const state = moduleState();
     const { rerender, refresh } = await renderRoute();
-    const commands = drive(state, data, (ui) => rerender(ui as never));
+    drive(state, data, (ui) => rerender(ui as never));
     await refresh();
     expect(screen.getByText("Skew hold marker question")).toBeInTheDocument();
 
+    // Server-driven M1→M2: a transient directions with a retained frame is an
+    // internal skew-hold — never an opening overlay, never inert, never a retry.
     const nextModule = routedBranchData();
     drive({ ...state, phase: "directions" }, nextModule, (ui) => rerender(ui as never), "math-m2");
     await refresh();
 
-    const heldExam = screen.getByTestId("sat-exam-shell").closest("[data-sat-transition-hold]");
-    expect(heldExam).toHaveAttribute("inert");
-    expect(heldExam).toHaveAttribute("aria-hidden", "true");
-    fireEvent.keyDown(document, { key: "x", ctrlKey: true, altKey: true });
-    fireEvent.keyDown(document, { key: "c", ctrlKey: true, altKey: true });
-    expect(commands.nextQuestion).not.toHaveBeenCalled();
-    expect(commands.toggleCalculator).not.toHaveBeenCalled();
+    expect(screen.getByTestId("sat-exam-shell")).toBeInTheDocument();
+    expect(screen.getByText("Skew hold marker question")).toBeInTheDocument();
+    expect(document.querySelector("[data-sat-transition-hold]")).toBeNull();
+    expect(document.querySelector("[data-sat-handoff]")).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Opening/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Retry now/ })).toBeNull();
+    expect(screen.queryByTestId("sat-scheduled-break")).toBeNull();
   });
 
-  it("shows a proctor pause immediately during a module-entry handoff", async () => {
+  it("keeps no handoff surface during a proctor pause at the boundary", async () => {
     const activeData = moduleData();
     const activeState = moduleState();
     const { rerender, refresh } = await renderRoute();
@@ -160,12 +162,14 @@ describe("SatStudentSessionRoute skew hold (Phase 04 T3)", () => {
     data.proctorStatus = "paused";
     const state = { ...activeState, phase: "directions" as const };
     drive(state, data, (ui) => rerender(ui as never), "math-m2");
-    (controllerMock.current as { entryReason: string }).entryReason = "proctor-blocked";
     await refresh();
 
-    expect(screen.getByRole("heading", { name: "Your exam is paused" })).toBeInTheDocument();
+    // No handoff, break, or recovery surface at the boundary — only the exam
+    // frame (with its blocking overlay) or the waiting room.
     expect(screen.queryByTestId("sat-scheduled-break")).toBeNull();
     expect(document.querySelector("[data-sat-transition-hold]")).toBeNull();
+    expect(document.querySelector("[data-sat-handoff]")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Retry now/ })).toBeNull();
   });
 
   it("shows runtime termination instead of the held exam frame", async () => {

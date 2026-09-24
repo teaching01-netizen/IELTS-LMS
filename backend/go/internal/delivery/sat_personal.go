@@ -38,17 +38,16 @@ func recordPersonalFrameLead(stage string, startsAt, enteredAt time.Time) {
 }
 
 // SAT personal timing (sat_personal_v1): attempt-owned module and break
-// deadlines. The authored module/break time begins at a server-issued
-// startsAt in the future. The server's deadlineAt is exactly
-// startsAt + authoredSeconds, adjusted only by authorized pause/extension
-// rules. Reloads resume the original deadline; they never reset it.
+// deadlines. The normal path is single-operation and immediate: StartModule
+// sets started_at = DB NOW and the server's deadlineAt is exactly
+// started_at + authoredSeconds, adjusted only by authorized pause/extension
+// rules. Reloads resume the original deadline; they never reset it. M1→M2
+// and break→next-M1 are server-driven (finalize + break-expiry activate the
+// next module atomically); the client renders authoritative state only.
 
-// personalOfferLeadSeconds is the short lead (initially three seconds) added
-// to database time when arming a future-start offer.
-//
-// The authored window is anchored to the server's own instant, never to a
-// request or render time: the offer is armed at DATE_ADD(UTC_TIMESTAMP(6), lead)
-// and enterModule sets started_at = entry_starts_at, so the deadline the
-// candidate lands on is exactly startsAt + the authored allotment
-// (computeModuleTiming derives it from started_at + allocated_seconds).
+// personalOfferLeadSeconds is deprecated: the normal module/break path no
+// longer arms future-start offers. It remains only for the deprecated
+// StartBreak/EnterBreak and armPersonalModuleOfferTx offer paths, which are
+// retained backward-compatibly until the follow-up cleanup migration removes
+// the entry_* columns.
 const personalOfferLeadSeconds = 3

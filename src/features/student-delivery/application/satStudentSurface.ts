@@ -3,20 +3,18 @@ import type { SatRunnerState, SatSectionKey } from "./satRunnerReducer";
 export const SAT_ENTRY_RECOVERY_SURFACE_MS = 5_000;
 
 /**
- * One student-visible stage (Stage model, spec docs/sat-student-transitions.md).
+ * One student-visible stage (Stage model).
  *
- * The route renders exactly one of these at a time, through the one presence
- * host, so "which surface is the student on?" has a single answer that is
- * unit-testable instead of being spread across the route's early returns. The
- * runner's internal phases (`directions`, `break`, `submitting`) are
- * orchestration states: several of them map onto the SAME stage, and a module
- * handoff never leaves the exam stage at all.
+ * Normal journey has only three interactive surfaces: WAITING ROOM, EXAM,
+ * BREAK. Finalizing/complete/terminated/error are terminal/system states.
+ * There is no entry-recovery, opening, restoring, or next-module waiting
+ * surface: skew-hold is an internal technique that holds the previous frame
+ * while state catches up, never a student-facing screen.
  */
 export type SatStudentStageKind =
   | "exam"
   | "scheduled-break"
   | "pre-start"
-  | "entry-recovery"
   | "finalizing"
   | "complete"
   | "terminated"
@@ -33,25 +31,21 @@ export interface SatStudentStageBase {
  *
  * `content` says what the frame is showing, never whether it exists:
  *  - `live`       a resolved module/review frame the student can use;
- *  - `opening`    the next module is opening; the finished frame stays mounted,
- *                 frozen and inert, behind one live status surface;
  *  - `skew-hold`  the phase says module/review but the module is momentarily
- *                 unresolvable; the last frame keeps rendering;
+ *                 unresolvable; the last frame keeps rendering (internal hold,
+ *                 never a separate screen);
  *  - `refreshing` the same moment with no frame to keep — the bare loader.
  */
-export type SatExamStageContent = "live" | "opening" | "skew-hold" | "refreshing";
+export type SatExamStageContent = "live" | "skew-hold" | "refreshing";
 
 export interface SatExamStage extends SatStudentStageBase {
   readonly kind: "exam";
   readonly content: SatExamStageContent;
-  /** Title of the module being opened; set only while content is `opening`. */
   readonly pendingModuleTitle: string | null;
 }
 
-export type SatBreakPhase = "waiting-for-break" | "starting-break" | "on-break" | "opening-next-section";
-
-/** What the automatic entry into the next section is doing (break copy). */
-export type SatBreakEntryProgress = "idle" | "starting" | "retrying";
+/** The scheduled break is one surface: waiting for it, or on it. */
+export type SatBreakPhase = "waiting" | "active";
 
 export interface SatScheduledBreakStage extends SatStudentStageBase {
   readonly kind: "scheduled-break";
@@ -59,19 +53,13 @@ export interface SatScheduledBreakStage extends SatStudentStageBase {
   /** Seconds the phase counts down, or null when it has no countdown. */
   readonly remainingSeconds: number | null;
   readonly nextSectionKey: SatSectionKey;
-  readonly entryProgress: SatBreakEntryProgress;
 }
 
-export type SatPreStartReason = "initial" | "waiting" | "restoring" | "loading";
+export type SatPreStartReason = "waiting" | "loading";
 
 export interface SatPreStartStage extends SatStudentStageBase {
   readonly kind: "pre-start";
   readonly reason: SatPreStartReason;
-}
-
-export interface SatEntryRecoveryStage extends SatStudentStageBase {
-  readonly kind: "entry-recovery";
-  readonly moduleId: string | null;
 }
 
 export interface SatFinalizingStage extends SatStudentStageBase {
@@ -101,7 +89,6 @@ export type SatStudentStage =
   | SatExamStage
   | SatScheduledBreakStage
   | SatPreStartStage
-  | SatEntryRecoveryStage
   | SatFinalizingStage
   | SatCompleteStage
   | SatTerminatedStage
@@ -139,13 +126,8 @@ export interface DeriveSatStudentStageInput {
   moduleResolved: boolean;
   /** The module's active question resolves (module phase only; Review needs none). */
   moduleQuestionResolved: boolean;
-  entryRecoverable: boolean;
-  entryBlocked: boolean;
-  entryHoldExpired: boolean;
   pendingBreakSeconds: number;
-  personalBreakStarting?: boolean;
   pendingSectionWaitSeconds: number;
-  entryInFlight: boolean;
   /** Identity of the attempt; every presence key is scoped by it. */
   attemptKey: string;
 }
@@ -162,11 +144,12 @@ function examStage(
  * The one decision "which stage is the student on".
  *
  * Order matters and is the contract: terminal surfaces win, then a real section
- * boundary, then the exam (live, or a handoff that stays inside the frame). The
- * exam stage is deliberately chosen for `directions` whenever a frame exists —
- * that is what makes a module handoff a content change instead of a screen
- * change — and the pre-start/recovery surfaces are only reachable when there is
- * no frame to keep (first entry, reload mid-handoff).
+ * boundary (the ONE break), then the exam (live, or a skew hold that keeps the
+ * last frame). A module handoff never leaves the exam stage: M1→M2 is
+ * server-activated, so the client swaps M1 UI → M2 UI with zero mutations.
+ * Directions with a retained frame is a skew-hold, never an opening overlay;
+ * directions without a frame is the waiting room (initial entry or a transient
+ * retry that keeps the waiting room mounted).
  */
 export function deriveSatStudentStage({
   runnerPhase,
@@ -183,13 +166,8 @@ export function deriveSatStudentStage({
   frameFresh,
   moduleResolved,
   moduleQuestionResolved,
-  entryRecoverable,
-  entryBlocked,
-  entryHoldExpired,
   pendingBreakSeconds,
-  personalBreakStarting = false,
   pendingSectionWaitSeconds,
-  entryInFlight,
   attemptKey,
 }: DeriveSatStudentStageInput): SatStudentStage {
   if (loadFailed) {
@@ -198,9 +176,6 @@ export function deriveSatStudentStage({
   if (!hasData) {
     return { kind: "pre-start", key: `pre-start:${attemptKey}:loading`, reason: "loading" };
   }
-  // An explicit proctor termination remains visible even if termination also
-  // recorded a submission timestamp/result. A student-submitted completion
-  // has no proctor termination flag and keeps the normal completion surface.
   if (terminated && terminatedByProctor) {
     return { kind: "terminated", key: `terminated:${attemptKey}`, byProctor: true };
   }
@@ -211,8 +186,6 @@ export function deriveSatStudentStage({
     return { kind: "terminated", key: `terminated:${attemptKey}`, byProctor: terminatedByProctor };
   }
 
-  // A finished attempt whose result is still being produced is one stage, with
-  // two contents: the progress surface, or its retry panel once a try failed.
   if (
     (runnerPhase === "directions" && allModulesFinal) ||
     runnerPhase === "submitting"
@@ -228,36 +201,20 @@ export function deriveSatStudentStage({
   // section boundary before the next module starts. Once the server marks that
   // module started, a resumed controller must return to its exam surface even
   // if its local runner still says `break`. A Module 1 → Module 2 handoff inside
-  // one section never lands here.
+  // one section never lands here. The same break surface stays mounted until
+  // the next active module replaces it — never "Opening Math…".
   const hasUnstartedSectionBoundary =
     Boolean(pendingModule?.startsNewSection) && !pendingModule?.started;
   if ((runnerPhase === "break" && !pendingModule?.started) || hasUnstartedSectionBoundary) {
-    // A break always has a next section to name: an attempt whose modules are all
-    // final took the finalizing branch above, so `math` is only the defensive
-    // default for a payload that has not hydrated the next attempt yet.
     const sectionKey = pendingModule?.sectionKey ?? "math";
-    const phase: SatBreakPhase =
-      pendingSectionWaitSeconds > 0
-        ? "waiting-for-break"
-        : personalBreakStarting
-          ? "starting-break"
-        : pendingBreakSeconds > 0
-          ? "on-break"
-          : "opening-next-section";
+    const waiting = pendingSectionWaitSeconds > 0 && pendingBreakSeconds <= 0;
+    const phase: SatBreakPhase = waiting ? "waiting" : "active";
     return {
       kind: "scheduled-break",
       key: `break:${attemptKey}:${sectionKey}`,
       phase,
-      remainingSeconds:
-        phase === "waiting-for-break"
-          ? pendingSectionWaitSeconds
-          : phase === "starting-break"
-            ? null
-          : phase === "on-break"
-            ? pendingBreakSeconds
-            : null,
+      remainingSeconds: waiting ? pendingSectionWaitSeconds : pendingBreakSeconds > 0 ? pendingBreakSeconds : null,
       nextSectionKey: sectionKey,
-      entryProgress: entryInFlight ? "starting" : entryRecoverable ? "retrying" : "idle",
     };
   }
 
@@ -267,8 +224,6 @@ export function deriveSatStudentStage({
     (runnerPhase === "break" && pendingModule?.started)
   ) {
     if (!moduleResolved) {
-      // One-frame data/state skew: keep the last frame when it is still fresh,
-      // otherwise say so — never swap valid exam UI for a spinner on a skew.
       return examStage(attemptKey, hasExamFrame && frameFresh ? "skew-hold" : "refreshing");
     }
     if (runnerPhase === "module" && !moduleQuestionResolved) {
@@ -278,11 +233,6 @@ export function deriveSatStudentStage({
   }
 
   if (runnerPhase === "loading") {
-    // A payload with the runner still loading is a one-frame window (or an
-    // invariant violation), not a wait: a frame keeps the screen for its bounded
-    // window, and nothing else is renderable — so the error surface owns it
-    // rather than a pre-start that would claim to be preparing an exam the
-    // attempt may not even have.
     return hasExamFrame && frameFresh
       ? examStage(attemptKey, "skew-hold")
       : { kind: "error", key: `error:${attemptKey}:state`, reason: "state" };
@@ -290,27 +240,17 @@ export function deriveSatStudentStage({
 
   if (runnerPhase === "directions") {
     if (isInitialEntry) {
-      return { kind: "pre-start", key: `pre-start:${attemptKey}:initial`, reason: "initial" };
-    }
-    // A proctor/runtime block owns the screen immediately; it never leaves a
-    // stale module standing (pause, not-live runtime, stage not ready).
-    if (entryBlocked) {
       return { kind: "pre-start", key: `pre-start:${attemptKey}:waiting`, reason: "waiting" };
     }
+    // A handoff with a retained frame holds it (skew-hold, internal only).
+    // Without a frame (initial load or transient), keep the waiting room
+    // mounted — retries happen automatically with jitter behind it.
     if (hasExamFrame) {
-      return examStage(attemptKey, "opening", pendingModule?.title ?? null);
+      return examStage(attemptKey, "skew-hold");
     }
-    if (!entryHoldExpired) {
-      return { kind: "pre-start", key: `pre-start:${attemptKey}:restoring`, reason: "restoring" };
-    }
-    return {
-      kind: "entry-recovery",
-      key: `entry-recovery:${attemptKey}:${pendingModule?.id ?? "next"}`,
-      moduleId: pendingModule?.id ?? null,
-    };
+    return { kind: "pre-start", key: `pre-start:${attemptKey}:waiting`, reason: "waiting" };
   }
 
-  // Unreachable for a healthy attempt: the phase is one the surfaces above cover.
   return { kind: "error", key: `error:${attemptKey}:state`, reason: "state" };
 }
 
@@ -319,7 +259,7 @@ export function isSatExamStage(stage: SatStudentStage): stage is SatExamStage {
   return stage.kind === "exam";
 }
 
-/** True while the exam frame is showing but not answering (handoff/skew/refresh). */
+/** True while the exam frame is showing but not answering (skew/refresh). */
 export function isSatExamFrameHeld(stage: SatStudentStage): boolean {
   return stage.kind === "exam" && stage.content !== "live";
 }

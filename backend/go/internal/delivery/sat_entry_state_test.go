@@ -242,12 +242,17 @@ func TestStartModuleReconcilesWhenTheModuleRowDoesNotExistYet(t *testing.T) {
 	personalModuleRow(mock, "not_started", 120, nil)
 	personalTimingGate(mock, now)
 	personalBreakPendingLookup(mock, false)
-	personalEntryArmRow(mock, 0, nil, nil, nil, nil)
-	mock.ExpectExec(personalArmAnchorsDatabaseTimeAndLead).
-		WithArgs(personalOfferLeadSeconds, "ma-1").
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
+		WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET phase = 'exam'")).
+		WithArgs("att-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	deliveryMaxRevision(mock, 7)
+	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
+	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
-	deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "not_started")
+	deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "active")
 
 	if _, err := deliverySvc(db).StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1"); err != nil {
 		t.Fatalf("a missing module row must fall back to reconciliation, got %v", err)

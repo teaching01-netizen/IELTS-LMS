@@ -12,9 +12,10 @@ import { useSatExamController } from "../useSatExamController";
  * and LOW must never be opened, rendered, or answered. The browser
  * "reloads" by mounting the controller fresh on this payload.
  *
- *   M1 expired -> server created HIGH attempt -> reload before M2 starts
+ *   M1 expired -> server created AND ACTIVATED HIGH attempt (atomic) ->
+ *   reload sees HIGH active
  *   => pendingModule.id == HIGH, adaptiveRole == higher_branch
- *   => POST /modules/start { moduleId: HIGH }, never LOW
+ *   => zero POST /modules/start (server-driven, never LOW)
  *   => every rendered question belongs to HIGH, none to LOW
  *   => no render ever pairs new payload data with an old module identity
  */
@@ -97,7 +98,7 @@ function branchModule(
   } as unknown as DeliveredModule;
 }
 
-/** M1 expired on its own clock; HIGH routed but not yet open; LOW attempt-free. */
+/** M1 expired on its own clock; HIGH routed AND activated atomically; LOW attempt-free. */
 function handoffBootstrap(): AssessmentDeliveryBootstrap {
   return {
     scheduleId: "schedule",
@@ -149,7 +150,7 @@ function handoffBootstrap(): AssessmentDeliveryBootstrap {
     ],
     attempt: {
       id: ATTEMPT_ID,
-      moduleAttempts: [expiredAttempt(M1_ID), pendingAttempt(HIGH_ID)],
+      moduleAttempts: [expiredAttempt(M1_ID), activeAttempt(HIGH_ID)],
       responses: [],
     },
     result: null,
@@ -257,14 +258,9 @@ describe("useSatExamController adaptive handoff", () => {
     await waitFor(() => expect(hook.result.current.pendingModule?.id).toBe(HIGH_ID));
     expect(hook.result.current.pendingModule?.adaptiveRole).toBe("higher_branch");
 
-    // Automatic entry posts the HIGH id — never LOW.
-    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
-    expect(gatewayMocks.startModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {
-      moduleId: HIGH_ID,
-    });
-    for (const call of gatewayMocks.startModule.mock.calls) {
-      expect(call[2]).not.toEqual(expect.objectContaining({ moduleId: LOW_ID }));
-    }
+    // Server-driven: zero client mutations for M1→M2 — never LOW, never even HIGH.
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(gatewayMocks.startModule).not.toHaveBeenCalled();
 
     // The committed runner state carries the HIGH identity.
     await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));

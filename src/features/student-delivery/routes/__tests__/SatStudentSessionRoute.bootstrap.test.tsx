@@ -60,7 +60,7 @@ describe("SatStudentSessionRoute bootstrap handoff", () => {
     // … in the SAT skin, with pre-start copy instead of a loading page …
     expect(screen.getByRole("status")).toHaveTextContent("Your session is loading");
     expect(container.querySelector(".sat-ui")).not.toBeNull();
-    expect(screen.getByRole("heading", { name: "Preparing your SAT session" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Loading your SAT session" })).toBeInTheDocument();
     expect(screen.queryByText("Loading Digital SAT…")).not.toBeInTheDocument();
     expect(container.querySelector("[data-sat-loading-kind]")).toBeNull();
     // … and zero admin-skeleton DOM (grey shell + admin copy).

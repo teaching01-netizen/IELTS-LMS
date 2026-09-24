@@ -48,7 +48,6 @@ import {
 } from "../application/satCommitRouting";
 import { createSatFinalizationGate } from "../application/satFinalizationGate";
 import { applyEntryAck, isEntryAck } from "../application/satEntryAck";
-import { hasBackendStatusCode } from "../infrastructure/assessmentDeliveryBackendGateway";
 // Clock + cadence policy (pure): display allotment vs expiry authority, stage
 // readiness, break/wait countdowns, and the recovery-poll cadence.
 import {
@@ -99,45 +98,10 @@ import { deriveSatTemporalSnapshot, type SatTemporalModel } from "../timing/satT
  * revision, and never faster than this. The section advance is system-driven,
  * so it does not ride the parent poll's control-command fast lane, and the
  * student would otherwise sit at 0:00 until that poll's steady cadence fires.
+ * The same break surface stays mounted for the tiny propagation window and is
+ * replaced directly by the next active module when state arrives.
  */
 const SAT_BREAK_END_PULL_WINDOW_MS = 2_000;
-const SAT_PERSONAL_MIN_ENTRY_LEAD_MS = 1_000;
-
-function isDocumentHidden(): boolean {
-  return typeof document !== "undefined" && document.visibilityState === "hidden";
-}
-
-async function waitUntilPersonalStart(startsAt: string, serverOffsetMs: number): Promise<boolean> {
-  const target = Date.parse(startsAt);
-  if (!Number.isFinite(target)) return false;
-  while (target > Date.now() + serverOffsetMs) {
-    if (isDocumentHidden()) return false;
-    await new Promise<void>((resolve) => window.setTimeout(resolve, Math.min(100, target - (Date.now() + serverOffsetMs))));
-  }
-  return !isDocumentHidden();
-}
-
-function waitForPersonalPaintOpportunity(): Promise<boolean> {
-  if (isDocumentHidden()) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    let frame = 0;
-    const finish = (visible: boolean) => {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      if (frame) window.cancelAnimationFrame(frame);
-      resolve(visible);
-    };
-    const onVisibilityChange = () => {
-      if (isDocumentHidden()) finish(false);
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    frame = window.requestAnimationFrame(() => finish(!isDocumentHidden()));
-  });
-}
-
-function personalStartHasFullDisplayedSecond(startsAt: string, serverOffsetMs: number): boolean {
-  const elapsed = Date.now() + serverOffsetMs - Date.parse(startsAt);
-  return Number.isFinite(elapsed) && elapsed >= 0 && elapsed < 1_000 && !isDocumentHidden();
-}
 
 /**
  * The control-epoch fence is optional on the wire: with
@@ -206,11 +170,8 @@ export function useSatExamController({
   const now = Date.now();
   const [, wakeAtTemporalBoundary] = useState(0);
   const timeoutTransitionKeyRef = useRef<string | null>(null);
-  const visibleEntryAckRef = useRef<string | null>(null);
   const [timeoutTransitionKey, setTimeoutTransitionKey] = useState<string | null>(null);
   const [timeoutTransitionStarted, setTimeoutTransitionStarted] = useState(false);
-  const personalBreakEntryRef = useRef<string | null>(null);
-  const visibleBreakAckRef = useRef<string | null>(null);
   // SAT-002: one owner for "which revision may finalize, and is one already
   // running" — the claim / single-flight / release rules live in
   // application/satFinalizationGate.ts and protect the automatic result path.
@@ -279,9 +240,6 @@ export function useSatExamController({
     setTimeoutTransitionKey(null);
     setAnswersRecorded(false);
     timeoutTransitionKeyRef.current = null;
-    visibleEntryAckRef.current = null;
-    personalBreakEntryRef.current = null;
-    visibleBreakAckRef.current = null;
     dataRef.current = null;
     entryAuthorizedAtRef.current = null;
     reportedAnswerableModulesRef.current.clear();
@@ -875,26 +833,6 @@ export function useSatExamController({
         })
       : 0;
 
-  /**
-   * The shared section clock the student is still on while the next module
-   * opens, or null when this frame has no authority to quote one.
-   *
-   * `remainingSeconds` is derived from the ACTIVE module's section, so during a
-   * handoff (no active module) a section-keyed cohort frame resolves it to 0 —
-   * which is why the retained exam frame used to show a dead countdown. The
-   * section clock is the honest number there: it is the clock that governs the
-   * section the student is still inside, and no module clock may be invented for
-   * a module that has not started. Null (never 0) when the published stage names
-   * some other section, so a surface can leave the number out instead of faking
-   * one.
-   */
-  const handoffSeconds =
-    pendingSection && effectiveTiming?.stageKey &&
-    (effectiveTiming.stageKey === pendingSection.sectionKey ||
-      effectiveTiming.stageKey.startsWith(`${pendingSection.sectionKey}:`))
-      ? authoritativeRemainingSeconds
-      : null;
-
   // Keep the predecessor's timeout attribution for the module-advance metric.
   // Routing and automatic entry follow the server's selected next module.
   const previousModuleTimedOut = useMemo(
@@ -909,115 +847,17 @@ export function useSatExamController({
     if (!isEntryAck(response)) return response;
     const merged = applyEntryAck(base, response);
     if (merged) return merged;
-    // A cold or stale local snapshot cannot safely fabricate mutable response
-    // rows. This is recovery, rather than the normal transition path.
     return satDeliveryGateway.bootstrap(scheduleId, attemptId);
   }, [attemptId, scheduleId]);
 
   /**
-   * Asks the server what actually committed before a recovery replays the
-   * transition command.
-   *
-   * A lost Start or Enter response may already have committed. Read the
-   * authoritative row first, resume an entered module, or complete an armed
-   * offer. Only a missing/expired offer needs another Start command. A failed
-   * state read remains retryable instead of blindly replaying a mutation.
+   * Single-operation StartModule: one idempotent mutation that activates
+   * immediately at DB time. The browser renders the exam on this response.
+   * A lost response is safe to retry: already-active returns the same
+   * authoritative state. Later progression (M1→M2, break→next-M1) is
+   * server-driven, so this runs only for the initial Module 1.
    */
-  const recoverCommittedModuleEntry = useCallback(
-    async (generation: number): Promise<SatEntryOutcome | "continue"> => {
-      if (
-        !pendingModule ||
-        !satDeliveryGateway.entryState ||
-        !isSatPersonalTimingModel(data?.timing.timingModel ?? "")
-      ) {
-        return "continue";
-      }
-      let ack: AssessmentModuleEntryStateAck;
-      try {
-        ack = await satDeliveryGateway.entryState(scheduleId, attemptId, pendingModule.id);
-      } catch (readError) {
-        // A missing adaptive row is the one case where StartModule must ask
-        // reconciliation to create the selected branch.
-        return hasBackendStatusCode(readError, 404) ? "continue" : "failed";
-      }
-      if (identityGenerationRef.current !== generation) return "noop";
-      if (ack.entryState === "none") return "continue";
-      const startsAt = ack.entryStartsAt;
-      if (ack.entryState !== "entered" && !startsAt) return "continue";
-      const offset = satClockOffsetMs(ack.serverNow, Date.now());
-      if (ack.entryState === "armed") {
-        const lead = Date.parse(startsAt!) - (Date.now() + offset);
-        if (isDocumentHidden() || !Number.isFinite(lead) || lead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS) {
-          return "continue";
-        }
-      }
-      let response: AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck = ack;
-      if (ack.entryState === "armed") {
-        if (!satDeliveryGateway.enterModule) return "failed";
-        response = await withEntryControlEpoch((epoch) => satDeliveryGateway.enterModule!(scheduleId, attemptId, {
-          moduleId: pendingModule.id,
-          generation: ack.entryGeneration,
-          ...controlEpochField(epoch),
-        }));
-      }
-      if (ack.entryState !== "entered") {
-        const lead = Date.parse(startsAt!) - (Date.now() + offset);
-        if (!Number.isFinite(lead) || lead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS) return "continue";
-        if (!await waitUntilPersonalStart(startsAt!, offset) ||
-            !await waitForPersonalPaintOpportunity() ||
-            !personalStartHasFullDisplayedSecond(startsAt!, offset)) return "continue";
-      }
-      let authoritative = await resolveEntryPayload(data!, response).catch(() => null);
-      if (identityGenerationRef.current !== generation) return "noop";
-      if (!authoritative) return "failed";
-      if (ack.entryState !== "entered") {
-        const serverNow = new Date(Date.now() + offset).toISOString();
-        authoritative = {
-          ...authoritative,
-          serverNow,
-          timing: { ...authoritative.timing, serverNow },
-        };
-      }
-      // Route through the same commit path as a startModule response: this
-      // payload resolved an OPEN module, which is what that hint means. A poll
-      // hint would deliberately ignore it from the directions phase, which is
-      // exactly where a student whose entry committed but never opened is.
-      const activeAttempt = findActiveAttempt(authoritative);
-      const committedModule = moduleForAttempt(authoritative, activeAttempt);
-      if (!committedModule) return "continue";
-      if (!acceptPayloadAndRoute(authoritative, { kind: "startModule", moduleId: committedModule.id })) {
-        return "continue";
-      }
-      if (!dataRef.current || !moduleForAttempt(dataRef.current, findActiveAttempt(dataRef.current))) {
-        return "continue";
-      }
-      // Recovery observability: a stranded student used to look exactly like
-      // one mid-module, so the recovered entry is its own funnel step. It is
-      // reported apart from the timeout/server reasons because nothing about
-      // the transition changed — only the client's knowledge of it.
-      emitStudentObservabilityMetric("sat_module_advance", {
-        reason: "recovered",
-        sectionKey: pendingSection?.sectionKey ?? null,
-        adaptiveRole: pendingModule.adaptiveRole,
-      });
-      return "opened";
-    },
-    [acceptPayloadAndRoute, attemptId, data, pendingModule, pendingSection, resolveEntryPayload, scheduleId, withEntryControlEpoch],
-  );
-
-  /**
-   * Starts the pending module and reports what actually happened:
-   *  - "opened": the module resolved active and the runner routed into it;
-   *  - "noop":   a guard stopped us, or the response did not open the module;
-   *  - "failed": the call rejected (the student-facing error is set here).
-   * Callers use this to decide whether the entry attempt may be retried, so a
-   * failure or an inert response can never be mistaken for a completed entry.
-   *
-   * `recover` marks a retry of a target the client already failed to enter: it
-   * consults the authoritative entry state first instead of replaying the
-   * transition command blind.
-   */
-  const startPendingModule = useCallback(async (options?: { recover?: boolean }): Promise<SatEntryOutcome> => {
+  const startPendingModule = useCallback(async (): Promise<SatEntryOutcome> => {
     if (!data || !pendingModule || isStarting) return "noop";
     const generation = identityGenerationRef.current;
     if (entryAuthorizedAtRef.current?.moduleId !== pendingModule.id) {
@@ -1026,96 +866,13 @@ export function useSatExamController({
     setIsStarting(true);
     setError(null);
     try {
-      if (options?.recover) {
-        const recovered = await recoverCommittedModuleEntry(generation);
-        if (recovered !== "continue") return recovered;
-      }
-      let payload = await resolveEntryPayload(data, await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
+      const payload = await resolveEntryPayload(data, await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
         moduleId: pendingModule.id,
-        // needContent is omitted when false so the wire shape stays
-        // {moduleId} for the common case (backend omitempty treats missing as
-        // false). Only a cold/stale snapshot that lacks the module requests it.
         ...(data.sections.some((section) => section.modules.some((module) => module.id === pendingModule.id)) ? {} : { needContent: true as const }),
         ...controlEpochField(epoch),
       })));
       if (identityGenerationRef.current !== generation) return "noop";
       if (payload.scheduleId !== scheduleId || payload.attempt.id !== attemptId) return "noop";
-      if (isSatPersonalTimingModel(payload.timing.timingModel)) {
-        if (!satDeliveryGateway.enterModule || !satDeliveryGateway.markStageVisible) {
-          throw new Error("Personal SAT entry is unavailable. Refresh and try again.");
-        }
-        let enteredPayload: AssessmentDeliveryBootstrap | null = null;
-        for (let rearm = 0; rearm < 4; rearm += 1) {
-          const offerAttempt = findAttemptForModule(payload, pendingModule.id);
-          const offerGeneration = offerAttempt?.entryGeneration;
-          const startsAt = offerAttempt?.entryStartsAt;
-          if (offerGeneration == null || !startsAt) {
-            throw new Error("The SAT module start offer is incomplete. Refresh and try again.");
-          }
-          const offerReceivedAt = Date.now();
-          const offerOffset = satClockOffsetMs(payload.serverNow, offerReceivedAt);
-          const offerLead = Date.parse(startsAt) - (Date.now() + offerOffset);
-          if (
-            isDocumentHidden() ||
-            !Number.isFinite(offerLead) ||
-            offerLead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS
-          ) {
-            payload = await resolveEntryPayload(payload, await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
-              moduleId: pendingModule.id,
-              generation: offerGeneration,
-              ...controlEpochField(epoch),
-            })));
-            continue;
-          }
-
-          const confirmed = await resolveEntryPayload(payload, await withEntryControlEpoch((epoch) => satDeliveryGateway.enterModule!(scheduleId, attemptId, {
-              moduleId: pendingModule.id,
-              generation: offerGeneration,
-              ...controlEpochField(epoch),
-          })));
-          if (identityGenerationRef.current !== generation) return "noop";
-          if (confirmed.scheduleId !== scheduleId || confirmed.attempt.id !== attemptId) return "noop";
-          const confirmedAt = Date.now();
-          const confirmedOffset = satClockOffsetMs(confirmed.serverNow, confirmedAt);
-          const confirmedLead = Date.parse(startsAt) - (Date.now() + confirmedOffset);
-          if (
-            isDocumentHidden() ||
-            !Number.isFinite(confirmedLead) ||
-            confirmedLead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS
-          ) {
-            payload = await resolveEntryPayload(confirmed, await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
-              moduleId: pendingModule.id,
-              generation: offerGeneration,
-              ...controlEpochField(epoch),
-            })));
-            continue;
-          }
-          const visibleAtStart = await waitUntilPersonalStart(startsAt, confirmedOffset);
-          if (
-            !visibleAtStart ||
-            !await waitForPersonalPaintOpportunity() ||
-            !personalStartHasFullDisplayedSecond(startsAt, confirmedOffset)
-          ) {
-            payload = await resolveEntryPayload(confirmed, await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
-              moduleId: pendingModule.id,
-              generation: offerGeneration,
-              ...controlEpochField(epoch),
-            })));
-            continue;
-          }
-          const estimatedServerNow = new Date(Date.now() + confirmedOffset).toISOString();
-          enteredPayload = {
-            ...confirmed,
-            serverNow: estimatedServerNow,
-            timing: { ...confirmed.timing, serverNow: estimatedServerNow },
-          };
-          break;
-        }
-        if (!enteredPayload) {
-          throw new Error("The SAT module could not be prepared. Ask the proctor to re-arm it.");
-        }
-        payload = enteredPayload;
-      }
       // SAT-005: one monotonic commit path. The startModule hint commits the
       // data and dispatches the routeToModule action atomically; a stale or
       // otherwise rejected payload reports "noop" and stays retryable.
@@ -1172,117 +929,14 @@ export function useSatExamController({
     pendingModule,
     pendingSection,
     previousModuleTimedOut,
-    recoverCommittedModuleEntry,
     resolveEntryPayload,
     scheduleId,
     withEntryControlEpoch,
   ]);
 
-  const startPersonalBreak = useCallback(async (): Promise<void> => {
-    if (
-      !personalBreak ||
-      personalBreak.state === "active" ||
-      personalBreak.state === "completed" ||
-      !satDeliveryGateway.startBreak ||
-      !satDeliveryGateway.enterBreak ||
-      isStarting
-    ) return;
-    const generationAtCall = identityGenerationRef.current;
-    setIsStarting(true);
-    setError(null);
-    try {
-      let offerPayload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startBreak!(scheduleId, attemptId, personalBreak.id, {
-        breakId: personalBreak.id,
-        generation: personalBreak.entryGeneration,
-        ...controlEpochField(epoch),
-      }));
-      let acceptedPayload: AssessmentDeliveryBootstrap | null = null;
-      for (let rearm = 0; rearm < 4; rearm += 1) {
-        if (identityGenerationRef.current !== generationAtCall) return;
-        const offer = offerPayload.attempt.personalBreaks?.find((item) => item.id === personalBreak.id);
-        if (!offer || offer.entryGeneration <= 0 || !offer.entryStartsAt) {
-          throw new Error("The scheduled break offer is incomplete. Refresh and try again.");
-        }
-        if (offer.state === "active" && offer.startsAt) {
-          acceptedPayload = offerPayload;
-          break;
-        }
-        if (isDocumentHidden()) return;
-        const offerReceivedAt = Date.now();
-        const offerOffset = satClockOffsetMs(offerPayload.serverNow, offerReceivedAt);
-        const lead = Date.parse(offer.entryStartsAt) - (Date.now() + offerOffset);
-        if (!Number.isFinite(lead) || lead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS) {
-          offerPayload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startBreak!(scheduleId, attemptId, personalBreak.id, {
-            breakId: personalBreak.id,
-            generation: offer.entryGeneration,
-            ...controlEpochField(epoch),
-          }));
-          continue;
-        }
-        const confirmed = await withEntryControlEpoch((epoch) => satDeliveryGateway.enterBreak!(scheduleId, attemptId, {
-          breakId: personalBreak.id,
-          generation: offer.entryGeneration,
-          ...controlEpochField(epoch),
-        }));
-        if (identityGenerationRef.current !== generationAtCall) return;
-        const confirmedAt = Date.now();
-        const confirmedOffset = satClockOffsetMs(confirmed.serverNow, confirmedAt);
-        const confirmedBreak = confirmed.attempt.personalBreaks?.find((item) => item.id === personalBreak.id);
-        const confirmedLead = Date.parse(offer.entryStartsAt) - (Date.now() + confirmedOffset);
-        if (
-          !confirmedBreak ||
-          isDocumentHidden() ||
-          !Number.isFinite(confirmedLead) ||
-          confirmedLead < SAT_PERSONAL_MIN_ENTRY_LEAD_MS
-        ) {
-          offerPayload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startBreak!(scheduleId, attemptId, personalBreak.id, {
-            breakId: personalBreak.id,
-            generation: offer.entryGeneration,
-            ...controlEpochField(epoch),
-          }));
-          continue;
-        }
-        if (!await waitUntilPersonalStart(offer.entryStartsAt, confirmedOffset)) {
-          // Keep the break unentered while hidden. The next visible retry
-          // reuses the offer or rearms it if its start was missed.
-          return;
-        }
-        if (
-          !await waitForPersonalPaintOpportunity() ||
-          !personalStartHasFullDisplayedSecond(offer.entryStartsAt, confirmedOffset)
-        ) {
-          offerPayload = await withEntryControlEpoch((epoch) => satDeliveryGateway.startBreak!(scheduleId, attemptId, personalBreak.id, {
-            breakId: personalBreak.id,
-            generation: offer.entryGeneration,
-            ...controlEpochField(epoch),
-          }));
-          continue;
-        }
-        const estimatedServerNow = new Date(Date.now() + confirmedOffset).toISOString();
-        acceptedPayload = {
-          ...confirmed,
-          serverNow: estimatedServerNow,
-          timing: { ...confirmed.timing, serverNow: estimatedServerNow },
-        };
-        break;
-      }
-      if (!acceptedPayload) throw new Error("The scheduled break could not be prepared. Ask the proctor to re-arm it.");
-      acceptPayloadAndRoute(acceptedPayload, { kind: "poll" });
-    } catch (breakError) {
-      if (identityGenerationRef.current === generationAtCall) {
-        setError(breakError instanceof Error ? breakError.message : "The scheduled break could not be started.");
-      }
-    } finally {
-      if (identityGenerationRef.current === generationAtCall) setIsStarting(false);
-    }
-  }, [acceptPayloadAndRoute, attemptId, isStarting, personalBreak, scheduleId, withEntryControlEpoch]);
-
-  useEffect(() => {
-    if (!data || !isSatPersonalTimingModel(data.timing.timingModel)) return;
-    if (state.phase !== "directions" && state.phase !== "break") return;
-    if (!personalBreak || personalBreak.state === "active" || personalBreak.state === "completed") return;
-    void startPersonalBreak();
-  }, [data, personalBreak, startPersonalBreak, state.phase]);
+  // Server-driven break lifecycle: the server starts the scheduled break at
+  // section finalization and activates the next-section Module 1 at break
+  // expiry. The client renders authoritative state only (zero mutations).
 
   // Phase 3 (client-forced break end): once the authoritative break has run
   // out, pull the advanced projection ourselves instead of waiting out the
@@ -1304,10 +958,11 @@ export function useSatExamController({
     phase: state.phase,
   });
 
-  // Phase 4: the entry surface is what the student sees when the break
-  // countdown has run out but the module has not opened — recovery state for
-  // the surfaces, never a silent 0:00.
-  const entrySurface = useSatModuleEntry({
+  // Initial Module 1 entry only (the proctor's Start). Later progression
+  // (M1→M2, break→next-M1) is server-driven; the client renders authoritative
+  // state. Transient failures keep the waiting room mounted and retry with
+  // jitter behind it.
+  useSatModuleEntry({
     identity: identityKey,
     enabled: entryDecision.shouldStart,
     entryKey: pendingModule ? `${attemptId}:${pendingModule.id}` : null,
@@ -1461,121 +1116,9 @@ export function useSatExamController({
     [data, stateModule]
   );
 
-  // A personal offer is marked entered only after the active module has had a
-  // paint opportunity. This acknowledgment closes the server's rearm window;
-  // it never moves the authoritative deadline.
-  useEffect(() => {
-    const generation = stateModuleAttempt?.entryGeneration;
-    if (
-      !data ||
-      !isSatPersonalTimingModel(data.timing.timingModel) ||
-      state.phase !== "module" ||
-      !stateModule ||
-      generation == null ||
-      !stateModuleAttempt?.startedAt ||
-      stateModuleAttempt.entryEnteredAt ||
-      stateModuleAttempt.pausedAt
-    ) return;
-    const key = `${attemptId}:${stateModule.id}:${generation}`;
-    if (visibleEntryAckRef.current === key) return;
-    let cancelled = false;
-    let frame = 0;
-    let retryTimer: number | null = null;
-    const scheduleAckAfterPaint = () => {
-      if (cancelled || document.visibilityState === "hidden" || frame !== 0) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        if (cancelled || document.visibilityState === "hidden") return;
-        visibleEntryAckRef.current = key;
-        if (!satDeliveryGateway.markStageVisible) return;
-        // The acknowledgment answers with a compact ack, not an attempt
-        // projection: the candidate is already looking at the module by the
-        // time it fires, so there is nothing left to route here. The projection
-        // that used to ride along was a second full bootstrap for a one-row
-        // write (plan 2026-09-24, entry reliability).
-        void withEntryControlEpoch((epoch) => satDeliveryGateway.markStageVisible!(scheduleId, attemptId, {
-          moduleId: stateModule.id,
-          generation,
-          ...controlEpochField(epoch),
-        })).then((ack) => {
-          if (cancelled || ack?.acknowledged) return;
-          if (visibleEntryAckRef.current === key) visibleEntryAckRef.current = null;
-          retryTimer = window.setTimeout(scheduleAckAfterPaint, 500 + Math.random() * 500);
-        }).catch(() => {
-          if (visibleEntryAckRef.current === key) visibleEntryAckRef.current = null;
-          if (!cancelled) {
-            retryTimer = window.setTimeout(scheduleAckAfterPaint, 500 + Math.random() * 500);
-          }
-        });
-      });
-    };
-    scheduleAckAfterPaint();
-    document.addEventListener("visibilitychange", scheduleAckAfterPaint);
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", scheduleAckAfterPaint);
-      if (frame !== 0) window.cancelAnimationFrame(frame);
-      if (retryTimer !== null) window.clearTimeout(retryTimer);
-    };
-  }, [
-    attemptId,
-    data,
-    renderIdentityGeneration,
-    scheduleId,
-    state.phase,
-    stateModule,
-    stateModuleAttempt,
-    withEntryControlEpoch,
-  ]);
-
-  // The acknowledgment means "the candidate has seen the break's first ACTIVE
-  // frame", so it cannot precede the break's own start. `pendingBreakSeconds` is
-  // exactly that clock (the server's start is in the past and the deadline is
-  // counting), so acknowledging earlier would close the server's re-arm window
-  // while the candidate is still on the pre-start surface — the module path is
-  // gated the same way, by its phase.
-  useEffect(() => {
-    if (
-      !data ||
-      !isSatPersonalTimingModel(data.timing.timingModel) ||
-      !personalBreak ||
-      personalBreak.state !== "active" ||
-      !personalBreak.startsAt ||
-      personalBreak.entryEnteredAt ||
-      pendingBreakSeconds <= 0 ||
-      !satDeliveryGateway.markBreakVisible
-    ) return;
-    const key = `${attemptId}:${personalBreak.id}:${personalBreak.entryGeneration}`;
-    if (visibleBreakAckRef.current === key) return;
-    let cancelled = false;
-    let frame = 0;
-    const scheduleAckAfterPaint = () => {
-      if (cancelled || document.visibilityState === "hidden" || frame !== 0) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        if (cancelled || document.visibilityState === "hidden") return;
-        visibleBreakAckRef.current = key;
-        void withEntryControlEpoch((epoch) => satDeliveryGateway.markBreakVisible!(scheduleId, attemptId, {
-          breakId: personalBreak.id,
-          generation: personalBreak.entryGeneration,
-          ...controlEpochField(epoch),
-        })).then((payload) => {
-          if (!cancelled && identityGenerationRef.current === renderIdentityGeneration) {
-            acceptPayloadAndRoute(payload, { kind: "poll" });
-          }
-        }).catch(() => {
-          if (visibleBreakAckRef.current === key) visibleBreakAckRef.current = null;
-        });
-      });
-    };
-    scheduleAckAfterPaint();
-    document.addEventListener("visibilitychange", scheduleAckAfterPaint);
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", scheduleAckAfterPaint);
-      if (frame !== 0) window.cancelAnimationFrame(frame);
-    };
-  }, [acceptPayloadAndRoute, attemptId, data, pendingBreakSeconds, personalBreak, renderIdentityGeneration, scheduleId, withEntryControlEpoch]);
+  // Single-op entry needs no paint acknowledgment: started_at = DB NOW is the
+  // authoritative deadline the moment StartModule commits. Reloads resume it
+  // via bootstrap/state; no enter/visible handshake remains.
 
   const stateSection = useMemo(() => {
     if (!data || !stateModule) return null;
@@ -2001,16 +1544,9 @@ export function useSatExamController({
     pendingModule,
     pendingModuleWindow,
     pendingBreakSeconds,
-    personalBreakStarting: Boolean(personalBreak && personalBreak.state !== "active" && state.phase !== "module" && state.phase !== "review" && isStarting),
     pendingSectionWaitSeconds,
-    handoffSeconds,
     pendingStageReady,
-    autoEntryRecoverable: entrySurface.recoverable,
-    retryModuleEntry: entrySurface.retry,
     entryReason: entryDecision.reason,
-    // True while the automatic entry path owns the pending module; the
-    // directions screen keeps its Start button recovery-only only then, so a
-    // branch module nobody will auto-start keeps a working button.
     entryAutoStartPending: entryDecision.autoStartPending,
     effectiveTiming,
     temporalModel,

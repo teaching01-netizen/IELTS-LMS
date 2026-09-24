@@ -16,7 +16,6 @@ import type { StudentAttempt } from "../../../types/studentAttempt";
 import type { SatBootstrapSeed } from "../bootstrap/satBootstrapSeed";
 import { useSatExamController } from "../hooks/useSatExamController";
 import { useSatReadingPreferences } from "../hooks/useSatReadingPreferences";
-import { useSatEntryTransitionHold } from "../hooks/useSatEntryTransitionHold";
 import {
   deriveSatStudentStage,
   type SatExamStage,
@@ -49,8 +48,6 @@ import { SatScheduledBreakScreen } from "../ui/break/SatScheduledBreakScreen";
 import { SatPresenceSurface } from "../ui/motion/SatPresenceSurface";
 import { SatStudentStageHost } from "../ui/stage/SatStudentStageHost";
 import { SatCompleteScreen, SatTerminatedScreen } from "../ui/transitions/SatCompleteScreen";
-import { SatEntryRecoveryScreen } from "../ui/transitions/SatEntryRecoveryScreen";
-import { SatModuleHandoffStatus } from "../ui/transitions/SatModuleHandoffStatus";
 import { SatPreStartScreen } from "../ui/transitions/SatPreStartScreen";
 import { useStudentExamPageLock } from "@components/student/layout/useStudentExamPageLock";
 import { useStudentExamViewport } from "@components/student/layout/useStudentExamViewport";
@@ -169,19 +166,6 @@ export function SatStudentSessionRoute({
       pendingSection?.displayOrder === 0 &&
       data.attempt.moduleAttempts.every((moduleAttempt) => moduleAttempt.state === "not_started"),
   );
-  /**
-   * Arms the bounded entry-hold window for the pending module.
-   *
-   * It is what a student WITHOUT a retained frame waits out — a reload that
-   * lands mid-handoff shows "restoring" and only escalates to the recovery
-   * surface after this window; with a frame in hand, the handoff status owns
-   * the moment instead and the window is never consulted.
-   */
-  const entryTransitionKey =
-    state.phase === "directions" && exam.pendingModule
-      ? `${identityKey}:${exam.pendingModule.id}`
-      : null;
-  const entryHoldExpired = useSatEntryTransitionHold(entryTransitionKey);
   const screenZoomDecided =
     screenZoomDecidedFor === identityKey || screenZoomDecisionStored;
   const prevIdentityKeyRef = useRef<string | null>(null);
@@ -290,10 +274,6 @@ export function SatStudentSessionRoute({
     (data?.attempt.moduleAttempts.every(
       (moduleAttempt) => moduleAttempt.state === "submitted" || moduleAttempt.state === "locked",
     ) ?? false);
-  const entryBlocked =
-    exam.entryReason === "runtime-not-live" ||
-    exam.entryReason === "proctor-blocked" ||
-    exam.entryReason === "stage-not-ready";
   const stage = deriveSatStudentStage({
     runnerPhase: state.phase,
     hasData: Boolean(data),
@@ -311,12 +291,7 @@ export function SatStudentSessionRoute({
             title: studentModuleTitle(exam.pendingModule),
             sectionKey:
               pendingSection.sectionKey === "math" ? "math" : "reading-writing",
-            // Structural, never ordinal: the module immediately before this one
-            // in exam order decides whether the student is crossing a section.
             startsNewSection: moduleStartsNewSection(data, exam.pendingModule.id),
-            // A section boundary is only a break before the server starts this
-            // module. Reopening after another tab has started it must show the
-            // current module instead of a stale break surface.
             started: Boolean(
               data.attempt.moduleAttempts.find(
                 (moduleAttempt) => moduleAttempt.moduleId === exam.pendingModule?.id,
@@ -328,13 +303,8 @@ export function SatStudentSessionRoute({
     frameFresh: heldFrameFresh,
     moduleResolved: Boolean(exam.stateModule && exam.stateModuleAttempt && exam.stateSection),
     moduleQuestionResolved: state.phase !== "module" || (liveQuestion !== null && liveQuestionId !== null),
-    entryRecoverable: exam.autoEntryRecoverable,
-    entryBlocked,
-    entryHoldExpired,
     pendingBreakSeconds: exam.pendingBreakSeconds,
-    personalBreakStarting: exam.personalBreakStarting,
     pendingSectionWaitSeconds: exam.pendingSectionWaitSeconds,
-    entryInFlight: exam.isStarting,
     attemptKey: identityKey,
   });
 
@@ -521,15 +491,14 @@ export function SatStudentSessionRoute({
   }
 
   if (stage.kind === "scheduled-break") {
-    // One break surface for all three phases: the stage key is the boundary, so
-    // waiting → on break → opening next section never remounts the card.
+    // One break surface: the same card stays mounted until the next active
+    // module replaces it — never "Opening Math…".
     return stageHost(
       stage,
       <SatScheduledBreakScreen
         phase={stage.phase}
         nextSectionKey={stage.nextSectionKey}
         remainingSeconds={stage.remainingSeconds}
-        entryProgress={stage.entryProgress}
       />,
     );
   }
@@ -543,19 +512,6 @@ export function SatStudentSessionRoute({
           runtimeStatus={data.scheduleRuntimeStatus}
           proctorStatus={data.proctorStatus}
           stageReady={exam.pendingStageReady}
-        />,
-      ),
-    );
-  }
-
-  if (stage.kind === "entry-recovery") {
-    return stageHost(
-      stage,
-      withCalculatorHost(
-        <SatEntryRecoveryScreen
-          module={exam.pendingModule}
-          isRetrying={exam.isStarting}
-          onRetry={exam.retryModuleEntry}
         />,
       ),
     );
@@ -588,29 +544,20 @@ export function SatStudentSessionRoute({
   /* ------------------------------------------------------------------ *
    * The exam stage
    *
-   * One stage for the whole attempt. Its contents below are: the live frame,
-   * the bounded skew hold, the bare refresh fallback, and the module handoff —
-   * which keeps the finished frame exactly where it is and adds one live status
-   * card beside it.
+   * One stage for the whole attempt. Its contents are the live frame, the
+   * bounded skew hold (previous frame held internally while state catches
+   * up — never a student-facing screen), and the bare refresh fallback.
+   * M1→M2 is server-activated: the client swaps M1 UI → M2 UI directly.
    * ------------------------------------------------------------------ */
   const retainedFrame = heldFrame;
   const refreshFallback = (
-    // Phase 03 bare-branch rule: transient skew shows the loader only — the
-    // warm tree remounts once the module resolves (no prewarm here). The
-    // fallback renders BARE (no withCalculatorHost) per the Phase 01/03
-    // single-surface contract: exactly one role=status, no hidden Desmos iframes.
     <SatLoadingSurface kind="module-refresh" label="Refreshing SAT module…" />
   );
   if (examStage.content !== "live") {
-    // A frame that vanished between the stage decision and here is a resolution
-    // failure, and the refresh fallback is the same answer as a stale hold —
-    // never a handoff over nothing.
     if (!retainedFrame || examStage.content === "refreshing") {
       return stageHost(examStage, refreshFallback);
     }
     if (examStage.content === "skew-hold") {
-      // Interactive on purpose (Phase 04): a live answer dispatch wins, and the
-      // next resolved render replaces the cache.
       return stageHost(examStage, [
         <SatPresenceSurface
           key="sat-exam-frame"
@@ -620,41 +567,6 @@ export function SatStudentSessionRoute({
         >
           {retainedFrame.element}
         </SatPresenceSurface>,
-      ]);
-    }
-    if (examStage.content === "opening") {
-      /**
-       * The module handoff, inside the exam.
-       *
-       * Position 0 is the same `SatPresenceSurface` the live frame renders, with
-       * the same retained element as its child, so React reconciles the frame
-       * instead of remounting it: the shell, its DOM, its tool hosts and its zoom
-       * plane never leave. Position 1 is the live status card — a SIBLING of the
-       * hidden frame, never inside it, so an assistive-tech student hears exactly
-       * the one thing that changed. `data-sat-transition-hold` keeps its existing
-       * meaning for keyboard guards and e2e.
-       */
-      return stageHost(examStage, [
-        // SAME key and same position as the live frame below: React reconciles
-        // the frame instead of remounting it, which is the whole point of the
-        // handoff. Keying it differently here is what a handoff cannot afford.
-        <SatPresenceSurface
-          key="sat-exam-frame"
-          className="sat-ui min-h-[100dvh] min-w-0"
-          data-sat-student-frame
-          data-sat-transition-hold="true"
-          aria-hidden="true"
-          inert
-        >
-          {retainedFrame.element}
-        </SatPresenceSurface>,
-        <SatModuleHandoffStatus
-          key="sat-module-handoff"
-          moduleTitle={examStage.pendingModuleTitle ?? "the next module"}
-          retrying={exam.autoEntryRecoverable}
-          remainingSeconds={exam.handoffSeconds ?? null}
-          onRetry={exam.retryModuleEntry}
-        />,
       ]);
     }
     return assertNever(examStage.content);

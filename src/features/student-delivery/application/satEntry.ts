@@ -161,11 +161,12 @@ function waiting(reason: SatEntryReason): SatEntryDecision {
 }
 
 /**
- * The one decision both entry paths read. Section 0 is the first module (it
- * opens when the proctor starts the runtime); a later section only opens once
- * the authoritative break and the previous section's clock are both over. A
- * branch module is selected by the server and opens automatically once its
- * unstarted attempt exists.
+ * The one decision the initial entry path reads. Only Section 0's first module
+ * (the proctor's Start) is client-started: it opens when the proctor starts
+ * the runtime, via one idempotent StartModule. All later progression (M1→M2,
+ * break→next-M1) is server-driven — the server activates the next module
+ * atomically and the client renders authoritative state — so this never
+ * returns shouldStart for branches or later sections.
  */
 export function deriveSatEntryDecision({
   data,
@@ -196,9 +197,6 @@ export function deriveSatEntryDecision({
   );
   const isBranch = module.adaptiveRole !== "base";
 
-  // Section 0's first module keeps its own rule, still checked before the break
-  // gates: only the directions screen opens it, and only while nothing in the
-  // attempt has started (the backend seeds just the entry module row).
   if (sectionDisplayOrder === 0 && !isBranch) {
     if (phase !== "directions") return waiting("initial-entry-not-on-directions");
     return data.attempt.moduleAttempts.every(isUnstartedAttempt)
@@ -209,11 +207,16 @@ export function deriveSatEntryDecision({
   if (breakSeconds > 0) return waiting("break-active");
   if (sectionWaitSeconds > 0) return waiting("section-wait");
 
+  // Personal (sat_personal_v1) is server-driven beyond the initial module:
+  // M1→M2 and break→next-M1 activate atomically server-side, so the client
+  // waits for authoritative state instead of negotiating entry. Cohort/legacy
+  // models still enter branches and later sections via client StartModule.
+  const personal = (data.timing as { timingModel?: string } | null)?.timingModel === "sat_personal_v1";
+  if (personal) {
+    return waiting("already-started");
+  }
+
   if (isBranch) {
-    // Module 2 of a section. The rows exist only because the server already
-    // scored Module 1 and wrote its routing decision in the same transaction
-    // that created this one, so there is nothing left to decide here — the only
-    // question is who opens it.
     if (!attempt || !isUnstartedAttempt(attempt)) return waiting("already-started");
     return { shouldStart: true, reason: "next-module-entry", autoStartPending: true };
   }

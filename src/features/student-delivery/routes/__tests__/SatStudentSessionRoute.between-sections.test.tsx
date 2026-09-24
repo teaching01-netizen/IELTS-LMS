@@ -417,30 +417,22 @@ describe("SatStudentSessionRoute between-sections window", () => {
     expect(screen.queryByText("Scheduled break")).not.toBeInTheDocument();
   });
 
-  // Phase 4 (kill the silent 0:00): the countdown reaches zero while the server
-  // is still advancing the section. The surface must name the entry progress
-  // instead of freezing at 0:00 with no explanation and no path forward.
-  it("explains the run-out break with the entry progress, not a frozen 0:00", () => {
+  // At 0:00 the same break surface stays mounted for the tiny propagation
+  // window and is replaced directly by Math Module 1 when state arrives —
+  // never "Opening Math…".
+  it("holds the same break surface at 0:00 with no opening copy", () => {
     renderRoute(
       mathData(),
       { breakSeconds: 0, waitSeconds: 0 },
-      { phase: "break", autoEntryRecoverable: true },
+      { phase: "break" },
     );
 
+    expect(screen.getByTestId("sat-scheduled-break")).toBeInTheDocument();
     expect(screen.queryByRole("timer")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Still opening Math/ })).toBeInTheDocument();
-    expect(screen.getByText(/saved answers are safe/)).toBeInTheDocument();
-    // The recovery path stays named. No button: entry is automatic, and only
-    // the preview route passes an advance handler.
+    expect(screen.getByRole("heading", { name: "Take a short break." })).toBeInTheDocument();
+    expect(screen.queryByText(/Opening Math/)).toBeNull();
+    expect(screen.queryByText(/Still opening/)).toBeNull();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    expect(screen.queryByText("Scheduled break")).not.toBeInTheDocument();
-  });
-
-  it("announces the entry attempt while it is still in flight", () => {
-    renderRoute(mathData(), { breakSeconds: 0, waitSeconds: 0 }, { phase: "break", isStarting: true });
-
-    expect(screen.getByRole("heading", { name: "Opening Math…" })).toBeInTheDocument();
-    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
   });
 
   it("keeps one scheduled-break surface mounted through waiting, break, and opening", () => {
@@ -475,8 +467,12 @@ describe("SatStudentSessionRoute module advance", () => {
       { breakSeconds: 0, waitSeconds: 0 },
     );
 
-    expect(screen.getByRole("heading", { name: "Preparing your exam" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Begin module/i })).not.toBeInTheDocument();
+    // Server-driven M1→M2: no directions, no opening, no recovery — the waiting
+    // room holds transiently (or the skew-hold with a frame) until the active
+    // Module 2 replaces it.
     expect(screen.queryByText(/Module directions/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Begin module/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Opening/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Retry now/ })).toBeNull();
   });
 });

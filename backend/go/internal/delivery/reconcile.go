@@ -157,6 +157,36 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			} else if n > 0 {
 				changed = true
 			}
+			// Server-driven break→next-section (product contract 2026-09-24):
+			// once no break remains pending, activate the waiting next-section
+			// Module 1 whose available_at has arrived. The client renders
+			// authoritative state only (BREAK → EXAM swap, zero mutations).
+			// The initial Module 1 is seeded without available_at, so this
+			// never steals the one client StartModule.
+			var pendingBreak bool
+			if err := t.QueryRowContext(ctx,
+				"SELECT EXISTS(SELECT 1 FROM assessment_attempt_breaks WHERE attempt_id = ? AND state <> 'completed')",
+				attemptID).Scan(&pendingBreak); err != nil {
+				return err
+			}
+			if !pendingBreak {
+				ares, err := t.ExecContext(ctx, `
+					UPDATE assessment_module_attempts
+					SET state = 'active', started_at = UTC_TIMESTAMP(6),
+					    available_at = COALESCE(available_at, UTC_TIMESTAMP(6)),
+					    paused_at = NULL, revision = revision + 1
+					WHERE attempt_id = ? AND state = 'not_started'
+					  AND available_at IS NOT NULL AND available_at <= UTC_TIMESTAMP(6)
+					ORDER BY created_at, id LIMIT 1`, attemptID)
+				if err != nil {
+					return err
+				}
+				if an, err := ares.RowsAffected(); err != nil {
+					return err
+				} else if an > 0 {
+					changed = true
+				}
+			}
 		}
 		for i := 0; i < reconcileCap; i++ {
 			mod, err := lockReconcileRowTx(ctx, t, attemptID)
@@ -413,6 +443,50 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 		if count < int(limit) {
 			break
 		}
+	}
+	// Server-driven break→next-section: attempts waiting on an expired ACTIVE
+	// break have no expired ACTIVE module, so the module scan above never finds
+	// them. Pick them up here so break completion + next-M1 activation runs on
+	// the short-cadence worker lane (zero client mutations).
+	if len(candidates) < personalTimeoutSweepLimit {
+		seen := make(map[string]struct{}, len(candidates))
+		for _, c := range candidates {
+			seen[c.attemptID] = struct{}{}
+		}
+		brows, berr := s.db.QueryContext(ctx, `
+			SELECT b.id, a.id, a.schedule_id
+			FROM assessment_attempt_breaks b
+			JOIN student_attempts a ON a.id = b.attempt_id
+			JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
+			WHERE b.state = 'active' AND b.paused_at IS NULL
+			  AND b.deadline_at IS NOT NULL AND b.deadline_at <= ?
+			  AND r.timing_model = 'sat_personal_v1'
+			  AND a.submitted_at IS NULL
+			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			ORDER BY b.id LIMIT 250`, asOf.UTC())
+		if berr != nil {
+			return 0, 0, berr
+		}
+		for brows.Next() {
+			var c candidate
+			if err := brows.Scan(&c.moduleID, &c.attemptID, &c.scheduleID); err != nil {
+				brows.Close()
+				return 0, 0, err
+			}
+			if _, dup := seen[c.attemptID]; dup {
+				continue
+			}
+			seen[c.attemptID] = struct{}{}
+			candidates = append(candidates, c)
+			if len(candidates) >= personalTimeoutSweepLimit {
+				break
+			}
+		}
+		if err := brows.Err(); err != nil {
+			brows.Close()
+			return 0, 0, err
+		}
+		brows.Close()
 	}
 	if len(candidates) == 0 {
 		return 0, 0, nil
