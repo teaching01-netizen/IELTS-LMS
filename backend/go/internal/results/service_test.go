@@ -161,9 +161,9 @@ func TestListSATAttemptsPagesAndIncludesAttemptWithoutResult(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM student_attempts a")).WithArgs("exam-1", "schedule-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(51))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, COALESCE(ar.outcome_status, 'unscored')")).WithArgs("exam-1", "schedule-1", 50, 50).WillReturnRows(sqlmock.NewRows([]string{
-		"result_id", "attempt_id", "outcome_status", "release_status", "total_score", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at",
-	}).AddRow(nil, "attempt-51", "unscored", "", nil, "schedule-1", "exam-1", "SAT", 20, "student-51", "Student 51", nil, "Cohort", nil, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored')")).WithArgs("exam-1", "schedule-1", 50, 50).WillReturnRows(sqlmock.NewRows([]string{
+		"result_id", "attempt_id", "attempt_status", "outcome_status", "release_status", "total_score", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at",
+	}).AddRow(nil, "attempt-51", "running", "unscored", "", nil, "schedule-1", "exam-1", "SAT", 20, "student-51", "Student 51", nil, "Cohort", nil, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)))
 	page, err := NewService(db).ListSATAttempts(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1", 50, 50, "", "all")
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestListSATAttemptsPagesAndIncludesAttemptWithoutResult(t *testing.T) {
 	if page.Total != 51 || page.Offset != 50 || page.HasMore {
 		t.Fatalf("unexpected page metadata: %#v", page)
 	}
-	if len(page.Items) != 1 || page.Items[0].ResultID != nil || page.Items[0].Outcome != "unscored" || page.Items[0].VersionNumber != 20 {
+	if len(page.Items) != 1 || page.Items[0].ResultID != nil || page.Items[0].Outcome != "unscored" || page.Items[0].AttemptStatus != "running" || page.Items[0].VersionNumber != 20 {
 		t.Fatalf("unscored administered attempt should remain visible with its attempt version: %#v", page.Items)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

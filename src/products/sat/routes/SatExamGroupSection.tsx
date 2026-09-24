@@ -20,6 +20,17 @@ export function outcomeLabel(outcomeStatus: string): string {
   }
 }
 
+function attemptLabel(attempt: SatAttemptRow): string {
+  if (attempt.outcomeStatus !== 'unscored') return outcomeLabel(attempt.outcomeStatus);
+  switch (attempt.attemptStatus) {
+    case 'running': return 'In progress · view answers';
+    case 'submitted': return 'Submitted · scoring pending';
+    case 'terminated': return 'Ended by proctor · not scored';
+    case 'locked': return 'Ended · not scored';
+    default: return 'Not scored · view saved answers';
+  }
+}
+
 export function versionLineFor(versions: number[]): string | null {
   if (versions.length === 0) return null;
   const first = versions[0];
@@ -131,11 +142,10 @@ export function SatExamAttemptRow({
 }: {
   attempt: SatAttemptRow;
   attemptIndex: number;
-  onOpen: (resultId: string) => void;
+  onOpen: (attempt: SatAttemptRow) => void;
 }) {
-  const canOpen = Boolean(attempt.resultId);
   return (
-    <SatListRow index={Math.min(attemptIndex, 5)} onOpen={() => { if (attempt.resultId) onOpen(attempt.resultId); }} disabled={!canOpen}>
+    <SatListRow index={Math.min(attemptIndex, 5)} onOpen={() => onOpen(attempt)}>
       <span className="flex w-full items-center gap-4 py-3">
         <span className="min-w-0 flex-1">
           {/* Density ladder: Results names at 13px + 17px score; Library titles sit at 14px. */}
@@ -145,9 +155,9 @@ export function SatExamAttemptRow({
         </span>
         <span className="shrink-0 text-right">
           <span className="block text-[17px] font-semibold tabular-nums tracking-[-0.025em] text-slate-900">{attempt.outcomeStatus === 'scored' && attempt.totalScore != null ? attempt.totalScore : '—'}</span>
-          <span className="mt-1.5 flex justify-end"><SatStatusPill tone={satOutcomeTone(attempt.outcomeStatus)}>{outcomeLabel(attempt.outcomeStatus)}</SatStatusPill></span>
+          <span className="mt-1.5 flex justify-end"><SatStatusPill tone={satOutcomeTone(attempt.outcomeStatus)}>{attemptLabel(attempt)}</SatStatusPill></span>
         </span>
-        {canOpen ? <ArrowRight size={15} className="sat-row-chevron hidden shrink-0 text-slate-400 group-hover:text-slate-500 sm:block" aria-hidden="true" /> : <span className="hidden shrink-0 text-[10px] text-slate-400 sm:block">Not available</span>}
+        <ArrowRight size={15} className="sat-row-chevron hidden shrink-0 text-slate-400 group-hover:text-slate-500 sm:block" aria-hidden="true" />
       </span>
     </SatListRow>
   );

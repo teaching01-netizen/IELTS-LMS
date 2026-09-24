@@ -24,6 +24,7 @@ export interface SatAccessGroupSummary {
 export interface SatAttemptRow extends Omit<SatResultSummary, 'id' | 'submissionId' | 'scoreKind'> {
   resultId: string | null;
   attemptId: string;
+  attemptStatus?: string;
 }
 
 export interface SatAttemptPage {
@@ -94,11 +95,36 @@ export interface SatResultDetail {
   questions: SatQuestionResult[];
 }
 
+export interface SatAttemptAnswer {
+  questionId: string;
+  sectionKey: string;
+  moduleKey: string;
+  displayOrder: number;
+  response: unknown;
+  markedForReview: boolean;
+}
+
+export interface SatAttemptAnswers {
+  attemptId: string;
+  examTitle: string;
+  versionNumber: number;
+  studentId: string;
+  studentName: string;
+  cohortName: string;
+  status: string;
+  protocolVersion: number;
+  responseRevision: number | null;
+  savedAnswerCount: number;
+  lastSavedAt: string | null;
+  questions: SatAttemptAnswer[];
+}
+
 export const satResultKeys = {
   all: ['sat-results'] as const,
   list: () => [...satResultKeys.all, 'list'] as const,
   attempts: (examId: string, scheduleId: string, offset: number, needle: string, scoreFilter: string) => [...satResultKeys.all, 'attempts', examId, scheduleId, offset, needle, scoreFilter] as const,
   detail: (resultId: string) => [...satResultKeys.all, 'detail', resultId] as const,
+  attemptAnswers: (attemptId: string) => [...satResultKeys.all, 'attempt-answers', attemptId] as const,
 };
 
 export function useSatResultsQuery() {
@@ -127,5 +153,15 @@ export function useSatResultQuery(resultId?: string) {
     enabled: Boolean(resultId),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
+  });
+}
+
+export function useSatAttemptAnswersQuery(attemptId?: string) {
+  return useQuery({
+    queryKey: satResultKeys.attemptAnswers(attemptId ?? 'missing'),
+    queryFn: () => resultsGateway.get<SatAttemptAnswers>(`/v1/results/sat/attempts/${encodeURIComponent(attemptId ?? '')}/answers`),
+    enabled: Boolean(attemptId),
+    staleTime: 0,
+    refetchOnWindowFocus: 'always',
   });
 }

@@ -111,6 +111,7 @@ type SATAccessGroup struct {
 type SATAttemptRow struct {
 	ResultID      *string    `json:"resultId"`
 	AttemptID     string     `json:"attemptId"`
+	AttemptStatus string     `json:"attemptStatus"`
 	Outcome       string     `json:"outcomeStatus"`
 	ReleaseState  string     `json:"releaseStatus"`
 	TotalScore    *int       `json:"totalScore"`
@@ -706,7 +707,7 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*)"+from+where, args...).Scan(&total); err != nil {
 		return nil, err
 	}
-	query := `SELECT ar.id, a.id, COALESCE(ar.outcome_status, 'unscored'),
+	query := `SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored'),
 		COALESCE(ar.release_status, ''), ar.total_score, a.schedule_id, a.exam_id,
 		sch.exam_title, version.version_number, a.candidate_id, a.candidate_name,
 		a.candidate_email, sch.cohort_name, a.submitted_at, a.created_at` + from + `
@@ -725,7 +726,7 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 		var score sql.NullInt64
 		var submitted sql.NullTime
 		var created time.Time
-		if err := rows.Scan(&resultID, &item.AttemptID, &item.Outcome, &item.ReleaseState,
+		if err := rows.Scan(&resultID, &item.AttemptID, &item.AttemptStatus, &item.Outcome, &item.ReleaseState,
 			&score, &item.ScheduleID, &item.ExamID, &item.ExamTitle, &item.VersionNumber,
 			&item.StudentID, &item.StudentName, &email, &item.CohortName, &submitted, &created); err != nil {
 			return nil, err

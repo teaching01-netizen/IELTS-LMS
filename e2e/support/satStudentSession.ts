@@ -113,5 +113,5 @@ export async function createRunningSatSession(
     await expect(studentPage.locator('input[type="radio"]').first()).toBeVisible({ timeout: 30_000 });
   }
 
-  return { studentContext, studentPage, scheduleId, candidateId, joinHref };
+  return { studentContext, studentPage, scheduleId, candidateId, joinHref, examTitle, linkName, studentName };
 }

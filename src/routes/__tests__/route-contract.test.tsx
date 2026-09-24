@@ -24,6 +24,7 @@ describe('route contracts', () => {
     expect(getLeafPath('/sat/sessions')).toBe('sessions');
     expect(getLeafPath('/sat/results')).toBe('results');
     expect(getLeafPath('/sat/results/result-1')).toBe('results/:resultId');
+    expect(getLeafPath('/sat/results/attempts/attempt-1')).toBe('results/attempts/:attemptId');
     // Exam detail/release/preview/access are nested under the /sat parent,
     // so leaf paths are relative (same full URLs as the manifest entries).
     expect(getLeafPath('/sat/exams/exam-1')).toBe('exams/:examId');

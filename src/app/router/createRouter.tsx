@@ -122,6 +122,9 @@ const SatResultsRoute = lazy(() =>
 const SatResultDetailRoute = lazy(() =>
   import("../../products/sat/routes/SatResultDetailRoute").then((module) => ({ default: module.SatResultDetailRoute }))
 );
+const SatAttemptAnswersRoute = lazy(() =>
+  import("../../products/sat/routes/SatAttemptAnswersRoute").then((module) => ({ default: module.SatAttemptAnswersRoute }))
+);
 const SatAccessRoute = lazy(() =>
   import("../../products/sat/routes/SatAccessRoute").then((module) => ({ default: module.SatAccessRoute }))
 );
@@ -361,6 +364,13 @@ const baseRoutes = [
             path: "results",
             element: withAuth(
               <Suspense fallback={<SatRouteLoadingFallback />}><SatResultsRoute /></Suspense>,
+              ["admin", "grader", "proctor"]
+            ),
+          },
+          {
+            path: "results/attempts/:attemptId",
+            element: withAuth(
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatAttemptAnswersRoute /></Suspense>,
               ["admin", "grader", "proctor"]
             ),
           },

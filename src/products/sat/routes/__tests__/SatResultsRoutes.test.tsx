@@ -3,14 +3,17 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatResultDetailRoute } from '../SatResultDetailRoute';
 import { SatResultsRoute } from '../SatResultsRoute';
+import { SatAttemptAnswersRoute } from '../SatAttemptAnswersRoute';
 
 const useSatResultsQueryMock = vi.hoisted(() => vi.fn());
 const useSatAttemptsQueryMock = vi.hoisted(() => vi.fn());
 const useSatResultQueryMock = vi.hoisted(() => vi.fn());
+const useSatAttemptAnswersQueryMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/results/api/satResultsQueries', () => ({
   useSatResultsQuery: useSatResultsQueryMock,
   useSatAttemptsQuery: useSatAttemptsQueryMock,
   useSatResultQuery: useSatResultQueryMock,
+  useSatAttemptAnswersQuery: useSatAttemptAnswersQueryMock,
 }));
 
 const accessGroups = [
@@ -21,7 +24,7 @@ const accessGroups = [
 const pageOne = {
   items: [
     { resultId: 'result-1', attemptId: 'attempt-1', outcomeStatus: 'scored', releaseStatus: 'ready_to_release', totalScore: 1380, scheduleId: 'schedule-1', examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S1', studentName: 'John Smith', studentEmail: null, cohortName: 'Morning', submittedAt: '2026-09-01T08:00:00Z' },
-    { resultId: null, attemptId: 'attempt-2', outcomeStatus: 'unscored', releaseStatus: '', totalScore: null, scheduleId: 'schedule-1', examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S2', studentName: 'Student X', studentEmail: null, cohortName: 'Morning', submittedAt: null },
+    { resultId: null, attemptId: 'attempt-2', attemptStatus: 'running', outcomeStatus: 'unscored', releaseStatus: '', totalScore: null, scheduleId: 'schedule-1', examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S2', studentName: 'Student X', studentEmail: null, cohortName: 'Morning', submittedAt: null },
   ], total: 51, offset: 0, limit: 50, hasMore: true,
 };
 const pageTwo = {
@@ -34,7 +37,7 @@ function LocationProbe() {
   return <span data-testid="test-location">{location.pathname + location.search}</span>;
 }
 function renderResultsRoute(initialEntry = '/sat/results') {
-  return render(<MemoryRouter initialEntries={[initialEntry]}><LocationProbe /><Routes><Route path="/sat/results" element={<SatResultsRoute />} /><Route path="/sat/results/:resultId" element={<SatResultDetailRoute />} /></Routes></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[initialEntry]}><LocationProbe /><Routes><Route path="/sat/results" element={<SatResultsRoute />} /><Route path="/sat/results/attempts/:attemptId" element={<SatAttemptAnswersRoute />} /><Route path="/sat/results/:resultId" element={<SatResultDetailRoute />} /></Routes></MemoryRouter>);
 }
 
 describe('SAT Results hierarchy', () => {
@@ -48,6 +51,12 @@ describe('SAT Results hierarchy', () => {
     useSatResultQueryMock.mockReturnValue({
       data: { summary: { id: 'result-1', attemptId: 'attempt-1', outcomeStatus: 'scored', releaseStatus: 'ready_to_release', totalScore: 1380, scheduleId: 'schedule-1', examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S1', studentName: 'John Smith', studentEmail: null, cohortName: 'Morning', submittedAt: '2026-09-01T08:00:00Z' }, scorePayload: {}, sections: [], questions: [] },
       isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
+    });
+    useSatAttemptAnswersQueryMock.mockReturnValue({
+      data: { attemptId: 'attempt-2', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S2', studentName: 'Student X', cohortName: 'Morning', status: 'running', protocolVersion: 2, responseRevision: 4, savedAnswerCount: 1, lastSavedAt: '2026-09-01T08:05:00Z', questions: [
+        { questionId: 'q1', sectionKey: 'reading-writing', moduleKey: 'module-1', displayOrder: 1, response: 'B', markedForReview: false },
+        { questionId: 'q2', sectionKey: 'reading-writing', moduleKey: 'module-1', displayOrder: 2, response: null, markedForReview: false },
+      ] }, isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
     });
   });
 
@@ -73,11 +82,46 @@ describe('SAT Results hierarchy', () => {
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-1&access=schedule-1');
   });
 
-  it('leaves attempts without result rows visible but not openable', () => {
+  it('opens server-saved answers for an attempt without a score', () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
     const row = screen.getByText('Student X').closest('button');
-    expect(row).toBeDisabled();
-    expect(screen.getByText('Not scored')).toBeInTheDocument();
+    expect(row).toBeEnabled();
+    fireEvent.click(row as HTMLElement);
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results/attempts/attempt-2');
+    expect(screen.getByText('1 server-saved answers')).toBeInTheDocument();
+    expect(screen.getByText(/Revision 4/)).toBeInTheDocument();
+    expect(screen.getByText('B')).toBeInTheDocument();
+    expect(screen.getByText('Unanswered')).toBeInTheDocument();
+    expect(screen.queryByText('Correct answer')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to SAT results' }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-1&access=schedule-1');
+  });
+
+  it('opens attempt answers when a pending result row exists', () => {
+    useSatAttemptsQueryMock.mockReturnValueOnce({
+      data: { ...pageOne, items: [{ ...pageOne.items[1], resultId: 'pending-result', outcomeStatus: 'pending', attemptStatus: 'submitted' }] },
+      isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
+    });
+    renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
+    fireEvent.click(screen.getByRole('button', { name: /Student X/ }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results/attempts/attempt-2');
+  });
+
+  it('distinguishes no saved answer from a failed answer read', () => {
+    useSatAttemptAnswersQueryMock.mockReturnValueOnce({ data: { attemptId: 'attempt-2', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S2', studentName: 'Student X', cohortName: 'Morning', status: 'running', protocolVersion: 2, responseRevision: 0, savedAnswerCount: 0, lastSavedAt: null, questions: [{ questionId: 'q1', sectionKey: 'math', moduleKey: 'm1', displayOrder: 1, response: null, markedForReview: false }] }, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    renderResultsRoute('/sat/results/attempts/attempt-2');
+    expect(screen.getByText('0 server-saved answers')).toBeInTheDocument();
+    expect(screen.getByText(/No server save yet/)).toBeInTheDocument();
+    expect(screen.getByText('Unanswered')).toBeInTheDocument();
+  });
+
+  it('offers retry when saved answers cannot be loaded', () => {
+    const refetch = vi.fn();
+    useSatAttemptAnswersQueryMock.mockReturnValueOnce({ data: undefined, isLoading: false, error: new Error('offline'), isFetching: false, refetch });
+    renderResultsRoute('/sat/results/attempts/attempt-2');
+    expect(screen.getByText('Saved answers could not load')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(refetch).toHaveBeenCalledOnce();
   });
 
   it('paginates through older attempts rather than truncating the schedule', () => {
