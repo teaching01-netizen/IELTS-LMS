@@ -399,19 +399,36 @@ jobs:
 
       - name: Run E2E Tests
         run: |
-          # Each browser project gets its own globalSetup/seed cycle. Running
-          # all seven projects in one Playwright invocation shares one MySQL
-          # fixture and lets a terminalized or paused schedule poison the next
-          # project. Keep the full browser matrix, but isolate the projects in
-          # separate invocations within this shard job.
+          # Each browser project and each selected test file gets its own
+          # globalSetup/seed cycle. A test file can terminalize or pause a
+          # schedule, so sharing one destructive MySQL fixture across files
+          # makes later files inherit the earlier file's state. The --list
+          # pass preserves Playwright's shard assignment; the actual file run
+          # omits --shard because the file has already been selected here.
           projects=(chromium mobile-chromium mobile-webkit tablet-portrait tablet-landscape firefox webkit)
           status=0
           for project in "${projects[@]}"; do
-            echo "Running E2E project: ${project}"
-            if ! PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${project}" \
-              bunx playwright test --project="${project}" --shard=${{ matrix.shard }}; then
-              status=1
+            mapfile -t files < <(
+              bunx playwright test \
+                --project="${project}" \
+                --shard=${{ matrix.shard }} \
+                --list 2>/dev/null |
+                sed -n 's/^  \[[^]]*\] › \([^:]*\.spec\.ts\):.*/\1/p' |
+                sort -u
+            )
+            if ((${#files[@]} == 0)); then
+              echo "No E2E files assigned to ${project} in shard ${{ matrix.shard }}"
+              continue
             fi
+            for file in "${files[@]}"; do
+              safe_file="${file//\//__}"
+              safe_file="${safe_file//./_}"
+              echo "Running E2E file: ${project} ${file}"
+              if ! PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${project}/${safe_file}" \
+                bunx playwright test "${file}" --project="${project}"; then
+                status=1
+              fi
+            done
           done
           exit "$status"
 
