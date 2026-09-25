@@ -31,13 +31,6 @@ import (
 //
 // Every case pins the error code a candidate can actually hit.
 
-// The arm statement, matched as a whole: a change that anchored the offer to
-// anything but database time (or dropped the lead) must fail this.
-const personalArmAnchorsDatabaseTimeAndLead = "(?s)UPDATE assessment_module_attempts.*" +
-	"SET state = 'not_started', started_at = NULL.*" +
-	"entry_starts_at = DATE_ADD\\(UTC_TIMESTAMP\\(6\\), INTERVAL \\? SECOND\\).*" +
-	"WHERE id = \\? AND state IN \\('not_started', 'active'\\) AND entry_entered_at IS NULL"
-
 // The enter statement: started_at must come from the offer, never from now().
 const personalEnterAnchorsStartedAtToTheOffer = "(?s)UPDATE assessment_module_attempts.*" +
 	"SET state = 'active', started_at = entry_starts_at,.*" +
@@ -112,17 +105,6 @@ func personalEntryRow(mock sqlmock.Sqlmock, generation int, startsAt, confirmedA
 			AddRow(generation, startsAt, confirmedAt, enteredAt))
 }
 
-// personalEntryArmRow stages the ARM path's own read, which also carries the
-// proctor grant column (entry_proctor_rearm_at): a non-nil instant is a grant,
-// and a grant is what lifts admission closure and restarts that stage's retry
-// budget.
-func personalEntryArmRow(mock sqlmock.Sqlmock, generation int, startsAt, confirmedAt, enteredAt, rearmAt any) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at, entry_proctor_rearm_at FROM assessment_module_attempts WHERE id = ? FOR UPDATE")).
-		WithArgs("ma-1").
-		WillReturnRows(sqlmock.NewRows([]string{"entry_generation", "entry_starts_at", "entry_confirmed_at", "entry_entered_at", "entry_proctor_rearm_at"}).
-			AddRow(generation, startsAt, confirmedAt, enteredAt, rearmAt))
-}
-
 func personalBreakPendingLookup(mock sqlmock.Sqlmock, pending bool) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM assessment_attempt_breaks WHERE attempt_id = ? AND state <> 'completed')")).
 		WithArgs("att-1").
@@ -133,12 +115,6 @@ func personalAdmissionRow(mock sqlmock.Sqlmock, endTime any) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT s.end_time FROM exam_schedules s JOIN student_attempts sa ON sa.schedule_id = s.id WHERE sa.id = ?")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"end_time"}).AddRow(endTime))
-}
-
-func personalResponseProbe(mock sqlmock.Sqlmock, hasResponse bool) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM assessment_question_responses WHERE module_attempt_id = ?)")).
-		WithArgs("ma-1", "att-1", "mod-1").
-		WillReturnRows(sqlmock.NewRows([]string{"has_response"}).AddRow(hasResponse))
 }
 
 // personalModuleAwaitingStartProbe stages the entry-seed probe: the state of
