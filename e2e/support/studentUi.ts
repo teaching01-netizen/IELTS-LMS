@@ -229,15 +229,33 @@ export async function openStudentCheckIn(page: Page, scheduleId: string) {
 export async function completePreCheckIfPresent(page: Page) {
   // The briefing/"Continue to waiting room" step was removed: after check-in the
   // student lands directly in the waiting room while compatibility checks are run
-  // and persisted silently. This helper now only settles on the resulting state
-  // (waiting room, lobby preview, or an already-started exam) without any click.
+  // and persisted silently. The pre-check card and waiting room share a heading,
+  // so the UI heading alone cannot prove that persistence has finished.
+  const scheduleId = page.url().match(/\/student\/([^/]+)/)?.[1];
+  if (!scheduleId) throw new Error("Cannot confirm pre-check without a student schedule route.");
+
+  const timeoutMs = Number(process.env["E2E_PROD_PRECHECK_SAVE_TIMEOUT_MS"] ?? "120000");
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request
+          .get(`/api/v1/student/sessions/${scheduleId}`)
+          .catch(() => null);
+        if (!response?.ok()) return false;
+        const session = (await response.json().catch(() => null)) as {
+          attempt?: { integrity?: { preCheck?: { completedAt?: string | null } | null } };
+        } | null;
+        return Boolean(session?.attempt?.integrity?.preCheck?.completedAt);
+      },
+      { timeout: Math.max(30_000, timeoutMs) }
+    )
+    .toBe(true);
+
   const waitingForStart = page.getByRole("heading", { name: "Waiting for the exam to start" });
   const startExam = page.getByRole("button", { name: "Start Exam" });
   const examShell = page.getByTestId("student-exam-shell");
   const answerField = page.getByLabel(/Answer for question/i).first();
   const writingEditor = page.locator('[contenteditable="true"]').first();
-
-  const timeoutMs = Number(process.env["E2E_PROD_PRECHECK_SAVE_TIMEOUT_MS"] ?? "120000");
 
   await expect
     .poll(
@@ -298,7 +316,7 @@ export async function startLobbyIfPresent(page: Page) {
     );
     const responseText = await response.text();
     const runtimeAlreadyExists =
-      response.status() === 409 ||
+      /runtime already exists for this schedule/i.test(responseText) ||
       /duplicate entry.*exam_session_runtimes\.schedule_id/i.test(responseText);
     if (!response.ok() && !runtimeAlreadyExists) {
       throw new Error(
@@ -308,6 +326,11 @@ export async function startLobbyIfPresent(page: Page) {
   } finally {
     await controlContext.close();
   }
+
+  // The seeded runtime may already be live before this student's pre-check
+  // finishes. In that case start_runtime is idempotent and emits no new
+  // transition to wake a route that still holds its pre-check snapshot.
+  await page.reload({ waitUntil: "domcontentloaded" });
 
   await expect
     .poll(

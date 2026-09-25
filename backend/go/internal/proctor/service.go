@@ -13,7 +13,7 @@
 //	warn inserts a PROCTOR_WARNING violation row and moves the attempt to warned
 //	(non-blocking: delivery_status is untouched).
 //	pause/resume are protocol-aware (V2 delivery + deadline/grace shift) with a
-//	 control_epoch+1 bump and schedule_roster/attempt_changed outbox rows.
+//	 control_epoch+1 bump and roster/attempt_changed wakeups.
 //	terminate seals ONLY via the terminalization service as
 //	 terminated/proctor_terminate/proctor — never a direct status write.
 //	complete-exam completes the runtime and auto-submits via proctor_complete.
@@ -1145,14 +1145,18 @@ func (s *Service) requireWriterRole(actor Actor) error {
 	return nil
 }
 
-// emitRoster enqueues schedule_roster/roster_changed + schedule_roster/attempt_changed.
+// emitRoster enqueues a schedule roster refresh and, for a targeted attempt,
+// an attempt_changed wakeup on that student's own live-update channel.
 func (s *Service) emitRoster(ctx context.Context, q tx.Tx, scheduleID, event string, attemptID *string, extra map[string]any) error {
 	roster, _ := json.Marshal(rosterPayload(scheduleID, event, attemptID, extra))
 	if err := s.enqueueWakeup(ctx, q, "schedule_roster", scheduleID, 0, "roster_changed", roster); err != nil {
 		return err
 	}
 	attempt, _ := json.Marshal(rosterPayload(scheduleID, "attempt_changed", attemptID, extra))
-	return s.enqueueWakeup(ctx, q, "schedule_roster", scheduleID, 0, "attempt_changed", attempt)
+	if attemptID == nil {
+		return s.enqueueWakeup(ctx, q, "schedule_roster", scheduleID, 0, outbox.FamilyAttemptChanged, attempt)
+	}
+	return s.enqueueWakeup(ctx, q, "attempt", *attemptID, 0, outbox.FamilyAttemptChanged, attempt)
 }
 
 func rosterPayload(scheduleID, event string, attemptID *string, extra map[string]any) map[string]any {

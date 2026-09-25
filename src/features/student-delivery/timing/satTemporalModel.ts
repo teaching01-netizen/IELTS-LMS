@@ -46,7 +46,14 @@ export function deriveSatTemporalSnapshot(model: SatTemporalModel, now: number) 
     stageStatus: effectiveTiming?.stageStatus,
   });
   const personalSeconds = model.stateModuleAttempt
-    ? personalModuleRemainingSeconds(model.stateModuleAttempt, snapshotReceivedAt, now, offset, personalRunning)
+    ? personalModuleRemainingSeconds(
+        model.stateModuleAttempt,
+        snapshotReceivedAt,
+        now,
+        offset,
+        personalRunning,
+        effectiveTiming?.timingModel,
+      )
     : null;
   const countdown = satCountdown({
     timingModel: effectiveTiming?.timingModel,

@@ -366,6 +366,13 @@ test.describe('SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       const link = unwrap<AccessLinkSnapshot>(linkResponse.payload as ApiPayload<AccessLinkSnapshot>);
       scheduleId = link.scheduleId;
 
+      // This contract covers cohort section clocks. Pin the model explicitly
+      // because newly created SAT schedules now default to personal timing.
+      await executeUpdate(
+        'UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?',
+        ['cohort_section_v3', scheduleId],
+      );
+
       const startResponse = await writeApi(page, 'POST', `/api/v1/schedules/${scheduleId}/runtime/commands`, {
         action: 'start_runtime',
         reason: 'SAT timing contract',
@@ -404,17 +411,15 @@ test.describe('SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       await expect(page.getByText('Module 2 · Higher').first()).toBeVisible();
       await expect(page.getByText('Break · 5 min').first()).toBeVisible();
       const readingLowerWindow = page
-        .locator('tr[data-sat-run-sheet-row="module"]')
+        .locator('[data-sat-run-sheet-row="module"]')
         .filter({ hasText: 'Module 2 · Lower' })
         .first()
-        .locator('td')
-        .nth(1);
+        .locator('.sat-run-sheet__row-window');
       const readingHigherWindow = page
-        .locator('tr[data-sat-run-sheet-row="module"]')
+        .locator('[data-sat-run-sheet-row="module"]')
         .filter({ hasText: 'Module 2 · Higher' })
         .first()
-        .locator('td')
-        .nth(1);
+        .locator('.sat-run-sheet__row-window');
       await expect(readingLowerWindow).toHaveText(/\d{2}:\d{2}–\d{2}:\d{2}/);
       await expect(readingHigherWindow).toHaveText(/\d{2}:\d{2}–\d{2}:\d{2}/);
       expect(await readingLowerWindow.innerText()).toBe(await readingHigherWindow.innerText());
@@ -481,8 +486,9 @@ test.describe('SAT timing contract against MySQL, HTTP, WebSocket, and browser r
 
       // The student route must enter the break from the authoritative target,
       // not from a stale zero remaining value carried by the completed row.
-      await expect(studentPage.getByText('On break', { exact: true })).toBeVisible({ timeout: 30_000 });
-      const breakTimer = studentPage.getByRole('timer');
+      const scheduledBreak = studentPage.getByTestId('sat-scheduled-break');
+      await expect(scheduledBreak).toHaveAttribute('data-sat-break-phase', 'active', { timeout: 30_000 });
+      const breakTimer = scheduledBreak.getByRole('timer');
       await expect(breakTimer).toBeVisible();
       const firstBreakText = await breakTimer.innerText();
       expect(firstBreakText).not.toBe('0:00');
@@ -491,8 +497,8 @@ test.describe('SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       expect(firstBreakSeconds).toBeLessThanOrEqual(300);
 
       await studentPage.reload({ waitUntil: 'domcontentloaded' });
-      await expect(studentPage.getByText('On break', { exact: true })).toBeVisible({ timeout: 30_000 });
-      const refreshedBreakText = await studentPage.getByRole('timer').innerText();
+      await expect(scheduledBreak).toHaveAttribute('data-sat-break-phase', 'active', { timeout: 30_000 });
+      const refreshedBreakText = await scheduledBreak.getByRole('timer').innerText();
       expect(refreshedBreakText).not.toBe('0:00');
       expect(timerSeconds(refreshedBreakText)).toBeGreaterThan(0);
       expect(timerSeconds(refreshedBreakText)).toBeLessThanOrEqual(300);

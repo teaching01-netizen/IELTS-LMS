@@ -15,6 +15,7 @@ dotenv.config({ path: path.resolve(".env"), override: false });
 dotenv.config({ path: path.resolve("backend/.env"), override: false });
 const configuredStaffIdleMinutes = process.env["SESSION_IDLE_STAFF_MINS"];
 const configuredStudentIdleMinutes = process.env["SESSION_IDLE_STUDENT_MINS"];
+const configuredStudentRealtime = process.env["VITE_STUDENT_REALTIME"];
 dotenv.config({ path: path.resolve("backend/.env.example"), override: false });
 
 // The Go-backed E2E suite reuses the sessions created by globalSetup across
@@ -101,6 +102,10 @@ const backendRuntimeEnv = {
 };
 const backendFeatureEnv = {
   VITE_BACKEND_API_URL: backendApiUrl,
+  // Exercise the authoritative event path in E2E by default, while preserving
+  // an explicit shell or .env override for polling-mode runs.
+  VITE_STUDENT_REALTIME:
+    inheritedEnv["VITE_STUDENT_REALTIME"] ?? configuredStudentRealtime ?? "websocket",
   VITE_FEATURE_USE_BACKEND_BUILDER: "true",
   VITE_FEATURE_USE_BACKEND_SCHEDULING: "true",
   VITE_FEATURE_USE_BACKEND_DELIVERY: "true",

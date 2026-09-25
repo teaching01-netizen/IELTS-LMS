@@ -1193,7 +1193,14 @@ export function useSatExamController({
   // has not hydrated and arm the expiry on it. The countdown rule reads an
   // absent personal clock as "use the section clock alone".
   const personalModuleRemainingSeconds = stateModuleAttempt
-    ? personalModuleCountdown(stateModuleAttempt, snapshotReceivedAt, now, serverClockOffsetMs, cohortStageRunning)
+    ? personalModuleCountdown(
+        stateModuleAttempt,
+        snapshotReceivedAt,
+        now,
+        serverClockOffsetMs,
+        cohortStageRunning,
+        effectiveTiming?.timingModel,
+      )
     : null;
   // Clock contract: the student reads the MODULE's own allotment, capped by the
   // shared section clock (min of the two). A candidate sits Module 1 plus

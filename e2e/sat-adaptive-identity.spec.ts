@@ -447,6 +447,14 @@ async function startSatAttempt(
   if (!scheduleId || !candidateId)
     throw new Error("Student handoff did not include schedule and candidate ids");
 
+  // These identity scenarios exercise section-to-section adaptive routing.
+  // New SAT schedules default to personal timing, so pin the cohort timing
+  // model before the proctor starts the session.
+  await executeUpdate(
+    "UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?",
+    ["cohort_section_v3", scheduleId],
+  );
+
   await page.goto("/sat/sessions");
   await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible({ timeout: 30_000 });
   const sessionRow = page
