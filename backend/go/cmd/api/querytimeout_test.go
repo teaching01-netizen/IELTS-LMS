@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -8,6 +9,15 @@ import (
 
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
+
+func TestEntryTimeoutProvidesRetryAfter(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/modules/start", nil)
+	writeEntryError(rec, req, context.DeadlineExceeded)
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
+		t.Fatalf("entry budget must return retryable 503 with Retry-After: status=%d headers=%v", rec.Code, rec.Header())
+	}
+}
 
 // Round 67 doc↔code parity: the runbook quotes DefaultQueryTimeout = 10s
 // (§3) but the tests above hardcode 10*time.Second literals — a const

@@ -446,11 +446,12 @@ describe("SatStudentSessionRoute prewarm gating", () => {
     expectBare(document.body);
   });
 
-  it("C7 break (B6): opening status has no timer or hidden calculator host", () => {
+  it("C7 break (B6): break surface has no hidden calculator host", () => {
     const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: "math-m1" });
     setup({ phase: "break", stateModuleId: null, pendingModuleId: null, data });
-    expect(screen.getByRole("heading", { name: "Opening Math…" })).toBeInTheDocument();
-    expect(screen.queryByRole("timer")).toBeNull();
+    // Same break surface until the next active module replaces it — never Opening.
+    expect(screen.getByTestId("sat-scheduled-break")).toBeInTheDocument();
+    expect(screen.queryByText(/Opening Math/)).toBeNull();
     expect(screen.queryByTitle(/Desmos/)).toBeNull();
     expectBare(document.body);
   });

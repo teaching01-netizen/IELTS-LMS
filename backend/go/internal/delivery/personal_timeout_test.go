@@ -37,6 +37,13 @@ func personalReconcileHarness(mock sqlmock.Sqlmock, runtimeStatus string, breakR
 	// Personal + live: the break sweep runs first (own deadline, no grace).
 	mock.ExpectExec("UPDATE assessment_attempt_breaks").
 		WillReturnResult(sqlmock.NewResult(0, breakRows))
+	// Server-driven break→next-M1: no pending break remains, then try to
+	// activate the waiting next-section module (none here).
+	mock.ExpectQuery("SELECT EXISTS\\(SELECT 1 FROM assessment_attempt_breaks").
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec("UPDATE assessment_module_attempts").
+		WillReturnResult(sqlmock.NewResult(0, 0))
 }
 
 // personalOfferRow is the locked open-module projection for a personal attempt.

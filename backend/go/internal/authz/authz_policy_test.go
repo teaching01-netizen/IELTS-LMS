@@ -63,9 +63,9 @@ var expectedAnnotated = []string{
 	"POST /links/{linkID}/lifecycle", "POST /links/{linkID}/duplicate",
 	"GET /links/{linkID}/members", "GET /links/{linkID}/activity",
 	"GET /public/access-links/{linkID}",
-	"POST /schedules/{scheduleID}/bootstrap", "PATCH /schedules/{scheduleID}/responses/{examQuestionID}",
+	"POST /schedules/{scheduleID}/bootstrap", "GET /schedules/{scheduleID}/state", "PATCH /schedules/{scheduleID}/responses/{examQuestionID}",
 	"POST /schedules/{scheduleID}/modules/start", "POST /schedules/{scheduleID}/modules/enter",
-	"POST /schedules/{scheduleID}/modules/visible", "POST /schedules/{scheduleID}/breaks/{breakID}/start",
+	"POST /schedules/{scheduleID}/modules/visible", "GET /schedules/{scheduleID}/modules/{moduleID}/entry-state", "POST /schedules/{scheduleID}/breaks/{breakID}/start",
 	"POST /schedules/{scheduleID}/breaks/enter", "POST /schedules/{scheduleID}/breaks/visible",
 	"POST /schedules/{scheduleID}/modules/submit",
 	"POST /schedules/{scheduleID}/submit",
@@ -122,7 +122,7 @@ var expectedAnnotated = []string{
 	"POST /submissions/{submissionID}/reopen-review",
 	"GET /results/{resultID}/events",
 	"GET /dashboard", "GET /analytics", "POST /export",
-	"GET /sat", "GET /sat/access-groups", "GET /sat/attempts", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
+	"GET /sat", "GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
 	"GET /{resultID}/events", "GET /{resultID}",
 	"POST /uploads", "POST /import-url", "PUT /uploads/{assetID}", "POST /uploads/{assetID}/complete",
 	"GET /assets/{assetID}", "GET /{assetID}/content", "GET /{assetID}",
@@ -265,7 +265,7 @@ func TestAssessmentAccessDeleteIsWriterOnly(t *testing.T) {
 }
 
 func TestSATResultsWorkspaceReadAdmitsObserverAndAssignedStaff(t *testing.T) {
-	for _, key := range []string{"GET /sat/access-groups", "GET /sat/attempts"} {
+	for _, key := range []string{"GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers"} {
 		policy, ok := LookupKey(Table, key)
 		if !ok {
 			t.Fatalf("%s must have an explicit route policy", key)

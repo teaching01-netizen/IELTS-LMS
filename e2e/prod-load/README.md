@@ -154,7 +154,13 @@ Required envs:
 
 Optional envs: same as IELTS runner, plus `EXAM_TIMEOUT_MS` (default `9000000` = 150 min for a full SAT),
 `CONTEXTS_PER_BROWSER` (default `5`), `ABORT_ON_FATAL_JOIN` (default `true`), and
-`JOIN_FAILURE_ABORT_THRESHOLD` (default `8`).
+`JOIN_FAILURE_ABORT_THRESHOLD` (default `8`). Set `SAT_ASSERT_ENTRY_FRAME=true`
+for a SAT personal entry rehearsal. The runner captures every
+`sat_first_answerable_frame_at` browser event before navigation, fails a
+candidate with no event, a recovery screen, or any module at 5 seconds or more, and writes p95,
+p99, and max frame latency into the summary JSON. Use `MAX_CONCURRENT_USERS`
+and enough load generators to reach the intended 2,000-browser concurrency;
+`USER_COUNT=2000` alone does not make a synchronized 2,000-browser wave.
 
 ### Browsers
 

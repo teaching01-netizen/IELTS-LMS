@@ -51,6 +51,29 @@ async function waitForSatSaved(page: Page) {
 test.describe('SAT answer durability recovery', () => {
   test.describe.configure({ timeout: 240_000 });
 
+  test('shows the last server-saved answer in staff Results after the student closes the exam', async ({ page, browser }) => {
+    const { studentContext, studentPage, examTitle, linkName, studentName } = await createRunningSatSession(browser, page, { label: 'staff-answers' });
+    try {
+      await studentPage.locator('label.sat-answer-choice').first().click();
+      await expect(studentPage.locator('input[type="radio"]').first()).toBeChecked();
+      await waitForSatSaved(studentPage);
+      await studentContext.close();
+
+      await page.goto('/sat/results');
+      await page.getByRole('button', { name: new RegExp(examTitle) }).click();
+      await page.getByRole('button', { name: new RegExp(linkName) }).click();
+      await page.getByRole('button', { name: new RegExp(studentName) }).click();
+      await expect(page).toHaveURL(/\/sat\/results\/attempts\/[0-9a-f-]+$/i);
+      await expect(page.getByText('1 server-saved answers')).toBeVisible();
+      await expect(page.getByText(/Revision [1-9]\d*/)).toBeVisible();
+      await expect(page.getByRole('heading', { name: /Question-level responses/ })).toBeVisible();
+      await expect(page.getByRole('columnheader', { name: 'Student raw' })).toBeVisible();
+      await expect(page.getByText('Unanswered').first()).toBeVisible();
+    } finally {
+      await studentContext.close();
+    }
+  });
+
   test('preserves answer, elimination, and annotation metadata through delayed recovery', async ({
     page,
     browser,

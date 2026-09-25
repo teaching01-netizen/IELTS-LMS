@@ -1611,7 +1611,7 @@ func (s *Service) saveAttemptBinding(ctx context.Context, scheduleID, attemptID,
 }
 
 // ensureAttemptCanWorkTx mirrors ensure_attempt_can_work_tx: attempt FOR
-// UPDATE then runtime FOR UPDATE; proctor paused/terminated =>
+// UPDATE then runtime FOR SHARE; proctor paused/terminated =>
 // StructuredConflict AttemptProctorBlocked; submitted/delivery-terminal /
 // post-exam => Conflict.
 func (s *Service) ensureAttemptCanWorkTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string) error {
@@ -1640,7 +1640,7 @@ func (s *Service) ensureAttemptCanWorkTx(ctx context.Context, t tx.Tx, scheduleI
 	}
 	var runtimeStatus sql.NullString
 	if err := t.QueryRowContext(ctx,
-		"SELECT status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+		"SELECT status FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE",
 		scheduleID).Scan(&runtimeStatus); err != nil {
 		if err == sql.ErrNoRows {
 			return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT session has not been started by the proctor.")
@@ -1755,7 +1755,7 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 	var timingModel sql.NullString
 	var activeStage sql.NullString
 	if err := t.QueryRowContext(ctx,
-		"SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+		"SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE",
 		scheduleID).Scan(&timingModel, &activeStage); err != nil {
 		if err == sql.ErrNoRows {
 			now, nerr := dbTimeTx(ctx, t)

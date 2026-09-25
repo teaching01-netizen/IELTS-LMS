@@ -17,6 +17,27 @@ import (
 // instead of unbounded goroutine/conn growth.
 const DefaultQueryTimeout = 10 * time.Second
 
+// DefaultEntryTimeout bounds the SAT module transition endpoints (start, enter,
+// visible, entry-state). They are not reads whose latency a student can wait
+// out: the client arms a three-second offer lead and needs the response back
+// with at least one displayed second to spare (SAT_PERSONAL_MIN_ENTRY_LEAD_MS),
+// so a transition that cannot get database capacity inside this budget must
+// fail fast as a retryable 503 instead of holding its connection for the 10s
+// read budget. That is the difference between a bounded retry storm and an
+// unbounded connection/lock convoy behind a saturated MySQL (plan 2026-09-24,
+// entry reliability). It stays above the p99 objective for these endpoints
+// (<500ms) with room for a cold first request.
+const DefaultEntryTimeout = 1500 * time.Millisecond
+
+func writeEntryError(w http.ResponseWriter, r *http.Request, err error) {
+	mapped := MapDBError(err)
+	if appErr, ok := apperrors.As(mapped); ok && appErr.Code == apperrors.CodeServiceUnavailable {
+		w.Header().Set("Retry-After", "1")
+		appErr.Details = map[string]any{"retryAfterSeconds": 1}
+	}
+	httpx.WriteError(w, r, mapped)
+}
+
 // withQueryTimeout runs h with a deadline budget. An already-exhausted
 // budget short-circuits to 503 (never runs the handler with a dead
 // context). Handlers derive per-query timeouts via QueryContext.

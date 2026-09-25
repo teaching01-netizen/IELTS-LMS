@@ -12,6 +12,12 @@ import (
 	"example.com/ielts-proctoring/internal/sat"
 )
 
+func omitDeliverySections(out *delivery.Bootstrap) {
+	if out != nil {
+		out.Sections = []delivery.DeliverySection{}
+	}
+}
+
 // deliveryBootstrapHandler bootstraps SAT assessment delivery for one
 // schedule. The request carries no body (POST with empty body); the attempt
 // bearer token binds schedule + attempt, and the URL schedule id must match
@@ -25,46 +31,59 @@ func deliveryBootstrapHandler(app *App) http.HandlerFunc {
 	}
 }
 
-func deliveryBootstrapInner(app *App, w http.ResponseWriter, r *http.Request) {
-	{
-		bearer, ok := requireBearer(w, r)
-		if !ok {
-			return
-		}
-		// Bootstrap is a read (no in-tx fence downstream): the
-		// session-bound read verify runs in BOTH verify modes so a
-		// revoked or takeover-rotated bearer renders 401 even when
-		// ATTEMPT_VERIFY=stateless.
-		claims, err := verifyAttemptReadBearer(app, r, bearer)
-		if err != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
-			return
-		}
-		if app.Delivery == nil || app.DB == nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Delivery service is unavailable."))
-			return
-		}
-		urlScheduleID := chi.URLParam(r, "scheduleID")
-		// NO conditional read here. The bootstrap payload is a LIVE attempt
-		// projection — module attempts, the adaptive Higher/Lower route,
-		// responses, timers, proctor state, result — while the only cache
-		// validator available is the published exam version
-		// (W/"v{versionId}-{revision}"). Routing a candidate from Module 1 into
-		// Module 2 Higher does not touch the published version, so a
-		// version-scoped 304 kept answering "nothing changed" and the client
-		// rehydrated the pre-routing module. Exam-version caching belongs to the
-		// genuinely immutable static content tree (loadSections / authored plan),
-		// never to attempt state: the assembly below always runs so the response
-		// can never be older than the routing decision it must report.
-		out, err := app.Delivery.Bootstrap(r.Context(), claims.ScheduleID, claims.AttemptID, urlScheduleID)
-		if err != nil {
-			httpx.WriteError(w, r, MapDBError(err))
-			return
-		}
-		// Attempt-state read: safe to re-send, never safe to reuse.
-		w.Header().Set("Cache-Control", "no-store")
-		httpx.WriteJSON(w, http.StatusOK, out)
+func deliveryStateHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		withQueryTimeout(w, r, DefaultQueryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			deliveryBootstrapInnerMode(app, w, r, false)
+		})
 	}
+}
+
+func deliveryBootstrapInner(app *App, w http.ResponseWriter, r *http.Request) {
+	deliveryBootstrapInnerMode(app, w, r, true)
+}
+
+func deliveryBootstrapInnerMode(app *App, w http.ResponseWriter, r *http.Request, includeSections bool) {
+	bearer, ok := requireBearer(w, r)
+	if !ok {
+		return
+	}
+	// Bootstrap is a read (no in-tx fence downstream): the
+	// session-bound read verify runs in BOTH verify modes so a
+	// revoked or takeover-rotated bearer renders 401 even when
+	// ATTEMPT_VERIFY=stateless.
+	claims, err := verifyAttemptReadBearer(app, r, bearer)
+	if err != nil {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+		return
+	}
+	if app.Delivery == nil || app.DB == nil {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Delivery service is unavailable."))
+		return
+	}
+	urlScheduleID := chi.URLParam(r, "scheduleID")
+	// NO conditional read here. The bootstrap payload is a LIVE attempt
+	// projection — module attempts, the adaptive Higher/Lower route,
+	// responses, timers, proctor state, result — while the only cache
+	// validator available is the published exam version
+	// (W/"v{versionId}-{revision}"). Routing a candidate from Module 1 into
+	// Module 2 Higher does not touch the published version, so a
+	// version-scoped 304 kept answering "nothing changed" and the client
+	// rehydrated the pre-routing module. Exam-version caching belongs to the
+	// genuinely immutable static content tree (loadSections / authored plan),
+	// never to attempt state: the assembly below always runs so the response
+	// can never be older than the routing decision it must report.
+	out, err := app.Delivery.Bootstrap(r.Context(), claims.ScheduleID, claims.AttemptID, urlScheduleID)
+	if err != nil {
+		httpx.WriteError(w, r, MapDBError(err))
+		return
+	}
+	if !includeSections {
+		omitDeliverySections(out)
+	}
+	// Attempt-state read: safe to re-send, never safe to reuse.
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // deliverySaveResponseHandler persists one SAT question response
@@ -118,80 +137,142 @@ func deliverySaveResponseHandler(app *App) http.HandlerFunc {
 // (POST /schedules/{scheduleID}/modules/start). The attempt bearer token
 // binds schedule + attempt, and the URL schedule id must match the bearer
 // schedule id.
+//
+// It runs on the entry budget: this request sits inside the client's
+// three-second offer lead, so a transition that cannot get database capacity
+// fails fast as a retryable 503 rather than holding its connection and
+// starving the rest of the cohort.
 func deliveryStartModuleHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		bearer, ok := requireBearer(w, r)
-		if !ok {
-			return
-		}
-		// Security P0: session-bound verify in both modes (see save).
-		claims, err := verifyAttemptReadBearer(app, r, bearer)
-		if err != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
-			return
-		}
-		if claims.ClientSessionID == "" {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
-			return
-		}
-		if app.Delivery == nil || app.DB == nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Delivery service is unavailable."))
-			return
-		}
-		var req delivery.ModuleStartRequest
-		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx
-		// re-checks token revocation + writer session in-tx); no separate
-		// pre-tx round trip.
-		out, err := app.Delivery.StartModuleOffer(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, req.Generation, req.ControlEpoch, claims.ClientSessionID, claims.TokenID)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		withQueryTimeout(w, r, DefaultEntryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			deliveryStartModuleInner(app, w, r)
+		})
 	}
+}
+
+func deliveryStartModuleInner(app *App, w http.ResponseWriter, r *http.Request) {
+	bearer, ok := requireBearer(w, r)
+	if !ok {
+		return
+	}
+	// Security P0: session-bound verify in both modes (see save).
+	claims, err := verifyAttemptReadBearer(app, r, bearer)
+	if err != nil {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+		return
+	}
+	if claims.ClientSessionID == "" {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+		return
+	}
+	if app.Delivery == nil || app.DB == nil {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Delivery service is unavailable."))
+		return
+	}
+	var req delivery.ModuleStartRequest
+	if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx
+	// re-checks token revocation + writer session in-tx); no separate
+	// pre-tx round trip.
+	out, err := app.Delivery.StartModuleOfferAck(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, req.Generation, req.ControlEpoch, req.NeedContent, claims.ClientSessionID, claims.TokenID)
+	if err != nil {
+		writeEntryError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func deliveryEnterModuleHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
-		if !ok {
-			return
-		}
-		var req delivery.ModuleEntryRequest
-		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		out, err := app.Delivery.EnterModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		withQueryTimeout(w, r, DefaultEntryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			deliveryEnterModuleInner(app, w, r)
+		})
 	}
+}
+
+func deliveryEnterModuleInner(app *App, w http.ResponseWriter, r *http.Request) {
+	claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+	if !ok {
+		return
+	}
+	var req delivery.ModuleEntryRequest
+	if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := app.Delivery.EnterModuleAck(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+	if err != nil {
+		writeEntryError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func deliveryMarkStageVisibleHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
-		if !ok {
-			return
-		}
-		var req delivery.ModuleEntryRequest
-		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		out, err := app.Delivery.MarkStageVisible(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		withQueryTimeout(w, r, DefaultEntryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			deliveryMarkStageVisibleInner(app, w, r)
+		})
+	}
+}
+
+// deliveryMarkStageVisibleInner acknowledges the first active frame. The
+// response is a compact ack: the candidate is already looking at the module, so
+// an attempt projection here would make one entry trigger a second full
+// projection for a one-row write.
+func deliveryMarkStageVisibleInner(app *App, w http.ResponseWriter, r *http.Request) {
+	claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+	if !ok {
+		return
+	}
+	var req delivery.ModuleEntryRequest
+	if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := app.Delivery.MarkStageVisible(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+	if err != nil {
+		writeEntryError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// deliveryModuleEntryStateHandler answers "where is this module entry right
+// now?" with a handful of indexed reads and no attempt projection. It is the
+// recovery read behind "Retry now" and the lost-response case: the client asks
+// the server what actually committed instead of blindly replaying the
+// transition command against a database that may already be saturated.
+func deliveryModuleEntryStateHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		withQueryTimeout(w, r, DefaultEntryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			bearer, ok := requireBearer(w, r)
+			if !ok {
+				return
+			}
+			// A read that reports authoritative entry state: session-bound verify
+			// in both modes, like the bootstrap read.
+			claims, err := verifyAttemptReadBearer(app, r, bearer)
+			if err != nil {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+				return
+			}
+			if app.Delivery == nil || app.DB == nil {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Delivery service is unavailable."))
+				return
+			}
+			out, err := app.Delivery.EntryState(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "moduleID"))
+			if err != nil {
+				writeEntryError(w, r, err)
+				return
+			}
+			// Attempt-state read: safe to re-send, never safe to reuse.
+			w.Header().Set("Cache-Control", "no-store")
+			httpx.WriteJSON(w, http.StatusOK, out)
+		})
 	}
 }
 

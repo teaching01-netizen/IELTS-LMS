@@ -61,11 +61,12 @@ func migDir(t *testing.T) string {
 // SAT full-entry-time personal timing model landed 0069 (sat_timing_model /
 // assessment_attempt_breaks) — count/max bumped 67->69. The proctor-authorized
 // entry re-arm for that model landed 0070 (entry_proctor_rearm_at) — count/max
-// bumped 69->70.
+// bumped 69->70. Personal-module expiry scan landed 0071 — count/max bumped
+// 70->71.
 // Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 70
-	pinnedMigrationMax   = 70
+	pinnedMigrationFiles = 71
+	pinnedMigrationMax   = 71
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

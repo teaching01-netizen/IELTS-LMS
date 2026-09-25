@@ -18,25 +18,17 @@ describe("SAT transition screens (Phase 6c)", () => {
     expect(screen.getByText(/starts automatically/)).toBeInTheDocument();
   });
 
-  // A missing authoritative break instant is not a zero-length break. The
-  // surface names the entry progress without inventing a numeric countdown.
-  it("explains a run-out break without rendering a fake 0:00", () => {
-    const { rerender } = render(
-      <SatBreakScreen nextSectionKey="math" remainingSeconds={null} entryProgress="starting" />
+  // A missing authoritative break instant is not a zero-length break.
+  // The same break surface stays mounted until the next active module
+  // replaces it — never "Opening Math…".
+  it("explains a synchronizing break without rendering a fake 0:00", () => {
+    render(
+      <SatBreakScreen nextSectionKey="math" remainingSeconds={null} />
     );
     expect(screen.getByRole("timer")).toHaveTextContent("—");
-    expect(screen.getByText("Starting your next section")).toBeInTheDocument();
     expect(screen.getByText(/do not need to do anything/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Math is next" })).toBeInTheDocument();
-    expect(screen.queryByText("On break")).not.toBeInTheDocument();
-
-    rerender(
-      <SatBreakScreen nextSectionKey="math" remainingSeconds={null} entryProgress="retrying" />
-    );
-    expect(screen.getByText("Still opening your next section")).toBeInTheDocument();
-    expect(screen.getByText(/Keep this screen open/)).toBeInTheDocument();
-    // The path forward stays named on the retrying state.
-    expect(screen.getByText(/wait 30 seconds then reload/)).toBeInTheDocument();
+    expect(screen.queryByText(/opening/i)).not.toBeInTheDocument();
   });
 
   it("names the Continue destination for its section", () => {

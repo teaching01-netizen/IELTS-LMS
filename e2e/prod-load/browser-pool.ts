@@ -40,6 +40,7 @@ export function createBrowserPool(options: BrowserPoolOptions): BrowserPool {
   const note = (message: string) => options.onEvent?.(message);
   let entries: PoolEntry[] = [];
   let generation = 0;
+  let acquireTail: Promise<void> = Promise.resolve();
 
   function dropDisconnected(): void {
     entries = entries.filter((entry) => {
@@ -54,26 +55,38 @@ export function createBrowserPool(options: BrowserPoolOptions): BrowserPool {
 
   return {
     async acquire(): Promise<BrowserPoolLease> {
-      dropDisconnected();
-      let entry: PoolEntry | null = entries.find((candidate) => candidate.contexts < maxContextsPerBrowser) ?? null;
-      if (!entry) {
-        if (entries.length < maxBrowsers) {
-          generation += 1;
-          const browser = await options.launch();
-          entry = { browser, contexts: 0, generation };
-          entries.push(entry);
-          note(`BROWSER_LAUNCHED: instance ${generation} (${entries.length}/${maxBrowsers}).`);
-        } else {
-          // Only reachable when the caller holds more contexts open than
-          // maxBrowsers * maxContextsPerBrowser: share the least-loaded instance.
-          entry = entries.reduce((least, candidate) =>
-            candidate.contexts < least.contexts ? candidate : least,
-          );
-        }
-      }
+      const previousAcquire = acquireTail;
+      let unlock!: () => void;
+      acquireTail = new Promise<void>((resolve) => {
+        unlock = resolve;
+      });
+      await previousAcquire;
 
-      entry.contexts += 1;
-      const target = entry;
+      let target: PoolEntry;
+      try {
+        dropDisconnected();
+        let entry = entries.find((candidate) => candidate.contexts < maxContextsPerBrowser) ?? null;
+        if (!entry) {
+          if (entries.length < maxBrowsers) {
+            generation += 1;
+            const browser = await options.launch();
+            entry = { browser, contexts: 0, generation };
+            entries.push(entry);
+            note(`BROWSER_LAUNCHED: instance ${generation} (${entries.length}/${maxBrowsers}).`);
+          } else {
+            // Only reachable when callers hold more contexts than the pool can
+            // accommodate; share the least-loaded browser as a safety fallback.
+            entry = entries.reduce((least, candidate) =>
+              candidate.contexts < least.contexts ? candidate : least,
+            );
+          }
+        }
+
+        entry.contexts += 1;
+        target = entry;
+      } finally {
+        unlock();
+      }
       let released = false;
       return {
         browser: target.browser,

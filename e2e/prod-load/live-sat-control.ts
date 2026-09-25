@@ -81,8 +81,8 @@ export function parseLiveSatControlConfig(input: unknown, workspaceRoot: string)
     jpegQuality: integer(record, 'jpegQuality', 'JPEG_QUALITY', 10, 90),
     startTimeoutMs: integer(record, 'startTimeoutMs', 'START_TIMEOUT_MS', 10_000, 3_600_000),
     examTimeoutMs: integer(record, 'examTimeoutMs', 'EXAM_TIMEOUT_MS', 60_000, 14_400_000),
-    k6Students: integer(record, 'k6Students', 'K6_STUDENTS', 1, 10_000),
-    k6StudentOffset: integer(record, 'k6StudentOffset', 'K6_STUDENT_OFFSET', 0, 100_000),
+    k6Students: runMode === 'k6' ? integer(record, 'k6Students', 'K6_STUDENTS', 1, 10_000) : 1,
+    k6StudentOffset: runMode === 'k6' ? integer(record, 'k6StudentOffset', 'K6_STUDENT_OFFSET', 0, 100_000) : 0,
     confirmK6Sat,
   };
 }

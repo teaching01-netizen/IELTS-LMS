@@ -146,6 +146,8 @@ export interface AssessmentDeliveryBootstrap {
   result: AssessmentResult | null;
 }
 
+export type AssessmentDeliveryState = Omit<AssessmentDeliveryBootstrap, "sections">;
+
 export interface AssessmentResponseRequest {
   revision: number;
   response: string | null;
@@ -161,6 +163,8 @@ export interface AssessmentResponseRequest {
 export interface AssessmentModuleStartRequest {
   moduleId: string;
   generation?: number;
+  /** Request the chosen immutable module only when it is absent locally. */
+  needContent?: boolean;
   /**
    * The control epoch the client believed it held when it issued the command.
    * A pause/resume between belief and arrival bumps the attempt's epoch, so a
@@ -173,6 +177,58 @@ export interface AssessmentModuleEntryRequest {
   moduleId: string;
   generation: number;
   controlEpoch?: number;
+}
+
+/**
+ * The derived entry verdict the recovery read reports. It is one closed
+ * vocabulary so the client never re-implements the precedence: an acknowledged
+ * first frame outranks a confirmation, which outranks a still-future
+ * unconfirmed offer.
+ */
+export type AssessmentModuleEntryState = "none" | "armed" | "confirmed" | "entered";
+
+/**
+ * The compact, authoritative answer to "where is this module entry right now?".
+ *
+ * Delivery transitions answer this instead of asking the client to replay the
+ * command: a replay of StartModule/EnterModule against a saturated database was
+ * how "Retry now" failed where a page refresh succeeded, because only the
+ * refresh read authoritative state.
+ */
+export interface AssessmentModuleEntryStateAck {
+  scheduleId: string;
+  attemptId: string;
+  moduleId: string;
+  moduleAttemptId: string;
+  moduleRevision: number;
+  selectedSection?: AssessmentDeliverySection;
+  /** The raw assessment_module_attempts row state. */
+  state: string;
+  /** The schedule runtime's timing model; a personal offer only exists under `sat_personal_v1`. */
+  timingModel: string;
+  entryState: AssessmentModuleEntryState;
+  entryGeneration: number;
+  entryStartsAt?: string;
+  entryConfirmedAt?: string;
+  entryEnteredAt?: string;
+  startedAt?: string;
+  deadlineAt?: string;
+  remainingSeconds?: number;
+  serverNow: string;
+  controlEpoch: number;
+  runtimeRevision: number;
+}
+
+/**
+ * The first-active-paint acknowledgment's response. The candidate is already
+ * looking at the module when it fires, so the server answers with a compact ack
+ * rather than a second full attempt projection.
+ */
+export interface AssessmentStageVisibleAck {
+  acknowledged: boolean;
+  moduleId: string;
+  entryGeneration: number;
+  serverNow: string;
 }
 
 export interface AssessmentBreakEntryRequest {

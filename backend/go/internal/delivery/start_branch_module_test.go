@@ -32,7 +32,7 @@ func deliveryCohortRuntimeAndModule(
 	activeSection, moduleSectionKey, adaptiveRole string,
 	authoredSeconds int,
 ) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key"}).
 			AddRow("cohort_section_v3", activeSection))

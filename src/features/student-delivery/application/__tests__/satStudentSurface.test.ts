@@ -25,12 +25,8 @@ function input(
     frameFresh: false,
     moduleResolved: false,
     moduleQuestionResolved: true,
-    entryRecoverable: false,
-    entryBlocked: false,
-    entryHoldExpired: false,
     pendingBreakSeconds: 0,
     pendingSectionWaitSeconds: 0,
-    entryInFlight: false,
     attemptKey: ATTEMPT_KEY,
     ...overrides,
   };
@@ -93,10 +89,9 @@ describe("deriveSatStudentStage — the scheduled break is only a section bounda
     });
     expect(stage).toMatchObject({
       kind: "scheduled-break",
-      phase: "on-break",
+      phase: "active",
       remainingSeconds: 640,
       nextSectionKey: "math",
-      entryProgress: "idle",
     });
   });
 
@@ -105,33 +100,17 @@ describe("deriveSatStudentStage — the scheduled break is only a section bounda
       derive({
         pendingModule: pending("Module 1", "math", true),
         pendingSectionWaitSeconds: 300,
-        pendingBreakSeconds: 640,
+        pendingBreakSeconds: 0,
       }),
-    ).toMatchObject({ kind: "scheduled-break", phase: "waiting-for-break", remainingSeconds: 300 });
-  });
-
-  it("names the entry progress while the next section opens", () => {
-    const boundary = pending("Module 1", "math", true);
-    expect(derive({ pendingModule: boundary, entryInFlight: true })).toMatchObject({
-      kind: "scheduled-break",
-      phase: "opening-next-section",
-      remainingSeconds: null,
-      entryProgress: "starting",
-    });
-    expect(derive({ pendingModule: boundary, entryRecoverable: true })).toMatchObject({
-      entryProgress: "retrying",
-    });
+    ).toMatchObject({ kind: "scheduled-break", phase: "waiting", remainingSeconds: 300 });
   });
 
   it("keeps every break phase on ONE stage key", () => {
     const boundary = pending("Module 1", "math", true);
-    const waiting = derive({ pendingModule: boundary, pendingSectionWaitSeconds: 300 });
+    const waiting = derive({ pendingModule: boundary, pendingSectionWaitSeconds: 300, pendingBreakSeconds: 0 });
     const onBreak = derive({ pendingModule: boundary, pendingBreakSeconds: 600 });
-    const opening = derive({ pendingModule: boundary, entryInFlight: true });
     expect(waiting.key).toBe(onBreak.key);
-    expect(opening.key).toBe(onBreak.key);
-    expect([waiting, onBreak, opening].map((stage) => stage.kind)).toEqual([
-      "scheduled-break",
+    expect([waiting, onBreak].map((stage) => stage.kind)).toEqual([
       "scheduled-break",
       "scheduled-break",
     ]);
@@ -140,7 +119,7 @@ describe("deriveSatStudentStage — the scheduled break is only a section bounda
   it("takes the runner's own break phase as a boundary", () => {
     expect(derive({ runnerPhase: "break", pendingBreakSeconds: 60 })).toMatchObject({
       kind: "scheduled-break",
-      phase: "on-break",
+      phase: "active",
     });
   });
 
@@ -161,24 +140,27 @@ describe("deriveSatStudentStage — the scheduled break is only a section bounda
       }),
     ).toMatchObject({ kind: "exam", content: "live" });
   });
+
+  it("never renders an opening-next-section surface", () => {
+    const boundary = pending("Module 1", "math", true);
+    const stage = derive({ pendingModule: boundary, pendingBreakSeconds: 0 });
+    expect(stage).toMatchObject({ kind: "scheduled-break", phase: "active" });
+    if (stage.kind === "scheduled-break") {
+      expect(stage.phase).not.toBe("opening-next-section");
+    }
+  });
 });
 
 describe("deriveSatStudentStage — a module handoff never leaves the exam", () => {
   it.each(["reading-writing", "math"] as const)(
-    "opens the next module inside the frame in %s",
+    "holds the previous frame inside the exam in %s (no opening overlay)",
     (sectionKey) => {
       const stage = derive({
         pendingModule: pending("Module 2", sectionKey),
         hasExamFrame: true,
-        entryInFlight: true,
+        frameFresh: true,
       });
-      expect(stage).toMatchObject({
-        kind: "exam",
-        content: "opening",
-        pendingModuleTitle: "Module 2",
-      });
-      // The same stage key as the live frame: the shell is reconciled, not
-      // remounted, and the student never changes surface.
+      expect(stage).toMatchObject({ kind: "exam", content: "skew-hold" });
       expect(stage.key).toBe(
         derive({ runnerPhase: "module", moduleResolved: true }).key,
       );
@@ -186,36 +168,22 @@ describe("deriveSatStudentStage — a module handoff never leaves the exam", () 
   );
 
   it("does not let a later section's Module 2 become a break", () => {
-    // The regression: Math's section display order is 1, which used to look
-    // like a boundary for Math Module 1 → Module 2.
     expect(
       derive({
         pendingModule: pending("Module 2", "math"),
         hasExamFrame: true,
-        entryInFlight: true,
+        frameFresh: true,
       }),
-    ).toMatchObject({ kind: "exam", content: "opening" });
+    ).toMatchObject({ kind: "exam", content: "skew-hold" });
   });
 
-  it("keeps the handoff in the frame while the entry retries", () => {
-    const opening = derive({
+  it("never escalates to a recovery screen", () => {
+    const held = derive({
       pendingModule: pending("Module 2", "math"),
       hasExamFrame: true,
-      entryRecoverable: true,
-      entryHoldExpired: true,
+      frameFresh: true,
     });
-    // No escalation to a recovery screen: the frame owns the whole handoff.
-    expect(opening).toMatchObject({ kind: "exam", content: "opening" });
-  });
-
-  it("lets a proctor block own the screen instead of a stale frame", () => {
-    expect(
-      derive({
-        pendingModule: pending("Module 2", "math"),
-        hasExamFrame: true,
-        entryBlocked: true,
-      }),
-    ).toMatchObject({ kind: "pre-start", reason: "waiting" });
+    expect(held.kind).not.toBe("entry-recovery");
   });
 });
 
@@ -239,7 +207,6 @@ describe("deriveSatStudentStage — exam contents", () => {
     expect(
       derive({ runnerPhase: "module", moduleResolved: true, moduleQuestionResolved: false }),
     ).toMatchObject({ kind: "error", reason: "question" });
-    // Review needs no single question, so it stays live.
     expect(derive({ runnerPhase: "review", moduleResolved: true })).toMatchObject({
       kind: "exam",
       content: "live",
@@ -248,22 +215,17 @@ describe("deriveSatStudentStage — exam contents", () => {
 });
 
 describe("deriveSatStudentStage — the no-frame paths", () => {
-  it("waits on pre-start for the first module and for a frame-less handoff", () => {
+  it("waits in the waiting room for the first module and for a frame-less handoff", () => {
     expect(derive({ isInitialEntry: true })).toMatchObject({
       kind: "pre-start",
-      reason: "initial",
+      reason: "waiting",
     });
-    expect(derive()).toMatchObject({ kind: "pre-start", reason: "restoring" });
+    expect(derive()).toMatchObject({ kind: "pre-start", reason: "waiting" });
   });
 
-  it("escalates to the recovery surface once the hold window expires", () => {
-    expect(
-      derive({
-        pendingModule: pending("Module 1", "math"),
-        entryHoldExpired: true,
-        entryRecoverable: true,
-      }),
-    ).toMatchObject({ kind: "entry-recovery", moduleId: "module-Module 1" });
+  it("never returns an entry-recovery stage", () => {
+    const stage = derive({ pendingModule: pending("Module 1", "math") });
+    expect(stage.kind).not.toBe("entry-recovery");
   });
 
   it("treats a payload with the runner still loading as unrenderable", () => {
@@ -286,28 +248,31 @@ describe("deriveSatStudentStage — one stage per step, one key per stage", () =
       derive({ runnerPhase: "module", moduleResolved: true }),
       derive({ runnerPhase: "module", hasExamFrame: true, frameFresh: true }),
       derive({ isInitialEntry: true }),
-      derive({ entryHoldExpired: true }),
     ];
     for (const stage of stages) {
       expect(stage.key.length).toBeGreaterThan(0);
       expect(stage.kind.length).toBeGreaterThan(0);
     }
-    // Identity is part of every key: a different attempt can never inherit the
-    // presence of the one before it.
     expect(
       deriveSatStudentStage(input({ attemptKey: "other", hasResult: true })).key,
     ).not.toBe(derive({ hasResult: true }).key);
   });
 
-  it("walks the runner's own phase sequence without changing the exam surface", () => {
-    const live = derive({ runnerPhase: "module", moduleResolved: true });
-    const submittingModule = derive({ runnerPhase: "module", moduleResolved: true });
+  it("walks Waiting Room → Module 1 → Module 2 → Break → Math without extra surfaces", () => {
+    const waitingRoom = derive({ isInitialEntry: true });
+    const module1 = derive({ runnerPhase: "module", moduleResolved: true });
     const handoff = derive({
-      pendingModule: pending("Module 2", "math"),
+      pendingModule: pending("Module 2", "reading-writing"),
       hasExamFrame: true,
-      entryInFlight: true,
+      frameFresh: true,
     });
-    const nextModule = derive({ runnerPhase: "module", moduleResolved: true });
-    expect(new Set([live.key, submittingModule.key, handoff.key, nextModule.key]).size).toBe(1);
+    const module2 = derive({ runnerPhase: "module", moduleResolved: true });
+    const brk = derive({ pendingModule: pending("Module 1", "math", true), pendingBreakSeconds: 600 });
+    expect(waitingRoom.kind).toBe("pre-start");
+    expect(module1).toMatchObject({ kind: "exam", content: "live" });
+    expect(handoff).toMatchObject({ kind: "exam", content: "skew-hold" });
+    expect(module2).toMatchObject({ kind: "exam", content: "live" });
+    expect(brk.kind).toBe("scheduled-break");
+    expect(new Set([module1.key, handoff.key, module2.key]).size).toBe(1);
   });
 });

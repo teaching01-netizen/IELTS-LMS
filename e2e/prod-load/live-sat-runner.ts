@@ -6,7 +6,7 @@ import { isSatJoinError, type SatJoinError } from './sat-join-failure';
 import { parseSatJoinUrl } from './sat-join-url';
 import { loadUsersFromFile, type VirtualUser } from './user-source';
 import { startLiveDashboardServer, type DashboardEvent } from './live-dashboard-server';
-import { satAnswerUntilComplete, satJoinViaAccessLink, satWaitForExamLive } from './sat-live-scenario';
+import { satAnswerUntilComplete, satCaptureAnswerableFrames, satJoinViaAccessLink, satReadAnswerableFrames, satWaitForExamLive, type SatAnswerableFrame } from './sat-live-scenario';
 
 interface RunnerConfig {
   joinUrl: string;
@@ -51,6 +51,8 @@ interface UserResult {
   ok: boolean;
   joinMs: number;
   answered: number;
+  recoveryScreens?: number;
+  answerableFrames?: SatAnswerableFrame[];
   error?: string;
 }
 
@@ -294,6 +296,7 @@ async function run(): Promise<void> {
       lease = opened.lease;
       context = opened.context;
       page = await context.newPage();
+      await satCaptureAnswerableFrames(page);
 
       setPhase('joining', 'starting');
       let joined = false;
@@ -358,13 +361,14 @@ async function run(): Promise<void> {
         }
       })();
 
+      let recoveryScreens = 0;
       await satWaitForExamLive(page, {
         origin: parsed.origin,
         accessLinkId: parsed.accessLinkId,
         examTimeoutMs: config.examTimeoutMs,
         startPollIntervalMs: config.startPollIntervalMs,
         startTimeoutMs: config.startTimeoutMs,
-      });
+      }, () => { recoveryScreens += 1; });
       setPhase('in_exam', 'live');
 
       const outcome = await satAnswerUntilComplete(
@@ -391,8 +395,15 @@ async function run(): Promise<void> {
           console.log(line);
           appendLog(line);
         },
+        () => { recoveryScreens += 1; },
       );
       answered = outcome.answered;
+      const answerableFrames = await satReadAnswerableFrames(page);
+      if (bool('SAT_ASSERT_ENTRY_FRAME', false) &&
+          (recoveryScreens > 0 || answerableFrames.length === 0 ||
+            answerableFrames.some((frame) => frame.latencyMs >= 5000 || frame.latencyMs < 0))) {
+        throw new Error(`SAT_ENTRY_FRAME_GATE: recoveryScreens=${recoveryScreens} frames=${JSON.stringify(answerableFrames)}`);
+      }
 
       setPhase('done', 'done');
       stopCapture = true;
@@ -404,6 +415,8 @@ async function run(): Promise<void> {
         ok: true,
         joinMs: Math.max(0, joinedAt - startedAt),
         answered,
+        recoveryScreens,
+        answerableFrames,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -469,6 +482,11 @@ async function run(): Promise<void> {
   const ok = results.filter((r) => r.ok);
   const fail = results.filter((r) => !r.ok);
   const failures = [...fail, ...skipped];
+  const answerableFrameLatencies = ok.flatMap((r) => r.answerableFrames?.map((frame) => frame.latencyMs) ?? []);
+  const sortedFrameLatencies = [...answerableFrameLatencies].sort((a, b) => a - b);
+  const percentile = (fraction: number) => sortedFrameLatencies.length
+    ? sortedFrameLatencies[Math.ceil(fraction * sortedFrameLatencies.length) - 1]
+    : null;
   const summary = {
     accessLinkId: parsed.accessLinkId,
     joinUrl: config.joinUrl,
@@ -480,6 +498,10 @@ async function run(): Promise<void> {
     ...(abort.reason ? { aborted: true, abortReason: abort.reason } : {}),
     medianJoinMs: computeMedian(ok.map((r) => r.joinMs)),
     medianAnswered: computeMedian(ok.map((r) => r.answered)),
+    answerableFrameCount: answerableFrameLatencies.length,
+    answerableFrameP95Ms: percentile(0.95),
+    answerableFrameP99Ms: percentile(0.99),
+    answerableFrameMaxMs: sortedFrameLatencies.at(-1) ?? null,
     generatedAt: new Date().toISOString(),
     failures,
   };
@@ -494,6 +516,7 @@ async function run(): Promise<void> {
     console.error(`[live-sat-runner] aborted before admitting the roster: ${abort.reason}`);
     process.exitCode = 3;
   }
+  if (bool('SAT_ASSERT_ENTRY_FRAME', false) && fail.length > 0) process.exitCode = 1;
   if (config.deleteArtifactsOnFinish) {
     try {
       fs.unlinkSync(summaryPath);

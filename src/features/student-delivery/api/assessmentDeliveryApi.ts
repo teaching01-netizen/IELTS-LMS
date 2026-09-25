@@ -1,4 +1,5 @@
 import {
+  backendGet,
   backendPatch,
   backendPost,
   ensureClientSessionIdForStudentKey,
@@ -13,13 +14,16 @@ import {
 } from '../infrastructure/assessmentDeliveryBackendGateway';
 import type {
   AssessmentDeliveryBootstrap,
+  AssessmentDeliveryState,
   AssessmentBreakEntryRequest,
   AssessmentModuleEntryRequest,
+  AssessmentModuleEntryStateAck,
   AssessmentModuleStartRequest,
   AssessmentModuleSubmitRequest,
   AssessmentResponseRequest,
   AssessmentResponseSnapshot,
   AssessmentResult,
+  AssessmentStageVisibleAck,
   AssessmentSubmitRequest,
 } from '../contracts/assessmentDelivery';
 
@@ -199,6 +203,13 @@ export const assessmentDeliveryApi = {
     ));
   },
 
+  state(scheduleId: string, attemptId: string): Promise<AssessmentDeliveryState> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendGet<AssessmentDeliveryState>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/state`,
+      config,
+    ));
+  },
+
   saveResponse(
     scheduleId: string,
     attemptId: string,
@@ -216,8 +227,8 @@ export const assessmentDeliveryApi = {
     scheduleId: string,
     attemptId: string,
     request: AssessmentModuleStartRequest,
-  ): Promise<AssessmentDeliveryBootstrap> {
-    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
+  ): Promise<AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentModuleEntryStateAck>(
       `/v1/assessment-delivery/schedules/${scheduleId}/modules/start`,
       request,
       config,
@@ -228,10 +239,27 @@ export const assessmentDeliveryApi = {
     scheduleId: string,
     attemptId: string,
     request: AssessmentModuleEntryRequest,
-  ): Promise<AssessmentDeliveryBootstrap> {
-    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
+  ): Promise<AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentModuleEntryStateAck>(
       `/v1/assessment-delivery/schedules/${scheduleId}/modules/enter`,
       request,
+      config,
+    ));
+  },
+
+  /**
+   * The authoritative, cheap entry read behind "Retry now" and the
+   * lost-response recovery path. It mutates nothing, so a client that does not
+   * know whether its transition command committed asks here instead of
+   * replaying the command.
+   */
+  entryState(
+    scheduleId: string,
+    attemptId: string,
+    moduleId: string,
+  ): Promise<AssessmentModuleEntryStateAck> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendGet<AssessmentModuleEntryStateAck>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/modules/${encodeURIComponent(moduleId)}/entry-state`,
       config,
     ));
   },
@@ -240,8 +268,8 @@ export const assessmentDeliveryApi = {
     scheduleId: string,
     attemptId: string,
     request: AssessmentModuleEntryRequest,
-  ): Promise<AssessmentDeliveryBootstrap> {
-    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
+  ): Promise<AssessmentStageVisibleAck> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentStageVisibleAck>(
       `/v1/assessment-delivery/schedules/${scheduleId}/modules/visible`,
       request,
       config,

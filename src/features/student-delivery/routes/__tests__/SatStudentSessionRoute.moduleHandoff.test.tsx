@@ -375,88 +375,25 @@ describe("SatStudentSessionRoute module handoff", () => {
     matchMediaMock();
   });
 
-  it("keeps the same exam frame and shows one in-frame status", () => {
+  it("swaps Module 1 to Module 2 directly with no handoff surface", () => {
     const { rerender } = renderLiveModule();
-    const shell = screen.getByTestId("sat-exam-shell");
     expect(screen.getByText("Math Module 1 marker")).toBeInTheDocument();
 
-    seed(
-      { ...moduleState("math-m1", "math-m1-q1"), phase: "directions" },
-      mathModuleTwoRouted(),
-      { pendingModuleId: "math-m2-higher", handoffSeconds: 754, isStarting: true },
-    );
+    // Server-driven M1→M2: the server activates the routed Module 2 atomically,
+    // so the client swaps M1 UI → M2 UI with zero mutations and no status card.
+    seed(moduleState("math-m2-higher", "math-m2-higher-q1"), mathModuleTwoRouted());
     rerender(routeElement());
 
-    // The frame is the SAME DOM node: the shell, its tool hosts and its zoom
-    // plane were reconciled, not remounted.
-    expect(screen.getByTestId("sat-exam-shell")).toBe(shell);
-    // The finished question is still on screen, frozen behind the status.
-    expect(screen.getByText("Math Module 1 marker")).toBeInTheDocument();
-    // No transition screen, no break surface.
+    expect(screen.getByText("Math Module 2 marker")).toBeInTheDocument();
     expect(screen.queryByTestId("sat-scheduled-break")).toBeNull();
-    expect(screen.queryByText("We’re having trouble opening")).toBeNull();
-
-    const hold = document.querySelector("[data-sat-transition-hold]");
-    expect(hold).not.toBeNull();
-    expect(hold).toHaveAttribute("inert");
-    expect(hold).toHaveAttribute("aria-hidden", "true");
-    expect(hold?.contains(shell)).toBe(true);
-
-    // One live status, OUTSIDE the hidden frame, naming what is opening and the
-    // section clock the student is still on.
-    expect(screen.getByRole("heading", { name: "Opening Module 2…" })).toBeInTheDocument();
-    const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("Opening Module 2.");
-    expect(hold?.contains(status)).toBe(false);
-    expect(document.querySelector("[data-sat-handoff-clock]")).toHaveTextContent("12:34");
+    expect(screen.queryByText(/trouble opening/)).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Opening Module 2/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Retry now/ })).toBeNull();
+    expect(document.querySelector("[data-sat-handoff]")).toBeNull();
+    expect(document.querySelector("[data-sat-transition-hold]")).toBeNull();
+    expect(document.querySelectorAll('[data-sat-stage="exam"]')).toHaveLength(1);
   });
 
-  it("escalates in frame while the entry retries, with the recovery action inline", () => {
-    const { rerender } = renderLiveModule();
-    const shell = screen.getByTestId("sat-exam-shell");
-
-    seed(
-      { ...moduleState("math-m1", "math-m1-q1"), phase: "directions" },
-      mathModuleTwoRouted(),
-      { pendingModuleId: "math-m2-higher", autoEntryRecoverable: true },
-    );
-    rerender(routeElement());
-
-    expect(screen.getByRole("heading", { name: "Still opening Module 2…" })).toBeInTheDocument();
-    expect(screen.getByTestId("sat-exam-shell")).toBe(shell);
-    expect(screen.queryByTestId("sat-scheduled-break")).toBeNull();
-    expect(screen.getByRole("status")).toHaveTextContent("Still opening Module 2.");
-
-    const retry = screen.getByRole("button", { name: "Retry now" });
-    fireEvent.click(retry);
-    const controller = controllerMock.current as { retryModuleEntry: () => void };
-    expect(controller.retryModuleEntry).toHaveBeenCalledTimes(1);
-
-    // No clock rather than a frozen or invented one when the frame has no
-    // authority to quote a section clock.
-    expect(document.querySelector("[data-sat-handoff-clock]")).toBeNull();
-  });
-
-  it("keeps the held frame inert to answers and shortcuts", () => {
-    const { rerender } = renderLiveModule();
-    const commands = seed(
-      { ...moduleState("math-m1", "math-m1-q1"), phase: "directions" },
-      mathModuleTwoRouted(),
-      { pendingModuleId: "math-m2-higher" },
-    );
-    rerender(routeElement());
-
-    const hold = document.querySelector("[data-sat-transition-hold]");
-    const radio = hold?.querySelector('input[type="radio"]');
-    expect(radio).not.toBeNull();
-    fireEvent.click(radio as Element);
-    expect(radio).not.toBeChecked();
-
-    fireEvent.keyDown(document, { key: "x", ctrlKey: true, altKey: true });
-    fireEvent.keyDown(document, { key: "c", ctrlKey: true, altKey: true });
-    expect(commands.nextQuestion).not.toHaveBeenCalled();
-    expect(commands.toggleCalculator).not.toHaveBeenCalled();
-  });
 
   it("hands the same surface over to the next module", () => {
     const { rerender } = renderLiveModule();

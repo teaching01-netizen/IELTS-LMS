@@ -676,8 +676,13 @@ func ensureQuestionAdmittedForProvider(owner QuestionOwner, gate RuntimeGate, qu
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT module deadline is unavailable.", HTTPStatus: 422}
 	}
 	personalSAT := isPersonalTimingModel(owner.TimingModel)
-	if personalSAT && (owner.EntryConfirmedAt == nil || owner.ModuleStartedAt == nil || gate.Now.Before(*owner.ModuleStartedAt)) {
-		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT module entry is not confirmed.", HTTPStatus: 422}
+	// The single-operation offer flow (StartModuleOfferAck) sets the module to
+	// active with started_at = DB NOW and no longer performs an enter/visible
+	// confirmation handshake. Module state is already gated active/review above,
+	// so an existing started_at plus a non-expired deadline is the authority for
+	// writability; entry_confirmed_at is not required.
+	if personalSAT && (owner.ModuleStartedAt == nil || gate.Now.Before(*owner.ModuleStartedAt)) {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT module has not started.", HTTPStatus: 422}
 	}
 	// The attempt deadline covers the shared SAT section clock. Module 1 can
 	// have a shorter personal clock, so enforce the effective module boundary

@@ -1142,6 +1142,24 @@ func resultsACTScienceDetailHandler(app *App) http.HandlerFunc {
 	}
 }
 
+func resultsSATAttemptAnswersHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
+			return
+		}
+		if app.Results == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Results service not configured."))
+			return
+		}
+		out, err := app.Results.GetSATAttemptAnswers(r.Context(), actorOf(r.Context()), chi.URLParam(r, "attemptID"))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
 // resultsSATGetHandler returns one SAT result with section detail.
 func resultsSATGetHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
