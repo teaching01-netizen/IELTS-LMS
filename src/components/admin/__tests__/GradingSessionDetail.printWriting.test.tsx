@@ -10,11 +10,11 @@ import { downloadCsvFile } from '../gradingReviewUtils';
 import type { GradingSession, StudentSubmission, WritingTaskSubmission } from '../../../types/grading';
 
 vi.mock('../../../services/developmentFixtures', () => ({
-  seedDevelopmentFixtures: vi.fn().mockResolvedValue(undefined),
+  seedDevelopmentFixtures: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('@services/developmentFixtures', () => ({
-  seedDevelopmentFixtures: vi.fn().mockResolvedValue(undefined),
+  seedDevelopmentFixtures: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('../../../services/examRepository', () => ({

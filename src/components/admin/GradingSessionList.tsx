@@ -122,7 +122,8 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
   useEffect(() => {
     void loadSummary();
     void seedDevelopmentFixtures()
-      .then(() => {
+      .then((seeded) => {
+        if (!seeded) return;
         void loadPage(pagination.page, pagination.pageSize, debouncedSearch);
         void loadSummary();
       })

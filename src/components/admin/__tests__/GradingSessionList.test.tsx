@@ -24,7 +24,7 @@ vi.mock('../../../features/grading/infrastructure/gradingGateway', async (import
 });
 
 vi.mock('../../../features/exam-authoring/api/examAuthoringGateway', () => ({
-  seedDevelopmentFixtures: vi.fn().mockResolvedValue(undefined),
+  seedDevelopmentFixtures: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('../../../utils/csvExport', () => ({
@@ -97,7 +97,7 @@ function mockQueuePage(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(seedDevelopmentFixtures).mockResolvedValue(undefined);
+  vi.mocked(seedDevelopmentFixtures).mockResolvedValue(false);
   vi.mocked(gradingService.getSessionQueueSummary).mockResolvedValue({
     success: true,
     data: { ...defaultSummary },

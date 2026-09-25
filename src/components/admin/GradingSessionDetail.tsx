@@ -171,8 +171,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     let cancelled = false;
     void loadSubmissions();
     void seedDevelopmentFixtures()
-      .then(() => {
-        if (!cancelled) {
+      .then((seeded) => {
+        if (!cancelled && seeded) {
           void loadSubmissions();
         }
       })
