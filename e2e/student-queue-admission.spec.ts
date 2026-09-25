@@ -58,9 +58,11 @@ test.describe("Student queue admission flow", () => {
           const lobby = page.getByRole("heading", { name: /Lobby|Exam Overview|Waiting/i });
           const startExam = page.getByRole("button", { name: "Start Exam" });
           const examContent = page.getByLabel("Answer for question 1");
+          const writingEditor = page.locator('[contenteditable="true"]').first();
           if (await lobby.isVisible().catch(() => false)) return "lobby";
           if (await startExam.isVisible().catch(() => false)) return "start";
           if (await examContent.isVisible().catch(() => false)) return "exam";
+          if (await writingEditor.isVisible().catch(() => false)) return "exam";
           return "pending";
         },
         { timeout: 30_000 }
