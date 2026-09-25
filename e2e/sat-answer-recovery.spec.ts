@@ -69,6 +69,14 @@ test.describe('SAT answer durability recovery', () => {
       await expect(page.getByRole('heading', { name: /Question-level responses/ })).toBeVisible();
       await expect(page.getByRole('columnheader', { name: 'Student raw' })).toBeVisible();
       await expect(page.getByText('Unanswered').first()).toBeVisible();
+      const refreshStatus = page.getByRole('status').filter({ hasText: 'Checks automatically every 15 seconds while visible' });
+      await expect(refreshStatus).toBeVisible();
+      await page.waitForResponse((response) =>
+        response.url().includes('/v1/results/sat/attempts/')
+        && response.url().endsWith('/answers')
+        && response.request().method() === 'GET'
+        && response.ok(), { timeout: 25_000 });
+      await expect(refreshStatus).toContainText('Last checked');
     } finally {
       await studentContext.close();
     }
@@ -132,7 +140,7 @@ test.describe('SAT answer durability recovery', () => {
       await expect(radios.first()).toBeChecked({ timeout: 30_000 });
 
       await studentPage.getByRole('button', { name: 'Turn on cross-out mode' }).click();
-      await expect(studentPage.getByRole('button', { name: 'Restore option B' })).toHaveAttribute(
+      await expect(studentPage.getByRole('button', { name: 'Undo option B' })).toHaveAttribute(
         'aria-pressed',
         'true',
       );

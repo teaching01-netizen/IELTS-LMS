@@ -123,7 +123,7 @@ test.describe('SAT automatic resume', () => {
       expect(resumed).toEqual(original);
       expect(await schedulePage.locator('input[type="radio"]:checked').first().inputValue()).toBe(savedAnswer);
       await schedulePage.getByRole('button', { name: 'Turn on cross-out mode' }).click();
-      await expect(schedulePage.getByRole('button', { name: 'Restore option B' })).toHaveAttribute(
+      await expect(schedulePage.getByRole('button', { name: 'Undo option B' })).toHaveAttribute(
         'aria-pressed',
         'true',
       );
@@ -204,7 +204,7 @@ test.describe('SAT automatic resume', () => {
       expect(await readAttemptIdentity(restartedPage, scheduleId, candidateId)).toEqual(original);
       expect(await restartedPage.locator('input[type="radio"]:checked').first().inputValue()).toBe(savedAnswer);
       await restartedPage.getByRole('button', { name: 'Turn on cross-out mode' }).click();
-      await expect(restartedPage.getByRole('button', { name: 'Restore option B' })).toHaveAttribute(
+      await expect(restartedPage.getByRole('button', { name: 'Undo option B' })).toHaveAttribute(
         'aria-pressed',
         'true',
       );

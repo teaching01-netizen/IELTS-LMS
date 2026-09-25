@@ -360,6 +360,12 @@ func main() {
 	}
 
 	app := BuildApp(cfg, pool)
+	if app.Media == nil {
+		log.Fatal("api: media storage is unavailable")
+	}
+	if err := app.Media.CheckStorage(context.Background()); err != nil {
+		log.Fatalf("api: media storage unavailable: %v", err)
+	}
 	// Phase 02: a flag-on process with no live bus must not start, or the
 	// authoring realtime capability would be silently disabled at runtime.
 	if app.AuthoringConfigErr != nil {
@@ -734,13 +740,13 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/{resultID}/events", resultsEventsHandler(app))
 			authzRoute(r, "GET", "/{resultID}", resultsGetHandler(app))
 		})
-		r.With(limitTier(app, httpx.TierWrites, userKey())).With(adminLimit).Route("/media", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierWrites, attemptKey())).With(adminLimit).Route("/media", func(r chi.Router) {
 			authzRoute(r, "POST", "/uploads", mediaUploadHandler(app))
 			authzRoute(r, "POST", "/import-url", mediaImportURLHandler(app))
 			authzRoute(r, "PUT", "/uploads/{assetID}", mediaUploadBytesHandler(app))
 			authzRoute(r, "POST", "/uploads/{assetID}/complete", mediaCompleteHandler(app))
 			authzRoute(r, "GET", "/assets/{assetID}", withAuthedReadsTier(app, mediaDownloadHandler(app)))
-			authzRoute(r, "GET", "/{assetID}/content", withAuthedReadsTier(app, mediaDownloadContentHandler(app)))
+			authzRoute(r, "GET", "/{assetID}/content", withAttemptReadsTier(app, mediaDownloadContentHandler(app)))
 			authzRoute(r, "GET", "/{assetID}", withAuthedReadsTier(app, mediaGetHandler(app)))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/answer-history", func(r chi.Router) {
@@ -892,6 +898,11 @@ func withAuthedReadsTier(app *App, h http.HandlerFunc) http.HandlerFunc {
 	return mw(h).ServeHTTP
 }
 
+func withAttemptReadsTier(app *App, h http.HandlerFunc) http.HandlerFunc {
+	mw := app.Tiers.Middleware(httpx.TierAuthedReads, attemptKey())
+	return mw(h).ServeHTTP
+}
+
 // userKey tiers authenticated traffic by user, anonymous by IP.
 func userKey() httpx.KeyFunc {
 	return httpx.UserOrIPKey(sessionUserLookup)
@@ -1024,12 +1035,17 @@ func readyz(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Schema version unknown."))
 			return
 		}
+		if app.Media == nil || app.Media.CheckStorage(ctx) != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Media storage is unavailable."))
+			return
+		}
 		// Plan E3/§7: pool gauges with role label (API/worker split is
 		// queryable; single-pool callers report role=single).
 		db.ReportPoolStats(db.RoleAPI, app.DB.Stats())
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{
 			"status":        "ready",
 			"database":      "ready",
+			"mediaStorage":  "ready",
 			"schemaVersion": version,
 			"requestId":     httpx.RequestIDOf(w, r),
 		})

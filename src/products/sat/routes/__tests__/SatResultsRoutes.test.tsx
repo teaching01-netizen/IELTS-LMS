@@ -31,6 +31,10 @@ const pageTwo = {
   items: [{ ...pageOne.items[0], resultId: 'result-51', attemptId: 'attempt-51', studentName: 'Older Student' }],
   total: 51, offset: 50, limit: 50, hasMore: false,
 };
+const savedAnswers = { attemptId: 'attempt-2', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S2', studentName: 'Student X', cohortName: 'Morning', status: 'running', protocolVersion: 2, responseRevision: 4, savedAnswerCount: 1, lastSavedAt: '2026-09-01T08:05:00Z', questions: [
+  { questionId: 'q1', sectionKey: 'reading-writing', moduleKey: 'module-1', displayOrder: 1, response: 'B', markedForReview: false },
+  { questionId: 'q2', sectionKey: 'reading-writing', moduleKey: 'module-1', displayOrder: 2, response: null, markedForReview: false },
+] };
 
 function LocationProbe() {
   const location = useLocation();
@@ -53,10 +57,7 @@ describe('SAT Results hierarchy', () => {
       isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
     });
     useSatAttemptAnswersQueryMock.mockReturnValue({
-      data: { attemptId: 'attempt-2', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S2', studentName: 'Student X', cohortName: 'Morning', status: 'running', protocolVersion: 2, responseRevision: 4, savedAnswerCount: 1, lastSavedAt: '2026-09-01T08:05:00Z', questions: [
-        { questionId: 'q1', sectionKey: 'reading-writing', moduleKey: 'module-1', displayOrder: 1, response: 'B', markedForReview: false },
-        { questionId: 'q2', sectionKey: 'reading-writing', moduleKey: 'module-1', displayOrder: 2, response: null, markedForReview: false },
-      ] }, isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
+      data: savedAnswers, isLoading: false, error: null, isFetching: false, dataUpdatedAt: Date.UTC(2026, 8, 1, 8, 6), refetch: vi.fn(),
     });
   });
 
@@ -90,6 +91,7 @@ describe('SAT Results hierarchy', () => {
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results/attempts/attempt-2');
     expect(screen.getByText('1 server-saved answers')).toBeInTheDocument();
     expect(screen.getByText(/Revision 4/)).toBeInTheDocument();
+    expect(screen.getByText(/Checks automatically every 15 seconds while visible/)).toHaveTextContent('Last checked');
     expect(screen.getByRole('heading', { name: 'Question-level responses (2)' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Reading & Writing' })).toBeInTheDocument();
     expect(screen.getByRole('table', { name: 'Reading & Writing question responses' })).toBeInTheDocument();
@@ -133,6 +135,14 @@ describe('SAT Results hierarchy', () => {
     expect(refetch).toHaveBeenCalledOnce();
   });
 
+  it('keeps the last successful answers visible when an automatic check fails', () => {
+    useSatAttemptAnswersQueryMock.mockReturnValueOnce({ data: savedAnswers, isLoading: false, error: new Error('offline'), isFetching: false, dataUpdatedAt: Date.UTC(2026, 8, 1, 8, 6), refetch: vi.fn() });
+    renderResultsRoute('/sat/results/attempts/attempt-2');
+    expect(screen.getByText('1 server-saved answers')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not check for newer answers');
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeEnabled();
+  });
+
   it('paginates through older attempts rather than truncating the schedule', () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
     fireEvent.click(screen.getByRole('button', { name: /Next/ }));
@@ -142,7 +152,7 @@ describe('SAT Results hierarchy', () => {
 
   it('keeps deleted-link fallback and versions on schedule groups', () => {
     renderResultsRoute('/sat/results?exam=sat-1');
-    expect(screen.getByText('Version 20 · 1 submitted · 1 scored')).toBeInTheDocument();
+    expect(screen.getByText('Version 20 · 1 completed')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Previous Student Access/ })).toBeInTheDocument();
   });
 });

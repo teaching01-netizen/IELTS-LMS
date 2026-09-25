@@ -406,13 +406,12 @@ describe('SAT Phase 02 copy contracts', () => {
     rows.forEach((row) => {
       expect(row.querySelectorAll('span[class*="rounded-full"][class*="inline-flex"]').length).toBe(1);
     });
-    // Mixed schedule: roll-up pill is pending (pending > 0) plus the pending row's
-    // own pill — two 'Scoring pending' nodes, one pill per row each.
-    expect(screen.getAllByText('Scoring pending')).toHaveLength(2);
+    // The pending result and its roll-up both report completion.
+    expect(screen.getAllByText('Completed')).toHaveLength(2);
     expect(screen.getByText('Exam terminated by proctor')).toBeInTheDocument();
   });
 
-  it('jargon footnote is gone; module scores stay', () => {
+  it('jargon footnote is gone; scaled score stays hidden', () => {
     useSatResultQueryMock.mockReturnValue({
       data: {
         summary: resultSummary,
@@ -446,5 +445,7 @@ describe('SAT Phase 02 copy contracts', () => {
     expect(screen.queryByText('Module identifiers as delivered.')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Reading & Writing module raw scores')).toBeInTheDocument();
     expect(screen.getByText('rw-base')).toBeInTheDocument();
+    expect(screen.queryByText('680')).not.toBeInTheDocument();
+    expect(screen.queryByText('1370')).not.toBeInTheDocument();
   });
 });

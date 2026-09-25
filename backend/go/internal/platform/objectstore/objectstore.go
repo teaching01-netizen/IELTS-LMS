@@ -1,4 +1,4 @@
-// Package objectstore abstracts MinIO-compatible media storage (plan: media).
+// Package objectstore abstracts the media object storage.
 package objectstore
 
 import "context"
@@ -7,6 +7,11 @@ import "context"
 type Store interface {
 	Put(ctx context.Context, key string, body []byte, contentType string) error
 	Get(ctx context.Context, key string) ([]byte, error)
+	Stat(ctx context.Context, key string) error
 	Delete(ctx context.Context, key string) error
-	PresignedGet(ctx context.Context, key string) (string, error)
+}
+
+// ReadinessStore can confirm the configured bucket or local root is usable.
+type ReadinessStore interface {
+	Check(ctx context.Context) error
 }

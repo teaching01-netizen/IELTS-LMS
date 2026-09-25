@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -21,7 +22,9 @@ import (
 
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoringrealtime"
+	"example.com/ielts-proctoring/internal/media"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/satpublish"
 )
@@ -135,8 +138,11 @@ func EffectiveProviderKey(providerKey, examType string) string {
 
 // Service wires exam transitions explicitly.
 type Service struct {
-	db     *sql.DB
-	runner *tx.Runner
+	db            *sql.DB
+	runner        *tx.Runner
+	mediaVerifier interface {
+		VerifyRenderableAssets(context.Context, []string) ([]media.AssetIssue, error)
+	}
 	// liveOrigin is this instance's bus origin id (mirrors delivery.Service and
 	// authoring.Service). Empty = no bus: eventsOn() stays false.
 	liveOrigin string
@@ -148,6 +154,13 @@ type Service struct {
 // NewService wires dependencies explicitly.
 func NewService(db *sql.DB, runner *tx.Runner) *Service {
 	return &Service{db: db, runner: runner}
+}
+
+func (s *Service) SetMediaVerifier(verifier interface {
+	VerifyRenderableAssets(context.Context, []string) ([]media.AssetIssue, error)
+}) *Service {
+	s.mediaVerifier = verifier
+	return s
 }
 
 // Exam is the list/detail row mirrored from ExamEntity (camelCase wire shape
@@ -812,6 +825,10 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 	if err != nil {
 		return Version{}, validationError(err.Error())
 	}
+	preflightVersionID, preflightRevision, err := s.verifySATPublishMedia(ctx, examID, requestedScope)
+	if err != nil {
+		return Version{}, err
+	}
 	publishScope := "publish:" + examID
 	var publishFingerprint string
 	if normalizedKey != "" {
@@ -858,6 +875,9 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 			return conflictError("Draft changed while publish checks were running. Run the checks again.")
 		}
 		if req.ExpectedDraftRevision != nil && *req.ExpectedDraftRevision != draftRev {
+			return conflictError("Draft changed while publish checks were running. Run the checks again.")
+		}
+		if preflightVersionID != "" && (draftID != preflightVersionID || draftRev != preflightRevision) {
 			return conflictError("Draft changed while publish checks were running. Run the checks again.")
 		}
 		var entityRevision int
@@ -971,6 +991,96 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 	})
 	emission.flush(err)
 	return out, err
+}
+
+type blockedMediaDiagnostic struct {
+	Code              string `json:"code"`
+	Path              string `json:"path"`
+	Message           string `json:"message"`
+	AssetID           string `json:"assetId"`
+	StorageErrorClass string `json:"storageErrorClass,omitempty"`
+}
+
+func (s *Service) verifySATPublishMedia(ctx context.Context, examID string, scope satpublish.Scope) (string, int, error) {
+	var versionID, providerKey, examType string
+	var revision int
+	err := s.db.QueryRowContext(ctx, `SELECT v.id, v.revision, e.provider_key, e.exam_type
+		FROM exam_entities e JOIN exam_versions v ON v.id = e.current_draft_version_id
+		WHERE e.id = ? AND v.is_draft = TRUE`, examID).Scan(&versionID, &revision, &providerKey, &examType)
+	if err == sql.ErrNoRows {
+		return "", 0, nil
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	if EffectiveProviderKey(providerKey, examType) != ProviderSAT {
+		return "", 0, nil
+	}
+	refs, err := satpublish.CollectDraftAssetReferences(ctx, s.db, versionID, scope)
+	if err != nil {
+		return "", 0, err
+	}
+	var endingRevision int
+	if err := s.db.QueryRowContext(ctx, "SELECT revision FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE", versionID, examID).Scan(&endingRevision); err != nil {
+		if err == sql.ErrNoRows {
+			return "", 0, conflictError("Draft changed while publish checks were running. Run the checks again.")
+		}
+		return "", 0, err
+	}
+	if endingRevision != revision {
+		return "", 0, conflictError("Draft changed while publish checks were running. Run the checks again.")
+	}
+	if len(refs) == 0 {
+		return versionID, revision, nil
+	}
+	if s.mediaVerifier == nil {
+		return "", 0, apperrors.New(apperrors.CodeServiceUnavailable, "Media storage is unavailable.")
+	}
+	assetIDs := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		assetIDs = append(assetIDs, ref.AssetID)
+	}
+	issues, err := s.mediaVerifier.VerifyRenderableAssets(ctx, assetIDs)
+	if err != nil {
+		return "", 0, err
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT revision FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE", versionID, examID).Scan(&endingRevision); err != nil {
+		if err == sql.ErrNoRows {
+			return "", 0, conflictError("Draft changed while publish checks were running. Run the checks again.")
+		}
+		return "", 0, err
+	}
+	if endingRevision != revision {
+		return "", 0, conflictError("Draft changed while publish checks were running. Run the checks again.")
+	}
+	byAsset := make(map[string]media.AssetIssue, len(issues))
+	for _, issue := range issues {
+		byAsset[issue.AssetID] = issue
+	}
+	blocked := make([]blockedMediaDiagnostic, 0)
+	for _, ref := range refs {
+		issue, ok := byAsset[ref.AssetID]
+		if !ok {
+			continue
+		}
+		diagnostic := blockedMediaDiagnostic{
+			Code: "sat.media.unavailable", Path: ref.Path,
+			Message: "An image used by this question is missing or unavailable.",
+			AssetID: ref.AssetID, StorageErrorClass: issue.StorageErrorClass,
+		}
+		blocked = append(blocked, diagnostic)
+		log.Printf(`{"event":"sat_publish_media_blocked","request_id":%q,"version_id":%q,"question_id":%q,"asset_id":%q,"storage_error_class":%q}`,
+			httpx.RequestIDFrom(ctx, nil), versionID, ref.ExamQuestionID, ref.AssetID, issue.StorageErrorClass)
+	}
+	if len(blocked) > 0 {
+		rejection := validationError("SAT publish requirements are not met: one or more images are unavailable.")
+		rejection.Details = map[string]any{
+			"code": blocked[0].Code, "path": blocked[0].Path,
+			"assetId": blocked[0].AssetID, "issues": blocked,
+		}
+		return "", 0, rejection
+	}
+	return versionID, revision, nil
 }
 
 // ReopenDraft heals clone-database IELTS exams that lost their editable draft

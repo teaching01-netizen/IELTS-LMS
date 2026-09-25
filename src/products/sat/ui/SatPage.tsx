@@ -164,8 +164,7 @@ const TONE_PILL_CLASS: Record<SatStatusTone, string> = {
  *   anything else         -> 'neutral'
  */
 export function satOutcomeTone(outcome: string): SatStatusTone {
-  if (outcome === 'scored') return 'ready';
-  if (outcome === 'pending') return 'pending';
+  if (outcome === 'scored' || outcome === 'pending') return 'ready';
   if (outcome === 'invalidated_proctor' || outcome === 'invalidated_timeout') return 'invalidated';
   return 'neutral';
 }

@@ -143,6 +143,32 @@ async function attemptRequest<T>(
   }
 }
 
+export function loadAssessmentDeliveryMedia(
+  scheduleId: string,
+  attemptId: string,
+  assetId: string,
+): Promise<string> {
+  const endpoint = `/api/v1/media/${encodeURIComponent(assetId)}/content`;
+  return attemptRequest(scheduleId, attemptId, async (config) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        ...(config.headers ? { headers: config.headers } : {}),
+        credentials: 'same-origin',
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw Object.assign(new Error(`Media request failed (${response.status}).`), { statusCode: response.status });
+      }
+      return URL.createObjectURL(await response.blob());
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  });
+}
+
 export const assessmentDeliveryApi = {
   heartbeat(
     scheduleId: string,
@@ -199,7 +225,7 @@ export const assessmentDeliveryApi = {
     return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
       `/v1/assessment-delivery/schedules/${scheduleId}/bootstrap`,
       undefined,
-      config,
+      { ...config, timeout: 8_000, retries: 0 },
     ));
   },
 

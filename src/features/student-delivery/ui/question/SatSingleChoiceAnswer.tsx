@@ -1,7 +1,7 @@
-import { CircleSlash2 } from "lucide-react";
 import type { ChoiceOption } from "../../../exam-rendering/api/assessmentContracts";
 import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import { isSatSelectionGestureEcho } from "../annotations/satSelectionDragGuard";
+import { SatCutChoiceGlyph } from "./SatCutChoiceGlyph";
 import type { ReactNode } from "react";
 
 export interface SatSingleChoiceAnswerProps {
@@ -38,6 +38,11 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
         const eliminated = props.eliminatedOptionIds.has(option.id);
         const selected = props.value === option.id;
         const letter = String.fromCharCode(65 + index);
+        // The cut-choice control appears while the eliminator is armed, and
+        // stays on any choice already crossed out — an eliminated choice must
+        // remain recoverable without re-arming the mode. A selected choice
+        // never gets one: elimination of the chosen answer is not expressible.
+        const showEliminationControl = !selected && (props.eliminationMode || eliminated);
         const inputId = `sat-answer-${props.questionId}-${index}`;
         const eliminatedStatusId = `${inputId}-eliminated`;
         const optionLetterId = `${inputId}-letter`;
@@ -80,7 +85,7 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 // Bluebook marker (Phase 6): 28px circle with a 2px border.
                 // Selected fill lives HERE only — the row itself keeps the
                 // calm accent-soft tint, never a flooded blue fill.
-                className={`sat-state-transition grid h-[var(--sat-choice-marker-size)] w-[var(--sat-choice-marker-size)] shrink-0 place-items-center rounded-full border-2 text-[14px] font-semibold ${selected ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]" : "border-[var(--sat-text-secondary)] text-[var(--sat-text)]"}`}
+                className={`sat-state-transition grid h-[var(--sat-choice-marker-size)] w-[var(--sat-choice-marker-size)] shrink-0 place-items-center rounded-full border-2 text-[14px] font-semibold ${selected ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]" : "border-[var(--sat-text-secondary)] text-[var(--sat-text)]"} ${eliminated ? "line-through decoration-[1.5px]" : ""}`}
                 aria-hidden="true"
               >
                 {letter}
@@ -104,17 +109,36 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
             {/* Audit finding 3: the selected choice offers no cross-out control.
                 Elimination must never be expressible on the answer the student
                 picked — the domain mutation refuses it, and the UI does not
-                offer a control whose only possible effect is a contradiction. */}
-            {props.eliminationMode && !selected ? (
+                offer a control whose only possible effect is a contradiction.
+
+                The control is a SIBLING of the choice label, never inside it:
+                a button nested in a <label> would activate the radio, so
+                crossing a choice out could select it. Crossing out is its own
+                action, and the answer changes only through the radio. */}
+            {showEliminationControl ? (
               <button
                 type="button"
+                // No answer change rides along, and the domain mutation is the
+                // only writer of `eliminatedOptionIds` — this control just
+                // reports the intent to toggle it.
                 onClick={() => props.onToggleElimination(option.id)}
                 disabled={props.disabled}
                 aria-pressed={eliminated}
-                aria-label={`${eliminated ? "Restore" : "Eliminate"} option ${letter}`}
-                className={`sat-pressable sat-state-transition absolute right-2.5 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] ${eliminated ? "bg-[var(--sat-text)] text-[var(--sat-background)]" : "text-[var(--sat-text-secondary)] hover:bg-[var(--sat-surface-hover)]"} disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)]`}
+                // Visible text stays inside the accessible name (label in name):
+                // "Undo" is what the student reads, "Undo option B" is what
+                // assistive tech announces.
+                aria-label={`${eliminated ? "Undo" : "Eliminate"} option ${letter}`}
+                data-sat-cut-choice={option.id}
+                className={`sat-pressable sat-state-transition absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-[6px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] ${eliminated ? "sat-type-metadata font-semibold text-[var(--sat-accent-strong)] underline-offset-4 hover:underline" : "text-[var(--sat-text-secondary)] hover:bg-[var(--sat-surface-hover)] hover:text-[var(--sat-text)]"} disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:no-underline`}
               >
-                <CircleSlash2 className="h-5 w-5" aria-hidden="true" />
+                {eliminated ? (
+                  <span aria-hidden="true">Undo</span>
+                ) : (
+                  <SatCutChoiceGlyph
+                    size="sm"
+                    className="border-[var(--sat-answer-border)] bg-[var(--sat-answer-bg)] text-[var(--sat-text)]"
+                  />
+                )}
               </button>
             ) : null}
           </div>

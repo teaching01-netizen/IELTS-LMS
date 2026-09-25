@@ -52,8 +52,8 @@ export const SAT_HELP_ENTRIES: readonly SatHelpEntry[] = [
   {
     id: "eliminator",
     title: "Option Eliminator",
-    body: "Cross out answers you have ruled out. Crossed-out choices stay in place so you keep context, and you can restore any choice. Eliminating never selects or clears your answer.",
-    whereToFind: "Where to find it: Option Eliminator beside the question number.",
+    body: "Cross out answers you have ruled out. Crossed-out choices stay in place so you keep context, and Undo restores any of them. Eliminating never selects or clears your answer.",
+    whereToFind: "Where to find it: the crossed-out ABC icon at the right of the question header.",
   },
   {
     id: "mark",

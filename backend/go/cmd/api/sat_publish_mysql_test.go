@@ -9,6 +9,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/authoring"
 	"example.com/ielts-proctoring/internal/exams"
+	"example.com/ielts-proctoring/internal/media"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"github.com/google/uuid"
 )
@@ -649,3 +650,68 @@ func TestSATPublishOperationKeyReplaysOneReleaseMySQL(t *testing.T) {
 }
 
 func stringPointer(value string) *string { return &value }
+
+type satPublishMediaVerifierFunc func(context.Context, []string) ([]media.AssetIssue, error)
+
+func (verify satPublishMediaVerifierFunc) VerifyRenderableAssets(ctx context.Context, assetIDs []string) ([]media.AssetIssue, error) {
+	return verify(ctx, assetIDs)
+}
+
+func TestSATPublishBlocksUnavailableMediaMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	questionID := f.modules[0].questions[0]
+	f.setQuestion(t, questionID, "single_choice", `{"version":1,"nodes":[{"type":"paragraph","text":"Choose the correct answer."},{"type":"image","attrs":{"assetId":"missing-media"}}]}`, string(validSATPublishQuestion().Answer))
+	f.h.exams.SetMediaVerifier(satPublishMediaVerifierFunc(func(_ context.Context, ids []string) ([]media.AssetIssue, error) {
+		if !reflect.DeepEqual(ids, []string{"missing-media"}) {
+			t.Fatalf("verified asset IDs = %v", ids)
+		}
+		return []media.AssetIssue{{AssetID: "missing-media", Reason: "object_unreadable", StorageErrorClass: "missing"}}, nil
+	}))
+
+	before := f.persistedState(t)
+	_, err := f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, f.publishRequest())
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.Code != apperrors.CodeValidation {
+		t.Fatalf("unavailable media should block publish with validation, got %v", err)
+	}
+	if got := appErr.Details["code"]; got != "sat.media.unavailable" {
+		t.Fatalf("diagnostic code = %v, want sat.media.unavailable", got)
+	}
+	if got := appErr.Details["path"]; got != "examQuestion:"+questionID+":prompt.nodes[1].attrs.assetId" {
+		t.Fatalf("diagnostic path = %v", got)
+	}
+	if after := f.persistedState(t); !reflect.DeepEqual(after, before) {
+		t.Fatalf("blocked publish changed persisted state:\nbefore: %+v\nafter:  %+v", before, after)
+	}
+}
+
+func TestSATPublishConflictsWhenDraftChangesDuringMediaCheckMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	questionID := f.modules[0].questions[0]
+	f.setQuestion(t, questionID, "single_choice", `{"version":1,"nodes":[{"type":"paragraph","text":"Choose the correct answer."},{"type":"image","attrs":{"assetId":"media-1"}}]}`, string(validSATPublishQuestion().Answer))
+	questionRevisionID := f.questionRevisionID(t, questionID)
+	f.h.exams.SetMediaVerifier(satPublishMediaVerifierFunc(func(_ context.Context, _ []string) ([]media.AssetIssue, error) {
+		// Simulate a committed author save after preflight read and before object verification returns.
+		if _, err := f.h.db.Exec(`UPDATE assessment_question_revisions SET prompt = ? WHERE id = ?`, `{"version":1,"nodes":[{"type":"paragraph","text":"Updated during media check."}]}`, questionRevisionID); err != nil {
+			return nil, err
+		}
+		if _, err := f.h.db.Exec("UPDATE exam_versions SET revision = revision + 1 WHERE id = ? AND is_draft = TRUE", f.draftID); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}))
+
+	before := f.persistedState(t)
+	_, err := f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, f.publishRequest())
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.Code != apperrors.CodeConflict {
+		t.Fatalf("draft change during media verification should conflict, got %v", err)
+	}
+	after := f.persistedState(t)
+	if !after.isDraft || after.isPublished || after.publishedID.Valid || after.publishedEvents != before.publishedEvents {
+		t.Fatalf("stale preflight published after draft changed: before=%+v after=%+v", before, after)
+	}
+	if after.draftRevision != before.draftRevision+1 {
+		t.Fatalf("simulated author save did not advance draft revision: before=%+v after=%+v", before, after)
+	}
+}

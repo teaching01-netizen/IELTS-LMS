@@ -14,13 +14,6 @@ function sectionTitle(key: string): string {
   return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function rawTotals(sections: SatSectionResult[]) {
-  return sections.reduce((total, section) => ({
-    correct: total.correct + section.rawCorrect,
-    questions: total.questions + section.operationalQuestionCount,
-  }), { correct: 0, questions: 0 });
-}
-
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
   const time = new Date(value).getTime();
@@ -50,8 +43,9 @@ function outcomeLabel(outcomeStatus: string): string {
   switch (outcomeStatus) {
     case 'invalidated_proctor': return 'Exam terminated by proctor';
     case 'invalidated_timeout': return 'Exam ended before scoring';
-    case 'pending': return 'Scoring pending';
-    default: return 'Practice score';
+    case 'scored':
+    case 'pending': return 'Completed · view answers';
+    default: return 'Completed · view answers';
   }
 }
 
@@ -94,9 +88,7 @@ export function SatResultDetailRoute() {
   }
 
   const { summary } = query.data;
-  const raw = rawTotals(sections);
   const isScored = summary.outcomeStatus === 'scored';
-  const hasScaledTotal = isScored && summary.totalScore !== null;
   const isInvalidated = summary.outcomeStatus === 'invalidated_proctor' || summary.outcomeStatus === 'invalidated_timeout';
 
   return (
@@ -108,8 +100,8 @@ export function SatResultDetailRoute() {
         <div className="mt-2 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div><h1 className="text-balance text-[30px] font-semibold tracking-[-0.045em]">{summary.studentName}</h1><p className="mt-1 text-[11px] text-slate-400">{summary.studentId} · {summary.cohortName} · {formatDate(summary.submittedAt)}</p></div>
           <div className="sm:text-right">
-            <p className="text-[52px] font-semibold tabular-nums leading-none tracking-[-0.045em] text-slate-950">{isInvalidated ? 'Not scored' : hasScaledTotal ? summary.totalScore : isScored ? `${raw.correct}/${raw.questions}` : 'Pending'}</p>
-            <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-400">{isScored ? (hasScaledTotal ? `Scaled practice score · Practice · ${summary.releaseStatus}` : `Raw correct ${raw.correct}/${raw.questions} — scaled score unavailable · Practice · ${summary.releaseStatus}`) : `${outcomeLabel(summary.outcomeStatus)} · Practice · ${summary.releaseStatus}`}</p>
+            <p className="text-[22px] font-semibold tracking-[-0.035em] text-slate-950">{isInvalidated ? 'Not scored' : 'Completed · view answers'}</p>
+            <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-400">{isInvalidated ? `${outcomeLabel(summary.outcomeStatus)} · ${summary.releaseStatus}` : 'Saved response review'}</p>
             {query.isFetching && !query.isLoading ? <p className="mt-1 text-[11px] text-slate-400">Updating…</p> : null}
           </div>
         </div>
@@ -122,10 +114,9 @@ export function SatResultDetailRoute() {
             const modules = Array.isArray(section.modules) ? section.modules : [];
             return (
             <div key={section.sectionKey} style={{ '--sat-row-index': Math.min(sectionIndex, 5) } as CSSProperties} className="sat-row-enter rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-4 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))] sm:p-5">
-              <div className="grid min-h-[82px] grid-cols-[minmax(0,1fr)_auto] items-center gap-5 sm:grid-cols-[minmax(0,1fr)_130px_130px]">
+              <div className="grid min-h-[82px] grid-cols-[minmax(0,1fr)_auto] items-center gap-5">
                 <div><p className="text-[13px] font-semibold text-slate-900">{sectionTitle(section.sectionKey)}</p>{section.route ? <p className="mt-1 text-[11px] font-medium text-slate-400">Adaptive route · {section.route === 'higher' ? 'Higher' : 'Lower'}</p> : null}</div>
                 <div className="text-right sm:text-left"><p className="text-[16px] font-semibold tabular-nums">{section.rawCorrect} / {section.operationalQuestionCount}</p><p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Raw</p></div>
-                <div className="hidden text-right sm:block"><p className="text-[16px] font-semibold tabular-nums">{section.scaledScore ?? '—'}</p><p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Practice score</p></div>
               </div>
               {modules.length > 0 ? (
                 <dl className="mt-2 space-y-1.5 rounded-xl bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))] p-3" aria-label={`${sectionTitle(section.sectionKey)} module raw scores`}>
@@ -147,9 +138,9 @@ export function SatResultDetailRoute() {
       </section> : <SatSectionCard labelledBy="sat-outcome-heading" className="mt-7">
         <div className="flex flex-wrap items-center gap-2">
           <h2 id="sat-outcome-heading" className="text-[17px] font-semibold tracking-[-0.025em]">Exam outcome</h2>
-          <SatStatusPill tone={isInvalidated ? 'invalidated' : 'pending'}>{outcomeLabel(summary.outcomeStatus)}</SatStatusPill>
+          <SatStatusPill tone={isInvalidated ? 'invalidated' : 'ready'}>{outcomeLabel(summary.outcomeStatus)}</SatStatusPill>
         </div>
-        <p className="mt-3 max-w-xl text-[13px] leading-6 text-slate-600">{outcomeLabel(summary.outcomeStatus)}. No score was produced for this attempt.</p>
+        <p className="mt-3 max-w-xl text-[13px] leading-6 text-slate-600">{outcomeLabel(summary.outcomeStatus)}. SAT scores are not generated by this completion flow.</p>
       </SatSectionCard>}
 
       {isScored ? (
@@ -187,7 +178,7 @@ export function SatResultDetailRoute() {
         </section>
       ) : null}
 
-      <p className="max-w-xl text-[10px] leading-5 text-slate-400">Scores shown here are generated by this practice assessment system. A value is only presented as a scaled practice score when the scoring policy produced one; otherwise the interface shows the raw correct count.</p>
+      <p className="max-w-xl text-[10px] leading-5 text-slate-400">Saved answers are available for review. SAT scaled scores are not generated by this completion flow.</p>
     </div>
   );
 }

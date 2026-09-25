@@ -30,6 +30,8 @@ export interface SatQuestionRendererProps {
   onToggleReview: () => void;
   onToggleEliminationMode: () => void;
   onToggleEliminatedOption: (optionId: string) => void;
+  loadMediaUrl?: ((assetId: string) => Promise<string | null>) | undefined;
+  onMediaFailure?: ((assetId: string, questionId: string) => void) | undefined;
 }
 
 /**
@@ -63,6 +65,9 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
       // whose policy does not advertise image zoom gets a plain, unlensed
       // figure rather than a disabled strip.
       enlarge={props.disabled || !policy.imageZoom ? undefined : SAT_QUESTION_IMAGE_ENLARGE}
+      loadMediaUrl={props.loadMediaUrl}
+      onMediaFailure={props.onMediaFailure}
+      questionId={props.question.examQuestionId}
     />
   );
 

@@ -1,17 +1,13 @@
 package attempts
 
-// Audit finding 1 (SEV-1): the SAT provisional submit is only legal once the
-// attempt holds the complete SAT module topology — a terminal module attempt in
-// each required section — and every row is terminal.
+// SAT submit is only legal once the attempt holds the complete module topology:
+// a terminal module attempt in each required section, with every row terminal.
 //
-// The claim itself flips the attempt to submitted/post-exam, which blocks module
+// The terminal claim flips the attempt to submitted/post-exam, which blocks module
 // work (delivery.ensureAttemptCanWorkTx -> ATTEMPT_TERMINAL) and further answer
-// writes (ensureWritable), while sat.scoreAndPersist refuses to score anything
-// less than the full topology and the provisional reconciler only selects
-// attempts whose modules are ALL terminal. Accepting the claim on a partial
-// topology (for example a single terminal module) therefore dead-ends the
-// attempt: no module can be submitted, the scorer refuses, and the watchdog
-// cannot repair it. The gate runs under the attempt row lock, in submitInTx.
+// writes (ensureWritable). Accepting the claim on a partial topology therefore
+// dead-ends the attempt because no module can be submitted. The gate runs under
+// the attempt row lock, in submitInTx.
 import (
 	"context"
 	"database/sql"
@@ -58,13 +54,11 @@ func submitPrefixStubs(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("SELECT attempt_id FROM attempt_submissions_v2 WHERE submission_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT active_client_session_id").
 		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	mock.ExpectQuery("FROM attempt_responses_v2").
-		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
 }
 
 // satTopologyRefusal runs one SAT submit whose module topology is `rows` and
-// returns the wire error. A refused submit must leave nothing behind: no claim
-// UPDATE and no receipt are staged, so a torn transaction fails the test.
+// returns the wire error. A refused submit must leave no terminal claim or
+// receipt behind, so a torn transaction fails the test.
 func satTopologyRefusal(t *testing.T, rows *sqlmock.Rows) *apperrors.Error {
 	t.Helper()
 	db, mock, err := sqlmock.New()
@@ -85,7 +79,7 @@ func satTopologyRefusal(t *testing.T, rows *sqlmock.Rows) *apperrors.Error {
 	cmd := SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, SubmissionID: "sub-early"}
 	res, err := svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderSAT), nil)
 	if err == nil {
-		t.Fatalf("incomplete SAT topology must refuse the provisional claim, got %+v", res)
+		t.Fatalf("incomplete SAT topology must refuse the terminal claim, got %+v", res)
 	}
 	e := durabilityErr(t, err)
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -227,6 +221,8 @@ func TestSubmitIELTSDoesNotQueryModules(t *testing.T) {
 	// sqlmock is ordered and strict: any query after the digest read other than
 	// the sealer's writes fails ExpectationsWereMet.
 	submitPrefixStubs(mock)
+	mock.ExpectQuery("FROM attempt_responses_v2").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
 	mock.ExpectExec("UPDATE student_attempts SET response_revision=").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO attempt_submissions_v2").

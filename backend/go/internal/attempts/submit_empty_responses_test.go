@@ -42,10 +42,8 @@ func TestFinalDigestEmptySetIsDeterministic(t *testing.T) {
 	}
 }
 
-// The SAT provisional two-phase path runs ComputeDigestInTx before the claim.
-// With zero stored responses the claim must still commit and a receipt must be
-// written, so finalization proceeds instead of looping on a 400.
-func TestSubmitZeroResponsesClaimsSATProvisionalSubmit(t *testing.T) {
+// SAT's direct terminal path accepts the deterministic empty answer digest.
+func TestSubmitZeroResponsesCanTerminalizeSAT(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +53,7 @@ func TestSubmitZeroResponsesClaimsSATProvisionalSubmit(t *testing.T) {
 	svc := testService(db, secret)
 	bearer := mintToken(t, secret, baseClaims())
 	qr, rl := liveStubs()
+	sealer := &recordingSealer{}
 
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -66,29 +65,31 @@ func TestSubmitZeroResponsesClaimsSATProvisionalSubmit(t *testing.T) {
 	// Active-session / writer-lease check.
 	mock.ExpectQuery("SELECT active_client_session_id").
 		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	// The defect's trigger: the projection is genuinely empty.
-	mock.ExpectQuery("FROM attempt_responses_v2").
-		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
-	// Audit finding 1: zero ANSWERS is legal, an incomplete MODULE topology is
-	// not — the claim is gated on a terminal module attempt in each SAT section.
+	// Zero answers are legal; the module topology must still be terminal.
 	satScopeUnscoped(mock)
 	mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").
 		WillReturnRows(satModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleLocked)))
-	// SAT provisional claim (never sets submitted_at/final_submission).
-	mock.ExpectExec("delivery_status='submitted', phase='post-exam'").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	// The final digest is computed after the topology gate.
+	mock.ExpectQuery("FROM attempt_responses_v2").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
+	// The shared sealer owns the terminal fact; submit stores the matching
+	// response revision and digest before writing the receipt.
+	mock.ExpectExec("UPDATE student_attempts SET response_revision=").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO attempt_submissions_v2").
 		WithArgs("att-1", "sub-zero", uint64(3), uint64(7), sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(9), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	cmd := SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, SubmissionID: "sub-zero"}
-	res, err := svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderSAT), nil)
+	res, err := svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderSAT), sealer)
 	if err != nil {
 		t.Fatalf("zero-response SAT submit must terminate, got %v", err)
 	}
-	if !res.Provisional {
-		t.Fatal("SAT zero-response submit must take the provisional path")
+	if res.Provisional {
+		t.Fatal("SAT zero-response submit must be a terminal receipt")
+	}
+	if sealer.calls != 1 {
+		t.Fatalf("empty SAT submit must seal once, got %d calls", sealer.calls)
 	}
 	sum := sha256.Sum256([]byte("[]"))
 	if want := hex.EncodeToString(sum[:]); res.FinalDigest != want {

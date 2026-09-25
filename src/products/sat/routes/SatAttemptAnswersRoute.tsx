@@ -13,8 +13,8 @@ function formatSavedAt(value: string | null): string {
 function statusLabel(status: string): string {
   switch (status) {
     case 'running': return 'In progress';
-    case 'submitted': return 'Submitted · scoring pending';
-    case 'pending': return 'Scoring pending';
+    case 'submitted':
+    case 'pending': return 'Completed';
     case 'terminated':
     case 'invalidated_proctor': return 'Ended by proctor · not scored';
     case 'invalidated_timeout': return 'Time expired · not scored';
@@ -38,7 +38,7 @@ export function SatAttemptAnswersRoute() {
   const query = useSatAttemptAnswersQuery(attemptId);
 
   if (query.isLoading) return <SatPageLoading label="Opening saved SAT answers…" />;
-  if (query.error || !query.data) {
+  if (!query.data) {
     return <SatPageError title="Saved answers could not load" description="The server could not load this attempt. Retry to check its saved answers." retryLabel="Retry" onRetry={() => void query.refetch()} />;
   }
   const detail = query.data;
@@ -60,8 +60,10 @@ export function SatAttemptAnswersRoute() {
             <p className="text-[13px] font-semibold text-slate-900">{detail.savedAnswerCount} server-saved answers</p>
             <p className="mt-1 text-[12px] text-slate-600">Last save: {formatSavedAt(detail.lastSavedAt)}{detail.responseRevision !== null ? ` · Revision ${detail.responseRevision}` : ' · Legacy attempt'}</p>
             <p className="mt-1 text-[11px] text-slate-500">Only answers accepted by the server appear here. A score is not available for this attempt.</p>
+            <p className="mt-1 text-[11px] text-slate-500" role="status">{query.isFetching ? 'Checking for newer answers…' : `Checks automatically every 15 seconds while visible${query.dataUpdatedAt ? ` · Last checked ${new Date(query.dataUpdatedAt).toLocaleTimeString()}` : ''}`}</p>
+            {query.error ? <p className="mt-2 text-[12px] font-medium text-amber-700" role="alert">Could not check for newer answers. Showing the last successful check; try again or wait for the next check.</p> : null}
           </div>
-          <button type="button" onClick={() => void query.refetch()} disabled={query.isFetching} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-50"><RefreshCw size={14} aria-hidden="true" />{query.isFetching ? 'Refreshing…' : 'Refresh answers'}</button>
+          <button type="button" onClick={() => void query.refetch()} disabled={query.isFetching} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-50"><RefreshCw size={14} aria-hidden="true" />{query.isFetching ? 'Checking…' : 'Check now'}</button>
         </div>
       </header>
       <section aria-labelledby="saved-answers-heading" className="border-t border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] py-7">

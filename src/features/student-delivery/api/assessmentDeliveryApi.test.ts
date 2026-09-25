@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../infrastructure/assessmentDeliveryBackendGateway', () => ({
   backendGet: vi.fn(),
@@ -42,6 +42,7 @@ import {
 import {
   assessmentDeliveryApi,
   configureAssessmentDeliveryAttempt,
+  loadAssessmentDeliveryMedia,
 } from './assessmentDeliveryApi';
 
 const mockedPatch = vi.mocked(backendPatch);
@@ -50,6 +51,13 @@ const mockedAuthHeader = vi.mocked(tryBuildAttemptAuthorizationHeader);
 const mockedExpiring = vi.mocked(isAttemptCredentialExpiringWithin);
 const mockedRefresh = vi.mocked(refreshAttemptCredential);
 const mockedStore = vi.mocked(storeAttemptCredential);
+const nativeCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  if (nativeCreateObjectURL) Object.defineProperty(URL, 'createObjectURL', nativeCreateObjectURL);
+  else Reflect.deleteProperty(URL, 'createObjectURL');
+});
 
 function responseSnapshot() {
   return {
@@ -65,6 +73,27 @@ describe('assessmentDeliveryApi attempt-auth transport', () => {
     mockedExpiring.mockReturnValue(false);
     mockedAuthHeader.mockReturnValue({ Authorization: 'Bearer current-token' });
   });
+
+  it('loads image bytes directly with the attempt bearer', async () => {
+    configureAssessmentDeliveryAttempt('schedule-media', 'attempt-media', 'candidate-media');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(['image-bytes'], { type: 'image/png' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const createObjectURL = vi.fn().mockReturnValue('blob:media-image');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+
+    await expect(loadAssessmentDeliveryMedia('schedule-media', 'attempt-media', 'asset-1'))
+      .resolves.toBe('blob:media-image');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/media/asset-1/content', expect.objectContaining({
+      headers: { Authorization: 'Bearer current-token' },
+      credentials: 'same-origin',
+    }));
+    expect(createObjectURL).toHaveBeenCalledOnce();
+  });
+
   it('stores a rotated attempt credential returned by heartbeat', async () => {
     const refreshedAttemptCredential = {
       attemptToken: 'rotated-token',
