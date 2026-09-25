@@ -15,6 +15,7 @@ import {
   stripTransientImagesFromEditor,
 } from "../ingestionImagePipe";
 import type { AssessmentMediaAsset } from "../../api/assessmentMediaApi";
+import { ALT_TEXT_FALLBACK } from "../ingestion/domain/altTextSuggestion";
 
 const PNG_HEAD = Uint8Array.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
@@ -139,7 +140,9 @@ describe("pasteClipboardImage temp insert", () => {
       uploading: true,
       uploadError: null,
       src: "blob:pipe-1",
-      alt: "",
+      // A temp node is never left undescribed: "photo.png" carries no words,
+      // so the neutral label stands in until the author replaces it.
+      alt: ALT_TEXT_FALLBACK,
       assetId: null,
     });
     gate.resolve(asset());

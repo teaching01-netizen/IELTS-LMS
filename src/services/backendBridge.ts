@@ -26,6 +26,7 @@ type BackendEnvelope<T> = {
     | {
         code?: string | undefined;
         message?: string | undefined;
+        details?: Record<string, unknown> | undefined;
       }
     | undefined;
 };
@@ -223,7 +224,15 @@ function extractBackendData<T>(value: unknown): T {
   if (isBackendEnvelope<T>(value)) {
     if (!value.success) {
       const message = value.error?.message ?? "Backend request failed";
-      throw new ApiError({ code: value.error?.code ?? "UNKNOWN", message, status: 200 });
+      // `details` carries machine-actionable diagnostics (the publish media
+      // gate names the question holding a missing object). Dropping it here
+      // would turn every such answer into a generic "something went wrong".
+      throw new ApiError({
+        code: value.error?.code ?? "UNKNOWN",
+        message,
+        status: 200,
+        ...(value.error?.details ? { details: value.error.details } : {}),
+      });
     }
     if (!("data" in value) || value.data === undefined) {
       throw new ApiError({

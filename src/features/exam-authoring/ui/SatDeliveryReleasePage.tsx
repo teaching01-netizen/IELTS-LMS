@@ -40,6 +40,11 @@ export interface SatDeliveryReleasePageProps {
   readinessError: string | null;
   publishScope: SatPublishScope;
   isPublishing: boolean;
+  /**
+   * A draft read is in flight. Publishing before it lands would validate and
+   * send the revision this page last saw, so the action waits.
+   */
+  draftBusy?: boolean;
   publishError: string | null;
   onBackToBuilder: () => void;
   onBackToExams: () => void;
@@ -65,6 +70,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     readinessError,
     publishScope,
     isPublishing,
+    draftBusy = false,
     publishError,
     onBackToBuilder,
     onBackToExams,
@@ -146,6 +152,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
       readinessError={readinessError}
       publishScope={publishScope}
       isPublishing={isPublishing}
+      draftBusy={draftBusy}
       publishError={publishError}
       dirtySections={dirtySections}
       showPublishDialog={showPublishDialog}
@@ -179,6 +186,7 @@ function ReleasePageBody(props: {
   readinessError: string | null;
   publishScope: SatPublishScope;
   isPublishing: boolean;
+  draftBusy: boolean;
   publishError: string | null;
   dirtySections: Set<string>;
   showPublishDialog: boolean;
@@ -209,6 +217,7 @@ function ReleasePageBody(props: {
     readinessError,
     publishScope,
     isPublishing,
+    draftBusy,
     publishError,
     dirtySections,
     showPublishDialog,
@@ -252,11 +261,19 @@ function ReleasePageBody(props: {
     canEdit: exam.canEdit,
     canPublishExam: exam.canPublish,
   });
+  // One reason for both causes: Publish reads the committed draft, so it waits
+  // while this page is still reading it AND while this tab still holds changes
+  // the room has not confirmed.
+  const draftReadBlocker = draftBusy
+    ? "Your latest changes are still being saved \u2014 publishing now could release an earlier draft"
+    : null;
   const offlineBlocker = online ? null : "You are offline — reconnect to publish";
-  const allPublishBlockers = offlineBlocker
-    ? [...publishBlockers, offlineBlocker]
-    : publishBlockers;
-  const canPublish = online && canPublishFromBlockers(publishBlockers);
+  const allPublishBlockers = [
+    ...publishBlockers,
+    ...(draftReadBlocker ? [draftReadBlocker] : []),
+    ...(offlineBlocker ? [offlineBlocker] : []),
+  ];
+  const canPublish = online && !draftBusy && canPublishFromBlockers(publishBlockers);
   const isPublishedCurrentView =
     releaseState.state === "published_current" && dirtySections.size === 0;
 
@@ -391,10 +408,12 @@ function ReleasePageBody(props: {
         publishScope={publishScope}
         candidateEstimateStale={dirtySections.size > 0}
         isPublishing={isPublishing}
+        draftBusy={draftBusy}
         isUpdate={releaseState.state === "unpublished_changes"}
         currentPublishedVersionNumber={releaseState.currentPublishedVersion?.versionNumber ?? null}
         onClose={onClosePublishDialog}
         onConfirm={onPublish}
+        onOpenIssue={onIssueClick}
       />
       <AuthoringConfirmDialog
         open={showLeaveDialog}

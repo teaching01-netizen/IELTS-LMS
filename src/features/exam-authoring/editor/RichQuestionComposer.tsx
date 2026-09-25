@@ -43,6 +43,7 @@ import {
   validateSatImageFile,
   type ImageRejectCode,
 } from "./ingestion/adapters/imageValidation";
+import { suggestAltText } from "./ingestion/domain/altTextSuggestion";
 import { SAT_IMAGE_POLICY, validateDurableImageSource } from "./ingestion/domain/imagePolicy";
 import { isCollaborativeTransaction } from "../realtime/coedit";
 
@@ -121,7 +122,6 @@ export interface SmartPasteStatus {
   source: string | null;
   imageCount: number;
   mathCount: number;
-  needsAltText: boolean;
   canUndo?: boolean;
   rejectedImageCount?: number;
   /** Normalized canonical paste (Phase-08 analysis input). */
@@ -165,19 +165,6 @@ export interface RichQuestionComposerProps {
    * Absent => byte-for-byte the pre-co-editing behavior.
    */
   collaboration?: RichComposerCollaboration | undefined;
-}
-
-function firstImageWithoutAlt(editor: Editor): number | null {
-  let position: number | null = null;
-  editor.state.doc.descendants((node, pos) => {
-    if (position !== null) return false;
-    if (node.type.name === "image" && !String(node.attrs["alt"] ?? "").trim()) {
-      position = pos;
-      return false;
-    }
-    return undefined;
-  });
-  return position;
 }
 
 /** Domain-facing collaboration binding handed to the composer. */
@@ -238,7 +225,6 @@ export function RichQuestionComposer({
   // never reaches for browser storage on its own.
   const hintStoreRef = useRef<OneTimeHintStore | null>(null);
   if (!hintStoreRef.current) hintStoreRef.current = hintStore ?? defaultHintStore();
-  const openAltTextRef = useRef<(() => void) | null>(null);
   const nextFeedbackId = () => `feedback-${(feedbackSequence.current += 1)}`;
   const undoLastChange = () => {
     setFeedback(null);
@@ -254,11 +240,7 @@ export function RichQuestionComposer({
   publishFeedbackRef.current = publishFeedback;
   const publishPasteFeedbackRef = useRef<(status: SmartPasteStatus) => void>(() => {});
   publishPasteFeedbackRef.current = (status: SmartPasteStatus) => {
-    const item = buildPasteFeedback(
-      status,
-      { onUndo: undoLastChange, onAddAltText: () => openAltTextRef.current?.() },
-      nextFeedbackId()
-    );
+    const item = buildPasteFeedback(status, { onUndo: undoLastChange }, nextFeedbackId());
     if (item) setFeedback(item);
   };
   const [initialContent] = useState(() => documentFromStructuredContent(value));
@@ -348,7 +330,6 @@ export function RichQuestionComposer({
             source: info.source,
             imageCount: info.imageCount,
             mathCount: info.mathCount,
-            needsAltText: info.needsAltText,
             canUndo: info.canUndo,
             ...(info.rejectedImageCount !== undefined
               ? { rejectedImageCount: info.rejectedImageCount }
@@ -382,7 +363,6 @@ export function RichQuestionComposer({
             source: info.source,
             imageCount: info.imageCount,
             mathCount: 0,
-            needsAltText: info.imageCount > 0,
             canUndo: info.canUndo,
             ...(info.rejectedImageCount > 0 ? { rejectedImageCount: info.rejectedImageCount } : {}),
           };
@@ -537,17 +517,6 @@ export function RichQuestionComposer({
     setDialogContext({ ...context, mode });
     setDialog("image");
   };
-
-  const openAltTextForFirstMissingImage = () => {
-    const position = firstImageWithoutAlt(editor);
-    if (position === null) return;
-    const node = editor.state.doc.nodeAt(position);
-    if (!node || node.type.name !== "image") return;
-    editor.chain().focus().setNodeSelection(position).run();
-    setFeedback(null);
-    openImageDialog({ kind: "image", pos: position, attrs: { ...(node.attrs as Record<string, unknown>) } }, "alt");
-  };
-  openAltTextRef.current = openAltTextForFirstMissingImage;
 
   return (
     <div
@@ -955,6 +924,9 @@ function ImageDialog({
     (isDirectImageSource(initialTargetSource) ? initialTargetSource : "");
   const [assetId, setAssetId] = useState(initialAssetId);
   const [alt, setAlt] = useState(String(target?.attrs["alt"] ?? ""));
+  // Alt text is filled for the author, so the only thing that must never be
+  // overwritten is a description they wrote themselves.
+  const altTouchedRef = useRef(false);
   const [caption, setCaption] = useState(String(target?.attrs["caption"] ?? ""));
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -968,12 +940,21 @@ function ImageDialog({
     ? String(editor.state.doc.nodeAt(target.pos)?.attrs["assetId"] ?? "")
     : "";
 
+  // The target is a document position, not a node: the author can delete the
+  // image, or undo, while this dialog is open. Every apply re-reads the
+  // document so a vanished image is reported instead of silently ignored.
+  const replacementTargetStillPresent = () => {
+    if (!target) return false;
+    return editor.state.doc.nodeAt(target.pos)?.type.name === "image";
+  };
+
   useEffect(() => {
     // Pasted images upload in the background. Keep the dialog actionable while
     // the author types alt text, then adopt the real asset ID once the upload
     // resolves instead of ever persisting a transient blob URL.
+    if (selectedFile) return;
     if (liveTargetAssetId && liveTargetAssetId !== assetId) setAssetId(liveTargetAssetId);
-  }, [assetId, liveTargetAssetId, target?.pos]);
+  }, [assetId, liveTargetAssetId, selectedFile, target?.pos]);
 
   useEffect(() => {
     return () => {
@@ -1016,6 +997,10 @@ function ImageDialog({
   };
 
   const chooseFile = (file: File) => {
+    // The description is part of the upload, not a second task: name the file's
+    // words into the field the moment a file is chosen. Only an empty field is
+    // filled, so anything the author typed (or the image already stored) wins.
+    if (!altTouchedRef.current && !alt.trim()) setAlt(suggestAltText(file.name));
     releasePreview();
     setSelectedFile(file);
     const nextPreviewUrl = URL.createObjectURL(file);
@@ -1032,16 +1017,43 @@ function ImageDialog({
   const dialogTitle =
     mode === "replace" ? "Replace visual" : mode === "alt" ? "Describe this visual" : "Insert image or graph";
 
+  // Replacing an image is a repair path: a question whose visual is broken
+  // must be fixable even when its stored alt text is empty (`alt: ""` is
+  // valid legacy content). Only a finalized asset is required — a brand-new
+  // insert still asks for a description so new content stays accessible.
+  const requiresAlt = mode !== "replace";
+  // A replacement means a new asset. Re-submitting the node's current asset
+  // (for example after a failed upload left it untouched) would report a
+  // replacement that never happened and leave the broken reference in place,
+  // so the action stays disabled until the source itself changes. Editing only
+  // the description has its own entry point (the object controls' "Alt text");
+  // the dialog says so instead of silently discarding the edit.
+  const sourceChanged = assetId.trim() !== initialAssetId.trim();
+  const canSubmit =
+    Boolean(assetId.trim()) &&
+    !uploading &&
+    (!requiresAlt || Boolean(alt.trim())) &&
+    (mode !== "replace" || sourceChanged);
+
   const handleInsert = async () => {
+    if (!canSubmit) return;
     const source = assetId.trim();
     const alternativeText = alt.trim();
-    if (!source || !alternativeText || uploading) return;
     setUploading(true);
     setUploadError(null);
     try {
       let durableAssetId = source;
       if (ownerId) {
         const asset = await importImageSource({ source, ownerId });
+        // A pending upload has no committed object to publish against; writing
+        // it into the document would make the draft unpublishable and the
+        // media gate would reject it later with no way back.
+        if (asset.uploadStatus === "pending") {
+          throw new ImageSourceError(
+            "import",
+            "That image is still uploading. Wait for it to finish and try again."
+          );
+        }
         durableAssetId = asset.id;
         setAssetId(asset.id);
       } else if (!validateDurableImageSource(source).ok) {
@@ -1057,18 +1069,38 @@ function ImageDialog({
       if (!attrs.src) {
         throw new ImageSourceError("source", "Use an existing asset ID or an HTTPS image URL.");
       }
-      if (target && editor.state.doc.nodeAt(target.pos)?.type.name === "image") {
-        editor
+      if (target) {
+        // A target that left the document while this dialog was open must never
+        // fall through to a silent close: the author would believe a
+        // replacement landed when nothing was written.
+        if (!replacementTargetStillPresent()) {
+          throw new ImageSourceError(
+            "import",
+            "That image is no longer part of the question. Nothing was replaced; insert it again if it is still needed."
+          );
+        }
+        // The old image is only ever replaced by a terminal transaction: the
+        // upload is already finalized, so a failed apply leaves it untouched.
+        const replaced = editor
           .chain()
           .focus()
           .setNodeSelection(target.pos)
           .updateAttributes("image", attrs)
           .run();
+        if (!replaced) {
+          throw new ImageSourceError(
+            "import",
+            "The image could not be replaced. The original is unchanged; try again."
+          );
+        }
         onFeedback?.({ message: "Image replaced", undoable: true });
-      } else if (!target) {
+      } else {
         // The placeholder already reserved the object's space; the document now
         // holds it, and the acknowledgement says so quietly.
-        editor.chain().focus().insertContent({ type: "image", attrs }).run();
+        const inserted = editor.chain().focus().insertContent({ type: "image", attrs }).run();
+        if (!inserted) {
+          throw new ImageSourceError("import", "The image could not be inserted. Try again.");
+        }
         onFeedback?.({ message: "Image added", undoable: true });
       }
       onClose();
@@ -1213,21 +1245,29 @@ function ImageDialog({
         </>
       )}
       <span id="sat-visual-alt-label" className="mt-3 block text-xs font-semibold text-slate-700">
-        Alternative text <span className="text-au-danger-text">*</span>
+        Alternative text{" "}
+        {mode === "replace" ? (
+          <span className="font-normal text-slate-400">optional</span>
+        ) : (
+          <span className="text-au-danger-text">*</span>
+        )}
       </span>
       <input
         id="sat-visual-alt"
         aria-labelledby="sat-visual-alt-label"
-        aria-required="true"
+        aria-required={mode !== "replace"}
         data-dialog-initial-focus={mode === "alt" && !alt.trim() ? true : undefined}
         value={alt}
-        onChange={(event) => setAlt(event.target.value)}
+        onChange={(event) => {
+          altTouchedRef.current = true;
+          setAlt(event.target.value);
+        }}
         className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
         placeholder="Describe the information a student needs from this visual"
       />
       <p className="mt-1.5 text-[10px] leading-5 text-slate-400">
-        Describe the visual information needed to answer the question; do not use the file name as
-        alt text.
+        Filled from the file name when one is available. Rewrite it to name the information a
+        student needs from this visual.
       </p>
       <span
         id="sat-visual-caption-label"
@@ -1243,16 +1283,28 @@ function ImageDialog({
         className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
         placeholder="Optional"
       />
+      {mode === "replace" && !sourceChanged && !uploading ? (
+        <p className="mt-3 text-[11px] leading-5 text-slate-500">
+          Upload a replacement file, or paste a different asset ID, to replace this visual. To
+          change only the description, use “Alt text” on the image.
+        </p>
+      ) : null}
       <div className="mt-4 flex justify-end">
         <motion.button
           type="button"
           whileTap={reduceMotion ? {} : authoringMotion.press}
           transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
-          disabled={uploading || !assetId.trim() || !alt.trim()}
+          disabled={!canSubmit}
           onClick={() => void handleInsert()}
           className="rounded-lg bg-au-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
         >
-          {uploading ? "Securing visual…" : target ? "Update visual" : "Insert visual"}
+          {uploading
+            ? "Securing visual…"
+            : mode === "replace"
+              ? "Replace visual"
+              : target
+                ? "Update visual"
+                : "Insert visual"}
         </motion.button>
       </div>
     </DialogFrame>

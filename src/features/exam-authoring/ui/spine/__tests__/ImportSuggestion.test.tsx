@@ -25,7 +25,7 @@ const FULL = "What is 2 + 2?\nA. 3\nB. 4\nC. 5\nD. 6\nAnswer: B\nExplanation: Ba
 
 function promptPasteStatus(): SmartPasteStatus {
   const parsed = parseTextHtml({ kind: "text", text: FULL }, { target: "rich" });
-  return { visible: true, source: "text", imageCount: 0, mathCount: 0, needsAltText: false, document: parsed.document, pastedPlainText: FULL };
+  return { visible: true, source: "text", imageCount: 0, mathCount: 0, document: parsed.document, pastedPlainText: FULL };
 }
 
 function renderView(question: QuestionRevision, onChange: (q: QuestionRevision) => void) {

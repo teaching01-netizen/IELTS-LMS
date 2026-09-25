@@ -67,20 +67,22 @@ export interface PasteFeedbackSource {
   visible: boolean;
   imageCount: number;
   mathCount: number;
-  needsAltText: boolean;
   canUndo?: boolean;
   rejectedImageCount?: number;
 }
 
 export interface PasteFeedbackHandlers {
   onUndo: () => void;
-  onAddAltText?: (() => void) | undefined;
 }
 
 /**
  * Paste copy is unchanged from the surface this replaced: one sentence, the
  * count that matters, and the one action worth offering. Undo is withheld for
  * rejected-only imports because there is nothing to take back.
+ *
+ * Images arrive already described (the ingestion boundary names them from the
+ * file or the source), so there is no alt-text step to announce here: asking
+ * the author to go and write one was the second task this surface invented.
  */
 export function buildPasteFeedback(
   status: PasteFeedbackSource,
@@ -102,18 +104,15 @@ export function buildPasteFeedback(
         status.imageCount +
         " visual" +
         (status.imageCount === 1 ? "" : "s") +
-        " \u2014 add alt text in the image dialog" +
         rejectedCopy
       : (status.rejectedImageCount ?? 0) > 0
         ? rejectedCopy.trim()
         : status.mathCount > 0
           ? status.mathCount + " equation" + (status.mathCount === 1 ? "" : "s") + " formatted"
           : "Pasted formatted content";
-  const actions: EditorFeedbackAction[] =
-    status.needsAltText && handlers.onAddAltText
-      ? [{ id: "alt", label: "Add alt text", onSelect: handlers.onAddAltText }]
-      : [];
   const undoable = status.canUndo !== false;
-  if (undoable) actions.push({ id: "undo", label: "Undo paste", onSelect: handlers.onUndo });
+  const actions: EditorFeedbackAction[] = undoable
+    ? [{ id: "undo", label: "Undo paste", onSelect: handlers.onUndo }]
+    : [];
   return { id, message, actions, undoable, timeoutMs: FEEDBACK_UNDO_MS };
 }

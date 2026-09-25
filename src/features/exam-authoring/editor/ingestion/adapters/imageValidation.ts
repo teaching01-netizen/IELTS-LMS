@@ -15,8 +15,10 @@
  * - Client validation first (MIME + magic bytes, size, dimensions,
  *   pixel/decompression-bomb caps). The backend media policy stays
  *   authoritative; this mirror only fails fast.
- * - Alt text is NOT fabricated here: temp nodes ship alt '' and the existing
- *   sat.accessibility.alt.required validator owns the publish gate.
+ * - Alt text arrives from the caller and is never invented here. The pipe that
+ *   builds transient nodes fills a missing description from the file name
+ *   (domain/altTextSuggestion), because sat.accessibility.alt.required blocks
+ *   publish on an empty one and that must not become the author's extra task.
  */
 import type { RichTextDocument, RichTextNode } from "../../../contracts/assessment";
 import {

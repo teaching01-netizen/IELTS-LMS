@@ -15,7 +15,7 @@ describe("editor feedback copy", () => {
   it("keeps the paste vocabulary it replaced", () => {
     expect(
       buildPasteFeedback(
-        { visible: true, imageCount: 0, mathCount: 2, needsAltText: false },
+        { visible: true, imageCount: 0, mathCount: 2 },
         { onUndo: vi.fn() },
         "f1"
       )?.message
@@ -25,7 +25,6 @@ describe("editor feedback copy", () => {
         visible: true,
         imageCount: 0,
         mathCount: 0,
-        needsAltText: false,
         rejectedImageCount: 1,
         canUndo: false,
       },
@@ -34,18 +33,20 @@ describe("editor feedback copy", () => {
     );
     expect(rejected?.message).toBe("1 visual was not imported.");
     expect(rejected?.actions).toEqual([]);
-    expect(
-      buildPasteFeedback(
-        { visible: true, imageCount: 1, mathCount: 0, needsAltText: true },
-        { onUndo: vi.fn(), onAddAltText: vi.fn() },
-        "f3"
-      )?.actions.map((action) => action.label)
-    ).toEqual(["Add alt text", "Undo paste"]);
+    // Pasted images arrive already described, so the acknowledgement raises no
+    // alt-text task and offers only the way back.
+    const pastedImage = buildPasteFeedback(
+      { visible: true, imageCount: 1, mathCount: 0 },
+      { onUndo: vi.fn() },
+      "f3"
+    );
+    expect(pastedImage?.message).toBe("Pasted 1 visual");
+    expect(pastedImage?.actions.map((action) => action.label)).toEqual(["Undo paste"]);
   });
 
   it("withholds Undo when there is nothing to take back", () => {
     const rejected = buildPasteFeedback(
-      { visible: true, imageCount: 0, mathCount: 0, needsAltText: false, rejectedImageCount: 2, canUndo: false },
+      { visible: true, imageCount: 0, mathCount: 0, rejectedImageCount: 2, canUndo: false },
       { onUndo: vi.fn() },
       "f1"
     );
@@ -127,19 +128,21 @@ describe("the acknowledgement surface", () => {
   });
 
   it("runs the actions it was given, in order", () => {
-    const onAddAltText = vi.fn();
+    const onUndo = vi.fn();
     render(
       <EditorFeedback
         feedback={buildPasteFeedback(
-          { visible: true, imageCount: 1, mathCount: 0, needsAltText: true },
-          { onUndo: vi.fn(), onAddAltText },
+          { visible: true, imageCount: 1, mathCount: 0 },
+          { onUndo },
           "f1"
         )}
         onDismiss={vi.fn()}
       />
     );
-    expect(screen.getByRole("status")).toHaveTextContent("add alt text");
-    fireEvent.click(screen.getByRole("button", { name: "Add alt text" }));
-    expect(onAddAltText).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status")).toHaveTextContent("Pasted 1 visual");
+    // Nothing about the paste asks the author to write alt text.
+    expect(screen.queryByRole("button", { name: "Add alt text" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo paste" }));
+    expect(onUndo).toHaveBeenCalledTimes(1);
   });
 });

@@ -176,6 +176,24 @@ describe("SAT public image lifecycle matrix", () => {
     expect(JSON.stringify(changed.mock.calls)).toContain(managedAsset.id);
   });
 
+  it("describes a pasted file from its name so nothing is left to the author", async () => {
+    // Empty alt text is a blocking publish issue of its own, so an upload has
+    // to arrive described rather than become a second task for the author.
+    const file = imageFile(PNG_BYTES, "supply-demand-curve.png", "image/png");
+    const { textbox, editor, changed } = await mountComposer();
+
+    paste(textbox, { files: [file] });
+
+    await waitFor(() =>
+      expect(uploadAssessmentAsset).toHaveBeenCalledWith(file, "question-lifecycle")
+    );
+    await waitFor(() => {
+      const image = editor.getJSON().content?.find((node) => node.type === "image");
+      expect(image?.attrs).toMatchObject({ alt: "Supply demand curve" });
+    });
+    expect(JSON.stringify(changed.mock.calls)).toContain("Supply demand curve");
+  });
+
   it.each([
     ["one byte over the source cap", SAT_IMAGE_POLICY.maxBytes + 1, { width: 4, height: 4 }],
     ["one pixel over the side cap", undefined, { width: SAT_IMAGE_POLICY.maxDimension + 1, height: 1 }],

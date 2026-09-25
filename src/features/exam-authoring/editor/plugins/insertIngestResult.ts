@@ -17,7 +17,30 @@ import {
   type TipTapJson,
 } from "../ingestion/conversion/importAstToRichDocument";
 import { prepareClipboardImage, type PreparedClipboardImageResult } from "../ingestionImagePipe";
+import { suggestAltText } from "../ingestion/domain/altTextSuggestion";
 import type { SmartPasteTarget } from "./smartPastePlugin";
+
+/**
+ * Give every inserted image a description.
+ *
+ * A pasted `<img>` whose alt attribute is missing or empty reaches the document
+ * as an image node with `alt: ""`, and `sat.accessibility.alt.required` is a
+ * blocking publish rule — so the author would have to come back and type one.
+ * This is the single point every ingested image passes through (prose, HTML
+ * images, direct URLs and validated file uploads alike), so the description is
+ * settled here, from the file name or the source the image arrived with.
+ * Anything already described is left exactly as it is.
+ */
+function withSuggestedAlt(node: TipTapJson): TipTapJson {
+  if (node.type !== "image") {
+    return node.content ? { ...node, content: node.content.map(withSuggestedAlt) } : node;
+  }
+  const attrs = (node.attrs ?? {}) as Record<string, unknown>;
+  const alt = typeof attrs["alt"] === "string" ? attrs["alt"] : "";
+  if (alt.trim()) return node;
+  const source = typeof attrs["src"] === "string" ? attrs["src"] : "";
+  return { ...node, attrs: { ...attrs, alt: suggestAltText(source) } };
+}
 
 export interface InsertIngestOptions {
   capabilities: Readonly<RichComposerCapabilities>;
@@ -102,7 +125,10 @@ export async function insertIngestResult(
     const converted = target.inTable
       ? convertForTableCell(result.document, opts.capabilities, imageResolver)
       : importAstToRichDocument(result.document, opts.capabilities, imageResolver);
-    const content = result.document.nodes.length > 0 ? [...(converted.doc.content ?? [])] : [];
+    const content =
+      result.document.nodes.length > 0
+        ? [...(converted.doc.content ?? [])].map(withSuggestedAlt)
+        : [];
     const nodes = content.map((node) => view.state.schema.nodeFromJSON(node));
     // File-only pastes are represented in the AST by ingestClipboard. Keep a
     // defensive tail fallback for legacy callers that still send only files.

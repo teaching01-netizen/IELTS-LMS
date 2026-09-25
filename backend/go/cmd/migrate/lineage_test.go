@@ -62,11 +62,13 @@ func migDir(t *testing.T) string {
 // assessment_attempt_breaks) — count/max bumped 67->69. The proctor-authorized
 // entry re-arm for that model landed 0070 (entry_proctor_rearm_at) — count/max
 // bumped 69->70. Personal-module expiry scan landed 0071 — count/max bumped
-// 70->71.
+// 70->71. The P0 SAT completion repair landed 0072 (assessment_results.
+// submission_id nullable, matching the attempt-owned contract 0044 and the
+// terminalization service already implement) — count/max bumped 71->72.
 // Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 71
-	pinnedMigrationMax   = 71
+	pinnedMigrationFiles = 72
+	pinnedMigrationMax   = 72
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but
