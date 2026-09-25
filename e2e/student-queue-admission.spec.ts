@@ -59,7 +59,9 @@ test.describe("Student queue admission flow", () => {
           const startExam = page.getByRole("button", { name: "Start Exam" });
           const examContent = page.getByLabel("Answer for question 1");
           const writingEditor = page.locator('[contenteditable="true"]').first();
-          if (await lobby.isVisible().catch(() => false)) return "lobby";
+          // The lobby heading is intentionally sr-only for screen readers, so
+          // WebKit reports it as not visible even though the lobby is mounted.
+          if ((await lobby.count().catch(() => 0)) > 0) return "lobby";
           if (await startExam.isVisible().catch(() => false)) return "start";
           if (await examContent.isVisible().catch(() => false)) return "exam";
           if (await writingEditor.isVisible().catch(() => false)) return "exam";
@@ -69,11 +71,12 @@ test.describe("Student queue admission flow", () => {
       )
       .toMatch(/lobby|start|exam/);
 
-    const lobbyVisible = await page
-      .getByRole("heading", { name: /Lobby|Exam Overview/i })
-      .isVisible()
-      .catch(() => false);
-    if (lobbyVisible) {
+    const lobbyMounted =
+      (await page
+        .getByRole("heading", { name: /Lobby|Exam Overview/i })
+        .count()
+        .catch(() => 0)) > 0;
+    if (lobbyMounted) {
       const sectionText = page.getByText(/listening|reading|writing|speaking/i);
       const hasSections = await sectionText.isVisible().catch(() => false);
       if (hasSections) {

@@ -139,11 +139,19 @@ test.describe('Frontend Performance Monitoring', () => {
         domContentLoaded: timing.domContentLoadedEventEnd - timing.startTime,
         loadComplete: timing.loadEventEnd > 0 ? timing.loadEventEnd - timing.startTime : null,
         firstPaint: performance.getEntriesByName('first-paint')[0]?.startTime,
+        readyState: document.readyState,
       };
     });
 
-    expect(navTiming.domContentLoaded).toBeGreaterThan(0);
-    // Chromium may leave loadEventEnd at zero for a cached Vite document. If
+    // WebKit can expose a zero DOMContentLoaded duration for a cached Vite
+    // document even after navigation has completed. In that case the ready
+    // state is the reliable browser-level signal that the page is usable.
+    if (navTiming.domContentLoaded <= 0) {
+      expect(navTiming.readyState).toBe('complete');
+    } else {
+      expect(navTiming.domContentLoaded).toBeGreaterThan(0);
+    }
+    // Browsers may leave loadEventEnd at zero for a cached Vite document. If
     // it is populated, it must still occur after navigation started.
     if (navTiming.loadComplete !== null) {
       expect(navTiming.loadComplete).toBeGreaterThan(0);
