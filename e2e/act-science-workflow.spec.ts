@@ -9,6 +9,7 @@ import { proctorEndSection } from "./support/proctorControls";
 import {
   completePreCheckIfPresent,
   openStudentSessionWithRetry,
+  startLobbyIfPresent,
   studentCheckIn,
   stubScreenDetails,
 } from "./support/studentUi";
@@ -61,6 +62,7 @@ test.describe("ACT Science workflow", () => {
       });
       await openStudentSessionWithRetry(studentPage, scheduleId, candidateId);
       await completePreCheckIfPresent(studentPage);
+      await startLobbyIfPresent(studentPage);
       await expect(studentPage.getByTestId("student-exam-shell")).toBeVisible({ timeout: 30_000 });
       await expect(studentPage.getByText("ACT", { exact: true }).first()).toBeVisible();
       await expect(studentPage.getByText("Seeded ecology experiment")).toBeVisible();
