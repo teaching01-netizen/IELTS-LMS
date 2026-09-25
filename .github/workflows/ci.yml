@@ -398,7 +398,22 @@ jobs:
         run: go run ./cmd/migrate
 
       - name: Run E2E Tests
-        run: bunx playwright test --shard=${{ matrix.shard }}
+        run: |
+          # Each browser project gets its own globalSetup/seed cycle. Running
+          # all seven projects in one Playwright invocation shares one MySQL
+          # fixture and lets a terminalized or paused schedule poison the next
+          # project. Keep the full browser matrix, but isolate the projects in
+          # separate invocations within this shard job.
+          projects=(chromium mobile-chromium mobile-webkit tablet-portrait tablet-landscape firefox webkit)
+          status=0
+          for project in "${projects[@]}"; do
+            echo "Running E2E project: ${project}"
+            if ! PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${project}" \
+              bunx playwright test --project="${project}" --shard=${{ matrix.shard }}; then
+              status=1
+            fi
+          done
+          exit "$status"
 
       - name: Upload E2E Test Results
         if: always()
