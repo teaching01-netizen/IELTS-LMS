@@ -24,9 +24,9 @@ async function openRuntimeBackedExam(
     email: `e2e+${wcode.toLowerCase()}@example.com`,
     fullName: `E2E Candidate ${wcode}`,
   });
+  await openStudentSessionWithRetry(page, manifest.student.scheduleId, wcode);
   await completePreCheckIfPresent(page);
   await startLobbyIfPresent(page);
-  await openStudentSessionWithRetry(page, manifest.student.scheduleId, wcode);
 
   return { context, page };
 }
@@ -80,7 +80,9 @@ test.describe("Browser compatibility", () => {
     await expect(page.getByLabel("IELTS Course")).toHaveAttribute("aria-label", "IELTS Course");
   });
 
-  test("OS dark preference does not switch the active UI away from light mode", async ({ page }) => {
+  test("OS dark preference does not switch the active UI away from light mode", async ({
+    page,
+  }) => {
     await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
     await openRegistration(page);
 
