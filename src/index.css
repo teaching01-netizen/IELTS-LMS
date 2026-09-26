@@ -1482,6 +1482,17 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-swatch-blue-ink: #1668B3;
   --sat-swatch-pink-ink: #C2407A;
   --sat-annotation-active-ring: rgba(0, 0, 0, 0.45);
+  /* The bar's own outlines (Bluebook parity): the hairline around an ink chip,
+   * and around the two glyph actions drawn as circles (note, remove). The chips
+   * wear the darker of the two — "this is the ink I am using" and "this is an
+   * action" should not be the same ink — and both stay clear of the pale ink
+   * they sit on. */
+  --sat-annotation-swatch-ring: rgba(0, 0, 0, 0.55);
+  --sat-annotation-control-outline: rgba(0, 0, 0, 0.45);
+  /* Note paper: the pale sheet a new note is written on, inside the note
+   * action's outline. Deliberately paler than the yellow highlight, so the icon
+   * never reads as "these words are already highlighted". */
+  --sat-annotation-note-fill: #FFF7D1;
   /* Annotation chrome motion (C4: exam TSX carries no duration literals). */
   --sat-motion-annotation: 140ms;
   /* Annotation surface placement (Highlights & Notes). BUDGETS, not guesses:
@@ -1500,19 +1511,30 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-annotation-edge: 12px;
   --sat-annotation-native-ui-zone: 80px;
   --sat-annotation-gap: 12px;
-  /* Surface density. Horizontal padding sits inside the spec's 12–16px band and
-   * vertical inside 10–14px, so a control never crowds the edge and two rows
-   * never read as one. `row-gap` is the rhythm both rows share. */
-  --sat-annotation-surface-padding-x: 14px;
-  --sat-annotation-surface-padding-y: 12px;
-  --sat-annotation-row-gap: 8px;
+  /* Surface density (Bluebook parity). The bar is a compact capsule hanging off
+   * the words, so the padding is the smallest that still clears its own rounded
+   * ends: at 6px a 44px target at either end sits concentric with the 29px end
+   * cap (44 + 2 x 6 + 2 x 1 border = the 58px capsule, so its cap centre and the
+   * target's centre are the same point), and the pill is a capsule rather than a
+   * box with margins. `row-gap` is the reference's tight rhythm, and it is what
+   * the ink chips space by too — one rhythm, one row (see
+   * SAT_ANNOTATION_PILL_ROW), so the gap only ever spaces actions APART along
+   * the bar and never splits it into two. */
+  --sat-annotation-surface-padding-x: 6px;
+  --sat-annotation-surface-padding-y: 6px;
+  --sat-annotation-row-gap: 2px;
   /* One hairline, named so the caret's layer can sit exactly on the border box
    * instead of the padding box (a 1px lie about where the surface starts). */
   --sat-annotation-surface-border: 1px;
   --sat-annotation-comfort: 24px;
   --sat-annotation-comfort-fine: 12px;
+  /* The widest the capsule may ever be. A CEILING, not a shape: the pill hugs
+   * the row inside it (see `satAnnotationSurfaceChrome`), and this is the one
+   * number that stops that row outgrowing the placement's band.
+   * The band is asserted in e2e/sat-annotation-placement.spec.ts (280–340px). */
   --sat-annotation-surface-max: 340px;
-  --sat-annotation-caret: 6px;
+  /* Keeps the placement's own arrow window away from the rounded ends. The
+   * surface no longer draws a caret; the engine's geometry still speaks in it. */
   --sat-annotation-caret-inset: 20px;
   --sat-annotation-switch-margin: 24px;
   --sat-annotation-stable-delta: 8px;
@@ -1669,40 +1691,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     top var(--sat-annotation-settle-motion) var(--sat-annotation-settle-ease);
 }
 
-/* The caret: the one thing that says "this control belongs to THAT text".
- * Border-drawn (never a gradient or an image), filled with the surface color
- * so it reads as part of the panel, and dropped entirely when the placement had
- * to clamp the surface away from its line (nothing honest left to point at).
- *
- * It lives in a layer that extends one border-width past the surface on every
- * side, because an absolutely positioned child is measured from the padding box
- * while the placement engine (correctly) works in border-box coordinates. The
- * layer closes that 1px without teaching either side about the other. */
-.sat-annotation-caret-layer {
-  position: absolute;
-  inset: calc(-1 * var(--sat-annotation-surface-border));
-  pointer-events: none;
-}
-
-.sat-annotation-caret {
-  position: absolute;
-  width: 0;
-  height: 0;
-  margin-left: calc(-1 * var(--sat-annotation-caret));
-  border-left: var(--sat-annotation-caret) solid transparent;
-  border-right: var(--sat-annotation-caret) solid transparent;
-  pointer-events: none;
-}
-
-.sat-annotation-caret[data-sat-annotation-caret='down'] {
-  top: 100%;
-  border-top: var(--sat-annotation-caret) solid var(--sat-surface);
-}
-
-.sat-annotation-caret[data-sat-annotation-caret='up'] {
-  bottom: 100%;
-  border-bottom: var(--sat-annotation-caret) solid var(--sat-surface);
-}
+/* There is deliberately no caret. The reference bar is a floating capsule with
+ * no triangular pointer, and the thing a caret used to say — "this belongs to
+ * THAT line" — is already made by the placement itself: the capsule is centred
+ * on the line it acts on and sits one gap from it. The engine still computes
+ * `arrowX` and `clamped`, because they are geometry, not chrome. */
 
 /* Highlights & Notes: existing marks read as interactive on mouse only — the
  * pointer plus a subtle ring teaches "tap me to change this" without animating

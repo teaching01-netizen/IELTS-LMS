@@ -12,7 +12,12 @@ import { createSatExamZoomGeometry } from '../zoom/satExamZoomGeometry';
  * in the edit surface would drift from this one the first time either changed. It
  * is deliberately not a component: the surfaces need the mode themselves (to
  * choose their own actions), so they take the chrome and render their own
- * children inside it, and the caret comes along for the ride.
+ * children inside it.
+ *
+ * The shape it maps to is the reference's: a compact white capsule that hugs the
+ * row of actions inside it, hanging off the words. No caret, no heading, no
+ * closing control — the placement already says which line it belongs to by
+ * sitting against it, centred on it.
  *
  * A full-bleed sheet docked to the bottom of the visible region used to be a
  * second mode here. It is gone: one presentation, one entrance, one place to
@@ -36,9 +41,16 @@ export const SAT_ANNOTATION_SURFACE_INSET = 8;
  * of actions — the selection tools and a mark's edit tools lay out identically,
  * and a second copy of these classes is how the two drift apart. There is one
  * row now (the reference's bar), so it is also the whole body.
+ *
+ * NO `flex-wrap`, and that is the point rather than an omission: the reference
+ * bar is one line in every state, and a bar that wrapped into two was answering
+ * "the actions do not fit" by growing taller — which is exactly the failure the
+ * compact metrics and the hugged width above exist to remove. If the visible
+ * region really cannot hold the row, the body scrolls it (see
+ * `SatAnnotationSurfaceBody`) rather than stacking it.
  */
 export const SAT_ANNOTATION_PILL_ROW =
-  'flex flex-wrap items-center gap-[var(--sat-annotation-row-gap)]';
+  'flex items-center gap-[var(--sat-annotation-row-gap)]';
 
 const SURFACE_BASE = 'sat-ui absolute z-[80] ';
 // The bar is a pill: the reference rounds its ends fully, and the shape is what
@@ -52,7 +64,7 @@ const SURFACE_FLOATING =
 
 export interface SatAnnotationSurfaceChrome {
   mode: SelectionMenuMode | null;
-  /** Toolbar against the selection, with a caret pointing at it. */
+  /** Toolbar against the selection, centred on the line it acts on. */
   floating: boolean;
   /** Mounted but out of the way: off screen, or waiting for geometry to settle. */
   hidden: boolean;
@@ -92,18 +104,22 @@ export function satAnnotationSurfaceChrome(
       top: placement ? geometry.viewportToLogicalPoint({ x: 0, y: placement.top }).y : SAT_ANNOTATION_SURFACE_INSET,
       // The engine owns the shape once it has measured one: it is the only thing
       // that knows how much of the visible region the surface may have. Until
-      // then the natural width is the token maximum, and NEVER zero — a hidden
-      // placement that collapsed the box would have its own collapse measured
-      // back on the next pass, and the surface would stay 30px wide (padding and
-      // border) for the rest of the selection's life.
+      // then the capsule hugs its own row and never collapses — a hidden
+      // placement that measured zero would have its own collapse read back on
+      // the next pass, and the surface would stay as wide as its padding and
+      // border for the rest of the selection's life. Hence a MAXIMUM and not a fixed
+      // width: the row inside decides how wide the pill is, the token only caps
+      // it, and the cap is a ceiling the placement can always meet because it is
+      // narrower than the region the placement guarantees.
       width: placement && placement.width > 0
         ? geometry.viewportToLogicalLength(placement.width)
-        : 'min(var(--sat-annotation-surface-max), 100%)',
+        : undefined,
+      maxWidth: 'min(var(--sat-annotation-surface-max), 100%)',
       // The bound the rows scroll inside. Deliberately NOT `overflow` on this
-      // node: the caret is drawn just outside the border box, and a scroll
-      // container clips whatever overflows it — on both axes, because a single
-      // `auto` axis forces the other one too. So the box stays visible and the
-      // body below it does the scrolling.
+      // node: the surface keeps its own box (and its rounded ends) visible, and
+      // the body below it does the scrolling instead. A scroll container here
+      // would also be forced onto both axes by a single `auto` axis, which is
+      // how a two-row bar appeared in the first place.
       maxHeight: placement && placement.maxHeight > 0
         ? geometry.viewportToLogicalLength(placement.maxHeight)
         : undefined,
@@ -115,12 +131,13 @@ export function satAnnotationSurfaceChrome(
 /**
  * The scrolling body: every row of the surface, inside the bound the placement
  * measured, so a viewport too short for the actions scrolls them instead of
- * hiding them under the keyboard or hanging them off the screen.
+ * hiding them under the keyboard or hanging them off the screen — and the same
+ * rule scrolls a row that is wider than the region it may occupy, which is what
+ * keeps the bar one line on a narrow screen instead of two.
  *
- * The caret layer is a sibling of this element, not a child, which is what keeps
- * it out of the clip. The bound subtracts the surface's own padding and border
- * (the tokens the chrome uses) rather than a hand-written number, so a change to
- * either cannot silently start the rows overflowing.
+ * The bound subtracts the surface's own padding and border (the tokens the
+ * chrome uses) rather than a hand-written number, so a change to either cannot
+ * silently start the rows overflowing.
  *
  * `max-height: 100%` is not an option here: a percentage resolves against the
  * parent's height, and the parent is content-sized — the percentage would be
@@ -149,35 +166,3 @@ export function SatAnnotationSurfaceBody({
   );
 }
 
-/**
- * The caret: the whole spatial argument that this control belongs to THAT line.
- *
- * Only when the surface really is against that line. A placement that had to be
- * pinned inside the visible region — a selection covering the screen, a viewport
- * with no room beside the text — is still the right place for the controls to
- * be, but it is no longer beside the line the arrow would point at, so there is
- * nothing honest for a caret to say and it is not drawn.
- *
- * Positioned inside a layer that sits on the surface's border box, so the
- * engine's border-box coordinates and the browser's padding-box positioning
- * agree.
- */
-export function SatAnnotationCaret({
-  placement,
-  visualScale = 1,
-}: {
-  placement: SelectionMenuPlacement | null;
-  visualScale?: number | undefined;
-}) {
-  if (!placement || placement.mode !== 'floating' || placement.clamped) return null;
-  const geometry = createSatExamZoomGeometry(visualScale);
-  return (
-    <span aria-hidden="true" className="sat-annotation-caret-layer">
-      <span
-        data-sat-annotation-caret={placement.side === 'above' ? 'down' : 'up'}
-        className="sat-annotation-caret"
-        style={{ left: geometry.viewportToLogicalLength(placement.arrowX) }}
-      />
-    </span>
-  );
-}

@@ -19,6 +19,22 @@ function actionOrder(): Array<string | null> {
   return screen.getAllByRole('button').map((button) => button.getAttribute('data-sat-annotation-action'));
 }
 
+/**
+ * The bar's contents in DOCUMENT order, with the divider standing in for
+ * itself: the reference reads left to right as inks, underline, removal,
+ * divider, note, and a list of `getAllByRole` results would not tell the divider
+ * from a missing action.
+ */
+function rowOrder(): string[] {
+  // The selection tools lay their actions out in the shared menu's row; a mark's
+  // edit controls own their row directly. Both are the same bar.
+  const row = document.querySelector(
+    '[data-selection-menu-row="0"], [data-sat-annotation-surface-body="true"] > div',
+  )!;
+  return [...row.querySelectorAll('[data-sat-annotation-action], [data-sat-annotation-divider="true"]')]
+    .map((node) => node.getAttribute('data-sat-annotation-action') ?? 'divider');
+}
+
 describe('desktop selection panel', () => {
   it('draws the reference bar: one icon row, no heading, and no visible words', () => {
     const on = actions();
@@ -41,6 +57,19 @@ describe('desktop selection panel', () => {
     // No X anywhere: Escape and a press outside are the ways out, and neither
     // one touches the mark.
     expect(screen.queryByRole('button', { name: 'Close text tools' })).toBeNull();
+    // …and no caret either. The reference bar is a plain capsule: where it sits
+    // is what says which line it acts on.
+    expect(document.querySelector('[data-sat-annotation-caret]')).toBeNull();
+    expect(document.querySelector('.sat-annotation-caret-layer')).toBeNull();
+  });
+
+  it('is one row: the bar never wraps into two', () => {
+    render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} {...closeProps} />);
+    // The row the actions are laid out in, and the inks' own group inside it.
+    // `flex-wrap` on either is how the reference's single line became two.
+    const row = document.querySelector('[data-selection-menu-row="0"]')!;
+    expect(row.className).not.toContain('flex-wrap');
+    expect(screen.getByRole('group', { name: 'Highlight' }).className).not.toContain('flex-wrap');
   });
 
   it('sizes the ink in use as the larger circle, and only it wears the drop', () => {
@@ -48,18 +77,28 @@ describe('desktop selection panel', () => {
     const blue = document.querySelector('[data-sat-swatch="blue"]')!;
     const yellow = document.querySelector('[data-sat-swatch="yellow"]')!;
     expect(blue).toHaveAttribute('data-sat-swatch-state', 'current');
-    expect(blue.className).toContain('h-8');
+    expect(blue.className).toContain('h-7');
     expect(blue.querySelector('[data-sat-swatch-ink="true"]')).not.toBeNull();
     expect(yellow).toHaveAttribute('data-sat-swatch-state', 'idle');
     expect(yellow.className).toContain('h-6');
     expect(yellow.querySelector('[data-sat-swatch-ink="true"]')).toBeNull();
+    // Both carry the same hairline: the family of marks is what makes the larger
+    // circle read as "the one in use" rather than as a different control.
+    for (const swatch of [blue, yellow]) {
+      expect(swatch.className).toContain('border-[var(--sat-annotation-swatch-ring)]');
+    }
   });
 
-  it('keeps every action at a 44px touch target', () => {
+  it('keeps every action at a 44px touch target, and the drawing inside it smaller', () => {
     render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} {...closeProps} />);
     for (const button of screen.getAllByRole('button')) {
       expect(button.className).toContain('h-11');
       expect(button.className).toContain('sat-touch-target');
+      // Whatever is drawn inside is the smaller thing — that is what makes the
+      // bar compact without making it unhittable.
+      const wash = button.querySelector('[data-sat-annotation-wash="true"]');
+      expect(wash).not.toBeNull();
+      expect(wash!.className).toContain('h-8');
     }
   });
 
@@ -212,6 +251,36 @@ describe('edit controls', () => {
     expect(actionOrder()).toEqual([
       'highlight-yellow', 'highlight-blue', 'highlight-pink', 'underline', 'underline-style', 'remove', 'note',
     ]);
+    // …and that is the order they are DRAWN in, left to right, with the hairline
+    // between removal and the note: the reference's bar, read as a student reads
+    // it rather than as a list of buttons.
+    expect(rowOrder()).toEqual([
+      'highlight-yellow', 'highlight-blue', 'highlight-pink', 'underline', 'underline-style', 'remove', 'divider', 'note',
+    ]);
+  });
+
+  it('draws the note as a pale sheet in a hairline circle, and the trash on the exam ink', () => {
+    render(
+      <SatAnnotationEditControls annotation={mark} onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
+    );
+    // The one control that opens a place to write reads as paper: a sheet inside
+    // a hairline circle, pale enough that it can never be mistaken for a
+    // highlight on the words themselves.
+    const note = screen.getByRole('button', { name: 'Edit note' });
+    const sheet = note.querySelector('[data-sat-note-glyph="true"]')!;
+    expect(sheet.className).toContain('h-7');
+    expect(sheet.className).toContain('border-[var(--sat-annotation-control-outline)]');
+    expect(sheet.className).toContain('bg-[var(--sat-annotation-note-fill)]');
+
+    // Removal is drawn like its neighbours at rest, and asks to be pressed with
+    // its hover and focus states: a red glyph all exam is a warning about a
+    // control the student has not chosen.
+    const remove = screen.getByRole('button', { name: 'Remove highlight' });
+    expect(remove.querySelector('[data-sat-remove-glyph="true"]')!.className)
+      .toContain('border-[var(--sat-annotation-control-outline)]');
+    const resting = remove.className.split(/\s+/).filter((token) => !token.includes(':'));
+    expect(resting).not.toContain('text-[var(--sat-danger)]');
+    expect(remove.className).toContain('hover:text-[var(--sat-danger)]');
   });
 
   it('draws an underline mark own line, and removes that mark by name', () => {

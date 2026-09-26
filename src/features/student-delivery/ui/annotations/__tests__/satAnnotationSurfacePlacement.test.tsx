@@ -353,7 +353,7 @@ describe('SatSelectionActionsPanel', () => {
     );
   }
 
-  it('keeps the toolbar and drops the caret when the placement has to pin it', async () => {
+  it('keeps the toolbar pinned and scrollable when the visible region is shorter than it', async () => {
     stubSurfaceSize();
     // A visible region shorter than the surface itself: there is nowhere to sit
     // beside the words, so the toolbar is pinned inside the region.
@@ -361,8 +361,9 @@ describe('SatSelectionActionsPanel', () => {
     stubAnchorBox(40, 60);
     renderPanel(FINE_POINTER);
 
-    // Still the toolbar — one presentation, and it scrolls its own rows — but
-    // with no caret, because it is not against that line any more.
+    // Still the toolbar — one presentation, and it scrolls its own rows — and
+    // drawn as the plain capsule it always is. The bar carries no pointer in any
+    // mode, so there is nothing here that the clamp would have to take away.
     await waitFor(() => expect(document.querySelector('[data-sat-selection-toolbar="true"]')).not.toBeNull());
     expect(document.querySelector('[data-sat-annotation-caret]')).toBeNull();
     expect(document.querySelector('[data-sat-annotation-surface-body]')).not.toBeNull();
@@ -379,7 +380,6 @@ describe('SatSelectionActionsPanel', () => {
     await waitFor(() => expect(document.querySelector('[data-sat-selection-toolbar="true"]')).not.toBeNull());
     const toolbar = document.querySelector<HTMLElement>('[data-sat-selection-toolbar="true"]')!;
     expect(toolbar.style.top).toBe(`${60 + 12}px`);
-    expect(document.querySelector('[data-sat-annotation-caret]')!.getAttribute('data-sat-annotation-caret')).toBe('up');
   });
 
   it('reserves a lane when a native selection surface is explicitly present', async () => {
@@ -393,19 +393,22 @@ describe('SatSelectionActionsPanel', () => {
     expect(toolbar.style.top).toBe(`${60 + 80 + 12}px`);
   });
 
-  it('gives a floating surface a caret pointing at the selection', async () => {
+  it('centres a floating surface on its anchored line, with no pointer of its own', async () => {
     stubSurfaceSize();
     stubAnchorBox(300, 320);
     stubVisualViewport(800);
     renderPanel(FINE_POINTER);
 
-    await waitFor(() => expect(document.querySelector('[data-sat-annotation-caret]')).not.toBeNull());
-    const caret = document.querySelector('[data-sat-annotation-caret]')!;
-    expect(document.querySelector('[data-sat-selection-toolbar="true"]')).not.toBeNull();
-    // The surface sits above the selection, so the caret points down at it, and
-    // it is positioned inside the layer that sits on the surface's border box.
-    expect(caret.getAttribute('data-sat-annotation-caret')).toBe('down');
-    expect(caret.closest('.sat-annotation-caret-layer')).not.toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-sat-selection-toolbar="true"]')).not.toBeNull());
+    const toolbar = document.querySelector<HTMLElement>('[data-sat-selection-toolbar="true"]')!;
+    // The anchored line runs 200→600, so its centre is 400 and a 288px surface
+    // centred on it starts at 256; the same surface sits one 12px gap above the
+    // line. That pair of numbers is the whole spatial argument now — the bar
+    // draws no caret, so where it sits IS what says which line it belongs to.
+    expect(toolbar.style.left).toBe(`${400 - SURFACE.width / 2}px`);
+    expect(toolbar.style.top).toBe(`${300 - SURFACE.height - 12}px`);
+    expect(document.querySelector('[data-sat-annotation-caret]')).toBeNull();
+    expect(document.querySelector('.sat-annotation-caret-layer')).toBeNull();
   });
 
   it('claims no interaction hooks while it is waiting to settle', () => {

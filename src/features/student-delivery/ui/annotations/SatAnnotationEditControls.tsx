@@ -9,7 +9,6 @@ import {
 import { SatUnderlineStyleControl, type SatUnderlineChoice } from './SatUnderlineStyleControl';
 import {
   SAT_ANNOTATION_PILL_ROW,
-  SatAnnotationCaret,
   SatAnnotationSurfaceBody,
 } from './SatAnnotationSurfaceFrame';
 import { useSatAnnotationSurface } from './useSatAnnotationSurface';
@@ -23,8 +22,10 @@ import type { SelectionMenuEnvironment } from '@shared/ui/selection-v2/engine/se
  * a mark they made and gets the same bar back, now with that mark's own
  * treatment pressed — its ink, or its underline style. Recoloring and restyling
  * are a single tap each, never delete-then-redraw, and removal is the one
- * destructive control on the row, drawn in the danger ink and immediately
- * undoable rather than confirmed.
+ * destructive control on the row — drawn the way its neighbours are, because a
+ * permanently red glyph is a warning about a control the student has not chosen;
+ * it asks to be pressed with its hover and focus states instead, and is
+ * immediately undoable rather than confirmed.
  *
  * It is the same surface as the selection tools, in edit mode: the same
  * placement engine, the same shared chrome, the same one presentation, the same
@@ -66,7 +67,7 @@ export function SatAnnotationEditControls({
   // Opening a mark's editor moves the caret into it: a tap and Enter/Space on
   // the mark must both leave the student able to change the mark without
   // hunting for the controls.
-  const { placement, chrome, containerRef } = useSatAnnotationSurface(annotation.anchor, {
+  const { chrome, containerRef } = useSatAnnotationSurface(annotation.anchor, {
     autoFocusKey: annotation.id,
     environment,
     visualScale,
@@ -95,7 +96,6 @@ export function SatAnnotationEditControls({
       className={chrome.className}
       style={chrome.style}
     >
-      <SatAnnotationCaret placement={placement} visualScale={visualScale} />
       <SatAnnotationSurfaceBody maxHeight={chrome.bodyMaxHeight}>
         <div className={SAT_ANNOTATION_PILL_ROW}>
           <SatHighlightSwatchButtons
@@ -109,11 +109,11 @@ export function SatAnnotationEditControls({
             onApply={(style) => onUnderline(style)}
             onChoose={onUnderline}
           />
-          {/* Removal keeps its distance from the inks: it is the only control
-              here that destroys something, so it is drawn in the danger ink and
-              the note follows a divider rather than sitting beside it. */}
+          {/* Removal keeps its distance from the inks, and the note follows a
+              divider rather than sitting beside it: writing about the words and
+              taking the mark off them are different kinds of decision. */}
           <SatRemoveControl disabled={disabled === true} label={removeLabel} onSelect={onRemove} />
-          <span aria-hidden="true" className="mx-1 h-6 w-px bg-[var(--sat-divider)]" />
+          <span aria-hidden="true" data-sat-annotation-divider="true" className="h-6 w-px shrink-0 bg-[var(--sat-divider)]" />
           <SatNoteControl hasNote={hasNote} disabled={disabled === true} onSelect={onNote} />
         </div>
       </SatAnnotationSurfaceBody>

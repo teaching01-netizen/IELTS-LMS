@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { SAT_UNDERLINE_STYLES, type SatUnderlineStyle } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
-import { SAT_ANNOTATION_ACTION, SatUnderlineGlyph } from './SatAnnotationControls';
+import { SAT_ANNOTATION_ACTION, SatActionWash, SatUnderlineGlyph } from './SatAnnotationControls';
 
 /**
  * The underline control and its style menu: `U̲ ⌄`.
@@ -12,6 +12,12 @@ import { SAT_ANNOTATION_ACTION, SatUnderlineGlyph } from './SatAnnotationControl
  * use — the one-tap path, and the only one a student who wants an underline
  * needs. The chevron opens the four styles (solid, dashed, dotted, none), which
  * is how the same span gets drawn differently without deleting and redrawing it.
+ *
+ * On the bar the two presses are drawn as ONE split control — `U̲ ⌄`, one glyph
+ * cluster with no divider and no second outline between them — because that is
+ * what the reference has and because two full rings beside each other read as
+ * two unrelated actions. Both halves keep their own 44px target; what is shared
+ * is the drawing, not the reach.
  *
  * The menu is a `menu` of `menuitemradio`s: one choice, one checked item, and
  * the arrow walk a keyboard user expects from a style picker. It is rendered
@@ -181,7 +187,10 @@ export function SatUnderlineStyleControl({
 
   return (
     <>
-      <span className="flex items-center gap-0.5">
+      {/* One control, two presses: the two targets are contiguous, so the U and
+          its chevron share one piece of chrome and the row does not pay a
+          separate gap for a disclosure. */}
+      <span className="flex shrink-0 items-center">
         <button
           type="button"
           data-sat-annotation-action="underline"
@@ -192,7 +201,9 @@ export function SatUnderlineStyleControl({
           onClick={() => onApply(applyStyle)}
           className={SAT_ANNOTATION_ACTION}
         >
-          <SatUnderlineGlyph style={applyStyle} />
+          <SatActionWash>
+            <SatUnderlineGlyph style={applyStyle} />
+          </SatActionWash>
         </button>
         <button
           ref={triggerRef}
@@ -208,13 +219,16 @@ export function SatUnderlineStyleControl({
           onClick={() => setOpen((current) => !current)}
           // Same 44px target as every other action: the chevron is a second
           // press, not a smaller one, and two widths on one element would leave
-          // the rendered box to stylesheet order.
+          // the rendered box to stylesheet order. What makes it read as part of
+          // the U is the drawing around it, not a smaller box.
           className={SAT_ANNOTATION_ACTION}
         >
-          <ChevronDown
-            className={'sat-state-transition h-4 w-4 shrink-0 ' + (open ? 'rotate-180' : '')}
-            aria-hidden="true"
-          />
+          <SatActionWash>
+            <ChevronDown
+              className={'sat-state-transition h-4 w-4 shrink-0 ' + (open ? 'rotate-180' : '')}
+              aria-hidden="true"
+            />
+          </SatActionWash>
         </button>
       </span>
       {menu && portalTarget ? createPortal(menu, portalTarget) : menu}

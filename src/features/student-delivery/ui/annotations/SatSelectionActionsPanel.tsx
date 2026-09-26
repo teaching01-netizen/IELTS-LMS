@@ -13,7 +13,6 @@ import {
 import { SatUnderlineStyleControl, type SatUnderlineChoice } from './SatUnderlineStyleControl';
 import {
   SAT_ANNOTATION_PILL_ROW,
-  SatAnnotationCaret,
   SatAnnotationSurfaceBody,
   satAnnotationSurfaceChrome,
 } from './SatAnnotationSurfaceFrame';
@@ -49,6 +48,10 @@ export interface SatSelectionActions {
  * actually uses are all still here: Escape, a press outside, and a new selection
  * each end the tools without touching the mark or the words; the dismissal is
  * owned by `SatSelectionActionsPanel`'s `onClose`, which those paths call.
+ *
+ * There is no caret either. The reference's bar is a plain capsule, and the thing
+ * a pointer would say — "these tools belong to THAT line" — is already said by
+ * where the capsule sits: centred on that line, one gap from it.
  *
  * It is a real toolbar: arrow keys walk the controls, Enter/Space fires the
  * focused one, and Escape belongs to the exam. Acting does not dismiss it:
@@ -114,8 +117,10 @@ export function SatSelectionActionsPanel({
             onChoose={chooseUnderlineStyle}
           />
           {/* The note is the one action that leaves the passage for the Notes
-              pane, so it is the one that gets a divider in front of it. */}
-          <span aria-hidden="true" className="mx-1 h-6 w-px bg-[var(--sat-divider)]" />
+              pane, so it is the one that gets a divider in front of it. The
+              hairline carries no margin of its own: the row's own rhythm spaces
+              it, so the bar has one system of gaps rather than two. */}
+          <span aria-hidden="true" data-sat-annotation-divider="true" className="h-6 w-px shrink-0 bg-[var(--sat-divider)]" />
           <SatNoteControl hasNote={false} disabled={disabled === true} onSelect={() => actions.addNote(anchor)} />
         </div>
       ),
@@ -133,10 +138,10 @@ export function SatSelectionActionsPanel({
     attributes: surface.hidden
       ? {}
       : { 'data-sat-selection-toolbar': 'true', 'data-sat-annotation-surface': 'true' },
-    caret: <SatAnnotationCaret placement={placement} visualScale={visualScale} />,
     bodyMaxHeight: surface.bodyMaxHeight,
-    // The caret is drawn outside the border box, so the rows scroll in their own
-    // layer inside the bound the placement measured — never on the surface.
+    // The rows scroll in their own layer inside the bound the placement
+    // measured, never on the surface: a scroll container on the surface would be
+    // forced onto both axes by a single `auto` axis.
     renderBody: (content, maxHeight) => <SatAnnotationSurfaceBody maxHeight={maxHeight}>{content}</SatAnnotationSurfaceBody>,
     rowClassName: () => SAT_ANNOTATION_PILL_ROW,
   };
