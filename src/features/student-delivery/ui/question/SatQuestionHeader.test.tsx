@@ -25,6 +25,8 @@ describe("SatQuestionHeader question semantics", () => {
     expect(heading).not.toHaveAttribute("aria-label");
     expect(heading.className).toContain("w-11");
     expect(heading.className).toContain("place-items-center");
+    // A 44px square inside a taller strip: inset, never stretched to the row.
+    expect(heading.className).toContain("h-11");
   });
 });
 
@@ -170,13 +172,22 @@ describe("SatQuestionHeader spectrum rail (Phase 6g, visual-only)", () => {
     expect(rail).not.toHaveAttribute("tabindex");
 
     const header = rail!.parentElement!;
-    // The strip is white now — the pale surface-subtle tint is gone — and the
-    // rail hangs off a positioned host as the header's bottom edge.
+    // The strip is the reference's own light gray — NOT the white of the main
+    // exam header, and not the shared surface-subtle that also dresses
+    // eliminated answer rows and popover segments.
     expect(header.className).toContain("relative");
-    expect(header.className).toContain("bg-[var(--sat-surface)]");
+    expect(header.className).toContain("bg-[var(--sat-question-header-bg)]");
+    expect(header.className).not.toContain("bg-[var(--sat-surface)]");
     expect(header.className).not.toContain("bg-[var(--sat-surface-subtle)]");
-    // Host keeps its 1px hairline so the overlay cannot resize the header.
+    // Reserved, transparent bottom border: the rail owns the visible edge, so
+    // no divider colour contributes pixels, and the strip cannot resize.
     expect(header.className).toContain("border-b");
+    expect(header.className).toContain("border-transparent");
+    expect(header.className).not.toContain("var(--sat-divider)");
+    // Reference geometry: a dedicated strip height with the controls centred.
+    expect(header.className).toContain("min-h-[var(--sat-question-header-height)]");
+    expect(header.className).toContain("items-center");
+    expect(header.className).not.toContain("items-stretch");
     // Last child: painted over the row it closes, owned by no control.
     expect(header.lastElementChild).toBe(rail);
   });

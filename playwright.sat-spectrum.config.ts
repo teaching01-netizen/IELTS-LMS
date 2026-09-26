@@ -6,10 +6,17 @@ import { defineConfig, devices } from "@playwright/test";
  * renders the real shell, so the dev server is the whole fixture — which is
  * what lets this run as a fast, deterministic screenshot comparison.
  *
- * Baselines are per-platform (they include antialiased text), so a new OS or a
- * font change regenerates them once with:
- *   bun run e2e:sat-spectrum -- --update-snapshots
- * The geometry assertions in the spec run everywhere and need no baseline.
+ * THE BASELINES ARE THE REFERENCE, NOT OUR OUTPUT. `snapshotPathTemplate`
+ * points every `toHaveScreenshot` at `e2e/fixtures/sat-rail-reference/`, so the
+ * file being compared against is the supplied Bluebook crop. A screenshot this
+ * suite takes of itself can only prove the implementation agrees with itself,
+ * which is why nothing here is ever written by `--update-snapshots` on our own
+ * run: replace the crops when the reference changes, and nothing else.
+ *
+ * DPR is pinned to 1 and the spec asserts examZoom=1, because screen zoom scales
+ * the plane the rail is painted inside and the crops are cut at that scale.
+ *
+ *   bun run e2e:sat-spectrum
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -18,14 +25,23 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: "list",
+  snapshotPathTemplate: "{testDir}/fixtures/sat-rail-reference/{arg}{ext}",
   expect: {
-    // The gate is structural, not anti-aliasing tolerance: the same rail should
-    // rasterise identically, so only sub-pixel text smoothing may differ.
-    toHaveScreenshot: { maxDiffPixels: 0 },
+    toHaveScreenshot: {
+      // The reference crop comes from another machine: glyph antialiasing differs
+      // even when the layout does not. The rail strip itself is flat colour, so
+      // its region can be tightened to 0 once the crops land — this tolerance is
+      // for the text the header regions carry.
+      maxDiffPixelRatio: 0.02,
+      animations: "disabled",
+    },
   },
   use: {
     baseURL: "http://127.0.0.1:3000",
     trace: "retain-on-failure",
+    // Reference crops are cut at DPR 1; `scale: css` (the default) keeps the
+    // captured PNG in CSS pixels so the two agree.
+    deviceScaleFactor: 1,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {

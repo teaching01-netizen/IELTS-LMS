@@ -14,12 +14,18 @@ export interface SatQuestionHeaderProps {
 
 export function SatQuestionHeader(props: SatQuestionHeaderProps) {
   return (
-    <div className="relative flex min-h-11 items-stretch border-b border-[var(--sat-divider)] bg-[var(--sat-surface)]">
+    // Reference geometry: the strip is taller than the 44px controls it holds
+    // and centres them, so the black number block and the ABC control keep
+    // vertical breathing space instead of stretching across the whole row. The
+    // strip is light GRAY (only the main exam header is paper white) and its
+    // reserved bottom border is transparent: the spectrum rail below paints the
+    // bottom edge, so no divider colour contributes pixels to it.
+    <div className="relative flex min-h-[var(--sat-question-header-height)] items-center border-b border-transparent bg-[var(--sat-question-header-bg)]">
       {/* Semantic question heading (mobile a11y Task 6): the number cell is a
           real h2 whose accessible name is "Question N" from real text — never
           an aria-label on a generic div. The "Question " prefix is sr-only so
           the visible Bluebook cell keeps its number-only styling. */}
-      <h2 className="grid w-11 shrink-0 place-items-center bg-[var(--sat-text)] sat-type-control-primary font-semibold text-[var(--sat-background)]">
+      <h2 className="grid h-11 w-11 shrink-0 place-items-center bg-[var(--sat-text)] sat-type-control-primary font-semibold text-[var(--sat-background)]">
         <span className="sr-only">Question </span>
         {props.questionNumber}
       </h2>

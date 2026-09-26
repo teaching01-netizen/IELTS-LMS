@@ -111,7 +111,10 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
 
   return (
     <header
-      className="sat-exam-topbar relative z-[60] min-w-0 border-b border-[var(--sat-divider-strong)] bg-[var(--sat-surface)]"
+      // Paper white (the question strip keeps the reference's light gray) and a
+      // transparent reserved border: the rail below owns the bar's bottom edge,
+      // so no divider colour contributes its own pixels to it.
+      className="sat-exam-topbar relative z-[60] min-w-0 border-b border-transparent bg-[var(--sat-surface)]"
       role="banner"
     >
       {/* Bluebook 3-anchor header: context | independently-centered timer | tools. Mobile keeps 2-row stacking. */}
@@ -299,8 +302,8 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
       {/* The bar's bottom edge is the spectrum rail, not the flat divider it
           used to paint (Bluebook parity). One decorative overlay, last in the
           header so it crosses the full width uninterrupted; it is aria-hidden,
-          untabbable and click-through, and `--sat-rail-hairline` keeps the
-          1px border above purely so replacing the divider moves nothing. */}
+          untabbable and click-through, and the reserved transparent border
+          above it is what keeps replacing the divider from moving anything. */}
       <span aria-hidden="true" data-sat-color-rail="true" className="sat-color-rail" />
     </header>
   );

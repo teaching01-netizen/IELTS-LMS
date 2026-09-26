@@ -1436,19 +1436,167 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-divider-strong: #24272A;
   --sat-answer-border: #74787D;
   --sat-split-divider: #777B80;
-  /* Bluebook spectrum rail: the multi-segment rule that closes the exam chrome
-   * (top bar) and the question header, in place of a flat divider. Primitives
-   * on purpose — the rail is ONE visual fact with two hosts, so no host may
-   * repaint it, and both read their segments from `.sat-color-rail` below. */
-  --sat-rail-dark: #24272A;
-  --sat-rail-gray: #6D7176;
-  --sat-rail-blue: #2D9CDB;
-  --sat-rail-yellow: #FFD718;
-  --sat-rail-height: 3px;
-  /* The 1px bottom hairline a rail host keeps: the rail is an overlay, so
-   * keeping the host's own border is what stops the rail from changing the
-   * header height it closes. The rail paints over that hairline. */
+  /* The 1px bottom edge a rail host reserves: the rail is an overlay, so the
+   * host keeps a `border-b` (transparent — it must contribute no pixels of its
+   * own) purely so mounting the rail cannot change the height of the header it
+   * closes. The rail paints over that reserved hairline and owns what a student
+   * sees as the bottom edge. */
   --sat-rail-hairline: 1px;
+
+  /* Bluebook spectrum rail: the multi-segment rule that closes the top bar and
+   * the question header, in place of a flat divider. The palette, height and
+   * the fixed-pixel pattern itself are ONE generated definition (`.sat-color-rail`
+   * below reads it), so the two hosts cannot drift apart. */
+/* >>> SAT SPECTRUM RAIL (generated) >>> */
+  /* Written by scripts/sat-rail-pattern.mjs — do not hand-edit inside the fence.
+   * PROVISIONAL (no reference crop supplied), seed 0x5a17, palette from the written spec
+   * 132 segments over 1104px, fixed pixels and never
+   * percentages, so the top bar and the question header wear the identical
+   * barcode at the identical scale. Breaks are transparent on purpose: they are
+   * the reference's light breaks, and each host's own surface shows through. */
+  --sat-rail-gray: #808080;
+  --sat-rail-light: #D0D0D0;
+  --sat-rail-blue: #70B7E1;
+  --sat-rail-yellow: #FAE570;
+  --sat-rail-height: 3px;
+  --sat-rail-pattern-length: 1104px;
+  --sat-rail-pattern:
+    linear-gradient(
+      90deg,
+      transparent 0px 2px,
+      var(--sat-rail-light) 2px 9px,
+      transparent 9px 13px,
+      var(--sat-rail-gray) 13px 19px,
+      transparent 19px 22px,
+      var(--sat-rail-gray) 22px 35px,
+      var(--sat-rail-blue) 35px 38px,
+      transparent 38px 40px,
+      var(--sat-rail-gray) 40px 76px,
+      var(--sat-rail-light) 76px 81px,
+      var(--sat-rail-gray) 81px 94px,
+      var(--sat-rail-light) 94px 96px,
+      transparent 96px 99px,
+      var(--sat-rail-gray) 99px 113px,
+      var(--sat-rail-yellow) 113px 122px,
+      var(--sat-rail-light) 122px 130px,
+      transparent 130px 132px,
+      var(--sat-rail-light) 132px 139px,
+      var(--sat-rail-gray) 139px 151px,
+      var(--sat-rail-blue) 151px 162px,
+      var(--sat-rail-gray) 162px 182px,
+      var(--sat-rail-blue) 182px 189px,
+      var(--sat-rail-gray) 189px 211px,
+      var(--sat-rail-yellow) 211px 217px,
+      var(--sat-rail-light) 217px 221px,
+      var(--sat-rail-gray) 221px 231px,
+      var(--sat-rail-blue) 231px 234px,
+      transparent 234px 237px,
+      var(--sat-rail-blue) 237px 241px,
+      transparent 241px 244px,
+      var(--sat-rail-light) 244px 249px,
+      var(--sat-rail-gray) 249px 258px,
+      transparent 258px 260px,
+      var(--sat-rail-yellow) 260px 263px,
+      var(--sat-rail-light) 263px 266px,
+      transparent 266px 268px,
+      var(--sat-rail-light) 268px 271px,
+      var(--sat-rail-gray) 271px 291px,
+      var(--sat-rail-yellow) 291px 298px,
+      transparent 298px 301px,
+      var(--sat-rail-gray) 301px 314px,
+      transparent 314px 315px,
+      var(--sat-rail-light) 315px 318px,
+      var(--sat-rail-gray) 318px 326px,
+      transparent 326px 335px,
+      var(--sat-rail-light) 335px 343px,
+      var(--sat-rail-yellow) 343px 348px,
+      transparent 348px 352px,
+      var(--sat-rail-light) 352px 356px,
+      var(--sat-rail-gray) 356px 363px,
+      transparent 363px 376px,
+      var(--sat-rail-gray) 376px 389px,
+      transparent 389px 392px,
+      var(--sat-rail-gray) 392px 406px,
+      var(--sat-rail-light) 406px 414px,
+      var(--sat-rail-gray) 414px 426px,
+      var(--sat-rail-light) 426px 435px,
+      var(--sat-rail-gray) 435px 449px,
+      transparent 449px 453px,
+      var(--sat-rail-yellow) 453px 461px,
+      var(--sat-rail-blue) 461px 471px,
+      var(--sat-rail-gray) 471px 481px,
+      transparent 481px 482px,
+      var(--sat-rail-gray) 482px 486px,
+      transparent 486px 489px,
+      var(--sat-rail-gray) 489px 496px,
+      transparent 496px 498px,
+      var(--sat-rail-blue) 498px 507px,
+      var(--sat-rail-gray) 507px 528px,
+      var(--sat-rail-light) 528px 536px,
+      var(--sat-rail-gray) 536px 542px,
+      var(--sat-rail-light) 542px 549px,
+      var(--sat-rail-gray) 549px 572px,
+      var(--sat-rail-blue) 572px 577px,
+      transparent 577px 579px,
+      var(--sat-rail-blue) 579px 585px,
+      transparent 585px 589px,
+      var(--sat-rail-gray) 589px 613px,
+      transparent 613px 616px,
+      var(--sat-rail-gray) 616px 623px,
+      transparent 623px 627px,
+      var(--sat-rail-light) 627px 632px,
+      var(--sat-rail-gray) 632px 687px,
+      transparent 687px 693px,
+      var(--sat-rail-gray) 693px 721px,
+      transparent 721px 723px,
+      var(--sat-rail-yellow) 723px 726px,
+      var(--sat-rail-gray) 726px 731px,
+      transparent 731px 734px,
+      var(--sat-rail-yellow) 734px 741px,
+      var(--sat-rail-gray) 741px 752px,
+      transparent 752px 757px,
+      var(--sat-rail-light) 757px 765px,
+      var(--sat-rail-gray) 765px 771px,
+      transparent 771px 786px,
+      var(--sat-rail-gray) 786px 793px,
+      transparent 793px 796px,
+      var(--sat-rail-blue) 796px 805px,
+      transparent 805px 816px,
+      var(--sat-rail-light) 816px 820px,
+      var(--sat-rail-gray) 820px 837px,
+      var(--sat-rail-blue) 837px 846px,
+      transparent 846px 848px,
+      var(--sat-rail-light) 848px 857px,
+      transparent 857px 858px,
+      var(--sat-rail-gray) 858px 869px,
+      transparent 869px 871px,
+      var(--sat-rail-light) 871px 877px,
+      var(--sat-rail-gray) 877px 884px,
+      transparent 884px 887px,
+      var(--sat-rail-gray) 887px 913px,
+      transparent 913px 916px,
+      var(--sat-rail-gray) 916px 929px,
+      transparent 929px 935px,
+      var(--sat-rail-gray) 935px 971px,
+      transparent 971px 974px,
+      var(--sat-rail-gray) 974px 981px,
+      var(--sat-rail-blue) 981px 986px,
+      var(--sat-rail-gray) 986px 999px,
+      var(--sat-rail-light) 999px 1007px,
+      var(--sat-rail-gray) 1007px 1018px,
+      transparent 1018px 1021px,
+      var(--sat-rail-blue) 1021px 1027px,
+      var(--sat-rail-gray) 1027px 1046px,
+      transparent 1046px 1047px,
+      var(--sat-rail-blue) 1047px 1051px,
+      var(--sat-rail-gray) 1051px 1064px,
+      transparent 1064px 1072px,
+      var(--sat-rail-light) 1072px 1080px,
+      transparent 1080px 1085px,
+      var(--sat-rail-gray) 1085px 1102px,
+      transparent 1102px 1104px
+    );
+/* <<< SAT SPECTRUM RAIL (generated) <<< */
   --sat-scrim: rgb(0 0 0 / 72%);
   --sat-reader-mask: rgb(20 20 20 / 92%);
   --sat-danger: #b42318;
@@ -1564,6 +1712,12 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
    * Components must prefer these over the raw primitives above. */
   --sat-shell-bg: var(--sat-chrome);
   --sat-body-bg: var(--sat-background);
+  /* The question strip's own surface, measured from the reference: the question
+   * header is light GRAY while the main exam header (top bar) is paper white.
+   * Deliberately not `--sat-surface-subtle`: that token also dresses eliminated
+   * answer rows and popover segments, and this strip must move with the
+   * reference, not with them. */
+  --sat-question-header-bg: #F2F3F5;
   --sat-control-primary-bg: var(--sat-accent);
   --sat-control-primary-bg-hover: var(--sat-accent-hover);
   --sat-control-primary-bg-pressed: var(--sat-accent-pressed);
@@ -1579,6 +1733,10 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-modal-scrim: var(--sat-scrim);
   /* Bluebook COMPONENT tokens: answer + primary button (Phase 2 contract). */
   --sat-answer-min-height: 52px;
+  /* Reference geometry for the question strip: the strip is taller than the
+   * 44px controls inside it, so the black number block and the ABC control sit
+   * with vertical breathing space instead of stretching across the whole row. */
+  --sat-question-header-height: 52px;
   --sat-answer-padding-y: 12px;
   --sat-answer-padding-x: 14px;
   --sat-answer-gap: 12px;
@@ -2388,109 +2546,33 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 /* Bluebook spectrum rail (Phase 6g): the multi-segment rule that closes the top
  * bar and the question header, standing in for the flat divider each host used
- * to paint. Two hard-stopped gradient layers — never dozens of spans, and never
- * one colour blending into the next: a fine charcoal/gray rhythm at a fixed
- * pixel cadence (so both hosts wear the same material at the same scale), and
- * sparse cyan/yellow accents scattered unevenly across the host's width.
- * Decorative only: the host's `aria-hidden` span is untabbable and
- * click-through, and the colour it replaces stays a layout fact, not a state.
+ * to paint.
  *
- * Geometry: flush with the host's bottom edge. A host keeps its 1px bottom
- * hairline (`--sat-rail-hairline`) only so the rail cannot move the header it
- * closes; the rail overpaints it, so the divider a student SEES is the rail. */
+ * It paints ONE fixed-pixel barcode — short gray / light-gray / blue / yellow
+ * segments separated by real light breaks — tiled along the host. Fixed pixels,
+ * never percentages: a percentage stop would stretch with each host's width, so
+ * the top bar (1440px) and the question header (639px) would wear different
+ * rails. Gaps are transparent on purpose: each host's own surface shows through
+ * them (paper in the top bar, the strip's gray in the question header).
+ *
+ * The pattern lives in the generated fence in `.sat-ui`
+ * (scripts/sat-rail-pattern.mjs), which is the only place it may be defined.
+ * Decorative only: the host's `aria-hidden` span is untabbable and
+ * click-through, and the edge it replaces stays a layout fact, not a state.
+ *
+ * Geometry: flush with the host's bottom edge. A host reserves a 1px bottom
+ * border (`--sat-rail-hairline`, transparent) so the rail cannot move the
+ * header it closes, and the rail overpaints that reserved hairline — the bottom
+ * edge a student sees is entirely the rail, with no divider underneath it. */
 .sat-ui .sat-color-rail {
   position: absolute;
   inset-inline: 0;
   bottom: calc(-1 * var(--sat-rail-hairline));
   height: var(--sat-rail-height);
   pointer-events: none;
-  background-color: var(--sat-rail-dark);
-  background-image:
-    /* Accents, above the rhythm layer: sparse, unevenly placed, and hard-stopped
-     * at both ends so no accent bleeds into the charcoal around it. */
-    linear-gradient(
-      90deg,
-      transparent 0 1.1%,
-      var(--sat-rail-gray) 1.1% 2.6%,
-      transparent 2.6% 3.6%,
-      var(--sat-rail-yellow) 3.6% 4.7%,
-      transparent 4.7% 6.9%,
-      var(--sat-rail-gray) 6.9% 7.8%,
-      transparent 7.8% 9.4%,
-      var(--sat-rail-gray) 9.4% 12.1%,
-      transparent 12.1% 12.4%,
-      var(--sat-rail-blue) 12.4% 14.6%,
-      transparent 14.6% 16.9%,
-      var(--sat-rail-blue) 16.9% 17.6%,
-      transparent 17.6% 20.3%,
-      var(--sat-rail-gray) 20.3% 21.2%,
-      transparent 21.2% 25.4%,
-      var(--sat-rail-gray) 25.4% 26.9%,
-      transparent 26.9% 31.2%,
-      var(--sat-rail-yellow) 31.2% 32.1%,
-      transparent 32.1% 34.6%,
-      var(--sat-rail-gray) 34.6% 35.5%,
-      transparent 35.5% 37.2%,
-      var(--sat-rail-gray) 37.2% 38.4%,
-      transparent 38.4% 38.8%,
-      var(--sat-rail-blue) 38.8% 40.3%,
-      transparent 40.3% 44.1%,
-      var(--sat-rail-gray) 44.1% 45.9%,
-      transparent 45.9% 48.3%,
-      var(--sat-rail-gray) 48.3% 49.2%,
-      transparent 49.2% 52.6%,
-      var(--sat-rail-yellow) 52.6% 54.4%,
-      transparent 54.4% 56.8%,
-      var(--sat-rail-gray) 56.8% 57.7%,
-      transparent 57.7% 61.1%,
-      var(--sat-rail-blue) 61.1% 62%,
-      transparent 62% 65.2%,
-      var(--sat-rail-gray) 65.2% 66.4%,
-      transparent 66.4% 69.8%,
-      var(--sat-rail-gray) 69.8% 71.1%,
-      transparent 71.1% 73.9%,
-      var(--sat-rail-yellow) 73.9% 74.8%,
-      transparent 74.8% 76.3%,
-      var(--sat-rail-gray) 76.3% 77.1%,
-      transparent 77.1% 79.4%,
-      var(--sat-rail-blue) 79.4% 82.1%,
-      transparent 82.1% 85.7%,
-      var(--sat-rail-gray) 85.7% 86.6%,
-      transparent 86.6% 88.1%,
-      var(--sat-rail-gray) 88.1% 88.9%,
-      transparent 88.9% 89.6%,
-      var(--sat-rail-yellow) 89.6% 90.9%,
-      transparent 90.9% 93.4%,
-      var(--sat-rail-gray) 93.4% 94.3%,
-      transparent 94.3% 95.2%,
-      var(--sat-rail-blue) 95.2% 96.6%,
-      transparent 96.6% 98.2%,
-      var(--sat-rail-gray) 98.2% 99.1%,
-      transparent 99.1% 100%
-    ),
-    /* The rhythm layer: short, square-ended charcoal and gray segments on a
-     * 103px unit whose internal cadence is deliberately uneven, so the repeat
-     * never reads as a pattern. The layer below both hosts is the same length,
-     * which is why the top bar and the header cannot drift apart. */
-    repeating-linear-gradient(
-      90deg,
-      var(--sat-rail-dark) 0 11px,
-      var(--sat-rail-gray) 11px 15px,
-      var(--sat-rail-dark) 15px 22px,
-      var(--sat-rail-gray) 22px 26px,
-      var(--sat-rail-dark) 26px 31px,
-      var(--sat-rail-gray) 31px 33px,
-      var(--sat-rail-dark) 33px 47px,
-      var(--sat-rail-gray) 47px 53px,
-      var(--sat-rail-dark) 53px 61px,
-      var(--sat-rail-gray) 61px 64px,
-      var(--sat-rail-dark) 64px 78px,
-      var(--sat-rail-gray) 78px 81px,
-      var(--sat-rail-dark) 81px 92px,
-      var(--sat-rail-gray) 92px 95px,
-      var(--sat-rail-dark) 95px 103px
-    );
-  background-repeat: no-repeat, repeat;
+  background-image: var(--sat-rail-pattern);
+  background-size: var(--sat-rail-pattern-length) 100%;
+  background-repeat: repeat-x;
 }
 
 @media (min-width: 1024px) {
