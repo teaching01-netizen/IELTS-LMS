@@ -7,16 +7,18 @@ import { expect, test, type Page } from "@playwright/test";
  * side you chose, pin inside the visible region when there is no room beside the
  * words) against geometry the test supplies. They cannot prove the thing a
  * student actually experiences, because jsdom has no layout: whether the surface
- * lands where the student can reach it, whether the caret points at the words,
- * and whether a toolbar appears at all on the device they are holding.
+ * lands where the student can reach it, whether it reads as the reference's bar
+ * once it is there (one row, no clipped action), and whether a toolbar appears at
+ * all on the device they are holding.
  *
  * So this file asserts geometry, per device profile, from the live DOM:
  *
  *   1. the surface is INSIDE the visual viewport (never clipped, never under
  *      the software keyboard's edge);
  *   2. it does not cover the selection it belongs to;
- *   3. its caret points at the line it belongs to — the first selected line when
- *      it floats above, the last when it floats below;
+ *   3. it belongs to the line it acts on — the bar draws no caret, so what says
+ *      so is where it sits: centred on the first selected line when it floats
+ *      above, the last when it floats below;
  *   4. it keeps a usable width;
  *   5. a viewport that cannot hold a toolbar still gets a toolbar, pinned inside
  *      the visible region — there is no second presentation to retreat to;
@@ -110,7 +112,6 @@ interface PlacementGeometry {
   surface: Box;
   /** The surface's positioning container — what "room above" is measured from. */
   bounds: Box | null;
-  caret: { center: number } | null;
   firstLine: Box | null;
   lastLine: Box | null;
   visible: { left: number; top: number; right: number; bottom: number };
@@ -160,20 +161,11 @@ async function readPlacement(page: Page, phrase: string): Promise<PlacementGeome
       const lines = anchored
         ? Array.from(anchored.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0)
         : [];
-      const caret = document.querySelector("[data-sat-annotation-caret]");
       const viewport = window.visualViewport;
       const container = document.querySelector("[data-sat-annotation-bounds]");
       return {
         surface: box(surface.getBoundingClientRect()),
         bounds: container ? box(container.getBoundingClientRect()) : null,
-        caret: caret
-          ? {
-              center: (() => {
-                const rect = caret.getBoundingClientRect();
-                return rect.left + rect.width / 2;
-              })(),
-            }
-          : null,
         firstLine: lines.length > 0 ? box(lines[0]) : null,
         lastLine: lines.length > 0 ? box(lines[lines.length - 1]) : null,
         visible: viewport
@@ -245,9 +237,82 @@ function expectDoesNotCoverSelection(geometry: PlacementGeometry): void {
   expect(above || below, "surface overlaps the text it belongs to").toBe(true);
 }
 
+/**
+ * The bar belongs to the anchored line, and says so by where it sits.
+ *
+ * This is the invariant the caret used to assert, and the surface's own box is
+ * what carries it now. Two forms, because the placement has two:
+ *
+ * - always, the bar OVERLAPS the line it acts on: it is over the words the
+ *   student selected rather than somewhere else on the same row;
+ * - and when no edge of the region clamped it, it is exactly CENTRED on that
+ *   line, because that is the placement's own rule (`anchorCenterX - width / 2`,
+ *   with the region's edge budget as the only thing allowed to move it).
+ *
+ * The line is the first selected one when the bar floats above it, the last when
+ * it floats below. Centring on the union box instead would aim a one-line bar at
+ * the middle of a wrapped selection, beside the words rather than over them.
+ */
+function expectCentredOnAnchoredLine(geometry: PlacementGeometry): void {
+  const above =
+    geometry.firstLine !== null && geometry.surface.bottom <= geometry.firstLine.top + 1;
+  const line = above ? geometry.firstLine : geometry.lastLine;
+  expect(line, "the selection has measurable lines").not.toBeNull();
+  if (!line) return;
+
+  expect(
+    geometry.surface.right,
+    "the bar sits clear of the line it acts on"
+  ).toBeGreaterThanOrEqual(line.left - 1);
+  expect(geometry.surface.left, "the bar sits clear of the line it acts on").toBeLessThanOrEqual(
+    line.right + 1
+  );
+
+  // The region the placement may use: the positioning container, inset by the
+  // 12px edge budget, inside the visible viewport. A bar flush with either edge of
+  // it was MOVED there, and centring is not something the placement promised for
+  // that bar; one that is clear of both is the centred case.
+  const bounds = geometry.bounds ?? geometry.visible;
+  const regionLeft = Math.max(geometry.visible.left + 12, bounds.left + 12);
+  const regionRight = Math.min(bounds.right - 12, geometry.visible.right - 12);
+  const moved =
+    geometry.surface.left <= regionLeft + 2 || geometry.surface.right >= regionRight - 2;
+  if (moved) return;
+
+  const barCentre = (geometry.surface.left + geometry.surface.right) / 2;
+  expect(
+    Math.abs(barCentre - (line.left + line.right) / 2),
+    "the bar is centred on the line it acts on"
+  ).toBeLessThanOrEqual(2);
+}
+
+/**
+ * The bar as the student sees it: one row of glyphs, no pointer, nothing clipped.
+ *
+ * A regression to wrapping is invisible to geometry that only measures the
+ * surface's box — the box would simply be taller — so the row itself is measured.
+ * One 44px line of targets is the reference's bar; two would be 88 or more. The
+ * horizontal overflow is the other half of the same promise: the compact metrics
+ * exist so that no action has to be scrolled for on a narrow screen, and a
+ * clipped action would show up as a body wider than the surface it sits in.
+ */
+async function readBar(
+  page: Page
+): Promise<{ rowHeight: number; pointer: boolean; overflowX: number }> {
+  return page.locator(SURFACE_SELECTOR).evaluate((surface) => {
+    const row = surface.querySelector<HTMLElement>('[data-selection-menu-row="0"]');
+    const body = surface.querySelector<HTMLElement>('[data-sat-annotation-surface-body="true"]');
+    return {
+      rowHeight: row ? row.getBoundingClientRect().height : -1,
+      pointer: surface.querySelector("[data-sat-annotation-caret]") !== null,
+      overflowX: body ? body.scrollWidth - body.clientWidth : 0,
+    };
+  });
+}
+
 test.describe("annotation surface placement", () => {
   for (const profile of PROFILES) {
-    test(`${profile.name}: the surface stays visible, clear of the selection, with its caret on the anchored line`, async ({
+    test(`${profile.name}: the surface stays visible, clear of the selection, on the anchored line`, async ({
       page,
       isMobile,
     }) => {
@@ -290,28 +355,15 @@ test.describe("annotation surface placement", () => {
       expect(geometry.surface.width).toBeGreaterThanOrEqual(SURFACE_MIN_WIDTH);
       expect(geometry.surface.width).toBeLessThanOrEqual(SURFACE_MAX_WIDTH);
 
-      // The caret belongs to the anchored line: the first line when the surface
-      // floats above it, the last when it floats below.
-      expect(geometry.caret, "a floating surface carries a caret").not.toBeNull();
-      const above =
-        geometry.firstLine !== null && geometry.surface.bottom <= geometry.firstLine.top + 1;
-      const line = above ? geometry.firstLine : geometry.lastLine;
-      expect(line, "the selection has measurable lines").not.toBeNull();
-      if (!line || !geometry.caret) return;
-      // Inside the anchored line, allowing only for the inward shift a
-      // screen-edge clamp applies.
-      expect(geometry.caret.center).toBeGreaterThanOrEqual(line.left - 16);
-      expect(geometry.caret.center).toBeLessThanOrEqual(line.right + 16);
-      // When the surface is not clamped by an edge, the caret sits on the line's
-      // centre rather than merely inside it.
-      const unclamped =
-        geometry.surface.left > geometry.visible.left + 1 &&
-        geometry.surface.right < geometry.visible.right - 1;
-      if (unclamped) {
-        expect(Math.abs(geometry.caret.center - (line.left + line.right) / 2)).toBeLessThanOrEqual(
-          2
-        );
-      }
+      // The bar is the reference's: one row, every action inside it, no pointer
+      // of its own — on every device profile, at every width that matters.
+      const bar = await readBar(page);
+      expect(bar.rowHeight, "the bar lays its actions out in one row").toBeGreaterThan(0);
+      expect(bar.rowHeight, "the bar has wrapped into two rows").toBeLessThanOrEqual(60);
+      expect(bar.overflowX, "an action is clipped or scrolled for").toBeLessThanOrEqual(1);
+      expect(bar.pointer, "the bar draws no caret of its own").toBe(false);
+
+      expectCentredOnAnchoredLine(geometry);
     });
   }
 
@@ -332,7 +384,7 @@ test.describe("annotation surface placement", () => {
     const geometry = await readPlacement(page, PHRASE);
     expectContained(geometry);
     expectDoesNotCoverSelection(geometry);
-    expect(geometry.caret, "caret remains attached to the selected text").not.toBeNull();
+    expectCentredOnAnchoredLine(geometry);
     const scaling = await page.locator(SURFACE_SELECTOR).evaluate((surface) => {
       const rect = surface.getBoundingClientRect();
       return {
@@ -454,10 +506,9 @@ test.describe("annotation surface placement", () => {
     const geometry = await readPlacement(page, PHRASE);
     expectContained(geometry);
     expectDoesNotCoverSelection(geometry);
-    expect(
-      geometry.caret,
-      "the surface comes back with its caret, not as a bare box"
-    ).not.toBeNull();
+    // Back from the rotation with its place on the words intact, not as a bare
+    // box somewhere it can be seen.
+    expectCentredOnAnchoredLine(geometry);
   });
 
   test("a software keyboard shrinking what is visible keeps the toolbar reachable", async ({
@@ -554,10 +605,7 @@ test.describe("annotation surface placement", () => {
     await expect(toolbar).toBeVisible();
     const restored = await readPlacement(page, PHRASE);
     expectContained(restored);
-    expect(
-      restored.caret,
-      "the surface comes back with its caret, not as a bare box"
-    ).not.toBeNull();
+    expectCentredOnAnchoredLine(restored);
     await toolbar.getByRole("button", { name: "Highlight Yellow" }).click();
     await expect(page.locator('[data-sat-highlight="true"]')).toHaveText(PHRASE);
   });
@@ -583,8 +631,8 @@ test.describe("annotation surface placement", () => {
   }) => {
     // Long enough that the passage is genuinely longer than its pane, and tall
     // enough to leave the tools a comfortable lane above the selection — so the
-    // surface the student meets is the ordinary floating one with a caret, not
-    // the pinned fallback.
+    // surface the student meets is the ordinary floating one, not the pinned
+    // fallback.
     await page.setViewportSize({ width: 390, height: 620 });
     await openHarness(page, "?long=1&ownedTouchSelection=1");
     const phrase = PHRASE;
@@ -624,7 +672,7 @@ test.describe("annotation surface placement", () => {
     await expect(toolbar).toBeVisible();
     const geometry = await readPlacement(page, phrase);
     expectContained(geometry);
-    expect(geometry.caret, "the surface returns with its caret, not as a bare box").not.toBeNull();
+    expectCentredOnAnchoredLine(geometry);
 
     // And it is the same span the student chose: the tool still acts on those
     // words, so the anchor survived the trip rather than being re-derived.
@@ -643,7 +691,11 @@ test.describe("annotation surface placement", () => {
     const selectedActions = page.getByRole("toolbar", { name: "Selected text actions" });
     await selectedActions.getByRole("button", { name: "Highlight Yellow" }).click();
     const edit = page.getByRole("toolbar", { name: "Edit annotation" });
-    await edit.getByRole("button", { name: "Close text tools" }).click({ force: true });
+    await expect(edit).toBeVisible();
+    // The bar carries no dismissal control: Escape is the way out, and it is
+    // what this test used the X for.
+    await page.keyboard.press("Escape");
+    await expect(edit).toHaveCount(0);
     const mark = page.locator('[data-sat-highlight="true"]').filter({ hasText: "Several" });
     await mark.tap();
     await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toBeVisible();
@@ -673,10 +725,8 @@ test.describe("annotation surface placement", () => {
       prompt.locator('[data-content-text-node="math-prompt::text-run-0"]')
     ).toBeVisible();
     expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("");
-    await page
-      .getByRole("toolbar", { name: "Selected text actions" })
-      .getByRole("button", { name: "Close text tools" })
-      .click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toHaveCount(0);
 
     await selectTextInRegion(page, '[data-sat-annotation-region="prompt"]', "minimum");
     await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toBeVisible();
@@ -700,10 +750,8 @@ test.describe("annotation surface placement", () => {
     await page.getByRole("button", { name: "Highlight Yellow" }).click();
     const mark = prompt.locator('[data-sat-highlight="true"]').filter({ hasText: "minimum" });
     await expect(mark).toBeVisible();
-    await page
-      .getByRole("toolbar", { name: "Edit annotation" })
-      .getByRole("button", { name: "Close text tools" })
-      .click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toHaveCount(0);
     await mark.tap();
     await expect(page.getByRole("button", { name: "Remove highlight" })).toBeVisible();
     await page.getByRole("button", { name: "Remove highlight" }).click();

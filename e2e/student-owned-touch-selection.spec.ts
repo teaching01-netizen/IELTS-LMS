@@ -720,10 +720,9 @@ test("SAT: closing text tools preserves the range and tapping its body restores 
     );
   });
 
-  await page
-    .locator('[data-sat-selection-toolbar="true"]')
-    .getByRole("button", { name: "Close text tools" })
-    .click();
+  // The bar has no dismissal control (the reference has none): Escape is the way
+  // out, and it must leave the owned Range exactly where it was.
+  await page.keyboard.press("Escape");
   await expect(page.locator('[data-sat-selection-toolbar="true"]')).toHaveCount(0);
   expect(await page.locator("[data-student-selection-handle]").count()).toBe(2);
   expect(await liveSelectionText(page)).toBe(before);
@@ -795,10 +794,7 @@ test("SAT: closing text tools preserves the range and tapping its body restores 
 
   // The reopened toolbar can be dismissed again without ending the Range, and
   // its end handle must remain usable while the toolbar is absent.
-  await page
-    .locator('[data-sat-selection-toolbar="true"]')
-    .getByRole("button", { name: "Close text tools" })
-    .click();
+  await page.keyboard.press("Escape");
   await expect(page.locator('[data-sat-selection-toolbar="true"]')).toHaveCount(0);
   const rangeBeforeHandle = await liveSelectionText(page);
   await dragHandle(page, browserName, "end", 28);
@@ -1145,7 +1141,8 @@ test("SAT choice wording uses owned selection, keeps the radio unchanged, and st
   // The next deliberate tap remains a normal answer action after the echo guard
   // expires. Close the mark editor first because it intentionally shares the
   // selected text's nearby surface and may cover the neighboring row.
-  await page.getByRole("button", { name: "Close text tools" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toHaveCount(0);
   await page.waitForTimeout(450);
   await page
     .getByText("All cities experience identical temperature changes from tree cover.")

@@ -60,11 +60,20 @@ describe('SatSingleChoiceAnswer Bluebook answer system (Phase 6)', () => {
     expect(label.className).not.toContain('bg-[var(--sat-accent)]');
   });
 
-  it('strikes the whole eliminated content and keeps the sr status', () => {
+  it('draws ONE strike across the eliminated row and keeps the sr status', () => {
     render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set(['a'])} eliminationMode disabled={false} onChange={vi.fn()} onToggleElimination={vi.fn()} />);
     const radio = screen.getByRole('radio', { name: /Option A.*First answer/i });
-    const content = document.getElementById('sat-answer-q1-0-content')!;
-    expect(content.className).toMatch(/line-through/);
+    const label = radio.closest('label')!;
+    const strike = label.querySelector('[data-sat-elimination-line="true"]');
+    expect(strike).not.toBeNull();
+    expect(strike!.className).toContain('sat-choice-elimination-line');
+    // Anchored to the marker's center line, so letter and content share one Y.
+    const marker = label.querySelector('[aria-hidden="true"].rounded-full')!;
+    expect(strike!.parentElement).toBe(marker.parentElement);
+    // No per-node decoration: line-through cannot cross equations, lists, or
+    // mixed structured content as a single stroke.
+    expect(marker.className).not.toContain('line-through');
+    expect(document.getElementById('sat-answer-q1-0-content')!.className).not.toContain('line-through');
     expect(radio).toHaveAccessibleDescription(/eliminated/i);
   });
 
@@ -85,10 +94,12 @@ describe('SatSingleChoiceAnswer cut-choice control', () => {
     render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set()} eliminationMode disabled={false} onChange={vi.fn()} onToggleElimination={vi.fn()} />);
     const cut = screen.getByRole('button', { name: 'Eliminate option A' });
     expect(cut).toHaveAttribute('aria-pressed', 'false');
-    // The glyph is drawn (ABC + strike), not a generic crossed-out icon.
-    const glyph = cut.querySelector('[data-sat-eliminator-glyph="true"]');
+    // The glyph names THIS choice — its letter in the strike circle — never the
+    // header's ABC toggle.
+    const glyph = cut.querySelector('[data-sat-eliminator-glyph="choice"]');
     expect(glyph).not.toBeNull();
-    expect(glyph).toHaveTextContent('ABC');
+    expect(glyph).toHaveTextContent('A');
+    expect(glyph).not.toHaveTextContent('ABC');
   });
 
   it('crosses a choice out without ever selecting it', () => {
@@ -104,28 +115,46 @@ describe('SatSingleChoiceAnswer cut-choice control', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('shows a visible Undo on a crossed-out choice and restores without answering', () => {
+  it('replaces the cut glyph with a visible Undo, and Undo restores the cut glyph', () => {
     const onChange = vi.fn();
     const onToggleElimination = vi.fn();
     // Elimination mode deliberately OFF: a crossed-out choice stays recoverable
     // without re-arming the mode.
-    render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set(['b'])} eliminationMode={false} disabled={false} onChange={onChange} onToggleElimination={onToggleElimination} />);
+    const { rerender } = render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set(['b'])} eliminationMode={false} disabled={false} onChange={onChange} onToggleElimination={onToggleElimination} />);
     const undo = screen.getByRole('button', { name: 'Undo option B' });
+    // Real exam applied state: the cut glyph is gone and the row offers the
+    // word "Undo" — compact dark text, no badge, no pill.
     expect(undo).toHaveTextContent('Undo');
+    expect(undo.querySelector('[data-sat-eliminator-glyph]')).toBeNull();
+    expect(undo).toHaveAttribute('data-sat-cut-choice-state', 'cut');
     expect(undo).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(undo);
     expect(onToggleElimination).toHaveBeenCalledWith('b');
     expect(onChange).not.toHaveBeenCalled();
     // Only the crossed-out choice carries a control while the mode is off.
     expect(screen.queryByRole('button', { name: 'Eliminate option A' })).toBeNull();
+
+    // The domain mutation lands: the choice is open again, so its own cut
+    // glyph is back (armed mode) and there is no Undo left to press.
+    rerender(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set()} eliminationMode disabled={false} onChange={onChange} onToggleElimination={onToggleElimination} />);
+    expect(screen.queryByRole('button', { name: 'Undo option B' })).toBeNull();
+    const restored = screen.getByRole('button', { name: 'Eliminate option B' });
+    expect(restored.querySelector('[data-sat-eliminator-glyph="choice"]')).toHaveTextContent('B');
+    const restoredLabel = screen.getByRole('radio', { name: /Option B.*Second answer/i }).closest('label')!;
+    expect(restoredLabel.querySelector('[data-sat-elimination-line="true"]')).toBeNull();
   });
 
-  it('strikes the option letter along with the choice content', () => {
+  it('keeps a crossed-out row on the normal answer card, with no dashed outline or fade', () => {
     render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set(['a'])} eliminationMode disabled={false} onChange={vi.fn()} onToggleElimination={vi.fn()} />);
+    const cut = screen.getByRole('button', { name: 'Undo option A' });
+    const open = screen.getByRole('button', { name: 'Eliminate option B' });
+    expect(cut).toHaveAttribute('data-sat-cut-choice-state', 'cut');
+    expect(open).toHaveAttribute('data-sat-cut-choice-state', 'open');
     const label = screen.getByRole('radio', { name: /Option A.*First answer/i }).closest('label')!;
-    const marker = label.querySelector('[aria-hidden="true"].rounded-full');
-    expect(marker).not.toBeNull();
-    expect(marker!.className).toContain('line-through');
+    // The crossed-out card keeps its border and geometry; the only ink that
+    // changes is the strike line and the muted content colour.
+    expect(label.className).toContain('var(--sat-answer-border)');
+    expect(label.className).not.toMatch(/border-dashed|opacity-/);
   });
 
   it('never offers a cut control on the selected answer', () => {

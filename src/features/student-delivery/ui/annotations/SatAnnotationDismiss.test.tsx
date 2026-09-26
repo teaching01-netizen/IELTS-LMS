@@ -79,9 +79,9 @@ describe('annotation tools: press outside to dismiss', () => {
       screen.getByRole('button', { name: 'Highlight Yellow' }),
       screen.getByRole('button', { name: 'Underline' }),
       screen.getByRole('button', { name: 'Add note' }),
-      // The caret layer sits outside the surface's border box but is a child of
-      // it, which is exactly the distinction the hook relies on.
-      toolbar.querySelector('.sat-annotation-caret-layer')!,
+      // The scrolling body is inside the surface's box and is a child of it,
+      // which is exactly the distinction the hook relies on.
+      toolbar.querySelector('[data-sat-annotation-surface-body="true"]')!,
     ];
     for (const target of targets) press(target);
     expect(onClose).not.toHaveBeenCalled();

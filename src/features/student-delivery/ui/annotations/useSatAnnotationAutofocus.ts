@@ -24,11 +24,11 @@ export function useSatAnnotationAutofocus(
   useEffect(() => {
     if (!placement || placement.mode === 'hidden' || focusedRef.current === anchorKey) return;
     focusedRef.current = anchorKey;
-    // Dismissals are skipped: the way out is not a way in, and landing the caret
-    // on "close" would make the first keystroke after selecting text undo the
-    // tools instead of using them.
+    // The first control in the row is the ink in use, which is the intended way
+    // in: the caret lands on the action the student is most likely to press, so
+    // Enter marks the words rather than doing nothing or leaving the tools.
     containerRef.current
-      ?.querySelector<HTMLButtonElement>('button:not([disabled]):not([data-sat-annotation-dismiss])')
+      ?.querySelector<HTMLButtonElement>('button:not([disabled])')
       ?.focus({ preventScroll: true });
   }, [anchorKey, containerRef, placement]);
 }

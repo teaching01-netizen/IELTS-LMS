@@ -140,10 +140,13 @@ test.describe("SAT automatic resume", () => {
         savedAnswer
       );
       await schedulePage.getByRole("button", { name: "Turn on cross-out mode" }).click();
-      await expect(schedulePage.getByRole("button", { name: "Undo option B" })).toHaveAttribute(
-        "aria-pressed",
-        "true"
-      );
+      // The recovered crossing out wears the real exam's applied shape: one
+      // strike across the row and the visible word "Undo", not the cut glyph.
+      const resumedUndo = schedulePage.getByRole("button", { name: "Undo option B" });
+      await expect(resumedUndo).toHaveAttribute("aria-pressed", "true");
+      await expect(resumedUndo).toHaveText("Undo");
+      await expect(resumedUndo.locator("[data-sat-eliminator-glyph]")).toHaveCount(0);
+      await expect(schedulePage.locator('[data-sat-elimination-line="true"]')).toHaveCount(1);
       await expect(schedulePage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
       expect(await readSatRemainingSeconds(schedulePage)).toBeLessThanOrEqual(
         originalRemainingSeconds
@@ -256,10 +259,11 @@ test.describe("SAT automatic resume", () => {
         savedAnswer
       );
       await restartedPage.getByRole("button", { name: "Turn on cross-out mode" }).click();
-      await expect(restartedPage.getByRole("button", { name: "Undo option B" })).toHaveAttribute(
-        "aria-pressed",
-        "true"
-      );
+      const restartedUndo = restartedPage.getByRole("button", { name: "Undo option B" });
+      await expect(restartedUndo).toHaveAttribute("aria-pressed", "true");
+      await expect(restartedUndo).toHaveText("Undo");
+      await expect(restartedUndo.locator("[data-sat-eliminator-glyph]")).toHaveCount(0);
+      await expect(restartedPage.locator('[data-sat-elimination-line="true"]')).toHaveCount(1);
       await expect(restartedPage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
 
       // This context has the same authenticated student but a fresh writer

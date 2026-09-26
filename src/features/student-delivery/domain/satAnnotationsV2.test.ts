@@ -11,7 +11,9 @@ import {
   removeSatAnnotationById,
   restoreSatAnnotationNote,
   satAnnotatedNotes,
+  satAnnotationUnderlineStyle,
   setSatAnnotationColor,
+  setSatAnnotationUnderlineStyle,
   SAT_ANNOTATION_NOTE_LIMIT,
   type SatQuestionAnnotations,
 } from './satResponses';
@@ -273,5 +275,62 @@ describe('sat annotation removal', () => {
     const next = removeSatAnnotationById(seeded, noted.id);
     expect(next.annotations.map((a) => a.id)).toEqual([plain.id]);
     expect(removeSatAnnotationById(seeded, 'missing-id')).toBe(seeded);
+  });
+});
+
+describe('sat underline styles', () => {
+  const anchor = { nodeId: 'stimulus:p', startOffset: 0, endOffset: 7, exact: 'Several' };
+
+  it('writes the style only when it is not the default, so old payloads stay byte-identical', () => {
+    const solid = applySatUnderlineRange(emptySatAnnotationsV2(), anchor);
+    expect(solid.annotation.kind).toBe('underline');
+    expect('underlineStyle' in solid.annotation).toBe(false);
+
+    const dotted = applySatUnderlineRange(emptySatAnnotationsV2(), anchor, 'dotted');
+    expect(dotted.annotation.underlineStyle).toBe('dotted');
+  });
+
+  it('restyles the mark that is already on those words instead of stacking a second one', () => {
+    const first = applySatUnderlineRange(emptySatAnnotationsV2(), anchor, 'solid');
+    const restyled = applySatUnderlineRange(first.annotations, anchor, 'dashed');
+    expect(restyled.annotations.annotations).toHaveLength(1);
+    expect(restyled.annotations.annotations[0]?.underlineStyle).toBe('dashed');
+    // The same style again is a no-op: the student pressed a choice, not a toggle.
+    expect(applySatUnderlineRange(restyled.annotations, anchor, 'dashed').annotations).toBe(restyled.annotations);
+  });
+
+  it('re-draws a stored mark by id and refuses to touch a highlight', () => {
+    const underline = createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 0, endOffset: 7, exact: 'Several', style: 'solid' });
+    const highlight = createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 0, endOffset: 7, exact: 'Several', color: 'blue' });
+    const seeded = { ...emptySatAnnotationsV2(), annotations: [underline, highlight] };
+
+    const restyled = setSatAnnotationUnderlineStyle(seeded, underline.id, 'dotted');
+    expect(restyled.annotations[0]?.underlineStyle).toBe('dotted');
+    expect(setSatAnnotationUnderlineStyle(seeded, underline.id, 'solid')).toBe(seeded);
+    expect(setSatAnnotationUnderlineStyle(seeded, highlight.id, 'dotted')).toBe(seeded);
+    expect(setSatAnnotationUnderlineStyle(seeded, 'missing-id', 'dotted')).toBe(seeded);
+  });
+
+  it('repairs an unknown style to the default on read without dropping the mark', () => {
+    const raw = {
+      version: 2,
+      legacyQuestionNote: '',
+      annotations: [
+        { id: 'a', kind: 'underline', anchor: { nodeId: 'p', startOffset: 0, endOffset: 4, exact: 'tree' }, underlineStyle: 'wavy', createdAt: 'x', updatedAt: 'x' },
+        { id: 'b', kind: 'underline', anchor: { nodeId: 'p', startOffset: 5, endOffset: 9, exact: 'frog' }, underlineStyle: 'dotted', createdAt: 'x', updatedAt: 'x' },
+        { id: 'c', kind: 'highlight', anchor: { nodeId: 'p', startOffset: 0, endOffset: 4, exact: 'tree' }, underlineStyle: 'dotted', createdAt: 'x', updatedAt: 'x' },
+      ],
+    };
+    const normalized = normalizeSatAnnotations(raw);
+    // Keyed by id: normalization reorders by node and offset, so the assertion
+    // must be about the marks, not about where they happened to land.
+    const styles = Object.fromEntries(normalized.annotations.map((a) => [a.id, a.underlineStyle]));
+    expect(styles).toEqual({ a: undefined, b: 'dotted', c: undefined });
+  });
+
+  it('resolves the style the renderer paints, defaulting to solid', () => {
+    const plain = createSatTextAnnotation({ kind: 'underline', nodeId: 'p', startOffset: 0, endOffset: 4, exact: 'tree' });
+    expect(satAnnotationUnderlineStyle(plain)).toBe('solid');
+    expect(satAnnotationUnderlineStyle({ ...plain, underlineStyle: 'dashed' })).toBe('dashed');
   });
 });

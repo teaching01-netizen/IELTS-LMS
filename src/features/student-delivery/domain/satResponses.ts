@@ -14,6 +14,20 @@ export function isSatHighlightColor(value: unknown): value is SatHighlightColor 
   return value === 'yellow' || value === 'blue' || value === 'pink';
 }
 
+/**
+ * How an underline is drawn. `solid` is the canonical default: an annotation
+ * that omits `underlineStyle` — every payload written before the style menu
+ * existed — renders solid, so the wire format stays backwards compatible.
+ */
+export type SatUnderlineStyle = 'solid' | 'dashed' | 'dotted';
+
+export const SAT_UNDERLINE_STYLES: readonly SatUnderlineStyle[] = ['solid', 'dashed', 'dotted'];
+export const defaultSatUnderlineStyle: SatUnderlineStyle = 'solid';
+
+export function isSatUnderlineStyle(value: unknown): value is SatUnderlineStyle {
+  return value === 'solid' || value === 'dashed' || value === 'dotted';
+}
+
 export interface SatTextAnchor {
   /** Annotation region plus stable structured-content node id, scoped before serialization. */
   nodeId: string;
@@ -34,6 +48,11 @@ export interface SatTextAnnotation {
    * `defaultSatHighlightColor` (yellow), never "no color".
    */
   color?: SatHighlightColor;
+  /**
+   * How the underline is drawn. Only meaningful for `kind: 'underline'`; absent
+   * means `defaultSatUnderlineStyle` (solid), never "no underline".
+   */
+  underlineStyle?: SatUnderlineStyle;
   /** Optional note attached to the annotated text. Max 2000 chars. */
   note?: string;
   createdAt: string;
@@ -122,11 +141,18 @@ function normalizeAnnotation(value: unknown): SatTextAnnotation | null {
   const color = kind === 'highlight' && isSatHighlightColor(candidate['color'])
     ? candidate['color']
     : undefined;
+  // Same rule for the underline's style: an unknown value degrades to the
+  // default instead of dropping the mark, so a future style can never cost a
+  // student their underline on reload.
+  const underlineStyle = kind === 'underline' && isSatUnderlineStyle(candidate['underlineStyle'])
+    ? candidate['underlineStyle']
+    : undefined;
   return {
     id: typeof candidate['id'] === 'string' && candidate['id'] ? candidate['id'].slice(0, 80) : createAnnotationId(),
     kind,
     anchor,
     ...(color ? { color } : {}),
+    ...(underlineStyle ? { underlineStyle } : {}),
     ...(typeof candidate['note'] === 'string' && candidate['note']
       ? { note: candidate['note'].slice(0, SAT_ANNOTATION_NOTE_LIMIT) }
       : {}),
@@ -197,6 +223,7 @@ export function createSatTextAnnotation(args: {
   prefix?: string;
   suffix?: string;
   color?: SatHighlightColor | undefined;
+  style?: SatUnderlineStyle | undefined;
   note?: string;
   id?: string;
   now?: string;
@@ -207,10 +234,16 @@ export function createSatTextAnnotation(args: {
   // Ink is written explicitly (including yellow) so the payload is
   // self-describing; readers still default an absent color to yellow.
   const color = args.kind === 'highlight' ? (args.color ?? defaultSatHighlightColor) : undefined;
+  // The style is only written when it is not the default, so a mark made before
+  // styles existed and a mark made in solid stay byte-identical on the wire.
+  const style = args.kind === 'underline' && args.style && args.style !== defaultSatUnderlineStyle
+    ? args.style
+    : undefined;
   return {
     id: args.id ?? createAnnotationId(),
     kind: args.kind,
     ...(color ? { color } : {}),
+    ...(style ? { underlineStyle: style } : {}),
     anchor: {
       nodeId: args.nodeId,
       startOffset,
@@ -315,6 +348,16 @@ export function satAnnotationColor(annotation: SatTextAnnotation): SatHighlightC
   return annotation.color ?? defaultSatHighlightColor;
 }
 
+/**
+ * Resolved underline style of a mark (underlines only; highlights have none).
+ *
+ * Presentation reads this rather than `underlineStyle` directly, so "absent"
+ * has exactly one meaning — solid — in the renderer and in the style menu.
+ */
+export function satAnnotationUnderlineStyle(annotation: SatTextAnnotation): SatUnderlineStyle {
+  return annotation.underlineStyle ?? defaultSatUnderlineStyle;
+}
+
 /** True when the student has attached a note or any mark to this question. */
 export function hasSatAnnotations(annotations: SatQuestionAnnotations): boolean {
   return annotations.annotations.length > 0 || annotations.legacyQuestionNote.trim().length > 0;
@@ -355,18 +398,28 @@ export function applySatMarkRange(
   annotations: SatQuestionAnnotations,
   anchor: SatTextAnchor,
   kind: SatTextAnnotationKind,
-  options: { color?: SatHighlightColor | undefined; now?: string | undefined } = {},
+  options: { color?: SatHighlightColor | undefined; style?: SatUnderlineStyle | undefined; now?: string | undefined } = {},
 ): { annotations: SatQuestionAnnotations; annotation: SatTextAnnotation } {
   const existing = annotations.annotations.find(
     (annotation) => annotation.kind === kind && sameAnchor(annotation.anchor, anchor),
   );
   if (existing) {
-    if (kind !== 'highlight' || existing.color === options.color || options.color === undefined) {
-      return { annotations, annotation: existing };
+    // Repeating an action on the same span is idempotent instead of stacking
+    // duplicates. The one thing it may change is the mark's own treatment:
+    // a different ink re-inks a highlight, a different style restyles an
+    // underline — and an omitted option means "leave it as it is".
+    const nextTreatment: Partial<SatTextAnnotation> = {};
+    if (kind === 'highlight') {
+      if (options.color !== undefined && existing.color !== options.color) {
+        nextTreatment.color = options.color;
+      }
+    } else if (options.style !== undefined && satAnnotationUnderlineStyle(existing) !== options.style) {
+      nextTreatment.underlineStyle = options.style;
     }
+    if (Object.keys(nextTreatment).length === 0) return { annotations, annotation: existing };
     const annotation: SatTextAnnotation = {
       ...existing,
-      color: options.color,
+      ...nextTreatment,
       updatedAt: options.now ?? new Date().toISOString(),
     };
     return {
@@ -381,6 +434,7 @@ export function applySatMarkRange(
     kind,
     ...anchor,
     ...(options.color ? { color: options.color } : {}),
+    ...(options.style ? { style: options.style } : {}),
     ...(options.now ? { now: options.now } : {}),
   });
   return {
@@ -398,12 +452,18 @@ export function applySatHighlightRange(
   return applySatMarkRange(annotations, anchor, 'highlight', { color });
 }
 
-/** Underline a selection (the toolbar's secondary action). */
+/**
+ * Underline a selection (the toolbar's secondary action).
+ *
+ * The style is the same decision as an ink: applying it to a span that is
+ * already underlined restyles that underline instead of drawing a second one.
+ */
 export function applySatUnderlineRange(
   annotations: SatQuestionAnnotations,
   anchor: SatTextAnchor,
+  style: SatUnderlineStyle = defaultSatUnderlineStyle,
 ): { annotations: SatQuestionAnnotations; annotation: SatTextAnnotation } {
-  return applySatMarkRange(annotations, anchor, 'underline');
+  return applySatMarkRange(annotations, anchor, 'underline', { style });
 }
 
 /**
@@ -431,6 +491,30 @@ export function setSatAnnotationColor(
     ...annotations,
     annotations: annotations.annotations.map((annotation) =>
       annotation.id === annotationId ? { ...annotation, color, updatedAt: now } : annotation,
+    ),
+  };
+}
+
+/**
+ * Re-draw an underline in another style (the style menu's one press).
+ *
+ * A no-op when the mark is not an underline or already wears that style, so the
+ * caller can offer all four options on every mark without special cases.
+ */
+export function setSatAnnotationUnderlineStyle(
+  annotations: SatQuestionAnnotations,
+  annotationId: string,
+  style: SatUnderlineStyle,
+  now: string = new Date().toISOString(),
+): SatQuestionAnnotations {
+  const target = annotations.annotations.find((annotation) => annotation.id === annotationId);
+  if (!target || target.kind !== 'underline' || satAnnotationUnderlineStyle(target) === style) {
+    return annotations;
+  }
+  return {
+    ...annotations,
+    annotations: annotations.annotations.map((annotation) =>
+      annotation.id === annotationId ? { ...annotation, underlineStyle: style, updatedAt: now } : annotation,
     ),
   };
 }

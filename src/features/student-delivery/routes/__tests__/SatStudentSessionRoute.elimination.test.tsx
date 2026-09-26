@@ -361,7 +361,7 @@ describe("SatStudentSessionRoute question-scoped eliminator", () => {
     expect(commands().setAnswer).not.toHaveBeenCalled();
   });
 
-  it("keeps a crossed-out choice and its Undo across navigation, and Undo restores without answering", () => {
+  it("keeps a crossed-out choice, its strike and its Undo across navigation, and Undo only reports the toggle", () => {
     const view = renderAt(0);
     const eliminated = { q1: responseFor("q1", ["b"]), q2: responseFor("q2") };
 
@@ -371,8 +371,25 @@ describe("SatStudentSessionRoute question-scoped eliminator", () => {
     goToQuestion(view, 0, eliminated);
 
     const undo = screen.getByRole("button", { name: "Undo option B" });
+    // Applied state: the cut glyph is replaced by the real exam's word "Undo".
     expect(undo).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("radio", { name: /Option B/ })).toHaveAccessibleDescription(/eliminated/i);
+    expect(undo).toHaveAttribute("data-sat-cut-choice-state", "cut");
+    expect(undo).toHaveTextContent("Undo");
+    expect(undo.querySelector("[data-sat-eliminator-glyph]")).toBeNull();
+    const radio = screen.getByRole("radio", { name: /Option B/ });
+    expect(radio).toHaveAccessibleDescription(/eliminated/i);
+    // One continuous strike on the row, anchored where the letter marker is.
+    const label = radio.closest("label")!;
+    const strike = label.querySelector('[data-sat-elimination-line="true"]');
+    expect(strike).not.toBeNull();
+    expect(strike!.className).toContain("sat-choice-elimination-line");
+    // The choice that was NOT crossed out keeps the plain row: no strike, and
+    // (with the mode closed) no cut control or Undo either.
+    expect(screen.queryByRole("button", { name: "Undo option A" })).toBeNull();
+    expect(
+      screen.getByRole("radio", { name: /Option A/ }).closest("label")!
+        .querySelector('[data-sat-elimination-line="true"]')
+    ).toBeNull();
 
     fireEvent.click(undo);
     expect(commands().toggleEliminatedOption).toHaveBeenCalledWith("q1", "b");
@@ -397,6 +414,8 @@ describe("SatStudentSessionRoute question-scoped eliminator", () => {
 
   it("remembers the armed question through a reload of the same attempt", () => {
     const first = renderAt(0);
+    // This attempt already crossed option B out on q1: the reload must bring
+    // back the strike and its Undo, not just the armed mode.
     fireEvent.click(eliminatorToggle());
     // Armed means armed for the attempt, on this device.
     expect(
@@ -405,13 +424,25 @@ describe("SatStudentSessionRoute question-scoped eliminator", () => {
     first.unmount();
 
     // A reload is a fresh mount of the same attempt: the exam comes back with
-    // the question the student left armed still armed.
-    seed(moduleState({ questionIndex: 0 }));
+    // the question the student left armed still armed, and with the crossing
+    // out they already made — the strike and its Undo are server state, not a
+    // side effect of the armed mode.
+    seed(moduleState({
+      questionIndex: 0,
+      responses: { q1: responseFor("q1", ["b"]), q2: responseFor("q2") },
+    }));
     render(createElement(SatStudentSessionRoute, routeProps()));
     expect(screen.getByRole("button", { name: "Turn off cross-out mode" })).toHaveAttribute(
       "aria-pressed",
       "true"
     );
+    const restoredUndo = screen.getByRole("button", { name: "Undo option B" });
+    expect(restoredUndo).toHaveTextContent("Undo");
+    expect(restoredUndo.querySelector("[data-sat-eliminator-glyph]")).toBeNull();
+    expect(
+      screen.getByRole("radio", { name: /Option B/ }).closest("label")!
+        .querySelector('[data-sat-elimination-line="true"]')
+    ).not.toBeNull();
 
     // Disarming is remembered too — no stale record to reopen on the next load.
     fireEvent.click(eliminatorToggle());

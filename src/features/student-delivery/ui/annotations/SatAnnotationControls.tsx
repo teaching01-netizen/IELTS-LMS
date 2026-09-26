@@ -1,5 +1,6 @@
-import { Highlighter, StickyNote, Trash2, Underline, X } from 'lucide-react';
-import type { SatHighlightColor } from '../../domain/satResponses';
+import type { ReactNode } from 'react';
+import { Droplet, FilePlus2, Trash2 } from 'lucide-react';
+import type { SatHighlightColor, SatUnderlineStyle } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
 import { satHighlightInkList } from './satAnnotationPalette';
 
@@ -7,20 +8,97 @@ import { satHighlightInkList } from './satAnnotationPalette';
  * The annotation action controls, shared by the selection toolbar and a mark's
  * edit controls (which are the same surface in two states).
  *
- * House rules encoded here (they are the whole reason these are one component
- * instead of three copies):
- * - every action keeps a written label — an unlabeled glyph is a puzzle, and
- *   the whole feature is meant to be understood without instruction;
- * - the visible swatch stays 18–22px while the hit target stays >= 44px, so
- *   touch requires no precision;
- * - the three inks are PRIMARY and underline/note are SECONDARY, matching how
- *   students actually annotate;
- * - every user-visible string and accessible name comes from SAT_COPY, so the
- *   words live in one table and never drift from what the tests assert.
+ * Bluebook's contextual bar, drawn as it is: one row of quiet glyphs on a
+ * rounded pill — the three inks as circles (the one in use drawn larger, with
+ * the ink drop inside it), an underline whose line shows the style in use, a
+ * note, and (on a mark) a removal. There is no heading and no visible word: the
+ * surface hangs off the words it acts on, so the relationship is already
+ * spatial, and a caption would only add height to a toolbar the student is
+ * trying to read past.
+ *
+ * Everything that made the labelled version trustworthy survives, because the
+ * words were never what made it work:
+ * - the glyphs shrink to 18–28px, the HIT TARGETS do not: every action keeps
+ *   `sat-touch-target` (44px), so touch still needs no precision;
+ * - `onMouseDown` is prevented on every control, so reaching for one never
+ *   collapses the selection the student is deciding about;
+ * - each control keeps an explicit accessible name, because the glyphs are for
+ *   the eye and the exam must stay usable without one;
+ * - every user-visible string and accessible name comes from SAT_COPY.
+ *
+ * The one thing the compact bar could not keep is a hover wash the size of the
+ * target: at 2px apart, three 44px washes would touch and the ink chips would
+ * stop reading as three controls. So the WASH shrank instead — see
+ * `SatActionWash` — while the target behind it stayed the same size.
  */
 
-const ACTION_BASE =
-  'sat-touch-target sat-pressable inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-1.5 rounded-[6px] px-2 sat-type-control-secondary font-medium text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)]';
+/** One action's box: 44px of target around a much smaller drawing. */
+export const SAT_ANNOTATION_ACTION =
+  'sat-touch-target sat-pressable group inline-grid h-11 w-11 shrink-0 place-items-center rounded-full text-[var(--sat-text)] disabled:cursor-not-allowed disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)]';
+
+/**
+ * The wash an action shows while the pointer is on it, at the size of the
+ * VISIBLE chrome rather than of the target.
+ *
+ * It exists because those two sizes came apart: the bar is a row of 44px targets
+ * two pixels apart, so a wash drawn at the full target width runs into its
+ * neighbour and turns separate actions into one hovered blob. Everything drawn
+ * inside an action goes through here, so the reaction to the pointer is inside
+ * the control the student is pointing at, and the target itself never moves.
+ *
+ * `aria-hidden` because it is the decoration around a glyph: the action's name
+ * and state live on the button.
+ */
+export function SatActionWash({
+  children,
+  hoverClassName = 'group-hover:bg-[var(--sat-surface-hover)]',
+}: {
+  children: ReactNode;
+  /** The hover treatment. The neutral wash, unless the action means something else. */
+  hoverClassName?: string | undefined;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      data-sat-annotation-wash="true"
+      className={'grid h-8 w-8 shrink-0 place-items-center rounded-full ' + hoverClassName}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * The U and its line, in the style that is in use.
+ *
+ * The line is a real border rather than a drawn stroke: `border-dashed` and
+ * `border-dotted` are the browser's own dash patterns, so the menu's three
+ * options are three genuinely different lines instead of three near-identical
+ * ones. `border-current` keeps the whole glyph on the button's ink, so disabled,
+ * hover, and forced-colours treatments move it together.
+ */
+export function SatUnderlineGlyph({
+  style,
+  className,
+}: {
+  style: SatUnderlineStyle;
+  className?: string | undefined;
+}) {
+  const line =
+    style === 'dashed' ? 'border-dashed'
+      : style === 'dotted' ? 'border-dotted'
+        : 'border-solid';
+  return (
+    <span
+      aria-hidden="true"
+      data-sat-underline-glyph={style}
+      className={'grid place-items-center gap-[1px] ' + (className ?? '')}
+    >
+      <span className="sat-type-control-secondary font-semibold leading-none">U</span>
+      <span data-sat-underline-style-line={style} className={'w-4 border-b-2 border-current ' + line} />
+    </span>
+  );
+}
 
 export function SatHighlightSwatchButtons({
   value,
@@ -38,9 +116,13 @@ export function SatHighlightSwatchButtons({
   const active = value ?? current;
   return (
     // The gap between inks is the surface's own row rhythm, not a smaller
-    // private one: three 44px targets a finger-width apart are unhittable, and
-    // on a narrow surface the row is allowed to wrap rather than crowd.
-    <div className="flex flex-wrap items-center gap-[var(--sat-annotation-row-gap)]" role="group" aria-label={SAT_COPY.annotations.highlight}>
+    // private one. Three 44px targets stay a finger apart; what shrank is the
+    // circles drawn inside them, which is what the student actually reads.
+    <div
+      className="flex shrink-0 items-center gap-[var(--sat-annotation-row-gap)]"
+      role="group"
+      aria-label={SAT_COPY.annotations.highlight}
+    >
       {satHighlightInkList.map((ink) => {
         const pressed = active === ink.color;
         return (
@@ -58,15 +140,33 @@ export function SatHighlightSwatchButtons({
             // color, and the toolbar would disappear under their finger.
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelect(ink.color)}
-            className={ACTION_BASE + (pressed ? ' bg-[var(--sat-surface-selected,rgba(0,0,0,0.06))]' : '')}
+            className={SAT_ANNOTATION_ACTION}
           >
-            <span
-              aria-hidden="true"
-              data-sat-swatch={ink.color}
-              className="h-[20px] w-[20px] shrink-0 rounded-full border border-[var(--sat-divider-strong)]"
-              style={{ backgroundColor: ink.swatch }}
-            />
-            <span className="whitespace-nowrap">{ink.label}</span>
+            {/* Size is the state: the ink in use is the larger circle, and it is
+                the only one carrying the drop. A hairline on all three (rather
+                than a heavier one on the pressed ink) keeps them reading as the
+                same family of marks, and keeps the pastel chips legible against
+                the white pill in a bright room. */}
+            <SatActionWash>
+              <span
+                data-sat-swatch={ink.color}
+                data-sat-swatch-state={pressed ? 'current' : 'idle'}
+                className={
+                  'grid shrink-0 place-items-center rounded-full border border-[var(--sat-annotation-swatch-ring)] '
+                  + (pressed ? 'h-7 w-7' : 'h-6 w-6')
+                }
+                style={{ backgroundColor: ink.swatch }}
+              >
+                {pressed ? (
+                  <Droplet
+                    data-sat-swatch-ink="true"
+                    className="h-4 w-4"
+                    style={{ color: ink.inkGlyph }}
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </span>
+            </SatActionWash>
           </button>
         );
       })}
@@ -74,32 +174,16 @@ export function SatHighlightSwatchButtons({
   );
 }
 
-export function SatUnderlineControl({
-  onSelect,
-  disabled,
-  pressed,
-}: {
-  onSelect: () => void;
-  disabled?: boolean | undefined;
-  pressed?: boolean | undefined;
-}) {
-  return (
-    <button
-      type="button"
-      data-sat-annotation-action="underline"
-      aria-label={SAT_COPY.annotations.underline}
-      aria-pressed={pressed === true}
-      disabled={disabled === true}
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onSelect}
-      className={ACTION_BASE}
-    >
-      <Underline className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-      <span className="whitespace-nowrap">{SAT_COPY.annotations.underline}</span>
-    </button>
-  );
-}
-
+/**
+ * Add a note to the marked words (or open the one they already wrote).
+ *
+ * The glyph is a note sheet with a plus, drawn the way the reference draws it:
+ * a pale sheet inside a hairline circle, so the one control on the bar that
+ * opens a place to WRITE is recognizable as paper rather than as one more
+ * outline. The name says which of the two things pressing it will do — a glyph
+ * cannot say "edit" as opposed to "add", and the student should not have to
+ * press it to find out.
+ */
 export function SatNoteControl({
   onSelect,
   disabled,
@@ -115,17 +199,34 @@ export function SatNoteControl({
       type="button"
       data-sat-annotation-action="note"
       aria-label={label}
+      title={label}
       disabled={disabled === true}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onSelect}
-      className={ACTION_BASE}
+      className={SAT_ANNOTATION_ACTION}
     >
-      <StickyNote className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-      <span className="whitespace-nowrap">{label}</span>
+      <SatActionWash>
+        <span
+          data-sat-note-glyph="true"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[var(--sat-annotation-control-outline)] bg-[var(--sat-annotation-note-fill)]"
+        >
+          <FilePlus2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+        </span>
+      </SatActionWash>
     </button>
   );
 }
 
+/**
+ * Take the mark off the words.
+ *
+ * The only destructive control on the surface — and it is drawn as its
+ * neighbours are, in the exam's own ink, because a permanently red glyph on a
+ * bar a student reads past all exam is a warning about a control they have not
+ * chosen. The danger colour arrives on hover and on keyboard focus, where it is
+ * about the press they are making; the control is still one press plus an undo
+ * rather than a press plus a confirmation.
+ */
 export function SatRemoveControl({
   onSelect,
   disabled,
@@ -139,60 +240,24 @@ export function SatRemoveControl({
     <button
       type="button"
       data-sat-annotation-action="remove"
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onSelect}
-      disabled={disabled === true}
-      className={ACTION_BASE + ' w-full justify-start text-[var(--sat-danger)] hover:bg-[var(--sat-danger-soft)]'}
-    >
-      <Trash2 className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-      <span className="whitespace-nowrap">{label}</span>
-    </button>
-  );
-}
-
-/**
- * The way out of a popover, written and labeled like every other action.
- *
- * Esc, a new selection, and (on desktop) a click outside already close these
- * tools, but none of them is visible: a student who does not want the toolbar
- * anymore needs a control they can see rather than a gesture they must guess.
- * It stays at full target size while reading as secondary, so it is easy to hit
- * and hard to mistake for an annotation action.
- */
-export function SatCloseControl({
-  onSelect,
-  disabled,
-  label,
-}: {
-  onSelect: () => void;
-  disabled?: boolean | undefined;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      data-sat-annotation-action="close"
-      // Marked as a dismissal so the shared autofocus skips it: the caret
-      // belongs on the action the student opened these tools for, and the first
-      // button in the markup is now the way out rather than a way in.
-      data-sat-annotation-dismiss="true"
       aria-label={label}
-      disabled={disabled === true}
+      title={label}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onSelect}
-      className={ACTION_BASE + ' text-[var(--sat-text-secondary)]'}
+      disabled={disabled === true}
+      className={
+        SAT_ANNOTATION_ACTION
+        + ' hover:text-[var(--sat-danger)] focus-visible:text-[var(--sat-danger)]'
+      }
     >
-      <X className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+      <SatActionWash hoverClassName="group-hover:bg-[var(--sat-danger-soft)]">
+        <span
+          data-sat-remove-glyph="true"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[var(--sat-annotation-control-outline)]"
+        >
+          <Trash2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+        </span>
+      </SatActionWash>
     </button>
-  );
-}
-
-/** Small heading the spec insists on: it links selection -> these colors -> highlight. */
-export function SatAnnotationHeading() {
-  return (
-    <p className="flex items-center gap-1.5 sat-type-metadata font-semibold uppercase tracking-wide text-[var(--sat-text-secondary)]">
-      <Highlighter className="h-[15px] w-[15px]" aria-hidden="true" />
-      {SAT_COPY.annotations.highlight}
-    </p>
   );
 }

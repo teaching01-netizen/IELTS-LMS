@@ -38,6 +38,14 @@ export interface SatAnnotationView {
   isExistingAnchor?: ((anchor: SatTextAnchor) => boolean) | undefined;
   /** Hide contextual tools while the Selection v2 range stays selected. */
   onSelectionToolsDismissed?: (() => void) | undefined;
+  /**
+   * Close an open mark editor. Returns true when there was one to close.
+   *
+   * It exists because the bar carries no dismissal control — the reference has
+   * none — so Escape is the keyboard student's way out of a mark's controls, and
+   * it has to reach the same owner the press outside reaches.
+   */
+  onMarkEditorDismissed?: (() => boolean) | undefined;
   /** The visual Selection v2 range itself ended. */
   onSelectionCleared?: (() => void) | undefined;
 }

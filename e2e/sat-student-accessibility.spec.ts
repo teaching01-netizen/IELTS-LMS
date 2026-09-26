@@ -384,8 +384,12 @@ test.describe("SAT student accessibility and layout", () => {
     await selectTextForAnnotation(page, "Several");
     const selectionToolbar = page.getByRole("toolbar", { name: "Selected text actions" });
     await expect(selectionToolbar).toBeVisible();
-    // The heading is what links "selected text" to "highlight" unaided.
-    await expect(selectionToolbar).toContainText("Highlight");
+    // The bar is the reference's and carries no heading: a row of glyphs on the
+    // selected words, where the bare U is the underline control's own drawing and
+    // every action is named for speech instead (asserted here, and below by the
+    // presses themselves).
+    await expect(selectionToolbar).toHaveText("U");
+    await expect(selectionToolbar.getByRole("button", { name: "Highlight Yellow" })).toBeVisible();
     await selectionToolbar.getByRole("button", { name: "Highlight Blue" }).click();
     await expect(page.locator('[data-sat-highlight="true"]')).toContainText("Several");
     await expect(page.locator('[data-sat-highlight="true"]').first()).toHaveAttribute(
@@ -409,9 +413,11 @@ test.describe("SAT student accessibility and layout", () => {
     );
 
     await selectTextForAnnotation(page, "researchers");
+    // Exact, because the underline control and its style disclosure are two
+    // presses with two names, and a partial match would find both.
     await page
       .getByRole("toolbar", { name: "Selected text actions" })
-      .getByRole("button", { name: "Underline" })
+      .getByRole("button", { name: "Underline", exact: true })
       .click();
     await expect(page.locator('[data-sat-underline="true"]')).toContainText("researchers");
 

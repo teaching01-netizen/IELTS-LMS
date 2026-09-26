@@ -288,6 +288,7 @@ export function SatExamShell(props: SatExamShellProps) {
     annotationView,
     selectionActions,
     currentColor,
+    currentUnderlineStyle,
     editingMark,
     closeMarkEditor,
     recolourMark,
@@ -680,7 +681,7 @@ export function SatExamShell(props: SatExamShellProps) {
             environment={selectionEnvironment}
             disabled={props.blocked || !annotationsWritable}
             onColor={(color) => recolourMark(editingMark, color)}
-            onUnderline={() => underlineMark(editingMark)}
+            onUnderline={(choice) => underlineMark(editingMark, choice)}
             // One editor for one note: pressing Add note hands the mark to the
             // Notes pane and these controls step aside.
             onNote={() => openNoteOnMark(editingMark)}
@@ -691,6 +692,7 @@ export function SatExamShell(props: SatExamShellProps) {
           <SatSelectionActionsPanel
             anchor={selectionToolsAnchor}
             currentColor={currentColor}
+            currentUnderlineStyle={currentUnderlineStyle}
             actions={selectionActions}
             disabled={props.blocked || !annotationsWritable}
             environment={selectionEnvironment}

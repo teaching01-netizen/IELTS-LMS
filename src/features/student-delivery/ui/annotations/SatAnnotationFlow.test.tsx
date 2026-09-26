@@ -54,6 +54,21 @@ function highlight(container: HTMLElement, value: string, color: 'Yellow' | 'Blu
 }
 
 /**
+ * Leave the tools the way the platform does: a press on the passage.
+ *
+ * The bar carries no dismissal control any more (the reference has none), so
+ * the two ways out a student actually uses are this press and Escape — and a
+ * test that needs the tools out of the way has to leave by one of them rather
+ * than by a button that no longer exists.
+ */
+function pressOutsideTools(container: HTMLElement): void {
+  const passage = container.querySelector('[data-sat-annotation-region="stimulus"]')!;
+  act(() => {
+    passage.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }));
+  });
+}
+
+/**
  * jsdom has no viewport, so every width query answers false and the notes
  * column would always land on its narrowest tier. This stands in for a desktop
  * exam window, which is the tier the three-pane promise belongs to.
@@ -225,16 +240,16 @@ describe('SAT annotation mode (the non-negotiable rule)', () => {
 });
 
 describe('SAT shell annotation flow (armed mode)', () => {
-  it('raises labeled color controls on a selection and highlights on one tap', () => {
+  it('raises the bar on a selection and highlights on one tap', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     armHighlights();
     expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
 
     selectStimulusText(container, 'Several');
     const toolbar = screen.getByRole('toolbar', { name: 'Selected text actions' });
-    // The word "Highlight" next to the swatches is what connects a selection to
-    // these colors — and each swatch is labeled, never a bare dot.
-    expect(toolbar).toHaveTextContent('Highlight');
+    // The reference's bar: the inks are the circles, so nothing on it is a word
+    // — and every one of them is named for speech anyway.
+    expect(toolbar.textContent).toBe('U');
     expect(screen.getByRole('button', { name: 'Highlight Yellow' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Highlight Blue' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Highlight Pink' })).toBeInTheDocument();
@@ -251,21 +266,24 @@ describe('SAT shell annotation flow (armed mode)', () => {
     expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
     const dock = screen.getByRole('toolbar', { name: 'Edit annotation' });
     expect(screen.getByRole('button', { name: 'Highlight Blue' })).toHaveAttribute('aria-pressed', 'true');
-    // The note the student may want next is one labeled press away, here — not in
-    // a pane that had to open in the middle of the exam to offer it.
-    expect(dock).toHaveTextContent('Add note');
+    // The note the student may want next is one press away, here — not in a pane
+    // that had to open in the middle of the exam to offer it.
+    expect(within(dock).getByRole('button', { name: 'Add note' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
     expect(screen.getByTestId('sat-annotation-announcement')).toHaveTextContent('Text highlighted blue.');
   });
 
-  it('lets the student close the popover with a written control', () => {
+  it('carries no dismissal control, and leaves the tools on Escape', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     armHighlights();
     selectStimulusText(container, 'Several');
     const toolbar = screen.getByRole('toolbar', { name: 'Selected text actions' });
-    // Esc already did this, invisibly. The control names the action for the
-    // student who does not guess gestures.
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Close text tools' }));
+    // The reference bar has no X: Escape and a press outside are the ways out,
+    // and neither one is a control competing with the inks for a thumb.
+    expect(within(toolbar).queryByRole('button', { name: 'Close text tools' })).toBeNull();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
     expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
     // Closing the tools is not editing: nothing was marked.
     expect(container.querySelector('[data-sat-highlight="true"]')).toBeNull();
@@ -300,6 +318,64 @@ describe('SAT shell annotation flow (armed mode)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Underline' }));
     expect(container.querySelector('[data-sat-underline="true"]')).toHaveTextContent('researchers');
     expect(screen.getByTestId('sat-annotation-announcement')).toHaveTextContent('Text underlined.');
+  });
+
+  it('draws the underline style the student picks, and remembers it for the next one', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
+    selectStimulusText(container, 'researchers');
+    fireEvent.click(screen.getByRole('button', { name: 'Underline style' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dotted underline' }));
+
+    const mark = container.querySelector<HTMLElement>('[data-sat-underline="true"]')!;
+    expect(mark).toHaveTextContent('researchers');
+    expect(mark.style.textDecorationStyle).toBe('dotted');
+
+    // The U now draws the line the student chose, so the next underline is one
+    // press rather than a trip back through the menu.
+    selectStimulusText(container, 'Several');
+    const u = screen.getByRole('button', { name: 'Underline' });
+    expect(u.querySelector('[data-sat-underline-glyph="dotted"]')).not.toBeNull();
+    fireEvent.click(u);
+    const underlines = [...container.querySelectorAll<HTMLElement>('[data-sat-underline="true"]')];
+    expect(underlines).toHaveLength(2);
+    expect(underlines[1]!.style.textDecorationStyle).toBe('dotted');
+  });
+
+  it('restyles an existing underline from its own controls, and takes it off with None', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
+    selectStimulusText(container, 'researchers');
+    fireEvent.click(screen.getByRole('button', { name: 'Underline' }));
+
+    // Tapping the mark reopens its controls with its own line already drawn.
+    fireEvent.click(container.querySelector<HTMLElement>('[data-sat-underline="true"]')!);
+    const dock = screen.getByRole('toolbar', { name: 'Edit annotation' });
+    expect(within(dock).getByRole('button', { name: 'Underline' }).querySelector('[data-sat-underline-glyph="solid"]')).not.toBeNull();
+
+    fireEvent.click(within(dock).getByRole('button', { name: 'Underline style' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dashed underline' }));
+    expect(container.querySelector<HTMLElement>('[data-sat-underline="true"]')!.style.textDecorationStyle).toBe('dashed');
+
+    // None takes the line off — one press, and the removal is undoable rather
+    // than confirmed.
+    fireEvent.click(screen.getByRole('button', { name: 'Underline style' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'No underline' }));
+    expect(container.querySelector('[data-sat-underline="true"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(container.querySelector<HTMLElement>('[data-sat-underline="true"]')!.style.textDecorationStyle).toBe('dashed');
+  });
+
+  it('leaves a mark editor on Escape, leaving the mark itself alone', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    highlight(container, 'Several', 'Yellow');
+    expect(screen.getByRole('toolbar', { name: 'Edit annotation' })).toBeInTheDocument();
+
+    // The bar has no X, so Escape is the keyboard way out of a mark's controls.
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('toolbar', { name: 'Edit annotation' })).not.toBeInTheDocument();
+    expect(container.querySelector('[data-sat-highlight="true"]')).toHaveAttribute('data-sat-highlight-color', 'yellow');
   });
 
   it('creates a highlight from the keyboard alone (shift+arrows then the toolbar)', () => {
@@ -355,8 +431,9 @@ describe('SAT shell annotation flow (armed mode)', () => {
   it('reopens an exact saved span in its editor, removes it, and restores it with Undo', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     highlight(container, 'Several', 'Yellow');
-    // Close the edit toolbar the highlight lands in, so the next gesture is a fresh capture.
-    fireEvent.click(screen.getByRole('button', { name: 'Close text tools' }));
+    // Leave the edit tools the highlight landed in, so the next gesture is a
+    // fresh capture.
+    pressOutsideTools(container);
     expect(screen.queryByRole('toolbar', { name: 'Edit annotation' })).not.toBeInTheDocument();
 
     // Selecting exactly the same saved span reopens that mark's editor.
@@ -374,7 +451,7 @@ describe('SAT shell annotation flow (armed mode)', () => {
   it('treats a partial overlap as a new selection without a Remove action', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     highlight(container, 'Several', 'Yellow');
-    fireEvent.click(screen.getByRole('button', { name: 'Close text tools' }));
+    pressOutsideTools(container);
 
     // A partial overlap stays a new selection and never removes another mark implicitly.
     selectStimulusText(container, 'Several', 4);
@@ -386,7 +463,7 @@ describe('SAT shell annotation flow (armed mode)', () => {
   it('keeps an unarmed saved mark decorative on reselect', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     highlight(container, 'Several', 'Yellow');
-    fireEvent.click(screen.getByRole('button', { name: 'Close text tools' }));
+    pressOutsideTools(container);
     fireEvent.click(highlightsToggle());
     expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'false');
 
@@ -406,7 +483,9 @@ describe('SAT shell annotation flow (armed mode)', () => {
     // Tapping the mark teaches that it is an object you can change later.
     fireEvent.click(mark);
     const dock = screen.getByRole('toolbar', { name: 'Edit annotation' });
-    expect(dock).toHaveTextContent('Highlight');
+    // The dock is the same bar, so the mark's own ink is the one drawn large:
+    // no words, no legend, just the circle that is already true.
+    expect(within(dock).getByRole('button', { name: 'Highlight Yellow' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Highlight Pink' }));
     expect(container.querySelector('[data-sat-highlight="true"]')).toHaveAttribute('data-sat-highlight-color', 'pink');
 
