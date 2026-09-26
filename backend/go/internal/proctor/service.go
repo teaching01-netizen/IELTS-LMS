@@ -918,14 +918,18 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 // proctor_complete. Call after CompleteExam commits; each seal is its own
 // receipt-first transaction via the injected Terminalizer.
 func (s *Service) AutoSubmitAfterComplete(ctx context.Context, actor Actor, scheduleID, attemptID string) error {
+	return s.autoSubmitAttempt(ctx, actor, scheduleID, attemptID, terminalization.ReasonProctorComplete)
+}
+
+func (s *Service) autoSubmitAttempt(ctx context.Context, actor Actor, scheduleID, attemptID, reason string) error {
 	if s.seal == nil {
 		return &apperrors.Error{Code: apperrors.CodeInternal, Message: "Terminalization service is not configured.", HTTPStatus: 500}
 	}
 	actorID := actor.ID
-	proj, _ := json.Marshal(map[string]any{"autoSubmission": true, "completionReason": terminalization.ReasonProctorComplete, "proctorStatus": "terminated"})
+	proj, _ := json.Marshal(map[string]any{"autoSubmission": true, "completionReason": reason, "proctorStatus": "terminated"})
 	_, err := s.seal.Terminalize(ctx, terminalization.SealCommand{
 		AttemptID: attemptID, ScheduleID: scheduleID,
-		Outcome: terminalization.OutcomeSubmitted, Reason: terminalization.ReasonProctorComplete,
+		Outcome: terminalization.OutcomeSubmitted, Reason: reason,
 		ActorKind: terminalization.ActorProctor, ActorID: &actorID,
 		RequestID: uuid.NewString(), FinalSubmission: proj,
 	})
@@ -981,6 +985,18 @@ func (s *Service) AutoSubmitACTAfterComplete(ctx context.Context, actor Actor, s
 // path, but the browser can observe a completed result immediately for both
 // IELTS and ACT instead of waiting for the worker's next hot cycle.
 func (s *Service) AutoSubmitScheduleAfterComplete(ctx context.Context, actor Actor, scheduleID string) error {
+	return s.autoSubmitSchedule(ctx, actor, scheduleID, terminalization.ReasonProctorComplete)
+}
+
+// AutoSubmitScheduleAfterEndSection seals writable attempts with the same
+// reason as the durable auto-submit event emitted when EndSectionNow ends the
+// final section. The synchronous path and worker path must agree so the
+// receipt-first race cannot let proctor_complete overwrite proctor_end.
+func (s *Service) AutoSubmitScheduleAfterEndSection(ctx context.Context, actor Actor, scheduleID string) error {
+	return s.autoSubmitSchedule(ctx, actor, scheduleID, terminalization.ReasonProctorEnd)
+}
+
+func (s *Service) autoSubmitSchedule(ctx context.Context, actor Actor, scheduleID, reason string) error {
 	if s == nil || s.seal == nil {
 		return nil
 	}
@@ -1012,7 +1028,7 @@ func (s *Service) AutoSubmitScheduleAfterComplete(ctx context.Context, actor Act
 		return err
 	}
 	for _, attemptID := range attemptIDs {
-		if err := s.AutoSubmitAfterComplete(ctx, actor, scheduleID, attemptID); err != nil {
+		if err := s.autoSubmitAttempt(ctx, actor, scheduleID, attemptID, reason); err != nil {
 			return err
 		}
 	}

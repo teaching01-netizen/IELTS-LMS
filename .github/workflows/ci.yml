@@ -355,6 +355,8 @@ jobs:
       DATABASE_WORKER_URL: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
       TEST_DATABASE_URL: "mysql://root:root@127.0.0.1:3306/ielts"
       AUTH_SECRET: ci-only-secret-with-at-least-32-characters
+      # E2E scrapes the private Prometheus endpoint with this test-only bearer token.
+      METRICS_TOKEN: "ci-only-e2e-metrics-token"
       API_HOST: 127.0.0.1
       PORT: 4000
       API_PORT: 4000
@@ -402,23 +404,20 @@ jobs:
           # Each browser project and each selected test file gets its own
           # globalSetup/seed cycle. A test file can terminalize or pause a
           # schedule, so sharing one destructive MySQL fixture across files
-          # makes later files inherit the earlier file's state. The --list
-          # pass preserves Playwright's shard assignment; the actual file run
-          # omits --shard because the file has already been selected here.
+          # makes later files inherit the earlier file's state. Balance whole
+          # files by test count because native file sharding leaves some shards
+          # empty and gives others more than twice the work. The actual file run
+          # omits --shard because each whole file has already been assigned.
           projects=(chromium mobile-chromium mobile-webkit tablet-portrait tablet-landscape firefox webkit)
+          E2E_SHARD="${{ matrix.shard }}"
           status=0
           for project in "${projects[@]}"; do
-            mapfile -t files < <(
-              bunx playwright test \
-                --project="${project}" \
-                --shard=${{ matrix.shard }} \
-                --list 2>/dev/null |
-                sed -n 's/^  \[[^]]*\] › \([^:]*\.spec\.ts\):.*/\1/p' |
-                sort -u
-            )
+            test_list=$(bunx playwright test --project="${project}" --list 2>/dev/null)
+            selected_files=$(printf '%s\n' "$test_list" | node scripts/ci/assign-e2e-files-to-shards.mjs "$E2E_SHARD")
+            mapfile -t files <<< "$selected_files"
             if ((${#files[@]} == 0)); then
               echo "No E2E files assigned to ${project} in shard ${{ matrix.shard }}"
-              continue
+              exit 1
             fi
             for file in "${files[@]}"; do
               safe_file="${file//\//__}"

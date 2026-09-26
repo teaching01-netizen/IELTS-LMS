@@ -6,6 +6,14 @@ const BACKEND_METRICS_URL = new URL(
   process.env["VITE_BACKEND_API_URL"] ?? "http://localhost:4000"
 ).toString();
 
+function metricsRequestOptions() {
+  const token = process.env["METRICS_TOKEN"];
+  if (!token) {
+    throw new Error("METRICS_TOKEN must be set to scrape the private backend /metrics endpoint.");
+  }
+  return { headers: { Authorization: `Bearer ${token}` } };
+}
+
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
 // QUARANTINE (WS-16, Lane J): selector drift — see e2e/TEST_STATUS.md.
@@ -155,7 +163,7 @@ test.describe("Backend Performance Metrics Verification", () => {
 
   test("verifies metrics registered in Prometheus registry", async ({ page, request }) => {
     // Try to access Prometheus metrics endpoint directly
-    const response = await request.get(BACKEND_METRICS_URL);
+    const response = await request.get(BACKEND_METRICS_URL, metricsRequestOptions());
     expect(response.ok()).toBeTruthy();
     const metricsText = await response.text();
 
@@ -171,7 +179,7 @@ test.describe("Backend Performance Metrics Verification", () => {
     // Exam-day on-call contract: the finalize/source/heartbeat series the
     // alerts page on must exist in the exposition (backend registers them
     // at startup even before any sample is recorded).
-    const response = await request.get(BACKEND_METRICS_URL);
+    const response = await request.get(BACKEND_METRICS_URL, metricsRequestOptions());
     expect(response.ok()).toBeTruthy();
     const metricsText = await response.text();
     expect(metricsText).toContain("sat_score_source_total");
@@ -244,7 +252,7 @@ test.describe("Backend Performance Metrics Verification", () => {
   });
 
   test("verifies metrics accessible via /metrics endpoint", async ({ request }) => {
-    const response = await request.get(BACKEND_METRICS_URL);
+    const response = await request.get(BACKEND_METRICS_URL, metricsRequestOptions());
 
     expect(response.status()).toBe(200);
 
@@ -253,7 +261,9 @@ test.describe("Backend Performance Metrics Verification", () => {
   });
 
   test("verifies metric labels are present", async ({ page, request }) => {
-    const response = await request.get(BACKEND_METRICS_URL);
+    const response = await request.get(BACKEND_METRICS_URL, metricsRequestOptions());
+
+    expect(response.status()).toBe(200);
 
     if (response.ok()) {
       const metricsText = await response.text();

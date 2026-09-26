@@ -20,10 +20,12 @@ type captureOutbox struct {
 
 type captureTerminalizer struct {
 	attemptIDs []string
+	reasons    []string
 }
 
 func (c *captureTerminalizer) Terminalize(_ context.Context, cmd terminalization.SealCommand) (*terminalization.SealResult, error) {
 	c.attemptIDs = append(c.attemptIDs, cmd.AttemptID)
+	c.reasons = append(c.reasons, cmd.Reason)
 	return &terminalization.SealResult{}, nil
 }
 
@@ -188,6 +190,35 @@ func TestAutoSubmitScheduleAfterCompleteSealsWritableIELTSAttemptsSynchronously(
 	}
 	if got := seal.attemptIDs; len(got) != 1 || got[0] != "attempt-ielts-1" {
 		t.Fatalf("sealed attempts = %#v, want the IELTS attempt", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAutoSubmitScheduleAfterEndSectionUsesProctorEndReason(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	seal := &captureTerminalizer{}
+	svc := NewService(tx.NewRunner(db), db, seal, nil, nil)
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT a.id")).
+		WithArgs("sched-ielts").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("attempt-ielts-1"))
+	mock.ExpectCommit()
+
+	if err := svc.AutoSubmitScheduleAfterEndSection(context.Background(), Actor{ID: "admin-1"}, "sched-ielts"); err != nil {
+		t.Fatalf("synchronous end-section auto-submit must succeed: %v", err)
+	}
+	if got := seal.attemptIDs; len(got) != 1 || got[0] != "attempt-ielts-1" {
+		t.Fatalf("sealed attempts = %#v, want the IELTS attempt", got)
+	}
+	if got := seal.reasons; len(got) != 1 || got[0] != terminalization.ReasonProctorEnd {
+		t.Fatalf("seal reasons = %#v, want %q", got, terminalization.ReasonProctorEnd)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

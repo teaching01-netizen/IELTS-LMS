@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Annotation surface placement: the invariants, in a real browser.
@@ -34,26 +34,26 @@ const SURFACE_SELECTOR = '[data-sat-selection-toolbar="true"]';
 
 /** The profiles a student actually sits an exam on. */
 const PROFILES = [
-  { name: 'phone', width: 390, height: 844 },
-  { name: 'iPad portrait', width: 820, height: 1180 },
-  { name: 'iPad landscape', width: 1024, height: 768 },
-  { name: 'desktop', width: 1280, height: 768 },
+  { name: "phone", width: 390, height: 844 },
+  { name: "iPad portrait", width: 820, height: 1180 },
+  { name: "iPad landscape", width: 1024, height: 768 },
+  { name: "desktop", width: 1280, height: 768 },
 ] as const;
 
 /** Comfortably inside the spec's 280–340px band. */
 const SURFACE_MIN_WIDTH = 280;
 const SURFACE_MAX_WIDTH = 340;
 
-async function openHarness(page: Page, query = '?ownedTouchSelection=1'): Promise<void> {
+async function openHarness(page: Page, query = "?ownedTouchSelection=1"): Promise<void> {
   await page.goto(`/__dev/sat-accessibility${query}`);
-  await expect(page.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 15_000 });
 }
 
 /**
  * Mid-passage text. On a phone the sentence occupies three rendered lines, so
  * the placement rule has room to choose either side using its comfort budget.
  */
-const PHRASE = 'canopy density';
+const PHRASE = "canopy density";
 
 /**
  * Arm annotation the way the student does: press the labeled top-bar control.
@@ -63,9 +63,9 @@ const PHRASE = 'canopy density';
  * nothing to place — which is the point of the mode, not a quirk of the harness.
  */
 async function armHighlights(page: Page): Promise<void> {
-  const toggle = page.getByRole('button', { name: /^Highlights & Notes/ });
-  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  const toggle = page.getByRole("button", { name: /^Highlights & Notes/ });
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
 }
 
 /**
@@ -83,7 +83,7 @@ async function selectTextInRegion(page: Page, selector: string, requested: strin
   await page.locator(selector).evaluate((root, value) => {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node: Node | null = walker.nextNode();
-    while (node && !(node.nodeValue ?? '').includes(value)) node = walker.nextNode();
+    while (node && !(node.nodeValue ?? "").includes(value)) node = walker.nextNode();
     if (!node) throw new Error(`Could not find stimulus text: ${value}`);
     const textNode = node as Text;
     const start = textNode.data.indexOf(value);
@@ -93,7 +93,7 @@ async function selectTextInRegion(page: Page, selector: string, requested: strin
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-    textNode.parentElement?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    textNode.parentElement?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
   }, requested);
 }
 
@@ -131,44 +131,64 @@ interface PlacementGeometry {
  * contract is asserted rather than assumed.
  */
 async function readPlacement(page: Page, phrase: string): Promise<PlacementGeometry> {
-  return page.evaluate(({ selector, text }) => {
-    const box = (rect: DOMRect) => ({
-      left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height,
-    });
-    const surface = document.querySelector(selector);
-    if (!surface) throw new Error('the selection surface is not in the document');
-    const region = document.querySelector('[data-sat-annotation-region]');
-    const anchored = (() => {
-      if (!region) return null;
-      const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
-      let node: Node | null = walker.nextNode();
-      while (node && !(node.nodeValue ?? '').includes(text)) node = walker.nextNode();
-      if (!node) return null;
-      const textNode = node as Text;
-      const start = textNode.data.indexOf(text);
-      const range = document.createRange();
-      range.setStart(textNode, start);
-      range.setEnd(textNode, start + text.length);
-      return range;
-    })();
-    const lines = anchored
-      ? Array.from(anchored.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0)
-      : [];
-    const caret = document.querySelector('[data-sat-annotation-caret]');
-    const viewport = window.visualViewport;
-    const container = document.querySelector('[data-sat-annotation-bounds]');
-    return {
-      surface: box(surface.getBoundingClientRect()),
-      bounds: container ? box(container.getBoundingClientRect()) : null,
-      caret: caret ? { center: (() => { const rect = caret.getBoundingClientRect(); return rect.left + rect.width / 2; })() } : null,
-      firstLine: lines.length > 0 ? box(lines[0]) : null,
-      lastLine: lines.length > 0 ? box(lines[lines.length - 1]) : null,
-      visible: viewport
-        ? { left: viewport.offsetLeft, top: viewport.offsetTop, right: viewport.offsetLeft + viewport.width, bottom: viewport.offsetTop + viewport.height }
-        : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
-      nativeSelection: window.getSelection()?.toString() ?? '',
-    };
-  }, { selector: SURFACE_SELECTOR, text: phrase });
+  return page.evaluate(
+    ({ selector, text }) => {
+      const box = (rect: DOMRect) => ({
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      });
+      const surface = document.querySelector(selector);
+      if (!surface) throw new Error("the selection surface is not in the document");
+      const region = document.querySelector("[data-sat-annotation-region]");
+      const anchored = (() => {
+        if (!region) return null;
+        const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
+        let node: Node | null = walker.nextNode();
+        while (node && !(node.nodeValue ?? "").includes(text)) node = walker.nextNode();
+        if (!node) return null;
+        const textNode = node as Text;
+        const start = textNode.data.indexOf(text);
+        const range = document.createRange();
+        range.setStart(textNode, start);
+        range.setEnd(textNode, start + text.length);
+        return range;
+      })();
+      const lines = anchored
+        ? Array.from(anchored.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0)
+        : [];
+      const caret = document.querySelector("[data-sat-annotation-caret]");
+      const viewport = window.visualViewport;
+      const container = document.querySelector("[data-sat-annotation-bounds]");
+      return {
+        surface: box(surface.getBoundingClientRect()),
+        bounds: container ? box(container.getBoundingClientRect()) : null,
+        caret: caret
+          ? {
+              center: (() => {
+                const rect = caret.getBoundingClientRect();
+                return rect.left + rect.width / 2;
+              })(),
+            }
+          : null,
+        firstLine: lines.length > 0 ? box(lines[0]) : null,
+        lastLine: lines.length > 0 ? box(lines[lines.length - 1]) : null,
+        visible: viewport
+          ? {
+              left: viewport.offsetLeft,
+              top: viewport.offsetTop,
+              right: viewport.offsetLeft + viewport.width,
+              bottom: viewport.offsetTop + viewport.height,
+            }
+          : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
+        nativeSelection: window.getSelection()?.toString() ?? "",
+      };
+    },
+    { selector: SURFACE_SELECTOR, text: phrase }
+  );
 }
 
 /**
@@ -186,7 +206,7 @@ function anchoredSpanIsAboveVisibleRegion(page: Page, phrase: string): Promise<b
   return page.locator('[data-sat-annotation-region="stimulus"]').evaluate((root, text) => {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node: Node | null = walker.nextNode();
-    while (node && !(node.nodeValue ?? '').includes(text)) node = walker.nextNode();
+    while (node && !(node.nodeValue ?? "").includes(text)) node = walker.nextNode();
     if (!node) return false;
     const textNode = node as Text;
     const start = textNode.data.indexOf(text);
@@ -203,10 +223,18 @@ function anchoredSpanIsAboveVisibleRegion(page: Page, phrase: string): Promise<b
 function expectContained(geometry: PlacementGeometry): void {
   const { surface, visible } = geometry;
   // A pixel of tolerance: sub-pixel layout rounds differently across engines.
-  expect(surface.top, 'surface starts above the visible region').toBeGreaterThanOrEqual(visible.top - 1);
-  expect(surface.bottom, 'surface ends below the visible region').toBeLessThanOrEqual(visible.bottom + 1);
-  expect(surface.left, 'surface starts left of the visible region').toBeGreaterThanOrEqual(visible.left - 1);
-  expect(surface.right, 'surface ends right of the visible region').toBeLessThanOrEqual(visible.right + 1);
+  expect(surface.top, "surface starts above the visible region").toBeGreaterThanOrEqual(
+    visible.top - 1
+  );
+  expect(surface.bottom, "surface ends below the visible region").toBeLessThanOrEqual(
+    visible.bottom + 1
+  );
+  expect(surface.left, "surface starts left of the visible region").toBeGreaterThanOrEqual(
+    visible.left - 1
+  );
+  expect(surface.right, "surface ends right of the visible region").toBeLessThanOrEqual(
+    visible.right + 1
+  );
 }
 
 function expectDoesNotCoverSelection(geometry: PlacementGeometry): void {
@@ -214,12 +242,15 @@ function expectDoesNotCoverSelection(geometry: PlacementGeometry): void {
   if (!firstLine || !lastLine) return;
   const above = surface.bottom <= firstLine.top + 1;
   const below = surface.top >= lastLine.bottom - 1;
-  expect(above || below, 'surface overlaps the text it belongs to').toBe(true);
+  expect(above || below, "surface overlaps the text it belongs to").toBe(true);
 }
 
-test.describe('annotation surface placement', () => {
+test.describe("annotation surface placement", () => {
   for (const profile of PROFILES) {
-    test(`${profile.name}: the surface stays visible, clear of the selection, with its caret on the anchored line`, async ({ page, isMobile }) => {
+    test(`${profile.name}: the surface stays visible, clear of the selection, with its caret on the anchored line`, async ({
+      page,
+      isMobile,
+    }) => {
       await page.setViewportSize({ width: profile.width, height: profile.height });
       await openHarness(page);
       await selectStimulusText(page, PHRASE);
@@ -229,7 +260,7 @@ test.describe('annotation surface placement', () => {
       // The app captures the anchor and retires the browser's own selection, so
       // no native Copy / Look Up bar can be painted over the passage. This suite
       // therefore measures the anchored phrase, and asserts the retirement.
-      expect(geometry.nativeSelection).toBe('');
+      expect(geometry.nativeSelection).toBe("");
       expectContained(geometry);
       expectDoesNotCoverSelection(geometry);
 
@@ -244,11 +275,15 @@ test.describe('annotation surface placement', () => {
       const roomAbove = selectionTop - (geometry.bounds?.top ?? geometry.visible.top) - 12;
       const comfort = isMobile ? 24 : 12;
       if (roomAbove >= geometry.surface.height + 12 + comfort) {
-        expect(geometry.surface.bottom, 'the surface takes the ordinary gap above when it comfortably fits')
-          .toBeLessThanOrEqual(selectionTop + 1);
+        expect(
+          geometry.surface.bottom,
+          "the surface takes the ordinary gap above when it comfortably fits"
+        ).toBeLessThanOrEqual(selectionTop + 1);
       } else {
-        expect(geometry.surface.top, 'the surface flips below when above is too small')
-          .toBeGreaterThanOrEqual(selectionBottom - 1);
+        expect(
+          geometry.surface.top,
+          "the surface flips below when above is too small"
+        ).toBeGreaterThanOrEqual(selectionBottom - 1);
       }
 
       // Usable width, and never wider than the accessible band.
@@ -257,10 +292,11 @@ test.describe('annotation surface placement', () => {
 
       // The caret belongs to the anchored line: the first line when the surface
       // floats above it, the last when it floats below.
-      expect(geometry.caret, 'a floating surface carries a caret').not.toBeNull();
-      const above = geometry.firstLine !== null && geometry.surface.bottom <= geometry.firstLine.top + 1;
+      expect(geometry.caret, "a floating surface carries a caret").not.toBeNull();
+      const above =
+        geometry.firstLine !== null && geometry.surface.bottom <= geometry.firstLine.top + 1;
       const line = above ? geometry.firstLine : geometry.lastLine;
-      expect(line, 'the selection has measurable lines').not.toBeNull();
+      expect(line, "the selection has measurable lines").not.toBeNull();
       if (!line || !geometry.caret) return;
       // Inside the anchored line, allowing only for the inward shift a
       // screen-edge clamp applies.
@@ -268,29 +304,35 @@ test.describe('annotation surface placement', () => {
       expect(geometry.caret.center).toBeLessThanOrEqual(line.right + 16);
       // When the surface is not clamped by an edge, the caret sits on the line's
       // centre rather than merely inside it.
-      const unclamped = geometry.surface.left > geometry.visible.left + 1
-        && geometry.surface.right < geometry.visible.right - 1;
+      const unclamped =
+        geometry.surface.left > geometry.visible.left + 1 &&
+        geometry.surface.right < geometry.visible.right - 1;
       if (unclamped) {
-        expect(Math.abs(geometry.caret.center - (line.left + line.right) / 2)).toBeLessThanOrEqual(2);
+        expect(Math.abs(geometry.caret.center - (line.left + line.right) / 2)).toBeLessThanOrEqual(
+          2
+        );
       }
     });
   }
 
-  test('keeps the toolbar aligned to its viewport anchor at 50%', async ({ page }) => {
+  test("keeps the toolbar aligned to its viewport anchor at 50%", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await openHarness(page);
-    await page.getByRole('button', { name: 'Display', exact: true }).click();
-    await page.getByRole('button', { name: 'Decrease screen zoom' }).click();
-    await page.getByRole('button', { name: 'Decrease screen zoom' }).click();
-    await expect(page.locator('[data-sat-zoom-plane]')).toHaveAttribute('data-sat-screen-zoom', '0.5');
-    await page.getByRole('button', { name: 'Close display settings' }).click();
+    await page.getByRole("button", { name: "Display", exact: true }).click();
+    await page.getByRole("button", { name: "Decrease screen zoom" }).click();
+    await page.getByRole("button", { name: "Decrease screen zoom" }).click();
+    await expect(page.locator("[data-sat-zoom-plane]")).toHaveAttribute(
+      "data-sat-screen-zoom",
+      "0.5"
+    );
+    await page.getByRole("button", { name: "Close display settings" }).click();
     await selectStimulusText(page, PHRASE);
     await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
 
     const geometry = await readPlacement(page, PHRASE);
     expectContained(geometry);
     expectDoesNotCoverSelection(geometry);
-    expect(geometry.caret, 'caret remains attached to the selected text').not.toBeNull();
+    expect(geometry.caret, "caret remains attached to the selected text").not.toBeNull();
     const scaling = await page.locator(SURFACE_SELECTOR).evaluate((surface) => {
       const rect = surface.getBoundingClientRect();
       return {
@@ -304,14 +346,16 @@ test.describe('annotation surface placement', () => {
     expect(Math.abs(scaling.renderedHeight - scaling.logicalHeight * 0.5)).toBeLessThanOrEqual(2);
   });
 
-  test('keeps the toolbar inside a viewport too short for it', async ({ page, isMobile }) => {
+  test("keeps the toolbar inside a viewport too short for it", async ({ page, isMobile }) => {
     // Phone: a short viewport is what a software keyboard leaves behind. Desktop:
     // a window too short for a toolbar is the same problem with a mouse. The
     // selection sits at the top of the passage, where no ordinary gap holds the
     // controls on either side.
-    await page.setViewportSize(isMobile ? { width: 390, height: 330 } : { width: 1280, height: 300 });
+    await page.setViewportSize(
+      isMobile ? { width: 390, height: 330 } : { width: 1280, height: 300 }
+    );
     await openHarness(page);
-    await selectStimulusText(page, 'Several');
+    await selectStimulusText(page, "Several");
 
     // Still a toolbar — there is no sheet to retreat to — and still inside what
     // the student can see: the actions scroll inside it rather than hanging off
@@ -319,46 +363,49 @@ test.describe('annotation surface placement', () => {
     const toolbar = page.locator(SURFACE_SELECTOR);
     await expect(toolbar).toBeVisible();
 
-    const geometry = await readPlacement(page, 'Several');
+    const geometry = await readPlacement(page, "Several");
     expectContained(geometry);
     expect(geometry.surface.bottom).toBeGreaterThan(geometry.surface.top);
     expect(
       await page.evaluate(() => {
         const body = document.querySelector('[data-sat-annotation-surface-body="true"]');
         return body ? getComputedStyle(body).overflowY : null;
-      }),
-    ).toBe('auto');
+      })
+    ).toBe("auto");
   });
 
-  test('surfaces promptly, but not the instant the gesture ends', async ({ page }) => {
+  test("surfaces promptly, but not the instant the gesture ends", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 768 });
     await openHarness(page);
     // Armed outside the measured window on purpose: the timing contract is about
     // the gesture, not about the press that made it possible.
     await armHighlights(page);
 
-    const elapsed = await page.locator('[data-sat-annotation-region="stimulus"]').evaluate(async (root, value) => {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      let node: Node | null = walker.nextNode();
-      while (node && !(node.nodeValue ?? '').includes(value)) node = walker.nextNode();
-      if (!node) throw new Error(`Could not find stimulus text: ${value}`);
-      const textNode = node as Text;
-      const range = document.createRange();
-      range.setStart(textNode, textNode.data.indexOf(value));
-      range.setEnd(textNode, textNode.data.indexOf(value) + value.length);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
+    const elapsed = await page
+      .locator('[data-sat-annotation-region="stimulus"]')
+      .evaluate(async (root, value) => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node: Node | null = walker.nextNode();
+        while (node && !(node.nodeValue ?? "").includes(value)) node = walker.nextNode();
+        if (!node) throw new Error(`Could not find stimulus text: ${value}`);
+        const textNode = node as Text;
+        const range = document.createRange();
+        range.setStart(textNode, textNode.data.indexOf(value));
+        range.setEnd(textNode, textNode.data.indexOf(value) + value.length);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
 
-      const started = performance.now();
-      textNode.parentElement?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
-      while (performance.now() - started < 3_000) {
-        const surface = document.querySelector('[data-sat-selection-toolbar="true"]');
-        if (surface && getComputedStyle(surface).visibility === 'visible') return performance.now() - started;
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-      }
-      return -1;
-    }, 'Several');
+        const started = performance.now();
+        textNode.parentElement?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+        while (performance.now() - started < 3_000) {
+          const surface = document.querySelector('[data-sat-selection-toolbar="true"]');
+          if (surface && getComputedStyle(surface).visibility === "visible")
+            return performance.now() - started;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+        return -1;
+      }, "Several");
 
     // The selection settles first (it is never shown under a handle the student
     // is still moving), and it is nowhere near a perceptible wait.
@@ -366,7 +413,9 @@ test.describe('annotation surface placement', () => {
     expect(elapsed).toBeLessThan(400);
   });
 
-  test('holds still through a rotation, then comes back placed in the new viewport', async ({ page }) => {
+  test("holds still through a rotation, then comes back placed in the new viewport", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 820, height: 1180 });
     await openHarness(page);
     await selectStimulusText(page, PHRASE);
@@ -376,20 +425,27 @@ test.describe('annotation surface placement', () => {
     // axes together, so the surface must not be placed from transitional
     // geometry: it goes quiet, and only then is it placed again.
     await page.evaluate(() => {
-      window.dispatchEvent(new Event('orientationchange'));
+      window.dispatchEvent(new Event("orientationchange"));
     });
-    const hiddenState = await page.waitForFunction(() => {
-      const menu = document.querySelector('[data-selection-action-menu]');
-      if (!menu || getComputedStyle(menu).visibility !== 'hidden') return false;
-      return {
-        visibility: getComputedStyle(menu).visibility,
-        claimsInteraction: document.querySelector('[data-sat-selection-toolbar="true"]') !== null,
-      };
-    }, null, { polling: 'raf', timeout: 1_000 });
+    const hiddenState = await page.waitForFunction(
+      () => {
+        const menu = document.querySelector("[data-selection-action-menu]");
+        if (!menu || getComputedStyle(menu).visibility !== "hidden") return false;
+        return {
+          visibility: getComputedStyle(menu).visibility,
+          claimsInteraction: document.querySelector('[data-sat-selection-toolbar="true"]') !== null,
+        };
+      },
+      null,
+      { polling: "raf", timeout: 1_000 }
+    );
     // A mounted-but-hidden surface claims no interaction: the Highlights
     // shortcut focuses the first control it finds, and it must not find one
     // nobody can see.
-    expect(await hiddenState.jsonValue()).toEqual({ visibility: 'hidden', claimsInteraction: false });
+    expect(await hiddenState.jsonValue()).toEqual({
+      visibility: "hidden",
+      claimsInteraction: false,
+    });
 
     // The viewport settles in the new orientation, and the surface comes back —
     // placed for the geometry it now has, not for the one it had.
@@ -398,10 +454,15 @@ test.describe('annotation surface placement', () => {
     const geometry = await readPlacement(page, PHRASE);
     expectContained(geometry);
     expectDoesNotCoverSelection(geometry);
-    expect(geometry.caret, 'the surface comes back with its caret, not as a bare box').not.toBeNull();
+    expect(
+      geometry.caret,
+      "the surface comes back with its caret, not as a bare box"
+    ).not.toBeNull();
   });
 
-  test('a software keyboard shrinking what is visible keeps the toolbar reachable', async ({ page }) => {
+  test("a software keyboard shrinking what is visible keeps the toolbar reachable", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openHarness(page);
     // A selection small enough to float on its own, so the keyboard's arrival is
@@ -414,30 +475,31 @@ test.describe('annotation surface placement', () => {
     // against the layout viewport would be pinned under the keyboard — present,
     // unreachable — which is why placement is measured against what the student
     // can actually see.
-    const shrinkVisibleRegion = (height: number) => page.evaluate((visible) => {
-      const viewport = window.visualViewport;
-      if (!viewport) return false;
-      // Stand in for the browser's own metrics: the same API, carrying the
-      // numbers a keyboard produces, with the real placement pipeline
-      // downstream of it.
-      Object.defineProperty(window, 'visualViewport', {
-        configurable: true,
-        value: {
-          offsetLeft: viewport.offsetLeft,
-          offsetTop: viewport.offsetTop,
-          width: viewport.width,
-          height: visible,
-          addEventListener: viewport.addEventListener.bind(viewport),
-          removeEventListener: viewport.removeEventListener.bind(viewport),
-        },
-      });
-      window.dispatchEvent(new Event('resize'));
-      return true;
-    }, height);
+    const shrinkVisibleRegion = (height: number) =>
+      page.evaluate((visible) => {
+        const viewport = window.visualViewport;
+        if (!viewport) return false;
+        // Stand in for the browser's own metrics: the same API, carrying the
+        // numbers a keyboard produces, with the real placement pipeline
+        // downstream of it.
+        Object.defineProperty(window, "visualViewport", {
+          configurable: true,
+          value: {
+            offsetLeft: viewport.offsetLeft,
+            offsetTop: viewport.offsetTop,
+            width: viewport.width,
+            height: visible,
+            addEventListener: viewport.addEventListener.bind(viewport),
+            removeEventListener: viewport.removeEventListener.bind(viewport),
+          },
+        });
+        window.dispatchEvent(new Event("resize"));
+        return true;
+      }, height);
 
     expect(
       await shrinkVisibleRegion(300),
-      'the harness runs in a browser with a visual viewport',
+      "the harness runs in a browser with a visual viewport"
     ).toBe(true);
 
     // The same selection that floated a moment ago now has nowhere to sit beside
@@ -453,7 +515,7 @@ test.describe('annotation surface placement', () => {
     await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
     await expect
       .poll(async () => (await readPlacement(page, PHRASE)).surface.bottom, {
-        message: 'the toolbar settles inside what the student can see',
+        message: "the toolbar settles inside what the student can see",
         timeout: 3_000,
       })
       .toBeLessThanOrEqual(301);
@@ -461,7 +523,7 @@ test.describe('annotation surface placement', () => {
     expectContained(geometry);
     // Above the keyboard's edge, not merely inside the page — the difference
     // between a control the student can reach and one hidden under glass.
-    expect(geometry.surface.bottom).toBeLessThanOrEqual(301);    // And when the keyboard leaves even less than that, the selection itself is
+    expect(geometry.surface.bottom).toBeLessThanOrEqual(301); // And when the keyboard leaves even less than that, the selection itself is
     // off the visible region: a contextual surface with no visible source hides
     // rather than pinning itself to a screen its words are no longer on.
     //
@@ -480,9 +542,11 @@ test.describe('annotation surface placement', () => {
     // re-anchor from scratch, and a lost anchor is how a student ends up
     // annotating a word they did not choose.
     expect(
-      await page.locator('[data-selection-action-menu]').evaluate((element) => getComputedStyle(element).visibility),
-      'a hidden surface stays mounted',
-    ).toBe('hidden');
+      await page
+        .locator("[data-selection-action-menu]")
+        .evaluate((element) => getComputedStyle(element).visibility),
+      "a hidden surface stays mounted"
+    ).toBe("hidden");
 
     // The room comes back, and so do the tools — placed again for the geometry
     // they now have, on the SAME words.
@@ -490,8 +554,11 @@ test.describe('annotation surface placement', () => {
     await expect(toolbar).toBeVisible();
     const restored = await readPlacement(page, PHRASE);
     expectContained(restored);
-    expect(restored.caret, 'the surface comes back with its caret, not as a bare box').not.toBeNull();
-    await toolbar.getByRole('button', { name: 'Highlight Yellow' }).click();
+    expect(
+      restored.caret,
+      "the surface comes back with its caret, not as a bare box"
+    ).not.toBeNull();
+    await toolbar.getByRole("button", { name: "Highlight Yellow" }).click();
     await expect(page.locator('[data-sat-highlight="true"]')).toHaveText(PHRASE);
   });
 
@@ -511,117 +578,155 @@ test.describe('annotation surface placement', () => {
    * The opt-in long passage is what a real SAT passage is; the default harness
    * one is a few lines, and a pane that cannot scroll cannot test this.
    */
-  test('hides while its anchor is scrolled out of the visible region, and acts on the same span when it returns', async ({ page }) => {
+  test("hides while its anchor is scrolled out of the visible region, and acts on the same span when it returns", async ({
+    page,
+  }) => {
     // Long enough that the passage is genuinely longer than its pane, and tall
     // enough to leave the tools a comfortable lane above the selection — so the
     // surface the student meets is the ordinary floating one with a caret, not
     // the pinned fallback.
     await page.setViewportSize({ width: 390, height: 620 });
-    await openHarness(page, '?long=1&ownedTouchSelection=1');
+    await openHarness(page, "?long=1&ownedTouchSelection=1");
     const phrase = PHRASE;
     await selectStimulusText(page, phrase);
     const toolbar = page.locator(SURFACE_SELECTOR);
     await expect(toolbar).toBeVisible();
 
-    const scroller = page.locator('[data-sat-passage-scroll]');
+    const scroller = page.locator("[data-sat-passage-scroll]");
     const range = await scroller.evaluate((element) => element.scrollHeight - element.clientHeight);
-    expect(range, 'the passage must be scrollable for this case to mean anything').toBeGreaterThan(0);
+    expect(range, "the passage must be scrollable for this case to mean anything").toBeGreaterThan(
+      0
+    );
 
-    await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await scroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
     // The premise, measured rather than assumed: the anchored span is off the
     // visible region, entirely above its top edge.
     await expect
-      .poll(() => anchoredSpanIsAboveVisibleRegion(page, phrase), { message: 'the words left the visible region' })
+      .poll(() => anchoredSpanIsAboveVisibleRegion(page, phrase), {
+        message: "the words left the visible region",
+      })
       .toBe(true);
     await expect(toolbar).toBeHidden();
     // Hidden, NOT gone: the surface is still in the document, holding the tool the
     // student armed, so nothing has to be rebuilt when the words come back.
     expect(
-      await page.locator('[data-selection-action-menu]').evaluate((element) => getComputedStyle(element).visibility),
-      'a hidden surface stays mounted',
-    ).toBe('hidden');
+      await page
+        .locator("[data-selection-action-menu]")
+        .evaluate((element) => getComputedStyle(element).visibility),
+      "a hidden surface stays mounted"
+    ).toBe("hidden");
 
-    await scroller.evaluate((element) => { element.scrollTop = 0; });
+    await scroller.evaluate((element) => {
+      element.scrollTop = 0;
+    });
     await expect(toolbar).toBeVisible();
     const geometry = await readPlacement(page, phrase);
     expectContained(geometry);
-    expect(geometry.caret, 'the surface returns with its caret, not as a bare box').not.toBeNull();
+    expect(geometry.caret, "the surface returns with its caret, not as a bare box").not.toBeNull();
 
     // And it is the same span the student chose: the tool still acts on those
     // words, so the anchor survived the trip rather than being re-derived.
-    await toolbar.getByRole('button', { name: 'Highlight Yellow' }).click();
+    await toolbar.getByRole("button", { name: "Highlight Yellow" }).click();
     await expect(page.locator('[data-sat-highlight="true"]')).toHaveText(phrase);
   });
 
-  test('reopens and removes a saved highlight with a real iPad tap', async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'webkit-ipad', 'real touch tap regression runs in iPad WebKit');
+  test("reopens and removes a saved highlight with a real iPad tap", async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "webkit-ipad",
+      "real touch tap regression runs in iPad WebKit"
+    );
     await page.setViewportSize({ width: 1024, height: 768 });
-    await openHarness(page, '?ownedTouchSelection=1');
-    await selectStimulusText(page, 'Several');
-    const selectedActions = page.getByRole('toolbar', { name: 'Selected text actions' });
-    await selectedActions.getByRole('button', { name: 'Highlight Yellow' }).click();
-    const edit = page.getByRole('toolbar', { name: 'Edit annotation' });
-    await edit.getByRole('button', { name: 'Close text tools' }).click({ force: true });
-    const mark = page.locator('[data-sat-highlight="true"]').filter({ hasText: 'Several' });
+    await openHarness(page, "?ownedTouchSelection=1");
+    await selectStimulusText(page, "Several");
+    const selectedActions = page.getByRole("toolbar", { name: "Selected text actions" });
+    await selectedActions.getByRole("button", { name: "Highlight Yellow" }).click();
+    const edit = page.getByRole("toolbar", { name: "Edit annotation" });
+    await edit.getByRole("button", { name: "Close text tools" }).click({ force: true });
+    const mark = page.locator('[data-sat-highlight="true"]').filter({ hasText: "Several" });
     await mark.tap();
-    await expect(page.getByRole('toolbar', { name: 'Edit annotation' })).toBeVisible();
-    await page.getByRole('button', { name: 'Remove highlight' }).click();
+    await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toBeVisible();
+    await page.getByRole("button", { name: "Remove highlight" }).click();
     await expect(page.locator('[data-sat-highlight="true"]')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(page.locator('[data-sat-highlight="true"]')).toHaveText('Several');
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(page.locator('[data-sat-highlight="true"]')).toHaveText("Several");
   });
 
-  test('owns Math prose selections beside inline equations without selecting the equation', async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'webkit-ipad', 'owned-selection contract runs in iPad WebKit');
+  test("owns Math prose selections beside inline equations without selecting the equation", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "webkit-ipad",
+      "owned-selection contract runs in iPad WebKit"
+    );
     await page.setViewportSize({ width: 1024, height: 768 });
-    await openHarness(page, '?mode=math&ownedTouchSelection=1');
-    await expect(page.getByRole('button', { name: 'Calculator' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Reference' })).toBeVisible();
+    await openHarness(page, "?mode=math&ownedTouchSelection=1");
+    await expect(page.getByRole("button", { name: "Calculator" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reference" })).toBeVisible();
 
     const prompt = page.locator('[data-sat-annotation-region="prompt"]');
     await armHighlights(page);
-    await selectTextInRegion(page, '[data-sat-annotation-region="prompt"]', 'graph');
-    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible();
-    await expect(prompt.locator('[data-content-text-node="math-prompt::text-run-0"]')).toBeVisible();
-    expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
-    await page.getByRole('toolbar', { name: 'Selected text actions' }).getByRole('button', { name: 'Close text tools' }).click();
+    await selectTextInRegion(page, '[data-sat-annotation-region="prompt"]', "graph");
+    await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toBeVisible();
+    await expect(
+      prompt.locator('[data-content-text-node="math-prompt::text-run-0"]')
+    ).toBeVisible();
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("");
+    await page
+      .getByRole("toolbar", { name: "Selected text actions" })
+      .getByRole("button", { name: "Close text tools" })
+      .click();
 
-    await selectTextInRegion(page, '[data-sat-annotation-region="prompt"]', 'minimum');
-    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible();
-    await expect.poll(() => prompt.getAttribute('data-student-selection-owner')).toBe('app');
-    await expect.poll(() => prompt.getAttribute('data-student-owned-touch-selection')).toBe('true');
-    await expect(prompt.locator('[data-content-text-node="math-prompt::text-run-2"]')).toBeVisible();
-    expect(await prompt.evaluate((root) => getComputedStyle(root).getPropertyValue('-webkit-user-select'))).toBe('none');
-    expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
-    expect(await prompt.locator('[role="math"]').evaluate((math) => math.closest('[data-content-text-node]'))).toBeNull();
+    await selectTextInRegion(page, '[data-sat-annotation-region="prompt"]', "minimum");
+    await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toBeVisible();
+    await expect.poll(() => prompt.getAttribute("data-student-selection-owner")).toBe("app");
+    await expect.poll(() => prompt.getAttribute("data-student-owned-touch-selection")).toBe("true");
+    await expect(
+      prompt.locator('[data-content-text-node="math-prompt::text-run-2"]')
+    ).toBeVisible();
+    expect(
+      await prompt.evaluate((root) =>
+        getComputedStyle(root).getPropertyValue("-webkit-user-select")
+      )
+    ).toBe("none");
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("");
+    expect(
+      await prompt
+        .locator('[role="math"]')
+        .evaluate((math) => math.closest("[data-content-text-node]"))
+    ).toBeNull();
 
-    await page.getByRole('button', { name: 'Highlight Yellow' }).click();
-    const mark = prompt.locator('[data-sat-highlight="true"]').filter({ hasText: 'minimum' });
+    await page.getByRole("button", { name: "Highlight Yellow" }).click();
+    const mark = prompt.locator('[data-sat-highlight="true"]').filter({ hasText: "minimum" });
     await expect(mark).toBeVisible();
-    await page.getByRole('toolbar', { name: 'Edit annotation' }).getByRole('button', { name: 'Close text tools' }).click();
+    await page
+      .getByRole("toolbar", { name: "Edit annotation" })
+      .getByRole("button", { name: "Close text tools" })
+      .click();
     await mark.tap();
-    await expect(page.getByRole('button', { name: 'Remove highlight' })).toBeVisible();
-    await page.getByRole('button', { name: 'Remove highlight' }).click();
+    await expect(page.getByRole("button", { name: "Remove highlight" })).toBeVisible();
+    await page.getByRole("button", { name: "Remove highlight" }).click();
     await expect(prompt.locator('[data-sat-highlight="true"]')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(prompt.locator('[data-sat-highlight="true"]')).toHaveText('minimum');
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(prompt.locator('[data-sat-highlight="true"]')).toHaveText("minimum");
 
     await prompt.locator('[role="math"]').evaluate((math) => {
       const walker = document.createTreeWalker(math, NodeFilter.SHOW_TEXT);
       const text = walker.nextNode();
-      if (!text) throw new Error('Equation has no rendered text');
+      if (!text) throw new Error("Equation has no rendered text");
       const range = document.createRange();
       range.selectNodeContents(text);
       const selection = window.getSelection();
       selection?.removeAllRanges();
       selection?.addRange(range);
-      text.parentElement?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      text.parentElement?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     });
-    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toHaveCount(0);
+    await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toHaveCount(0);
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
 
-    await page.goto('/__dev/sat-accessibility?mode=spr&ownedTouchSelection=1');
-    const answer = page.getByRole('textbox');
+    await page.goto("/__dev/sat-accessibility?mode=spr&ownedTouchSelection=1");
+    const answer = page.getByRole("textbox");
     await expect(answer).toBeEditable();
   });
 });

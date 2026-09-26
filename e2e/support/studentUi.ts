@@ -251,16 +251,21 @@ export async function completePreCheckIfPresent(page: Page) {
     )
     .toBe(true);
 
-  const waitingForStart = page.getByRole("heading", { name: "Waiting for the exam to start" });
+  const lobbyHeading = page.getByRole("heading", { name: /Lobby|Exam Overview|Waiting/i });
   const startExam = page.getByRole("button", { name: "Start Exam" });
   const examShell = page.getByTestId("student-exam-shell");
-  const answerField = page.getByLabel(/Answer for question/i).first();
-  const writingEditor = page.locator('[contenteditable="true"]').first();
+  const answerField = page
+    .getByLabel(/Answer for question/i)
+    .filter({ visible: true })
+    .first();
+  const writingEditor = page.locator('[contenteditable="true"]').filter({ visible: true }).first();
 
   await expect
     .poll(
       async () => {
-        if (await waitingForStart.isVisible().catch(() => false)) return "waiting";
+        // The lobby heading is intentionally screen-reader-only on some routes;
+        // role presence is the reliable mounted-state signal in WebKit.
+        if ((await lobbyHeading.count().catch(() => 0)) > 0) return "lobby";
         if (await startExam.isVisible().catch(() => false)) return "lobby";
         if (await examShell.isVisible().catch(() => false)) return "exam";
         if (await answerField.isVisible().catch(() => false)) return "answer";
@@ -275,19 +280,22 @@ export async function completePreCheckIfPresent(page: Page) {
 export async function startLobbyIfPresent(page: Page) {
   const waiting = page.getByRole("heading", { name: "Waiting for the exam to start" });
   const examShell = page.getByTestId("student-exam-shell");
-  const answerField = page.getByLabel(/Answer for question/i).first();
+  const answerField = page
+    .getByLabel(/Answer for question/i)
+    .filter({ visible: true })
+    .first();
   await expect
     .poll(
       async () => {
         if (await examShell.isVisible().catch(() => false)) return "exam";
         if (await answerField.isVisible().catch(() => false)) return "exam";
-        if (await waiting.isVisible().catch(() => false)) return "waiting";
+        if ((await waiting.count().catch(() => 0)) > 0) return "waiting";
         return "pending";
       },
       { timeout: 30_000 }
     )
     .toMatch(/waiting|exam/);
-  if (!(await waiting.isVisible().catch(() => false))) return;
+  if ((await waiting.count().catch(() => 0)) === 0) return;
   await expect(page.getByRole("button", { name: "Start Exam" })).not.toBeVisible();
 
   const scheduleId = page.url().match(/\/student\/([^/]+)/)?.[1];
@@ -391,7 +399,7 @@ export async function openStudentSessionWithRetry(
   const loadingError = page.getByRole("heading", { name: "Loading Error" });
   const retryButton = page.getByRole("button", { name: "Retry" });
   const waitingRoomHeading = page.getByRole("heading", { name: "Waiting for the exam to start" });
-  const answerField = page.getByLabel("Answer for question 1");
+  const answerField = page.getByLabel("Answer for question 1").filter({ visible: true });
   const finishButton = page.getByRole("button", { name: "Finish" });
   const reviewButton = page.getByRole("button", { name: "Review & Submit" });
 
@@ -417,7 +425,7 @@ export async function openStudentSessionWithRetry(
         break;
       }
 
-      if (await waitingRoomHeading.isVisible().catch(() => false)) {
+      if ((await waitingRoomHeading.count().catch(() => 0)) > 0) {
         return;
       }
 

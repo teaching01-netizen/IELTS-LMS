@@ -67,7 +67,10 @@ test.describe("ACT Science workflow", () => {
       await expect(studentPage.getByText("ACT", { exact: true }).first()).toBeVisible();
       await expect(studentPage.getByText("Seeded ecology experiment")).toBeVisible();
       await expect(
-        studentPage.getByText("Which condition produced the greatest plant growth?").first()
+        studentPage
+          .getByText("Which condition produced the greatest plant growth?", { exact: true })
+          .filter({ visible: true })
+          .first()
       ).toBeVisible();
 
       const options = studentPage.locator('input[type="radio"]');

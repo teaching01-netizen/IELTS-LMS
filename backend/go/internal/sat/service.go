@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/attempts"
-	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
@@ -251,14 +250,7 @@ type attemptCore struct {
 }
 
 type moduleRow struct {
-	ModuleID        string
-	SectionKey      string
-	ModuleKey       string
-	AdaptiveRole    string
-	State           string
-	RawCorrect      sql.NullInt64
-	OperationalCons sql.NullInt64
-	TargetCount     int64
+	State string
 }
 
 // CompleteAssessment validates the SAT module topology and idempotently seals
@@ -491,276 +483,6 @@ func (s *Service) OldestProvisionalAgeSeconds(ctx context.Context) (int64, error
 	return age.Int64, nil
 }
 
-// scoreAndPersist aggregates terminal modules, scores sections, and persists
-// student_submissions + assessment_results(scored/ready_to_release) +
-// section rows, then seals sat_complete. Callers hold the attempt lock.
-func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptCore, submissionID, actorKind, actorID, requestID string, now time.Time) (*AssessmentResult, error) {
-	// "Declared" is the Student Access link's section scope, or the full SAT
-	// pair when the link is unscoped — the same set the submit gate and the
-	// delivery gates use, so a run cannot be admitted by one boundary and
-	// refused by another. Read first: every refusal below is scoped to it.
-	required, err := loadRunSectionsTx(ctx, t, attempt.ID)
-	if err != nil {
-		return nil, err
-	}
-	mods, err := loadModules(ctx, t, attempt.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(mods) == 0 {
-		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "The SAT attempt has no module submissions.", HTTPStatus: 409}
-	}
-	if !moduleStatesAcceptable(mods) {
-		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "All SAT modules must be submitted before finalization.", HTTPStatus: 409}
-	}
-	policy, err := loadPolicy(ctx, t, attempt.PublishedVerID)
-	if err != nil {
-		return nil, &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "SAT scoring policy is missing.", HTTPStatus: 400}
-	}
-
-	aggs := map[string]*resultAccum{}
-	for _, m := range mods {
-		a := aggs[m.SectionKey]
-		if a == nil {
-			a = &resultAccum{}
-			aggs[m.SectionKey] = a
-		}
-		a.raw += nullInt(m.RawCorrect)
-		a.operational += nullInt(m.OperationalCons)
-		if m.AdaptiveRole == "base" {
-			a.target += m.TargetCount
-		}
-		if route, ok := routeFromAdaptiveRole(m.AdaptiveRole); ok {
-			if a.route != nil && *a.route != route {
-				return nil, &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Multiple adaptive branches were submitted for one SAT section.", HTTPStatus: 400}
-			}
-			r := route
-			a.route = &r
-			a.branchModuleID = m.ModuleID
-			a.target += m.TargetCount
-		}
-		a.modules = append(a.modules, map[string]any{
-			"moduleKey": m.ModuleKey, "state": m.State,
-			"rawCorrect": nullInt(m.RawCorrect), "operationalQuestionCount": nullInt(m.OperationalCons),
-		})
-	}
-
-	// Audit finding 5 (second half): totalScore tolerates a nil section, so a
-	// partial topology — a section whose adaptive route was never recorded —
-	// would otherwise persist a plausible-looking SAT total. A score may only be
-	// minted from exactly one terminal route per section the RUN declared;
-	// anything else fails closed instead of becoming a legitimate-looking
-	// result.
-	//
-	for _, sectionKey := range required {
-		a, ok := aggs[sectionKey]
-		if !ok {
-			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no submitted %s modules.", sectionKey), HTTPStatus: 400}
-		}
-		if a.route == nil {
-			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no completed adaptive route for %s.", sectionKey), HTTPStatus: 400}
-		}
-	}
-	for sectionKey := range aggs {
-		if !containsSection(required, sectionKey) {
-			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has modules outside its %s sections.", strings.Join(required, " and ")), HTTPStatus: 400}
-		}
-	}
-
-	// Last-line integrity fence (P10): the administered branch of every
-	// section must be the module the router recorded for it. Without this the
-	// route below is derived from the branch alone and a corrupt attempt
-	// (decision HIGH, terminal LOW) would persist a confident wrong result.
-	decisions, err := loadRouteDecisionsTx(ctx, t, attempt.ID)
-	if err != nil {
-		return nil, err
-	}
-	if err := assertResultRouteIntegrity(ctx, attempt.ID, decisions, aggs); err != nil {
-		return nil, err
-	}
-
-	var sections []SectionResult
-
-	for sectionKey, a := range aggs {
-		maxRaw := a.target
-		if maxRaw < 1 {
-			maxRaw = 1
-		}
-		// Live-rehearsal P0: partial module coverage (answered < placed <
-		// target) normalizes UP to the full base+branch target scale, so the
-		// index can exceed the per-module table max (practice tables stop at
-		// 27 RW / 22 math) and terminal submit fails closed with
-		// "configured score is missing". Clamp to the target scale: the
-		// table is authoritative in range, and above-scale means a
-		// perfect-or-better paper, which the table max scores at 800.
-		normalized := normalizedRaw(a.raw, a.operational, maxRaw)
-		if normalized > maxRaw {
-			normalized = maxRaw
-		}
-		route := "lower"
-		if a.route != nil {
-			route = *a.route
-		}
-		scaled, err := s.scorer.ScoreSection(sectionKey, route, int(normalized), int(maxRaw), policy)
-		if err != nil {
-			return nil, &apperrors.Error{Code: apperrors.CodeBadRequest, Message: err.Error(), HTTPStatus: 400}
-		}
-		sc := scaled
-		r := route
-		sections = append(sections, SectionResult{
-			SectionKey: sectionKey, Route: &r,
-			RawCorrect: a.raw, OperationalQuestionCount: a.operational,
-			ScaledScore: &sc,
-			Details:     map[string]any{"normalizedRawCorrect": normalized, "modules": a.modules},
-		})
-	}
-	scaledBy := map[string]*int{}
-	for i := range sections {
-		scaledBy[sections[i].SectionKey] = sections[i].ScaledScore
-	}
-	// A one-section sitting has no composite total: the 400–1600 scale is
-	// defined over Reading & Writing + Math, so a lone section score must not
-	// be published as — or mistaken for — an SAT total. totalScore stays NULL
-	// and the section score (200–800) carries the result.
-	var total *int
-	if len(required) > 1 {
-		composite := totalScore(scaledBy[SectionReadingWriting], scaledBy[SectionMath])
-		total = &composite
-	}
-	scorePayload := map[string]any{
-		"providerKey": "sat", "scoreKind": "practice",
-		"totalScore": total, "sections": sections,
-	}
-
-	// Audit finding 4: derive the real active exam time before the insert so the
-	// result metadata represents reality instead of a hardcoded zero.
-	timeSpentSeconds, err := loadTimeSpentSeconds(ctx, t, attempt.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Global submission ownership: a submission id belongs to exactly one attempt.
-	var owner string
-	err = t.QueryRowContext(ctx, "SELECT attempt_id FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&owner)
-	switch {
-	case err == nil && owner != attempt.ID:
-		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "submissionId is already bound to another attempt.", HTTPStatus: 409, Details: map[string]any{"code": "SUBMISSION_ID_MISUSE"}}
-	case err == sql.ErrNoRows:
-		candidate, name, email, cohort := attemptCandidate(ctx, t, attempt.ID)
-		// Section statuses mirror the sections this run actually took; a
-		// narrowed run must not claim an auto-graded section it never ran.
-		statuses := make(map[string]string, len(required))
-		for _, sectionKey := range required {
-			statuses[sectionKey] = "auto_graded"
-		}
-		sectionStatuses, _ := json.Marshal(statuses)
-		if _, err := t.ExecContext(ctx, `
-			INSERT INTO student_submissions
-				(id, attempt_id, schedule_id, exam_id, published_version_id, provider_key,
-				 student_id, student_name, student_email, cohort_name,
-				 submitted_at, time_spent_seconds, grading_status, section_statuses)
-			VALUES (?, ?, ?, ?, ?, 'sat', ?, ?, ?, ?, ?, ?, 'submitted', ?)`,
-			submissionID, attempt.ID, attempt.ScheduleID, attempt.ExamID, attempt.PublishedVerID,
-			candidate, name, email, cohort, now, timeSpentSeconds, string(sectionStatuses)); err != nil {
-			// The missing-row SELECT locks nothing, so a concurrent INSERT
-			// of the same id (or the UNIQUE attempt_id twin) surfaces as
-			// a duplicate key: converge same-attempt twins to the winner's
-			// result (idempotent success), 409 only cross-attempt misuse.
-			if isDupSubmissionKey(err) {
-				var dupOwner string
-				// Current read: FOR UPDATE is load-bearing here. The
-				// tx runs at REPEATABLE READ, so a plain re-read could
-				// miss the just-committed winner and misroute a
-				// same-attempt twin to MISUSE below.
-				ownerErr := t.QueryRowContext(ctx, "SELECT attempt_id FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&dupOwner)
-				if ownerErr == nil {
-					if dupOwner != attempt.ID {
-						return nil, submissionMisuseError()
-					}
-					// Same-attempt twin: the winner's submission row is
-					// ours. If it already scored, return its result;
-					// otherwise the winner is still persisting — tell
-					// the loser to retry rather than double-score.
-					wonRes, werr := loadResultTx(ctx, t, submissionID)
-					if werr != nil || wonRes == nil {
-						if werr != nil {
-							return nil, werr
-						}
-						return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "A concurrent finalization owns this submission; retry.", HTTPStatus: 409}
-					}
-					return wonRes, nil
-				}
-				if ownerErr != sql.ErrNoRows {
-					return nil, ownerErr
-				}
-				// Same id absent but a UNIQUE(attempt_id) twin won with
-				// a different id: the attempt already has a bound
-				// submission — return its result (idempotent success).
-				// Only reached when the same-id lookup missed AND no
-				// bound row locked: near-dead in InnoDB (a duplicate
-				// implies a winner row visible to current reads), so a
-				// miss here is a transient visibility gap — retry,
-				// never permanent MISUSE (which tells clients not to
-				// retry).
-				boundID, berr := lockedSubmissionID(ctx, t, attempt.ID)
-				if berr != nil {
-					return nil, berr
-				}
-				if boundID != "" {
-					boundRes, rerr := loadResultTx(ctx, t, boundID)
-					if rerr != nil || boundRes == nil {
-						if rerr != nil {
-							return nil, rerr
-						}
-						return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "A concurrent finalization owns this attempt; retry.", HTTPStatus: 409}
-					}
-					return boundRes, nil
-				}
-				return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "A concurrent finalization is in progress; retry.", HTTPStatus: 409}
-			}
-			return nil, err
-		}
-	case err != nil:
-		return nil, err
-	}
-
-	resultID := uuid.NewString()
-	payloadJSON, _ := json.Marshal(scorePayload)
-	if _, err := t.ExecContext(ctx, `
-		INSERT INTO assessment_results
-			(id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status)
-		VALUES (?, ?, ?, 'sat', 'scored', ?, ?, 'ready_to_release')`,
-		resultID, attempt.ID, submissionID, nullableIntPtr(total), string(payloadJSON)); err != nil {
-		return nil, err
-	}
-	for _, sec := range sections {
-		detailsJSON, _ := json.Marshal(sec.Details)
-		var routeVal any
-		if sec.Route != nil {
-			routeVal = *sec.Route
-		}
-		if _, err := t.ExecContext(ctx, `
-			INSERT INTO assessment_section_results
-				(id, assessment_result_id, section_key, route, raw_correct, operational_question_count, scaled_score, details)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			uuid.NewString(), resultID, sec.SectionKey, routeVal, sec.RawCorrect, sec.OperationalQuestionCount, sec.ScaledScore, string(detailsJSON)); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := sealAttemptTx(ctx, t, attempt, "submitted", "sat_complete", orStudent(actorKind), strOrNil(actorID), map[string]any{
-		"submissionId": submissionID, "providerKey": "sat", "assessmentResultId": resultID,
-	}, now, requestID); err != nil {
-		return nil, err
-	}
-	return &AssessmentResult{
-		ID: resultID, SubmissionID: submissionID, AttemptID: attempt.ID,
-		ProviderKey: "sat", OutcomeStatus: "scored", TotalScore: total,
-		ScoreKind:    "practice",
-		ScorePayload: scorePayload, ReleaseStatus: "ready_to_release", Sections: sections,
-	}, nil
-}
-
 func lockAttempt(ctx context.Context, t tx.Tx, attemptID, scheduleID string) (attemptCore, error) {
 	var a attemptCore
 	err := t.QueryRowContext(ctx, `
@@ -803,15 +525,11 @@ func lockedSubmissionID(ctx context.Context, t tx.Tx, attemptID string) (string,
 	return id.String, nil
 }
 
-// resultAccum aggregates one section's terminal modules during scoring: raw
-// hits, coverage, the administered adaptive route, and the branch module id
-// the route came from (the identity the result fence checks against the
-// recorded route decision).
+// resultAccum carries the administered adaptive route and its module identity
+// into the integrity fence that compares it with the recorded route decision.
 type resultAccum struct {
-	raw, operational, target int64
-	route                    *string
-	branchModuleID           string
-	modules                  []any
+	route          *string
+	branchModuleID string
 }
 
 // moduleStatesAcceptable reports whether every loaded module row is in a state
@@ -828,62 +546,12 @@ func moduleStatesAcceptable(mods []moduleRow) bool {
 	return true
 }
 
-func loadModules(ctx context.Context, t tx.Tx, attemptID string) ([]moduleRow, error) {
-	rows, err := t.QueryContext(ctx, `
-		SELECT m.id, s.section_key, m.module_key, m.adaptive_role, ma.state,
-			ma.raw_correct, ma.operational_question_count, m.target_question_count
-		FROM assessment_module_attempts ma
-		JOIN assessment_modules m ON m.id = ma.module_id
-		JOIN assessment_sections s ON s.id = m.section_id
-		WHERE ma.attempt_id = ?
-		ORDER BY s.display_order, m.display_order FOR UPDATE`, attemptID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []moduleRow
-	for rows.Next() {
-		var m moduleRow
-		if err := rows.Scan(&m.ModuleID, &m.SectionKey, &m.ModuleKey, &m.AdaptiveRole, &m.State,
-			&m.RawCorrect, &m.OperationalCons, &m.TargetCount); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
-}
-
 // routeDecision is one recorded adaptive-routing decision for an attempt,
 // keyed by section key: the module the router selected and the route name
 // that selected it.
 type routeDecision struct {
 	SelectedModuleID string
 	SelectedRoute    string
-}
-
-// loadRouteDecisionsTx reads every recorded routing decision for the attempt
-// (one row per routed section), keyed by section key. Missing rows are not
-// an error here — the integrity fence below decides what a missing decision
-// means — so a corrupt or legacy attempt cannot silently become a result.
-func loadRouteDecisionsTx(ctx context.Context, t tx.Tx, attemptID string) (map[string]routeDecision, error) {
-	rows, err := t.QueryContext(ctx, `
-		SELECT s.section_key, rd.selected_module_id, rd.selected_route
-		FROM assessment_route_decisions rd
-		JOIN assessment_sections s ON s.id = rd.section_id
-		WHERE rd.attempt_id = ? FOR UPDATE`, attemptID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]routeDecision{}
-	for rows.Next() {
-		var sectionKey, selectedModuleID, selectedRoute string
-		if err := rows.Scan(&sectionKey, &selectedModuleID, &selectedRoute); err != nil {
-			return nil, err
-		}
-		out[sectionKey] = routeDecision{SelectedModuleID: selectedModuleID, SelectedRoute: selectedRoute}
-	}
-	return out, rows.Err()
 }
 
 // assertResultRouteIntegrity is the last-line fence before a result is
@@ -933,48 +601,6 @@ func resultRouteIntegrityError(ctx context.Context, attemptID, sectionKey, selec
 	return conflict
 }
 
-// loadRunSectionsTx resolves the section set this run declared: the backing
-// Student Access link's scope when it narrows the run, otherwise the full SAT
-// pair. One indexed-ish join read, no lock, so it can run beside the attempt
-// row lock the scorers already hold. This is the same source
-// (assessment_access_links.enabled_sections) the runtime plan seam and the
-// submit gate read.
-func loadRunSectionsTx(ctx context.Context, t tx.Tx, attemptID string) ([]string, error) {
-	var raw sql.NullString
-	err := t.QueryRowContext(ctx,
-		"SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a ON a.schedule_id = l.schedule_id WHERE a.id = ?",
-		attemptID).Scan(&raw)
-	if err == sql.ErrNoRows {
-		return attempts.SATModuleRequiredSections, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	sections := examdomain.SectionScopeKeys(examdomain.ParseStoredSectionScope(raw.String))
-	if len(sections) == 0 {
-		return attempts.SATModuleRequiredSections, nil
-	}
-	return sections, nil
-}
-
-// containsSection reports whether a section key is part of a declared set.
-func containsSection(sections []string, sectionKey string) bool {
-	for _, section := range sections {
-		if section == sectionKey {
-			return true
-		}
-	}
-	return false
-}
-
-// nullableIntPtr renders an optional integer for a nullable column.
-func nullableIntPtr(value *int) any {
-	if value == nil {
-		return nil
-	}
-	return *value
-}
-
 // loadTimeSpentSeconds derives the attempt's active exam time from the
 // authoritative module timing: each module that actually ran contributes its
 // wall time from start to submit (still-paused modules stop at paused_at),
@@ -998,19 +624,6 @@ func loadTimeSpentSeconds(ctx context.Context, t tx.Tx, attemptID string) (int64
 	return seconds.Int64, nil
 }
 
-func loadPolicy(ctx context.Context, t tx.Tx, versionID string) (PolicyConfig, error) {
-	var raw sql.NullString
-	err := t.QueryRowContext(ctx,
-		"SELECT policy_config FROM assessment_scoring_policies WHERE exam_version_id = ?", versionID).Scan(&raw)
-	if err == sql.ErrNoRows || !raw.Valid || strings.TrimSpace(raw.String) == "" {
-		return PolicyConfig{}, sql.ErrNoRows
-	}
-	if err != nil {
-		return PolicyConfig{}, err
-	}
-	return PolicyConfig{Raw: json.RawMessage(raw.String)}, nil
-}
-
 // LoadResultForAttempt reads the persisted result for a terminal attempt.
 // Delivery uses this after the terminal write commits so bootstrap can return
 // the same result object as the result endpoints. It deliberately does not
@@ -1021,10 +634,6 @@ func LoadResultForAttempt(ctx context.Context, db *sql.DB, attemptID string) (*A
 		return nil, nil
 	}
 	return loadResult(ctx, db, "attempt_id = ?", attemptID, false, true)
-}
-
-func loadResultTx(ctx context.Context, t tx.Tx, submissionID string) (*AssessmentResult, error) {
-	return loadResult(ctx, t, "submission_id = ?", submissionID, true, false)
 }
 
 type resultQueryer interface {
@@ -1107,87 +716,6 @@ func loadResult(ctx context.Context, q resultQueryer, predicate string, arg any,
 	return res, nil
 }
 
-// sealAttemptTx writes the immutable terminal fact plus the submitted
-// projection. It mirrors the shared terminalization writer's submitted path:
-// INSERT attempt_terminalizations, then claim the attempt projection with a
-// guarded UPDATE whose affected row count decides writability.
-func sealAttemptTx(ctx context.Context, t tx.Tx, a attemptCore, outcome, reason, actorKind string, actorID *string, finalSubmission map[string]any, effectiveAt time.Time, requestID string) error {
-	terminalizationID := uuid.NewString()
-	if finalSubmission == nil {
-		finalSubmission = map[string]any{}
-	}
-	finalSubmission["submittedAt"] = effectiveAt.UTC()
-	finalSubmission["completionReason"] = reason
-	finalSubmission["terminalizationOutcome"] = outcome
-	finalSubmission["terminalizationId"] = terminalizationID
-	projectionJSON, _ := json.Marshal(finalSubmission)
-	snapshotJSON, _ := json.Marshal(map[string]any{
-		"attemptId": a.ID, "scheduleId": a.ScheduleID,
-		"organizationId": nullStr(a.OrganizationID), "examId": a.ExamID,
-		"providerKey": "sat", "answerRevision": a.AnswerRevision,
-		"completionReason": reason, "terminalizationId": terminalizationID,
-	})
-	var actorVal any
-	if actorID != nil {
-		actorVal = *actorID
-	}
-	var orgVal any
-	if a.OrganizationID.Valid {
-		orgVal = a.OrganizationID.String
-	}
-	if _, err := t.ExecContext(ctx, `
-		INSERT INTO attempt_terminalizations
-			(attempt_id, organization_id, terminalization_id, schedule_id,
-			 outcome, reason, actor_kind, actor_id, effective_at, recorded_at,
-			 answer_revision, final_snapshot, request_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), ?, ?, ?)`,
-		a.ID, orgVal, terminalizationID, a.ScheduleID,
-		outcome, reason, actorKind, actorVal, effectiveAt.UTC(),
-		a.AnswerRevision, string(snapshotJSON), requestID); err != nil {
-		return err
-	}
-	res, err := t.ExecContext(ctx, `
-		UPDATE student_attempts
-		SET phase = 'post-exam', delivery_status = 'submitted', final_submission = ?,
-			submitted_at = COALESCE(submitted_at, ?),
-			updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1
-		WHERE id = ? AND schedule_id = ?
-		  AND ((submitted_at IS NULL AND phase <> 'post-exam')
-			OR (delivery_status = 'submitted' AND phase = 'post-exam' AND final_submission IS NULL))
-		  AND COALESCE(proctor_status, 'active') <> 'terminated'`,
-		string(projectionJSON), effectiveAt.UTC(), a.ID, a.ScheduleID)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n != 1 {
-		return &apperrors.Error{Code: apperrors.CodeTerminalConflict, Message: "SAT attempt changed before terminalization completed.", HTTPStatus: 409}
-	}
-	return nil
-}
-
-// attemptCandidate returns (id, name, email, cohort): SELECT order is
-// candidate_id, candidate_name, candidate_email, student_key. Callers bind
-// positionally (id→student_id, name→student_name, email→student_email), so
-// keep this order — swapping name/email silently misattributes results.
-func attemptCandidate(ctx context.Context, t tx.Tx, attemptID string) (id, name, email, cohort string) {
-	_ = t.QueryRowContext(ctx,
-		"SELECT candidate_id, candidate_name, candidate_email, COALESCE(student_key, '') FROM student_attempts WHERE id = ?",
-		attemptID).Scan(&id, &name, &email, &cohort)
-	return id, name, email, cohort
-}
-
-func routeFromAdaptiveRole(role string) (string, bool) {
-	switch role {
-	case "lower_branch":
-		return "lower", true
-	case "higher_branch":
-		return "higher", true
-	default:
-		return "", false
-	}
-}
-
 // normalizedRaw scales raw hits by operational coverage: round(raw * max /
 // operational), clamped to [0, max]. Zero operational coverage yields 0.
 func normalizedRaw(raw, operational, max int64) int64 {
@@ -1202,43 +730,6 @@ func normalizedRaw(raw, operational, max int64) int64 {
 		return max
 	}
 	return n
-}
-
-func totalScore(readingWriting, math *int) int {
-	total := 0
-	if readingWriting != nil {
-		total += *readingWriting
-	}
-	if math != nil {
-		total += *math
-	}
-	return total
-}
-
-func submissionMisuseError() *apperrors.Error {
-	return &apperrors.Error{Code: apperrors.CodeConflict, Message: "submissionId is already bound to another attempt.", HTTPStatus: 409, Details: map[string]any{"code": "SUBMISSION_ID_MISUSE"}}
-}
-
-func isDupSubmissionKey(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "duplicate") || strings.Contains(s, "1062")
-}
-
-func nullInt(n sql.NullInt64) int64 {
-	if n.Valid {
-		return n.Int64
-	}
-	return 0
-}
-
-func nullStr(n sql.NullString) any {
-	if n.Valid {
-		return n.String
-	}
-	return nil
 }
 
 func strOrNil(s string) *string {

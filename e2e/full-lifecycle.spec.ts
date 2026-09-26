@@ -109,7 +109,9 @@ test.describe("Full browser lifecycle", () => {
     await proctorStartExam(loginContext, manifest.student.lifecycleScheduleId);
     await studentPage.reload();
     await openStudentSessionWithRetry(studentPage, manifest.student.lifecycleScheduleId, wcode);
-    await expect(studentPage.getByLabel("Answer for question 1")).toBeVisible();
+    await expect(
+      studentPage.getByLabel("Answer for question 1").filter({ visible: true })
+    ).toBeVisible();
 
     const resetContext = await browser.newContext();
     const resetPage = await resetContext.newPage();
@@ -162,7 +164,10 @@ test.describe("Full browser lifecycle", () => {
     await proctorStartExam(adminControlContext, scheduleId);
     await startLobbyIfPresent(studentPage);
     await openStudentSessionWithRetry(studentPage, scheduleId, wcode);
-    await studentPage.getByLabel("Answer for question 1").fill("lifecycle test answer");
+    await studentPage
+      .getByLabel("Answer for question 1")
+      .filter({ visible: true })
+      .fill("lifecycle test answer");
     await waitForAttemptResponse(
       scheduleId,
       email,
@@ -173,7 +178,10 @@ test.describe("Full browser lifecycle", () => {
     await expect(studentPage.getByText("Write the missing word from the passage.")).toBeVisible({
       timeout: 60_000,
     });
-    await studentPage.getByLabel("Answer for question 1").fill("lifecycle reading answer");
+    await studentPage
+      .getByLabel("Answer for question 1")
+      .filter({ visible: true })
+      .fill("lifecycle reading answer");
     await waitForAttemptResponse(
       scheduleId,
       email,
@@ -294,7 +302,10 @@ test.describe("Full browser lifecycle", () => {
     await proctorStartExam(adminControlContext, scheduleId);
     await startLobbyIfPresent(studentPage);
     await openStudentSessionWithRetry(studentPage, scheduleId, wcode);
-    await studentPage.getByLabel("Answer for question 1").fill("audit trail test");
+    await studentPage
+      .getByLabel("Answer for question 1")
+      .filter({ visible: true })
+      .fill("audit trail test");
     await waitForAttemptResponse(
       scheduleId,
       `e2e+${wcode.toLowerCase()}@example.com`,

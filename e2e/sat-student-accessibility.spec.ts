@@ -36,7 +36,7 @@ function axeSource(): string {
   const candidate = resolve(process.cwd(), "node_modules/axe-core/axe.min.js");
   if (!existsSync(candidate)) {
     throw new Error(
-      `axe-core is not installed at ${candidate}. Run 'bun install' before the SAT accessibility profile.`,
+      `axe-core is not installed at ${candidate}. Run 'bun install' before the SAT accessibility profile.`
     );
   }
   axeSourceCache = readFileSync(candidate, "utf8");
@@ -61,7 +61,11 @@ async function runAxe(page: Page): Promise<AxeViolation[]> {
     await page.addScriptTag({ content: axeSource() });
   }
   return page.evaluate(async () => {
-    const axe = (window as unknown as { axe: { run: (context: Element, options: unknown) => Promise<unknown> } }).axe;
+    const axe = (
+      window as unknown as {
+        axe: { run: (context: Element, options: unknown) => Promise<unknown> };
+      }
+    ).axe;
     const results = (await axe.run(document.body, {
       resultTypes: ["violations"],
       rules: {
@@ -83,7 +87,7 @@ async function runAxe(page: Page): Promise<AxeViolation[]> {
 
 async function expectNoSeriousAxeViolations(page: Page, surface: string) {
   const blocking = (await axeViolations(page)).filter(
-    (violation) => violation.impact === "critical" || violation.impact === "serious",
+    (violation) => violation.impact === "critical" || violation.impact === "serious"
   );
   expect(blocking, `axe reported critical/serious violations in ${surface}`).toEqual([]);
 }
@@ -250,7 +254,7 @@ async function selectStimulusText(page: Page, requested: string) {
   await page.locator('[data-sat-annotation-region="stimulus"]').evaluate((root, value) => {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node: Node | null = walker.nextNode();
-    while (node && !(node.nodeValue ?? '').includes(value)) node = walker.nextNode();
+    while (node && !(node.nodeValue ?? "").includes(value)) node = walker.nextNode();
     if (!node) throw new Error(`Could not find stimulus text: ${value}`);
     const textNode = node as Text;
     const start = textNode.data.indexOf(value);
@@ -260,7 +264,7 @@ async function selectStimulusText(page: Page, requested: string) {
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-    textNode.parentElement?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    textNode.parentElement?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
   }, requested);
 }
 
@@ -272,9 +276,9 @@ async function selectStimulusText(page: Page, requested: string) {
  * flow test, and is the invariant the mode exists for.
  */
 async function armHighlights(page: Page) {
-  const toggle = page.getByRole('button', { name: /^Highlights & Notes/ });
-  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  const toggle = page.getByRole("button", { name: /^Highlights & Notes/ });
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
 }
 
 /**
@@ -290,110 +294,154 @@ async function selectTextForAnnotation(page: Page, requested: string) {
 }
 
 test.describe("SAT student accessibility and layout", () => {
-  test('combined text size, exam zoom, and contrast reflow without clipping', async ({ page }) => {
+  test("combined text size, exam zoom, and contrast reflow without clipping", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openSatHarness(page);
-    await page.getByRole('button', { name: 'Display', exact: true }).click();
-    for (let step = 0; step < 5; step += 1) await page.getByRole('button', { name: 'Increase text size' }).click();
-    for (let step = 0; step < 4; step += 1) await page.getByRole('button', { name: 'Increase screen zoom' }).click();
-    await page.getByRole('button', { name: 'High contrast', exact: true }).click();
-    await page.getByRole('button', { name: 'Close display settings' }).click();
-    await expect(page.locator('[data-sat-screen-zoom]')).toHaveAttribute('data-sat-screen-zoom', '2');
-    await expect(page.getByTestId('sat-exam-shell')).toHaveCSS('color', 'rgb(0, 0, 0)');
-    const passage = page.locator('[data-sat-passage-scroll]');
-    const geometry = await passage.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+    await page.getByRole("button", { name: "Display", exact: true }).click();
+    for (let step = 0; step < 5; step += 1)
+      await page.getByRole("button", { name: "Increase text size" }).click();
+    for (let step = 0; step < 4; step += 1)
+      await page.getByRole("button", { name: "Increase screen zoom" }).click();
+    await page.getByRole("button", { name: "High contrast", exact: true }).click();
+    await page.getByRole("button", { name: "Close display settings" }).click();
+    await expect(page.locator("[data-sat-screen-zoom]")).toHaveAttribute(
+      "data-sat-screen-zoom",
+      "2"
+    );
+    await expect(page.getByTestId("sat-exam-shell")).toHaveCSS("color", "rgb(0, 0, 0)");
+    const passage = page.locator("[data-sat-passage-scroll]");
+    const geometry = await passage.evaluate((element) => ({
+      width: element.clientWidth,
+      scroll: element.scrollWidth,
+    }));
     expect(geometry.scroll).toBeLessThanOrEqual(geometry.width + 1);
-    const question = page.locator('[data-sat-question-scroll]');
-    await expect(page.getByRole('button', { name: 'Split view', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Passage only', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Question only', exact: true })).toHaveCount(0);
+    const question = page.locator("[data-sat-question-scroll]");
+    await expect(page.getByRole("button", { name: "Split view", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Passage only", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Question only", exact: true })).toHaveCount(0);
     await expect(question).toBeVisible();
-    const questionGeometry = await question.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+    const questionGeometry = await question.evaluate((element) => ({
+      width: element.clientWidth,
+      scroll: element.scrollWidth,
+    }));
     expect(questionGeometry.scroll).toBeLessThanOrEqual(questionGeometry.width + 1);
     await page.reload();
-    await expect(page.locator('[data-sat-screen-zoom]')).toHaveAttribute('data-sat-screen-zoom', '2');
-    await expect(page.getByTestId('sat-exam-shell')).toHaveAttribute('data-sat-contrast', 'high-contrast');
+    await expect(page.locator("[data-sat-screen-zoom]")).toHaveAttribute(
+      "data-sat-screen-zoom",
+      "2"
+    );
+    await expect(page.getByTestId("sat-exam-shell")).toHaveAttribute(
+      "data-sat-contrast",
+      "high-contrast"
+    );
   });
-  test('mobile reading keeps both panes available without layout mode controls', async ({ page }) => {
+  test("mobile reading keeps both panes available without layout mode controls", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await openSatHarness(page);
-    await page.getByRole('button', { name: 'Display', exact: true }).click();
-    for (let step = 0; step < 5; step += 1) await page.getByRole('button', { name: 'Increase text size' }).click();
-    await page.getByRole('button', { name: 'Close display settings' }).click();
-    const passage = page.locator('[data-sat-passage-scroll]');
-    const question = page.locator('[data-sat-question-scroll]');
+    await page.getByRole("button", { name: "Display", exact: true }).click();
+    for (let step = 0; step < 5; step += 1)
+      await page.getByRole("button", { name: "Increase text size" }).click();
+    await page.getByRole("button", { name: "Close display settings" }).click();
+    const passage = page.locator("[data-sat-passage-scroll]");
+    const question = page.locator("[data-sat-question-scroll]");
     await expect(passage).toBeVisible();
     await expect(question).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Split view', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Passage only', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Question only', exact: true })).toHaveCount(0);
-    const scrollTop = await passage.evaluate((element) => { element.scrollTop = 60; return element.scrollTop; });
+    await expect(page.getByRole("button", { name: "Split view", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Passage only", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Question only", exact: true })).toHaveCount(0);
+    const scrollTop = await passage.evaluate((element) => {
+      element.scrollTop = 60;
+      return element.scrollTop;
+    });
     expect(scrollTop).toBeGreaterThan(0);
     await expect.poll(() => passage.evaluate((element) => element.scrollTop)).toBe(scrollTop);
   });
 
-  test('selected text raises labeled highlight controls that recolor, underline, and undo removal', async ({ page }) => {
+  test("selected text raises labeled highlight controls that recolor, underline, and undo removal", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await openSatHarness(page);
 
     // The controls belong to the SELECTION, not to a paint button in the top bar:
     // nothing sits up there waiting to be decoded, and nothing appears until the
     // student arms the tool and selects text.
-    await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Underline', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Highlight", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Underline", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Eraser", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toHaveCount(0);
 
     // Off by default, and OFF MEANS OFF: the first selection of the exam raises
     // nothing whatsoever. This is the invariant the whole mode exists for.
-    await selectStimulusText(page, 'Several');
-    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Highlight Yellow' })).toHaveCount(0);
+    await selectStimulusText(page, "Several");
+    await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Highlight Yellow" })).toHaveCount(0);
     await expect(page.locator('[data-sat-highlight="true"]')).toHaveCount(0);
 
     // The same gesture, after one press on the labeled control, produces them.
-    await selectTextForAnnotation(page, 'Several');
-    const selectionToolbar = page.getByRole('toolbar', { name: 'Selected text actions' });
+    await selectTextForAnnotation(page, "Several");
+    const selectionToolbar = page.getByRole("toolbar", { name: "Selected text actions" });
     await expect(selectionToolbar).toBeVisible();
     // The heading is what links "selected text" to "highlight" unaided.
-    await expect(selectionToolbar).toContainText('Highlight');
-    await selectionToolbar.getByRole('button', { name: 'Highlight Blue' }).click();
-    await expect(page.locator('[data-sat-highlight="true"]')).toContainText('Several');
-    await expect(page.locator('[data-sat-highlight="true"]').first()).toHaveAttribute('data-sat-highlight-color', 'blue');
+    await expect(selectionToolbar).toContainText("Highlight");
+    await selectionToolbar.getByRole("button", { name: "Highlight Blue" }).click();
+    await expect(page.locator('[data-sat-highlight="true"]')).toContainText("Several");
+    await expect(page.locator('[data-sat-highlight="true"]').first()).toHaveAttribute(
+      "data-sat-highlight-color",
+      "blue"
+    );
 
     // Forgiving recolor: one tap on the mark, one tap on the new ink — never
     // delete-then-redraw.
     await page.locator('[data-sat-highlight="true"]').first().click();
-    const editDock = page.getByRole('toolbar', { name: 'Edit annotation' });
+    const editDock = page.getByRole("toolbar", { name: "Edit annotation" });
     await expect(editDock).toBeVisible();
-    await expect(editDock.getByRole('button', { name: 'Highlight Blue' })).toHaveAttribute('aria-pressed', 'true');
-    await editDock.getByRole('button', { name: 'Highlight Pink' }).click();
-    await expect(page.locator('[data-sat-highlight="true"]').first()).toHaveAttribute('data-sat-highlight-color', 'pink');
+    await expect(editDock.getByRole("button", { name: "Highlight Blue" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    await editDock.getByRole("button", { name: "Highlight Pink" }).click();
+    await expect(page.locator('[data-sat-highlight="true"]').first()).toHaveAttribute(
+      "data-sat-highlight-color",
+      "pink"
+    );
 
-    await selectTextForAnnotation(page, 'researchers');
-    await page.getByRole('toolbar', { name: 'Selected text actions' }).getByRole('button', { name: 'Underline' }).click();
-    await expect(page.locator('[data-sat-underline="true"]')).toContainText('researchers');
+    await selectTextForAnnotation(page, "researchers");
+    await page
+      .getByRole("toolbar", { name: "Selected text actions" })
+      .getByRole("button", { name: "Underline" })
+      .click();
+    await expect(page.locator('[data-sat-underline="true"]')).toContainText("researchers");
 
     // Removal is undoable instead of confirmed, and the mark itself names the
     // removal after its kind.
     await page.locator('[data-sat-underline="true"]').first().click();
-    await page.getByRole('toolbar', { name: 'Edit annotation' }).getByRole('button', { name: 'Remove underline' }).click();
+    await page
+      .getByRole("toolbar", { name: "Edit annotation" })
+      .getByRole("button", { name: "Remove underline" })
+      .click();
     await expect(page.locator('[data-sat-underline="true"]')).toHaveCount(0);
-    await expect(page.getByTestId('sat-undo-toast')).toContainText('Underline removed');
-    await page.getByTestId('sat-undo-toast').getByRole('button', { name: 'Undo' }).click();
-    await expect(page.locator('[data-sat-underline="true"]')).toContainText('researchers');
+    await expect(page.getByTestId("sat-undo-toast")).toContainText("Underline removed");
+    await page.getByTestId("sat-undo-toast").getByRole("button", { name: "Undo" }).click();
+    await expect(page.locator('[data-sat-underline="true"]')).toContainText("researchers");
 
-    // Math keeps the surface entirely: no top-bar entry, no selection tools.
-    await openSatHarness(page, { mode: 'math' });
-    await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Underline', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /Highlights & Notes/ })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /^Notes/ })).toHaveCount(0);
+    // Math still allows annotations under the SAT tool policy. The top-bar
+    // controls remain available while contextual actions stay selection-bound.
+    await openSatHarness(page, { mode: "math" });
+    await expect(page.getByRole("button", { name: "Highlight", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Underline", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Eraser", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Highlights & Notes/ })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /^Notes/ })).toHaveCount(1);
     await expect(page.locator('[data-sat-annotation-region="stimulus"]')).toHaveCount(0);
   });
 
-  test('a selection hands the keyboard to the toolbar, and a drag on a mark is not a tap', async ({ page, isMobile }) => {
+  test("a selection hands the keyboard to the toolbar, and a drag on a mark is not a tap", async ({
+    page,
+    isMobile,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 768 });
     // This is a locked student session. On a coarse pointer, exercise the same
     // owned-selection scope used by real SAT delivery instead of relying on a
@@ -409,23 +457,26 @@ test.describe("SAT student accessibility and layout", () => {
     await page.mouse.down();
     await page.mouse.move(box.x + 120, box.y + 12, { steps: 10 });
     await page.mouse.up();
-    const toolbar = page.getByRole('toolbar', { name: 'Selected text actions' });
+    const toolbar = page.getByRole("toolbar", { name: "Selected text actions" });
     await expect(toolbar).toBeVisible();
 
     // The caret lands on the primary action, so the mark is one keystroke away
     // and the arrow-key walk is reachable at all.
-    await expect(toolbar.getByRole('button', { name: 'Highlight Yellow' })).toBeFocused();
-    await page.keyboard.press('ArrowRight');
-    await expect(toolbar.getByRole('button', { name: 'Highlight Blue' })).toBeFocused();
-    await page.keyboard.press('Enter');
+    await expect(toolbar.getByRole("button", { name: "Highlight Yellow" })).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect(toolbar.getByRole("button", { name: "Highlight Blue" })).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(page.locator('[data-sat-highlight-color="blue"]')).toHaveCount(1);
     // Acting keeps the tools open: they are the new mark's controls now, in the
     // same place, with the ink the student just chose pressed — and the Notes
     // pane stayed out of the middle of the exam.
-    const afterHighlight = page.getByRole('toolbar', { name: 'Edit annotation' });
+    const afterHighlight = page.getByRole("toolbar", { name: "Edit annotation" });
     await expect(afterHighlight).toBeVisible();
-    await expect(afterHighlight.getByRole('button', { name: 'Highlight Blue' })).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByRole('complementary', { name: 'Notes' })).toHaveCount(0);
+    await expect(afterHighlight.getByRole("button", { name: "Highlight Blue" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
 
     // The rest of this case is specifically the desktop mouse-selection path.
     // Coarse-pointer press arbitration (including a mark tap while selection
@@ -441,59 +492,65 @@ test.describe("SAT student accessibility and layout", () => {
     await page.mouse.move(markBox.x + 2, markBox.y + markBox.height / 2, { steps: 10 });
     await page.mouse.up();
     await expect(toolbar).toBeVisible();
-    await expect(page.getByRole('toolbar', { name: 'Edit annotation' })).toHaveCount(0);
+    await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toHaveCount(0);
 
     // A real tap still opens the editor, the editor takes the caret, and the
     // mark itself reads as the one being edited.
     await mark.click();
-    const editDock = page.getByRole('toolbar', { name: 'Edit annotation' });
+    const editDock = page.getByRole("toolbar", { name: "Edit annotation" });
     await expect(editDock).toBeVisible();
-    await expect(editDock.getByRole('button', { name: 'Highlight Yellow' })).toBeFocused();
-    await expect(mark).toHaveAttribute('data-sat-annotation-active', 'true');
+    await expect(editDock.getByRole("button", { name: "Highlight Yellow" })).toBeFocused();
+    await expect(mark).toHaveAttribute("data-sat-annotation-active", "true");
   });
 
-  test('axe: the selection toolbar, the edit dock, and the notes column report no critical or serious violations', async ({ page }) => {
+  test("axe: the selection toolbar, the edit dock, and the notes column report no critical or serious violations", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await openSatHarness(page);
 
-    await selectTextForAnnotation(page, 'Several');
-    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible();
-    await expectNoSeriousAxeViolations(page, 'selection toolbar over a live selection');
+    await selectTextForAnnotation(page, "Several");
+    await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toBeVisible();
+    await expectNoSeriousAxeViolations(page, "selection toolbar over a live selection");
 
-    await page.getByRole('toolbar', { name: 'Selected text actions' }).getByRole('button', { name: 'Highlight Yellow' }).click();
-    const editDock = page.getByRole('toolbar', { name: 'Edit annotation' });
+    await page
+      .getByRole("toolbar", { name: "Selected text actions" })
+      .getByRole("button", { name: "Highlight Yellow" })
+      .click();
+    const editDock = page.getByRole("toolbar", { name: "Edit annotation" });
     await expect(editDock).toBeVisible();
-    await expectNoSeriousAxeViolations(page, 'edit dock for a new highlight');
+    await expectNoSeriousAxeViolations(page, "edit dock for a new highlight");
 
     // Writing opens the pane on this note's card, and that state needs its own
     // scan: the selected words as the student selected them, and the one field
     // their note lives in — nothing else repeating either of them.
-    await editDock.getByRole('button', { name: 'Add note' }).click();
-    const column = page.getByRole('complementary', { name: 'Notes' });
-    await expect(page.getByRole('textbox', { name: 'Note on \u201CSeveral\u201D' })).toBeFocused();
-    await expect(column.locator('[data-sat-note-excerpt]')).toHaveText('Several');
-    await expectNoSeriousAxeViolations(page, 'notes column while writing a note');
+    await editDock.getByRole("button", { name: "Add note" }).click();
+    const column = page.getByRole("complementary", { name: "Notes" });
+    await expect(page.getByRole("textbox", { name: "Note on \u201CSeveral\u201D" })).toBeFocused();
+    await expect(column.locator("[data-sat-note-excerpt]")).toHaveText("Several");
+    await expectNoSeriousAxeViolations(page, "notes column while writing a note");
 
     // The question's own note is one quiet button under the list; with it open the
     // pane holds one field per note, and no field is a preview of another.
-    await column.getByRole('button', { name: 'Add question note' }).click();
-    await expect(page.getByRole('textbox', { name: 'This question' })).toBeFocused();
-    await expect(column.getByRole('textbox')).toHaveCount(2);
-    await expectNoSeriousAxeViolations(page, 'notes column while writing about the question');
+    await column.getByRole("button", { name: "Add question note" }).click();
+    await expect(page.getByRole("textbox", { name: "This question" })).toBeFocused();
+    await expect(column.getByRole("textbox")).toHaveCount(2);
+    await expectNoSeriousAxeViolations(page, "notes column while writing about the question");
   });
 
-  test('desktop reading keeps the split divider without layout mode controls', async ({ page }) => {
+  test("desktop reading keeps the split divider without layout mode controls", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await openSatHarness(page);
-    const divider = page.getByRole('slider', { name: 'Passage and question width' });
-    await expect(divider).toHaveAttribute('aria-valuenow', '50');
-    await divider.focus(); await page.keyboard.press('ArrowRight');
-    await expect(divider).toHaveAttribute('aria-valuenow', '55');
-    await expect(page.getByRole('button', { name: 'Split view', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Passage only', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Question only', exact: true })).toHaveCount(0);
-    await expect(page.locator('[data-sat-passage-scroll]')).toBeVisible();
-    await expect(page.locator('[data-sat-question-scroll]')).toBeVisible();
+    const divider = page.getByRole("slider", { name: "Passage and question width" });
+    await expect(divider).toHaveAttribute("aria-valuenow", "50");
+    await divider.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(divider).toHaveAttribute("aria-valuenow", "55");
+    await expect(page.getByRole("button", { name: "Split view", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Passage only", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Question only", exact: true })).toHaveCount(0);
+    await expect(page.locator("[data-sat-passage-scroll]")).toBeVisible();
+    await expect(page.locator("[data-sat-question-scroll]")).toBeVisible();
   });
   test("regular iPad geometry preserves 44px controls and visible radio focus", async ({
     page,
@@ -516,7 +573,9 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(page.locator('input[type="radio"]').nth(1)).toBeChecked();
   });
 
-  test("directions stay anchored popovers, and notes open as a column beside the exam", async ({ page }) => {
+  test("directions stay anchored popovers, and notes open as a column beside the exam", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await openSatHarness(page);
 
@@ -577,7 +636,7 @@ test.describe("SAT student accessibility and layout", () => {
       .getByRole("button", { name: "Add note" })
       .click();
     const opened = page.getByRole("complementary", { name: "Notes" });
-    await expect(opened.locator('[data-sat-note-excerpt]')).toHaveText("Several");
+    await expect(opened.locator("[data-sat-note-excerpt]")).toHaveText("Several");
     // One note has one editor: the mark's floating tools step aside for the field.
     await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toHaveCount(0);
     const field = page.getByRole("textbox", { name: "Note on \u201CSeveral\u201D" });
@@ -648,7 +707,7 @@ test.describe("SAT student accessibility and layout", () => {
     await rail.click();
     const reopened = page.getByRole("complementary", { name: "Notes" });
     await expect(
-      reopened.getByRole("textbox", { name: "Note on \u201CSeveral\u201D" }),
+      reopened.getByRole("textbox", { name: "Note on \u201CSeveral\u201D" })
     ).toHaveValue("Compare the two blocks");
     await expect(reopened.locator("[data-sat-note-excerpt]")).toHaveText("Several");
 
@@ -680,7 +739,9 @@ test.describe("SAT student accessibility and layout", () => {
     // reading it back is the same field the student typed it in.
     await page.getByRole("button", { name: /^Notes/ }).click();
     await expect(
-      page.getByRole("complementary", { name: "Notes" }).getByRole("textbox", { name: "Note on \u201CSeveral\u201D" }),
+      page
+        .getByRole("complementary", { name: "Notes" })
+        .getByRole("textbox", { name: "Note on \u201CSeveral\u201D" })
     ).toHaveValue("Compare the two blocks");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
@@ -703,10 +764,12 @@ test.describe("SAT student accessibility and layout", () => {
     // anchored note, each under the source it came from.
     await page.getByRole("button", { name: /^Notes/ }).click();
     const list = page.getByRole("complementary", { name: "Notes" });
-    await expect(list.getByRole("textbox", { name: "This question" })).toHaveValue("Look for the contrast");
+    await expect(list.getByRole("textbox", { name: "This question" })).toHaveValue(
+      "Look for the contrast"
+    );
     // Each note under the source it came from: the anchored one shows its words,
     // the question's own shows none, because it has no source to quote.
-    await expect(list.locator('[data-sat-note-excerpt]')).toHaveText("Several");
+    await expect(list.locator("[data-sat-note-excerpt]")).toHaveText("Several");
     await expect(list).not.toContainText("This question");
   });
 
@@ -728,7 +791,9 @@ test.describe("SAT student accessibility and layout", () => {
     await page.getByRole("button", { name: "Previous" }).click();
     await page.getByRole("button", { name: /^Notes/ }).click();
     await expect(
-      page.getByRole("complementary", { name: "Notes" }).getByRole("textbox", { name: "This question" }),
+      page
+        .getByRole("complementary", { name: "Notes" })
+        .getByRole("textbox", { name: "This question" })
     ).toHaveValue("Half a thought");
   });
 
@@ -861,7 +926,9 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(calculator).toHaveAttribute("data-sat-tool-presentation", "compact-sheet");
   });
 
-  test("floating calculator keeps a clamped resizable geometry beside the question", async ({ page }) => {
+  test("floating calculator keeps a clamped resizable geometry beside the question", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1194, height: 834 });
     await openSatHarness(page, { mode: "math" });
     await page.getByRole("button", { name: "Calculator" }).click();
@@ -935,9 +1002,7 @@ test.describe("SAT student accessibility and layout", () => {
     expect(sheetBox).not.toBeNull();
     expect(sheetBox!.height).toBeLessThan(844);
     expect(sheetBox!.y).toBeGreaterThan(0);
-    await expect(
-      page.getByRole("button", { name: /expand|restore calculator/i })
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /expand|restore calculator/i })).toHaveCount(0);
     await page.getByRole("button", { name: "Close Calculator" }).click();
 
     await page.getByRole("button", { name: "Reference" }).click();
@@ -976,7 +1041,7 @@ test.describe("SAT student accessibility and layout", () => {
           if (!currentNavigatorBox || !currentFooterBox) return Number.POSITIVE_INFINITY;
           return currentNavigatorBox.y + currentNavigatorBox.height - (currentFooterBox.y + 2);
         },
-        { timeout: 1_000 },
+        { timeout: 1_000 }
       )
       .toBeLessThanOrEqual(0);
     await expectVisibleButtonsAtLeast44(page);
@@ -1256,7 +1321,8 @@ test.describe("SAT student accessibility and layout", () => {
         visibleBottom: (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? 0),
         paneScrollTop: owner?.scrollTop ?? 0,
         documentScrollY: window.scrollY,
-        shellHeight: document.querySelector<HTMLElement>("[data-testid='sat-exam-shell']")
+        shellHeight: document
+          .querySelector<HTMLElement>("[data-testid='sat-exam-shell']")
           ?.getBoundingClientRect().height,
         footer: footer
           ? {
@@ -1691,7 +1757,7 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(page.locator("[data-sat-question-transition]")).toHaveCount(0);
     // Task 6: the question number is a real h2 heading, not a labelled div.
     await expect(
-      page.getByRole("heading", { level: 2, name: "Question 2", exact: true }),
+      page.getByRole("heading", { level: 2, name: "Question 2", exact: true })
     ).toBeVisible();
     expect(await questionSurface.evaluate((element) => getComputedStyle(element).transform)).toBe(
       "none"
@@ -1699,14 +1765,14 @@ test.describe("SAT student accessibility and layout", () => {
 
     await page.getByRole("button", { name: "Previous" }).click();
     await expect(
-      page.getByRole("heading", { level: 2, name: "Question 1", exact: true }),
+      page.getByRole("heading", { level: 2, name: "Question 1", exact: true })
     ).toBeVisible();
     await expect(page.locator("[data-sat-question-transition]")).toHaveCount(0);
 
     await page.getByRole("button", { name: /open question navigator/i }).click();
     await page.getByRole("button", { name: /Question 3, unanswered/i }).click();
     await expect(
-      page.getByRole("heading", { level: 2, name: "Question 3", exact: true }),
+      page.getByRole("heading", { level: 2, name: "Question 3", exact: true })
     ).toBeVisible();
     await expect(page.locator("[data-sat-question-transition]")).toHaveCount(0);
   });
@@ -1720,7 +1786,7 @@ test.describe("SAT student accessibility and layout", () => {
 
     await page.getByRole("button", { name: "Next" }).click();
     await expect(
-      page.getByRole("heading", { level: 2, name: "Question 2", exact: true }),
+      page.getByRole("heading", { level: 2, name: "Question 2", exact: true })
     ).toBeVisible();
     await expect(page.locator("[data-sat-question-transition]")).toHaveCount(0);
     const surface = page.locator('[data-sat-question-presentation="instant"]');
@@ -1744,7 +1810,7 @@ test.describe("SAT student accessibility and layout", () => {
 
     // Task 6: the question number is a semantic heading, not a labelled div.
     await expect(
-      page.getByRole("heading", { level: 2, name: "Question 1", exact: true }),
+      page.getByRole("heading", { level: 2, name: "Question 1", exact: true })
     ).toBeVisible();
     // Closed triggers expose no aria-controls, so nothing can dangle.
     await expectNoDanglingAriaControls(page);
@@ -1756,7 +1822,7 @@ test.describe("SAT student accessibility and layout", () => {
     expect(directionsPanelId).toBeTruthy();
     await expect(page.getByRole("dialog", { name: "Directions" })).toHaveAttribute(
       "id",
-      directionsPanelId!,
+      directionsPanelId!
     );
     expect(await page.locator(`[id="${directionsPanelId}"]`).count()).toBe(1);
     await expectNoDanglingAriaControls(page);

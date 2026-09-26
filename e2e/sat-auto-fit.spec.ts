@@ -46,13 +46,14 @@ async function readExamGeometry(page: Page): Promise<ExamGeometry> {
     };
     const panes = Array.from(
       document.querySelectorAll<HTMLElement>(
-        "[data-sat-passage-scroll], [data-sat-question-scroll]",
-      ),
+        "[data-sat-passage-scroll], [data-sat-question-scroll]"
+      )
     );
     const passage = document.querySelector<HTMLElement>("[data-sat-passage-scroll]");
     const walker = passage ? document.createTreeWalker(passage, NodeFilter.SHOW_TEXT) : null;
     let node = walker?.nextNode() ?? null;
-    while (node && !(node.nodeValue ?? "").includes("canopy density")) node = walker?.nextNode() ?? null;
+    while (node && !(node.nodeValue ?? "").includes("canopy density"))
+      node = walker?.nextNode() ?? null;
     let rangeBox = null;
     if (node) {
       const text = node as Text;
@@ -60,7 +61,10 @@ async function readExamGeometry(page: Page): Promise<ExamGeometry> {
       const range = document.createRange();
       range.setStart(text, start);
       range.setEnd(text, start + "canopy density".length);
-      const rect = range.getBoundingClientRect();
+      // A range spanning wrapped lines returns one union rect, whose height
+      // changes when zoom gives the text a wider logical layout. Measure one
+      // line fragment so this assertion tests font scaling rather than reflow.
+      const rect = range.getClientRects().item(0) ?? range.getBoundingClientRect();
       rangeBox = { width: rect.width, height: rect.height };
     }
     return {
@@ -75,7 +79,8 @@ async function readExamGeometry(page: Page): Promise<ExamGeometry> {
       rangeBox,
       documentWidth: document.documentElement.scrollWidth,
       zoom: plane ? Number(plane.getAttribute("data-sat-screen-zoom")) : null,
-      probing: document.querySelector("[data-sat-fit-root]")?.getAttribute("data-sat-fit-probing") ?? null,
+      probing:
+        document.querySelector("[data-sat-fit-root]")?.getAttribute("data-sat-fit-probing") ?? null,
       planeTransform: plane?.style.transform ?? null,
       planeWidth: plane?.style.width ?? null,
       planeHeight: plane?.style.height ?? null,
@@ -87,13 +92,15 @@ async function readExamGeometry(page: Page): Promise<ExamGeometry> {
 async function settled(page: Page): Promise<ExamGeometry> {
   await expect(page.locator("[data-sat-fit-root]")).toHaveAttribute(
     "data-sat-fit-probing",
-    "false",
+    "false"
   );
   return readExamGeometry(page);
 }
 
 test.describe("SAT auto-fit screen zoom (1920x1080)", () => {
-  test("50% scales the whole shell while the plane still fills the physical viewport", async ({ page }) => {
+  test("50% scales the whole shell while the plane still fills the physical viewport", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto(DEBUG_ROUTE);
     await expect(page.getByTestId("sat-exam-shell")).toBeVisible();
@@ -102,7 +109,10 @@ test.describe("SAT auto-fit screen zoom (1920x1080)", () => {
     await page.getByRole("button", { name: "Display", exact: true }).click();
     await page.getByRole("button", { name: "Decrease screen zoom" }).click();
     await page.getByRole("button", { name: "Decrease screen zoom" }).click();
-    await expect(page.locator("[data-sat-zoom-plane]")).toHaveAttribute("data-sat-screen-zoom", "0.5");
+    await expect(page.locator("[data-sat-zoom-plane]")).toHaveAttribute(
+      "data-sat-screen-zoom",
+      "0.5"
+    );
     await page.getByRole("button", { name: "Close display settings" }).click();
 
     const at50 = await readExamGeometry(page);
@@ -118,7 +128,9 @@ test.describe("SAT auto-fit screen zoom (1920x1080)", () => {
     expect(at50.documentWidth).toBeLessThanOrEqual(1025);
   });
 
-  test("every supported zoom step scales the shell and keeps the plane on screen", async ({ page }) => {
+  test("every supported zoom step scales the shell and keeps the plane on screen", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto(DEBUG_ROUTE);
     await expect(page.getByTestId("sat-exam-shell")).toBeVisible();
@@ -135,7 +147,7 @@ test.describe("SAT auto-fit screen zoom (1920x1080)", () => {
         }
         await expect(page.locator("[data-sat-zoom-plane]")).toHaveAttribute(
           "data-sat-screen-zoom",
-          String(zoom),
+          String(zoom)
         );
         await page.getByRole("button", { name: "Close display settings" }).click();
       }
@@ -166,7 +178,7 @@ test.describe("SAT auto-fit screen zoom (1920x1080)", () => {
     // away from, no Reset to explain.
     await expect(page.locator("[data-sat-screen-zoom]")).toHaveAttribute(
       "data-sat-screen-zoom",
-      "1",
+      "1"
     );
   });
 
@@ -205,7 +217,7 @@ test.describe("SAT auto-fit screen zoom (1920x1080)", () => {
 
     await expect(page.locator("[data-sat-screen-zoom]")).toHaveAttribute(
       "data-sat-screen-zoom",
-      "1",
+      "1"
     );
     const geometry = await readExamGeometry(page);
 
@@ -234,7 +246,7 @@ test.describe("SAT auto-fit screen zoom (1920x1080)", () => {
     await page.goto(`${DEBUG_ROUTE}?long=2`);
     await expect(page.locator("[data-sat-screen-zoom]")).toHaveAttribute(
       "data-sat-screen-zoom",
-      "1",
+      "1"
     );
 
     await page.getByRole("button", { name: "Display" }).click();

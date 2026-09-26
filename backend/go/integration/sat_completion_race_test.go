@@ -201,8 +201,7 @@ func TestConcurrentSATClientSubmitAndTimeoutReconcileSealOnce(t *testing.T) {
 		}
 	})
 
-	var hashes map[string]string
-	hashes = map[string]string{}
+	hashes := map[string]string{}
 	rows, err := f.db.QueryContext(ctx, `SELECT question_id, response_hash FROM attempt_responses_v2 WHERE attempt_id = ?`, attemptID)
 	if err != nil {
 		t.Fatal(err)
