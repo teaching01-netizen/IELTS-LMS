@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Plus, Trash2, X } from 'lucide-react';
+import React, { useEffect, useState } from "react";
+import { Plus, Trash2, X } from "lucide-react";
 import {
   ACT_SCIENCE_SKILL_CATEGORIES,
   ActScienceStimulus,
@@ -7,11 +7,12 @@ import {
   MCQOption,
   SingleMCQBlock,
   SingleMCQQuestion,
-} from '../types';
-import { createId } from '../utils/idUtils';
-import { getImageUrlCandidates } from '../utils/imageUrl';
+} from "../types";
+import { createId } from "../utils/idUtils";
+import { getImageUrlCandidates } from "../utils/imageUrl";
+import { getMcqOptionLabel } from "../utils/mcqOptionLabel";
 
-const OPTION_LABELS = ['A', 'B', 'C', 'D'] as const;
+const OPTION_LABELS = ["A", "B", "C", "D"] as const;
 
 interface ActImagePreviewProps {
   src: string;
@@ -23,7 +24,7 @@ function ActImagePreview({ src, alt, className }: ActImagePreviewProps) {
   const candidates = getImageUrlCandidates(src);
   const [candidateIndex, setCandidateIndex] = useState(0);
   const [hasError, setHasError] = useState(false);
-  const resolvedSrc = candidates[candidateIndex] ?? '';
+  const resolvedSrc = candidates[candidateIndex] ?? "";
 
   useEffect(() => {
     setCandidateIndex(0);
@@ -54,25 +55,25 @@ function ActImagePreview({ src, alt, className }: ActImagePreviewProps) {
   );
 }
 
-export function createActScienceQuestion(id = createId('act_q')): SingleMCQQuestion {
+export function createActScienceQuestion(id = createId("act_q")): SingleMCQQuestion {
   return {
     id,
-    stem: '',
-    skillCategory: 'interpretation_of_data',
+    stem: "",
+    skillCategory: "interpretation_of_data",
     options: OPTION_LABELS.map((label, index) => ({
-      id: createId('act_opt'),
+      id: createId("act_opt"),
       text: `Option ${label}`,
       isCorrect: index === 0,
     })),
   };
 }
 
-export function createActScienceBlock(id = createId('act_block')): SingleMCQBlock {
+export function createActScienceBlock(id = createId("act_block")): SingleMCQBlock {
   const question = createActScienceQuestion(id);
   return {
     id,
-    type: 'SINGLE_MCQ',
-    instruction: '',
+    type: "SINGLE_MCQ",
+    instruction: "",
     stem: question.stem,
     options: question.options,
     questions: [question],
@@ -82,13 +83,13 @@ export function createActScienceBlock(id = createId('act_block')): SingleMCQBloc
 function normalizeOptions(options: MCQOption[]): MCQOption[] {
   const normalized = options.slice(0, OPTION_LABELS.length).map((option) => ({
     ...option,
-    text: option.text ?? '',
+    text: option.text ?? "",
   }));
 
   while (normalized.length < OPTION_LABELS.length) {
     const index = normalized.length;
     normalized.push({
-      id: createId('act_opt'),
+      id: createId("act_opt"),
       text: `Option ${OPTION_LABELS[index]}`,
       isCorrect: false,
     });
@@ -101,7 +102,7 @@ function getBlockQuestions(block: SingleMCQBlock): SingleMCQQuestion[] {
   if (Array.isArray(block.questions) && block.questions.length > 0) {
     return block.questions.map((question) => ({
       ...question,
-      skillCategory: question.skillCategory ?? 'interpretation_of_data',
+      skillCategory: question.skillCategory ?? "interpretation_of_data",
       options: normalizeOptions(question.options),
     }));
   }
@@ -109,8 +110,8 @@ function getBlockQuestions(block: SingleMCQBlock): SingleMCQQuestion[] {
   return [
     {
       id: block.id,
-      stem: block.stem || '',
-      skillCategory: 'interpretation_of_data',
+      stem: block.stem || "",
+      skillCategory: "interpretation_of_data",
       options: normalizeOptions(block.options),
     },
   ];
@@ -120,7 +121,7 @@ function syncBlockQuestions(block: SingleMCQBlock, questions: SingleMCQQuestion[
   const firstQuestion = questions[0];
   return {
     ...block,
-    stem: firstQuestion?.stem ?? '',
+    stem: firstQuestion?.stem ?? "",
     options: firstQuestion?.options ?? normalizeOptions([]),
     questions,
   };
@@ -150,7 +151,7 @@ export function ActScienceQuestionBuilderPane({
       questionIndex,
       question,
       number: startNumber + 0,
-    })),
+    }))
   );
 
   entries.forEach((entry, index) => {
@@ -164,7 +165,7 @@ export function ActScienceQuestionBuilderPane({
   const updateQuestion = (
     blockIndex: number,
     questionIndex: number,
-    update: (question: SingleMCQQuestion) => SingleMCQQuestion,
+    update: (question: SingleMCQQuestion) => SingleMCQQuestion
   ) => {
     updateStimulus((current) => ({
       ...current,
@@ -174,7 +175,7 @@ export function ActScienceQuestionBuilderPane({
         }
 
         const questions = getBlockQuestions(block).map((question, currentQuestionIndex) =>
-          currentQuestionIndex === questionIndex ? update(question) : question,
+          currentQuestionIndex === questionIndex ? update(question) : question
         );
         return syncBlockQuestions(block, questions);
       }),
@@ -185,7 +186,7 @@ export function ActScienceQuestionBuilderPane({
     updateStimulus((current) => ({
       ...current,
       blocks: current.blocks.map((block, currentBlockIndex) =>
-        currentBlockIndex === blockIndex ? { ...block, instruction } : block,
+        currentBlockIndex === blockIndex ? { ...block, instruction } : block
       ),
     }));
   };
@@ -201,7 +202,7 @@ export function ActScienceQuestionBuilderPane({
     updateQuestion(blockIndex, questionIndex, (current) => ({
       ...current,
       options: current.options.map((candidate) =>
-        candidate.id === optionId ? { ...candidate, imageUrl: undefined } : candidate,
+        candidate.id === optionId ? { ...candidate, imageUrl: undefined } : candidate
       ),
     }));
   };
@@ -238,9 +239,12 @@ export function ActScienceQuestionBuilderPane({
         }
 
         const questions = getBlockQuestions(block).filter(
-          (_question, currentQuestionIndex) => currentQuestionIndex !== questionIndex,
+          (_question, currentQuestionIndex) => currentQuestionIndex !== questionIndex
         );
-        return syncBlockQuestions(block, questions.length > 0 ? questions : [createActScienceQuestion()]);
+        return syncBlockQuestions(
+          block,
+          questions.length > 0 ? questions : [createActScienceQuestion()]
+        );
       }),
     }));
   };
@@ -252,7 +256,8 @@ export function ActScienceQuestionBuilderPane({
           <p className="text-xs font-bold uppercase tracking-wider text-blue-700">ACT Science</p>
           <h2 className="text-lg font-bold text-gray-900">Questions ({entries.length})</h2>
           <p className="mt-1 text-xs text-gray-500">
-            Single-choice questions with four options. Choose one correct answer and one skill category.
+            Single-choice questions with four options. Choose one correct answer and one skill
+            category.
           </p>
         </div>
         <button
@@ -270,7 +275,10 @@ export function ActScienceQuestionBuilderPane({
         return (
           <div key={block.id} className="mb-5 space-y-4">
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <label className="mb-1 block text-xs font-semibold text-gray-700" htmlFor={`act-instruction-${block.id}`}>
+              <label
+                className="mb-1 block text-xs font-semibold text-gray-700"
+                htmlFor={`act-instruction-${block.id}`}
+              >
                 Question set instructions
               </label>
               <textarea
@@ -286,14 +294,19 @@ export function ActScienceQuestionBuilderPane({
             {blockQuestions.map((question, questionIndex) => {
               const entry = entries.find(
                 (candidate) =>
-                  candidate.blockIndex === blockIndex && candidate.questionIndex === questionIndex,
+                  candidate.blockIndex === blockIndex && candidate.questionIndex === questionIndex
               );
               const questionNumber = entry?.number ?? startNumber;
 
               return (
-                <div key={question.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                <div
+                  key={question.id}
+                  className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                >
                   <div className="mb-4 flex items-center justify-between gap-3">
-                    <span className="text-sm font-bold text-gray-900">Question {questionNumber}</span>
+                    <span className="text-sm font-bold text-gray-900">
+                      Question {questionNumber}
+                    </span>
                     <button
                       type="button"
                       onClick={() => removeQuestion(blockIndex, questionIndex)}
@@ -305,7 +318,10 @@ export function ActScienceQuestionBuilderPane({
                     </button>
                   </div>
 
-                  <label className="mb-1 block text-xs font-semibold text-gray-700" htmlFor={`act-stem-${question.id}`}>
+                  <label
+                    className="mb-1 block text-xs font-semibold text-gray-700"
+                    htmlFor={`act-stem-${question.id}`}
+                  >
                     Question {questionNumber} stem
                   </label>
                   <textarea
@@ -351,7 +367,7 @@ export function ActScienceQuestionBuilderPane({
                     <input
                       id={`act-question-image-url-${question.id}`}
                       type="url"
-                      value={question.imageUrl ?? ''}
+                      value={question.imageUrl ?? ""}
                       onChange={(event) =>
                         updateQuestion(blockIndex, questionIndex, (current) => ({
                           ...current,
@@ -364,12 +380,15 @@ export function ActScienceQuestionBuilderPane({
                     />
                   </div>
 
-                  <label className="mb-1 block text-xs font-semibold text-gray-700" htmlFor={`act-skill-${question.id}`}>
+                  <label
+                    className="mb-1 block text-xs font-semibold text-gray-700"
+                    htmlFor={`act-skill-${question.id}`}
+                  >
                     Skill category for question {questionNumber}
                   </label>
                   <select
                     id={`act-skill-${question.id}`}
-                    value={question.skillCategory ?? 'interpretation_of_data'}
+                    value={question.skillCategory ?? "interpretation_of_data"}
                     onChange={(event) =>
                       updateQuestion(blockIndex, questionIndex, (current) => ({
                         ...current,
@@ -386,12 +405,16 @@ export function ActScienceQuestionBuilderPane({
                   </select>
 
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold text-gray-700">Answer choices (select the correct answer)</p>
-                    {OPTION_LABELS.map((label, optionIndex) => {
+                    <p className="text-xs font-semibold text-gray-700">
+                      Answer choices (select the correct answer)
+                    </p>
+                    {OPTION_LABELS.map((defaultLabel, optionIndex) => {
                       const option = question.options[optionIndex];
                       if (!option) {
                         return null;
                       }
+
+                      const label = getMcqOptionLabel(option, optionIndex);
 
                       return (
                         <div key={option.id} className="flex items-start gap-2">
@@ -410,7 +433,26 @@ export function ActScienceQuestionBuilderPane({
                             }
                             aria-label={`Correct answer ${label} for question ${questionNumber}`}
                           />
-                          <span className="w-5 text-sm font-bold text-gray-700">{label}</span>
+                          <input
+                            type="text"
+                            value={option.label ?? defaultLabel}
+                            maxLength={1}
+                            aria-label={`Choice label ${optionIndex + 1} for question ${questionNumber}`}
+                            onChange={(event) =>
+                              updateQuestion(blockIndex, questionIndex, (current) => ({
+                                ...current,
+                                options: current.options.map((candidate) =>
+                                  candidate.id === option.id
+                                    ? {
+                                        ...candidate,
+                                        label: event.target.value.toUpperCase().slice(0, 1),
+                                      }
+                                    : candidate
+                                ),
+                              }))
+                            }
+                            className="w-8 rounded-md border border-gray-300 px-1 py-2 text-center text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                          />
                           <div className="flex min-w-0 flex-1 flex-col gap-2">
                             <input
                               type="text"
@@ -421,7 +463,7 @@ export function ActScienceQuestionBuilderPane({
                                   options: current.options.map((candidate) =>
                                     candidate.id === option.id
                                       ? { ...candidate, text: event.target.value }
-                                      : candidate,
+                                      : candidate
                                   ),
                                 }))
                               }
@@ -458,14 +500,14 @@ export function ActScienceQuestionBuilderPane({
                             <input
                               id={`act-option-image-url-${question.id}-${option.id}`}
                               type="url"
-                              value={option.imageUrl ?? ''}
+                              value={option.imageUrl ?? ""}
                               onChange={(event) =>
                                 updateQuestion(blockIndex, questionIndex, (current) => ({
                                   ...current,
                                   options: current.options.map((candidate) =>
                                     candidate.id === option.id
                                       ? { ...candidate, imageUrl: event.target.value }
-                                      : candidate,
+                                      : candidate
                                   ),
                                 }))
                               }
@@ -493,4 +535,3 @@ export function ActScienceQuestionBuilderPane({
     </div>
   );
 }
-

@@ -38,6 +38,7 @@ import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
 import { TableCompletionSlotCell } from "./TableCompletionSlotCell";
 import { emitAnswerMutationDebugLog } from "./answerMutationDebug";
 import { getMultiSelectSelectionLimit } from "../../utils/multiSelectMcq";
+import { getMcqOptionLabel } from "../../utils/mcqOptionLabel";
 
 /** Roman labels for matching headings; index = heading index. */
 const HEADING_ROMAN_LABELS = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"] as const;
@@ -348,11 +349,7 @@ export function QuestionRenderer({
           onValueChange={(value) => commitAnswerChange(value)}
           compact={selectSheetPresentation}
           className={
-            isCompactPane
-              ? "w-full min-w-0 max-w-full"
-              : tabletMode
-                ? "max-w-full"
-                : "max-w-xs"
+            isCompactPane ? "w-full min-w-0 max-w-full" : tabletMode ? "max-w-full" : "max-w-xs"
           }
         />
       </div>
@@ -553,7 +550,7 @@ export function QuestionRenderer({
         ) : null}
         <div className={`${fieldIndentClass} space-y-3`}>
           {options.map((option, index) => {
-            const letter = String.fromCharCode(65 + index);
+            const letter = getMcqOptionLabel(option, index);
             const isEliminated = eliminatedOptionIds.includes(option.id);
             // ACT Science choice-level figure (MCQOption.imageUrl). Drive-tolerant;
             // unsafe schemes resolve to [] so nothing mounts for that option.
@@ -569,7 +566,9 @@ export function QuestionRenderer({
                       : "border-gray-200 hover:border-blue-300"
                 }`}
               >
-                <label className={`flex min-w-0 flex-1 items-start gap-3 ${isEliminated ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                <label
+                  className={`flex min-w-0 flex-1 items-start gap-3 ${isEliminated ? "cursor-not-allowed" : "cursor-pointer"}`}
+                >
                   <input
                     type="radio"
                     name={inputGroupName}
@@ -579,43 +578,47 @@ export function QuestionRenderer({
                     className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus-visible:ring-blue-500"
                   />
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
-                    <div className={`relative flex min-w-0 gap-2 ${isEliminated ? "text-gray-500" : ""}`}>
-                    <StudentQuestionText
-                      as="span"
-                      className={isEliminated ? "font-bold text-gray-500" : "font-bold text-gray-700"}
-                      text={`${letter}.`}
-                      highlightEnabled={highlightEnabled}
-                      highlightColor={highlightColor}
-                      highlightSurfaceId={getHighlightSurfaceId(
-                        `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
-                        "option-letter"
-                      )}
-                    />
-                    <StudentQuestionText
-                      as="span"
-                      className={isEliminated ? "text-gray-500" : "text-gray-800"}
-                      text={option.text}
-                      highlightEnabled={highlightEnabled}
-                      highlightColor={highlightColor}
-                      highlightSurfaceId={getHighlightSurfaceId(
-                        `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
-                        "option-text"
-                      )}
-                    />
-                    {isEliminated ? (
-                      <>
-                        <span
-                          aria-hidden="true"
-                          data-testid="choice-elimination-mark"
-                          className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 -rotate-6 bg-gray-500/80"
-                        />
-                        <span
-                          aria-hidden="true"
-                          data-testid="choice-elimination-mark"
-                          className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 rotate-6 bg-gray-500/80"
-                        />
-                      </>
-                    ) : null}
+                    <div
+                      className={`relative flex min-w-0 gap-2 ${isEliminated ? "text-gray-500" : ""}`}
+                    >
+                      <StudentQuestionText
+                        as="span"
+                        className={
+                          isEliminated ? "font-bold text-gray-500" : "font-bold text-gray-700"
+                        }
+                        text={`${letter}.`}
+                        highlightEnabled={highlightEnabled}
+                        highlightColor={highlightColor}
+                        highlightSurfaceId={getHighlightSurfaceId(
+                          `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
+                          "option-letter"
+                        )}
+                      />
+                      <StudentQuestionText
+                        as="span"
+                        className={isEliminated ? "text-gray-500" : "text-gray-800"}
+                        text={option.text}
+                        highlightEnabled={highlightEnabled}
+                        highlightColor={highlightColor}
+                        highlightSurfaceId={getHighlightSurfaceId(
+                          `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
+                          "option-text"
+                        )}
+                      />
+                      {isEliminated ? (
+                        <>
+                          <span
+                            aria-hidden="true"
+                            data-testid="choice-elimination-mark"
+                            className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 -rotate-6 bg-gray-500/80"
+                          />
+                          <span
+                            aria-hidden="true"
+                            data-testid="choice-elimination-mark"
+                            className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 rotate-6 bg-gray-500/80"
+                          />
+                        </>
+                      ) : null}
                     </div>
                     {optionImageSources.length > 0 ? (
                       <StudentZoomableMedia
@@ -714,9 +717,7 @@ export function QuestionRenderer({
                           slotId
                         )}`}
                       >
-                        <StudentQuestionNumber
-                          number={slotNumber}
-                        />
+                        <StudentQuestionNumber number={slotNumber} />
                         <ProtectedInput
                           type="text"
                           name={slotId}
@@ -772,9 +773,7 @@ export function QuestionRenderer({
                           slotId
                         )}`}
                       >
-                        <StudentQuestionNumber
-                          number={slotNumber}
-                        />
+                        <StudentQuestionNumber number={slotNumber} />
                         <ProtectedInput
                           type="text"
                           name={slotId}
@@ -1148,9 +1147,7 @@ export function QuestionRenderer({
                 className={`flex flex-col gap-3 ${isCompactPane ? "" : "md:flex-row md:items-center"}`}
               >
                 <div className="flex items-start gap-3 md:flex-1">
-                  <StudentQuestionNumber
-                    number={slotNumber}
-                  />
+                  <StudentQuestionNumber number={slotNumber} />
                   <StudentQuestionText
                     as="span"
                     className="text-gray-800"
@@ -1178,17 +1175,10 @@ export function QuestionRenderer({
                       label: stripBoldMarkdown(category),
                     }))}
                     onValueChange={(value) =>
-                      updateIndexedAnswer(
-                        index,
-                        value,
-                        classificationBlock.items.length,
-                        slotId
-                      )
+                      updateIndexedAnswer(index, value, classificationBlock.items.length, slotId)
                     }
                     compact={selectSheetPresentation}
-                    className={
-                      isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"
-                    }
+                    className={isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}
                   />
                   {renderFlagButton(slotId)}
                 </div>
@@ -1217,9 +1207,7 @@ export function QuestionRenderer({
                 className={`flex flex-col gap-3 ${isCompactPane ? "" : "md:flex-row md:items-center"}`}
               >
                 <div className="flex items-start gap-3 md:flex-1">
-                  <StudentQuestionNumber
-                    number={slotNumber}
-                  />
+                  <StudentQuestionNumber number={slotNumber} />
                   <StudentQuestionText
                     as="span"
                     className="text-gray-800"
@@ -1255,9 +1243,7 @@ export function QuestionRenderer({
                       )
                     }
                     compact={selectSheetPresentation}
-                    className={
-                      isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"
-                    }
+                    className={isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}
                   />
                   {renderFlagButton(slotId)}
                 </div>
