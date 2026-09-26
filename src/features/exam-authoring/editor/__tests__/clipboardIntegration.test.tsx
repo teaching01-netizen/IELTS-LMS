@@ -294,7 +294,12 @@ describe("SAT production composer clipboard integration", () => {
     });
     const images = editor.getJSON().content?.filter((node) => node.type === "image") ?? [];
     expect(images).toHaveLength(2);
-    expect(images.map((node) => node.attrs?.["alt"]).sort()).toEqual(["", "Re-encoded visual"]);
+    const alts = images.map((node) => node.attrs?.["alt"]);
+    // The HTML representation's own description survives untouched...
+    expect(alts).toContain("Re-encoded visual");
+    // ...and the pasted file is described from its name, so no image reaches
+    // the question with an empty alt text that would block publishing.
+    expect(alts.filter((alt) => typeof alt !== "string" || alt.trim() === "")).toEqual([]);
   });
 
   it("does not upload images when the field disables images", async () => {

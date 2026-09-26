@@ -12,11 +12,12 @@ export function formatDate(value: string | null | undefined): string {
 
 export function outcomeLabel(outcomeStatus: string): string {
   switch (outcomeStatus) {
+    case 'scored': return 'Completed · view answers';
     case 'invalidated_proctor': return 'Exam terminated by proctor';
     case 'invalidated_timeout': return 'Exam ended before scoring';
-    case 'pending': return 'Scoring pending';
-    case 'unscored': return 'Not scored';
-    default: return 'Practice';
+    case 'pending':
+    case 'unscored': return 'Completed · view answers';
+    default: return 'Completed · view answers';
   }
 }
 
@@ -24,10 +25,10 @@ function attemptLabel(attempt: SatAttemptRow): string {
   if (attempt.outcomeStatus !== 'unscored') return outcomeLabel(attempt.outcomeStatus);
   switch (attempt.attemptStatus) {
     case 'running': return 'In progress · view answers';
-    case 'submitted': return 'Submitted · scoring pending';
+    case 'submitted': return 'Completed · view answers';
     case 'terminated': return 'Ended by proctor · not scored';
     case 'locked': return 'Ended · not scored';
-    default: return 'Not scored · view saved answers';
+    default: return 'Completed · view answers';
   }
 }
 
@@ -48,28 +49,25 @@ export function cohortCountFor(group: SatExamGroup): number {
   return names.size;
 }
 
-export type ExamRollup = 'pending' | 'ready' | 'invalidated';
+export type ExamRollup = 'ready' | 'invalidated';
 
 export function rollupFor(group: SatExamGroup): ExamRollup {
-  if (group.pending > 0) return 'pending';
-  if (group.scored > 0) return 'ready';
+  if (group.pending + group.scored > 0) return 'ready';
   return 'invalidated';
 }
 
 export function rollupToneFor(rollup: ExamRollup) {
-  if (rollup === 'pending') return satOutcomeTone('pending');
   if (rollup === 'ready') return satOutcomeTone('scored');
   return satOutcomeTone('invalidated_proctor');
 }
 
 export function rollupLabelFor(rollup: ExamRollup): string {
-  if (rollup === 'pending') return 'Scoring pending';
-  if (rollup === 'ready') return outcomeLabel('scored');
+  if (rollup === 'ready') return 'Completed';
   return 'Not scored';
 }
 
 export function aggregateLineFor(group: SatExamGroup): string {
-	return group.total + ' attempts · ' + group.scored + ' scored' + (group.avgScore != null ? ' · avg ' + String(group.avgScore) : '');
+	return group.total + ' attempts · ' + (group.scored + group.pending) + ' completed';
 }
 
 export function recencyLineFor(group: SatExamGroup): string {
@@ -122,7 +120,7 @@ export function SatAccessGroupRow({
       <span className="flex w-full items-center gap-4 py-3">
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold tracking-[-0.012em] text-slate-900">{group.accessLinkName}</span>
-          <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">Version {group.versionNumber} · {group.submittedCount} submitted · {group.scoredCount} scored{state}</span>
+          <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">Version {group.versionNumber} · {group.scoredCount + group.pendingCount} completed{state}</span>
         </span>
         <span className="shrink-0 text-right text-[11px] tabular-nums text-slate-500">{group.attemptCount} students</span>
         <ArrowRight size={15} className="sat-row-chevron shrink-0 text-slate-400 group-hover:text-slate-500" aria-hidden="true" />
@@ -148,14 +146,13 @@ export function SatExamAttemptRow({
     <SatListRow index={Math.min(attemptIndex, 5)} onOpen={() => onOpen(attempt)}>
       <span className="flex w-full items-center gap-4 py-3">
         <span className="min-w-0 flex-1">
-          {/* Density ladder: Results names at 13px + 17px score; Library titles sit at 14px. */}
+          {/* Density ladder: Results names sit at 13px; Library titles sit at 14px. */}
           <span className="block truncate text-[13px] font-semibold tracking-[-0.012em] text-slate-900">{attempt.studentName}</span>
           <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{attempt.studentId} · {attempt.cohortName}</span>
           <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{attempt.examTitle} · Version {attempt.versionNumber} · {formatDate(attempt.submittedAt)}</span>
         </span>
         <span className="shrink-0 text-right">
-          <span className="block text-[17px] font-semibold tabular-nums tracking-[-0.025em] text-slate-900">{attempt.outcomeStatus === 'scored' && attempt.totalScore != null ? attempt.totalScore : '—'}</span>
-          <span className="mt-1.5 flex justify-end"><SatStatusPill tone={satOutcomeTone(attempt.outcomeStatus)}>{attemptLabel(attempt)}</SatStatusPill></span>
+          <span className="flex justify-end"><SatStatusPill tone={satOutcomeTone(attempt.outcomeStatus === 'unscored' && attempt.attemptStatus === 'submitted' ? 'pending' : attempt.outcomeStatus)}>{attemptLabel(attempt)}</SatStatusPill></span>
         </span>
         <ArrowRight size={15} className="sat-row-chevron hidden shrink-0 text-slate-400 group-hover:text-slate-500 sm:block" aria-hidden="true" />
       </span>

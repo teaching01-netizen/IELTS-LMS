@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
-	"sync"
 	"time"
 
 	"example.com/ielts-proctoring/internal/attempts"
@@ -341,10 +340,9 @@ func (s *Service) ReconcileTimeouts(ctx context.Context, asOf time.Time, batchSi
 	if err != nil {
 		return 0, err
 	}
-	type candidate struct{ attemptID, scheduleID string }
-	var candidates []candidate
+	var candidates []timeoutCandidate
 	for rows.Next() {
-		var c candidate
+		var c timeoutCandidate
 		if err := rows.Scan(&c.attemptID, &c.scheduleID); err != nil {
 			rows.Close()
 			return 0, err
@@ -356,21 +354,49 @@ func (s *Service) ReconcileTimeouts(ctx context.Context, asOf time.Time, batchSi
 		return 0, err
 	}
 	rows.Close()
+	return reconcileTimeoutCandidateBatch(ctx, candidates, asOf, s.ReconcileAttemptTimeout)
+}
+
+const personalTimeoutSweepLimit = 2500
+
+type timeoutCandidate struct {
+	moduleID, attemptID, scheduleID string
+}
+
+func reconcileTimeoutCandidateBatch(
+	ctx context.Context,
+	candidates []timeoutCandidate,
+	asOf time.Time,
+	reconcile func(context.Context, string, string, time.Time) (bool, error),
+) (int64, error) {
 	var changed int64
+	var firstErr error
 	for _, c := range candidates {
-		ok, err := s.ReconcileAttemptTimeout(ctx, c.scheduleID, c.attemptID, asOf.UTC())
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return changed, err
+		}
+		ok, err := reconcile(ctx, c.scheduleID, c.attemptID, asOf.UTC())
+		if err != nil {
+			attrs := []any{
+				slog.String("attempt_id", c.attemptID),
+				slog.String("schedule_id", c.scheduleID),
+				slog.Any("error", err),
+			}
+			if c.moduleID != "" {
+				attrs = append(attrs, slog.String("module_id", c.moduleID))
+			}
+			slog.ErrorContext(ctx, "attempt timeout reconciliation failed; continuing batch", attrs...)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		if ok {
 			changed++
 		}
 	}
-	return changed, nil
+	return changed, firstErr
 }
-
-const personalTimeoutSweepLimit = 2500
-const personalTimeoutWorkers = 8
 
 // ReconcilePersonalTimeouts is the short-cadence worker lane for synchronized
 // personal deadlines. The general repair sweep can remain on its slower
@@ -388,7 +414,6 @@ func (s *Service) ReconcilePersonalTimeouts(ctx context.Context, asOf time.Time,
 // transaction. Keyset paging prevents the same save-grace row from occupying
 // every batch of a synchronized transition.
 func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time.Time, batchSize int64) (int64, int64, error) {
-	type candidate struct{ moduleID, attemptID, scheduleID string }
 	pageSize := batchSize
 	if pageSize > 250 {
 		pageSize = 250
@@ -396,7 +421,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 	if pageSize < 1 {
 		pageSize = 250
 	}
-	var candidates []candidate
+	var candidates []timeoutCandidate
 	cursor := ""
 	// A SAT module remains writable for the three-second save grace. Scanning
 	// before that boundary only locks thousands of attempts that cannot yet
@@ -426,7 +451,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 		}
 		count := 0
 		for rows.Next() {
-			var c candidate
+			var c timeoutCandidate
 			if err := rows.Scan(&c.moduleID, &c.attemptID, &c.scheduleID); err != nil {
 				rows.Close()
 				return 0, 0, err
@@ -468,7 +493,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			return 0, 0, berr
 		}
 		for brows.Next() {
-			var c candidate
+			var c timeoutCandidate
 			if err := brows.Scan(&c.moduleID, &c.attemptID, &c.scheduleID); err != nil {
 				brows.Close()
 				return 0, 0, err
@@ -491,37 +516,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 	if len(candidates) == 0 {
 		return 0, 0, nil
 	}
-	jobs := make(chan candidate)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var changed int64
-	var firstErr error
-	workers := personalTimeoutWorkers
-	if workers > len(candidates) {
-		workers = len(candidates)
-	}
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for c := range jobs {
-				ok, err := s.ReconcileAttemptTimeout(ctx, c.scheduleID, c.attemptID, asOf.UTC())
-				mu.Lock()
-				if ok {
-					changed++
-				}
-				if err != nil && firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
-			}
-		}()
-	}
-	for _, c := range candidates {
-		jobs <- c
-	}
-	close(jobs)
-	wg.Wait()
+	changed, firstErr := reconcileTimeoutCandidateBatch(ctx, candidates, asOf, s.ReconcileAttemptTimeout)
 	return int64(len(candidates)), changed, firstErr
 }
 

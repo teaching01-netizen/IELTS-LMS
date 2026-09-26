@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { SAT_TIMER_AUTO_REVEAL_SECONDS, shouldAutoRevealTimer } from "../domain/satTiming";
 import type { StructuredContent } from "../../exam-authoring/api/assessmentContracts";
 import type { SatQuestionNavigationItem } from "../domain/satSelectors";
@@ -130,6 +130,19 @@ export interface SatExamShellProps {
   /** When true the More utility center (button + menu + its shortcuts) is enabled. Defaults to false (excluded for now). */
   moreAvailable?: boolean | undefined;
   onReadingPreferencesChange: (preferences: SatReadingPreferences) => void;
+  /**
+   * The Notes column the student left open in THIS module attempt, on return
+   * (recovery). One-way seed: the shell opens the column through its normal
+   * guarded intent, so a stored flag can never force a pane open where the
+   * policy has no notes or the exam is blocked.
+   */
+  initialNotesColumnOpen?: boolean | undefined;
+  /**
+   * Reports the column's own state, after the student changed it. Never fired
+   * for the mount value: the attempt already holds that, and reporting it back
+   * would erase a flag a refused restore could not honor.
+   */
+  onNotesColumnOpenChange?: ((open: boolean) => void) | undefined;
   onRetrySave?: () => void;
   onTakeOver?: (() => void) | undefined;
   isTakingOver?: boolean | undefined;
@@ -298,6 +311,54 @@ export function SatExamShell(props: SatExamShellProps) {
    * the notes state keeps the disclosure's expanded state honest in both cases.
    */
   const notesColumnOpen = satNotesColumnOpen(surface.notesState);
+  /**
+   * Restore the column a recovered sitting left open.
+   *
+   * A LAYOUT effect, not a passive one: the restored pane has to be on screen in
+   * the first painted frame — the same standard the automatic zoom fit holds —
+   * or the student watches the exam reflow one frame after it appears. The open
+   * request goes through the normal intent, so the guards still decide: a
+   * section whose policy has no notes, or a blocked exam, refuses the stored
+   * flag exactly as it refuses a press.
+   *
+   * Once per module attempt. Turning to another question closes the column (the
+   * app's chrome rule) and must not reopen it; a new module attempt mounts its
+   * own shell and finds its own record.
+   */
+  const restoredNotesForRef = useRef<string | null>(null);
+  /** True while the restore we asked for has not shown up on screen yet. */
+  const notesRestorePendingRef = useRef(false);
+  const notesRestoreKey = props.moduleIdentity ?? '';
+  const restoreNotesColumn = props.initialNotesColumnOpen === true;
+  const onNotesColumnOpenChange = props.onNotesColumnOpenChange;
+  const openNotes = surface.openNotes;
+  useLayoutEffect(() => {
+    if (!restoreNotesColumn) return;
+    if (restoredNotesForRef.current === notesRestoreKey) return;
+    restoredNotesForRef.current = notesRestoreKey;
+    notesRestorePendingRef.current = true;
+    openNotes();
+  }, [notesRestoreKey, openNotes, restoreNotesColumn]);
+  /**
+   * Report the student's own open/close — never the mount value, and never our
+   * own restore landing in the commit after mount.
+   *
+   * What is deliberately NOT reported: a refused restore. Its observed value is
+   * "closed" only because the exam is blocked or has no notes right now; writing
+   * that back would erase the pane the student left for a reason that has
+   * nothing to do with them, and the next load would not bring it back.
+   */
+  const notesSeenRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const previous = notesSeenRef.current;
+    notesSeenRef.current = notesColumnOpen;
+    // The restore can land before or after this effect's first run, so it is
+    // consumed by VALUE (the value we asked for), not by run order.
+    const restoring = notesRestorePendingRef.current && notesColumnOpen;
+    if (restoring) notesRestorePendingRef.current = false;
+    if (previous === null || restoring || previous === notesColumnOpen) return;
+    onNotesColumnOpenChange?.(notesColumnOpen);
+  }, [notesColumnOpen, onNotesColumnOpenChange]);
   const notesCount = satNotesCount(questionNotes, props.questionNote);
   /**
    * The disclosure's one job: show or hide the column.

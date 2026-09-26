@@ -100,6 +100,16 @@ func TestValidateForRuntime(t *testing.T) {
 	prod := good
 	prod.Environment = "production"
 	prod.AuthSecret = ""
+	prod.ObjectStorageLocalRoot = "./.data/object-store"
+	if err := prod.ValidateForRuntime(); err == nil {
+		t.Fatal("expected production persistent-path requirement")
+	}
+	prod.AuthSecret = "test-only-auth-secret-32-chars-min!!"
+	if err := prod.ValidateForRuntime(); err == nil {
+		t.Fatal("relative object storage path must fail in production")
+	}
+	prod.AuthSecret = ""
+	prod.ObjectStorageLocalRoot = "/data/object-store"
 	if err := prod.ValidateForRuntime(); err == nil {
 		t.Fatal("expected production AUTH_SECRET requirement")
 	}

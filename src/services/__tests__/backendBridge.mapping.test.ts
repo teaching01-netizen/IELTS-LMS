@@ -187,6 +187,32 @@ describe('backendBridge contract mappings', () => {
     expect(failure).toMatchObject({ code: 'CONFLICT', message: 'Conflict' });
   });
 
+  it('forwards envelope error details so publish diagnostics survive the bridge', async () => {
+    // The SAT media gate answers with details.issues[].path; the publish dialog
+    // can only name the question to repair if the bridge hands the payload on.
+    get.mockResolvedValueOnce({
+      data: {
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'SAT publish requirements are not met',
+          details: {
+            code: 'sat.media.unavailable',
+            path: 'examQuestion:q-17:prompt.nodes[1].attrs.assetId',
+          },
+        },
+      },
+    });
+
+    const failure = await backendGet('/v1/exam/publish').catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).details).toEqual({
+      code: 'sat.media.unavailable',
+      path: 'examQuestion:q-17:prompt.nodes[1].attrs.assetId',
+    });
+  });
+
   it('hasBackendStatusCode matches ApiError by status', () => {
     const error = new ApiError({ code: 'NOT_FOUND', message: 'missing', status: 404 });
     expect(hasBackendStatusCode(error, 404)).toBe(true);

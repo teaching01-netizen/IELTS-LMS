@@ -18,6 +18,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/objectstore"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
@@ -29,6 +30,8 @@ type fakeStore struct {
 	getBody        []byte
 	getErr         error
 	putErr         error
+	statErrors     map[string]error
+	statCalls      []string
 }
 
 type fakeRemoteFetcher struct {
@@ -66,11 +69,12 @@ func (f *fakeStore) Get(_ context.Context, _ string) ([]byte, error) {
 	return f.getBody, nil
 }
 
-func (f *fakeStore) Delete(_ context.Context, _ string) error { return nil }
-
-func (f *fakeStore) PresignedGet(_ context.Context, key string) (string, error) {
-	return "https://objects.example/" + key, nil
+func (f *fakeStore) Stat(_ context.Context, key string) error {
+	f.statCalls = append(f.statCalls, key)
+	return f.statErrors[key]
 }
+
+func (f *fakeStore) Delete(_ context.Context, _ string) error { return nil }
 
 func codeOf(err error) apperrors.Code {
 	if e, ok := apperrors.As(err); ok {
@@ -292,6 +296,60 @@ func TestCreateUploadRejectsNonImageContentType(t *testing.T) {
 	s, _ := svcWith(db, store)
 	if _, err := s.CreateUpload(context.Background(), CreateRequest{OwnerKind: "assessment_question", OwnerID: "q-1", ContentType: "application/octet-stream", FileName: "evil.bin"}); codeOf(err) != apperrors.CodeValidation {
 		t.Fatalf("expected VALIDATION_ERROR on octet-stream, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifyRenderableAssetsDeduplicatesAndChecksFinalizedBytes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := &fakeStore{}
+	svc := NewService(db, tx.NewRunner(db), store)
+	mock.ExpectQuery(`SELECT id, upload_status, content_type, object_key FROM media_assets WHERE id IN \(\?,\?\)`).
+		WithArgs("ready-1", "pending-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "upload_status", "content_type", "object_key"}).
+			AddRow("ready-1", StatusFinalized, "image/png", "media/ready-1.png").
+			AddRow("pending-1", StatusPending, "image/png", "media/pending-1.png"))
+
+	issues, err := svc.VerifyRenderableAssets(context.Background(), []string{"ready-1", "ready-1", "pending-1"})
+	if err != nil {
+		t.Fatalf("VerifyRenderableAssets() error = %v", err)
+	}
+	if len(issues) != 1 || issues[0].AssetID != "pending-1" || issues[0].Reason != "not_finalized" {
+		t.Fatalf("issues = %+v, want only the pending asset", issues)
+	}
+	if len(store.statCalls) != 1 || store.statCalls[0] != "media/ready-1.png" {
+		t.Fatalf("Stat calls = %v, want one check for the unique finalized object", store.statCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifyRenderableAssetsRejectsMissingUnderlyingObject(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := objectstore.NewLocalStore(t.TempDir())
+	svc := NewService(db, tx.NewRunner(db), store)
+	mock.ExpectQuery(`SELECT id, upload_status, content_type, object_key FROM media_assets WHERE id IN \(\?\)`).
+		WithArgs("missing-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "upload_status", "content_type", "object_key"}).
+			AddRow("missing-1", StatusFinalized, "image/png", "media/missing.png"))
+
+	issues, err := svc.VerifyRenderableAssets(context.Background(), []string{"missing-1"})
+	if err != nil {
+		t.Fatalf("VerifyRenderableAssets() error = %v", err)
+	}
+	if len(issues) != 1 || issues[0].StorageErrorClass != "missing" {
+		t.Fatalf("issues = %+v, want missing object diagnostic", issues)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

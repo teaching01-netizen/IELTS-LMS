@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, LoaderCircle, Rocket } from "lucide-react";
-import type { AssessmentAuthoringShell, SatPublishScope } from "../../contracts/assessment";
+import type {
+  AssessmentAuthoringShell,
+  AssessmentValidationIssue,
+  SatPublishScope,
+} from "../../contracts/assessment";
 import {
   MAX_PUBLISH_NOTES_LENGTH,
   candidateSecondsForSection,
   formatDuration,
   normalizePublishNotes,
+  publishMediaIssueDiagnostic,
   toUserFacingPublishError,
 } from "./releaseSelectors";
 import { releaseDisabledButtonClass } from "./releaseUi";
@@ -21,10 +26,14 @@ interface PublishAssessmentDialogProps {
   publishScope: SatPublishScope;
   candidateEstimateStale: boolean;
   isPublishing: boolean;
+  /** The draft read that Publish must trust is still in flight. */
+  draftBusy?: boolean;
   isUpdate: boolean;
   currentPublishedVersionNumber: number | null;
   onClose: () => void;
   onConfirm: (scope: SatPublishScope, publishNotes?: string) => Promise<void>;
+  /** Opens the question a failing publish check named (media gate 422). */
+  onOpenIssue?: ((issue: AssessmentValidationIssue) => void) | undefined;
 }
 
 export function PublishAssessmentDialog({
@@ -36,32 +45,44 @@ export function PublishAssessmentDialog({
   publishScope,
   candidateEstimateStale,
   isPublishing,
+  draftBusy = false,
   isUpdate,
   currentPublishedVersionNumber,
   onClose,
   onConfirm,
+  onOpenIssue,
 }: PublishAssessmentDialogProps) {
   const [notes, setNotes] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const [issueTarget, setIssueTarget] = useState<AssessmentValidationIssue | null>(null);
   const submittingRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
       setNotes("");
       setLocalError(null);
+      setIssueTarget(null);
       submittingRef.current = false;
     }
   }, [open ]);
 
   const submit = async () => {
-    if (blockerCount > 0 || isPublishing || submittingRef.current) return;
+    // One in-flight publish per dialog: the ref covers a double click before a
+    // re-render, the props cover the same state arriving from the parent.
+    if (blockerCount > 0 || isPublishing || draftBusy || submittingRef.current) return;
     submittingRef.current = true;
     setLocalError(null);
+    setIssueTarget(null);
     try {
       await onConfirm(publishScope, normalizePublishNotes(notes));
       onClose();
     } catch (error) {
-      setLocalError(toUserFacingPublishError(error));
+      // A 422 media rejection names the question holding the missing object.
+      // Showing it as an action (not a retry) is the only way the author can
+      // fix it; a retry would send the identical, still-invalid draft.
+      const diagnostic = publishMediaIssueDiagnostic(error);
+      setLocalError(diagnostic?.message ?? toUserFacingPublishError(error));
+      setIssueTarget(diagnostic?.issue ?? null);
     } finally {
       submittingRef.current = false;
     }
@@ -167,9 +188,24 @@ export function PublishAssessmentDialog({
           />
 
         {localError ? (
-          <p role="alert" className="mt-3 rounded-xl bg-destructive/10 p-3 text-xs leading-5 text-destructive">
-            {localError}
-          </p>
+          <div
+            role="alert"
+            className="mt-3 rounded-xl bg-destructive/10 p-3 text-xs leading-5 text-destructive"
+          >
+            <p data-publish-error>{localError}</p>
+            {issueTarget && onOpenIssue ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenIssue(issueTarget);
+                }}
+                className="mt-2 font-semibold underline underline-offset-2"
+              >
+                Open this question
+              </button>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -185,7 +221,7 @@ export function PublishAssessmentDialog({
           <button
             type="button"
             onClick={() => void submit()}
-            disabled={blockerCount > 0 || isPublishing}
+            disabled={blockerCount > 0 || isPublishing || draftBusy}
             className={`flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${releaseDisabledButtonClass}`}
           >
             {isPublishing ? (

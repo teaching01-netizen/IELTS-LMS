@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AdminResultRow,
@@ -74,6 +75,30 @@ const actResult: AdminResultRow = {
   submittedAt: "2026-09-02T08:00:00Z",
 };
 
+const satResult: AdminResultRow = {
+  id: "result-sat",
+  submissionId: null,
+  attemptId: "attempt-sat",
+  providerKey: "sat",
+  outcomeStatus: "pending",
+  releaseStatus: "pending",
+  totalScore: 1380,
+  maxScore: 1600,
+  percentage: null,
+  overallBand: null,
+  sectionBands: null,
+  studentId: "SAT-001",
+  studentName: "Cleo SAT",
+  studentEmail: "cleo@example.com",
+  scheduleId: "schedule-sat",
+  examId: "exam-sat",
+  examTitle: "Digital SAT Practice",
+  cohortName: "Cohort C",
+  institution: "Test School",
+  versionNumber: 1,
+  submittedAt: "2026-09-03T08:00:00Z",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.useActScienceDetailQuery.mockReturnValue({ data: undefined, isLoading: false, error: null });
@@ -103,6 +128,29 @@ beforeEach(() => {
 });
 
 describe("AdminResults", () => {
+  it("shows SAT completion and saved answers without rendering scaled scores", () => {
+    mocks.useAdminResultsQuery.mockReturnValue({
+      data: [satResult],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
+
+    const row = screen.getByText("Cleo SAT").closest("tr");
+    expect(row).toHaveTextContent("Completed · view answers");
+    expect(row).not.toHaveTextContent("1380");
+
+    fireEvent.click(screen.getByRole("button", { name: "View Report" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Completed · view answers");
+    expect(within(dialog).getByRole("link", { name: "View saved answers" })).toHaveAttribute(
+      "href",
+      "/sat/results/attempts/attempt-sat",
+    );
+    expect(dialog).not.toHaveTextContent("1380");
+  });
+
   it("renders provider-backed IELTS and ACT results and opens the real report", () => {
     render(<AdminResults />);
 

@@ -217,7 +217,7 @@ func init() {
 		"PUT /uploads/{assetID}":           {MinRoles: mediaWrite},
 		"POST /uploads/{assetID}/complete": {MinRoles: mediaWrite},
 		"GET /assets/{assetID}":            {MinRoles: AllRoles},
-		"GET /{assetID}/content":           {MinRoles: AllRoles},
+		"GET /{assetID}/content":           {Bearer: true, Scope: ScopeAttemptOwner},
 		"GET /{assetID}":                   {MinRoles: AllRoles},
 		// answer-history.
 		"GET /submissions/{submissionID}/overview":           {MinRoles: resultsRead},

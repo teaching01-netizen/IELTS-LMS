@@ -38,6 +38,8 @@ import {
   clearCalculatorWorkspacesForAttempt,
 } from "../infrastructure/satCalculatorWorkspace";
 import { clearSatReadingPreferences } from "../infrastructure/satReadingPreferencesStore";
+import { clearSatEliminatorArms } from "../infrastructure/satEliminatorArmStore";
+import { clearSatNotesColumn } from "../infrastructure/satNotesColumnStore";
 import { createSatRunnerState, satRunnerReducer } from "../application/satRunnerReducer";
 // SAT-005/007: commit-to-phase routing and conflict policy live in application/
 // (pure); the hook only wires them to state and the gateway.
@@ -439,7 +441,10 @@ export function useSatExamController({
           const needsSections = state.attempt.moduleAttempts.some((item) => !known.has(item.moduleId));
           payload = needsSections
             ? await satDeliveryGateway.bootstrap(scheduleId, attemptId)
-            : { ...state, sections: current.sections };
+            : {
+                ...state,
+                sections: current.sections,
+              };
         } else {
           payload = await satDeliveryGateway.bootstrap(scheduleId, attemptId);
         }
@@ -658,6 +663,24 @@ export function useSatExamController({
     startModuleFrom(data, activeModule);
   }, [data, startModuleFrom, state.phase]);
 
+  /**
+   * Everything this attempt kept on THIS device, released when the attempt
+   * ends: reading preferences (which carry its automatic zoom decision and the
+   * display choices that go with them), cached calculator workspaces, the
+   * questions whose eliminator was left open, and the Notes column's open pane.
+   *
+   * One helper, because the end of an attempt arrives down more than one path
+   * (termination, a committed result, a successful finalization retry) and a
+   * client-side record that only some of them release is a record that comes
+   * back on the one that did not.
+   */
+  const clearAttemptClientState = useCallback(() => {
+    clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
+    clearSatReadingPreferences(scheduleId, attemptId);
+    clearSatEliminatorArms(scheduleId, attemptId);
+    clearSatNotesColumn(scheduleId, attemptId);
+  }, [attemptId, scheduleId]);
+
   useEffect(() => {
     if (!data) return;
     const terminalWithoutResult =
@@ -665,8 +688,8 @@ export function useSatExamController({
       data.scheduleRuntimeStatus === "completed" ||
       data.scheduleRuntimeStatus === "cancelled";
     if (!terminalWithoutResult) return;
-    clearSatReadingPreferences(scheduleId, attemptId);
-  }, [attemptId, data, scheduleId]);
+    clearAttemptClientState();
+  }, [clearAttemptClientState, data]);
 
   // Phase 04: terminal-result commit path. Poll commits carrying `result`
   // recover to complete synchronously; this effect stays as the safety net
@@ -676,8 +699,7 @@ export function useSatExamController({
     const key = `terminal:${data.versionId}:${data.result.id}`;
     if (reconcileGuardKeyRef.current === key) return;
     reconcileGuardKeyRef.current = key;
-    clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
-    clearSatReadingPreferences(scheduleId, attemptId);
+    clearAttemptClientState();
     setResult(data.result);
     dispatch({
       type: "recover",
@@ -689,7 +711,7 @@ export function useSatExamController({
         resultId: data.result.id,
       },
     });
-  }, [attemptId, data, scheduleId, state.phase]);
+  }, [clearAttemptClientState, data, scheduleId, state.phase]);
 
   const runtimeTiming = useMemo<AssessmentTimingSnapshot | null>(() => {
     if (!data || !runtimeSnapshot) return null;
@@ -1081,8 +1103,7 @@ export function useSatExamController({
     try {
       const finalResult = await finalizeAssessment(generation, data?.versionId ?? "");
       if (!finalResult || identityGenerationRef.current !== generation) return;
-      clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
-      clearSatReadingPreferences(scheduleId, attemptId);
+      clearAttemptClientState();
     } catch (retryError) {
       if (identityGenerationRef.current !== generation) return;
       // A bootstrap that already carries the result rescues without error.
@@ -1094,7 +1115,7 @@ export function useSatExamController({
     } finally {
       if (identityGenerationRef.current === generation) setIsSubmitting(false);
     }
-  }, [attemptId, data?.versionId, finalizeAssessment, isSubmitting, recoveryNeedsRetry, refresh, scheduleId, state.phase]);
+  }, [attemptId, clearAttemptClientState, data?.versionId, finalizeAssessment, isSubmitting, recoveryNeedsRetry, refresh, scheduleId, state.phase]);
 
   // Identity lookup, never a key lookup: the module the runner is sitting is
   // the id the server selected (route decision -> module attempt -> bootstrap).

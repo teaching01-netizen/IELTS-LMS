@@ -97,9 +97,8 @@ func TestV2SubmitLegacyNullProviderKeySeals(t *testing.T) {
 	}
 }
 
-// The same path with a SAT exam row must park the provisional claim instead of
-// sealing — the branch decision follows the resolver, not the caller.
-func TestV2SubmitSATTakesProvisionalFromResolver(t *testing.T) {
+// The same path with a SAT exam row keeps its module gate and then seals.
+func TestV2SubmitSATSealsAfterTopologyGate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -119,13 +118,18 @@ func TestV2SubmitSATTakesProvisionalFromResolver(t *testing.T) {
 	mock.ExpectQuery("SELECT active_client_session_id").
 		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
-	mock.ExpectQuery("FROM attempt_responses_v2").
-		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
 	mock.ExpectQuery("SELECT l.enabled_sections FROM assessment_access_links").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("FROM assessment_module_attempts").
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "state"}).
 			AddRow("reading-writing", "submitted").AddRow("math", "locked"))
-	mock.ExpectExec("delivery_status='submitted', phase='post-exam'").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("FROM attempt_responses_v2").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
+	mock.ExpectQuery("FROM attempt_terminalizations").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT answer_revision, revision, organization_id FROM student_attempts").
+		WillReturnRows(sqlmock.NewRows([]string{"answer_revision", "revision", "organization_id"}).AddRow(0, 5, nil))
+	mock.ExpectExec("INSERT INTO attempt_terminalizations").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE student_attempts SET phase = 'post-exam'").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE student_attempts SET response_revision=").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO attempt_submissions_v2").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -134,10 +138,10 @@ func TestV2SubmitSATTakesProvisionalFromResolver(t *testing.T) {
 		attempts.SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, SubmissionID: "sub-sat"},
 		nil, nil, v2ProviderResolver{}, terminalSealer{outboxExecOnly: true})
 	if err != nil {
-		t.Fatalf("SAT submit must take the provisional path, got %v", err)
+		t.Fatalf("SAT submit must seal after its topology check, got %v", err)
 	}
-	if !res.Provisional {
-		t.Fatalf("SAT submit must be provisional, got %+v", res)
+	if res.Provisional {
+		t.Fatalf("SAT submit must return a terminal receipt, got %+v", res)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

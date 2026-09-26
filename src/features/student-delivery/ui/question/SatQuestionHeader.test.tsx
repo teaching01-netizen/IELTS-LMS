@@ -29,18 +29,45 @@ describe("SatQuestionHeader question semantics", () => {
 });
 
 describe("SatQuestionHeader eliminator (Phase 6e endgame)", () => {
-  it("carries a visible static label in both states", () => {
+  it("renders the compact ABC cut icon at the far right of the header", () => {
     const { unmount } = renderHeader(false);
-    // Bluebook parity (Phase 6): ABC strikethrough + Option Eliminator.
-    expect(screen.getByRole("button", { name: "Turn on cross-out mode" })).toHaveTextContent(
-      "Option Eliminator"
-    );
+    const closed = screen.getByRole("button", { name: "Turn on cross-out mode" });
+    // The glyph is drawn here (letters + diagonal strike), not a generic icon.
+    const glyph = closed.querySelector('[data-sat-eliminator-glyph="true"]');
+    expect(glyph).not.toBeNull();
+    expect(glyph).toHaveTextContent("ABC");
+    // Visual box ~36px inside a 44px hit target, pushed to the header's edge.
+    expect(closed.className).toContain("sat-touch-target");
+    expect(closed.className).toContain("h-11");
+    expect(closed.className).toContain("w-11");
+    expect(closed.className).toContain("ml-auto");
+    expect(glyph!.className).toContain("h-9");
+    expect(glyph!.className).toContain("w-9");
+    // The old text treatment is gone.
+    expect(closed).not.toHaveTextContent("Option Eliminator");
     unmount();
     renderHeader(true);
-    // Static label: state lives in fill + aria-pressed, never label text.
-    expect(screen.getByRole("button", { name: "Turn off cross-out mode" })).toHaveTextContent(
-      "Option Eliminator"
-    );
+    // Same control, same name shape; only the state changed.
+    expect(
+      screen.getByRole("button", { name: "Turn off cross-out mode" }).querySelector(
+        '[data-sat-eliminator-glyph="true"]'
+      )
+    ).not.toBeNull();
+  });
+
+  it("inverts the glyph ink between the outline and SAT blue treatments", () => {
+    const { unmount } = renderHeader(false);
+    const closed = screen.getByRole("button", { name: "Turn on cross-out mode" });
+    // Closed: light surface with a dark-blue outline.
+    expect(closed.innerHTML).toContain("var(--sat-accent-strong)");
+    expect(closed.innerHTML).toContain("bg-[var(--sat-surface)]");
+    expect(closed.innerHTML).not.toContain("bg-[var(--sat-accent)]");
+    unmount();
+    renderHeader(true);
+    const open = screen.getByRole("button", { name: "Turn off cross-out mode" });
+    // Open: the filled SAT blue treatment.
+    expect(open.innerHTML).toContain("bg-[var(--sat-accent)]");
+    expect(open.innerHTML).toContain("var(--sat-accent-text)");
   });
 
   it("uses Bluebook mark vocabulary", () => {
@@ -94,12 +121,12 @@ describe("SatQuestionHeader eliminator (Phase 6e endgame)", () => {
     );
   });
 
-  it("tokenizes the eliminator static ABC-strikethrough label with fill + aria-pressed state", () => {
+  it("carries state in aria-pressed and a title, never in the accessible name's identity", () => {
     const { unmount } = renderHeader(true);
     const toggle = screen.getByRole("button", { name: "Turn off cross-out mode" });
     expect(toggle).toHaveAttribute("aria-pressed", "true");
-    expect(toggle.innerHTML).toContain("var(--sat-accent");
-    expect(toggle).toHaveTextContent("Option Eliminator");
+    expect(toggle).toHaveAttribute("title", "Turn off cross-out mode");
+    expect(toggle).toHaveAttribute("data-sat-eliminator-toggle", "true");
     unmount();
     renderHeader(false);
     expect(screen.getByRole("button", { name: "Turn on cross-out mode" })).toHaveAttribute(

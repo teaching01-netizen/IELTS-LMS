@@ -9,9 +9,8 @@ import (
 	"strings"
 )
 
-// LocalStore is the durable single-node object store used when no external
-// S3-compatible service is configured. Objects are published with an atomic
-// rename so a reader can never observe a partially written upload.
+// LocalStore is the filesystem-backed object store. Objects are published
+// with an atomic rename so readers never observe a partial upload.
 type LocalStore struct {
 	root string
 }
@@ -26,7 +25,10 @@ func NewLocalStore(root string) *LocalStore {
 	return &LocalStore{root: filepath.Clean(root)}
 }
 
-func (s *LocalStore) Put(_ context.Context, key string, body []byte, _ string) error {
+func (s *LocalStore) Put(ctx context.Context, key string, body []byte, _ string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	path, err := s.path(key)
 	if err != nil {
 		return err
@@ -61,7 +63,10 @@ func (s *LocalStore) Put(_ context.Context, key string, body []byte, _ string) e
 	return nil
 }
 
-func (s *LocalStore) Get(_ context.Context, key string) ([]byte, error) {
+func (s *LocalStore) Get(ctx context.Context, key string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	path, err := s.path(key)
 	if err != nil {
 		return nil, err
@@ -69,7 +74,65 @@ func (s *LocalStore) Get(_ context.Context, key string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func (s *LocalStore) Delete(_ context.Context, key string) error {
+func (s *LocalStore) Stat(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := s.path(key)
+	if err != nil {
+		return err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("object is not a regular file")
+	}
+	return nil
+}
+
+func (s *LocalStore) Check(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if filepath.IsAbs(s.root) {
+		info, err := os.Stat(s.root)
+		if err != nil {
+			return fmt.Errorf("configured object storage root is unavailable: %w", err)
+		}
+		if !info.IsDir() {
+			return errors.New("configured object storage root is not a directory")
+		}
+	} else if err := os.MkdirAll(s.root, 0o750); err != nil {
+		return err
+	}
+	probe, err := os.CreateTemp(s.root, ".storage-ready-*")
+	if err != nil {
+		return err
+	}
+	name := probe.Name()
+	defer func() { _ = os.Remove(name) }()
+	if _, err := probe.Write([]byte("ready")); err != nil {
+		_ = probe.Close()
+		return err
+	}
+	if err := probe.Sync(); err != nil {
+		_ = probe.Close()
+		return err
+	}
+	return probe.Close()
+}
+
+func (s *LocalStore) Delete(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	path, err := s.path(key)
 	if err != nil {
 		return err
@@ -78,13 +141,6 @@ func (s *LocalStore) Delete(_ context.Context, key string) error {
 		return err
 	}
 	return nil
-}
-
-// PresignedGet deliberately returns an error: local uploads and downloads
-// must use the authenticated API routes, not an unauthenticated filesystem
-// URL. The media service falls back to those routes on this error.
-func (s *LocalStore) PresignedGet(_ context.Context, _ string) (string, error) {
-	return "", errors.New("presigned URLs are not supported by the local object store")
 }
 
 func (s *LocalStore) path(key string) (string, error) {

@@ -140,7 +140,7 @@ test.describe("SAT automatic resume", () => {
         savedAnswer
       );
       await schedulePage.getByRole("button", { name: "Turn on cross-out mode" }).click();
-      await expect(schedulePage.getByRole("button", { name: "Restore option B" })).toHaveAttribute(
+      await expect(schedulePage.getByRole("button", { name: "Undo option B" })).toHaveAttribute(
         "aria-pressed",
         "true"
       );
@@ -256,7 +256,7 @@ test.describe("SAT automatic resume", () => {
         savedAnswer
       );
       await restartedPage.getByRole("button", { name: "Turn on cross-out mode" }).click();
-      await expect(restartedPage.getByRole("button", { name: "Restore option B" })).toHaveAttribute(
+      await expect(restartedPage.getByRole("button", { name: "Undo option B" })).toHaveAttribute(
         "aria-pressed",
         "true"
       );

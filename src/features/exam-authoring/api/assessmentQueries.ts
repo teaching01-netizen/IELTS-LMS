@@ -179,6 +179,11 @@ export function useAssessmentReleaseReadiness(
 export function usePublishAssessment(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    // Publish is deliberately never retried: a 422 is the media gate's answer
+    // ("this draft is not publishable"), not a transient fault, and replaying
+    // it would hammer the object store for the same rejection. The idempotency
+    // key already covers a genuinely lost response.
+    retry: false,
     mutationFn: async (request: PublishAssessmentRequest) => {
       const publishedVersion = await assessmentAuthoringApi.publishExam(examId, request);
       const releaseState = await assessmentReleaseApi.get(examId);

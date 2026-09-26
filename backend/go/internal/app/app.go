@@ -114,10 +114,11 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 		objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot),
 		media.NewHTTPRemoteImageFetcher(media.RemoteImageFetcherOptions{}),
 	)
+	s.Exams.SetMediaVerifier(s.Media)
 	s.Library = library.NewService(pool, s.Tx)
 	s.AnswerHistory = answerhistory.NewService(pool)
 	s.AccessLinks = accesslinks.NewService(pool, s.Tx)
-	s.SAT = sat.NewService(pool, s.Tx, clock.System{}, nil)
+	s.SAT = sat.NewService(pool, s.Tx, clock.System{}, nil, s.Terminal)
 	s.ACT = act.NewService(pool, s.Tx)
 	s.Terminal.SetAttemptScorer(s.ACT)
 	s.Release = release.NewService(pool)

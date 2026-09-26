@@ -25,6 +25,7 @@ import {
   isSATPublishReadinessValid,
   normalizePublishNotes,
   parseIssueLink,
+  publishMediaIssueDiagnostic,
   secondsToMinutes,
   summarizeStaleReadiness,
   toUserFacingPublishError,
@@ -430,6 +431,70 @@ describe("operationalCountForSection", () => {
       }),
     ).toBe(9);
     expect(operationalCountForSection({ sectionKey: "custom", routingPolicy: null, modules: [] })).toBe(1);
+  });
+});
+
+describe("publishMediaIssueDiagnostic", () => {
+  const mediaPath = "examQuestion:q-17:prompt.nodes[1].attrs.assetId";
+  const mediaIssue = {
+    code: "sat.media.unavailable",
+    path: mediaPath,
+    message: "An image used by this question is missing or unavailable.",
+    assetId: "63a5b1e2-0000-4000-8000-000000000001",
+    storageErrorClass: "missing",
+  };
+
+  it("maps the media gate's 422 payload back to the question to repair", () => {
+    const diagnostic = publishMediaIssueDiagnostic(
+      Object.assign(new Error("SAT publish requirements are not met"), {
+        details: { code: "sat.media.unavailable", path: mediaPath, issues: [mediaIssue] },
+      }),
+    );
+    expect(diagnostic?.message).toBe("Question image is unavailable \u2014 replace this image.");
+    expect(diagnostic?.issue).toMatchObject({
+      code: "sat.media.unavailable",
+      path: mediaPath,
+      blocking: true,
+      examQuestionId: "q-17",
+      field: "asset",
+    });
+  });
+
+  it("finds the media issue among the other reported issues", () => {
+    const diagnostic = publishMediaIssueDiagnostic({
+      details: {
+        issues: [
+          { code: "question.prompt.required", path: "examQuestion:q-1:prompt" },
+          mediaIssue,
+        ],
+      },
+    });
+    expect(diagnostic?.issue?.examQuestionId).toBe("q-17");
+  });
+
+  it("falls back to the top-level path when the payload lists no issues", () => {
+    const diagnostic = publishMediaIssueDiagnostic({
+      details: { code: "sat.media.unavailable", path: mediaPath },
+    });
+    expect(diagnostic?.issue?.examQuestionId).toBe("q-17");
+  });
+
+  it("still names the failure when the path cannot be mapped to a question", () => {
+    const diagnostic = publishMediaIssueDiagnostic({
+      details: { issues: [{ code: "sat.media.unavailable", path: "version.content" }] },
+    });
+    // The copy is the actionable part; without a question there is nowhere to
+    // send the author, so no link is offered rather than a broken one.
+    expect(diagnostic?.message).toBe("Question image is unavailable \u2014 replace this image.");
+    expect(diagnostic?.issue).toBeNull();
+  });
+
+  it("returns null for every other failure so generic copy stays generic", () => {
+    expect(publishMediaIssueDiagnostic(new Error("publish 500"))).toBeNull();
+    expect(publishMediaIssueDiagnostic({ details: { issues: [{ code: "other" }] } })).toBeNull();
+    expect(publishMediaIssueDiagnostic({ details: "not-an-object" })).toBeNull();
+    expect(publishMediaIssueDiagnostic(null)).toBeNull();
+    expect(publishMediaIssueDiagnostic(undefined)).toBeNull();
   });
 });
 

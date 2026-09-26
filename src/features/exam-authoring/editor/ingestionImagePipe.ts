@@ -14,9 +14,10 @@
  * stay inline on the node (retry/remove), never toasts, never block typing.
  *
  * Alt text is captured from the ingestion result when available, trimmed into
- * the transient node, and retained when the upload resolves. Empty alt text is
- * still allowed at staging time; the existing sat.accessibility.alt.required
- * validator blocks publish until the author fills it via the toolbar flow.
+ * the transient node, and retained when the upload resolves. When nothing
+ * usable arrived with the file, the file's own name supplies the description
+ * (see domain/altTextSuggestion): sat.accessibility.alt.required blocks publish
+ * on empty alt text, so staging must never leave the author a second task.
  *
  * allowBase64:false invariant: the objectURL in a temp node is transient and
  * is stripped by stripTransientImages* before persist. Every registry create
@@ -33,6 +34,7 @@ import {
   type BitmapLoader,
   type ImageRejectCode,
 } from "./ingestion/adapters/imageValidation";
+import { suggestAltText } from "./ingestion/domain/altTextSuggestion";
 
 export interface PastedImageHandle {
   uploadId: string;
@@ -63,8 +65,8 @@ export interface IngestionImagePipeDeps {
 }
 
 export const TRANSIENT_UPLOAD_COPY = {
-  uploadingNote: "Uploading… — alt text will be required before publish.",
-  failedNote: "Upload failed — Retry / Remove. Alt text still required before publish.",
+  uploadingNote: "Uploading…",
+  failedNote: "Upload failed — Retry / Remove.",
 } as const;
 
 interface RegistryEntry {
@@ -286,6 +288,9 @@ export async function prepareClipboardImage(
       message: "The editor was closed before the image could be inserted.",
     };
   }
+  // A description is part of the upload: prefer whatever the paste carried,
+  // otherwise name the file's own words. Never left empty.
+  const descriptiveAlt = alt.trim() || suggestAltText(file.name);
   const uploadId = resolved.makeUploadId();
   const objectUrl = resolved.createObjectUrl(file);
   const upload = resolved.upload ?? uploadAssessmentAsset;
@@ -307,7 +312,10 @@ export async function prepareClipboardImage(
   return {
     status: "accepted",
     handle: { uploadId, objectUrl },
-    node: { type: "image", attrs: buildTransientImageAttrs(uploadId, objectUrl, alt) },
+    node: {
+      type: "image",
+      attrs: buildTransientImageAttrs(uploadId, objectUrl, descriptiveAlt),
+    },
     discard,
     startUpload: () => {
       if (started || entry.settled) return;

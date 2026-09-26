@@ -88,6 +88,10 @@ const backendRuntimeEnv = {
   AUTHORING_COEDIT_PUBLIC_URL: coeditPublicUrl,
   AUTHORING_COEDIT_PUBLIC_WS_SCHEME: coeditPublicWSScheme,
   AUTHORING_COEDIT_ALLOWED_ORIGIN: inheritedEnv["AUTHORING_COEDIT_ALLOWED_ORIGIN"] ?? frontendUrl,
+  // The embedded service calls back into Go to hydrate authorized documents.
+  // Local E2E often runs the API on a dynamically assigned port, so keep this
+  // internal callback aligned with the same backend origin advertised to Vite.
+  AUTHORING_COEDIT_GO_BASE_URL: inheritedEnv["AUTHORING_COEDIT_GO_BASE_URL"] ?? backendApiOrigin,
   AUTHORING_COEDIT_MYSQL_DSN: coeditDatabaseUrl,
   PORT: process.env["PORT"] ?? "4000",
   API_PORT: process.env["API_PORT"] ?? "4000",

@@ -188,14 +188,9 @@ func (s *Service) CreateUpload(ctx context.Context, req CreateRequest) (UploadIn
 	}
 	assetID := uuid.NewString()
 	objectKey := fmt.Sprintf("media/%s/%s", assetID, req.FileName)
-	// Local deployments upload through the authenticated API route. Keeping
-	// the asset id in the URL avoids exposing the storage object key.
+	// Uploads always use the authenticated API route. A signed GET is never a
+	// valid upload URL, even when the configured store supports presigning.
 	uploadURL := fmt.Sprintf("/api/v1/media/uploads/%s", assetID)
-	if s.store != nil {
-		if u, err := s.store.PresignedGet(ctx, objectKey); err == nil && strings.TrimSpace(u) != "" {
-			uploadURL = u
-		}
-	}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if _, err := q.ExecContext(ctx, "INSERT INTO media_assets (id, owner_kind, owner_id, content_type, file_name, upload_status, object_key, size_bytes, checksum_sha256, upload_url, delete_after_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY), NOW(), NOW())", assetID, req.OwnerKind, req.OwnerID, contentType, req.FileName, objectKey, nullableInt(req.SizeBytes), nullableStr(checksum), uploadURL); err != nil {
 			return err

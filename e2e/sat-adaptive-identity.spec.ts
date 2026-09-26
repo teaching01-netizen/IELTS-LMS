@@ -88,7 +88,7 @@ test.describe("SAT adaptive identity in the browser", () => {
     }
   });
 
-  test("Lower normal: an unanswered section routes, shows, and scores Lower", async ({
+  test("Lower normal: an unanswered section routes and shows Lower before scoring", async ({
     page,
     browser,
   }, testInfo) => {
@@ -154,7 +154,9 @@ test.describe("SAT adaptive identity in the browser", () => {
         }
       }
 
-      // The attempt completes and both section routes read lower.
+      // Completion seals a pending SAT result. Routing is proven above by the
+      // per-section decisions and administered branch attempts; sections and
+      // scores are materialized later by the scoring workflow.
       const result = await studentPage.evaluate(
         async ({ scheduleId: id, attemptId: attempt, candidateId: candidate }) => {
           const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
@@ -163,9 +165,10 @@ test.describe("SAT adaptive identity in the browser", () => {
         },
         { scheduleId, attemptId, candidateId },
       );
-      for (const section of result.sections) {
-        expect(section.route).toBe("lower");
-      }
+      expect(result.outcomeStatus).toBe("pending");
+      expect(result.totalScore).toBeNull();
+      expect(result.sections ?? []).toHaveLength(0);
+      expect(result.submissionId).toBeFalsy();
 
       // Nothing was ever answered on the unadministered branch.
       const strayAnswers = await queryDb<{ count: number }>(

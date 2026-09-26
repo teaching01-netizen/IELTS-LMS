@@ -479,6 +479,16 @@ describe("SatDeliveryReleasePage", () => {
     expect(screen.queryByText("Blocking issue 24")).not.toBeInTheDocument();
   });
 
+  it("holds publish back until the committed draft has been read back", () => {
+    // Publish validates assessment_question_revisions server-side, so a tab
+    // still reading (or still saving through the co-edit room) has no business
+    // offering it: the release would be the earlier revision.
+    render(<SatDeliveryReleasePage {...pageProps({ draftBusy: true })} />);
+
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByText(/latest changes are still being saved/)).toBeInTheDocument();
+  });
+
   it("keeps publish reachable by keyboard tab order", () => {
     render(<SatDeliveryReleasePage {...pageProps()} />);
 

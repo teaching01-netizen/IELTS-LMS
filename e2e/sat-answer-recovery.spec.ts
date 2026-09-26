@@ -71,6 +71,18 @@ test.describe("SAT answer durability recovery", () => {
       await expect(page.getByRole("heading", { name: /Question-level responses/ })).toBeVisible();
       await expect(page.getByRole("columnheader", { name: "Student raw" })).toBeVisible();
       await expect(page.getByText("Unanswered").first()).toBeVisible();
+      const refreshStatus = page
+        .getByRole("status")
+        .filter({ hasText: "Checks automatically every 15 seconds while visible" });
+      await expect(refreshStatus).toBeVisible();
+      await page.waitForResponse((response) =>
+        response.url().includes("/v1/results/sat/attempts/") &&
+        response.url().endsWith("/answers") &&
+        response.request().method() === "GET" &&
+        response.ok(),
+        { timeout: 25_000 }
+      );
+      await expect(refreshStatus).toContainText("Last checked");
     } finally {
       await studentContext.close();
     }
@@ -85,9 +97,16 @@ test.describe("SAT answer durability recovery", () => {
     });
     try {
       const radios = studentPage.locator('input[type="radio"]');
-      await radios.first().check();
+      await studentPage.locator("label.sat-answer-choice").first().click();
+      await expect(radios.first()).toBeChecked();
 
-      await studentPage.getByRole("button", { name: "Turn on cross-out mode" }).click();
+      const crossOutToggle = studentPage.getByRole("button", {
+        name: /Turn (on|off) cross-out mode/,
+      });
+      if ((await crossOutToggle.getAttribute("aria-pressed")) !== "true") {
+        await crossOutToggle.click();
+      }
+      await expect(crossOutToggle).toHaveAttribute("aria-pressed", "true");
       await studentPage.getByRole("button", { name: "Eliminate option B" }).click();
 
       // Highlights & Notes is an armed mode: pressing the labeled control lets a
@@ -100,13 +119,10 @@ test.describe("SAT answer durability recovery", () => {
         .click();
       await expect(studentPage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
 
-      // Writing happens in the Notes pane now: choosing Add note marks the words
-      // (the same span, so this stays one highlight), opens the pane on that
-      // note's card, and puts the caret in its field. There is no Save and no
-      // Done — the draft is committed on the way out.
-      await selectFirstStimulusText(studentPage);
+      // A highlight opens its edit toolbar. Add note there to attach the note
+      // to this exact mark and open the Notes pane; there is no Save or Done.
       await studentPage
-        .getByRole("toolbar", { name: "Selected text actions" })
+        .getByRole("toolbar", { name: "Edit annotation" })
         .getByRole("button", { name: "Add note" })
         .click();
       // The field is named for the words it is about, so the test does not have to
@@ -135,8 +151,11 @@ test.describe("SAT answer durability recovery", () => {
       await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
       await expect(radios.first()).toBeChecked({ timeout: 30_000 });
 
-      await studentPage.getByRole("button", { name: "Turn on cross-out mode" }).click();
-      await expect(studentPage.getByRole("button", { name: "Restore option B" })).toHaveAttribute(
+      if ((await crossOutToggle.getAttribute("aria-pressed")) !== "true") {
+        await crossOutToggle.click();
+      }
+      await expect(crossOutToggle).toHaveAttribute("aria-pressed", "true");
+      await expect(studentPage.getByRole("button", { name: "Undo option B" })).toHaveAttribute(
         "aria-pressed",
         "true"
       );
@@ -145,24 +164,21 @@ test.describe("SAT answer durability recovery", () => {
       // the note having survived, not a stale attribute.
       await expect(studentPage.locator("[data-sat-note-marker]")).toHaveCount(1);
 
-      // The recovered note is the note attached to the recovered mark, and it
-      // reads back in the one place a note is written.
-      await studentPage.locator('[data-sat-highlight="true"]').first().click();
-      await studentPage
-        .getByRole("toolbar", { name: "Edit annotation" })
-        .getByRole("button", { name: "Edit note" })
-        .click();
+      // The Notes disclosure is the stable route back to a recovered note;
+      // activating its highlight is a separate passage interaction.
+      await studentPage.getByRole("button", { name: /^Notes/ }).click();
       await expect(studentPage.getByRole("complementary", { name: "Notes" })).toBeVisible();
       await expect(studentPage.getByRole("textbox", { name: /^Note on / })).toHaveValue(
         "Keep this evidence."
       );
       await studentPage.keyboard.press("Escape");
       await expect(studentPage.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
-      await radios.nth(2).check();
+      await studentPage.locator("label.sat-answer-choice").nth(2).click();
       await waitForSatSaved(studentPage);
 
       // Review remains available for navigation and state inspection, while
       // module completion stays owned by the server clock.
+      await studentPage.getByRole("button", { name: /^Open question navigator/ }).click();
       await studentPage.getByRole("button", { name: /Review answers/ }).click();
       await expect(studentPage.getByRole("heading", { name: "Review your answers" })).toBeVisible();
       await expect(

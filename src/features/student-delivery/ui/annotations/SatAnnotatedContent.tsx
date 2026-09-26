@@ -19,13 +19,16 @@ import { isSatDragRelease } from './satSelectionDragGuard';
  * Selection capture lives in `useSatAnnotationSelection`; writes flow upward
  * through the shell's annotation view context.
  */
-export function SatAnnotatedContent({ content, annotations, region, enabled, selectionScopeKey, enlarge, onLimitReached }: {
+export function SatAnnotatedContent({ content, annotations, region, enabled, selectionScopeKey, enlarge, onLimitReached, loadMediaUrl, onMediaFailure, questionId }: {
   content: StructuredContent;
   annotations: SatQuestionAnnotations;
   region: SatAnnotationRegion;
   enabled: boolean;
   selectionScopeKey?: string | undefined;
   enlarge?: StaticStructuredImageEnlargeApi | undefined;
+  loadMediaUrl?: ((assetId: string) => Promise<string | null>) | undefined;
+  onMediaFailure?: ((assetId: string, questionId: string) => void) | undefined;
+  questionId?: string | undefined;
   /** Announced + inline notice when the 200-annotation cap drops a gesture. */
   onLimitReached?: (() => void) | undefined;
 }) {
@@ -217,7 +220,14 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, sel
         data-sat-highlight-preview={enabled ? 'true' : undefined}
         className="relative rounded-[8px]"
       >
-        <StructuredContentRenderer content={content} renderText={enabled ? renderText : undefined} enlarge={enlarge} />
+        <StructuredContentRenderer
+          content={content}
+          renderText={enabled ? renderText : undefined}
+          enlarge={enlarge}
+          loadMediaUrl={loadMediaUrl}
+          onMediaFailure={onMediaFailure}
+          questionId={questionId}
+        />
         {/* The margin dots: one per line that carries a note, level with the
             phrase's first line, in that highlight's own ink — the same dot the
             note's card shows in the pane, so the two ends read as one object.

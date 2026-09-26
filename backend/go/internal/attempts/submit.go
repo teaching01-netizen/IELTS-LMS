@@ -14,10 +14,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Submit handles the common submission preamble then diverges by provider:
-// SAT takes the provisional two-phase path (no seal, submitted_at stays
-// NULL); every other provider seals submitted/student_submit first and only
-// then records the digest (plan 28-32).
+// Submit handles the common submission preamble, validates SAT's terminal
+// module topology, and seals every provider through the same terminalization
+// boundary before recording the final digest (plan 28-32).
 //
 // The provider is NOT a parameter: it is resolved by pr inside the transaction
 // that locks the attempt (see submitInTx), so the branch a submit takes is
@@ -119,8 +118,8 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 	}
 	// Single authoritative provider decision: taken on this transaction, after
 	// the attempt row lock, with no caller-supplied provider and no default. It
-	// selects the whole terminalization branch below (SAT parks a provisional
-	// receipt and scores later; every other provider seals directly), so
+	// selects the whole terminalization branch below. SAT has a module-topology
+	// gate; all providers then seal through the same terminalization path, so
 	// deciding it anywhere else would let a wrong branch originate outside the
 	// lock that fences it. A missing resolver fails closed.
 	if pr == nil {
@@ -214,35 +213,17 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 			return SubmitResult{}, err
 		}
 	}
+	if provider == ProviderSAT {
+		// Lifecycle invariant: SAT can be sealed only when every required module
+		// is terminal (see sat_modules.go).
+		if err := ensureSATModuleTopologyTx(ctx, q, cmd.AttemptID); err != nil {
+			return SubmitResult{}, err
+		}
+	}
 	digest, err := ComputeDigestInTx(ctx, q, cmd.AttemptID)
 	if err != nil {
 		return SubmitResult{}, err
 	}
-	if provider == ProviderSAT {
-		// Lifecycle invariant: the provisional claim is legal only when the SAT
-		// module topology is already complete (see sat_modules.go).
-		if err := ensureSATModuleTopologyTx(ctx, q, cmd.AttemptID); err != nil {
-			return SubmitResult{}, err
-		}
-		// Provisional claim: NEVER sets submitted_at/final_submission.
-		res, err := q.ExecContext(ctx, `UPDATE student_attempts SET delivery_status='submitted', phase='post-exam', response_revision=?, final_response_digest=?, revision=revision+1, control_epoch=control_epoch+1, updated_at=CURRENT_TIMESTAMP(6) WHERE id=? AND submitted_at IS NULL AND final_submission IS NULL AND COALESCE(delivery_status,'running') NOT IN ('terminated','locked','cancelled')`, attempt.ResponseRevision, digest, cmd.AttemptID)
-		if err != nil {
-			return SubmitResult{}, err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return SubmitResult{}, err
-		}
-		if n != 1 {
-			return SubmitResult{}, &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Attempt could not claim the provisional submit state.", HTTPStatus: 422}
-		}
-		result := SubmitResult{SubmissionID: cmd.SubmissionID, FinalDigest: digest, Provisional: true, ServerTime: now}
-		if err := insertSubmissionReceipt(ctx, q, cmd, attempt, reqHash, digest, result, now); err != nil {
-			return SubmitResult{}, err
-		}
-		return result, nil
-	}
-	// IELTS + ACT direct completion: seal FIRST, then digest.
 	if sealer == nil {
 		return SubmitResult{}, fmt.Errorf("sealer is required for provider %q", provider)
 	}

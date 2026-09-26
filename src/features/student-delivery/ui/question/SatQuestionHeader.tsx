@@ -1,5 +1,6 @@
-import { Bookmark, ListX } from "lucide-react";
+import { Bookmark } from "lucide-react";
 import { SAT_COPY } from "../../domain/satCopy";
+import { SatCutChoiceGlyph } from "./SatCutChoiceGlyph";
 
 export interface SatQuestionHeaderProps {
   questionNumber: number;
@@ -42,11 +43,13 @@ export function SatQuestionHeader(props: SatQuestionHeaderProps) {
             44px touch target never squeezes below minimum. */}
         <span aria-hidden="true" className="hidden truncate sm:inline">{props.markedForReview ? SAT_COPY.flag.markedForReview : SAT_COPY.flag.markForReview}</span>
       </button>
-      {/* Bluebook Option Eliminator (Phase 6): the mode toggle carries a
-          VISIBLE static label instead of an icon-only affordance; state lives
-          in fill + aria-pressed, never in label text — the label must not
-          flip between on/off or screen-reader users lose control identity.
-          The strikethrough style evokes Bluebook's [ABC] affordance. */}
+      {/* Bluebook Option Eliminator: the compact ABC-strike control at the
+          FAR RIGHT of the header, as in the reference. It is icon-only, so the
+          accessible name (not a visible label) carries its identity and the
+          state rides on the glyph's ink plus aria-pressed — the name must not
+          flip between two labels or the control loses its identity for
+          screen-reader users. `title` keeps the name discoverable on hover.
+          Visual box is 36px inside a real 44px hit target (sat-touch-target). */}
       {props.eliminationAvailable ? (
         <button
           type="button"
@@ -56,18 +59,21 @@ export function SatQuestionHeader(props: SatQuestionHeaderProps) {
           aria-label={
             props.eliminationMode ? SAT_COPY.flag.turnOffEliminator : SAT_COPY.flag.turnOnEliminator
           }
-          className={`sat-pressable sat-state-transition inline-flex min-h-11 shrink-0 items-center gap-1.5 border-l border-[var(--sat-divider-soft)] px-3 sat-type-control-secondary font-medium hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] ${props.eliminationMode ? "bg-[var(--sat-surface-hover)] text-[var(--sat-text)]" : "text-[var(--sat-text)]"}`}
+          title={
+            props.eliminationMode ? SAT_COPY.flag.turnOffEliminator : SAT_COPY.flag.turnOnEliminator
+          }
+          data-sat-eliminator-toggle="true"
+          className="sat-touch-target sat-pressable sat-state-transition ml-auto inline-grid h-11 w-11 shrink-0 place-items-center rounded-[6px] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)]"
         >
-          <ListX
-            // Eliminator state (Phase 6): static ABC label (below) + fill +
-            // aria-pressed carry state; accent-soft fill tokenized.
-            className={`h-5 w-5 shrink-0 ${props.eliminationMode ? "fill-[var(--sat-accent-soft)] text-[var(--sat-accent)]" : ""}`}
-            aria-hidden="true"
+          <SatCutChoiceGlyph
+            // Closed = light surface with a dark-blue outline; open = the SAT
+            // blue treatment. Both pairs are tokens, so high contrast wins.
+            className={
+              props.eliminationMode
+                ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]"
+                : "border-[var(--sat-accent-strong)] bg-[var(--sat-surface)] text-[var(--sat-accent-strong)]"
+            }
           />
-          {/* Label collapses below sm like the mark button (accessible
-              name kept via aria-label), so neither control squeezes below
-              the 44px touch minimum at 320px / 200%. */}
-          <span aria-hidden="true" className="hidden truncate sm:inline"><span className="line-through decoration-[1.5px]">ABC</span> {SAT_COPY.flag.optionEliminator}</span>
         </button>
       ) : null}
     </div>

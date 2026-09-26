@@ -1,7 +1,12 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { StructuredContent } from "../api/assessmentContracts";
 import { StructuredContentRenderer } from "../StructuredContentRenderer";
+
+vi.mock("../../exam-authoring/api/assessmentMediaApi", () => ({
+  getAssessmentMediaAsset: vi.fn(),
+}));
+import { getAssessmentMediaAsset } from "../../exam-authoring/api/assessmentMediaApi";
 
 const content: StructuredContent = {
   version: 2,
@@ -52,6 +57,70 @@ const content: StructuredContent = {
 };
 
 describe("StructuredContentRenderer", () => {
+  it("loads delivery images directly by asset id without requesting metadata", async () => {
+    const managed: StructuredContent = {
+      version: 2,
+      nodes: [],
+      document: { type: "doc", content: [{ type: "image", attrs: { assetId: "asset-1", alt: "Graph" } }] },
+    };
+    const loadMediaUrl = vi.fn().mockResolvedValue("blob:asset-1");
+    render(
+      <StructuredContentRenderer
+        content={managed}
+        loadMediaUrl={loadMediaUrl}
+      />,
+    );
+
+    expect(await screen.findByRole("img", { name: "Graph" })).toHaveAttribute("src", "blob:asset-1");
+    expect(loadMediaUrl).toHaveBeenCalledWith("asset-1");
+    expect(getAssessmentMediaAsset).not.toHaveBeenCalled();
+  });
+
+  it("shows unavailable when direct delivery loading fails", async () => {
+    const managed: StructuredContent = {
+      version: 2,
+      nodes: [],
+      document: { type: "doc", content: [{ type: "image", attrs: { assetId: "asset-1", alt: "Graph" } }] },
+    };
+    const loadMediaUrl = vi.fn().mockRejectedValue(new Error("missing"));
+    render(
+      <StructuredContentRenderer
+        content={managed}
+        loadMediaUrl={loadMediaUrl}
+      />,
+    );
+
+    await screen.findByRole("status");
+    expect(loadMediaUrl).toHaveBeenCalledWith("asset-1");
+    expect(getAssessmentMediaAsset).not.toHaveBeenCalled();
+  });
+
+  it("does not make another request when the loaded image fails", async () => {
+    const managed: StructuredContent = {
+      version: 2,
+      nodes: [],
+      document: { type: "doc", content: [{ type: "image", attrs: { assetId: "asset-1", alt: "Graph" } }] },
+    };
+    const loadMediaUrl = vi.fn().mockResolvedValue("blob:asset-1");
+    const onMediaFailure = vi.fn();
+    const { container } = render(
+      <StructuredContentRenderer
+        content={managed}
+        questionId="question-1"
+        loadMediaUrl={loadMediaUrl}
+        onMediaFailure={onMediaFailure}
+      />,
+    );
+
+    await screen.findByRole("img", { name: "Graph" });
+    fireEvent.error(screen.getByRole("img", { name: "Graph" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Visual could not be loaded");
+    expect(loadMediaUrl).toHaveBeenCalledTimes(1);
+    expect(onMediaFailure).toHaveBeenCalledWith("asset-1", "question-1");
+    expect(getAssessmentMediaAsset).not.toHaveBeenCalled();
+  });
+
   it("decorates text with stable block offsets while retaining authored marks", () => {
     const source: StructuredContent = { version: 2, nodes: [], document: { type: 'doc', content: [
       { type: 'paragraph', attrs: { id: 'evidence' }, content: [

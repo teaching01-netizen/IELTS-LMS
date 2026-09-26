@@ -472,6 +472,57 @@ export function toUserFacingPublishError(error: unknown): string {
   return "The SAT version could not be published. Try again.";
 }
 
+export interface PublishIssueDiagnostic {
+  /** Author-facing copy for the failing publish check. */
+  message: string;
+  /** The question/field to open, when the server named one. */
+  issue: AssessmentValidationIssue | null;
+}
+
+const MEDIA_UNAVAILABLE_COPY = "Question image is unavailable \u2014 replace this image.";
+
+/**
+ * Reads the fail-closed media gate's 422 payload.
+ *
+ * `details.issues[]` names the authored path (`examQuestion:<id>:prompt...`)
+ * that holds a missing object; mapping it back to the question is what makes
+ * the error actionable, because the author can only fix it in the editor. A
+ * 422 is an answer, not a transient fault, so callers must never retry it.
+ * Returns null for every other failure so generic copy stays generic.
+ */
+export function publishMediaIssueDiagnostic(error: unknown): PublishIssueDiagnostic | null {
+  const details = (error as { details?: unknown } | null | undefined)?.details;
+  if (!details || typeof details !== "object") return null;
+  const record = details as Record<string, unknown>;
+  const issues = Array.isArray(record["issues"]) ? (record["issues"] as unknown[]) : [];
+  const media = issues.find(
+    (issue): issue is Record<string, unknown> =>
+      typeof issue === "object" &&
+      issue !== null &&
+      (issue as Record<string, unknown>)["code"] === "sat.media.unavailable",
+  );
+  const rawPath = media?.["path"] ?? record["path"];
+  // The media copy is only honest when the payload is the media gate's own
+  // answer. A 422 about anything else must fall through to generic copy rather
+  // than sending the author after an image that is fine.
+  if (!media && record["code"] !== "sat.media.unavailable") return null;
+  const path = typeof rawPath === "string" ? rawPath : "";
+  const { questionId } = parseIssueLink(path);
+  return {
+    message: MEDIA_UNAVAILABLE_COPY,
+    issue: questionId
+      ? {
+          code: "sat.media.unavailable",
+          path,
+          message: MEDIA_UNAVAILABLE_COPY,
+          blocking: true,
+          examQuestionId: questionId,
+          field: "asset",
+        }
+      : null,
+  };
+}
+
 export function summarizeStaleReadiness(
   readiness: AssessmentValidationReport | null | undefined,
   shell: Pick<AssessmentAuthoringShell, "versionId" | "versionRevision"> | null | undefined,

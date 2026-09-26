@@ -36,7 +36,6 @@ export interface SmartPasteInfo {
   mathCount: number;
   imageCount: number;
   tableCount: number;
-  needsAltText: boolean;
   canUndo: boolean;
   rejectedImageCount?: number;
   warnings: IngestWarning[];
@@ -156,7 +155,6 @@ export const SmartPastePlugin = Extension.create<SmartPastePluginOptions>({
                   mathCount: result.stats.mathCount,
                   imageCount: acceptedImageCount,
                   tableCount: result.stats.tableCount,
-                  needsAltText: acceptedImageCount > 0,
                   canUndo: outcome.handled,
                   rejectedImageCount,
                   warnings: result.warnings,

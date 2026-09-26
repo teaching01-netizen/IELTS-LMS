@@ -47,6 +47,18 @@ export interface AuthoringShellLifecycle {
   state: AuthoringShellState;
   /** Retry the read. This is a READ: it can never create a draft. */
   refetch: () => Promise<unknown>;
+  /** True while the shell read is in flight (initial mount or background). */
+  isFetching: boolean;
+  /**
+   * Await a fresh read and return the state it produced.
+   *
+   * Commands that must act on the COMMITTED draft (Publish) call this instead
+   * of trusting whatever revision the last render held: a question save that
+   * landed after the shell was read would otherwise make Publish validate and
+   * send a stale revision. It is still only a read — the operator's own save
+   * acknowledgement remains the thing that changes the draft.
+   */
+  refresh: () => Promise<AuthoringShellState>;
 }
 
 export type DraftOpenErrorKind = "exam-missing" | "forbidden" | "conflict" | "unknown";
@@ -137,5 +149,20 @@ export function useAuthoringShellLifecycle(examId: string): AuthoringShellLifecy
   } else {
     state = { kind: "loading" };
   }
-  return { state, refetch: () => query.refetch() };
+  return {
+    state,
+    refetch: () => query.refetch(),
+    isFetching: query.isFetching,
+    refresh: async () => {
+      const result = await query.refetch();
+      // A mocked or failed refetch can answer nothing; keep the state we hold
+      // rather than reporting a loading surface to a caller that already has
+      // an answer (and a workspace the author is editing).
+      if (result && "data" in result) {
+        if (result.data) return toAuthoringShellState(result.data);
+        if (result.error) return toAuthoringShellErrorState(result.error);
+      }
+      return state;
+    },
+  };
 }

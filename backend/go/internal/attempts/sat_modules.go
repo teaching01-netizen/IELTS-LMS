@@ -30,9 +30,7 @@ const (
 )
 
 // SATModuleTerminal reports whether a stored module state is one the SAT
-// completion path accepts as done. Every place that needs to know — the
-// provisional submit gate here, sat.scoreAndPersist, sat.repairOne — asks this
-// function.
+// completion path accepts as done.
 func SATModuleTerminal(state string) bool {
 	switch state {
 	case SATModuleSubmitted, SATModuleLocked:
@@ -63,10 +61,8 @@ type SATModuleTopology struct {
 
 // Validate refuses every shape the SAT completion path cannot finish. A SAT
 // attempt may be finished only when it holds at least one module attempt in
-// each required section and every row is terminal: the claim that follows
-// blocks further module work and answer writes, the finalizer refuses partial
-// topologies, and the provisional reconciler skips attempts that do not match
-// this shape — so an attempt admitted here with anything less would strand.
+// each required section and every row is terminal, so completion cannot block
+// further work while required answers are still writable.
 //
 // required is the section set the run declared; no arguments means the full SAT
 // pair, which is what an unscoped run holds. A narrowed run passes its subset,
@@ -149,6 +145,13 @@ func ensureSATModuleTopologyTx(ctx context.Context, q tx.Tx, attemptID string) e
 		return err
 	}
 	return topology.Validate(required...)
+}
+
+// EnsureSATModuleTopologyTx exposes the shared SAT terminal gate to the
+// compatibility completion service. It must be called while the attempt row
+// is locked in the same transaction that seals the attempt.
+func EnsureSATModuleTopologyTx(ctx context.Context, q tx.Tx, attemptID string) error {
+	return ensureSATModuleTopologyTx(ctx, q, attemptID)
 }
 
 // satRequiredSectionsTx resolves the section set this run declared, from the

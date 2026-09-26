@@ -30,6 +30,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/terminalization"
 )
 
 type adaptiveBranch struct {
@@ -577,15 +578,6 @@ func (f *adaptiveExam) proctorSession(t *testing.T, attemptID string) proctor.St
 	return proctor.StudentSessionSummary{}
 }
 
-func (f *adaptiveExam) seedScoringPolicy(t *testing.T) {
-	t.Helper()
-	if _, err := f.db.ExecContext(context.Background(),
-		`INSERT INTO assessment_scoring_policies (id, exam_version_id, policy_key, policy_config, revision) VALUES (?, ?, 'practice', '{}', 1)`,
-		uuid.NewString(), f.versionID); err != nil {
-		t.Fatalf("seed scoring policy: %v", err)
-	}
-}
-
 func (f *adaptiveExam) complete(t *testing.T, attemptID string) *sat.AssessmentResult {
 	t.Helper()
 	svc := sat.NewService(f.db, tx.NewRunner(f.db), clock.System{}, sat.DeterministicScorer{})
@@ -599,9 +591,26 @@ func (f *adaptiveExam) complete(t *testing.T, attemptID string) *sat.AssessmentR
 	return result
 }
 
+func (f *adaptiveExam) assertPendingResult(t *testing.T, attemptID string, result *sat.AssessmentResult) {
+	t.Helper()
+	if result == nil || result.OutcomeStatus != terminalization.SATPending {
+		t.Fatalf("completion result = %+v, want pending SAT outcome", result)
+	}
+	if result.TotalScore != nil || len(result.Sections) != 0 {
+		t.Fatalf("pending SAT result must not have a score or sections: total=%v sections=%d",
+			result.TotalScore, len(result.Sections))
+	}
+	submissionID, outcomeStatus, releaseStatus := f.satResultRow(t, attemptID)
+	if submissionID.Valid || outcomeStatus != terminalization.SATPending || releaseStatus != "pending" {
+		t.Fatalf("stored SAT result = submissionID:%v outcome:%q release:%q, want NULL/pending/pending",
+			submissionID, outcomeStatus, releaseStatus)
+	}
+}
+
 // P0-a + T15: full Higher end-to-end invariant. One student, both sections
-// scoring HIGH: route decision, module attempt, student bootstrap, proctor
-// roster and final result must ALL agree on HIGH, and LOW must never exist.
+// score HIGH: route decision, module attempt, student bootstrap and proctor
+// roster must agree on HIGH, LOW must never exist, and completion must remain
+// an unscored pending result until the scoring workflow runs.
 func TestSATAdaptiveHigherEndToEndInvariant(t *testing.T) {
 	f := newAdaptiveExam(t)
 	attemptID := f.seedStudent(f.rw, 3, true)
@@ -666,18 +675,8 @@ func TestSATAdaptiveHigherEndToEndInvariant(t *testing.T) {
 	for _, branch := range []adaptiveBranch{f.rw, f.math} {
 		f.lockBranch(t, attemptID, branch.highID)
 	}
-	f.seedScoringPolicy(t)
 	result := f.complete(t, attemptID)
-	routes := map[string]string{}
-	for _, section := range result.Sections {
-		if section.Route == nil {
-			t.Fatalf("section %s result must carry its route", section.SectionKey)
-		}
-		routes[section.SectionKey] = *section.Route
-	}
-	if routes["reading-writing"] != "higher" || routes["math"] != "higher" {
-		t.Fatalf("result routes = %v, want higher/higher", routes)
-	}
+	f.assertPendingResult(t, attemptID, result)
 	for _, branch := range []adaptiveBranch{f.rw, f.math} {
 		if f.countModuleAttempts(t, attemptID, branch.lowID) != 0 {
 			t.Fatalf("LOW %s was never allowed an attempt", branch.lowID)
@@ -804,13 +803,8 @@ func TestSATAdaptiveLowerControl(t *testing.T) {
 	for _, branch := range []adaptiveBranch{f.rw, f.math} {
 		f.lockBranch(t, attemptID, branch.lowID)
 	}
-	f.seedScoringPolicy(t)
 	result := f.complete(t, attemptID)
-	for _, section := range result.Sections {
-		if section.Route == nil || *section.Route != "lower" {
-			t.Fatalf("section %s route must be lower, got %+v", section.SectionKey, section.Route)
-		}
-	}
+	f.assertPendingResult(t, attemptID, result)
 	for _, branch := range []adaptiveBranch{f.rw, f.math} {
 		if f.countModuleAttempts(t, attemptID, branch.highID) != 0 {
 			t.Fatalf("HIGH %s was never allowed an attempt", branch.highID)
@@ -821,8 +815,8 @@ func TestSATAdaptiveLowerControl(t *testing.T) {
 // T17: high-concurrency cohort. 25 students finish Module 1 with mixed
 // scores under concurrent reconciliation; every student must hold exactly
 // one decision, one matching branch attempt, a matching bootstrap, a
-// matching proctor projection, and a matching result route per section —
-// and no student may ever hold two branch attempts for one section.
+// matching proctor projection, and a pending unscored completion — and no
+// student may ever hold two branch attempts for one section.
 func TestSATAdaptiveCohortRouting(t *testing.T) {
 	f := newAdaptiveExam(t)
 	const students = 25
@@ -873,7 +867,6 @@ func TestSATAdaptiveCohortRouting(t *testing.T) {
 			t.Fatalf("student %d reconcile: %v", i, err)
 		}
 	}
-	f.seedScoringPolicy(t)
 	for i, s := range cohort {
 		for _, branch := range []adaptiveBranch{f.rw, f.math} {
 			wantID := s.wantID
@@ -910,15 +903,13 @@ func TestSATAdaptiveCohortRouting(t *testing.T) {
 		if session.RuntimeCurrentModuleRole == nil || *session.RuntimeCurrentModuleRole != s.wantRole {
 			t.Fatalf("student %d proctor roster role = %v, want %s", i, session.RuntimeCurrentModuleRole, s.wantRole)
 		}
-		// Final result: both section routes must equal the routed branch.
+		// Completion is intentionally pending until the scoring workflow runs;
+		// routing correctness is asserted above from decisions and administered
+		// branch attempts.
 		f.lockBranch(t, s.attemptID, s.wantID)
 		f.lockBranch(t, s.attemptID, mathWantID(s))
 		result := f.complete(t, s.attemptID)
-		for _, section := range result.Sections {
-			if section.Route == nil || *section.Route != s.wantRoute {
-				t.Fatalf("student %d section %s route must be %s, got %+v", i, section.SectionKey, s.wantRoute, section.Route)
-			}
-		}
+		f.assertPendingResult(t, s.attemptID, result)
 	}
 }
 

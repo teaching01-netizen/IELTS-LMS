@@ -1,17 +1,6 @@
-// Package sat owns the SAT provider completion policy for the Go backend.
-//
-// Split-brain model (mirrors the Rust assessment_delivery + durability V2):
-//   - The V2 submit preamble only parks a PROVISIONAL receipt for SAT:
-//     delivery_status='submitted', phase='post-exam', response digest persisted,
-//     while submitted_at/final_submission stay NULL so the legacy
-//     attempt_terminalizations compatibility trigger cannot manufacture a
-//     terminal fact before scoring runs.
-//   - True terminal state arrives here, in CompleteAssessment, or via the
-//     ReconcileProvisional watchdog when the scorer path was skipped.
-//
-// Production scoring reads the table-driven conversion policy persisted in
-// assessment_scoring_policies.policy_config. Missing entries fail closed so a
-// practice result is never fabricated by the backend.
+// Package sat owns the SAT completion compatibility and recovery hooks for the
+// Go backend. Completion requires durable terminal modules and then seals the
+// attempt; score conversion is intentionally outside this path.
 package sat
 
 import (
@@ -32,6 +21,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/terminalization"
 )
 
 // Section keys owned by the SAT provider. The terminal-state vocabulary and the
@@ -43,11 +33,9 @@ const (
 	SectionMath           = attempts.SATSectionMath
 )
 
-// maxSubmissionIDLen is the scoring-boundary submission-id limit:
-// student_submissions.id and assessment_results.submission_id are VARCHAR(36),
-// and CompleteAssessment rejects anything longer. The V2 receipt path validates
-// against attempts.MaxSubmissionIDLen (64), so a receipt id can legally exceed
-// this and must not be carried across the scoring boundary unreduced.
+// maxSubmissionIDLen preserves the compatibility completion request limit.
+// V2 submission receipts have their own wider limit and never pass through this
+// SAT compatibility API.
 const maxSubmissionIDLen = 36
 
 // PolicyConfig carries the scoring policy row for one exam version.
@@ -133,10 +121,46 @@ func (PolicyScorer) ScoreSection(sectionKey, route string, normalized, _ int, po
 // Service is the SAT completion service. All state flows through explicit SQL
 // with row locks; there is no package-level state.
 type Service struct {
-	db     *sql.DB
-	runner *tx.Runner
-	clock  clock.Clock
-	scorer Scorer
+	db               *sql.DB
+	runner           *tx.Runner
+	clock            clock.Clock
+	scorer           Scorer
+	completionSealer completionSealer
+}
+
+type completionSealer interface {
+	SealCompletion(ctx context.Context, q tx.Tx, attempt attemptCore, req CompleteRequest, effectiveAt time.Time) (*AssessmentResult, bool, error)
+}
+
+type terminalizationCompletionSealer struct {
+	service *terminalization.Service
+}
+
+func (s terminalizationCompletionSealer) SealCompletion(ctx context.Context, q tx.Tx, attempt attemptCore, req CompleteRequest, effectiveAt time.Time) (*AssessmentResult, bool, error) {
+	if s.service == nil {
+		return nil, false, apperrors.New(apperrors.CodeInternal, "SAT terminalization is unavailable.")
+	}
+	projection, err := json.Marshal(map[string]any{"submissionId": req.SubmissionID, "providerKey": "sat"})
+	if err != nil {
+		return nil, false, err
+	}
+	seal, err := s.service.TerminalizeInTx(ctx, q, terminalization.SealCommand{
+		AttemptID: attempt.ID, ScheduleID: attempt.ScheduleID,
+		Outcome: terminalization.OutcomeSubmitted, Reason: terminalization.ReasonSATComplete,
+		ActorKind: orStudent(req.ActorKind), ActorID: strOrNil(req.ActorID),
+		EffectiveAt: &effectiveAt, FinalSubmission: projection, RequestID: newRequestID(req.RequestID),
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	result, err := loadResult(ctx, q, "attempt_id = ?", attempt.ID, true, true)
+	if err != nil {
+		return nil, false, err
+	}
+	if result == nil {
+		return nil, false, apperrors.New(apperrors.CodeInternal, "SAT completion has no materialized assessment result.")
+	}
+	return result, seal.Created, nil
 }
 
 // reconcileAdapter implements the delivery.AssessmentCompleter interface
@@ -159,13 +183,25 @@ func (s *Service) ReconcileAdapter() func(ctx context.Context, scheduleID, attem
 	}
 }
 
-// NewService wires dependencies explicitly. A nil scorer selects the
-// fail-closed, table-driven production scorer.
-func NewService(db *sql.DB, runner *tx.Runner, clk clock.Clock, scorer Scorer) *Service {
+// NewService wires dependencies explicitly. The scoring implementation remains
+// available for a later scoring path; completion never invokes it.
+// A terminalizer can be shared with the application graph so its transaction
+// and outbox configuration stay consistent with V2 submit.
+func NewService(db *sql.DB, runner *tx.Runner, clk clock.Clock, scorer Scorer, terminalizers ...*terminalization.Service) *Service {
 	if scorer == nil {
 		scorer = PolicyScorer{}
 	}
-	return &Service{db: db, runner: runner, clock: clk, scorer: scorer}
+	var terminalizer *terminalization.Service
+	if len(terminalizers) > 0 {
+		terminalizer = terminalizers[0]
+	}
+	if terminalizer == nil && runner != nil {
+		terminalizer = terminalization.NewService(runner, nil, nil)
+	}
+	return &Service{
+		db: db, runner: runner, clock: clk, scorer: scorer,
+		completionSealer: terminalizationCompletionSealer{service: terminalizer},
+	}
 }
 
 // CompleteRequest asks for true terminal completion of a SAT attempt.
@@ -225,11 +261,9 @@ type moduleRow struct {
 	TargetCount     int64
 }
 
-// CompleteAssessment runs the true-terminal gate: proctor/receipt terminated
-// => ProctorBlocked; submission idempotency => return bound result, no re-seal; require
-// all modules submitted|locked else Conflict; score, INSERT
-// student_submissions + assessment_results(scored/ready_to_release) +
-// sections, seal sat_complete.
+// CompleteAssessment validates the SAT module topology and idempotently seals
+// the attempt. The terminalization service materializes the lightweight SAT
+// pending result with no scaled score.
 func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (*AssessmentResult, error) {
 	if strings.TrimSpace(req.AttemptID) == "" || strings.TrimSpace(req.ScheduleID) == "" {
 		return nil, apperrors.New(apperrors.CodeBadRequest, "Attempt and schedule ids are required.")
@@ -255,35 +289,24 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 		if err := rejectIfTerminated(ctx, t, attempt); err != nil {
 			return err
 		}
-		// Submission idempotency: a bound SAT submission returns the
-		// existing result instead of scoring twice. No re-seal here: the
-		// first completion already terminalized the attempt (final_submission
-		// non-NULL), so sealAttemptTx's guarded UPDATE would match 0 rows
-		// and 409 every idempotent retry. A mismatched req.SubmissionID on
-		// a bound attempt still returns the bound result — the submission
-		// id is the client's idempotency key, not a selector.
-		if existingID, err := lockedSubmissionID(ctx, t, attempt.ID); err != nil {
+		if err := attempts.EnsureSATModuleTopologyTx(ctx, t, attempt.ID); err != nil {
 			outcome = telemetry.FinalizeRejected
 			return err
-		} else if existingID != "" {
-			res, err := loadResultTx(ctx, t, existingID)
-			if err != nil {
-				return err
-			}
-			if res == nil {
-				return apperrors.New(apperrors.CodeInternal, "SAT submission exists without an assessment result.")
-			}
-			out = res
-			outcome = telemetry.FinalizeReplayed
-			return nil
 		}
-		res, err := s.scoreAndPersist(ctx, t, attempt, req.SubmissionID, req.ActorKind, req.ActorID, newRequestID(req.RequestID), now)
+		if s.completionSealer == nil {
+			return apperrors.New(apperrors.CodeInternal, "SAT terminalization is unavailable.")
+		}
+		res, created, err := s.completionSealer.SealCompletion(ctx, t, attempt, req, now)
 		if err != nil {
 			outcome = telemetry.FinalizeRejected
 			return err
 		}
 		out = res
-		outcome = telemetry.FinalizeCompleted
+		if created {
+			outcome = telemetry.FinalizeCompleted
+		} else {
+			outcome = telemetry.FinalizeReplayed
+		}
 		return nil
 	})
 	if outcome != "" {
@@ -295,14 +318,9 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 	return out, nil
 }
 
-// ReconcileProvisional is the SAT watchdog: provider SAT AND delivery
-// submitted AND phase post-exam AND submitted_at NULL AND final_submission
-// NULL AND no assessment result AND all modules terminal => lock, re-check,
-// score, complete, terminalize. A V2 provisional receipt is an idempotency
-// anchor, not an exclusion: the receipt's submission id is reused so the
-// scoring path stays replay-safe when the student's completion request never
-// arrived (SAT-001). It never fabricates a score: attempts with no modules,
-// a missing scoring policy, or a raced terminal state are skipped.
+// ReconcileProvisional is a compatibility repair for old SAT attempts left in
+// the provisional state. It checks the terminal module topology and seals the
+// attempt without generating a score.
 func (s *Service) ReconcileProvisional(ctx context.Context) (int64, error) {
 	return s.ReconcileProvisionalBatch(ctx, 250)
 }
@@ -312,17 +330,14 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 	if batchSize < 1 {
 		batchSize = 250
 	}
-	type candidate struct{ attemptID, scheduleID, receiptSubmissionID string }
+	type candidate struct{ attemptID, scheduleID string }
 	var cands []candidate
-	// Candidate scan runs outside a transaction (read-only sweep); every
-	// candidate is re-locked and re-checked inside its own transaction. The
-	// attempt_submissions_v2 attempt_id is the PK, so the LEFT JOIN yields at
-	// most one receipt row per attempt.
+	// Candidate scan runs outside a transaction (read-only sweep); each
+	// candidate is re-locked and re-checked inside its own transaction.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT a.id, a.schedule_id, COALESCE(r.submission_id, '')
+		SELECT a.id, a.schedule_id
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
-		LEFT JOIN attempt_submissions_v2 r ON r.attempt_id = a.id
 		WHERE e.provider_key = 'sat'
 		  AND a.delivery_status = 'submitted'
 		  AND a.phase = 'post-exam'
@@ -343,7 +358,7 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 	}
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.attemptID, &c.scheduleID, &c.receiptSubmissionID); err != nil {
+		if err := rows.Scan(&c.attemptID, &c.scheduleID); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -356,7 +371,7 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 
 	var repaired int64
 	for _, c := range cands {
-		done, err := s.repairOne(ctx, c.attemptID, c.scheduleID, c.receiptSubmissionID)
+		done, err := s.repairOne(ctx, c.attemptID, c.scheduleID)
 		if err != nil {
 			// A raced terminal state or a concurrently completed attempt is
 			// benign; anything else aborts loudly via the returned error
@@ -377,7 +392,7 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 	return repaired, nil
 }
 
-func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID, receiptSubmissionID string) (bool, error) {
+func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (bool, error) {
 	var done bool
 	var outcome string
 	err := s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
@@ -410,29 +425,8 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID, receiptS
 		} else if existingID != "" {
 			return nil // Raced with the student completion path; it owns the seal.
 		}
-		// SAT-001: a V2 provisional receipt proves the terminal claim committed
-		// without the scoring continuation. Reuse its submission id as the
-		// scoring identity so a watchdog retry replays idempotently instead of
-		// minting a fresh identity each pass.
-		receiptID, err := lockedProvisionalReceiptTx(ctx, t, attempt.ID)
-		if err != nil {
-			return err
-		}
-		if receiptID == "" {
-			receiptID = receiptSubmissionID
-		}
-		if len(receiptID) > maxSubmissionIDLen {
-			// The V2 receipt accepts submission ids up to 64 chars
-			// (attempts.MaxSubmissionIDLen) while the scoring boundary
-			// persists them into VARCHAR(36) columns and CompleteAssessment
-			// rejects anything longer. Reusing such an id would fail the very
-			// first INSERT on every pass — the orphaned attempt this repair
-			// exists to resolve would never repair. Fall back to the delivery
-			// reconcile anchor (submission_id = attempt_id).
-			receiptID = attempt.ID
-		}
-		// An existing result means another owner already finished the
-		// continuation; never score a second time.
+		// An existing result without a terminal fact is an older partial repair
+		// state; leave it for the dedicated data repair path.
 		var existingResultID sql.NullString
 		if err := t.QueryRowContext(ctx,
 			"SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE",
@@ -442,35 +436,29 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID, receiptS
 		if existingResultID.Valid {
 			return nil
 		}
-		// Never fake a score: without terminal modules or a scoring policy
-		// there is nothing to persist, so leave the attempt provisional.
-		mods, err := loadModules(ctx, t, attempt.ID)
-		if err != nil {
+		if err := attempts.EnsureSATModuleTopologyTx(ctx, t, attempt.ID); err != nil {
+			if appErr, ok := apperrors.As(err); ok && appErr.Code == apperrors.CodeConflict {
+				return nil
+			}
 			return err
 		}
-		if len(mods) == 0 {
-			return nil
+		if s.completionSealer == nil {
+			return apperrors.New(apperrors.CodeInternal, "SAT terminalization is unavailable.")
 		}
-		if !moduleStatesAcceptable(mods) {
-			return nil
-		}
-		if _, err := loadPolicy(ctx, t, attempt.PublishedVerID); err != nil {
-			return nil
-		}
-		submissionID := receiptID
-		if submissionID == "" {
-			submissionID = uuid.NewString()
-			if len(submissionID) > 36 {
-				submissionID = submissionID[:36]
-			}
-		}
-		_, err = s.scoreAndPersist(ctx, t, attempt, submissionID, "system", "", uuid.NewString(), now)
+		_, created, err := s.completionSealer.SealCompletion(ctx, t, attempt, CompleteRequest{
+			AttemptID: attempt.ID, ScheduleID: attempt.ScheduleID, SubmissionID: attempt.ID,
+			ActorKind: terminalization.ActorSystem, RequestID: uuid.NewString(),
+		}, now)
 		if err != nil {
 			outcome = telemetry.FinalizeRejected
 			return err
 		}
-		done = true
-		outcome = telemetry.FinalizeCompleted
+		done = created
+		if done {
+			outcome = telemetry.FinalizeCompleted
+		} else {
+			outcome = telemetry.FinalizeReplayed
+		}
 		return nil
 	})
 	// Single emission after the retry wrapper (see CompleteAssessment): a
@@ -800,21 +788,6 @@ func rejectIfTerminated(ctx context.Context, t tx.Tx, a attemptCore) error {
 		return &apperrors.Error{Code: apperrors.CodeAttemptProctorBlocked, Message: "Your SAT attempt has been terminated by the proctor.", HTTPStatus: 403}
 	}
 	return nil
-}
-
-// lockedProvisionalReceiptTx loads the attempt's V2 provisional receipt
-// submission id under the attempt lock. Empty when no receipt exists.
-func lockedProvisionalReceiptTx(ctx context.Context, t tx.Tx, attemptID string) (string, error) {
-	var id sql.NullString
-	err := t.QueryRowContext(ctx,
-		"SELECT submission_id FROM attempt_submissions_v2 WHERE attempt_id = ? FOR UPDATE", attemptID).Scan(&id)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	return id.String, nil
 }
 
 func lockedSubmissionID(ctx context.Context, t tx.Tx, attemptID string) (string, error) {

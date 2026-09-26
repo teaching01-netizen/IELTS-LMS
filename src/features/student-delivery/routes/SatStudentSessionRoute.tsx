@@ -16,6 +16,7 @@ import type { StudentAttempt } from "../../../types/studentAttempt";
 import type { SatBootstrapSeed } from "../bootstrap/satBootstrapSeed";
 import { useSatExamController } from "../hooks/useSatExamController";
 import { useSatReadingPreferences } from "../hooks/useSatReadingPreferences";
+import { useSatEliminatorArms } from "../hooks/useSatEliminatorArms";
 import {
   deriveSatStudentStage,
   type SatExamStage,
@@ -34,6 +35,10 @@ import {
   hasSatExamZoomDecision,
   saveSatExamZoomDecision,
 } from "../infrastructure/satReadingPreferencesStore";
+import {
+  loadSatNotesColumnOpen,
+  saveSatNotesColumnOpen,
+} from "../infrastructure/satNotesColumnStore";
 import { answeredSatQuestionCount, buildSatQuestionNavigationItems } from "../domain/satSelectors";
 import { formatSatTime } from "../domain/satTiming";
 import { resolveSatToolCapabilities } from "../domain/satTools";
@@ -60,6 +65,8 @@ import {
 } from "../ui/feedback/SatControlFeedback";
 import { SatIntegrityWarning } from "../ui/feedback/SatIntegrityWarning";
 import { SatTemporalRuntime } from "../timing/SatTemporalRuntime";
+import { loadAssessmentDeliveryMedia } from "../api/assessmentDeliveryApi";
+import { emitStudentObservabilityMetric } from "../../../utils/studentObservability";
 
 export interface SatStudentSessionRouteProps {
   scheduleId: string;
@@ -136,7 +143,43 @@ export function SatStudentSessionRoute({
     () => hasSatExamZoomDecision(scheduleId, attemptId),
     [attemptId, scheduleId],
   );
-  const [eliminationMode, setEliminationMode] = useState(false);
+  /**
+   * Questions whose eliminator is OPEN, keyed by module attempt + question.
+   *
+   * The choices a student actually crossed out are data and live in the
+   * response draft (`eliminatedOptionIds`), persisted like every other answer
+   * edit. This is only the presentation state of "the cut control is showing on
+   * this question", and keying it per question is the whole point: the arm used
+   * to be one route-wide boolean that EVERY navigation reset, so returning to a
+   * question the student had armed found it closed again while the
+   * crossing-out itself had survived. It is attempt-scoped client state that
+   * outlives a page reload (the hook owns that), never server state.
+   */
+  const eliminator = useSatEliminatorArms(scheduleId, attemptId);
+  /**
+   * Which module attempt the exam's own chrome belongs to, resolved here rather
+   * than in the answering branch because the Notes record below is read through
+   * a hook — and hooks run in every render, above every phase early-return.
+   * Empty until a module resolves, which reads as "no record", and the value the
+   * shell is handed is always computed for the module attempt it mounts in.
+   */
+  const moduleAttemptKey = exam.stateModuleAttempt?.id ?? exam.stateModule?.id ?? "";
+  /**
+   * The Notes column this module attempt was left with, read at MOUNT time and
+   * keyed to the module attempt — which is what makes it safe to read during
+   * render: the value is only ever consumed by a shell mounting for this module
+   * attempt, and a module change mounts a different shell, whose own record
+   * answers for it (a new module is a new context, so it starts closed even when
+   * the previous one was left open).
+   */
+  const initialNotesColumnOpen = useMemo(
+    () => loadSatNotesColumnOpen(scheduleId, attemptId, moduleAttemptKey),
+    [attemptId, moduleAttemptKey, scheduleId],
+  );
+  const reportNotesColumnOpen = useCallback(
+    (open: boolean) => saveSatNotesColumnOpen(scheduleId, attemptId, moduleAttemptKey, open),
+    [attemptId, moduleAttemptKey, scheduleId],
+  );
   // Bluebook Help + Shortcuts (Phases 2-3): transient route-level state.
   // Timer unaffected. Single-modal rule: at most one open at a time.
   const [helpOpen, setHelpOpen] = useState(false);
@@ -148,6 +191,23 @@ export function SatStudentSessionRoute({
   const [breakVeilOpen, setBreakVeilOpen] = useState(false);
 
   const { state, data, result, error, commands, persistence } = exam;
+  const loadMediaUrl = useCallback(async (assetId: string): Promise<string | null> => {
+    try {
+      return await loadAssessmentDeliveryMedia(scheduleId, attemptId, assetId);
+    } catch {
+      return null;
+    }
+  }, [attemptId, scheduleId]);
+  const reportMediaFailure = useCallback((assetId: string, questionId: string) => {
+    emitStudentObservabilityMetric("sat_media_load_failed", {
+      assetId,
+      questionId,
+      versionId: data?.versionId,
+      scheduleId,
+      attemptId,
+      reason: "media_request_failed",
+    });
+  }, [attemptId, data?.versionId, scheduleId]);
   // Phase 04 hold-previous-UI vessel: a render-time fallback (ref, not
   // state — holding must not itself trigger renders or reset clocks).
   // Updated only on successful module/review renders; cleared on identity
@@ -234,8 +294,10 @@ export function SatStudentSessionRoute({
   const activeQuestionIndex =
     state.phase === "module" || state.phase === "review" ? state.questionIndex : -1;
   useEffect(() => {
-    setEliminationMode(false);
     // Ephemeral UI resets on navigation: Help/Shortcuts/Break never linger.
+    // The eliminator deliberately does NOT reset here — it is question-scoped
+    // and persisted per attempt (see `eliminator`), so navigating away and back
+    // restores exactly what the student left open on that question.
     setHelpOpen(false);
     setShortcutsOpen(false);
     setBreakConfirmOpen(false);
@@ -664,6 +726,16 @@ export function SatStudentSessionRoute({
     return stageHost(examStage, refreshFallback);
   }
 
+  /**
+   * This question's eliminator key, and the one place a question's display
+   * state is read from: armed or not, per module attempt + exam question. The
+   * module attempt scopes it, so a module re-entry cannot inherit an arm from a
+   * question that merely shares its exam question id — and the module attempt id
+   * survives a reload, which is what lets the restored page find its arm again.
+   */
+  const questionKey = `${moduleAttemptKey}:${questionId}`;
+  const eliminationMode = eliminator.armedKeys.has(questionKey);
+  const toggleEliminationMode = () => eliminator.toggle(questionKey);
   const response = responseForQuestion(state.responses, questionId);
   const interactionBlocked =
     exam.blocked || exam.isSubmitting || exam.answerInteractionBlocked || persistenceInteractionBlocked;
@@ -754,7 +826,9 @@ export function SatStudentSessionRoute({
         answered={Boolean(response.answer.trim())}
         educationKey={satAnnotationEducationKey(scheduleId, attemptId)}
         onToggleMarkForReview={() => commands.toggleReview(questionId)}
-        onToggleEliminationMode={() => setEliminationMode((enabled) => !enabled)}
+        onToggleEliminationMode={toggleEliminationMode}
+        initialNotesColumnOpen={initialNotesColumnOpen}
+        onNotesColumnOpenChange={reportNotesColumnOpen}
         helpOpen={helpOpen}
         onOpenHelp={() => { setShortcutsOpen(false); setHelpOpen(true); }}
         onCloseHelp={() => setHelpOpen(false)}
@@ -802,6 +876,8 @@ export function SatStudentSessionRoute({
           questionNumber={state.questionIndex + 1}
           selectionScopeKey={`${stateModule.id}::${questionId}`}
           question={question}
+          loadMediaUrl={loadMediaUrl}
+          onMediaFailure={reportMediaFailure}
           response={response}
           eliminationMode={eliminationMode}
           disabled={interactionBlocked}
@@ -812,7 +888,7 @@ export function SatStudentSessionRoute({
           onAnswerChange={(answer) => commands.setAnswer(questionId, answer)}
           onAnswerBlur={flushAnnotations}
           onToggleReview={() => commands.toggleReview(questionId)}
-          onToggleEliminationMode={() => setEliminationMode((enabled) => !enabled)}
+          onToggleEliminationMode={toggleEliminationMode}
           onToggleEliminatedOption={(optionId) =>
             commands.toggleEliminatedOption(questionId, optionId)
           }

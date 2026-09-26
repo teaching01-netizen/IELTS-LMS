@@ -23,10 +23,8 @@ func (s stubStore) Put(_ context.Context, _ string, _ []byte, _ string) error {
 	return nil
 }
 func (s stubStore) Get(_ context.Context, _ string) ([]byte, error) { return s.body, nil }
+func (s stubStore) Stat(_ context.Context, _ string) error          { return nil }
 func (s stubStore) Delete(_ context.Context, _ string) error        { return nil }
-func (s stubStore) PresignedGet(_ context.Context, _ string) (string, error) {
-	return "http://presigned/asset", nil
-}
 
 func TestMediaDownloadEmitsImmutableCacheControl(t *testing.T) {
 	db, mock, err := sqlmock.New()

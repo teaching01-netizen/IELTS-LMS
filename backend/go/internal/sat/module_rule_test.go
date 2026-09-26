@@ -1,14 +1,9 @@
 package sat
 
 // The terminal-state rule has one owner: attempts.SATModuleTerminal, which the
-// V2 provisional submit gate also uses. These tests pin both halves of that
-// claim — the finalizer's verdict is exactly the predicate's verdict for every
-// state, and the real completion path refuses an unfinished module.
+// SAT submit and compatibility completion gates both use.
 import (
 	"context"
-	"database/sql"
-	"database/sql/driver"
-	"regexp"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -51,29 +46,19 @@ func TestFinalizerDelegatesTerminalRuleToAttempts(t *testing.T) {
 	}
 }
 
-// The finalizer itself refuses an unfinished module: staged through the real
-// CompleteAssessment path, one active module beside the terminal set must stop
-// the completion before any scoring work.
+// Completion refuses an unfinished module before invoking the seal boundary.
 func TestFinalizerRefusesUnfinishedModule(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	svc := satTwinService(db)
-
-	satBegin(mock)
-	satDBTime(mock)
-	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(satAttemptRow("running", "exam", "active"))
-	satNoReceipt(mock)
-	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
-	satUnscopedRun(mock)
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satModules(
-		[]driver.Value{"mod-rw-m1", "reading-writing", "rw-m1", "base", attempts.SATModuleSubmitted, int64(20), int64(27), int64(27)},
-		[]driver.Value{"mod-rw-m2-lower", "reading-writing", "rw-m2-lower", "lower_branch", attempts.SATModuleSubmitted, int64(20), int64(27), int64(27)},
-		[]driver.Value{"mod-math-m1", "math", "math-m1", "base", "active", int64(20), int64(27), int64(27)},
+	svc := satService(db)
+	expectCompleteAssessmentPrefix(mock, "running", "exam", "active", satTopologyRows(
+		[2]string{"reading-writing", attempts.SATModuleSubmitted},
+		[2]string{"reading-writing", attempts.SATModuleSubmitted},
+		[2]string{"math", "active"},
 	))
-	// No policy read, no scoring write: the refusal happens before them.
 	mock.ExpectRollback()
 
 	_, err = svc.CompleteAssessment(context.Background(), CompleteRequest{AttemptID: "att-1", ScheduleID: "sched-1", SubmissionID: "sub-unfinished", ActorKind: "student"})

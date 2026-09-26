@@ -163,5 +163,7 @@ export function useSatAttemptAnswersQuery(attemptId?: string) {
     enabled: Boolean(attemptId),
     staleTime: 0,
     refetchOnWindowFocus: 'always',
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
 }

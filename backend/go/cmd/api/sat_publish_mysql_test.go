@@ -4,12 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"example.com/ielts-proctoring/internal/authoring"
 	"example.com/ielts-proctoring/internal/exams"
+	"example.com/ielts-proctoring/internal/media"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/objectstore"
+	"example.com/ielts-proctoring/internal/platform/tx"
 	"github.com/google/uuid"
 )
 
@@ -239,6 +246,66 @@ func (f *satPublishFixture) questionRevisionID(t *testing.T, examQuestionID stri
 		t.Fatal(err)
 	}
 	return revisionID
+}
+
+// questionRevisionNumber reads the CAS fence the authoring save expects.
+func (f *satPublishFixture) questionRevisionNumber(t *testing.T, examQuestionID string) int {
+	t.Helper()
+	var revision int
+	if err := f.h.db.QueryRowContext(context.Background(), `
+		SELECT r.revision FROM assessment_exam_questions eq
+		JOIN assessment_question_revisions r ON r.id = eq.question_revision_id
+		WHERE eq.id = ?`, examQuestionID).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	return revision
+}
+
+// questionPrompt reads the prompt the publish gate actually collects assets from.
+func (f *satPublishFixture) questionPrompt(t *testing.T, examQuestionID string) string {
+	t.Helper()
+	var prompt string
+	if err := f.h.db.QueryRowContext(context.Background(), `
+		SELECT CAST(r.prompt AS CHAR) FROM assessment_exam_questions eq
+		JOIN assessment_question_revisions r ON r.id = eq.question_revision_id
+		WHERE eq.id = ?`, examQuestionID).Scan(&prompt); err != nil {
+		t.Fatal(err)
+	}
+	return prompt
+}
+
+// refreshFences re-reads the draft/exam revisions so the next publish request
+// mirrors what a console sends after committing an author save.
+func (f *satPublishFixture) refreshFences(t *testing.T) {
+	t.Helper()
+	if err := f.h.db.QueryRowContext(context.Background(),
+		"SELECT revision FROM exam_versions WHERE id = ? AND is_draft = TRUE", f.draftID,
+	).Scan(&f.draftRevision); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.h.db.QueryRowContext(context.Background(),
+		"SELECT revision FROM exam_entities WHERE id = ?", f.h.examID,
+	).Scan(&f.examRevision); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// insertFinalizedAsset stands in for the upload-complete step so the real media
+// service can resolve the object it was given.
+func (f *satPublishFixture) insertFinalizedAsset(t *testing.T, assetID, objectKey, fileName string) {
+	t.Helper()
+	if _, err := f.h.db.ExecContext(context.Background(), `
+		INSERT INTO media_assets (id, owner_kind, owner_id, content_type, file_name, upload_status, object_key, size_bytes, checksum_sha256, upload_url, created_at, updated_at)
+		VALUES (?, 'assessment_question', ?, 'image/png', ?, 'finalized', ?, 68, ?, '', NOW(), NOW())`,
+		assetID, "replacement-owner-"+assetID, fileName, objectKey, strings.Repeat("a", 64),
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := f.h.db.Exec("DELETE FROM media_assets WHERE id = ?", assetID); err != nil {
+			t.Error(err)
+		}
+	})
 }
 
 func (f *satPublishFixture) setQuestion(t *testing.T, examQuestionID, questionType, prompt, answer string) {
@@ -649,3 +716,170 @@ func TestSATPublishOperationKeyReplaysOneReleaseMySQL(t *testing.T) {
 }
 
 func stringPointer(value string) *string { return &value }
+
+type satPublishMediaVerifierFunc func(context.Context, []string) ([]media.AssetIssue, error)
+
+func (verify satPublishMediaVerifierFunc) VerifyRenderableAssets(ctx context.Context, assetIDs []string) ([]media.AssetIssue, error) {
+	return verify(ctx, assetIDs)
+}
+
+func TestSATPublishBlocksUnavailableMediaMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	questionID := f.modules[0].questions[0]
+	f.setQuestion(t, questionID, "single_choice", `{"version":1,"nodes":[{"type":"paragraph","text":"Choose the correct answer."},{"type":"image","attrs":{"assetId":"missing-media"}}]}`, string(validSATPublishQuestion().Answer))
+	f.h.exams.SetMediaVerifier(satPublishMediaVerifierFunc(func(_ context.Context, ids []string) ([]media.AssetIssue, error) {
+		if !reflect.DeepEqual(ids, []string{"missing-media"}) {
+			t.Fatalf("verified asset IDs = %v", ids)
+		}
+		return []media.AssetIssue{{AssetID: "missing-media", Reason: "object_unreadable", StorageErrorClass: "missing"}}, nil
+	}))
+
+	before := f.persistedState(t)
+	_, err := f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, f.publishRequest())
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.Code != apperrors.CodeValidation {
+		t.Fatalf("unavailable media should block publish with validation, got %v", err)
+	}
+	if got := appErr.Details["code"]; got != "sat.media.unavailable" {
+		t.Fatalf("diagnostic code = %v, want sat.media.unavailable", got)
+	}
+	if got := appErr.Details["path"]; got != "examQuestion:"+questionID+":prompt.nodes[1].attrs.assetId" {
+		t.Fatalf("diagnostic path = %v", got)
+	}
+	if after := f.persistedState(t); !reflect.DeepEqual(after, before) {
+		t.Fatalf("blocked publish changed persisted state:\nbefore: %+v\nafter:  %+v", before, after)
+	}
+}
+
+// TestSATPublishAfterLegacyImageReplacementMySQL is the end-to-end proof for
+// the image-replacement repair path. A legacy question points at an asset whose
+// object is gone and whose alt text is empty; the author replaces the file; the
+// committed revision must then carry the new finalized asset, the old ID must
+// be gone from it, and the media gate must pass with the real object store.
+func TestSATPublishAfterLegacyImageReplacementMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	ctx := context.Background()
+	questionID := f.modules[0].questions[0]
+
+	root := t.TempDir()
+	store := objectstore.NewLocalStore(root)
+	inner := media.NewService(f.h.db, tx.NewRunner(f.h.db), store)
+	var verified []string
+	f.h.exams.SetMediaVerifier(satPublishMediaVerifierFunc(func(ctx context.Context, ids []string) ([]media.AssetIssue, error) {
+		verified = append([]string(nil), ids...)
+		return inner.VerifyRenderableAssets(ctx, ids)
+	}))
+
+	// Legacy state: an uploaded-then-lost asset and the empty alt text the old
+	// upload flow produced.
+	const legacyAssetID = "legacy-lost-image"
+	f.setQuestion(t, questionID, "single_choice", legacyImagePrompt(legacyAssetID, ""), string(validSATPublishQuestion().Answer))
+
+	before := f.persistedState(t)
+	_, err := f.h.exams.Publish(ctx, f.h.examID, f.h.actor, f.publishRequest())
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.Code != apperrors.CodeValidation {
+		t.Fatalf("a lost legacy asset should block publish with validation, got %v", err)
+	}
+	if got := appErr.Details["code"]; got != "sat.media.unavailable" {
+		t.Fatalf("diagnostic code = %v, want sat.media.unavailable", got)
+	}
+	if got := appErr.Details["assetId"]; got != legacyAssetID {
+		t.Fatalf("diagnostic asset = %v, want %q", got, legacyAssetID)
+	}
+	if !reflect.DeepEqual(verified, []string{legacyAssetID}) {
+		t.Fatalf("verified asset IDs = %v, want only the lost legacy asset", verified)
+	}
+	if after := f.persistedState(t); !reflect.DeepEqual(after, before) {
+		t.Fatalf("blocked publish changed persisted state:\nbefore: %+v\nafter:  %+v", before, after)
+	}
+
+	// Replace the file: object written under the configured root at the same
+	// media/<assetId>/<file> layout the upload-complete flow uses, then a
+	// finalized asset row, then the normal author save that commits the node.
+	const replacementAssetID = "replaced-image"
+	objectKey := "media/" + replacementAssetID + "/graph.png"
+	if err := store.Put(ctx, objectKey, []byte("\x89PNG replacement bytes"), "image/png"); err != nil {
+		t.Fatalf("write replacement object: %v", err)
+	}
+	objectPath := filepath.Join(root, filepath.FromSlash(objectKey))
+	if _, err := os.Stat(objectPath); err != nil {
+		t.Fatalf("replacement object missing at %s: %v", objectPath, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "media", legacyAssetID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy object unexpectedly present for %q: %v", legacyAssetID, err)
+	}
+	f.insertFinalizedAsset(t, replacementAssetID, objectKey, "graph.png")
+
+	legacyRevisionID := f.questionRevisionID(t, questionID)
+	if _, err := f.h.authors.UpdateQuestion(ctx, questionID, f.h.actor, f.questionRevisionNumber(t, questionID), authoring.QuestionDraft{
+		QuestionType: "single_choice",
+		Prompt:       json.RawMessage(legacyImagePrompt(replacementAssetID, "Supply demand graph")),
+		Answer:       validSATPublishQuestion().Answer,
+	}); err != nil {
+		t.Fatalf("commit the replacement author save: %v", err)
+	}
+
+	// The acceptance condition: the canonical revision holds the new asset ID
+	// and never the old one.
+	committedRevisionID := f.questionRevisionID(t, questionID)
+	if committedRevisionID == legacyRevisionID {
+		t.Fatal("replacement should commit a new question revision")
+	}
+	committedPrompt := f.questionPrompt(t, questionID)
+	if !strings.Contains(committedPrompt, replacementAssetID) {
+		t.Fatalf("committed revision is missing the new asset: %s", committedPrompt)
+	}
+	if strings.Contains(committedPrompt, legacyAssetID) {
+		t.Fatalf("committed revision still references the lost asset: %s", committedPrompt)
+	}
+
+	verified = nil
+	f.refreshFences(t)
+	published, err := f.h.exams.Publish(ctx, f.h.examID, f.h.actor, f.publishRequest())
+	if err != nil {
+		t.Fatalf("publish after repairing the image should pass the media gate: %v", err)
+	}
+	if published.ID != f.draftID || !published.IsPublished {
+		t.Fatalf("unexpected published version: %+v", published)
+	}
+	if !reflect.DeepEqual(verified, []string{replacementAssetID}) {
+		t.Fatalf("publish verified asset IDs = %v, want only the replacement", verified)
+	}
+}
+
+func legacyImagePrompt(assetID, alt string) string {
+	return `{"version":1,"nodes":[{"type":"paragraph","text":"Choose the correct answer."},` +
+		`{"type":"image","attrs":{"assetId":"` + assetID + `","alt":"` + alt + `"}}]}`
+}
+
+func TestSATPublishConflictsWhenDraftChangesDuringMediaCheckMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	questionID := f.modules[0].questions[0]
+	f.setQuestion(t, questionID, "single_choice", `{"version":1,"nodes":[{"type":"paragraph","text":"Choose the correct answer."},{"type":"image","attrs":{"assetId":"media-1"}}]}`, string(validSATPublishQuestion().Answer))
+	questionRevisionID := f.questionRevisionID(t, questionID)
+	f.h.exams.SetMediaVerifier(satPublishMediaVerifierFunc(func(_ context.Context, _ []string) ([]media.AssetIssue, error) {
+		// Simulate a committed author save after preflight read and before object verification returns.
+		if _, err := f.h.db.Exec(`UPDATE assessment_question_revisions SET prompt = ? WHERE id = ?`, `{"version":1,"nodes":[{"type":"paragraph","text":"Updated during media check."}]}`, questionRevisionID); err != nil {
+			return nil, err
+		}
+		if _, err := f.h.db.Exec("UPDATE exam_versions SET revision = revision + 1 WHERE id = ? AND is_draft = TRUE", f.draftID); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}))
+
+	before := f.persistedState(t)
+	_, err := f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, f.publishRequest())
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.Code != apperrors.CodeConflict {
+		t.Fatalf("draft change during media verification should conflict, got %v", err)
+	}
+	after := f.persistedState(t)
+	if !after.isDraft || after.isPublished || after.publishedID.Valid || after.publishedEvents != before.publishedEvents {
+		t.Fatalf("stale preflight published after draft changed: before=%+v after=%+v", before, after)
+	}
+	if after.draftRevision != before.draftRevision+1 {
+		t.Fatalf("simulated author save did not advance draft revision: before=%+v after=%+v", before, after)
+	}
+}

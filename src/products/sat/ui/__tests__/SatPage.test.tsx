@@ -181,7 +181,7 @@ describe('SatStatStrip', () => {
 describe('satOutcomeTone', () => {
   it('maps the outcomeStatus table exactly', () => {
     expect(satOutcomeTone('scored')).toBe('ready');
-    expect(satOutcomeTone('pending')).toBe('pending');
+    expect(satOutcomeTone('pending')).toBe('ready');
     expect(satOutcomeTone('invalidated_proctor')).toBe('invalidated');
     expect(satOutcomeTone('invalidated_timeout')).toBe('invalidated');
     expect(satOutcomeTone('anything-else')).toBe('neutral');

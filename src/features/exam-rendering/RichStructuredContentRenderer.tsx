@@ -131,7 +131,19 @@ export interface StaticStructuredImageEnlargeApi {
   resolveGesture?: SatImageResolveGesture | undefined;
 }
 
-function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?: StaticStructuredImageEnlargeApi | undefined }) {
+export interface StructuredContentMediaProps {
+  loadMediaUrl?: ((assetId: string) => Promise<string | null>) | undefined;
+  onMediaFailure?: ((assetId: string, questionId: string) => void) | undefined;
+  questionId?: string | undefined;
+}
+
+function StaticStructuredImage({
+  node,
+  enlarge,
+  loadMediaUrl,
+  onMediaFailure,
+  questionId = "",
+}: { node: RichTextNode; enlarge?: StaticStructuredImageEnlargeApi | undefined } & StructuredContentMediaProps) {
   const assetId = stringAttribute(node, "assetId");
   const fallbackSource = stringAttribute(node, "src");
   const alt = stringAttribute(node, "alt");
@@ -146,7 +158,12 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
   const size = stringAttribute(node, "size");
   const presentation = satImagePresentation(node.attrs ?? {});
   const [source, setSource] = useState(() => initialImageSource(node));
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
   const [failed, setFailed] = useState(() => !assetId && !directSource(fallbackSource));
+  const refreshAttempted = useRef(false);
+  const failureReported = useRef(false);
+  const loadGeneration = useRef(0);
   // Bluebook figure inspection (Phase 10): transient per-image viewing state.
   // No timer, answer, or persistence touch — pure presentation over the same
   // source. The view and the measured geometry live here, beside the image they
@@ -162,14 +179,59 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const enlargeId = `sat-enlarge-${assetId || "inline"}-${width ?? 0}x${height ?? 0}`;
 
+  const reportFailure = useCallback(() => {
+    if (failureReported.current) return;
+    failureReported.current = true;
+    setFailed(true);
+    onMediaFailure?.(assetId, questionId);
+  }, [assetId, onMediaFailure, questionId]);
+
+  const refreshOnce = useCallback(async () => {
+    if (!assetId || !loadMediaUrl || refreshAttempted.current) {
+      reportFailure();
+      return;
+    }
+    refreshAttempted.current = true;
+    const generation = loadGeneration.current;
+    try {
+      const refreshed = await loadMediaUrl(assetId);
+      if (generation !== loadGeneration.current) {
+        if (refreshed?.startsWith("blob:")) URL.revokeObjectURL(refreshed);
+        return;
+      }
+      const nextSource = directSource(refreshed ?? "");
+      if (nextSource && nextSource !== sourceRef.current) {
+        setSource(nextSource);
+        setFailed(false);
+        return;
+      }
+    } catch {
+      // One bounded refresh attempt; the existing unavailable state is final.
+    }
+    reportFailure();
+  }, [assetId, loadMediaUrl, reportFailure]);
+
   useEffect(() => {
     let cancelled = false;
+    const generation = ++loadGeneration.current;
     const directAssetSource = directSource(assetId);
     const directFallbackSource = directSource(fallbackSource);
-    setSource(directAssetSource || (!assetId ? directFallbackSource : ""));
-    setFailed(!assetId && !directFallbackSource);
+    const protectedDelivery = Boolean(assetId && loadMediaUrl);
+    const initialSource = protectedDelivery ? "" : directAssetSource || (!assetId ? directFallbackSource : "");
+    refreshAttempted.current = false;
+    failureReported.current = false;
+    setSource(initialSource);
+    setFailed(!initialSource);
 
-    if (!assetId || directAssetSource) return;
+    if (!assetId || directAssetSource || protectedDelivery) {
+      if (protectedDelivery) {
+        void refreshOnce();
+      }
+      return () => {
+        cancelled = true;
+        if (loadGeneration.current === generation) loadGeneration.current++;
+      };
+    }
     void getAssessmentMediaAsset(assetId)
       .then((asset) => {
         if (cancelled) return;
@@ -186,8 +248,13 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
 
     return () => {
       cancelled = true;
+      if (loadGeneration.current === generation) loadGeneration.current++;
     };
-  }, [assetId, fallbackSource]);
+  }, [assetId, fallbackSource, loadMediaUrl, refreshOnce]);
+
+  useEffect(() => () => {
+    if (source.startsWith("blob:") && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(source);
+  }, [source]);
 
   // A new source is a new figure: no magnification survives it.
   useEffect(() => {
@@ -380,7 +447,7 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
             decoding="async"
             loading="lazy"
             draggable={false}
-            onError={() => setFailed(true)}
+            onError={() => void refreshOnce()}
             onLoad={measure}
             aria-hidden={viewerOpen ? true : undefined}
             // The visual itself carries the alignment: auto margins move it
@@ -432,8 +499,8 @@ export type StructuredTextRenderer = (value: {
   startOffset: number;
 }) => ReactNode;
 
-function RichNode({ node, renderText, enlarge }: { node: RichTextNode; renderText?: StructuredTextRenderer | undefined; enlarge?: StaticStructuredImageEnlargeApi | undefined }): ReactNode {
-  const children = (key: string) => renderNodes(node.content, key, renderText, enlarge);
+function RichNode({ node, renderText, enlarge, ...mediaProps }: { node: RichTextNode; renderText?: StructuredTextRenderer | undefined; enlarge?: StaticStructuredImageEnlargeApi | undefined } & StructuredContentMediaProps): ReactNode {
+  const children = (key: string) => renderNodes(node.content, key, renderText, enlarge, mediaProps);
   const nodeId = stringAttribute(node, 'id');
   const annotatable = Boolean(renderText && nodeId && (node.content ?? []).every((child) => child.type === 'text' || child.type === 'hardBreak'));
   const textAttributes = annotatable ? { 'data-content-text-node': nodeId } : {};
@@ -446,7 +513,7 @@ function RichNode({ node, renderText, enlarge }: { node: RichTextNode; renderTex
         const first = index;
         const child = inline[index]!;
         if (child.type !== 'text' && child.type !== 'hardBreak') {
-          parts.push(<RichNode key={`mixed-${first}`} node={child} renderText={renderText} enlarge={enlarge} />);
+          parts.push(<RichNode key={`mixed-${first}`} node={child} renderText={renderText} enlarge={enlarge} {...mediaProps} />);
           index += 1;
           continue;
         }
@@ -523,7 +590,7 @@ function RichNode({ node, renderText, enlarge }: { node: RichTextNode; renderTex
     case "blockMath":
       return <div>{renderMath(stringAttribute(node, "latex"), true)}</div>;
     case "image":
-      return <StaticStructuredImage node={node} enlarge={enlarge} />;
+      return <StaticStructuredImage node={node} enlarge={enlarge} {...mediaProps} />;
     case "table":
       return <table><tbody>{children("table")}</tbody></table>;
     case "tableRow":
@@ -546,19 +613,23 @@ function cellSpanAttributes(node: RichTextNode): { colSpan?: number; rowSpan?: n
   };
 }
 
-function renderNodes(nodes: readonly RichTextNode[] | undefined, keyPrefix: string, renderText?: StructuredTextRenderer, enlarge?: StaticStructuredImageEnlargeApi): ReactNode[] {
-  return (nodes ?? []).map((node, index) => <RichNode key={`${keyPrefix}-${index}`} node={node} renderText={renderText} enlarge={enlarge} />);
+function renderNodes(nodes: readonly RichTextNode[] | undefined, keyPrefix: string, renderText?: StructuredTextRenderer, enlarge?: StaticStructuredImageEnlargeApi, mediaProps: StructuredContentMediaProps = {}): ReactNode[] {
+  return (nodes ?? []).map((node, index) => <RichNode key={`${keyPrefix}-${index}`} node={node} renderText={renderText} enlarge={enlarge} {...mediaProps} />);
 }
 
 export const RichStructuredContentRenderer = memo(function RichStructuredContentRenderer({
   content,
   renderText,
   enlarge,
+  loadMediaUrl,
+  onMediaFailure,
+  questionId,
 }: {
   content: StructuredContent;
   renderText?: StructuredTextRenderer | undefined;
   enlarge?: StaticStructuredImageEnlargeApi | undefined;
-}) {
+} & StructuredContentMediaProps) {
+  const mediaProps: StructuredContentMediaProps = { loadMediaUrl, onMediaFailure, questionId };
   const document = documentFromStructuredContent(content) as RichTextDocument;
-  return <div className={CONTENT_CLASS_NAME}>{renderNodes(document.content, "content", renderText, enlarge)}</div>;
+  return <div className={CONTENT_CLASS_NAME}>{renderNodes(document.content, "content", renderText, enlarge, mediaProps)}</div>;
 });

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { BarChart2, CheckCircle2, Clock3, Download, RefreshCw, Search, Users, X } from "lucide-react";
 import { ErrorSurface } from "../ui/ErrorSurface";
 import { LoadingSurface } from "../ui/LoadingSurface";
@@ -46,7 +47,9 @@ function outcomeLabel(result: AdminResultRow): string {
     case "invalidated_timeout":
       return "Exam ended before scoring";
     case "pending":
-      return "Scoring pending";
+      return result.providerKey === "sat" ? "Completed · view answers" : "Scoring pending";
+    case "scored":
+      return result.providerKey === "sat" ? "Completed · view answers" : releaseLabel(result.releaseStatus);
     default:
       return releaseLabel(result.releaseStatus);
   }
@@ -70,6 +73,7 @@ function scoreLabel(result: AdminResultRow): string {
   ) {
     return "Not scored";
   }
+  if (result.providerKey === "sat") return "—";
   if (
     result.providerKey === "ielts" &&
     typeof result.overallBand === "number" &&
@@ -117,6 +121,7 @@ function formatDetailValue(value: unknown): string {
 function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: () => void }) {
   const [tab, setTab] = useState<ResultDetailTab>("summary");
   const isIelts = result.providerKey === "ielts";
+  const isSat = result.providerKey === "sat";
   const isAct = result.providerKey === "act";
   const ieltsSubmissionId = isIelts ? (result.submissionId ?? null) : null;
   const ieltsDetail = useIeltsResultDetailQuery(ieltsSubmissionId, isIelts && tab !== "summary");
@@ -160,13 +165,13 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
           </button>
         </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-xl bg-slate-50 p-3">
+        <div className={`mt-6 grid grid-cols-2 gap-3 ${isSat ? "sm:grid-cols-3" : "sm:grid-cols-4"}`}>
+          {!isSat ? <div className="rounded-xl bg-slate-50 p-3">
             <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
               Score
             </p>
             <p className="mt-1 text-lg font-semibold text-slate-900">{scoreLabel(result)}</p>
-          </div>
+          </div> : null}
           <div className="rounded-xl bg-slate-50 p-3">
             <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
               Outcome
@@ -192,6 +197,7 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
             </p>
           </div>
         </div>
+        {isSat ? <Link to={`/sat/results/attempts/${encodeURIComponent(result.attemptId)}`} className="mt-4 inline-flex text-sm font-semibold text-blue-600 hover:text-blue-800">View saved answers</Link> : null}
 
         {result.providerKey === "ielts" ? (
           <div className="mt-6 border-y border-black/[0.06] py-4">
@@ -207,7 +213,7 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
               ))}
             </div>
           </div>
-        ) : typeof result.percentage === "number" && Number.isFinite(result.percentage) ? (
+        ) : !isSat && typeof result.percentage === "number" && Number.isFinite(result.percentage) ? (
           <div className="mt-6 border-y border-black/[0.06] py-4">
             <h3 className="text-sm font-semibold text-slate-900">Objective performance</h3>
             <p className="mt-2 text-sm text-slate-600">
@@ -302,6 +308,8 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
                   ]}
                 />
               )
+            ) : isSat ? (
+              <p className="py-4 text-sm text-slate-500">SAT scores are not generated at completion. Use saved answers for review.</p>
             ) : typeof result.percentage === "number" && Number.isFinite(result.percentage) ? (
               <ModuleRawTable
                 caption="SAT objective raw score"
@@ -381,8 +389,7 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
               )
             ) : (
               <p className="py-4 text-sm text-slate-500">
-                SAT per-question rows live on the SAT result page, where adaptive
-                module context is preserved.
+                <Link to={`/sat/results/attempts/${encodeURIComponent(result.attemptId)}`} className="font-semibold text-blue-600 hover:text-blue-800">Completed · view answers</Link>
               </p>
             )}
           </div>

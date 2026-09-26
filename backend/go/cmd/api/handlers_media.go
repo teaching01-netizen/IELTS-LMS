@@ -76,11 +76,52 @@ func mediaDownloadHandler(app *App) http.HandlerFunc {
 	}
 }
 
-// mediaDownloadContentHandler serves the Rust-compatible canonical content
-// route. It deliberately shares the byte-serving behavior with the current
-// /assets/{assetID} alias so old and new persisted download URLs remain valid.
+// mediaDownloadContentHandler serves normal readers by session and SAT
+// students by an attempt credential scoped to their pinned version.
 func mediaDownloadContentHandler(app *App) http.HandlerFunc {
-	return mediaDownloadHandler(app)
+	return func(w http.ResponseWriter, r *http.Request) {
+		bearer := bearerOf(r)
+		if bearer == "" {
+			mediaDownloadHandler(app)(w, r)
+			return
+		}
+		if app == nil || app.DB == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Media service is unavailable."))
+			return
+		}
+		claims, err := verifyAttemptReadBearer(app, r, bearer)
+		if err != nil || claims.ClientSessionID == "" {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			return
+		}
+		if app.Delivery == nil || app.Media == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Media service is unavailable."))
+			return
+		}
+		assetID := strings.TrimSpace(chi.URLParam(r, "assetID"))
+		allowed, err := app.Delivery.CanAttemptReadMedia(r.Context(), claims.ScheduleID, claims.AttemptID, assetID)
+		if err != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Media is unavailable."))
+			return
+		}
+		if !allowed {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Media asset not found."))
+			return
+		}
+		contentType, body, err := app.Media.ReadBytes(r.Context(), assetID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if strings.TrimSpace(contentType) == "" {
+			contentType = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}
 }
 
 // mediaGetHandler returns one media asset's metadata JSON, mirroring Rust

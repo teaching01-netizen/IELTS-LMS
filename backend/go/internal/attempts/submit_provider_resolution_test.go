@@ -100,10 +100,8 @@ func TestSubmitResolvesProviderOnLockedTransaction(t *testing.T) {
 	}
 }
 
-// The branch follows the resolver and nothing else: a SAT resolver takes the
-// provisional path (no seal, no submitted_at) even though the sealed path is
-// available.
-func TestSubmitTakesSATBranchFromResolver(t *testing.T) {
+// SAT keeps its topology gate, then uses the shared terminal seal path.
+func TestSubmitSATResolverSealsAfterTerminalTopology(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -118,21 +116,23 @@ func TestSubmitTakesSATBranchFromResolver(t *testing.T) {
 	submitPrefixStubs(mock)
 	satScopeUnscoped(mock)
 	mock.ExpectQuery("FROM assessment_module_attempts").
-		WillReturnRows(satModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleLocked)))
-	mock.ExpectExec("delivery_status='submitted', phase='post-exam'").WillReturnResult(sqlmock.NewResult(0, 1))
+		WillReturnRows(satModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleSubmitted)))
+	mock.ExpectQuery("FROM attempt_responses_v2").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
+	mock.ExpectExec("UPDATE student_attempts SET response_revision=").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO attempt_submissions_v2").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	cmd := SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, SubmissionID: "sub-sat"}
 	res, err := svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderSAT), sealer)
 	if err != nil {
-		t.Fatalf("SAT resolver must take the provisional path, got %v", err)
+		t.Fatalf("SAT resolver must take the terminal seal path, got %v", err)
 	}
-	if !res.Provisional {
-		t.Fatalf("SAT resolver must produce a provisional receipt, got %+v", res)
+	if res.Provisional {
+		t.Fatalf("SAT resolver must produce a final receipt, got %+v", res)
 	}
-	if sealer.calls != 0 {
-		t.Fatalf("SAT must not seal, got %d seal calls", sealer.calls)
+	if sealer.calls != 1 {
+		t.Fatalf("SAT must seal once after the topology check, got %d seal calls", sealer.calls)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

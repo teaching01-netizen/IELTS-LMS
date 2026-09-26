@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -986,6 +987,12 @@ func defaultCookieSecure(environment string) bool {
 func (c Config) ValidateForRuntime() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
+	}
+	if productionLike(c.Environment) {
+		root := strings.TrimSpace(c.ObjectStorageLocalRoot)
+		if root == "" || !filepath.IsAbs(root) {
+			return fmt.Errorf("OBJECT_STORAGE_LOCAL_ROOT must be absolute; configure it inside the mounted persistent volume")
+		}
 	}
 	// Master key is an emergency credential: enabling it without a password
 	// is a misconfiguration in every environment (fail closed), matching the

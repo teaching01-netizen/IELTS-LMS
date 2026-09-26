@@ -14,7 +14,24 @@ const mocks = vi.hoisted(() => ({
   refetchReadiness: vi.fn(),
   refetchRelease: vi.fn(),
   refetchDistribution: vi.fn(),
+  refetchShell: vi.fn(),
+  // The revision the SERVER has committed. The shell read returns it, so a
+  // test can advance it the way a question save does and watch what Publish
+  // acts on.
+  shellRevision: 42,
 }));
+
+// The readiness report the page holds. Sharing one object lets a test model a
+// checks run against the freshly committed revision.
+const readinessReport = {
+  examId: "exam-sat-1",
+  versionId: "draft-v5",
+  versionRevision: 42,
+  publishScope: "full" as const,
+  valid: true,
+  errors: [] as never[],
+  warnings: [] as never[],
+};
 
 vi.mock("../../api/assessmentQueries", () => ({
   // The shell read answers a lifecycle envelope now; this route renders the
@@ -26,13 +43,14 @@ vi.mock("../../api/assessmentQueries", () => ({
         examId: "exam-sat-1",
         providerKey: "sat",
         versionId: "draft-v5",
-        versionRevision: 42,
+        versionRevision: mocks.shellRevision,
         sections: [],
       },
     },
     isLoading: false,
+    isFetching: false,
     error: null,
-    refetch: vi.fn(),
+    refetch: mocks.refetchShell,
   }),
   useAssessmentReleaseState: () => ({
     data: {
@@ -49,15 +67,7 @@ vi.mock("../../api/assessmentQueries", () => ({
     refetch: mocks.refetchRelease,
   }),
   useAssessmentReleaseReadiness: () => ({
-    data: {
-      examId: "exam-sat-1",
-      versionId: "draft-v5",
-      versionRevision: 42,
-      publishScope: "full",
-      valid: true,
-      errors: [],
-      warnings: [],
-    },
+    data: readinessReport,
     isFetching: false,
     error: null,
     refetch: mocks.refetchReadiness,
@@ -205,6 +215,22 @@ beforeEach(() => {
   mocks.refetchReadiness.mockReset();
   mocks.refetchRelease.mockReset();
   mocks.refetchDistribution.mockReset();
+  mocks.refetchShell.mockReset();
+  mocks.shellRevision = 42;
+  readinessReport.versionRevision = 42;
+  // A fresh read answers the revision the server has committed right now.
+  mocks.refetchShell.mockImplementation(async () => ({
+    data: {
+      state: "READY",
+      shell: {
+        examId: "exam-sat-1",
+        providerKey: "sat",
+        versionId: "draft-v5",
+        versionRevision: mocks.shellRevision,
+        sections: [],
+      },
+    },
+  }));
   mocks.refetchReadiness.mockResolvedValue(undefined);
   mocks.refetchRelease.mockResolvedValue(undefined);
   mocks.refetchDistribution.mockResolvedValue(undefined);
@@ -240,6 +266,28 @@ describe("SatDeliveryReleaseRoute", () => {
     expect(mocks.refetchRelease).toHaveBeenCalledTimes(1);
     expect(mocks.refetchDistribution).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("student-links-dashboard")).toBeInTheDocument();
+  });
+
+  it("publishes the revision committed after an image replacement, never the stale one", async () => {
+    // The page rendered with revision 42. The author replaced an image and the
+    // save (and a checks run) landed at 43 before they clicked Publish.
+    renderRoute();
+    const readinessFor42 = readinessReport.versionRevision;
+    mocks.shellRevision = 43;
+    readinessReport.versionRevision = 43;
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    await waitFor(() => expect(mocks.publish).toHaveBeenCalledTimes(1));
+    // Publish collects asset references from the committed question
+    // revisions, so it must be sent with the revision that holds the new
+    // asset IDs, not the one this page last rendered.
+    expect(mocks.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedDraftVersionId: "draft-v5", expectedDraftRevision: 43 })
+    );
+    expect(mocks.publish).not.toHaveBeenCalledWith(
+      expect.objectContaining({ expectedDraftRevision: readinessFor42 })
+    );
   });
 
   it("deep-links a release blocker to the exact authoring question and field", () => {

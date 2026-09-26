@@ -743,6 +743,67 @@ describe("SatExamShell", () => {
     expect(onReadingPreferencesChange).toHaveBeenLastCalledWith(expect.objectContaining({ textScale: 1.15, examZoom: 1.25 }));
   });
 
+  it("opens the Notes column in the first commit when the attempt says it was left open", () => {
+    const onNotesColumnOpenChange = vi.fn();
+    render(
+      <SatExamShell {...props({ initialNotesColumnOpen: true, onNotesColumnOpenChange })}>
+        <NotesWorkspace />
+      </SatExamShell>,
+    );
+
+    // Restored in the FIRST commit — a layout effect, so the pane is part of the
+    // painted frame rather than appearing one frame later.
+    expect(document.querySelector('[data-sat-notes-column="true"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: /^Notes/ })).toHaveAttribute("aria-expanded", "true");
+    // The mount value is never reported back: the attempt already holds it.
+    expect(onNotesColumnOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("reports the student's own open and close, not the mount value", () => {
+    const onNotesColumnOpenChange = vi.fn();
+    render(
+      <SatExamShell {...props({ initialNotesColumnOpen: false, onNotesColumnOpenChange })}>
+        <NotesWorkspace />
+      </SatExamShell>,
+    );
+    expect(document.querySelector('[data-sat-notes-column="true"]')).toBeNull();
+    expect(onNotesColumnOpenChange).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Notes/ }));
+    expect(document.querySelector('[data-sat-notes-column="true"]')).not.toBeNull();
+    expect(onNotesColumnOpenChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Notes/ }));
+    expect(document.querySelector('[data-sat-notes-column="true"]')).toBeNull();
+    expect(onNotesColumnOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("refuses a stored open column where the exam is blocked or has no notes", () => {
+    const onNotesColumnOpenChange = vi.fn();
+    const { unmount } = render(
+      <SatExamShell
+        {...props({ blocked: true, initialNotesColumnOpen: true, onNotesColumnOpenChange })}
+      >
+        <NotesWorkspace />
+      </SatExamShell>,
+    );
+    // The restore rides the normal open intent, so the guards still decide.
+    expect(document.querySelector('[data-sat-notes-column="true"]')).toBeNull();
+    // A refusal must not erase what the student left: nothing is reported.
+    expect(onNotesColumnOpenChange).not.toHaveBeenCalled();
+    unmount();
+
+    render(
+      <SatExamShell
+        {...props({ notesAvailable: false, initialNotesColumnOpen: true, onNotesColumnOpenChange })}
+      >
+        <NotesWorkspace />
+      </SatExamShell>,
+    );
+    expect(document.querySelector('[data-sat-notes-column="true"]')).toBeNull();
+    expect(onNotesColumnOpenChange).not.toHaveBeenCalled();
+  });
+
   it("offers Fit to screen in Display, and measures rather than guesses when pressed", () => {
     const onReadingPreferencesChange = vi.fn();
     const onScreenZoomDecided = vi.fn();
