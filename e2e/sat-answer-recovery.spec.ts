@@ -75,11 +75,12 @@ test.describe("SAT answer durability recovery", () => {
         .getByRole("status")
         .filter({ hasText: "Checks automatically every 15 seconds while visible" });
       await expect(refreshStatus).toBeVisible();
-      await page.waitForResponse((response) =>
-        response.url().includes("/v1/results/sat/attempts/") &&
-        response.url().endsWith("/answers") &&
-        response.request().method() === "GET" &&
-        response.ok(),
+      await page.waitForResponse(
+        (response) =>
+          response.url().includes("/v1/results/sat/attempts/") &&
+          response.url().endsWith("/answers") &&
+          response.request().method() === "GET" &&
+          response.ok(),
         { timeout: 25_000 }
       );
       await expect(refreshStatus).toContainText("Last checked");

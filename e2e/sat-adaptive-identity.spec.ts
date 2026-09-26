@@ -21,7 +21,7 @@ test.describe("SAT adaptive identity in the browser", () => {
   }, testInfo) => {
     test.skip(
       testInfo.project.name !== "chromium",
-      "Adaptive identity scenarios run once in desktop Chromium.",
+      "Adaptive identity scenarios run once in desktop Chromium."
     );
     const { studentContext, studentPage, scheduleId, candidateId, attemptId, studentName } =
       await startSatAttempt(page, browser, {
@@ -30,7 +30,6 @@ test.describe("SAT adaptive identity in the browser", () => {
         studentPrefix: "SAT Adaptive Higher Student",
       });
     try {
-
       // Answer everything correctly so Module 1 must route HIGH.
       const frame = await readDeliveryFrame(studentPage, scheduleId, attemptId, candidateId);
       const base = frame.sections
@@ -38,14 +37,20 @@ test.describe("SAT adaptive identity in the browser", () => {
         ?.modules.find((module) => module.adaptiveRole === "base");
       if (!base) throw new Error("Reading & Writing base module missing from bootstrap");
       await answerBaseModuleCorrectly(studentPage, scheduleId, attemptId, candidateId, base.id);
-      await expireCurrentBaseModule(studentPage, scheduleId, attemptId, candidateId, "reading-writing");
+      await expireCurrentBaseModule(
+        studentPage,
+        scheduleId,
+        attemptId,
+        candidateId,
+        "reading-writing"
+      );
 
       const branch = await waitForActiveBranch(
         studentPage,
         scheduleId,
         attemptId,
         candidateId,
-        "reading-writing",
+        "reading-writing"
       );
       expect(branch.role).toBe("higher_branch");
 
@@ -57,10 +62,13 @@ test.describe("SAT adaptive identity in the browser", () => {
 
       // Staff projection agrees through the staff API the room reads.
       await expect
-        .poll(async () => (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleId, {
-          timeout: 45_000,
-          intervals: [500, 1_000, 2_000],
-        })
+        .poll(
+          async () => (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleId,
+          {
+            timeout: 45_000,
+            intervals: [500, 1_000, 2_000],
+          }
+        )
         .toBe(branch.moduleId);
       const projection = await staffProjection(page, scheduleId, studentName);
       expect(projection.runtimeCurrentModuleRole).toBe("higher_branch");
@@ -73,7 +81,7 @@ test.describe("SAT adaptive identity in the browser", () => {
       const dialog = page.getByRole("dialog", { name: "Selected student inspector" });
       await expect(dialog).toBeVisible();
       await expect(
-        dialog.locator("[data-sat-room-student-detail]").getByText("Module 2 · Higher"),
+        dialog.locator("[data-sat-room-student-detail]").getByText("Module 2 · Higher")
       ).toBeVisible();
 
       // The rendered student screen belongs to the routed module: reload and
@@ -81,7 +89,9 @@ test.describe("SAT adaptive identity in the browser", () => {
       await studentPage.reload({ waitUntil: "domcontentloaded" });
       await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
       const reloaded = await readDeliveryFrame(studentPage, scheduleId, attemptId, candidateId);
-      const activeAfterReload = reloaded.attempt.moduleAttempts.find((item) => item.state === "active");
+      const activeAfterReload = reloaded.attempt.moduleAttempts.find(
+        (item) => item.state === "active"
+      );
       expect(activeAfterReload?.moduleId).toBe(branch.moduleId);
     } finally {
       await studentContext.close();
@@ -94,7 +104,7 @@ test.describe("SAT adaptive identity in the browser", () => {
   }, testInfo) => {
     test.skip(
       testInfo.project.name !== "chromium",
-      "Adaptive identity scenarios run once in desktop Chromium.",
+      "Adaptive identity scenarios run once in desktop Chromium."
     );
     const { studentContext, studentPage, scheduleId, candidateId, attemptId, studentName } =
       await startSatAttempt(page, browser, {
@@ -103,7 +113,6 @@ test.describe("SAT adaptive identity in the browser", () => {
         studentPrefix: "SAT Adaptive Lower Student",
       });
     try {
-
       // Answer nothing on either section: zero correct must route LOW — the
       // control that proves fixing Higher did not break Lower.
       for (const sectionKey of ["reading-writing", "math"] as const) {
@@ -113,7 +122,7 @@ test.describe("SAT adaptive identity in the browser", () => {
           scheduleId,
           attemptId,
           candidateId,
-          sectionKey,
+          sectionKey
         );
         expect(branch.role).toBe("lower_branch");
 
@@ -125,8 +134,9 @@ test.describe("SAT adaptive identity in the browser", () => {
         // timeout closes it the roster correctly has no active module to name.
         await expect
           .poll(
-            async () => (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleId,
-            { timeout: 45_000, intervals: [500, 1_000, 2_000] },
+            async () =>
+              (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleId,
+            { timeout: 45_000, intervals: [500, 1_000, 2_000] }
           )
           .toBe(branch.moduleId);
         const branchProjection = await staffProjection(page, scheduleId, studentName);
@@ -139,11 +149,17 @@ test.describe("SAT adaptive identity in the browser", () => {
         const dialog = page.getByRole("dialog", { name: "Selected student inspector" });
         await expect(dialog).toBeVisible();
         await expect(
-          dialog.locator("[data-sat-room-student-detail]").getByText("Module 2 · Lower"),
+          dialog.locator("[data-sat-room-student-detail]").getByText("Module 2 · Lower")
         ).toBeVisible();
 
         await expireModuleAttempt(branch.attemptId);
-        await waitForTerminalBranch(studentPage, scheduleId, attemptId, candidateId, branch.attemptId);
+        await waitForTerminalBranch(
+          studentPage,
+          scheduleId,
+          attemptId,
+          candidateId,
+          branch.attemptId
+        );
         if (sectionKey === "reading-writing") {
           await expireCurrentSatSection(scheduleId, attemptId);
           await expect
@@ -159,11 +175,14 @@ test.describe("SAT adaptive identity in the browser", () => {
       // scores are materialized later by the scoring workflow.
       const result = await studentPage.evaluate(
         async ({ scheduleId: id, attemptId: attempt, candidateId: candidate }) => {
-          const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+          const delivery =
+            await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
           delivery.configureAssessmentDeliveryAttempt(id, attempt, candidate);
-          return delivery.assessmentDeliveryApi.submitAssessment(id, attempt, { submissionId: attempt });
+          return delivery.assessmentDeliveryApi.submitAssessment(id, attempt, {
+            submissionId: attempt,
+          });
         },
-        { scheduleId, attemptId, candidateId },
+        { scheduleId, attemptId, candidateId }
       );
       expect(result.outcomeStatus).toBe("pending");
       expect(result.totalScore).toBeNull();
@@ -177,7 +196,7 @@ test.describe("SAT adaptive identity in the browser", () => {
              ON eq.id = v.question_id OR eq.question_id = v.question_id
            JOIN assessment_modules m ON m.id = eq.module_id
           WHERE v.attempt_id = ? AND m.adaptive_role = 'higher_branch'`,
-        [attemptId],
+        [attemptId]
       );
       expect(strayAnswers[0]?.count ?? -1).toBe(0);
     } finally {
@@ -185,10 +204,13 @@ test.describe("SAT adaptive identity in the browser", () => {
     }
   });
 
-  test("Reload at the handoff starts exactly the routed module", async ({ page, browser }, testInfo) => {
+  test("Reload at the handoff starts exactly the routed module", async ({
+    page,
+    browser,
+  }, testInfo) => {
     test.skip(
       testInfo.project.name !== "chromium",
-      "Adaptive identity scenarios run once in desktop Chromium.",
+      "Adaptive identity scenarios run once in desktop Chromium."
     );
     const { studentContext, studentPage, scheduleId, candidateId, attemptId } =
       await startSatAttempt(page, browser, {
@@ -223,14 +245,25 @@ test.describe("SAT adaptive identity in the browser", () => {
         await route.continue();
       });
       try {
-        await expireCurrentBaseModule(studentPage, scheduleId, attemptId, candidateId, "reading-writing");
+        await expireCurrentBaseModule(
+          studentPage,
+          scheduleId,
+          attemptId,
+          candidateId,
+          "reading-writing"
+        );
         // Wait until the server has routed: the HIGH attempt exists while
         // the student's start stays held.
         let highModuleId: string | null = null;
         await expect
           .poll(
             async () => {
-              const current = await readDeliveryFrame(studentPage, scheduleId, attemptId, candidateId);
+              const current = await readDeliveryFrame(
+                studentPage,
+                scheduleId,
+                attemptId,
+                candidateId
+              );
               const pending = current.attempt.moduleAttempts.find((item) => {
                 const module = current.sections
                   .find((section) => section.sectionKey === "reading-writing")
@@ -240,7 +273,7 @@ test.describe("SAT adaptive identity in the browser", () => {
               highModuleId = pending?.moduleId ?? null;
               return highModuleId;
             },
-            { timeout: 60_000, intervals: [500, 1_000, 2_000] },
+            { timeout: 60_000, intervals: [500, 1_000, 2_000] }
           )
           .not.toBeNull();
         if (!highModuleId) throw new Error("HIGH branch attempt never materialized");
@@ -268,7 +301,7 @@ test.describe("SAT adaptive identity in the browser", () => {
           scheduleId,
           attemptId,
           candidateId,
-          "reading-writing",
+          "reading-writing"
         );
         expect(opened.moduleId).toBe(highModuleId);
         expect(opened.role).toBe("higher_branch");
@@ -287,7 +320,7 @@ test.describe("SAT adaptive identity in the browser", () => {
   }, testInfo) => {
     test.skip(
       testInfo.project.name !== "chromium",
-      "Adaptive identity scenarios run once in desktop Chromium.",
+      "Adaptive identity scenarios run once in desktop Chromium."
     );
     const { studentContext, studentPage, scheduleId, candidateId, attemptId, studentName } =
       await startSatAttempt(page, browser, {
@@ -302,14 +335,23 @@ test.describe("SAT adaptive identity in the browser", () => {
         ?.modules.find((module) => module.adaptiveRole === "base");
       if (!base) throw new Error("Reading & Writing base module missing from bootstrap");
       await answerBaseModuleCorrectly(studentPage, scheduleId, attemptId, candidateId, base.id);
-      await expireCurrentBaseModule(studentPage, scheduleId, attemptId, candidateId, "reading-writing");
+      await expireCurrentBaseModule(
+        studentPage,
+        scheduleId,
+        attemptId,
+        candidateId,
+        "reading-writing"
+      );
 
       // Convergence: the staff projection must arrive at the routed module.
       await expect
-        .poll(async () => (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleId, {
-          timeout: 60_000,
-          intervals: [500, 1_000, 2_000],
-        })
+        .poll(
+          async () => (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleId,
+          {
+            timeout: 60_000,
+            intervals: [500, 1_000, 2_000],
+          }
+        )
         .not.toBeNull();
       const converged = await staffProjection(page, scheduleId, studentName);
       const decision = await routeDecision(attemptId);
@@ -382,7 +424,7 @@ type SatAttemptHarness = {
 async function startSatAttempt(
   page: Page,
   browser: { newContext: () => Promise<BrowserContext> },
-  options: { titlePrefix?: string; linkPrefix?: string; studentPrefix?: string } = {},
+  options: { titlePrefix?: string; linkPrefix?: string; studentPrefix?: string } = {}
 ): Promise<SatAttemptHarness> {
   const stamp = Date.now().toString(36);
   const examTitle = `${options.titlePrefix ?? "SAT Adaptive"} ${stamp}`;
@@ -418,7 +460,9 @@ async function startSatAttempt(
 
   await page.getByRole("button", { name: "Release" }).click();
   await expect(page).toHaveURL(`/sat/exams/${examId}/release`);
-  await expect(page.getByRole("heading", { name: "Ready to publish" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Ready to publish" })).toBeVisible({
+    timeout: 30_000,
+  });
   await page.getByRole("button", { name: "Publish" }).click();
   const publishDialog = page.getByRole("dialog");
   await expect(publishDialog).toBeVisible();
@@ -438,7 +482,9 @@ async function startSatAttempt(
   const studentContext = await browser.newContext();
   const studentPage = await studentContext.newPage();
   await studentPage.goto(joinHref);
-  await expect(studentPage.getByRole("heading", { name: linkName })).toBeVisible({ timeout: 30_000 });
+  await expect(studentPage.getByRole("heading", { name: linkName })).toBeVisible({
+    timeout: 30_000,
+  });
   await expect(studentPage.getByText(`${examTitle} · Version 1`)).toBeVisible();
   await studentPage.getByLabel("Full name").fill(studentName);
   await studentPage.getByLabel("Email").fill(studentEmail);
@@ -453,10 +499,10 @@ async function startSatAttempt(
   // These identity scenarios exercise section-to-section adaptive routing.
   // New SAT schedules default to personal timing, so pin the cohort timing
   // model before the proctor starts the session.
-  await executeUpdate(
-    "UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?",
-    ["cohort_section_v3", scheduleId],
-  );
+  await executeUpdate("UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?", [
+    "cohort_section_v3",
+    scheduleId,
+  ]);
 
   await page.goto("/sat/sessions");
   await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible({ timeout: 30_000 });
@@ -486,7 +532,7 @@ async function startSatAttempt(
   const attemptId = await studentPage.evaluate(
     async ({ scheduleId: id, candidateId: candidate }) => {
       const response = await fetch(
-        `/api/v1/student/sessions/${id}/live?candidateId=${encodeURIComponent(candidate)}`,
+        `/api/v1/student/sessions/${id}/live?candidateId=${encodeURIComponent(candidate)}`
       );
       const payload = (await response.json()) as {
         data?: { attempt?: { id?: string } };
@@ -494,7 +540,7 @@ async function startSatAttempt(
       };
       return payload?.data?.attempt?.id ?? payload?.attempt?.id ?? null;
     },
-    { scheduleId, candidateId },
+    { scheduleId, candidateId }
   );
   if (!attemptId) throw new Error("SAT student attempt did not materialize after proctor start");
 
@@ -515,7 +561,7 @@ async function readDeliveryFrame(
   studentPage: import("@playwright/test").Page,
   scheduleId: string,
   attemptId: string,
-  candidateId: string,
+  candidateId: string
 ): Promise<DeliveryFrame> {
   return studentPage.evaluate(
     async ({ scheduleId: id, attemptId: attempt, candidateId: candidate }) => {
@@ -526,7 +572,10 @@ async function readDeliveryFrame(
         sections: snapshot.sections.map((section) => ({
           id: section.id,
           sectionKey: section.sectionKey,
-          modules: section.modules.map((module) => ({ id: module.id, adaptiveRole: module.adaptiveRole })),
+          modules: section.modules.map((module) => ({
+            id: module.id,
+            adaptiveRole: module.adaptiveRole,
+          })),
         })),
         attempt: {
           id: snapshot.attempt.id,
@@ -538,19 +587,19 @@ async function readDeliveryFrame(
         },
       };
     },
-    { scheduleId, attemptId, candidateId },
+    { scheduleId, attemptId, candidateId }
   );
 }
 
 async function correctAnswerPlan(
-  moduleId: string,
+  moduleId: string
 ): Promise<Array<{ examQuestionId: string; correctAnswer: string }>> {
   const keyRows = await queryDb<{ exam_question_id: string; answer_definition: string }>(
     `SELECT eq.id AS exam_question_id, CAST(qr.answer_definition AS CHAR) AS answer_definition
        FROM assessment_exam_questions eq
        JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id
       WHERE eq.module_id = ? AND eq.is_pretest = FALSE`,
-    [moduleId],
+    [moduleId]
   );
   const plan: Array<{ examQuestionId: string; correctAnswer: string }> = [];
   for (const row of keyRows) {
@@ -582,12 +631,18 @@ async function answerBaseModuleCorrectly(
   scheduleId: string,
   attemptId: string,
   candidateId: string,
-  baseModuleId: string,
+  baseModuleId: string
 ): Promise<number> {
   const answerPlan = await correctAnswerPlan(baseModuleId);
   if (answerPlan.length < 1) throw new Error(`No answerable base questions for ${baseModuleId}`);
   const answered = await studentPage.evaluate(
-    async ({ scheduleId: id, attemptId: attempt, candidateId: candidate, baseModuleId: base, answerPlan }) => {
+    async ({
+      scheduleId: id,
+      attemptId: attempt,
+      candidateId: candidate,
+      baseModuleId: base,
+      answerPlan,
+    }) => {
       const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
       delivery.configureAssessmentDeliveryAttempt(id, attempt, candidate);
       const snapshot = await delivery.assessmentDeliveryApi.bootstrap(id, attempt);
@@ -596,7 +651,8 @@ async function answerBaseModuleCorrectly(
       if (baseAttempt.state === "not_started") {
         await delivery.assessmentDeliveryApi.startModule(id, attempt, { moduleId: base });
       }
-      const durable = await import("/src/features/student/infrastructure/responseDurabilityTransport.ts");
+      const durable =
+        await import("/src/features/student/infrastructure/responseDurabilityTransport.ts");
       const engineMod = await import("/src/shared/durability/DurableResponseEngine.ts");
       const transport = durable.createResponseDurabilityV2Transport(id, undefined);
       const engine = new engineMod.DurableResponseEngine({
@@ -625,7 +681,7 @@ async function answerBaseModuleCorrectly(
       engine.destroy();
       return answeredCount;
     },
-    { scheduleId, attemptId, candidateId, baseModuleId, answerPlan },
+    { scheduleId, attemptId, candidateId, baseModuleId, answerPlan }
   );
   if (answered < 1) throw new Error(`Nothing answerable in ${baseModuleId}`);
   return answered;
@@ -638,9 +694,10 @@ async function expireModuleAttempt(moduleAttemptId: string): Promise<void> {
             updated_at = NOW(6)
       WHERE id = ?
         AND state IN ('active', 'review')`,
-    [moduleAttemptId],
+    [moduleAttemptId]
   );
-  if (changed !== 1) throw new Error(`Expected active SAT module attempt ${moduleAttemptId} to expire`);
+  if (changed !== 1)
+    throw new Error(`Expected active SAT module attempt ${moduleAttemptId} to expire`);
 }
 
 async function expireCurrentBaseModule(
@@ -648,7 +705,7 @@ async function expireCurrentBaseModule(
   scheduleId: string,
   attemptId: string,
   candidateId: string,
-  sectionKey: string,
+  sectionKey: string
 ): Promise<string> {
   // Auto-entry opens the base module on its own cadence (especially right
   // after a section advance), so wait until it is started before expiring
@@ -669,39 +726,50 @@ async function expireCurrentBaseModule(
         }
         return null;
       },
-      { timeout: 60_000, intervals: [500, 1_000, 2_000] },
+      { timeout: 60_000, intervals: [500, 1_000, 2_000] }
     )
     .not.toBeNull();
-  if (!baseId || !baseAttemptId) throw new Error(`No started base module attempt for ${sectionKey}`);
+  if (!baseId || !baseAttemptId)
+    throw new Error(`No started base module attempt for ${sectionKey}`);
   await expireModuleAttempt(baseAttemptId);
   return baseId;
 }
 
-async function routeDecision(attemptId: string): Promise<{ sectionKey: string; route: string; moduleId: string }> {
-  const rows = await queryDb<{ section_key: string; selected_route: string; selected_module_id: string }>(
+async function routeDecision(
+  attemptId: string
+): Promise<{ sectionKey: string; route: string; moduleId: string }> {
+  const rows = await queryDb<{
+    section_key: string;
+    selected_route: string;
+    selected_module_id: string;
+  }>(
     `SELECT s.section_key, rd.selected_route, rd.selected_module_id
        FROM assessment_route_decisions rd
        JOIN assessment_sections s ON s.id = rd.section_id
       WHERE rd.attempt_id = ?
       ORDER BY s.display_order
       LIMIT 1`,
-    [attemptId],
+    [attemptId]
   );
   const row = rows[0];
   if (!row) throw new Error(`No route decision for attempt ${attemptId}`);
-  return { sectionKey: row.section_key, route: row.selected_route, moduleId: row.selected_module_id };
+  return {
+    sectionKey: row.section_key,
+    route: row.selected_route,
+    moduleId: row.selected_module_id,
+  };
 }
 
 async function routeDecisionForSection(
   attemptId: string,
-  sectionKey: string,
+  sectionKey: string
 ): Promise<{ route: string; moduleId: string }> {
   const rows = await queryDb<{ selected_route: string; selected_module_id: string }>(
     `SELECT rd.selected_route, rd.selected_module_id
        FROM assessment_route_decisions rd
        JOIN assessment_sections s ON s.id = rd.section_id
       WHERE rd.attempt_id = ? AND s.section_key = ?`,
-    [attemptId, sectionKey],
+    [attemptId, sectionKey]
   );
   const row = rows[0];
   if (!row) throw new Error(`No route decision for ${sectionKey}`);
@@ -711,10 +779,10 @@ async function routeDecisionForSection(
 async function staffProjection(
   page: import("@playwright/test").Page,
   scheduleId: string,
-  studentName: string,
+  studentName: string
 ): Promise<StaffProjection> {
   const response = await page.request.get(
-    `/api/v1/proctor/sessions/${scheduleId}?mode=dashboard&auditLimit=200&alertLimit=100`,
+    `/api/v1/proctor/sessions/${scheduleId}?mode=dashboard&auditLimit=200&alertLimit=100`
   );
   if (!response.ok()) throw new Error(`Proctor detail read failed: ${response.status()}`);
   const detail = (await response.json()) as {
@@ -742,7 +810,7 @@ async function waitForActiveBranch(
   scheduleId: string,
   attemptId: string,
   candidateId: string,
-  sectionKey: string,
+  sectionKey: string
 ): Promise<{ moduleId: string; role: string; attemptId: string }> {
   let found: { moduleId: string; role: string; attemptId: string } | null = null;
   await expect
@@ -756,10 +824,14 @@ async function waitForActiveBranch(
         });
         if (!branch) return null;
         const module = section?.modules.find((candidate) => candidate.id === branch.moduleId);
-        found = { moduleId: branch.moduleId, role: module?.adaptiveRole ?? "unknown", attemptId: branch.id };
+        found = {
+          moduleId: branch.moduleId,
+          role: module?.adaptiveRole ?? "unknown",
+          attemptId: branch.id,
+        };
         return branch.moduleId;
       },
-      { timeout: 60_000, intervals: [500, 1_000, 2_000] },
+      { timeout: 60_000, intervals: [500, 1_000, 2_000] }
     )
     .not.toBeNull();
   if (!found) throw new Error(`No active adaptive branch for ${sectionKey}`);
@@ -771,17 +843,18 @@ async function waitForTerminalBranch(
   scheduleId: string,
   attemptId: string,
   candidateId: string,
-  branchAttemptId: string,
+  branchAttemptId: string
 ): Promise<void> {
   await expect
     .poll(
       async () => {
         const frame = await readDeliveryFrame(studentPage, scheduleId, attemptId, candidateId);
         return (
-          frame.attempt.moduleAttempts.find((item) => item.id === branchAttemptId)?.state ?? "missing"
+          frame.attempt.moduleAttempts.find((item) => item.id === branchAttemptId)?.state ??
+          "missing"
         );
       },
-      { timeout: 60_000, intervals: [500, 1_000, 2_000] },
+      { timeout: 60_000, intervals: [500, 1_000, 2_000] }
     )
     .toMatch(/^(submitted|locked)$/);
 }
@@ -790,18 +863,18 @@ async function expireCurrentSatSection(scheduleId: string, attemptId: string): P
   const affected = await executeTransaction(async (connection) => {
     const [attemptRows] = await connection.execute(
       "SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? AND protocol_version = 2 FOR UPDATE",
-      [attemptId, scheduleId],
+      [attemptId, scheduleId]
     );
     if ((attemptRows as Array<Record<string, unknown>>).length === 0) return 0;
     const [runtimeRows] = await connection.execute(
       "SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
-      [scheduleId],
+      [scheduleId]
     );
     const runtime = (runtimeRows as Array<{ id: string; active_section_key: string | null }>)[0];
     if (!runtime?.active_section_key) return 0;
     const [sectionRows] = await connection.execute(
       "SELECT section_key FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? AND status = 'live' FOR UPDATE",
-      [runtime.id, runtime.active_section_key],
+      [runtime.id, runtime.active_section_key]
     );
     if ((sectionRows as Array<Record<string, unknown>>).length === 0) return 0;
     await connection.execute(
@@ -815,14 +888,14 @@ async function expireCurrentSatSection(scheduleId: string, attemptId: string): P
               extension_minutes = 0,
               accumulated_paused_seconds = 0
         WHERE runtime_id = ? AND section_key = ? AND status = 'live'`,
-      [runtime.id, runtime.active_section_key],
+      [runtime.id, runtime.active_section_key]
     );
     const [attemptUpdate] = await connection.execute(
       `UPDATE student_attempts
           SET deadline_at = DATE_SUB(NOW(6), INTERVAL 1 MINUTE),
               closing_grace_until = DATE_SUB(NOW(6), INTERVAL 30 SECOND)
         WHERE id = ? AND schedule_id = ? AND protocol_version = 2`,
-      [attemptId, scheduleId],
+      [attemptId, scheduleId]
     );
     return Number((attemptUpdate as { affectedRows?: number }).affectedRows ?? 0);
   });
@@ -833,7 +906,7 @@ async function expireCurrentSatSection(scheduleId: string, attemptId: string): P
 
 async function readRuntimeStage(
   page: import("@playwright/test").Page,
-  scheduleId: string,
+  scheduleId: string
 ): Promise<{ currentSectionKey: string | null }> {
   const response = await page.request.get(`/api/v1/schedules/${scheduleId}/runtime`);
   if (!response.ok()) throw new Error(`Runtime read failed: ${response.status()}`);
