@@ -14,7 +14,7 @@ export interface SatQuestionHeaderProps {
 
 export function SatQuestionHeader(props: SatQuestionHeaderProps) {
   return (
-    <div className="flex min-h-11 items-stretch border-b border-[var(--sat-divider)] bg-[var(--sat-surface-subtle)]">
+    <div className="relative flex min-h-11 items-stretch border-b border-[var(--sat-divider)] bg-[var(--sat-surface)]">
       {/* Semantic question heading (mobile a11y Task 6): the number cell is a
           real h2 whose accessible name is "Question N" from real text — never
           an aria-label on a generic div. The "Question " prefix is sr-only so
@@ -76,6 +76,12 @@ export function SatQuestionHeader(props: SatQuestionHeaderProps) {
           />
         </button>
       ) : null}
+      {/* Bluebook parity: the header's bottom divider IS the spectrum rail, one
+          continuous line spanning the whole header — under the review control
+          and across to the ABC eliminator on the right. Decorative: aria-hidden,
+          untabbable, click-through, and last in the row so it paints over the
+          controls it passes beneath without moving any of them. */}
+      <span aria-hidden="true" data-sat-color-rail="true" className="sat-color-rail" />
     </div>
   );
 }

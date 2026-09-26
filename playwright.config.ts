@@ -99,9 +99,10 @@ export default defineConfig({
   testMatch: "**/*.spec.ts",
   // Production-load and production-smoke suites target an external deployment
   // and have dedicated configs/credentials; generated design-system files are
-  // scratch audits, not product regression tests. The default CI suite is
-  // Go-backed local integration coverage.
-  testIgnore: ["**/prod-load/**", "**/prod-smoke/**", "**/.generated/**"],
+  // scratch audits, not product regression tests; the spectrum-rail suite runs
+  // against the dev harness with no backend (`bun run e2e:sat-spectrum`). The
+  // default CI suite is Go-backed local integration coverage.
+  testIgnore: ["**/prod-load/**", "**/prod-smoke/**", "**/.generated/**", "**/sat-spectrum-rail.spec.ts"],
   fullyParallel: false,
   forbidOnly: !!process.env["CI"],
   retries: process.env["CI"] ? 2 : 0,

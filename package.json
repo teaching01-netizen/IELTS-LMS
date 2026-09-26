@@ -28,6 +28,7 @@
     "playwright:ui": "playwright test --ui",
     "playwright:debug": "playwright test --debug",
     "e2e:sat-a11y": "playwright test --config playwright.sat-a11y.config.ts",
+    "e2e:sat-spectrum": "playwright test --config playwright.sat-spectrum.config.ts",
     "e2e:sat-annotations": "playwright test --config playwright.sat-annotations.config.ts",
     "e2e:sat-auto-fit": "playwright test --config playwright.sat-auto-fit.config.ts",
     "e2e:sat-screen-zoom": "playwright test --config playwright.sat-screen-zoom.config.ts",

@@ -48,7 +48,13 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
         const optionLetterId = `${inputId}-letter`;
         const optionContentId = `${inputId}-content`;
         return (
-          <div key={option.id} className="relative">
+          // The choice card and its cut control are SIBLINGS in this row: the
+          // card keeps the Bluebook answer geometry and the eliminator control
+          // sits in the row's own right gutter, vertically centered. The gutter
+          // is reserved whether or not the control is drawn, so arming the
+          // eliminator never reflows the card and a crossed-out row is exactly
+          // as wide as its neighbours.
+          <div key={option.id} className="flex items-center gap-2">
             <label
               htmlFor={inputId}
               // Bluebook answer system (Phase 6): min-height + radius +
@@ -56,7 +62,7 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
               // accent border + accent-soft tint (never flooded blue);
               // hover = subtle surface token; borders carry the structure
               // (no shadow utilities on rows).
-              className={`sat-answer-choice group flex min-h-[var(--sat-answer-min-height)] cursor-pointer items-start gap-3 rounded-[var(--sat-answer-radius)] border border-[var(--sat-answer-border)] bg-[var(--sat-answer-bg)] px-4 py-3.5 pr-14 ${selected ? "border-2 border-[var(--sat-accent)] bg-[var(--sat-accent-soft)]" : eliminated ? "bg-[var(--sat-surface-subtle)]" : "hover:bg-[var(--sat-surface-hover)] hover:border-[var(--sat-accent)]"}`}
+              className={`sat-answer-choice group relative flex min-h-[var(--sat-answer-min-height)] flex-1 cursor-pointer items-start gap-3 rounded-[var(--sat-answer-radius)] border border-[var(--sat-answer-border)] bg-[var(--sat-answer-bg)] px-4 py-3.5 ${selected ? "border-2 border-[var(--sat-accent)] bg-[var(--sat-accent-soft)]" : eliminated ? "bg-[var(--sat-surface-subtle)]" : "hover:bg-[var(--sat-surface-hover)] hover:border-[var(--sat-accent)]"}`}
             >
               <input
                 id={inputId}
@@ -81,24 +87,39 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
               <span id={optionLetterId} className="sr-only">
                 Option {letter}.
               </span>
-              <span
-                // Bluebook marker (Phase 6): 28px circle with a 2px border.
-                // Selected fill lives HERE only — the row itself keeps the
-                // calm accent-soft tint, never a flooded blue fill.
-                className={`sat-state-transition grid h-[var(--sat-choice-marker-size)] w-[var(--sat-choice-marker-size)] shrink-0 place-items-center rounded-full border-2 text-[14px] font-semibold ${selected ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]" : "border-[var(--sat-text-secondary)] text-[var(--sat-text)]"} ${eliminated ? "line-through decoration-[1.5px]" : ""}`}
-                aria-hidden="true"
-              >
-                {letter}
-              </span>
-              <div
-                id={optionContentId}
-                // Whole-content strikethrough (Phase 6): eliminated choices
-                // strike lists, equations, and mixed content — not just <p>.
-                className={`min-w-0 flex-1 sat-type-body text-[var(--sat-text)] ${eliminated ? "line-through decoration-[1.5px]" : ""}`}
-              >
-                {props.renderOptionContent
-                  ? props.renderOptionContent(option)
-                  : <StructuredContentRenderer content={option.content} />}
+              {/* One positioned surface for the marker and the answer content:
+                  the crossed-out strike is anchored to the MARKER's center, so
+                  it crosses the letter and the content at the same Y instead of
+                  being a decoration per text node (which cannot cross an
+                  equation or a multi-line list). */}
+              <div className="relative flex min-w-0 flex-1 items-start gap-3">
+                <span
+                  // Bluebook marker (Phase 6): 28px circle with a 2px border.
+                  // Selected fill lives HERE only — the row itself keeps the
+                  // calm accent-soft tint, never a flooded blue fill.
+                  className={`sat-state-transition grid h-[var(--sat-choice-marker-size)] w-[var(--sat-choice-marker-size)] shrink-0 place-items-center rounded-full border-2 text-[14px] font-semibold ${selected ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]" : "border-[var(--sat-text-secondary)] text-[var(--sat-text)]"}`}
+                  aria-hidden="true"
+                >
+                  {letter}
+                </span>
+                <div
+                  id={optionContentId}
+                  // Muting only: the cross-out itself is the row strike below,
+                  // so equations and mixed structured content stay readable
+                  // (a per-node line-through would break them apart).
+                  className={`min-w-0 flex-1 sat-type-body ${eliminated ? "text-[var(--sat-text-secondary)]" : "text-[var(--sat-text)]"}`}
+                >
+                  {props.renderOptionContent
+                    ? props.renderOptionContent(option)
+                    : <StructuredContentRenderer content={option.content} />}
+                </div>
+                {eliminated ? (
+                  <span
+                    aria-hidden="true"
+                    data-sat-elimination-line="true"
+                    className="sat-choice-elimination-line"
+                  />
+                ) : null}
               </div>
             </label>
             {eliminated ? (
@@ -115,42 +136,42 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 a button nested in a <label> would activate the radio, so
                 crossing a choice out could select it. Crossing out is its own
                 action, and the answer changes only through the radio. */}
-            {showEliminationControl ? (
-              <button
-                type="button"
-                // No answer change rides along, and the domain mutation is the
-                // only writer of `eliminatedOptionIds` — this control just
-                // reports the intent to toggle it.
-                onClick={() => props.onToggleElimination(option.id)}
-                disabled={props.disabled}
-                aria-pressed={eliminated}
-                // Icon-only control, exactly like the header eliminator: the
-                // accessible name carries the action ("Undo option B") and the
-                // state rides on the glyph's ink plus aria-pressed. The name is
-                // never drawn, so there is no visible word the name could
-                // contradict — and the badge keeps one identity across both
-                // states. `title` keeps that name discoverable on hover.
-                aria-label={`${eliminated ? "Undo" : "Eliminate"} option ${letter}`}
-                title={`${eliminated ? "Undo" : "Eliminate"} option ${letter}`}
-                data-sat-cut-choice={option.id}
-                data-sat-cut-choice-state={eliminated ? "cut" : "open"}
-                className="sat-pressable sat-state-transition absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-[6px] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-              >
-                <SatCutChoiceGlyph
-                  size="sm"
-                  // Every choice box wears the SAME cut badge; a crossed-out
-                  // choice keeps it rather than becoming the word "Undo". The
-                  // applied state is the same outline, dashed and muted, so the
-                  // control the student just used is still where they left it —
-                  // and one press puts the choice back.
-                  className={
-                    eliminated
-                      ? "border-dashed border-[var(--sat-text-secondary)] bg-transparent text-[var(--sat-text-secondary)]"
-                      : "border-[var(--sat-answer-border)] bg-[var(--sat-answer-bg)] text-[var(--sat-text)]"
-                  }
-                />
-              </button>
-            ) : null}
+            <div className="grid w-11 shrink-0 place-items-center">
+              {showEliminationControl ? (
+                <button
+                  type="button"
+                  // No answer change rides along, and the domain mutation is the
+                  // only writer of `eliminatedOptionIds` — this control just
+                  // reports the intent to toggle it.
+                  onClick={() => props.onToggleElimination(option.id)}
+                  disabled={props.disabled}
+                  aria-pressed={eliminated}
+                  // The accessible name carries the action and the option
+                  // ("Eliminate option B" / "Undo option B"); the visible ink
+                  // says the same thing, so a sighted reader and a screen reader
+                  // learn the same control. Both states keep the full 44px hit
+                  // target even though the visible glyph is much smaller.
+                  aria-label={`${eliminated ? "Undo" : "Eliminate"} option ${letter}`}
+                  title={`${eliminated ? "Undo" : "Eliminate"} option ${letter}`}
+                  data-sat-cut-choice={option.id}
+                  data-sat-cut-choice-state={eliminated ? "cut" : "open"}
+                  className="sat-pressable sat-state-transition grid h-11 w-11 place-items-center rounded-[6px] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                >
+                  {eliminated ? (
+                    // Crossed out: the cut glyph is gone and the row offers the
+                    // real Bluebook "Undo" — compact dark underlined text, no
+                    // pill, background or border. One press restores the choice.
+                    <span className="sat-type-control-secondary font-medium text-[var(--sat-text)] underline underline-offset-2">
+                      Undo
+                    </span>
+                  ) : (
+                    // This choice's own cut control: its letter in the strike
+                    // circle, never the header's ABC toggle.
+                    <SatCutChoiceGlyph variant="choice" letter={letter} />
+                  )}
+                </button>
+              ) : null}
+            </div>
           </div>
         );
       })}

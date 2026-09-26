@@ -1436,6 +1436,19 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-divider-strong: #24272A;
   --sat-answer-border: #74787D;
   --sat-split-divider: #777B80;
+  /* Bluebook spectrum rail: the multi-segment rule that closes the exam chrome
+   * (top bar) and the question header, in place of a flat divider. Primitives
+   * on purpose — the rail is ONE visual fact with two hosts, so no host may
+   * repaint it, and both read their segments from `.sat-color-rail` below. */
+  --sat-rail-dark: #24272A;
+  --sat-rail-gray: #6D7176;
+  --sat-rail-blue: #2D9CDB;
+  --sat-rail-yellow: #FFD718;
+  --sat-rail-height: 3px;
+  /* The 1px bottom hairline a rail host keeps: the rail is an overlay, so
+   * keeping the host's own border is what stops the rail from changing the
+   * header height it closes. The rail paints over that hairline. */
+  --sat-rail-hairline: 1px;
   --sat-scrim: rgb(0 0 0 / 72%);
   --sat-reader-mask: rgb(20 20 20 / 92%);
   --sat-danger: #b42318;
@@ -2355,6 +2368,131 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   outline-offset: var(--sat-focus-offset, 2px);
 }
 
+/* Bluebook crossed-out choice (Phase 6f): ONE continuous strike across the
+ * answer row. Anchored to the marker's center (the positioned parent starts at
+ * the marker's top edge), so the letter and the content share the same Y, and
+ * the line crosses list items, equations and mixed structured content as a
+ * single stroke — which per-node `line-through` cannot do. Decorative only:
+ * the state is announced through the radio's `aria-describedby` status. */
+.sat-choice-elimination-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--sat-choice-marker-size) / 2);
+  height: 1.5px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background-color: var(--sat-text);
+  pointer-events: none;
+}
+
+/* Bluebook spectrum rail (Phase 6g): the multi-segment rule that closes the top
+ * bar and the question header, standing in for the flat divider each host used
+ * to paint. Two hard-stopped gradient layers — never dozens of spans, and never
+ * one colour blending into the next: a fine charcoal/gray rhythm at a fixed
+ * pixel cadence (so both hosts wear the same material at the same scale), and
+ * sparse cyan/yellow accents scattered unevenly across the host's width.
+ * Decorative only: the host's `aria-hidden` span is untabbable and
+ * click-through, and the colour it replaces stays a layout fact, not a state.
+ *
+ * Geometry: flush with the host's bottom edge. A host keeps its 1px bottom
+ * hairline (`--sat-rail-hairline`) only so the rail cannot move the header it
+ * closes; the rail overpaints it, so the divider a student SEES is the rail. */
+.sat-ui .sat-color-rail {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(-1 * var(--sat-rail-hairline));
+  height: var(--sat-rail-height);
+  pointer-events: none;
+  background-color: var(--sat-rail-dark);
+  background-image:
+    /* Accents, above the rhythm layer: sparse, unevenly placed, and hard-stopped
+     * at both ends so no accent bleeds into the charcoal around it. */
+    linear-gradient(
+      90deg,
+      transparent 0 1.1%,
+      var(--sat-rail-gray) 1.1% 2.6%,
+      transparent 2.6% 3.6%,
+      var(--sat-rail-yellow) 3.6% 4.7%,
+      transparent 4.7% 6.9%,
+      var(--sat-rail-gray) 6.9% 7.8%,
+      transparent 7.8% 9.4%,
+      var(--sat-rail-gray) 9.4% 12.1%,
+      transparent 12.1% 12.4%,
+      var(--sat-rail-blue) 12.4% 14.6%,
+      transparent 14.6% 16.9%,
+      var(--sat-rail-blue) 16.9% 17.6%,
+      transparent 17.6% 20.3%,
+      var(--sat-rail-gray) 20.3% 21.2%,
+      transparent 21.2% 25.4%,
+      var(--sat-rail-gray) 25.4% 26.9%,
+      transparent 26.9% 31.2%,
+      var(--sat-rail-yellow) 31.2% 32.1%,
+      transparent 32.1% 34.6%,
+      var(--sat-rail-gray) 34.6% 35.5%,
+      transparent 35.5% 37.2%,
+      var(--sat-rail-gray) 37.2% 38.4%,
+      transparent 38.4% 38.8%,
+      var(--sat-rail-blue) 38.8% 40.3%,
+      transparent 40.3% 44.1%,
+      var(--sat-rail-gray) 44.1% 45.9%,
+      transparent 45.9% 48.3%,
+      var(--sat-rail-gray) 48.3% 49.2%,
+      transparent 49.2% 52.6%,
+      var(--sat-rail-yellow) 52.6% 54.4%,
+      transparent 54.4% 56.8%,
+      var(--sat-rail-gray) 56.8% 57.7%,
+      transparent 57.7% 61.1%,
+      var(--sat-rail-blue) 61.1% 62%,
+      transparent 62% 65.2%,
+      var(--sat-rail-gray) 65.2% 66.4%,
+      transparent 66.4% 69.8%,
+      var(--sat-rail-gray) 69.8% 71.1%,
+      transparent 71.1% 73.9%,
+      var(--sat-rail-yellow) 73.9% 74.8%,
+      transparent 74.8% 76.3%,
+      var(--sat-rail-gray) 76.3% 77.1%,
+      transparent 77.1% 79.4%,
+      var(--sat-rail-blue) 79.4% 82.1%,
+      transparent 82.1% 85.7%,
+      var(--sat-rail-gray) 85.7% 86.6%,
+      transparent 86.6% 88.1%,
+      var(--sat-rail-gray) 88.1% 88.9%,
+      transparent 88.9% 89.6%,
+      var(--sat-rail-yellow) 89.6% 90.9%,
+      transparent 90.9% 93.4%,
+      var(--sat-rail-gray) 93.4% 94.3%,
+      transparent 94.3% 95.2%,
+      var(--sat-rail-blue) 95.2% 96.6%,
+      transparent 96.6% 98.2%,
+      var(--sat-rail-gray) 98.2% 99.1%,
+      transparent 99.1% 100%
+    ),
+    /* The rhythm layer: short, square-ended charcoal and gray segments on a
+     * 103px unit whose internal cadence is deliberately uneven, so the repeat
+     * never reads as a pattern. The layer below both hosts is the same length,
+     * which is why the top bar and the header cannot drift apart. */
+    repeating-linear-gradient(
+      90deg,
+      var(--sat-rail-dark) 0 11px,
+      var(--sat-rail-gray) 11px 15px,
+      var(--sat-rail-dark) 15px 22px,
+      var(--sat-rail-gray) 22px 26px,
+      var(--sat-rail-dark) 26px 31px,
+      var(--sat-rail-gray) 31px 33px,
+      var(--sat-rail-dark) 33px 47px,
+      var(--sat-rail-gray) 47px 53px,
+      var(--sat-rail-dark) 53px 61px,
+      var(--sat-rail-gray) 61px 64px,
+      var(--sat-rail-dark) 64px 78px,
+      var(--sat-rail-gray) 78px 81px,
+      var(--sat-rail-dark) 81px 92px,
+      var(--sat-rail-gray) 92px 95px,
+      var(--sat-rail-dark) 95px 103px
+    );
+  background-repeat: no-repeat, repeat;
+}
+
 @media (min-width: 1024px) {
   .sat-exam-topbar {
     padding-left: calc(1.5rem + var(--student-safe-left));
@@ -2419,6 +2557,22 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-answer-choice:active {
     outline: 2px solid Highlight;
     outline-offset: -2px;
+  }
+
+  /* The elimination strike is a background, which forced colors would paint as
+   * Canvas (invisible on the Canvas surface). Keep it as the system ink. */
+  .sat-choice-elimination-line {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+  }
+
+  /* The rail is a background image, which forced colors would erase along with
+   * the divider it replaced: drop the decorative segments and keep the header's
+   * bottom edge as one system separator instead. */
+  .sat-ui .sat-color-rail {
+    forced-color-adjust: none;
+    background-image: none;
+    background-color: CanvasText;
   }
 }
 

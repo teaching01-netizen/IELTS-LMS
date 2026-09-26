@@ -32,10 +32,12 @@ describe("SatQuestionHeader eliminator (Phase 6e endgame)", () => {
   it("renders the compact ABC cut icon at the far right of the header", () => {
     const { unmount } = renderHeader(false);
     const closed = screen.getByRole("button", { name: "Turn on cross-out mode" });
-    // The glyph is drawn here (letters + diagonal strike), not a generic icon.
-    const glyph = closed.querySelector('[data-sat-eliminator-glyph="true"]');
+    // The header glyph is drawn here (letters + diagonal strike), not a
+    // generic icon — and never the per-choice letter geometry.
+    const glyph = closed.querySelector('[data-sat-eliminator-glyph="header"]');
     expect(glyph).not.toBeNull();
     expect(glyph).toHaveTextContent("ABC");
+    expect(closed.querySelector('[data-sat-eliminator-glyph="choice"]')).toBeNull();
     // Visual box ~36px inside a 44px hit target, pushed to the header's edge.
     expect(closed.className).toContain("sat-touch-target");
     expect(closed.className).toContain("h-11");
@@ -50,7 +52,7 @@ describe("SatQuestionHeader eliminator (Phase 6e endgame)", () => {
     // Same control, same name shape; only the state changed.
     expect(
       screen.getByRole("button", { name: "Turn off cross-out mode" }).querySelector(
-        '[data-sat-eliminator-glyph="true"]'
+        '[data-sat-eliminator-glyph="header"]'
       )
     ).not.toBeNull();
   });
@@ -152,5 +154,52 @@ describe("SatQuestionHeader eliminator (Phase 6e endgame)", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SatQuestionHeader spectrum rail (Phase 6g, visual-only)", () => {
+  it("closes a white header with the shared decorative rail, touching no control", () => {
+    renderHeader(false);
+    const rail = document.querySelector('[data-sat-color-rail="true"]');
+    expect(rail).not.toBeNull();
+    expect(rail!.tagName).toBe("SPAN");
+    expect(rail!.className).toContain("sat-color-rail");
+    // Decoration, never content: not announced, not focusable, not a target.
+    expect(rail).toHaveAttribute("aria-hidden", "true");
+    expect(rail).not.toHaveAttribute("role");
+    expect(rail).not.toHaveAttribute("tabindex");
+
+    const header = rail!.parentElement!;
+    // The strip is white now — the pale surface-subtle tint is gone — and the
+    // rail hangs off a positioned host as the header's bottom edge.
+    expect(header.className).toContain("relative");
+    expect(header.className).toContain("bg-[var(--sat-surface)]");
+    expect(header.className).not.toContain("bg-[var(--sat-surface-subtle)]");
+    // Host keeps its 1px hairline so the overlay cannot resize the header.
+    expect(header.className).toContain("border-b");
+    // Last child: painted over the row it closes, owned by no control.
+    expect(header.lastElementChild).toBe(rail);
+  });
+
+  it("leaves exactly the two header controls interactive, in order", () => {
+    render(
+      <SatQuestionHeader
+        questionNumber={3}
+        markedForReview
+        eliminationAvailable
+        eliminationMode
+        disabled={false}
+        onToggleReview={vi.fn()}
+        onToggleEliminationMode={vi.fn()}
+      />
+    );
+    const buttons = screen.getAllByRole("button");
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Marked for Review",
+      "Turn off cross-out mode",
+    ]);
+    // The rail adds no control, no image and no second heading.
+    expect(screen.getAllByRole("heading")).toHaveLength(1);
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
   });
 });

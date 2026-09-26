@@ -30,9 +30,35 @@ describe("bluebook shell (Phase 3)", () => {
     expect(shellSrc).toMatch(/grid-rows-\[auto_minmax\(0,1fr\)_auto\]/);
   });
 
-  it("structures the topbar as context | timer | tools with chrome bg", () => {
-    expect(topbarSrc).toContain("var(--sat-shell-bg)");
+  it("gives the topbar a white surface closed by the shared spectrum rail", () => {
+    // Bluebook parity: the bar is paper, and its bottom edge is the rail — the
+    // pale chrome tint stays on the shell and footer only.
+    expect(topbarSrc).toContain("bg-[var(--sat-surface)]");
+    expect(topbarSrc).not.toContain("bg-[var(--sat-shell-bg)]");
+    expect(topbarSrc).toContain("sat-color-rail");
     expect(topbarSrc).toContain("minmax(280px,1fr)");
+  });
+
+  it("defines the spectrum rail once, under .sat-ui, with a forced-colors separator", () => {
+    for (const token of [
+      "--sat-rail-dark:",
+      "--sat-rail-blue:",
+      "--sat-rail-yellow:",
+      "--sat-rail-height:",
+      "--sat-rail-hairline:",
+    ]) {
+      expect(css).toContain(token);
+    }
+    // One definition plus the forced-colors fallback, both SAT-scoped, so the
+    // top bar and the question header cannot drift apart.
+    expect(css.match(/\.sat-ui \.sat-color-rail \{/g)).toHaveLength(2);
+    expect(css).toContain("bottom: calc(-1 * var(--sat-rail-hairline))");
+    expect(css).toContain("pointer-events: none");
+    expect(css).toContain("background-repeat: no-repeat, repeat");
+    // Decorative segments are not retained in forced colors: one system rule.
+    expect(css).toMatch(
+      /\.sat-ui \.sat-color-rail \{[^}]*forced-color-adjust: none;[^}]*background-color: CanvasText;[^}]*\}/
+    );
   });
 
   it("gives the footer chrome bg + strong top border + 1fr/auto/1fr rhythm", () => {
