@@ -1475,6 +1475,12 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-swatch-yellow: #F2DE8C;
   --sat-swatch-blue: #9CC3F2;
   --sat-swatch-pink: #F0AFC8;
+  /* The ink glyph inside the swatch of the colour a student is using: the same
+   * hue as its chip, driven to a tone that stays legible on it in both contrast
+   * modes. Literals live here, never in TSX (see the SAT hex ban). */
+  --sat-swatch-yellow-ink: #A9821F;
+  --sat-swatch-blue-ink: #1668B3;
+  --sat-swatch-pink-ink: #C2407A;
   --sat-annotation-active-ring: rgba(0, 0, 0, 0.45);
   /* Annotation chrome motion (C4: exam TSX carries no duration literals). */
   --sat-motion-annotation: 140ms;

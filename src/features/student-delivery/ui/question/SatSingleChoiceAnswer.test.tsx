@@ -104,20 +104,37 @@ describe('SatSingleChoiceAnswer cut-choice control', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('shows a visible Undo on a crossed-out choice and restores without answering', () => {
+  it('keeps the cut badge on a crossed-out choice and restores without answering', () => {
     const onChange = vi.fn();
     const onToggleElimination = vi.fn();
     // Elimination mode deliberately OFF: a crossed-out choice stays recoverable
     // without re-arming the mode.
     render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set(['b'])} eliminationMode={false} disabled={false} onChange={onChange} onToggleElimination={onToggleElimination} />);
     const undo = screen.getByRole('button', { name: 'Undo option B' });
-    expect(undo).toHaveTextContent('Undo');
+    // One control, one shape: the crossed-out box keeps the ABC cut badge
+    // instead of swapping it for the word "Undo".
+    expect(undo.querySelector('[data-sat-eliminator-glyph="true"]')).toHaveTextContent('ABC');
+    expect(undo).not.toHaveTextContent('Undo');
     expect(undo).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(undo);
     expect(onToggleElimination).toHaveBeenCalledWith('b');
     expect(onChange).not.toHaveBeenCalled();
     // Only the crossed-out choice carries a control while the mode is off.
     expect(screen.queryByRole('button', { name: 'Eliminate option A' })).toBeNull();
+  });
+
+  it('wears the same badge in both states, with the applied one dashed and muted', () => {
+    render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set(['a'])} eliminationMode disabled={false} onChange={vi.fn()} onToggleElimination={vi.fn()} />);
+    const cut = screen.getByRole('button', { name: 'Undo option A' });
+    const open = screen.getByRole('button', { name: 'Eliminate option B' });
+    expect(cut).toHaveAttribute('data-sat-cut-choice-state', 'cut');
+    expect(open).toHaveAttribute('data-sat-cut-choice-state', 'open');
+    const cutGlyph = cut.querySelector('[data-sat-eliminator-glyph="true"]')!;
+    const openGlyph = open.querySelector('[data-sat-eliminator-glyph="true"]')!;
+    // Same badge in both states: the difference is its paint, never a word.
+    expect(cutGlyph).toHaveTextContent(openGlyph.textContent!);
+    expect(cutGlyph.className).toContain('border-dashed');
+    expect(openGlyph.className).not.toContain('border-dashed');
   });
 
   it('strikes the option letter along with the choice content', () => {

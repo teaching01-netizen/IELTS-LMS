@@ -18,26 +18,34 @@ import { createSatExamZoomGeometry } from '../zoom/satExamZoomGeometry';
  * second mode here. It is gone: one presentation, one entrance, one place to
  * fix. What it answered — a viewport too short for the actions — is now the
  * body's own scroll, bounded by the placement.
+ *
+ * The surface is also the positioning context for anything a control discloses
+ * (the underline's style menu): the body scrolls, so a popover rendered inside
+ * it would be clipped to the height of the bar it hangs off. Disclosed UI is
+ * portaled into this node instead, which is why every surface wears
+ * `data-sat-annotation-surface`.
  */
 
 /** Where a surface sits before its placement lands. */
 export const SAT_ANNOTATION_SURFACE_INSET = 8;
 
 /**
- * The surface's row rhythm, owned here because it is a property of the surface
- * rather than of any one set of actions: the selection tools and a mark's edit
- * tools space their rows identically, and a second copy of these classes is how
- * the two drift apart.
+ * The surface's row: one line of glyphs, spaced by the surface's own rhythm.
+ *
+ * Owned here because it is a property of the surface rather than of any one set
+ * of actions — the selection tools and a mark's edit tools lay out identically,
+ * and a second copy of these classes is how the two drift apart. There is one
+ * row now (the reference's bar), so it is also the whole body.
  */
-export const SAT_ANNOTATION_ROW = 'mt-[var(--sat-annotation-row-gap)]';
-/** A row that is separated from the one above it, for a destructive action. */
-export const SAT_ANNOTATION_ROW_DIVIDED =
-  SAT_ANNOTATION_ROW
-  + ' flex flex-wrap items-center gap-2 border-t border-[var(--sat-divider)] pt-[var(--sat-annotation-row-gap)]';
+export const SAT_ANNOTATION_PILL_ROW =
+  'flex flex-wrap items-center gap-[var(--sat-annotation-row-gap)]';
 
 const SURFACE_BASE = 'sat-ui absolute z-[80] ';
+// The bar is a pill: the reference rounds its ends fully, and the shape is what
+// makes a row of quiet glyphs read as one object hanging off the words rather
+// than as a panel placed near them.
 const SURFACE_FLOATING =
-  'sat-annotation-surface-floating rounded-[10px]'
+  'sat-annotation-surface-floating rounded-full'
   + ' border border-[var(--sat-answer-border)] bg-[var(--sat-surface)]'
   + ' px-[var(--sat-annotation-surface-padding-x)] py-[var(--sat-annotation-surface-padding-y)]'
   + ' shadow-[var(--sat-shadow-floating)]';

@@ -196,12 +196,23 @@ export const SAT_COPY = {
     // edit controls — the same surface in two states.
     highlight: "Highlight",
     underline: "Underline",
+    // The underline's style menu. Three glyph rows and one written word, exactly
+    // as the reference draws it: the shapes ARE the styles, so only the option
+    // with no shape to show carries text. Every row still has a spoken name, so
+    // the menu is usable without seeing the lines at all.
+    underlineStyle: "Underline style",
+    underlineSolid: "Solid underline",
+    underlineDashed: "Dashed underline",
+    underlineDotted: "Dotted underline",
+    underlineNone: "None",
+    removeUnderlineStyle: "No underline",
     selectedTextActions: "Selected text actions",
     editAnnotation: "Edit annotation",
-    // The visible way out of either popover. Esc, a click outside, and a new
-    // selection all dismiss it too, but a panel that can only be dismissed by a
-    // gesture the student has to guess is a panel they will try to avoid.
-    closeTools: "Close text tools",
+    // There is deliberately no "Close text tools" string: the reference bar has
+    // no dismissal control, so the ways out are Escape and a press outside, and
+    // both are owned by the surfaces (`onClose` / `onMarkEditorDismissed`). A
+    // word here with no control to wear it would be copy for a button nobody
+    // can press.
     // The activation cue: one quiet line at the top of the passage, shown when
     // the student arms annotation, until they annotate something. It answers
     // "what did I just turn on?" where the answer applies — over the text that

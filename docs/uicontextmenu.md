@@ -1,3 +1,13 @@
+> **Superseded (2026-09-26).** The bar that shipped follows the product reference
+> instead of this plan: three visible inks (the one in use drawn larger with the
+> ink drop), an underline whose line shows its style plus a chevron menu
+> (solid / dashed / dotted / none), a removal, and a note — one icon-only row on
+> a rounded pill, with **no X** and **no split colour control**. Escape and a
+> press outside dismiss it. See `SatAnnotationControls.tsx`,
+> `SatUnderlineStyleControl.tsx`, and `SatSelectionActionsPanel.tsx`. The
+> reasoning below about progressive disclosure, 44px targets, restrained motion,
+> and hierarchical Escape still describes the shipped behavior.
+
 I inspected the current SAT annotation implementation. The cognitive load is coming from the structure itself: `SatAnnotationControls.tsx` renders all three colors as labeled 44px actions, while `SatSelectionActionsPanel.tsx` puts colors on row 1 and Underline + Add note + X on row 2. There is also a separate “Highlight” heading. So a very small decision is being presented as a mini control panel.
 
 Your proposed simplification is the right direction. I would make the contextual menu behave more like an Apple text-formatting control: **one compact horizontal action bar, with complexity disclosed only when the student asks for it.**

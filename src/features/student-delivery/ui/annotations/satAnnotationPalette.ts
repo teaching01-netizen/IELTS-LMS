@@ -20,6 +20,13 @@ export interface SatHighlightInk {
   foreground: string;
   /** Swatch chip fill. */
   swatch: string;
+  /**
+   * The ink glyph drawn inside the chip when this colour is the current one.
+   *
+   * A darker tone of the same hue: it has to read as ink ON the chip, so it can
+   * never be borrowed from the chip itself or from the mark's text colour.
+   */
+  inkGlyph: string;
 }
 
 export const satHighlightInks: Record<SatHighlightColor, SatHighlightInk> = {
@@ -29,6 +36,7 @@ export const satHighlightInks: Record<SatHighlightColor, SatHighlightInk> = {
     background: 'var(--sat-highlight-background, #FFF2B3)',
     foreground: 'var(--sat-highlight-text, #1d1d1f)',
     swatch: 'var(--sat-swatch-yellow, #F2DE8C)',
+    inkGlyph: 'var(--sat-swatch-yellow-ink, #A9821F)',
   },
   blue: {
     color: 'blue',
@@ -36,6 +44,7 @@ export const satHighlightInks: Record<SatHighlightColor, SatHighlightInk> = {
     background: 'var(--sat-highlight-bg-blue, #D6E6FB)',
     foreground: 'var(--sat-highlight-text-blue, #1d1d1f)',
     swatch: 'var(--sat-swatch-blue, #9CC3F2)',
+    inkGlyph: 'var(--sat-swatch-blue-ink, #1668B3)',
   },
   pink: {
     color: 'pink',
@@ -43,6 +52,7 @@ export const satHighlightInks: Record<SatHighlightColor, SatHighlightInk> = {
     background: 'var(--sat-highlight-bg-pink, #FBDBE6)',
     foreground: 'var(--sat-highlight-text-pink, #1d1d1f)',
     swatch: 'var(--sat-swatch-pink, #F0AFC8)',
+    inkGlyph: 'var(--sat-swatch-pink-ink, #C2407A)',
   },
 };
 

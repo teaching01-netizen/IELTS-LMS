@@ -12,7 +12,7 @@ function actions() {
 }
 
 /** The props a dismissal needs wherever a popover is rendered. */
-const closeProps = { onClose: vi.fn(), environment };
+const closeProps = { onClose: vi.fn(), environment, currentUnderlineStyle: 'solid' as const };
 
 /** Every action's marker, in the order the surface renders them. */
 function actionOrder(): Array<string | null> {
@@ -20,65 +20,81 @@ function actionOrder(): Array<string | null> {
 }
 
 describe('desktop selection panel', () => {
-  it('names the group and labels every action, never showing a bare dot', () => {
+  it('draws the reference bar: one icon row, no heading, and no visible words', () => {
     const on = actions();
     render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={on} {...closeProps} />);
     const toolbar = screen.getByRole('toolbar', { name: 'Selected text actions' });
-    // The heading is what connects "selected text" to "highlight" with no tutorial.
-    expect(toolbar).toHaveTextContent('Highlight');
-    for (const label of ['Highlight Yellow', 'Highlight Blue', 'Highlight Pink']) {
-      expect(screen.getByRole('button', { name: label })).toHaveTextContent(label.replace('Highlight ', ''));
+    // The bar hangs off the selected words, so the relationship is spatial: a
+    // heading would only add height to a surface the student reads past. The
+    // bare "U" is the underline glyph itself, not a label for it.
+    expect(toolbar.textContent).toBe('U');
+    for (const word of ['Highlight', 'Underline', 'Add note', 'Close']) {
+      expect(toolbar.textContent).not.toContain(word);
     }
-    // Visible words and accessible names come from the same copy table.
-    expect(screen.getByRole('button', { name: 'Underline' })).toHaveTextContent('Underline');
-    expect(screen.getByRole('button', { name: 'Add note' })).toHaveTextContent('Add note');
+    for (const label of ['Highlight Yellow', 'Highlight Blue', 'Highlight Pink']) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+    }
+    // The underline and the note are the same row, one press each.
+    expect(actionOrder()).toEqual([
+      'highlight-yellow', 'highlight-blue', 'highlight-pink', 'underline', 'underline-style', 'note',
+    ]);
+    // No X anywhere: Escape and a press outside are the ways out, and neither
+    // one touches the mark.
+    expect(screen.queryByRole('button', { name: 'Close text tools' })).toBeNull();
   });
 
-  it('keeps every action at a 44px touch target with a small visual swatch', () => {
+  it('sizes the ink in use as the larger circle, and only it wears the drop', () => {
+    render(<SatSelectionActionsPanel anchor={anchor} currentColor="blue" actions={actions()} {...closeProps} />);
+    const blue = document.querySelector('[data-sat-swatch="blue"]')!;
+    const yellow = document.querySelector('[data-sat-swatch="yellow"]')!;
+    expect(blue).toHaveAttribute('data-sat-swatch-state', 'current');
+    expect(blue.className).toContain('h-8');
+    expect(blue.querySelector('[data-sat-swatch-ink="true"]')).not.toBeNull();
+    expect(yellow).toHaveAttribute('data-sat-swatch-state', 'idle');
+    expect(yellow.className).toContain('h-6');
+    expect(yellow.querySelector('[data-sat-swatch-ink="true"]')).toBeNull();
+  });
+
+  it('keeps every action at a 44px touch target', () => {
     render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} {...closeProps} />);
     for (const button of screen.getAllByRole('button')) {
-      expect(button.className).toContain('min-h-[44px]');
-      expect(button.className).toContain('min-w-[44px]');
+      expect(button.className).toContain('h-11');
+      expect(button.className).toContain('sat-touch-target');
     }
-    const swatch = document.querySelector('[data-sat-swatch="yellow"]')!;
-    expect(swatch.className).toContain('h-[20px]');
-    expect(swatch.className).toContain('w-[20px]');
   });
 
-  it('applies the tapped ink to the live anchor and dismisses nothing else', () => {
+  it('applies the tapped ink, the current underline style, and the note request', () => {
     const on = actions();
-    render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={on} {...closeProps} />);
+    render(
+      <SatSelectionActionsPanel
+        anchor={anchor}
+        currentColor="yellow"
+        currentUnderlineStyle="dotted"
+        actions={on}
+        environment={environment}
+        onClose={vi.fn()}
+      />,
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Highlight Pink' }));
     expect(on.highlight).toHaveBeenCalledWith(anchor, 'pink');
+    // The U applies the line it is drawing: the student's last choice, shown
+    // before they press it.
+    expect(screen.getByRole('button', { name: 'Underline' }).querySelector('[data-sat-underline-glyph="dotted"]')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Underline' }));
-    expect(on.underline).toHaveBeenCalledWith(anchor);
+    expect(on.underline).toHaveBeenCalledWith(anchor, 'dotted');
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
     expect(on.addNote).toHaveBeenCalledWith(anchor);
   });
 
-  it('lands the caret on the first action, never on the way out', () => {
+  it('lands the caret on the first action, with nothing to dismiss by accident', () => {
     render(<SatSelectionActionsPanel anchor={anchor} currentColor="blue" actions={actions()} {...closeProps} />);
     const yellow = screen.getByRole('button', { name: 'Highlight Yellow' });
     const blue = screen.getByRole('button', { name: 'Highlight Blue' });
-    // Focus starts on the primary action so Enter highlights immediately — and
-    // not on "Close text tools", which would make the first keystroke after
-    // selecting text throw the tools away.
     expect(document.activeElement).toBe(yellow);
-    expect(screen.getByRole('button', { name: 'Close text tools' })).toBeInTheDocument();
-    // The pressed swatch stays the remembered ink: it tells the student what
-    // their next highlight will use before they act.
     expect(blue).toHaveAttribute('aria-pressed', 'true');
     expect(yellow).toHaveAttribute('aria-pressed', 'false');
     fireEvent.keyDown(yellow, { key: 'ArrowRight' });
     expect(document.activeElement).toBe(blue);
-  });
-
-  it('offers a written way out, and closing touches nothing', () => {
-    const onClose = vi.fn();
-    render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} environment={environment} onClose={onClose} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Close text tools' }));
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: 'Close text tools' })).toHaveAttribute('data-sat-annotation-dismiss', 'true');
   });
 
   it('disables every action while the exam is blocked', () => {
@@ -86,28 +102,7 @@ describe('desktop selection panel', () => {
     for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled();
   });
 
-  it('puts the dismissal last, in the bottom row, beside the secondary actions', () => {
-    render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} {...closeProps} />);
-    const close = screen.getByRole('button', { name: 'Close text tools' });
-    const row = close.parentElement!;
-    // Nothing comes after the way out: it is the last control in the surface, so
-    // "bottom right corner" is a property of the markup and not of a stylesheet
-    // someone can reorder later.
-    expect(actionOrder().at(-1)).toBe('close');
-    const body = document.querySelector('[data-sat-annotation-surface-body="true"]')!;
-    expect(body).toContainElement(row);
-    expect(body.lastElementChild).toBe(row);
-    // Same row as the secondary actions, at the far end of it.
-    expect(row).toContainElement(screen.getByRole('button', { name: 'Underline' }));
-    expect(row).toContainElement(screen.getByRole('button', { name: 'Add note' }));
-    expect(row.className).toContain('justify-between');
-    // And the inks stay above it, where the primary action belongs.
-    expect(actionOrder()).toEqual([
-      'highlight-yellow', 'highlight-blue', 'highlight-pink', 'underline', 'note', 'close',
-    ]);
-  });
-
-  it('scrolls its own rows inside the bound the placement measured', () => {
+  it('scrolls its own row inside the bound the placement measured', () => {
     render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} {...closeProps} />);
     // The body is what scrolls; the surface itself does not, because a scroll
     // container would clip the caret that sits outside its border box.
@@ -118,14 +113,79 @@ describe('desktop selection panel', () => {
   });
 });
 
+describe('underline style menu', () => {
+  function openMenu() {
+    const on = actions();
+    render(
+      <SatSelectionActionsPanel
+        anchor={anchor}
+        currentColor="yellow"
+        currentUnderlineStyle="solid"
+        actions={on}
+        environment={environment}
+        onClose={vi.fn()}
+      />,
+    );
+    const trigger = screen.getByRole('button', { name: 'Underline style' });
+    fireEvent.click(trigger);
+    return { on, trigger };
+  }
+
+  it('offers the three lines and none, with the one in use checked', () => {
+    const { trigger } = openMenu();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('menu', { name: 'Underline style' })).toBeInTheDocument();
+    const options = screen.getAllByRole('menuitemradio').map((item) => item.getAttribute('data-sat-underline-style-option'));
+    expect(options).toEqual(['solid', 'dashed', 'dotted', 'none']);
+    expect(screen.getByRole('menuitemradio', { name: 'Solid underline' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: 'Dashed underline' })).toHaveAttribute('aria-checked', 'false');
+    // The one option with no line to draw carries the word instead.
+    expect(screen.getByRole('menuitemradio', { name: 'No underline' })).toHaveTextContent('None');
+  });
+
+  it('is closed until the chevron asks, and applies the chosen line', () => {
+    const on = actions();
+    render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={on} {...closeProps} />);
+    expect(screen.queryByRole('menu')).toBeNull();
+    const trigger = screen.getByRole('button', { name: 'Underline style' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dashed underline' }));
+    expect(on.underline).toHaveBeenCalledWith(anchor, 'dashed');
+    // Choosing closes the menu and hands focus back to its trigger.
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('takes Escape first: the menu closes and the selection tools stay', () => {
+    const { trigger } = openMenu();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    // The toolbar itself is still there: one Escape, one meaning.
+    expect(screen.getByRole('toolbar', { name: 'Selected text actions' })).toBeInTheDocument();
+  });
+
+  it('takes "none" as doing nothing on a selection that is not underlined yet', () => {
+    const { on } = openMenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'No underline' }));
+    expect(on.underline).not.toHaveBeenCalled();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+});
+
 describe('edit controls', () => {
   const mark = createSatTextAnnotation({
     kind: 'highlight', nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree', color: 'pink', note: 'Check this',
   });
+  const underlineMark = createSatTextAnnotation({
+    kind: 'underline', nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree', style: 'dashed',
+  });
   /** What every render of the mark's controls needs beyond the mark itself. */
   const base = { onClose: vi.fn(), environment };
 
-  it('shows the current ink pressed, offers the note edit, and separates removal', () => {
+  it('shows the mark own ink pressed, offers the note edit, and keeps removal on the row', () => {
     const onColor = vi.fn();
     const onRemove = vi.fn();
     const onNote = vi.fn();
@@ -140,29 +200,63 @@ describe('edit controls', () => {
       />,
     );
     expect(screen.getByRole('button', { name: 'Highlight Pink' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Highlight Yellow' })).toHaveAttribute('aria-pressed', 'false');
-    // Recolour is one tap on the existing mark: never delete-then-redraw.
+    expect(document.querySelector('[data-sat-swatch="pink"]')).toHaveAttribute('data-sat-swatch-state', 'current');
     fireEvent.click(screen.getByRole('button', { name: 'Highlight Blue' }));
     expect(onColor).toHaveBeenCalledWith('blue');
-    // The note action explains its own state without documentation.
-    expect(screen.getByRole('button', { name: 'Edit note' })).toHaveTextContent('Edit note');
     fireEvent.click(screen.getByRole('button', { name: 'Edit note' }));
     expect(onNote).toHaveBeenCalledOnce();
-    // Removal keeps its own row, visually apart from the colours.
     fireEvent.click(screen.getByRole('button', { name: 'Remove highlight' }));
     expect(onRemove).toHaveBeenCalledOnce();
+    // The note is the one action that leaves the passage, so it comes after a
+    // divider; nothing sits behind a second disclosure any more.
+    expect(actionOrder()).toEqual([
+      'highlight-yellow', 'highlight-blue', 'highlight-pink', 'underline', 'underline-style', 'remove', 'note',
+    ]);
   });
 
-  it('asks to add a note on a bare mark and names removal after the mark kind', () => {
+  it('draws an underline mark own line, and removes that mark by name', () => {
+    render(
+      <SatAnnotationEditControls annotation={underlineMark} onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
+    );
+    // A highlight has no underline yet, so the menu's checked row is "none";
+    // an underline shows its own style.
+    const underlineTrigger = screen.getByRole('button', { name: 'Underline' });
+    expect(underlineTrigger.querySelector('[data-sat-underline-glyph="dashed"]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Add note' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove underline' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Underline style' }));
+    expect(screen.getByRole('menuitemradio', { name: 'Dashed underline' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: 'Solid underline' })).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('hands a style choice to the mark, including none', () => {
+    const onUnderline = vi.fn();
+    render(
+      <SatAnnotationEditControls annotation={underlineMark} onColor={vi.fn()} onUnderline={onUnderline} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Underline style' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dotted underline' }));
+    expect(onUnderline).toHaveBeenCalledWith('dotted');
+    fireEvent.click(screen.getByRole('button', { name: 'Underline style' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'No underline' }));
+    expect(onUnderline).toHaveBeenLastCalledWith('none');
+  });
+
+  it('checks "none" on a highlight, whose words carry no underline', () => {
+    render(
+      <SatAnnotationEditControls annotation={mark} onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Underline style' }));
+    expect(screen.getByRole('menuitemradio', { name: 'No underline' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: 'Solid underline' })).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('asks to add a note on a bare mark and moves the caret into the controls', () => {
     const bare = createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree' });
     render(
       <SatAnnotationEditControls annotation={bare} onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
     );
-    expect(screen.getByRole('button', { name: 'Add note' })).toHaveTextContent('Add note');
-    expect(screen.getByRole('button', { name: 'Remove underline' })).toBeInTheDocument();
-    // Opening a mark's controls moves the caret into them, so the keyboard never
-    // has to hunt for what the tap just revealed — and never onto the dismissal,
-    // which would throw the controls away on the next keystroke.
+    expect(screen.getByRole('button', { name: 'Add note' })).toBeInTheDocument();
     const controls = screen.getByRole('toolbar', { name: 'Edit annotation' });
     expect(controls.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Highlight Yellow' }));
@@ -190,21 +284,5 @@ describe('edit controls', () => {
     expect(onNote).toHaveBeenCalledOnce();
     // Asking for a note is not touching the mark.
     expect(onRemove).not.toHaveBeenCalled();
-  });
-
-  it('keeps the dismissal at the far end of the removal row', () => {
-    render(
-      <SatAnnotationEditControls annotation={mark} onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
-    );
-    const close = screen.getByRole('button', { name: 'Close text tools' });
-    const remove = screen.getByRole('button', { name: 'Remove highlight' });
-    // One row: the destructive action at one end, the way out at the other, and
-    // the way out is the last control in the surface.
-    expect(close.parentElement).toBe(remove.parentElement);
-    expect(close.parentElement!.className).toContain('justify-between');
-    expect(actionOrder().at(-1)).toBe('close');
-    // Both stay reachable and apart: a thumb reaching for one cannot land on the
-    // other by accident.
-    expect(close.parentElement!.contains(remove)).toBe(true);
   });
 });

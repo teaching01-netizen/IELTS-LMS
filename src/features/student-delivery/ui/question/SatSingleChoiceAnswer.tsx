@@ -124,21 +124,31 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 onClick={() => props.onToggleElimination(option.id)}
                 disabled={props.disabled}
                 aria-pressed={eliminated}
-                // Visible text stays inside the accessible name (label in name):
-                // "Undo" is what the student reads, "Undo option B" is what
-                // assistive tech announces.
+                // Icon-only control, exactly like the header eliminator: the
+                // accessible name carries the action ("Undo option B") and the
+                // state rides on the glyph's ink plus aria-pressed. The name is
+                // never drawn, so there is no visible word the name could
+                // contradict — and the badge keeps one identity across both
+                // states. `title` keeps that name discoverable on hover.
                 aria-label={`${eliminated ? "Undo" : "Eliminate"} option ${letter}`}
+                title={`${eliminated ? "Undo" : "Eliminate"} option ${letter}`}
                 data-sat-cut-choice={option.id}
-                className={`sat-pressable sat-state-transition absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-[6px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] ${eliminated ? "sat-type-metadata font-semibold text-[var(--sat-accent-strong)] underline-offset-4 hover:underline" : "text-[var(--sat-text-secondary)] hover:bg-[var(--sat-surface-hover)] hover:text-[var(--sat-text)]"} disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:no-underline`}
+                data-sat-cut-choice-state={eliminated ? "cut" : "open"}
+                className="sat-pressable sat-state-transition absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-[6px] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
               >
-                {eliminated ? (
-                  <span aria-hidden="true">Undo</span>
-                ) : (
-                  <SatCutChoiceGlyph
-                    size="sm"
-                    className="border-[var(--sat-answer-border)] bg-[var(--sat-answer-bg)] text-[var(--sat-text)]"
-                  />
-                )}
+                <SatCutChoiceGlyph
+                  size="sm"
+                  // Every choice box wears the SAME cut badge; a crossed-out
+                  // choice keeps it rather than becoming the word "Undo". The
+                  // applied state is the same outline, dashed and muted, so the
+                  // control the student just used is still where they left it —
+                  // and one press puts the choice back.
+                  className={
+                    eliminated
+                      ? "border-dashed border-[var(--sat-text-secondary)] bg-transparent text-[var(--sat-text-secondary)]"
+                      : "border-[var(--sat-answer-border)] bg-[var(--sat-answer-bg)] text-[var(--sat-text)]"
+                  }
+                />
               </button>
             ) : null}
           </div>

@@ -1,14 +1,17 @@
 import type { SatHighlightColor, SatTextAnnotation } from '../../domain/satResponses';
+import { satAnnotationUnderlineStyle } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
 import {
-  SatAnnotationHeading,
-  SatCloseControl,
   SatHighlightSwatchButtons,
   SatNoteControl,
   SatRemoveControl,
-  SatUnderlineControl,
 } from './SatAnnotationControls';
-import { SatAnnotationCaret, SatAnnotationSurfaceBody, SAT_ANNOTATION_ROW, SAT_ANNOTATION_ROW_DIVIDED } from './SatAnnotationSurfaceFrame';
+import { SatUnderlineStyleControl, type SatUnderlineChoice } from './SatUnderlineStyleControl';
+import {
+  SAT_ANNOTATION_PILL_ROW,
+  SatAnnotationCaret,
+  SatAnnotationSurfaceBody,
+} from './SatAnnotationSurfaceFrame';
 import { useSatAnnotationSurface } from './useSatAnnotationSurface';
 import { useSatExamZoom } from '../zoom/SatExamZoomContext';
 import type { SelectionMenuEnvironment } from '@shared/ui/selection-v2/engine/selectionPlacement';
@@ -17,19 +20,17 @@ import type { SelectionMenuEnvironment } from '@shared/ui/selection-v2/engine/se
  * Edit controls for an annotation that already exists.
  *
  * This is where the feature teaches "I can change this later": the student taps
- * a mark they made and gets the same colors back, now with the current one
- * pressed. Recoloring is a single tap — never delete-then-redraw — and removal
- * lives below a divider so it can never be hit while reaching for a color.
- *
- * There is deliberately no "are you sure?" step: removal is immediately
- * undoable instead, which is both kinder and faster.
+ * a mark they made and gets the same bar back, now with that mark's own
+ * treatment pressed — its ink, or its underline style. Recoloring and restyling
+ * are a single tap each, never delete-then-redraw, and removal is the one
+ * destructive control on the row, drawn in the danger ink and immediately
+ * undoable rather than confirmed.
  *
  * It is the same surface as the selection tools, in edit mode: the same
- * placement engine, the same shared chrome, the same one presentation and the
- * same clamp-when-there-is-no-room rule. A mark's controls therefore appear
- * where the student left them (and where the taps that made them were), on a
- * mouse and on glass alike — coarse-pointer comfort and native selection UI are
- * separate placement inputs; neither changes the surface's presentation.
+ * placement engine, the same shared chrome, the same one presentation, the same
+ * pill, and the same controls. A mark's controls therefore appear where the
+ * student left them — and the bar reads as the same object in two states rather
+ * than as two different interfaces.
  *
  * Since these controls are also what a mark becomes the instant a highlight
  * lands (see useSatAnnotationSurface), this is the whole post-highlight surface:
@@ -53,7 +54,8 @@ export function SatAnnotationEditControls({
   environment: SelectionMenuEnvironment;
   disabled?: boolean | undefined;
   onColor: (color: SatHighlightColor) => void;
-  onUnderline: () => void;
+  /** A style to underline in, or `'none'` to take the underline off. */
+  onUnderline: (choice: SatUnderlineChoice) => void;
   /** Open this mark's note in the Notes pane, which is where notes are written. */
   onNote: () => void;
   onRemove: () => void;
@@ -73,6 +75,10 @@ export function SatAnnotationEditControls({
   const isHighlight = annotation.kind === 'highlight';
   const hasNote = typeof annotation.note === 'string' && annotation.note.length > 0;
   const removeLabel = isHighlight ? SAT_COPY.annotations.removeHighlight : SAT_COPY.annotations.removeUnderline;
+  // What the underline control shows: this mark's own style when it IS the
+  // underline, and "none" when the words are only highlighted — the menu's
+  // checked row is then the honest "there is no underline on this yet".
+  const underlineChoice: SatUnderlineChoice = isHighlight ? 'none' : satAnnotationUnderlineStyle(annotation);
 
   return (
     <div
@@ -80,6 +86,9 @@ export function SatAnnotationEditControls({
       // Present for a student who can act on it, and only then — see the
       // selection surface for why a hidden surface claims no interaction hooks.
       data-sat-annotation-edit-controls={chrome.hidden ? undefined : 'true'}
+      // The positioning context for disclosed UI (the underline style menu),
+      // which must not be rendered inside the scrolling body.
+      data-sat-annotation-surface={chrome.hidden ? undefined : 'true'}
       data-sat-annotation-id={annotation.id}
       role="toolbar"
       aria-label={SAT_COPY.annotations.editAnnotation}
@@ -88,26 +97,24 @@ export function SatAnnotationEditControls({
     >
       <SatAnnotationCaret placement={placement} visualScale={visualScale} />
       <SatAnnotationSurfaceBody maxHeight={chrome.bodyMaxHeight}>
-        <SatAnnotationHeading />
-        <div className={SAT_ANNOTATION_ROW}>
+        <div className={SAT_ANNOTATION_PILL_ROW}>
           <SatHighlightSwatchButtons
             value={isHighlight ? annotation.color : null}
             disabled={disabled === true}
             onSelect={onColor}
           />
-        </div>
-        <div className={SAT_ANNOTATION_ROW_DIVIDED}>
-          <SatUnderlineControl pressed={!isHighlight} disabled={disabled === true} onSelect={onUnderline} />
-          <SatNoteControl hasNote={hasNote} disabled={disabled === true} onSelect={onNote} />
-        </div>
-        {/* Removal keeps its own row below the divider, so it can never be hit
-            while reaching for an ink. The dismissal shares that row at its far
-            end: one press leaves, and it is a row away from every action that
-            changes the mark, which is the whole reason the destructive control
-            was separated in the first place. */}
-        <div className={SAT_ANNOTATION_ROW_DIVIDED + ' justify-between'}>
+          <SatUnderlineStyleControl
+            current={underlineChoice}
+            disabled={disabled === true}
+            onApply={(style) => onUnderline(style)}
+            onChoose={onUnderline}
+          />
+          {/* Removal keeps its distance from the inks: it is the only control
+              here that destroys something, so it is drawn in the danger ink and
+              the note follows a divider rather than sitting beside it. */}
           <SatRemoveControl disabled={disabled === true} label={removeLabel} onSelect={onRemove} />
-          <SatCloseControl onSelect={onClose} disabled={disabled} label={SAT_COPY.annotations.closeTools} />
+          <span aria-hidden="true" className="mx-1 h-6 w-px bg-[var(--sat-divider)]" />
+          <SatNoteControl hasNote={hasNote} disabled={disabled === true} onSelect={onNote} />
         </div>
       </SatAnnotationSurfaceBody>
     </div>

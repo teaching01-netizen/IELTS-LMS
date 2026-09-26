@@ -561,7 +561,11 @@ test.describe('annotation surface placement', () => {
     const selectedActions = page.getByRole('toolbar', { name: 'Selected text actions' });
     await selectedActions.getByRole('button', { name: 'Highlight Yellow' }).click();
     const edit = page.getByRole('toolbar', { name: 'Edit annotation' });
-    await edit.getByRole('button', { name: 'Close text tools' }).click({ force: true });
+    await expect(edit).toBeVisible();
+    // The bar carries no dismissal control: Escape is the way out, and it is
+    // what this test used the X for.
+    await page.keyboard.press('Escape');
+    await expect(edit).toHaveCount(0);
     const mark = page.locator('[data-sat-highlight="true"]').filter({ hasText: 'Several' });
     await mark.tap();
     await expect(page.getByRole('toolbar', { name: 'Edit annotation' })).toBeVisible();
@@ -584,7 +588,8 @@ test.describe('annotation surface placement', () => {
     await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible();
     await expect(prompt.locator('[data-content-text-node="math-prompt::text-run-0"]')).toBeVisible();
     expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
-    await page.getByRole('toolbar', { name: 'Selected text actions' }).getByRole('button', { name: 'Close text tools' }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toHaveCount(0);
 
     await selectTextInRegion(page, '[data-sat-annotation-region="prompt"]', 'minimum');
     await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible();
@@ -598,7 +603,8 @@ test.describe('annotation surface placement', () => {
     await page.getByRole('button', { name: 'Highlight Yellow' }).click();
     const mark = prompt.locator('[data-sat-highlight="true"]').filter({ hasText: 'minimum' });
     await expect(mark).toBeVisible();
-    await page.getByRole('toolbar', { name: 'Edit annotation' }).getByRole('button', { name: 'Close text tools' }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('toolbar', { name: 'Edit annotation' })).toHaveCount(0);
     await mark.tap();
     await expect(page.getByRole('button', { name: 'Remove highlight' })).toBeVisible();
     await page.getByRole('button', { name: 'Remove highlight' }).click();

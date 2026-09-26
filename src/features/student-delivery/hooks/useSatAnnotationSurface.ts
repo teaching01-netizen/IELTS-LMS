@@ -9,17 +9,20 @@ import {
   applySatHighlightRange,
   applySatUnderlineRange,
   attachSatNoteToAnchor,
+  defaultSatUnderlineStyle,
   hasSatAnnotations,
   reinsertSatAnnotation,
   removeSatAnnotationById,
   restoreSatAnnotationNote,
   satAnnotatedNotes,
   setSatAnnotationColor,
+  setSatAnnotationUnderlineStyle,
   SAT_ANNOTATION_NOTE_LIMIT,
   type SatHighlightColor,
   type SatQuestionAnnotations,
   type SatTextAnchor,
   type SatTextAnnotation,
+  type SatUnderlineStyle,
 } from '../domain/satResponses';
 import { satNotesUiFromSurface, SAT_QUESTION_NOTE_EDITOR, type SatNotesUiState } from '../domain/satNotesUi';
 import type { SatInteractionController } from './useSatInteractionController';
@@ -32,7 +35,15 @@ import {
   scrollSatAnnotationIntoView,
 } from '../ui/annotations/satAnnotationDom';
 import type { SatSelectionActions } from '../ui/annotations/SatSelectionActionsPanel';
+import type { SatUnderlineChoice } from '../ui/annotations/SatUnderlineStyleControl';
 import type { SatAnnotationView } from '../ui/annotations/SatAnnotationViewContext';
+
+/** The same span, matched the way the domain matches it (anchors are the identity).
+ *  Used to find the underline drawn over a highlight's words.
+ */
+function sameSatAnchor(a: SatTextAnchor, b: SatTextAnchor): boolean {
+  return a.nodeId === b.nodeId && a.startOffset === b.startOffset && a.endOffset === b.endOffset && a.exact === b.exact;
+}
 
 export interface SatAnnotationSurfaceOptions {
   annotations?: SatQuestionAnnotations | undefined;
@@ -109,6 +120,12 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   /** Mark whose edit controls are open (presentation state, not exam truth). */
   const [editingMarkId, setEditingMarkId] = useState<string | null>(null);
   const [undoEntry, setUndoEntry] = useState<SatAnnotationUndoEntry | null>(null);
+  /**
+   * The line the next underline will be drawn in (presentation state, like the
+   * current ink): the student's last choice, so the U in the toolbar already
+   * shows what pressing it will do.
+   */
+  const [currentUnderlineStyle, setCurrentUnderlineStyle] = useState<SatUnderlineStyle>(defaultSatUnderlineStyle);
   const [announcement, setAnnouncement] = useState('');
   const [hintVisible, setHintVisible] = useState(false);
 
@@ -158,9 +175,13 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   );
 
   const underlineSelection = useCallback(
-    (anchor: SatTextAnchor) => {
+    (anchor: SatTextAnchor, style: SatUnderlineStyle) => {
       if (!annotations || !writable) return;
-      const result = applySatUnderlineRange(annotations, anchor);
+      // The style is remembered the way the ink is: the next underline the
+      // student draws gets the line they chose last, and the U in the toolbar
+      // redraws itself to show it.
+      setCurrentUnderlineStyle(style);
+      const result = applySatUnderlineRange(annotations, anchor, style);
       if (result.annotations !== annotations) write(result.annotations);
       setAnnouncement(SAT_COPY.annotations.underlinedAnnouncement);
       interaction.selectionToolsDismissed();
@@ -187,25 +208,18 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   const recolourMark = useCallback(
     (annotation: SatTextAnnotation, color: SatHighlightColor) => {
       if (!annotations || !writable) return;
-      const next = setSatAnnotationColor(annotations, annotation.id, color);
+      // On a highlighted span this re-inks the mark. On an underline it adds the
+      // highlight the student just asked for over the same words: the colours are
+      // the other half of one decision about these words, so pressing one on an
+      // underlined span must paint it rather than do nothing at all.
+      const next = annotation.kind === 'highlight'
+        ? setSatAnnotationColor(annotations, annotation.id, color)
+        : applySatHighlightRange(annotations, annotation.anchor, color).annotations;
       if (next !== annotations) write(next);
       education.rememberColor(color);
       setAnnouncement(satHighlightedAnnouncement(satHighlightInk(color).label.toLowerCase()));
     },
     [annotations, education, writable, write],
-  );
-
-  const underlineMark = useCallback(
-    (annotation: SatTextAnnotation) => {
-      if (!annotations || !writable || annotation.kind !== 'highlight') return;
-      // Underline on a highlight ADDS an underline over the same span rather than
-      // converting it: converting would silently destroy the ink the student
-      // already chose.
-      const result = applySatUnderlineRange(annotations, annotation.anchor);
-      if (result.annotations !== annotations) write(result.annotations);
-      setAnnouncement(SAT_COPY.annotations.underlinedAnnouncement);
-    },
-    [annotations, writable, write],
   );
 
   /**
@@ -323,6 +337,44 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       setAnnouncement(annotation.kind === 'highlight' ? SAT_COPY.annotations.removedHighlight : SAT_COPY.annotations.removedUnderline);
     },
     [annotations, dismissMarkControls, interaction, noteEditorId, writable, write],
+  );
+
+  /**
+   * Draw this mark's underline, restyle it, or take it off.
+   *
+   * One entry point for all three because they are one control in the UI: the U
+   * applies a line, the menu behind its chevron picks which line, and `none`
+   * removes it. Underline on a highlight ADDS an underline over the same span
+   * rather than converting it: converting would silently destroy the ink the
+   * student already chose. Removal goes through `removeMark`, so it carries the
+   * same undo promise as the trash control does.
+   */
+  const underlineMark = useCallback(
+    (annotation: SatTextAnnotation, choice: SatUnderlineChoice) => {
+      if (!annotations || !writable) return;
+      if (choice === 'none') {
+        // The mark that IS the underline: this one, or the underline drawn over
+        // this highlight's words.
+        const target =
+          annotation.kind === 'underline'
+            ? annotation
+            : annotations.annotations.find(
+                (item) => item.kind === 'underline' && sameSatAnchor(item.anchor, annotation.anchor),
+              ) ?? null;
+        if (target) removeMark(target);
+        return;
+      }
+      setCurrentUnderlineStyle(choice);
+      if (annotation.kind === 'underline') {
+        const next = setSatAnnotationUnderlineStyle(annotations, annotation.id, choice);
+        if (next !== annotations) write(next);
+        return;
+      }
+      const result = applySatUnderlineRange(annotations, annotation.anchor, choice);
+      if (result.annotations !== annotations) write(result.annotations);
+      setAnnouncement(SAT_COPY.annotations.underlinedAnnouncement);
+    },
+    [annotations, removeMark, writable, write],
   );
 
   const undoLastRemoval = useCallback(() => {
@@ -537,9 +589,12 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       isExistingAnchor: (anchor: SatTextAnchor) => findExactMark(anchor) !== null,
       selectionToolsVisible: selectionToolsAnchor !== null,
       onSelectionToolsDismissed: () => interaction.selectionToolsDismissed(),
+      // Escape's second job, after a disclosed menu has had the key: the bar has
+      // no X to press, so the keyboard's way out of a mark's editor is this.
+      onMarkEditorDismissed: closeMarkEditor,
       onSelectionCleared: () => interaction.selectionCleared(),
     }),
-    [annotationModeEnabled, editingMarkId, findExactMark, interaction, noteEditorId, selectionToolsAnchor, writable],
+    [annotationModeEnabled, closeMarkEditor, editingMarkId, findExactMark, interaction, noteEditorId, selectionToolsAnchor, writable],
   );
 
   return {
@@ -554,6 +609,8 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     annotationView,
     /** Ink the toolbar offers as current (the student's last choice). */
     currentColor: education.state.lastHighlightColor,
+    /** Underline style the toolbar offers as current (the student's last choice). */
+    currentUnderlineStyle,
     editingMark,
     closeMarkEditor,
     closeSelectionTools,

@@ -357,6 +357,28 @@ describe('SAT annotation rendering', () => {
     expect(container.querySelector('[data-sat-highlight-color="pink"]')).toHaveTextContent('grows');
   });
 
+  it('draws each underline in the style its own mark stores, solid by default', () => {
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [
+      createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 0, endOffset: 1, exact: 'A' }),
+      createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree', style: 'dashed' }),
+      createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 7, endOffset: 12, exact: 'grows', style: 'dotted' }),
+    ];
+    const { container } = renderContent({ annotations });
+    const marked = (text: string) =>
+      [...container.querySelectorAll<HTMLElement>('[data-sat-underline="true"]')]
+        .find((element) => element.textContent === text)!;
+
+    expect(marked('A').style.textDecorationStyle).toBe('solid');
+    expect(marked('tree').style.textDecorationStyle).toBe('dashed');
+    expect(marked('grows').style.textDecorationStyle).toBe('dotted');
+    // The style is a repaint of ONE line, not a second decoration: the line,
+    // its token and its weight are the same on all three.
+    expect(marked('tree').style.textDecorationLine).toBe('underline');
+    expect(marked('tree').style.textDecorationColor).toBe('var(--sat-underline, currentColor)');
+    expect(marked('tree').style.textDecorationThickness).toBe('2px');
+  });
+
   it('keeps multi-line marks as inline accessible controls that open their editor', () => {
     const text = 'A long supporting-material sentence that wraps across several lines.';
     const annotations = emptySatAnnotations();

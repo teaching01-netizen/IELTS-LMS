@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { StructuredContent } from '../../../exam-authoring/api/assessmentContracts';
 import { StructuredContentRenderer, type StaticStructuredImageEnlargeApi } from '../../../exam-rendering/api/structuredContent';
 import type { StructuredTextRenderer } from '../../../exam-rendering/api/structuredContent';
-import { applySatAnnotationsToText, resolveSatTextAnchor, type SatQuestionAnnotations, type SatTextAnnotation, type SatTextSegment } from '../../domain/satResponses';
+import { applySatAnnotationsToText, resolveSatTextAnchor, satAnnotationUnderlineStyle, type SatQuestionAnnotations, type SatTextAnnotation, type SatTextSegment } from '../../domain/satResponses';
 import { createSatAnnotationNodeId, type SatAnnotationRegion } from '../../domain/satAnnotationIdentity';
 import { SAT_COPY } from '../../domain/satCopy';
 import { satHighlightInk, satHighlightMarkStyle } from './satAnnotationPalette';
@@ -194,7 +194,10 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, sel
             // Chromium and WebKit.
             style={{
               ...(segment.highlight ? satHighlightMarkStyle(segment.highlight) : {}),
-              ...(segment.underline ? { textDecorationLine: 'underline', textDecorationColor: 'var(--sat-underline, currentColor)', textDecorationThickness: '2px', textUnderlineOffset: '3px' } : {}),
+              // The style rides on the same span as the line: the browser draws
+              // solid, dashed and dotted itself, so a restyled underline is a
+              // repaint of the student's own words rather than a second mark.
+              ...(segment.underline ? { textDecorationLine: 'underline', textDecorationStyle: match ? satAnnotationUnderlineStyle(match) : 'solid', textDecorationColor: 'var(--sat-underline, currentColor)', textDecorationThickness: '2px', textUnderlineOffset: '3px' } : {}),
               // Cloned per wrapped line for the same geometry in Chromium and
               // WebKit. Keyed on the mark being PAINTED, never on it being
               // interactive: arming the mode must not restyle anyone's ink.
@@ -266,9 +269,14 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, sel
         portalContainer={viewportOverlayRoot}
         loupe={{ sourceRef: root }}
         onEscape={() => {
-          if (view.selectionToolsVisible !== true) return false;
-          view.onSelectionToolsDismissed?.();
-          return true;
+          if (view.selectionToolsVisible === true) {
+            view.onSelectionToolsDismissed?.();
+            return true;
+          }
+          // The bar carries no dismissal control (the reference has none), so
+          // Escape is the keyboard student's way out of a mark's editor too —
+          // and it leaves the mark alone, exactly as the press outside does.
+          return view.onMarkEditorDismissed?.() === true;
         }}
         onSelectionCleared={view.onSelectionCleared}
       />
