@@ -455,6 +455,17 @@ export async function openStudentSessionWithRetry(
   throw new Error(`Student session failed to load for ${targetUrl} after retries.`);
 }
 
+/** Select the question pane when compact student delivery separates passage and answers. */
+export async function showQuestionsIfTabbed(page: Page) {
+  const questionsTab = page.getByRole("button", { name: "Questions", exact: true });
+  if (
+    (await questionsTab.isVisible().catch(() => false)) &&
+    (await questionsTab.getAttribute("aria-pressed")) !== "true"
+  ) {
+    await questionsTab.click();
+  }
+}
+
 export interface StudentTouchTargetFailure {
   selector: string;
   name: string;

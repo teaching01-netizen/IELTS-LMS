@@ -4,6 +4,7 @@ import {
   completePreCheckIfPresent,
   deterministicWcode,
   openStudentSessionWithRetry,
+  showQuestionsIfTabbed,
   startLobbyIfPresent,
   studentCheckIn,
   stubScreenDetails,
@@ -11,13 +12,6 @@ import {
 
 function visibleAnswerField(page: Page) {
   return page.getByLabel("Answer for question 1").filter({ visible: true }).first();
-}
-
-async function showQuestionsIfTabbed(page: Page) {
-  const questionsTab = page.getByRole("button", { name: "Questions", exact: true });
-  if (await questionsTab.isVisible().catch(() => false)) {
-    await questionsTab.click();
-  }
 }
 
 async function enterRuntimeBackedExam(page: Page, scheduleId: string, wcode: string) {

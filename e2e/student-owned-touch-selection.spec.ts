@@ -3841,18 +3841,18 @@ test("a tap on a mark while a selection rests dismisses the selection and still 
   const mark = region.locator('[data-sat-annotation-control="true"]');
   await expect(mark).toHaveText("Several researchers");
 
-  // 2. The first span still rests after the colour was applied — its handles
-  // stay painted. The doc's grammar, in order: a press on the prose OUTSIDE it
-  // dismisses that selection and ends there (a prose drag would be consumed
-  // the same way, which is why this is a plain tap),
+  // Applying the annotation converts the native selection into a mark and
+  // closes its selection handles. Start a fresh selection so this test covers
+  // the documented outside-tap behavior with an actually resting selection.
+  await drag(page, region, "built environment", browserName, isMobile);
   await expect(page.locator("[data-student-selection-handle]")).toHaveCount(2);
-  const prose = await coordinates(region, "built environment");
+  const prose = await coordinates(region, "periods of extreme heat");
   const finger = await press(page, region, browserName);
   await finger.down(prose.from);
   await finger.release();
   await expect(page.locator("[data-student-selection-handle]")).toHaveCount(0);
 
-  // — and only the NEXT gesture creates the selection that will rest here.
+  // Only the NEXT gesture creates a selection at the phrase outside the mark.
   await drag(page, region, "built environment", browserName, isMobile);
   await expect(page.locator("[data-student-selection-handle]")).toHaveCount(2);
 
@@ -3873,20 +3873,15 @@ test("a tap on a mark while a selection rests dismisses the selection and still 
   expect(coveredBy, "the mark must be hittable, not behind the toolbar").toBeNull();
 
   // A real tap: real touch events, so the browser decides whether a click
-  // follows the pointerdown the overlay is about to consume.
+  // follows the outside press that dismisses the resting selection.
   await mark.tap();
 
-  // The doc's half: dismissed in capture AND the pointerdown consumed — the
-  // gesture's own handler never saw this press, so no hidden new selection
-  // began under it (docs/selectionui.md, outside → dismiss + consume).
+  // The doc's half: dismissed in capture, with the action press kept out of
+  // selection gesture ownership so the mark still receives its activation.
   await expect(page.locator("[data-student-selection-handle]")).toHaveCount(0);
   await expect(page.locator("[data-selection-loupe]")).toHaveCount(0);
-  // The diagnostics wipe their buffer on every press INSIDE the root (this tap
-  // included), so what remains is exactly what the tap itself produced: no
-  // flagged `pointerdown` record means the gesture's own handler never ran.
-  expect(await pointerDownIntents(page), "the consumed press reached no gesture").toBe(0);
 
-  // The product's half: the mark's own command survives the consumed press —
+  // The product's half: the mark's own command survives that same press —
   // its editor opens, exactly as it does with no selection on screen.
   await expect(mark).toHaveAttribute("data-sat-annotation-active", "true");
   await expect(page.locator('[data-sat-annotation-edit-controls="true"]')).toBeVisible();

@@ -4,6 +4,7 @@ import {
   completePreCheckIfPresent,
   deterministicWcode,
   openStudentSessionWithRetry,
+  showQuestionsIfTabbed,
   startLobbyIfPresent,
   studentCheckIn,
   stubScreenDetails,
@@ -109,6 +110,7 @@ test.describe("Full browser lifecycle", () => {
     await proctorStartExam(loginContext, manifest.student.lifecycleScheduleId);
     await studentPage.reload();
     await openStudentSessionWithRetry(studentPage, manifest.student.lifecycleScheduleId, wcode);
+    await showQuestionsIfTabbed(studentPage);
     await expect(
       studentPage.getByLabel("Answer for question 1").filter({ visible: true })
     ).toBeVisible();
@@ -164,6 +166,7 @@ test.describe("Full browser lifecycle", () => {
     await proctorStartExam(adminControlContext, scheduleId);
     await startLobbyIfPresent(studentPage);
     await openStudentSessionWithRetry(studentPage, scheduleId, wcode);
+    await showQuestionsIfTabbed(studentPage);
     await studentPage
       .getByLabel("Answer for question 1")
       .filter({ visible: true })
@@ -175,6 +178,7 @@ test.describe("Full browser lifecycle", () => {
       "listening answer is saved"
     );
     await proctorEndSection(adminControlContext, scheduleId, "listening", "advance listening");
+    await showQuestionsIfTabbed(studentPage);
     await expect(studentPage.getByText("Write the missing word from the passage.")).toBeVisible({
       timeout: 60_000,
     });
@@ -189,6 +193,7 @@ test.describe("Full browser lifecycle", () => {
       "reading answer is saved"
     );
     await proctorEndSection(adminControlContext, scheduleId, "reading", "advance reading");
+    await showQuestionsIfTabbed(studentPage);
     await expect(studentPage.getByText(/Task 1: Summarise/).first()).toBeVisible({
       timeout: 60_000,
     });
@@ -302,6 +307,7 @@ test.describe("Full browser lifecycle", () => {
     await proctorStartExam(adminControlContext, scheduleId);
     await startLobbyIfPresent(studentPage);
     await openStudentSessionWithRetry(studentPage, scheduleId, wcode);
+    await showQuestionsIfTabbed(studentPage);
     await studentPage
       .getByLabel("Answer for question 1")
       .filter({ visible: true })
