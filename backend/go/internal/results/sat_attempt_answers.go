@@ -80,7 +80,7 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 
 	rows, err := tx.QueryContext(ctx, `SELECT s.section_key, m.module_key, eq.display_order,
 		eq.id, eq.question_id, ar.response, ar.marked_for_review, ar.updated_at,
-		CAST(v.response AS CHAR), v.updated_at
+		CAST(v.response AS CHAR), v.question_id IS NOT NULL, v.updated_at
 		FROM assessment_module_attempts ma
 		JOIN assessment_modules m ON m.id = ma.module_id
 		JOIN assessment_sections s ON s.id = m.section_id
@@ -103,39 +103,26 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 		var question SATAttemptAnswer
 		var examQuestionID string
 		var legacy, canonical sql.NullString
-		var marked sql.NullBool
+		var legacyMarked, v2Present sql.NullBool
 		var legacySaved, v2Saved sql.NullTime
 		if err := rows.Scan(&question.SectionKey, &question.ModuleKey, &question.DisplayOrder,
-			&examQuestionID, &question.QuestionID, &legacy, &marked, &legacySaved,
-			&canonical, &v2Saved); err != nil {
+			&examQuestionID, &question.QuestionID, &legacy, &legacyMarked, &legacySaved,
+			&canonical, &v2Present, &v2Saved); err != nil {
 			return nil, err
 		}
 		if _, duplicate := seen[examQuestionID]; duplicate {
 			continue
 		}
 		seen[examQuestionID] = struct{}{}
-		question.MarkedForReview = marked.Valid && marked.Bool
-		var savedAt sql.NullTime
-		if canonical.Valid {
-			var payload struct {
-				Answer          json.RawMessage `json:"answer"`
-				MarkedForReview bool            `json:"markedForReview"`
-			}
-			if err := json.Unmarshal([]byte(canonical.String), &payload); err != nil {
+		resolved, err := resolveSATResponse(v2Present.Valid && v2Present.Bool, canonical, v2Saved, legacy, legacyMarked, legacySaved)
+		if err != nil {
+			return nil, err
+		}
+		question.MarkedForReview = resolved.MarkedForReview
+		if resolved.HasAnswer {
+			if err := json.Unmarshal(resolved.Answer, &question.Response); err != nil {
 				return nil, err
 			}
-			question.MarkedForReview = payload.MarkedForReview
-			if len(payload.Answer) > 0 && string(payload.Answer) != "null" {
-				if err := json.Unmarshal(payload.Answer, &question.Response); err != nil {
-					return nil, err
-				}
-			}
-			savedAt = v2Saved
-		} else if legacy.Valid && strings.TrimSpace(legacy.String) != "" && legacy.String != "null" {
-			if err := json.Unmarshal([]byte(legacy.String), &question.Response); err != nil {
-				return nil, err
-			}
-			savedAt = legacySaved
 		}
 		switch answer := question.Response.(type) {
 		case nil:
@@ -146,10 +133,7 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 		default:
 			out.SavedAnswerCount++
 		}
-		if savedAt.Valid && (out.LastSavedAt == nil || savedAt.Time.After(*out.LastSavedAt)) {
-			t := savedAt.Time
-			out.LastSavedAt = &t
-		}
+		out.LastSavedAt = latestSavedAt(out.LastSavedAt, resolved.SavedAt)
 		out.Questions = append(out.Questions, question)
 	}
 	if err := rows.Err(); err != nil {

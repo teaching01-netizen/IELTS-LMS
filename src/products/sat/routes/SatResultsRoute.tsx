@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, BarChart3 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BarChart3, Download } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { SatPageError } from '../ui/SatPage';
+import { exportSatRawdataVerbal } from '../../../features/results/api/satRawdataExport';
 import { useSatAttemptsQuery, useSatResultsQuery } from '../../../features/results/api/satResultsQueries';
 import { filterSatAttempts, groupSatAccessGroups, type SatExamGroup } from '../../../features/results/domain/satResultsGroups';
 import { SatContainer, SatEmptyState, SatList, SatListSkeleton, SatPageHeader, SatPrimaryButton, SatResultCount, SatSearchField, SatStatStrip, SatStatusPill } from '../ui/SatPage';
@@ -18,6 +19,8 @@ export function SatResultsRoute() {
   const [examSearch, setExamSearch] = useState('');
   const [accessSearch, setAccessSearch] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
   const query = useSatResultsQuery();
   const attemptsQuery = useSatAttemptsQuery(examIdParam, accessIdParam, offset, studentSearch.trim(), 'all');
   const backButtonRef = useRef<HTMLButtonElement>(null);
@@ -36,6 +39,19 @@ export function SatResultsRoute() {
   const page = attemptsQuery.data;
   const visibleAttempts = useMemo(() => filterSatAttempts(page?.items ?? [], { needle: studentSearch, scoreFilter: 'all' }), [page, studentSearch]);
   const accessPath = `/sat/results?exam=${encodeURIComponent(examIdParam)}&access=${encodeURIComponent(accessIdParam)}`;
+
+  const handleExport = async () => {
+    if (!examIdParam || !accessIdParam) return;
+    setExporting(true);
+    setExportError('');
+    try {
+      await exportSatRawdataVerbal(examIdParam, accessIdParam);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'The RAWDATA CSV export failed.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => { setOffset(0); }, [examIdParam, accessIdParam, studentSearch]);
   useEffect(() => {
@@ -88,7 +104,8 @@ export function SatResultsRoute() {
     return (
       <SatContainer>
         {backButton(selectedGroup.examTitle, `/sat/results?exam=${encodeURIComponent(examIdParam)}`)}
-        <SatPageHeader eyebrow="Student Access" title={selectedAccess.accessLinkName} description={`${selectedGroup.examTitle} · Version ${selectedAccess.versionNumber}`} />
+        <SatPageHeader eyebrow="Student Access" title={selectedAccess.accessLinkName} description={`${selectedGroup.examTitle} · Version ${selectedAccess.versionNumber}`} actions={<SatPrimaryButton onClick={() => void handleExport()} icon={<Download size={14} aria-hidden="true" />} pending={exporting}>{exporting ? 'Exporting…' : 'Export RAWDATA CSV'}</SatPrimaryButton>} />
+        {exportError ? <div role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">{exportError}</div> : null}
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2"><p className="text-[11px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{selectedAccess.scoredCount + selectedAccess.pendingCount} completed · {selectedAccess.attemptCount} students</p><SatStatusPill tone={rollup === 'ready' ? 'ready' : 'invalidated'}>{rollup === 'invalidated' ? 'Not scored' : 'Completed'}</SatStatusPill></div>
         <SatStatStrip label="Results summary" stats={stats} />
         <SatSearchField id="sat-results-student-search" label="Search students" value={studentSearch} onChange={setStudentSearch} placeholder="Search name, ID, cohort" widthClassName="mt-5 w-full sm:max-w-[420px]" />
