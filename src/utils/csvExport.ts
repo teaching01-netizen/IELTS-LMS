@@ -26,13 +26,12 @@ export function downloadCsv(
   headers: string[],
   rows: Array<Array<unknown>>,
 ): void {
-  downloadCsvRows(filename, [headers, ...rows]);
-}
-
-export function downloadCsvRows(filename: string, rows: Array<Array<unknown>>): void {
   // \uFEFF BOM makes Excel detect UTF-8; \r\n line endings match RFC 4180 and
   // Excel's expectations on Windows.
-  const csvContent = rows.map((row) => row.map(escapeCsvCell).join(',')).join('\r\n');
+  const csvContent = [
+    headers.map(escapeCsvCell).join(','),
+    ...rows.map((row) => row.map(escapeCsvCell).join(',')),
+  ].join('\r\n');
 
   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);

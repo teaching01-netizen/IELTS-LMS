@@ -3765,52 +3765,6 @@ paths:
                 properties:
                   results: { type: array, items: { $ref: "#/components/schemas/ResultSummary" } }
         "401": { $ref: "#/components/responses/Error" }
-  /results/sat/export/rawdata-verbal:
-    get:
-      tags: [sat, results]
-      summary: Export SAT Reading and Writing RAWDATA rows for one Student Access schedule
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - name: examId
-          in: query
-          required: true
-          schema: { type: string }
-        - name: scheduleId
-          in: query
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: Two compatibility headers and all attempt/module rows
-          headers:
-            X-Request-Id: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [schemaVersion, headerRows, rows]
-                properties:
-                  schemaVersion: { type: integer, example: 1 }
-                  headerRows:
-                    type: array
-                    minItems: 2
-                    maxItems: 2
-                    items:
-                      type: array
-                      minItems: 50
-                      maxItems: 50
-                      items: { type: string }
-                  rows:
-                    type: array
-                    items:
-                      type: array
-                      minItems: 50
-                      maxItems: 50
-                      items: { type: string }
-        "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
-        "403": { $ref: "#/components/responses/Error" }
-        "429": { $ref: "#/components/responses/RateLimited" }
   /results/sat/{resultId}:
     get:
       tags: [sat, results]

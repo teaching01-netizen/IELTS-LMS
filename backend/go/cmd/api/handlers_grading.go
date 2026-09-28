@@ -1090,33 +1090,6 @@ func resultsSATAttemptsHandler(app *App) http.HandlerFunc {
 	}
 }
 
-func resultsSATRawdataVerbalExportHandler(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
-			return
-		}
-		if !enforceExportRateLimit(app, w, r) {
-			return
-		}
-		if app.Results == nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Results service not configured."))
-			return
-		}
-		examID := strings.TrimSpace(r.URL.Query().Get("examId"))
-		scheduleID := strings.TrimSpace(r.URL.Query().Get("scheduleId"))
-		if examID == "" || scheduleID == "" {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "examId and scheduleId are required."))
-			return
-		}
-		out, err := app.Results.ExportSATRawdataVerbal(r.Context(), actorOf(r.Context()), examID, scheduleID)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
-	}
-}
-
 // resultsACTScienceHandler lists sealed ACT science reports, optional ?scheduleId=.
 // Errors keep the stable envelope via httpx.WriteError: unknown (non-apperrors)
 // failures render 500 INTERNAL without leaking internals, and DB outages
