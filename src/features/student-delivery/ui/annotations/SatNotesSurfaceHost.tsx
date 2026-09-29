@@ -11,7 +11,8 @@ import type { SatTextAnnotation } from '../../domain/satResponses';
 import { SatNotesColumn } from './SatNotesColumn';
 import { SatNotesRail } from './SatNotesRail';
 import { SatNotesSurfaceContext, type SatNotesSurface } from './SatNotesSurfaceContext';
-import { useSatMediaQuery } from '../useSatMediaQuery';
+import { satNotesSeatGutter } from '../../domain/satReadingLayout';
+import { useSatReadingLayout } from '../reading/SatReadingLayoutContext';
 import { SatAnnotationPassageHint } from '../education/SatAnnotationEducationCues';
 
 export interface SatNotesSurfaceHostProps {
@@ -62,18 +63,29 @@ export interface SatNotesSurfaceHostProps {
  * The handle a hidden column leaves behind is decided here for the same reason:
  * "should the pane's ability to open be visible right now" is one question, and
  * it has one answer (`satNotesRailVisible`).
+ *
+ * What it does NOT do any more is measure the room itself. It used to read two
+ * viewport media queries (767px, 1024px) — its own responsive opinion, sitting
+ * beside the workspace's. Placement now comes from the one measurement of the
+ * actual workspace, taken by the shared reading layout provider, so "the notes
+ * pane has room" and "the passage has room" cannot disagree.
  */
 export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
-  const compact = useSatMediaQuery('(max-width: 767px)');
-  const threeColumn = useSatMediaQuery('(min-width: 1024px)');
+  const readingLayout = useSatReadingLayout();
+  const { presentation, threeColumnNotesFit, sideNotesFit } = readingLayout.decision;
   const open = satNotesColumnOpen(props.state);
-  const placement: SatNotesPlacement = satNotesPlacement({ open, compact, threeColumn });
+  const placement: SatNotesPlacement = satNotesPlacement({
+    open,
+    readingPresentation: presentation,
+    threeColumnFits: threeColumnNotesFit,
+    sideColumnFits: sideNotesFit,
+  });
   // The handle waits for a note: until there is something to come back to, the
   // middle of the exam holds nothing notes-shaped at all, and the labeled top-bar
   // entry stays the only way in.
   const railVisible = satNotesRailVisible({
     open,
-    compact,
+    readingPresentation: presentation,
     available: props.notesAvailable,
     hasNotes: satNotesCount(props.annotations, props.questionNote) > 0,
   });
@@ -88,6 +100,10 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
             key={props.questionKey}
             state={props.state}
             placement={placement}
+            // The seat's gutter, from the same answer the workspace builds the
+            // grid track from: the pane has to stand clear of the divider handle
+            // exactly where that handle exists.
+            leadingGutterPx={satNotesSeatGutter(presentation)}
             annotations={props.annotations}
             questionNote={props.questionNote}
             hasHighlights={props.hasHighlights}
@@ -107,7 +123,11 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
       rail: railVisible ? <SatNotesRail onOpen={props.onOpenNotes} /> : null,
       passageHint: props.hintVisible ? <SatAnnotationPassageHint /> : null,
     }),
-    [placement, props.annotations, props.disabled, props.hasHighlights, props.hintVisible, props.onAddQuestionNote, props.onChangeNote, props.onClose, props.onFlush, props.onOpenNotes, props.onRemoveNote, props.onSaveQuestionNote, props.onSelectNote, props.onSettleNoteEditor, props.questionKey, props.questionNote, props.state, railVisible],
+    // `presentation` is load bearing and not reachable from `placement`: dropping
+    // from split to single keeps the column placed while the divider handle — and
+    // so the gutter in front of it — goes away. A memo that skipped it would hold
+    // the pane at a clearance nothing is standing in any more.
+    [placement, presentation, props.annotations, props.disabled, props.hasHighlights, props.hintVisible, props.onAddQuestionNote, props.onChangeNote, props.onClose, props.onFlush, props.onOpenNotes, props.onRemoveNote, props.onSaveQuestionNote, props.onSelectNote, props.onSettleNoteEditor, props.questionKey, props.questionNote, props.state, railVisible],
   );
 
   return <SatNotesSurfaceContext.Provider value={surface}>{props.children}</SatNotesSurfaceContext.Provider>;

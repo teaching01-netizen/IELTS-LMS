@@ -122,7 +122,7 @@ var expectedAnnotated = []string{
 	"POST /submissions/{submissionID}/reopen-review",
 	"GET /results/{resultID}/events",
 	"GET /dashboard", "GET /analytics", "POST /export",
-	"GET /sat", "GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
+	"GET /sat", "GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers", "GET /sat/export/rawdata", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
 	"GET /{resultID}/events", "GET /{resultID}",
 	"POST /uploads", "POST /import-url", "PUT /uploads/{assetID}", "POST /uploads/{assetID}/complete",
 	"GET /assets/{assetID}", "GET /{assetID}/content", "GET /{assetID}",
@@ -265,7 +265,7 @@ func TestAssessmentAccessDeleteIsWriterOnly(t *testing.T) {
 }
 
 func TestSATResultsWorkspaceReadAdmitsObserverAndAssignedStaff(t *testing.T) {
-	for _, key := range []string{"GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers"} {
+	for _, key := range []string{"GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers", "GET /sat/export/rawdata"} {
 		policy, ok := LookupKey(Table, key)
 		if !ok {
 			t.Fatalf("%s must have an explicit route policy", key)
@@ -280,6 +280,15 @@ func TestSATResultsWorkspaceReadAdmitsObserverAndAssignedStaff(t *testing.T) {
 				t.Errorf("%s must deny %s", key, role)
 			}
 		}
+	}
+
+	// TC-SEC-002: the deny is enforced at the middleware as a 403, not a silent
+	// pass-through for an unrelated staff role.
+	if code := serve(t, Table, "GET /sat/export/rawdata", "GET", "/results/sat/export/rawdata", RoleBuilder, true); code != http.StatusForbidden {
+		t.Errorf("builder on the RAWDATA export = %d, want 403", code)
+	}
+	if code := serve(t, Table, "GET /sat/export/rawdata", "GET", "/results/sat/export/rawdata", RoleStudent, true); code != http.StatusForbidden {
+		t.Errorf("student on the RAWDATA export = %d, want 403", code)
 	}
 }
 

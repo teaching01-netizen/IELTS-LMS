@@ -140,7 +140,21 @@ func (s terminalizationCompletionSealer) SealCompletion(ctx context.Context, q t
 	if s.service == nil {
 		return nil, false, apperrors.New(apperrors.CodeInternal, "SAT terminalization is unavailable.")
 	}
-	projection, err := json.Marshal(map[string]any{"submissionId": req.SubmissionID, "providerKey": "sat"})
+	var protocolVersion int
+	if err := q.QueryRowContext(ctx, "SELECT COALESCE(protocol_version, 1) FROM student_attempts WHERE id = ?", attempt.ID).Scan(&protocolVersion); err != nil {
+		return nil, false, err
+	}
+	projectionFields := map[string]any{"submissionId": req.SubmissionID, "providerKey": "sat"}
+	var digest string
+	if protocolVersion == 2 {
+		var err error
+		digest, err = attempts.ComputeDigestInTx(ctx, q, attempt.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		projectionFields["digest"] = digest
+	}
+	projection, err := json.Marshal(projectionFields)
 	if err != nil {
 		return nil, false, err
 	}
@@ -152,6 +166,11 @@ func (s terminalizationCompletionSealer) SealCompletion(ctx context.Context, q t
 	})
 	if err != nil {
 		return nil, false, err
+	}
+	if seal.Created && protocolVersion == 2 {
+		if _, err := q.ExecContext(ctx, "UPDATE student_attempts SET final_response_digest = ? WHERE id = ?", digest, attempt.ID); err != nil {
+			return nil, false, err
+		}
 	}
 	result, err := loadResult(ctx, q, "attempt_id = ?", attempt.ID, true, true)
 	if err != nil {
@@ -180,6 +199,18 @@ func (s *Service) ReconcileAdapter() func(ctx context.Context, scheduleID, attem
 			ActorID:      attemptID,
 		})
 		return err
+	}
+}
+
+// ReconcileInTxAdapter seals SAT on the delivery reconciler's transaction, so
+// final-module state and the terminal receipt commit or roll back together.
+func (s *Service) ReconcileInTxAdapter() func(context.Context, tx.Tx, string, string) (bool, error) {
+	return func(ctx context.Context, q tx.Tx, scheduleID, attemptID string) (bool, error) {
+		_, created, err := s.completeInTx(ctx, q, CompleteRequest{
+			ScheduleID: scheduleID, AttemptID: attemptID, SubmissionID: attemptID,
+			ActorKind: "student", ActorID: attemptID,
+		})
+		return created, err
 	}
 }
 
@@ -278,25 +309,7 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 	var out *AssessmentResult
 	var outcome string
 	err := s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
-		now, err := dbTime(ctx, t)
-		if err != nil {
-			return err
-		}
-		attempt, err := lockAttempt(ctx, t, req.AttemptID, req.ScheduleID)
-		if err != nil {
-			return err
-		}
-		if err := rejectIfTerminated(ctx, t, attempt); err != nil {
-			return err
-		}
-		if err := attempts.EnsureSATModuleTopologyTx(ctx, t, attempt.ID); err != nil {
-			outcome = telemetry.FinalizeRejected
-			return err
-		}
-		if s.completionSealer == nil {
-			return apperrors.New(apperrors.CodeInternal, "SAT terminalization is unavailable.")
-		}
-		res, created, err := s.completionSealer.SealCompletion(ctx, t, attempt, req, now)
+		res, created, err := s.completeInTx(ctx, t, req)
 		if err != nil {
 			outcome = telemetry.FinalizeRejected
 			return err
@@ -316,6 +329,27 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 		return nil, err
 	}
 	return out, nil
+}
+
+func (s *Service) completeInTx(ctx context.Context, t tx.Tx, req CompleteRequest) (*AssessmentResult, bool, error) {
+	now, err := dbTime(ctx, t)
+	if err != nil {
+		return nil, false, err
+	}
+	attempt, err := lockAttempt(ctx, t, req.AttemptID, req.ScheduleID)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := rejectIfTerminated(ctx, t, attempt); err != nil {
+		return nil, false, err
+	}
+	if err := attempts.EnsureSATModuleTopologyTx(ctx, t, attempt.ID); err != nil {
+		return nil, false, err
+	}
+	if s.completionSealer == nil {
+		return nil, false, apperrors.New(apperrors.CodeInternal, "SAT terminalization is unavailable.")
+	}
+	return s.completionSealer.SealCompletion(ctx, t, attempt, req, now)
 }
 
 // ReconcileProvisional is a compatibility repair for old SAT attempts left in
@@ -370,12 +404,14 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 	}
 
 	var repaired int64
+	var firstErr error
 	for _, c := range cands {
+		if err := ctx.Err(); err != nil {
+			return repaired, err
+		}
 		done, err := s.repairOne(ctx, c.attemptID, c.scheduleID)
 		if err != nil {
-			// A raced terminal state or a concurrently completed attempt is
-			// benign; anything else aborts loudly via the returned error
-			// only when it is not a writability conflict.
+			// A raced terminal state or a concurrently completed attempt is benign.
 			if appErr, ok := apperrors.As(err); ok {
 				switch appErr.Code {
 				case apperrors.CodeAttemptNotWritable, apperrors.CodeAttemptProctorBlocked,
@@ -383,13 +419,18 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 					continue
 				}
 			}
-			return repaired, err
+			slog.ErrorContext(ctx, "SAT provisional repair failed; continuing batch",
+				slog.String("attempt_id", c.attemptID), slog.String("schedule_id", c.scheduleID), slog.Any("error", err))
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		if done {
 			repaired++
 		}
 	}
-	return repaired, nil
+	return repaired, firstErr
 }
 
 func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (bool, error) {

@@ -37,7 +37,7 @@ function harness(options: {
       enabled: true,
       zoomDecided: false,
       storedZoom: null,
-      compact: false,
+      automaticFitSuppressed: false,
       blocked: false,
       onDecide,
       ...options.input,
@@ -141,9 +141,9 @@ describe("useSatExamFitZoom", () => {
     expect(onDecide).not.toHaveBeenCalled();
   });
 
-  it("never shrinks a compact layout, a blocked exam, or an unrequested fit", () => {
+  it("never shrinks a layout the reading reflow owns, a blocked exam, or an unrequested fit", () => {
     for (const input of [
-      { compact: true },
+      { automaticFitSuppressed: true },
       { blocked: true },
       { enabled: false },
     ] as const) {

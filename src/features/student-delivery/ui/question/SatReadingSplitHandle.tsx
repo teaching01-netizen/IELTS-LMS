@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
+import { useEffect, useRef, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import {
   SAT_READING_SPLIT_MAX,
   SAT_READING_SPLIT_MIN,
@@ -11,6 +11,18 @@ export interface SatReadingSplitHandleProps {
   ratio: number;
   leftPaneLabel?: string;
   onChange: (ratio: number) => void;
+  /**
+   * Reports a live pointer gesture, from pointer-down to release.
+   *
+   * The ratio participates in readability, so a drag can walk the panes across
+   * the width the shared layout policy considers readable. Without this the
+   * resolver would be free to answer mid-gesture and unmount the element holding
+   * pointer capture — the divider vanishing under the student's finger. The
+   * shared provider latches the presentation for exactly as long as this says
+   * `true`; discrete keyboard changes are not latched, because they are single
+   * decisions the layout may answer immediately.
+   */
+  onInteractionChange?: ((active: boolean) => void) | undefined;
 }
 
 export function SatReadingSplitHandle({
@@ -18,8 +30,18 @@ export function SatReadingSplitHandle({
   ratio,
   leftPaneLabel = "Passage",
   onChange,
+  onInteractionChange,
 }: SatReadingSplitHandleProps) {
   const draggingPointer = useRef<number | null>(null);
+  // Read through a ref so the unmount release never depends on the callback's
+  // identity: it must report against whatever handler is current.
+  const onInteractionChangeRef = useRef(onInteractionChange);
+  onInteractionChangeRef.current = onInteractionChange;
+  const reportInteraction = (active: boolean) => onInteractionChangeRef.current?.(active);
+
+  // Unmounting mid-drag (question change, module end) must release the latch,
+  // or the next workspace would inherit a presentation nobody is dragging.
+  useEffect(() => () => onInteractionChangeRef.current?.(false), []);
 
   const updateFromClientX = (clientX: number) => {
     const bounds = containerRef.current?.getBoundingClientRect();
@@ -29,6 +51,7 @@ export function SatReadingSplitHandle({
 
   const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
     draggingPointer.current = event.pointerId;
+    reportInteraction(true);
     event.currentTarget.setPointerCapture(event.pointerId);
     updateFromClientX(event.clientX);
   };
@@ -41,9 +64,18 @@ export function SatReadingSplitHandle({
   const handlePointerEnd = (event: PointerEvent<HTMLButtonElement>) => {
     if (draggingPointer.current !== event.pointerId) return;
     draggingPointer.current = null;
+    reportInteraction(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+  };
+
+  // Capture can be lost without a pointerup reaching this element (the browser
+  // cancels the gesture, or the capture is taken away); the latch still ends.
+  const handleLostPointerCapture = () => {
+    if (draggingPointer.current === null) return;
+    draggingPointer.current = null;
+    reportInteraction(false);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -80,8 +112,12 @@ export function SatReadingSplitHandle({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
       onPointerCancel={handlePointerEnd}
+      onLostPointerCapture={handleLostPointerCapture}
       onKeyDown={handleKeyDown}
-      className="group relative z-10 hidden h-full w-11 justify-self-center touch-none cursor-col-resize select-none items-stretch border-0 bg-transparent p-0 focus-visible:outline-none md:flex"
+      // No viewport breakpoint hides this control: it exists exactly when the
+      // shared layout says the panes are side by side, and a media query would
+      // be the second opinion that decision does not have.
+      className="group relative z-10 flex h-full w-11 justify-self-center touch-none cursor-col-resize select-none items-stretch border-0 bg-transparent p-0 focus-visible:outline-none"
     >
       <span
         aria-hidden="true"

@@ -3,6 +3,7 @@ package sat
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"testing"
 
@@ -99,6 +100,35 @@ func TestReconcileProvisionalBatchUsesNoScoreRepair(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("repaired %d attempts, want 1", count)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReconcileProvisionalBatchContinuesAfterOneFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := satService(db)
+	failed := errors.New("one provisional attempt is broken")
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT a.id, a.schedule_id")).
+		WithArgs("submitted", "locked", int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id"}).
+			AddRow("att-bad", "sched-1").AddRow("att-1", "sched-1"))
+	satBegin(mock)
+	satDBTime(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
+		WithArgs("att-bad", "sched-1").WillReturnError(failed)
+	mock.ExpectRollback()
+	expectRepairPrefix(mock)
+	mock.ExpectCommit()
+
+	count, err := svc.ReconcileProvisionalBatch(context.Background(), 10)
+	if count != 1 || !errors.Is(err, failed) {
+		t.Fatalf("repair should complete the healthy attempt and report the failure; count=%d err=%v", count, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -57,7 +57,7 @@ func deliveryReconcileDrainedStranded(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('submitted', 'locked')")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(2))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_results WHERE attempt_id = ?")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_terminalizations WHERE attempt_id = ?")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
 	mock.ExpectCommit()

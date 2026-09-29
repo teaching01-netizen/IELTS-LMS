@@ -85,7 +85,7 @@ func (s *Service) StartModuleOfferAck(ctx context.Context, bearerScheduleID, bea
 		if bindingErr != nil {
 			return nil, bindingErr
 		}
-		ack.SelectedSection, err = s.selectedModuleSection(ctx, bearerScheduleID, versionID, moduleID)
+		ack.SelectedSection, err = s.selectedModuleSection(ctx, bearerAttemptID, bearerScheduleID, versionID, moduleID)
 	}
 	return ack, err
 }
@@ -818,6 +818,11 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 		return nil, err
 	}
 	moduleAttempts = filterModuleAttemptsForSections(moduleAttempts, sections)
+	// SEV-1 content fence: the candidate receives only the adaptive branch the
+	// server opened for them. This payload backs StartModule / EnterModule, so
+	// without it the entry response would still hand a candidate the branch they
+	// were not routed into.
+	sections = deliverySectionsForAttempt(sections, moduleAttempts)
 	responses, err := s.loadResponses(ctx, attemptID)
 	if err != nil {
 		return nil, err

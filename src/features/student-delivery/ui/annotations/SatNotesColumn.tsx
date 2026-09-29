@@ -47,6 +47,17 @@ export interface SatNotesColumnProps {
   onSettleNoteEditor: () => void;
   onFlush?: (() => void) | undefined;
   onClose: () => void;
+  /**
+   * Extra inset in front of the pane's own chrome, in pixels, for the seat the
+   * shared reading layout gave it — `SAT_NOTES_SEAT_GUTTER_PX` where a draggable
+   * divider runs along this pane's leading edge.
+   *
+   * The pane's chrome already insets every control it holds, so the seat owes the
+   * divider only the remainder of its reach; the sum is what keeps a note's field
+   * out from under the grab zone. Zero everywhere else (a stacked row, a
+   * single-pane question), because nothing draggable stands beside the pane there.
+   */
+  leadingGutterPx?: number | undefined;
 }
 
 /**
@@ -143,6 +154,11 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
       data-sat-notes-column="true"
       aria-label={SAT_COPY.notes.title}
       className="flex h-full min-h-0 min-w-0 flex-col border-l border-[var(--sat-divider)] bg-[var(--sat-surface)] outline-none"
+      // The seat's gutter, applied to the whole pane rather than to any one
+      // control: the surface and its hairline still start at the seam (the pane
+      // looks exactly as it did), and nothing interactive is put in the strip the
+      // divider's 44px target reaches across.
+      style={props.leadingGutterPx ? { paddingLeft: props.leadingGutterPx } : undefined}
     >
       {/* Title first, count as the metadata it is, dismissal last and quiet: the
           three used to sit on one line at equal weight, which made "1 note" look

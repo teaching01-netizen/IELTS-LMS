@@ -261,7 +261,7 @@ export function useSatResponsePersistence({
         }
         setBlockedDrafts(blockedIds);
         const display = mapEngineStatus(status, blockedIds.length);
-        if (error?.includes('DEADLINE_EXPIRED')) {
+        if (error?.includes('DEADLINE_EXPIRED') || error?.includes('TIMEOUT_RECOVERY_CLOSED')) {
           setFailure('A final answer was not confirmed before the save window ended. It remains on this device. Please contact your proctor.');
           setFailureKind('expired');
         } else if (status === 'durability_fault') {

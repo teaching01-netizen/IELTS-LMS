@@ -132,7 +132,7 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	if cfg.VersionCacheEnabled {
 		deliverySvc.SetVersionCache(deps.Versions)
 	}
-	s.Delivery = deliverySvc.SetCompleter(Completer(pool, s))
+	s.Delivery = deliverySvc.SetCompleter(Completer(pool, s)).SetSATTerminalizerInTx(s.SAT.ReconcileInTxAdapter())
 	// Authoring Preview reuses the SAME delivery service + revision-keyed
 	// cache (single-build, no bare per-request service). Cache off
 	// (VERSION_CACHE unset or nil Versions) leaves a nil cache: Preview

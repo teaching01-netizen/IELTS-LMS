@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatResultDetailRoute } from '../SatResultDetailRoute';
@@ -9,6 +9,10 @@ const useSatResultsQueryMock = vi.hoisted(() => vi.fn());
 const useSatAttemptsQueryMock = vi.hoisted(() => vi.fn());
 const useSatResultQueryMock = vi.hoisted(() => vi.fn());
 const useSatAttemptAnswersQueryMock = vi.hoisted(() => vi.fn());
+const downloadSatRawdataCsvMock = vi.hoisted(() => vi.fn());
+vi.mock('../../../../features/results/api/satRawdataExport', () => ({
+  downloadSatRawdataCsv: downloadSatRawdataCsvMock,
+}));
 vi.mock('../../../../features/results/api/satResultsQueries', () => ({
   useSatResultsQuery: useSatResultsQueryMock,
   useSatAttemptsQuery: useSatAttemptsQueryMock,
@@ -47,6 +51,7 @@ function renderResultsRoute(initialEntry = '/sat/results') {
 describe('SAT Results hierarchy', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    downloadSatRawdataCsvMock.mockResolvedValue(4);
     useSatResultsQueryMock.mockReturnValue({ data: accessGroups, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
     useSatAttemptsQueryMock.mockImplementation((_examId: string, scheduleId: string, offset: number) => ({
       data: scheduleId === 'schedule-1' ? (offset === 0 ? pageOne : pageTwo) : { items: [], total: 0, offset, limit: 50, hasMore: false },
@@ -69,6 +74,44 @@ describe('SAT Results hierarchy', () => {
     expect(screen.getByRole('button', { name: /Saturday 9 AM/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Previous Student Access/ })).toBeInTheDocument();
     expect(screen.queryByText('John Smith')).not.toBeInTheDocument();
+  });
+
+  it('exports the RAWDATA CSV for the selected Student Access group', async () => {
+    renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
+    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA CSV/ }));
+    await waitFor(() => expect(downloadSatRawdataCsvMock).toHaveBeenCalledWith('sat-1', 'schedule-1', 'Saturday 9 AM'));
+  });
+
+  it('surfaces a failed RAWDATA export and offers the button again', async () => {
+    downloadSatRawdataCsvMock.mockRejectedValue(new Error('Export failed: 500'));
+    renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
+    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA CSV/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Export failed: 500');
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export RAWDATA CSV/ })).toBeEnabled());
+  });
+
+  it('blocks a second RAWDATA export while the first is still running', async () => {
+    let finishExport: (rows: number) => void = () => undefined;
+    downloadSatRawdataCsvMock.mockImplementation(
+      () => new Promise<number>((resolve) => { finishExport = resolve; }),
+    );
+    renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
+
+    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA CSV/ }));
+
+    const pendingButton = await screen.findByRole('button', { name: /Exporting/ });
+    expect(pendingButton).toBeDisabled();
+    fireEvent.click(pendingButton);
+    expect(downloadSatRawdataCsvMock).toHaveBeenCalledTimes(1);
+
+    finishExport(4);
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export RAWDATA CSV/ })).toBeEnabled());
+  });
+
+  it('only offers the RAWDATA export inside a Student Access group', () => {
+    renderResultsRoute('/sat/results?exam=sat-1');
+    expect(screen.queryByRole('button', { name: /Export RAWDATA CSV/ })).not.toBeInTheDocument();
   });
 
   it('keeps attempts inside their schedule and opens the existing detail by result id', () => {
@@ -116,6 +159,17 @@ describe('SAT Results hierarchy', () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
     fireEvent.click(screen.getByRole('button', { name: /Student X/ }));
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results/attempts/attempt-2');
+  });
+
+  it('links a directly opened pending result to its saved answers', () => {
+    useSatResultQueryMock.mockReturnValueOnce({
+      data: { summary: { id: 'pending-result', attemptId: 'attempt-2', outcomeStatus: 'pending', releaseStatus: 'pending', totalScore: null, scheduleId: 'schedule-1', examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S2', studentName: 'Student X', cohortName: 'Morning', submittedAt: '2026-09-01T08:00:00Z' }, scorePayload: {}, sections: [], questions: [] },
+      isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
+    });
+    renderResultsRoute('/sat/results/pending-result');
+    fireEvent.click(screen.getByRole('link', { name: 'View saved answers' }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results/attempts/attempt-2');
+    expect(screen.getByRole('heading', { name: 'Question-level responses (2)' })).toBeInTheDocument();
   });
 
   it('distinguishes no saved answer from a failed answer read', () => {

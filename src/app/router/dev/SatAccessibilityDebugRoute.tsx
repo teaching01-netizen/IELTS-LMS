@@ -100,6 +100,33 @@ const oversizedStimulus = paragraph(
 const oversizedReadingQuestion: DeliveredQuestion = { ...readingQuestion, stimulus: oversizedStimulus };
 
 /**
+ * A prompt no pane can hold, in the same v1 paragraph shape as the passage ones.
+ *
+ * The passage fixtures above lengthen the STIMULUS, so the question pane still
+ * fits whatever viewport they are opened on — and "did the question pane keep its
+ * reading position across a reflow?" is a question about the pane that has
+ * somewhere to have been. This is that fixture for the other pane; the text is a
+ * real prompt's shape rather than lorem, because it is read by the same renderer
+ * either way.
+ */
+const LONG_PROMPT_TEXT =
+  "Which choice best states the main idea of the text, and which detail from the passage most directly supports that idea? Consider how the researchers' conclusion about canopy density relates to the measurements they took across four summers of extreme heat.";
+
+const longPrompt = paragraph(
+  "prompt",
+  Array.from({ length: 5 }, () => LONG_PROMPT_TEXT).join(" ")
+);
+
+/**
+ * A question and a passage that BOTH overflow their panes (`?long=3`).
+ *
+ * The fixture the reflow cases need: a layout whose panes have a reading position
+ * to lose, in both of them, so the assertion is about the panes rather than about
+ * whichever pane happened to have enough text.
+ */
+const longPanesQuestion: DeliveredQuestion = { ...oversizedReadingQuestion, prompt: longPrompt };
+
+/**
  * A stimulus whose CHARACTERS are the point (`?clusters=1`).
  *
  * A handle is the precision instrument, and precision is measured in characters a
@@ -116,6 +143,29 @@ const clusterStimulus = paragraph(
 );
 
 const clusterReadingQuestion: DeliveredQuestion = { ...readingQuestion, stimulus: clusterStimulus };
+
+/**
+ * A 108-character token with no break opportunity in it (`?unbreakable=1`).
+ *
+ * Deliberately not a URL: line breaking follows UAX #14, which offers a break
+ * after every `/` — so a long address wraps on its own and would prove nothing
+ * about the rule. This is the case the rule actually exists for, one run of
+ * characters wider than the pane that has to break where it stands rather than
+ * widen the pane or the exam around it. `coefficient` is repeated only to be
+ * long enough to exceed a 200%-text pane at 1024px, which is where the wrap is
+ * load-bearing; the sentence around it stays legible prose.
+ */
+const UNBREAKABLE_TOKEN = "coolingcoefficient".repeat(6);
+
+const unbreakableStimulus = paragraph(
+  "stimulus",
+  `Researchers filed the raw estimate under ${UNBREAKABLE_TOKEN} and asked other groups to re-check it.`
+);
+
+const unbreakableReadingQuestion: DeliveredQuestion = {
+  ...readingQuestion,
+  stimulus: unbreakableStimulus,
+};
 
 const mathQuestion: DeliveredQuestion = {
   ...readingQuestion,
@@ -177,8 +227,12 @@ export function SatAccessibilityDebugRoute() {
   const longPassage = params.get("long") === "1";
   /** A passage longer than any pane, for the cases that need overflow itself. */
   const oversizedPassage = params.get("long") === "2";
+  /** Both panes longer than the room they have, for the reflow cases. */
+  const longPanes = params.get("long") === "3";
   /** A stimulus made of multi-code-unit characters, for the handle-precision cases. */
   const clusters = params.get("clusters") === "1";
+  /** A stimulus holding one token no pane can fit, for the wrapping cases. */
+  const unbreakable = params.get("unbreakable") === "1";
   /**
    * Auto-fit, as real delivery runs it (once, when the exam opens).
    *
@@ -225,11 +279,15 @@ export function SatAccessibilityDebugRoute() {
       ? sprQuestion
       : clusters
         ? clusterReadingQuestion
-        : oversizedPassage
-          ? oversizedReadingQuestion
-          : longPassage
-            ? longReadingQuestion
-            : readingQuestion;
+        : unbreakable
+          ? unbreakableReadingQuestion
+          : longPanes
+            ? longPanesQuestion
+            : oversizedPassage
+              ? oversizedReadingQuestion
+              : longPassage
+                ? longReadingQuestion
+                : readingQuestion;
   const navigationItems = [0, 1, 2].map((index) => ({
     id: `debug-${index}`,
     index,

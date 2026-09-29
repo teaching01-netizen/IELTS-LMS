@@ -21,6 +21,32 @@ import (
 
 const satRaceTokenSecret = "integration-sat-submit-secret-32bytes"
 
+func expectedSATDigest(t *testing.T, db *sql.DB, attemptID string) string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(),
+		"SELECT question_id, response_hash FROM attempt_responses_v2 WHERE attempt_id = ?", attemptID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	hashes := map[string]string{}
+	for rows.Next() {
+		var questionID, hash string
+		if err := rows.Scan(&questionID, &hash); err != nil {
+			t.Fatal(err)
+		}
+		hashes[questionID] = hash
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := attempts.FinalDigest(hashes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}
+
 // seedTerminalModules makes a real full SAT topology while retaining the
 // responses seedStudent already wrote to the V2 durability tables.
 func (f *adaptiveExam) seedTerminalModules(attemptID string) {
@@ -110,6 +136,14 @@ func TestSATCompletionDoesNotRequireScoringPolicy(t *testing.T) {
 	}
 	if answerRevision != 0 || responseRevision != 7 || responseCount != 3 || len(answers) == 0 || string(answers) == "{}" || len(finalSubmission) == 0 {
 		t.Fatalf("terminalization must retain durable answers and revisions; answer_revision=%d response_revision=%d response_rows=%d answers=%s", answerRevision, responseRevision, responseCount, answers)
+	}
+	var finalDigest sql.NullString
+	if err := f.db.QueryRowContext(context.Background(),
+		"SELECT final_response_digest FROM student_attempts WHERE id = ?", attemptID).Scan(&finalDigest); err != nil {
+		t.Fatal(err)
+	}
+	if !finalDigest.Valid || finalDigest.String != expectedSATDigest(t, f.db, attemptID) {
+		t.Fatalf("completion must persist the V2 response digest, got %q", finalDigest.String)
 	}
 }
 
@@ -262,7 +296,7 @@ func TestConcurrentSATClientSubmitAndTimeoutReconcileSealOnce(t *testing.T) {
 	reconcileDone := make(chan error, 1)
 	reconcileReady := make(chan struct{})
 	go func() {
-		reconciler := delivery.NewService(f.db, tx.NewRunner(f.db)).SetCompleter(sat.NewService(f.db, tx.NewRunner(f.db), clock.System{}, nil).ReconcileAdapter())
+		reconciler := delivery.NewService(f.db, tx.NewRunner(f.db)).SetSATTerminalizerInTx(sat.NewService(f.db, tx.NewRunner(f.db), clock.System{}, nil).ReconcileInTxAdapter())
 		close(reconcileReady)
 		_, reconcileErr := reconciler.ReconcileAttemptTimeout(ctx, f.scheduleID, attemptID, time.Now().UTC())
 		reconcileDone <- reconcileErr

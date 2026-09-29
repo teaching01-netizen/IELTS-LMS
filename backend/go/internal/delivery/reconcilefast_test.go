@@ -22,7 +22,7 @@ func TestReconcileFastPathSkipsTx(t *testing.T) {
 	mock.ExpectQuery("FROM assessment_module_attempts WHERE attempt_id").
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"open_modules", "terminal_modules"}).AddRow(0, 2))
-	mock.ExpectQuery("FROM assessment_results WHERE attempt_id").
+	mock.ExpectQuery("FROM attempt_terminalizations WHERE attempt_id").
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"COUNT"}).AddRow(1))
 	// NO tx expectations: any BEGIN/FOR UPDATE fails the test.

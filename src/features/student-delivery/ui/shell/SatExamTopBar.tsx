@@ -3,6 +3,7 @@ import { BookOpen, Calculator, ChevronDown, EllipsisVertical, Highlighter } from
 import { SAT_COPY, satNotesToolLabel } from "../../domain/satCopy";
 import type { StructuredContent } from "../../../exam-authoring/api/assessmentContracts";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
+import type { SatDisplayPresentation } from "../../domain/satReadingLayout";
 import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
 import { SatDirectionsPopover } from "./SatDirectionsPopover";
 import { SatReadingPopover } from "./SatReadingPopover";
@@ -45,6 +46,11 @@ export interface SatExamTopBarProps {
   moreOpen?: boolean | undefined;
   readingOpen: boolean;
   readingPreferences: SatReadingPreferences;
+  /**
+   * How Display may present itself, from the shared reading layout decision.
+   * Passed through to the panel; every other popover is unaffected.
+   */
+  displayPresentation?: SatDisplayPresentation | undefined;
   blocked: boolean;
   onToggleDirections: () => void;
   onCloseDirections: () => void;
@@ -257,6 +263,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
               onChange={props.onReadingPreferencesChange}
               onClose={props.onCloseReading}
               onFitToScreen={props.onFitToScreen}
+              presentation={props.displayPresentation ?? 'anchored'}
             />
           </div>
           {props.calculatorAvailable ? (

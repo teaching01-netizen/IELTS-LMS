@@ -4,6 +4,23 @@ import (
 	"encoding/json"
 )
 
+// V2ResponseState reports why one V2 canonical payload did or did not yield
+// scorer input. Read-side callers that publish a per-question verdict need to
+// tell "the candidate left this blank" apart from "a payload exists but its
+// content cannot be decoded": only V2ResponseNone licenses a "no answer"
+// verdict, while V2ResponseMalformed means the row exists and says nothing
+// trustworthy about what the candidate did.
+type V2ResponseState int
+
+const (
+	// V2ResponseNone: no payload, or one whose answer field is absent/null.
+	V2ResponseNone V2ResponseState = iota
+	// V2ResponseMalformed: a payload exists but cannot be decoded.
+	V2ResponseMalformed
+	// V2ResponseAnswered: a usable answer was extracted.
+	V2ResponseAnswered
+)
+
 // V2ResponseToScorerInput converts one V2 canonical response payload into the
 // JSON-string scorer input used by delivery.responseIsCorrect /
 // SATResponseCorrect. The canonical payload is the full envelope
@@ -13,34 +30,48 @@ import (
 // carries no usable answer (null/missing/unmarshalable) so callers apply the
 // standard incorrect/null-verdict rules instead of inventing semantics.
 //
+// Callers that must distinguish "no answer" from "unreadable payload" use
+// ClassifyV2Response, which this function delegates to; the scorer input and
+// the boolean are unchanged.
+//
 // Parity anchor: attempts.payloadAnswer extracts p.Answer and mergeProjection
 // persists CanonicalJSON(payloadAnswer(...)); answerblobs.Project extracts
 // the same "answer" field. This function is the read-side mirror of that
 // write-side extraction.
 func V2ResponseToScorerInput(canonical string) (string, bool) {
+	input, state := ClassifyV2Response(canonical)
+	return input, state == V2ResponseAnswered
+}
+
+// ClassifyV2Response is V2ResponseToScorerInput plus the reason an unusable
+// payload was unusable: V2ResponseNone when the candidate answered nothing
+// (absent/null answer), V2ResponseMalformed when the payload itself cannot be
+// decoded. The extraction rules are exactly those of the scorer-input helper,
+// so the two never disagree about which payloads carry an answer.
+func ClassifyV2Response(canonical string) (string, V2ResponseState) {
 	if canonical == "" {
-		return "", false
+		return "", V2ResponseNone
 	}
 	var envelope struct {
 		Answer json.RawMessage `json:"answer"`
 	}
 	if err := json.Unmarshal([]byte(canonical), &envelope); err != nil {
-		return "", false
+		return "", V2ResponseMalformed
 	}
 	if len(envelope.Answer) == 0 || string(envelope.Answer) == "null" {
-		return "", false
+		return "", V2ResponseNone
 	}
 	// Re-encode through RawMessage to normalize whitespace without changing
 	// the value: the scorer unmarshals it as a JSON string.
 	var probe any
 	if err := json.Unmarshal(envelope.Answer, &probe); err != nil {
-		return "", false
+		return "", V2ResponseMalformed
 	}
 	normalized, err := json.Marshal(probe)
 	if err != nil {
-		return "", false
+		return "", V2ResponseMalformed
 	}
-	return string(normalized), true
+	return string(normalized), V2ResponseAnswered
 }
 
 // V2MarkedForReview extracts markedForReview from one V2 canonical payload.

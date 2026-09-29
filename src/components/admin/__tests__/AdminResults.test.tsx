@@ -140,6 +140,9 @@ describe("AdminResults", () => {
     const row = screen.getByText("Cleo SAT").closest("tr");
     expect(row).toHaveTextContent("Completed · view answers");
     expect(row).not.toHaveTextContent("1380");
+    expect(screen.getByRole("columnheader", { name: "Result" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Score" })).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).getByRole("link", { name: "View answers" })).toHaveAttribute("href", "/sat/results/attempts/attempt-sat");
 
     fireEvent.click(screen.getByRole("button", { name: "View Report" }));
     const dialog = screen.getByRole("dialog");
@@ -149,6 +152,7 @@ describe("AdminResults", () => {
       "/sat/results/attempts/attempt-sat",
     );
     expect(dialog).not.toHaveTextContent("1380");
+    expect(within(dialog).queryByText("Release")).not.toBeInTheDocument();
   });
 
   it("renders provider-backed IELTS and ACT results and opens the real report", () => {

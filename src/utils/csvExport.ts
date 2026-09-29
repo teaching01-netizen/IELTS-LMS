@@ -21,17 +21,10 @@ export function escapeCsvCell(value: unknown): string {
   return `"${guarded.replace(/"/g, '""')}"`;
 }
 
-export function downloadCsv(
-  filename: string,
-  headers: string[],
-  rows: Array<Array<unknown>>,
-): void {
+function emitCsv(filename: string, rows: Array<Array<unknown>>): void {
   // \uFEFF BOM makes Excel detect UTF-8; \r\n line endings match RFC 4180 and
   // Excel's expectations on Windows.
-  const csvContent = [
-    headers.map(escapeCsvCell).join(','),
-    ...rows.map((row) => row.map(escapeCsvCell).join(',')),
-  ].join('\r\n');
+  const csvContent = rows.map((row) => row.map(escapeCsvCell).join(',')).join('\r\n');
 
   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -51,4 +44,26 @@ export function downloadCsv(
   // Revoke asynchronously (0ms): revoking synchronously can abort the download
   // in Chrome before the navigation captures the blob URL.
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+export function downloadCsv(
+  filename: string,
+  headers: string[],
+  rows: Array<Array<unknown>>,
+): void {
+  emitCsv(filename, [headers, ...rows]);
+}
+
+/**
+ * Downloads a CSV that carries more than one header row (for example the SAT
+ * RAWDATA template's column-letter row plus its named column row). Reuses the
+ * same escaping, BOM, and formula-injection guards as `downloadCsv` so there is
+ * a single CSV implementation.
+ */
+export function downloadCsvRows(
+  filename: string,
+  headerRows: Array<Array<unknown>>,
+  rows: Array<Array<unknown>>,
+): void {
+  emitCsv(filename, [...headerRows, ...rows]);
 }

@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { useSatExamController } from "../useSatExamController";
@@ -7,10 +7,13 @@ import { useSatExamController } from "../useSatExamController";
  * Reload at the exact adaptive handoff (plan rigorous test 6) + question
  * ownership (test 9) + atomic start-module commit (test 10).
  *
- * The payload carries BOTH Module 2 branches with the SAME business
- * `moduleKey` — the server routed HIGH, so only HIGH has a module attempt
- * and LOW must never be opened, rendered, or answered. The browser
- * "reloads" by mounting the controller fresh on this payload.
+ * The payload carries ONLY the assigned Module 2 branch (the server's
+ * delivered-branch fence drops the other branch's modules entirely), with the
+ * SAME business `moduleKey` as the dropped one. The server routed HIGH, so
+ * only HIGH has a module attempt and LOW must never be opened, rendered, or
+ * answered — a legacy/leaked payload that still carries LOW is covered by a
+ * separate case below. The browser "reloads" by mounting the controller fresh
+ * on this payload.
  *
  *   M1 expired -> server created AND ACTIVATED HIGH attempt (atomic) ->
  *   reload sees HIGH active
@@ -22,6 +25,7 @@ import { useSatExamController } from "../useSatExamController";
 
 const gatewayMocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
+  state: vi.fn(),
   configureSatDeliveryAttempt: vi.fn(),
   startModule: vi.fn(),
   submitModule: vi.fn(),
@@ -48,6 +52,7 @@ vi.mock("../../infrastructure/satDeliveryGateway", () => ({
   configureSatDeliveryAttempt: gatewayMocks.configureSatDeliveryAttempt,
   satDeliveryGateway: {
     bootstrap: gatewayMocks.bootstrap,
+    state: gatewayMocks.state,
     startModule: gatewayMocks.startModule,
     submitModule: gatewayMocks.submitModule,
     submitAssessment: gatewayMocks.submitAssessment,
@@ -143,7 +148,6 @@ function handoffBootstrap(): AssessmentDeliveryBootstrap {
             toolPolicy: { calculator: false, reference_sheet: false },
             questions: [question("m1-q-1")],
           } as unknown as DeliveredModule,
-          branchModule(LOW_ID, "lower_branch", ["low-q-1"]),
           branchModule(HIGH_ID, "higher_branch", ["high-q-1", "high-q-2"]),
         ],
       },
@@ -155,6 +159,35 @@ function handoffBootstrap(): AssessmentDeliveryBootstrap {
     },
     result: null,
   } as unknown as AssessmentDeliveryBootstrap;
+}
+
+/**
+ * A legacy/leaked payload: the routed handoff plus the OTHER branch's module.
+ * The client must still refuse to open LOW — server-side filtering is the
+ * primary fence, this is the client-side backstop for a cached or older build.
+ */
+function leakedBootstrap(): AssessmentDeliveryBootstrap {
+  const payload = handoffBootstrap();
+  payload.sections[0].modules.splice(1, 0, branchModule(LOW_ID, "lower_branch", ["low-q-1"]));
+  return payload;
+}
+
+/**
+ * Before the handoff: Module 1 is the only module with an attempt row, so it
+ * is the only module the fixed server delivers. Carries the SAME schedule-wide
+ * runtimeRevision as the routed payload — that is the defect: only per-row
+ * revisions can order these two.
+ */
+function preHandoffBootstrap(): AssessmentDeliveryBootstrap {
+  const payload = handoffBootstrap();
+  payload.sections = [
+    {
+      ...payload.sections[0],
+      modules: payload.sections[0].modules.filter((module) => module.id === M1_ID),
+    },
+  ];
+  payload.attempt = { ...payload.attempt, moduleAttempts: [activeAttempt(M1_ID)] };
+  return payload;
 }
 
 function expiredAttempt(moduleId: string): ModuleAttempt {
@@ -209,6 +242,31 @@ function activeAttempt(moduleId: string): ModuleAttempt {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function bootstrapSeedFor(staticVersionId: string) {
+  return {
+    scheduleId: "schedule",
+    attemptId: ATTEMPT_ID,
+    candidateId: "candidate",
+    attemptSnapshot: null,
+    runtimeSnapshot: null,
+    liveSnapshotReceivedAt: null,
+    staticVersionId,
+    attemptRevision: null,
+    runtimeRevision: null,
+    seedGeneration: 1,
+  };
+}
+
 function renderController(seen: Array<{ phase: string; moduleId: string | null }>) {
   return renderHook(() => {
     const controller = useSatExamController({
@@ -233,11 +291,16 @@ describe("useSatExamController adaptive handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     gatewayMocks.bootstrap.mockReset();
+    gatewayMocks.state.mockReset();
     gatewayMocks.startModule.mockReset();
     gatewayMocks.submitModule.mockReset();
     gatewayMocks.submitAssessment.mockReset();
     gatewayMocks.configureSatDeliveryAttempt.mockReset();
     persistenceMock.flush.mockResolvedValue(undefined);
+    // The recovery poll must not race these cases unless a test opts in: an
+    // in-flight state read that never settles keeps the poll cadence quiet
+    // without producing a rejection.
+    gatewayMocks.state.mockImplementation(() => new Promise(() => undefined));
   });
 
   it("resumes into HIGH (never LOW) after a reload at the Module 1 boundary", async () => {
@@ -288,6 +351,93 @@ describe("useSatExamController adaptive handoff", () => {
     hook.unmount();
   });
 
+  it("never opens LOW even when a leaked payload still carries it", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(leakedBootstrap());
+
+    const seen: Array<{ phase: string; moduleId: string | null }> = [];
+    const hook = renderController(seen);
+    await waitFor(() => expect(hook.result.current.pendingModule?.id).toBe(HIGH_ID));
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+
+    expect(hook.result.current.stateModule?.id).toBe(HIGH_ID);
+    const rendered = (hook.result.current.stateModule?.questions ?? []).map(
+      (q) => q.examQuestionId,
+    );
+    expect(rendered).not.toContain("low-q-1");
+    for (const frame of seen) {
+      if (frame.phase === "module" || frame.phase === "review") {
+        expect(frame.moduleId).toBe(HIGH_ID);
+      }
+    }
+    hook.unmount();
+  });
+
+  it("drops an older payload at the SAME runtimeRevision (attempt-scoped guard)", async () => {
+    const handoff = handoffBootstrap();
+    gatewayMocks.bootstrap.mockResolvedValue(preHandoffBootstrap());
+
+    const hook = renderController([]);
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(hook.result.current.state.phase === "module" && hook.result.current.state.moduleId).toBe(
+      M1_ID,
+    );
+
+    // The handoff arrives: same schedule-wide runtimeRevision, newer per-row
+    // revisions. It must be accepted.
+    expect(await hook.result.current.commitForTest(handoff)).toBe(true);
+    await waitFor(() =>
+      expect(hook.result.current.state.phase === "module" && hook.result.current.state.moduleId).toBe(
+        HIGH_ID,
+      ),
+    );
+    const afterHandoff = hook.result.current.data;
+
+    // The pre-handoff snapshot arrives late — identical runtimeRevision, so
+    // the schedule-wide guard cannot order the two.
+    const stale = preHandoffBootstrap();
+    expect(stale.timing.runtimeRevision).toBe(handoff.timing.runtimeRevision);
+    expect(await hook.result.current.commitForTest(stale)).toBe(false);
+
+    expect(hook.result.current.data).toBe(afterHandoff);
+    expect(
+      hook.result.current.state.phase === "module" && hook.result.current.state.moduleId,
+    ).toBe(HIGH_ID);
+    expect(hook.result.current.stateModule?.id).toBe(HIGH_ID);
+    hook.unmount();
+  });
+
+  it("commits a break-only advance at the same runtime revision", async () => {
+    const initial = handoffBootstrap();
+    gatewayMocks.bootstrap.mockResolvedValue(initial);
+    const hook = renderController([]);
+    await waitFor(() => expect(hook.result.current.data).toBe(initial));
+
+    const advanced = structuredClone(initial);
+    advanced.attempt.personalBreaks = [{
+      id: "break-1",
+      afterSectionId: "section-rw",
+      durationSeconds: 600,
+      state: "active",
+      startsAt: SERVER_NOW,
+      deadlineAt: new Date(Date.parse(SERVER_NOW) + 600_000).toISOString(),
+      enteredAt: SERVER_NOW,
+      pausedAt: null,
+      accumulatedPausedSeconds: 0,
+      entryGeneration: 1,
+      entryStartsAt: SERVER_NOW,
+      entryConfirmedAt: SERVER_NOW,
+      entryEnteredAt: SERVER_NOW,
+      remainingSeconds: 600,
+      revision: 2,
+    }];
+    expect(advanced.timing.runtimeRevision).toBe(initial.timing.runtimeRevision);
+    act(() => {
+      expect(hook.result.current.commitForTest(advanced)).toBe(true);
+    });
+    await waitFor(() => expect(hook.result.current.data?.attempt.personalBreaks).toEqual(advanced.attempt.personalBreaks));
+    hook.unmount();
+  });
+
   it("keeps a stale pre-handoff poll from regressing the routed module", async () => {
     const handoff = handoffBootstrap();
     gatewayMocks.bootstrap.mockResolvedValue(handoff);
@@ -321,6 +471,117 @@ describe("useSatExamController adaptive handoff", () => {
     const state = hook.result.current.state;
     expect(state.phase === "module" && state.moduleId).toBe(HIGH_ID);
     expect(hook.result.current.stateModule?.id).toBe(HIGH_ID);
+    hook.unmount();
+  });
+
+  // The guard must hold on the async path too, where the payloads arrive out of
+  // request order: a slow Module 1 bootstrap must not undo a fast handoff that
+  // landed first. Both requests share one schedule-wide runtimeRevision, so only
+  // the attempt-scoped revisions can order them.
+  it("applies two in-flight bootstraps in reverse order without regressing", async () => {
+    const older = preHandoffBootstrap();
+    const newer = handoffBootstrap();
+    const first = deferred<AssessmentDeliveryBootstrap>();
+    const second = deferred<AssessmentDeliveryBootstrap>();
+    gatewayMocks.bootstrap
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+
+    const hook = renderHook(
+      ({ staticVersionId }: { staticVersionId: string }) =>
+        useSatExamController({
+          scheduleId: "schedule",
+          attemptId: ATTEMPT_ID,
+          candidateId: "candidate",
+          attemptUpdateToken: 0,
+          liveSocketConnected: false,
+          bootstrapSeed: bootstrapSeedFor(staticVersionId),
+        }),
+      { initialProps: { staticVersionId: "version-a" } },
+    );
+
+    await waitFor(() => expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(1));
+    // A republish refires the bootstrap effect: the second request is in flight
+    // while the first is still pending.
+    hook.rerender({ staticVersionId: "version-b" });
+    await waitFor(() => expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(2));
+
+    // The NEWER payload wins the race.
+    await act(async () => {
+      second.resolve(newer);
+    });
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(hook.result.current.data).toBe(newer);
+
+    // The older request finally answers. It must be dropped: a module that is
+    // already locked cannot come back, and HIGH cannot vanish from the attempt.
+    await act(async () => {
+      first.resolve(older);
+    });
+    await waitFor(() =>
+      expect(hook.result.current.state.phase === "module" && hook.result.current.state.moduleId).toBe(
+        HIGH_ID,
+      ),
+    );
+    expect(hook.result.current.data).toBe(newer);
+    expect(hook.result.current.stateModule?.id).toBe(HIGH_ID);
+    hook.unmount();
+  });
+
+  // The state endpoint answers without the immutable question tree, so when it
+  // reveals a module attempt the retained sections do not know about (adaptive
+  // routing just seeded a branch), the client must fetch the whole tree exactly
+  // once — not per poll, and never by rendering the unknown module.
+  it("re-runs exactly one full bootstrap when the state read reports an unknown module", async () => {
+    gatewayMocks.bootstrap
+      .mockResolvedValueOnce(preHandoffBootstrap())
+      .mockResolvedValueOnce(handoffBootstrap());
+    gatewayMocks.state.mockResolvedValue(handoffBootstrap());
+
+    const seen: Array<{ phase: string; moduleId: string | null }> = [];
+    const hook = renderHook(
+      ({ token }: { token: number }) => {
+        const controller = useSatExamController({
+          scheduleId: "schedule",
+          attemptId: ATTEMPT_ID,
+          candidateId: "candidate",
+          attemptUpdateToken: token,
+          liveSocketConnected: false,
+        });
+        seen.push({
+          phase: controller.state.phase,
+          moduleId:
+            controller.state.phase === "module" || controller.state.phase === "review"
+              ? controller.state.moduleId
+              : null,
+        });
+        return controller;
+      },
+      { initialProps: { token: 0 } },
+    );
+
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(hook.result.current.state.phase === "module" && hook.result.current.state.moduleId).toBe(
+      M1_ID,
+    );
+    expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(1);
+
+    // A pull reveals the routed module attempt absent from the retained tree.
+    hook.rerender({ token: 1 });
+    await waitFor(() =>
+      expect(hook.result.current.state.phase === "module" && hook.result.current.state.moduleId).toBe(
+        HIGH_ID,
+      ),
+    );
+
+    expect(gatewayMocks.state).toHaveBeenCalled();
+    expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(2);
+    // No frame ever rendered the unknown module by identity.
+    for (const frame of seen) {
+      if (frame.phase === "module" || frame.phase === "review") {
+        expect([M1_ID, HIGH_ID]).toContain(frame.moduleId);
+      }
+    }
     hook.unmount();
   });
 });

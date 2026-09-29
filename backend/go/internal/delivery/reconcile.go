@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -17,8 +18,8 @@ import (
 // reconcile loop finalizes the last open module (Rust complete_assessment
 // with submission_id=attempt_id, actor student/attempt_id). It is a func type
 // (not an interface) so package sat can supply it as a bare method value
-// without importing delivery. Delivery calls it outside the reconcile tx so
-// scoring never nests inside the lock-order tx.
+// without importing delivery. ACT and legacy test wiring use this after the
+// reconcile transaction; production SAT uses SetSATTerminalizerInTx.
 type AssessmentCompleter func(ctx context.Context, scheduleID, attemptID string) error
 
 // reconcileCap bounds the finalize loop per Rust (0..32).
@@ -62,30 +63,27 @@ type reconcileStage struct {
 // shared runtime lock lets independent candidates finalize concurrently;
 // proctor commands first lock the attempts before changing the runtime. Missing attempt
 // or runtime commits a no-op (false); each expired module is finalized via
-// finalizeModuleTx("time_expired"); when the last open module is finalized,
-// the completer runs CompleteAssessment outside the tx.
+// finalizeModuleTx("time_expired"); when the last SAT module is finalized,
+// terminalization runs on the same transaction.
 //
-// Retry contract: the finalize tx commits before the completer runs, so a
-// completer failure must stay retryable. The loop below arms completion only
-// when this pass finalized the last open module (drained-after-work), plus a
-// drained-at-entry backstop when the SAT result is still missing — i.e. a
-// previous pass finalized everything but completion never landed. Callers
-// treat the returned CodeRecoveryFailed error as a retry signal: the tx work
-// is durable and only completion is outstanding.
+// The drained-at-entry backstop also seals attempts left by older two-phase
+// completion when terminal modules exist but no terminal receipt was written.
 func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attemptID string, asOf time.Time) (bool, error) {
 	// Plan D1 lock-light fast path: steady drained attempts (no open modules
-	// and either no terminal modules or a result already present) skip the
+	// and either no terminal modules or a receipt already present) skip the
 	// write tx entirely — two cheap committed-read probes instead of
 	// attempt+runtime FOR UPDATE locks. Any probe error fails closed to the
 	// full path (never skips work on uncertainty).
 	if skip, serr := s.reconcileSteady(ctx, attemptID); serr == nil && skip {
 		return false, nil
 	}
-	var shouldComplete bool
+	var shouldComplete, completedInTx, satCreated bool
 	changed := false
+	finalizedModules := 0
 	// B1: reconcile locks attempt + runtime rows explicitly; it never depends
 	// on a repeatable snapshot, so RC only shrinks its gap-lock footprint.
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
+		shouldComplete, completedInTx, satCreated, changed, finalizedModules = false, false, false, false, 0
 		var attemptRow, providerKey string
 		if err := t.QueryRowContext(ctx,
 			"SELECT id, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), '') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
@@ -122,8 +120,8 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		// didWork tracks whether this pass finalized at least one module.
 		// Drained-at-entry (no open rows before any finalize) is the steady
 		// state for finished attempts — not a retry signal by itself; the
-		// missing-result backstop below re-arms completion only when the
-		// SAT result row is still absent. Drained-after-work means this pass
+		// missing-receipt backstop below re-arms completion only when the
+		// terminal receipt is still absent. Drained-after-work means this pass
 		// just finalized the last open module, so completion is newly due.
 		// Mixing the two without the backstop would turn every read of a
 		// finished attempt into a spurious completion attempt and a 503.
@@ -226,7 +224,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			if err != nil {
 				return err
 			}
-			telemetry.IncCounter(telemetry.MSATTimeoutFinalize)
+			finalizedModules++
 			changed = true
 			didWork = true
 			if next == nil {
@@ -239,8 +237,8 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			// last open module and committed, but completion failed
 			// afterwards. The next sweep finds no open modules and must
 			// still retry completion — otherwise the attempt strands
-			// with locked modules and no result. Only re-arm when a
-			// terminal module exists but the SAT result row is still
+			// with locked modules and no receipt. Only re-arm when a
+			// terminal module exists but the receipt is still
 			// missing, so attempts that never had expirations (steady
 			// drained state, no terminal modules) stay a cheap no-op
 			// with exactly one extra existence probe.
@@ -251,22 +249,40 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				return err
 			}
 			if terminalModules > 0 {
-				var resultCount int
+				var terminalCount int
 				if err := t.QueryRowContext(ctx,
-					"SELECT COUNT(*) FROM assessment_results WHERE attempt_id = ?",
-					attemptID).Scan(&resultCount); err != nil {
+					"SELECT COUNT(*) FROM attempt_terminalizations WHERE attempt_id = ?",
+					attemptID).Scan(&terminalCount); err != nil {
 					return err
 				}
-				if resultCount == 0 {
+				if terminalCount == 0 {
 					shouldComplete = true
 				}
 			}
+		}
+		if shouldComplete && providerKey == "sat" && s.satTerminalizerInTx != nil {
+			created, err := s.satTerminalizerInTx(ctx, t, scheduleID, attemptID)
+			if err != nil {
+				return err
+			}
+			completedInTx = true
+			satCreated = created
 		}
 		return nil
 	}); err != nil {
 		return false, err
 	}
-	if shouldComplete && s.completer != nil {
+	for i := 0; i < finalizedModules; i++ {
+		telemetry.IncCounter(telemetry.MSATTimeoutFinalize)
+	}
+	if completedInTx {
+		outcome := telemetry.FinalizeReplayed
+		if satCreated {
+			outcome = telemetry.FinalizeCompleted
+		}
+		telemetry.IncCounter(telemetry.MSATFinalizeTotal, "outcome", outcome)
+	}
+	if shouldComplete && !completedInTx && s.completer != nil {
 		if err := s.completer(ctx, scheduleID, attemptID); err != nil {
 			telemetry.IncCounter(telemetry.MJobFailures, "job", "reconcile_complete_assessment")
 			// The finalize tx already committed: report the modules as
@@ -282,7 +298,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 
 // reconcileSteady reports whether the attempt is provably steady: zero open
 // modules (nothing can expire) AND the drained-at-entry backstop cannot fire
-// (no terminal modules, or the result row already exists). Both probes are
+// (no terminal modules, or the terminal receipt already exists). Both probes are
 // committed-read aggregates (no locks). Errors fail closed to false (full tx).
 func (s *Service) reconcileSteady(ctx context.Context, attemptID string) (bool, error) {
 	var openModules, terminalModules int
@@ -297,13 +313,13 @@ func (s *Service) reconcileSteady(ctx context.Context, attemptID string) (bool, 
 	if terminalModules == 0 {
 		return true, nil
 	}
-	var results int
+	var receipts int
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM assessment_results WHERE attempt_id = ?`,
-		attemptID).Scan(&results); err != nil {
+		`SELECT COUNT(*) FROM attempt_terminalizations WHERE attempt_id = ?`,
+		attemptID).Scan(&receipts); err != nil {
 		return false, err
 	}
-	return results > 0, nil
+	return receipts > 0, nil
 }
 
 // ReconcileTimeouts is the worker-facing bounded sweep. Request paths still
@@ -320,13 +336,27 @@ func (s *Service) ReconcileTimeouts(ctx context.Context, asOf time.Time, batchSi
 		batchSize = 250
 	}
 	// Personal deadlines can align across a whole cohort. Drain their due rows
-	// before the general repair sweep, which deliberately looks at only one
-	// maintenance batch and otherwise revisits the oldest attempts every tick.
-	personalSeen, personalChanged, err := s.reconcileExpiredPersonalModules(ctx, asOf, batchSize)
-	if err != nil || personalSeen > 0 {
+	// before the general repair sweep, which advances one bounded page per tick.
+	_, personalChanged, personalErr := s.reconcileExpiredPersonalModules(ctx, asOf, batchSize)
+	if err := ctx.Err(); err != nil {
 		return personalChanged, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	candidates, err := s.timeoutCandidates(ctx, batchSize)
+	if err != nil {
+		return personalChanged, errors.Join(personalErr, err)
+	}
+	generalChanged, generalErr := reconcileTimeoutCandidateBatch(ctx, candidates, asOf, s.ReconcileAttemptTimeout)
+	return personalChanged + generalChanged, errors.Join(personalErr, generalErr)
+}
+
+// timeoutCandidates advances a bounded sweep by attempt ID. A permanently
+// failing oldest attempt is revisited after wraparound without occupying the
+// first slot on every worker run.
+func (s *Service) timeoutCandidates(ctx context.Context, batchSize int64) ([]timeoutCandidate, error) {
+	s.timeoutCursorMu.Lock()
+	defer s.timeoutCursorMu.Unlock()
+	load := func(afterID string) ([]timeoutCandidate, error) {
+		rows, err := s.db.QueryContext(ctx, `
 		SELECT a.id, a.schedule_id
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
@@ -335,26 +365,39 @@ func (s *Service) ReconcileTimeouts(ctx context.Context, asOf time.Time, batchSi
 		  AND a.submitted_at IS NULL
 		  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
 		  AND r.status IN ('live', 'paused', 'completed', 'cancelled')
-		ORDER BY a.updated_at ASC, a.id ASC
-		LIMIT ?`, batchSize)
-	if err != nil {
-		return 0, err
-	}
-	var candidates []timeoutCandidate
-	for rows.Next() {
-		var c timeoutCandidate
-		if err := rows.Scan(&c.attemptID, &c.scheduleID); err != nil {
-			rows.Close()
-			return 0, err
+		  AND a.id > ?
+		ORDER BY a.id ASC
+		LIMIT ?`, afterID, batchSize)
+		if err != nil {
+			return nil, err
 		}
-		candidates = append(candidates, c)
+		defer rows.Close()
+		var candidates []timeoutCandidate
+		for rows.Next() {
+			var c timeoutCandidate
+			if err := rows.Scan(&c.attemptID, &c.scheduleID); err != nil {
+				return nil, err
+			}
+			candidates = append(candidates, c)
+		}
+		return candidates, rows.Err()
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return 0, err
+	candidates, err := load(s.timeoutCursorID)
+	if err != nil {
+		return nil, err
 	}
-	rows.Close()
-	return reconcileTimeoutCandidateBatch(ctx, candidates, asOf, s.ReconcileAttemptTimeout)
+	if len(candidates) == 0 && s.timeoutCursorID != "" {
+		candidates, err = load("")
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(candidates) == 0 {
+		s.timeoutCursorID = ""
+	} else {
+		s.timeoutCursorID = candidates[len(candidates)-1].attemptID
+	}
+	return candidates, nil
 }
 
 const personalTimeoutSweepLimit = 2500

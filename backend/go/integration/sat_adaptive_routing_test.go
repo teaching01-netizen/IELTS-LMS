@@ -18,6 +18,9 @@ package integration
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -359,6 +362,59 @@ func bootstrapModuleIDs(out *delivery.Bootstrap) map[string]string {
 		ids[ma.ModuleID] = ma.State
 	}
 	return ids
+}
+
+// bootstrapSectionModuleIDs lists every module the payload actually DELIVERS
+// (the sections tree), which is where question content lives.
+func bootstrapSectionModuleIDs(out *delivery.Bootstrap) []string {
+	var ids []string
+	for _, section := range out.Sections {
+		for _, module := range section.Modules {
+			ids = append(ids, module.ID)
+		}
+	}
+	return ids
+}
+
+// examQuestionIDs lists one module's delivered exam-question ids.
+func (f *adaptiveExam) examQuestionIDs(t *testing.T, moduleID string) []string {
+	t.Helper()
+	rows, err := f.db.QueryContext(context.Background(),
+		`SELECT id FROM assessment_exam_questions WHERE module_id = ? ORDER BY display_order`, moduleID)
+	if err != nil {
+		t.Fatalf("read module questions: %v", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan module questions: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read module questions: %v", err)
+	}
+	return ids
+}
+
+// setStimulusAsset points one module's first question at a rich-content image
+// asset, so media authorization can be exercised for that module.
+func (f *adaptiveExam) setStimulusAsset(t *testing.T, moduleID, assetID string) {
+	t.Helper()
+	ctx := context.Background()
+	var revisionID string
+	if err := f.db.QueryRowContext(ctx,
+		`SELECT question_revision_id FROM assessment_exam_questions WHERE module_id = ? ORDER BY display_order LIMIT 1`,
+		moduleID).Scan(&revisionID); err != nil {
+		t.Fatalf("read module question revision: %v", err)
+	}
+	stimulus := `{"version":1,"nodes":[{"type":"image","attrs":{"assetId":"` + assetID + `"}}]}`
+	if _, err := f.db.ExecContext(ctx,
+		`UPDATE assessment_question_revisions SET stimulus = ? WHERE id = ?`, stimulus, revisionID); err != nil {
+		t.Fatalf("set stimulus asset: %v", err)
+	}
 }
 
 // T2: persisted route-decision invariant (real MySQL, not sqlmock).
@@ -970,5 +1026,219 @@ func TestSATAdaptiveReconnectTorture(t *testing.T) {
 	}
 	if got := f.countDecisions(t, attemptID); got != 1 {
 		t.Fatalf("post-torture decisions = %d, want 1", got)
+	}
+}
+
+// T19 (SEV-1): the delivered payload must contain only the adaptive branch the
+// candidate was routed into. Both branches live in ONE published version tree,
+// so before the delivered-branch fence every student received the other
+// branch's stimulus, prompt and options (the answer key was already redacted).
+//
+// The assertions are made against the RAW JSON of the whole payload, so any
+// future field that re-exposes the unassigned branch fails this test even if
+// the sections tree stays clean.
+func (f *adaptiveExam) setBranchContentCanaries(t *testing.T, moduleID string) []string {
+	t.Helper()
+	canaries := []string{
+		"SAT_STIMULUS_" + moduleID,
+		"SAT_PROMPT_" + moduleID,
+		"SAT_OPTION_" + moduleID,
+	}
+	stimulus := fmt.Sprintf(`{"version":1,"nodes":[{"type":"paragraph","text":%q}]}`, canaries[0])
+	prompt := fmt.Sprintf(`{"version":1,"nodes":[{"type":"paragraph","text":%q}]}`, canaries[1])
+	answer := fmt.Sprintf(`{"kind":"single_choice","correctOptionId":"B","options":[{"id":"A","content":%q},{"id":"B","content":"ordinary option"}]}`, canaries[2])
+	result, err := f.db.ExecContext(context.Background(), `
+		UPDATE assessment_question_revisions qr
+		JOIN assessment_exam_questions eq ON eq.question_revision_id = qr.id
+		SET qr.stimulus = ?, qr.prompt = ?, qr.answer_definition = ?
+		WHERE eq.module_id = ? AND eq.display_order = 0`, stimulus, prompt, answer, moduleID)
+	if err != nil {
+		t.Fatalf("set branch content canaries: %v", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		t.Fatalf("canary update changed %d questions, want 1", changed)
+	}
+	return canaries
+}
+
+func assertCanariesAbsent(t *testing.T, body string, canaries []string) {
+	t.Helper()
+	for _, canary := range canaries {
+		if strings.Contains(body, canary) {
+			t.Fatalf("unassigned branch content leaked: %s", canary)
+		}
+	}
+}
+
+func assertCanariesPresent(t *testing.T, body string, canaries []string) {
+	t.Helper()
+	for _, canary := range canaries {
+		if !strings.Contains(body, canary) {
+			t.Fatalf("assigned branch content missing: %s", canary)
+		}
+	}
+}
+
+func TestSATAdaptiveBootstrapHidesUnassignedBranch(t *testing.T) {
+	f := newAdaptiveExam(t)
+	ctx := context.Background()
+	lowCanaries := f.setBranchContentCanaries(t, f.rw.lowID)
+	highCanaries := f.setBranchContentCanaries(t, f.rw.highID)
+
+	// Module 1 is still running: neither branch has an attempt row yet, so
+	// neither branch's content may be delivered.
+	attemptID := f.seedStudent(f.rw, 3, false)
+	preRouting, err := json.Marshal(f.bootstrap(t, attemptID))
+	if err != nil {
+		t.Fatalf("marshal pre-routing bootstrap: %v", err)
+	}
+	for label, moduleID := range map[string]string{"LOW": f.rw.lowID, "HIGH": f.rw.highID} {
+		if strings.Contains(string(preRouting), moduleID) {
+			t.Fatalf("pre-routing bootstrap must not carry the %s branch module", label)
+		}
+		for _, questionID := range f.examQuestionIDs(t, moduleID) {
+			if strings.Contains(string(preRouting), questionID) {
+				t.Fatalf("pre-routing bootstrap must not carry a %s branch question", label)
+			}
+		}
+	}
+	assertCanariesAbsent(t, string(preRouting), lowCanaries)
+	assertCanariesAbsent(t, string(preRouting), highCanaries)
+	if !strings.Contains(string(preRouting), f.rw.baseID) {
+		t.Fatal("the base module must still be delivered before routing")
+	}
+
+	// Route HIGH.
+	f.expireBase(t, attemptID, f.rw.baseID)
+	if !f.reconcile(t, attemptID) {
+		t.Fatal("expired Module 1 must be finalized by the reconciler")
+	}
+	routed, err := json.Marshal(f.bootstrap(t, attemptID))
+	if err != nil {
+		t.Fatalf("marshal routed bootstrap: %v", err)
+	}
+	body := string(routed)
+	assertCanariesPresent(t, body, highCanaries)
+	assertCanariesAbsent(t, body, lowCanaries)
+	if !strings.Contains(body, f.rw.highID) {
+		t.Fatal("the routed HIGH module must be delivered")
+	}
+	for _, questionID := range f.examQuestionIDs(t, f.rw.highID) {
+		if !strings.Contains(body, questionID) {
+			t.Fatalf("HIGH question %s missing from the routed payload", questionID)
+		}
+	}
+	if strings.Contains(body, f.rw.lowID) {
+		t.Fatal("the unassigned LOW module must never be delivered")
+	}
+	for _, questionID := range f.examQuestionIDs(t, f.rw.lowID) {
+		if strings.Contains(body, questionID) {
+			t.Fatalf("LOW question %s leaked into the bootstrap", questionID)
+		}
+	}
+	// The math section has not opened either: both of its branches stay hidden.
+	for label, moduleID := range map[string]string{"math LOW": f.math.lowID, "math HIGH": f.math.highID} {
+		if strings.Contains(body, moduleID) {
+			t.Fatalf("unopened %s module must not be delivered", label)
+		}
+	}
+	if !strings.Contains(body, f.math.baseID) {
+		t.Fatal("the unopened math base module is still listed for planning")
+	}
+
+	// Media authorization follows the same assigned-module fence: an asset that
+	// exists only in the unassigned branch is not readable by asset id.
+	f.setStimulusAsset(t, f.rw.lowID, "asset-low")
+	f.setStimulusAsset(t, f.rw.highID, "asset-high")
+	svc := f.deliverySvc()
+	allowed, err := svc.CanAttemptReadMedia(ctx, f.scheduleID, attemptID, "asset-high")
+	if err != nil {
+		t.Fatalf("read assigned branch media: %v", err)
+	}
+	if !allowed {
+		t.Fatal("an assigned branch's image must stay readable")
+	}
+	allowed, err = svc.CanAttemptReadMedia(ctx, f.scheduleID, attemptID, "asset-low")
+	if err != nil {
+		t.Fatalf("read unassigned branch media: %v", err)
+	}
+	if allowed {
+		t.Fatal("an unassigned branch's image must not be readable")
+	}
+}
+
+// T20 (SEV-1, Lower control): the same delivered-branch fence below the routing
+// threshold. Routing HIGH is the common case, so the Lower path is the one a
+// fence keyed on the wrong role or on a hard-coded branch would break — or
+// leave wide open. Every assertion is mirrored: LOW present, HIGH absent by
+// module id AND question id, and media authorization agreeing with the payload.
+func TestSATAdaptiveBootstrapHidesUnassignedBranchWhenRoutedLower(t *testing.T) {
+	f := newAdaptiveExam(t)
+	ctx := context.Background()
+	lowCanaries := f.setBranchContentCanaries(t, f.rw.lowID)
+	highCanaries := f.setBranchContentCanaries(t, f.rw.highID)
+
+	// 1 of 3 correct is below the authored threshold of 2, so the route is lower.
+	attemptID := f.seedStudent(f.rw, 1, true)
+	if !f.reconcile(t, attemptID) {
+		t.Fatal("expired Module 1 must be finalized by the reconciler")
+	}
+	decision, ok := f.routeDecision(t, attemptID, f.rw.sectionID)
+	if !ok || decision.selectedRoute != "lower" || decision.selectedModuleID != f.rw.lowID {
+		t.Fatalf("this fixture must route lower/LOW, got %+v", decision)
+	}
+
+	routed, err := json.Marshal(f.bootstrap(t, attemptID))
+	if err != nil {
+		t.Fatalf("marshal routed bootstrap: %v", err)
+	}
+	body := string(routed)
+	assertCanariesPresent(t, body, lowCanaries)
+	assertCanariesAbsent(t, body, highCanaries)
+	if !strings.Contains(body, f.rw.lowID) {
+		t.Fatal("the routed LOW module must be delivered")
+	}
+	for _, questionID := range f.examQuestionIDs(t, f.rw.lowID) {
+		if !strings.Contains(body, questionID) {
+			t.Fatalf("LOW question %s missing from the routed payload", questionID)
+		}
+	}
+	if strings.Contains(body, f.rw.highID) {
+		t.Fatal("the unassigned HIGH module must never be delivered")
+	}
+	for _, questionID := range f.examQuestionIDs(t, f.rw.highID) {
+		if strings.Contains(body, questionID) {
+			t.Fatalf("HIGH question %s leaked into the bootstrap", questionID)
+		}
+	}
+	if !strings.Contains(body, f.rw.baseID) {
+		t.Fatal("the base module must stay delivered after routing")
+	}
+
+	// The entry-state fallback must agree with the payload: the module the
+	// candidate was routed into is readable, the other branch is not.
+	if f.countModuleAttempts(t, attemptID, f.rw.highID) != 0 {
+		t.Fatal("HIGH must never gain a module attempt on a lower route")
+	}
+	if got := f.countModuleAttempts(t, attemptID, f.rw.lowID); got != 1 {
+		t.Fatalf("LOW module attempts = %d, want exactly 1", got)
+	}
+
+	f.setStimulusAsset(t, f.rw.highID, "asset-high")
+	f.setStimulusAsset(t, f.rw.lowID, "asset-low")
+	svc := f.deliverySvc()
+	allowed, err := svc.CanAttemptReadMedia(ctx, f.scheduleID, attemptID, "asset-low")
+	if err != nil {
+		t.Fatalf("read assigned branch media: %v", err)
+	}
+	if !allowed {
+		t.Fatal("the routed LOW branch's image must stay readable")
+	}
+	allowed, err = svc.CanAttemptReadMedia(ctx, f.scheduleID, attemptID, "asset-high")
+	if err != nil {
+		t.Fatalf("read unassigned branch media: %v", err)
+	}
+	if allowed {
+		t.Fatal("the unassigned HIGH branch's image must not be readable")
 	}
 }

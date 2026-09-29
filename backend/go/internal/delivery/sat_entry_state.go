@@ -187,7 +187,23 @@ func (s *Service) entryStateBound(ctx context.Context, scheduleID, bearerAttempt
 
 // selectedModuleSection supplies only the chosen immutable module when a
 // client's cold snapshot lacks it. The common entry path never calls this.
-func (s *Service) selectedModuleSection(ctx context.Context, scheduleID, versionID, moduleID string) (*DeliverySection, error) {
+//
+// The attempt must own a module attempt row for the requested module: an
+// adaptive branch the candidate was never routed into has no row, and its
+// content must not be reachable by asking for it by id. StartModule has
+// already locked that row by the time this runs, so this is defense in depth
+// rather than a new restriction on the entry path.
+func (s *Service) selectedModuleSection(ctx context.Context, attemptID, scheduleID, versionID, moduleID string) (*DeliverySection, error) {
+	var attemptedModuleID string
+	err := s.db.QueryRowContext(ctx,
+		"SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ?",
+		attemptID, moduleID).Scan(&attemptedModuleID)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.New(apperrors.CodeNotFound, "Selected module content not found.")
+	}
+	if err != nil {
+		return nil, err
+	}
 	revision, err := s.versionRevision(ctx, versionID)
 	if err != nil {
 		return nil, err

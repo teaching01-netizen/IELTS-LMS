@@ -19,7 +19,7 @@ simulates a lost Start or Enter response in the recovery modes. Give each VU a
 different bearer credential in a local JSON array:
 
 ```json
-[{"attemptId":"attempt-1","token":"bearer-token-1","expectedBranch":"higher","expectedModuleId":"module-higher-id","otherModuleId":"module-lower-id","expectedResponseCount":27}]
+[{"attemptId":"attempt-1","token":"bearer-token-1","expectedBranch":"higher","expectedModuleId":"module-higher-id","otherModuleId":"module-lower-id","otherQuestionIds":["eq-lower-1","eq-lower-2"],"expectedResponseCount":27}]
 ```
 
 Use a fresh SAT personal schedule and 2,000 pre-admitted attempts for each run.
@@ -43,6 +43,39 @@ k6 run \
 ```
 
 Set `K6_MODE` to `adaptive`, `lost-start`, or `lost-enter` for the other gates.
+In adaptive mode every Bootstrap body is also scanned for the unassigned
+branch's module id (`otherModuleId`) and for every question of that branch
+(`otherQuestionIds`, both required): the server delivers both adaptive branches
+from one immutable version tree, so a body that mentions either means the
+delivered-branch fence regressed (`sat_other_branch_leaks` and
+`sat_other_branch_question_leaks` must stay 0). The question-id scan exists
+because a body that drops the module but still carries its questions is the
+same leak.
+Adaptive mode also records expiry -> routed-branch-visible latency as
+`sat_branch_visible_ms`, thresholded at p50 < 5 s, p95 < 8 s, p99 < 10 s,
+max < 30 s. Those numbers are the proposed release bar, not an agreed one.
+
+For the synchronized timeout-capacity gate, add `-e K6_SAVE_LOOP=1`. Each
+candidate keeps answering its module while the window elapses, then waits for
+the server (the 1 s worker sweep or the candidate's own lazy reconcile) to
+close it. `sat_timeout_close_ms` is deadline -> locked; `sat_lost_saves` must
+stay 0, meaning no answer the server accepted went missing from the response
+projection after the close. `sat_route_drift` must also stay 0: the delivered
+branch must not change identity across the close, and it must stay the branch
+the credential names. `K6_SAVE_POLL_MS` (250) sets the poll cadence and
+`K6_CLOSE_WAIT_SECONDS` (120) the wait budget. Use a schedule whose personal
+module window is short enough to expire inside the run, and give every attempt
+`expectedResponseCount` seeded answers. Run it once with the worker stopped and
+once with two workers to check idempotency, and read worker tick duration plus
+MySQL lock waits alongside the k6 summary.
+
+The save-loop gate cannot check that the delivered branch matches the score of
+the saved answers: the answer key is redacted from every student payload by
+design, so no client can recompute the expected route. That parity is asserted
+server-side (`backend/go/integration`, `sat_last_second_answer_test.go`); the
+load test pins the observable half — correct and stable branch identity across
+the close, and no lost accepted answer.
+
 This is a controlled staging load test that mutates attempts. The k6 latency
 metric ends at the visibility ACK and is a protocol proxy. To gate the actual
 first answerable browser frame, run `e2e:live-sat-runner` with

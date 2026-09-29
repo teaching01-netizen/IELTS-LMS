@@ -197,7 +197,9 @@ describe("Wave B R-10/R-17 token swap is size-preserving", () => {
     "shell/SatReadingPopover.tsx",
     "annotations/SatNotesColumn.tsx",
     "transitions/SatPreStartScreen.tsx",
-    "transitions/SatEntryRecoveryScreen.tsx",
+    // `transitions/SatEntryRecoveryScreen.tsx` is gone: the recovery surface was
+    // replaced by the server-driven break/entry flow, so it holds no tokens that
+    // could be checked against this contract any more.
     "break/SatScheduledBreakScreen.tsx",
     "shell/SatQuestionNavigator.tsx",
   ];

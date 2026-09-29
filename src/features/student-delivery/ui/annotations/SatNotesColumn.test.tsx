@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatNotesColumn } from './SatNotesColumn';
 import { createSatTextAnnotation } from '../../domain/satResponses';
 import type { SatTextAnnotation } from '../../domain/satResponses';
-import { SAT_QUESTION_NOTE_EDITOR } from '../../domain/satNotesUi';
+import { SAT_NOTES_CHROME_PADDING_PX, SAT_QUESTION_NOTE_EDITOR } from '../../domain/satNotesUi';
 
 /**
  * The Notes column is where the feature's mental model is either obvious or
@@ -471,6 +471,55 @@ describe('SatNotesColumn', () => {
     // visually dominant, and nothing else layers up with it.
     expect(field.className).toContain('focus:ring-2');
     expect(container.querySelectorAll('[data-sat-note-card]')).toHaveLength(1);
+  });
+
+  it('insets the whole pane by the seat’s gutter, so no control sits under the handle', () => {
+    // The divider handle beside this pane is a 44px target on a 2px divider: 21px
+    // of it reaches across the seam, over the pane's leading edge. The seat pays
+    // for the part the pane's own chrome does not already cover.
+    const gutter = 9;
+    const { container } = renderColumn({ leadingGutterPx: gutter });
+    const pane = container.querySelector<HTMLElement>('[data-sat-notes-column]')!;
+    expect(pane.style.paddingLeft).toBe(`${gutter}px`);
+    // The surface and its hairline stay at the seam — the pane looks untouched —
+    // and the inset lands on the pane as a whole rather than on one control, so
+    // every field, button and card inside inherits the clearance.
+    expect(pane.className).toContain('border-l');
+    expect(pane.className).not.toContain('px-');
+  });
+
+  it('claims no gutter where no divider runs along its edge', () => {
+    // A stacked row, or a question with no passage, has nothing draggable beside
+    // the pane: reserving the handle's clearance there would take width from the
+    // exam for a control that is not on screen.
+    const { container } = renderColumn({ placement: 'row', leadingGutterPx: 0 });
+    const pane = container.querySelector<HTMLElement>('[data-sat-notes-column]')!;
+    expect(pane.style.paddingLeft).toBe('');
+  });
+
+  it('keeps the chrome inset the seat’s arithmetic is written against', () => {
+    // The seat owes only `reach - chrome`, so the chrome's own inset is load
+    // bearing: at `px-1` the first note field would slide back under the divider's
+    // grab zone, and nothing about the pane's looks would say so. Both halves are
+    // pinned here — the number, and the classes that have to mean it.
+    expect(SAT_NOTES_CHROME_PADDING_PX).toBe(12); // px-3 / p-3
+    const { container } = renderColumn({ annotations: [note()] });
+    const pane = container.querySelector<HTMLElement>('[data-sat-notes-column]')!;
+    // Nothing interactive lives in the inset: the pane's chrome owns it, so the
+    // controls all start at the padding edge and not before it.
+    for (const control of Array.from(
+      pane.querySelectorAll<HTMLElement>('button, textarea, input'),
+    )) {
+      expect(control.closest('[data-sat-notes-column]')).toBe(pane);
+    }
+    // And the inset is real: the chrome that holds the controls carries it.
+    const chrome = [
+      pane.querySelector('header')!,
+      pane.querySelector('.overflow-y-auto')!,
+    ];
+    for (const element of chrome) {
+      expect(element.className, element.tagName).toMatch(/(^|\s)(px-3|p-3)(\s|$)/);
+    }
   });
 
   it('puts the count under the title instead of on the dismissal’s line', () => {

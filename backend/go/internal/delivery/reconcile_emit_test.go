@@ -87,3 +87,64 @@ func TestReconcileCompleterFailureEmitsAndRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSATFinalModuleAndSealRollbackTogether(t *testing.T) {
+	reg := telemetry.NewRegistry()
+	old := telemetry.DefaultRegistry
+	telemetry.DefaultRegistry = reg
+	defer func() { telemetry.DefaultRegistry = old }()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	injected := errors.New("seal failed before commit")
+	called := false
+	svc := NewService(db, tx.NewRunner(db)).SetSATTerminalizerInTx(
+		func(_ context.Context, _ tx.Tx, scheduleID, attemptID string) (bool, error) {
+			called = true
+			if scheduleID != "sched-1" || attemptID != "att-1" {
+				t.Fatalf("wrong seal target: %s/%s", scheduleID, attemptID)
+			}
+			return false, injected
+		})
+	startedAt := time.Now().UTC().Add(-time.Hour)
+	mock.ExpectQuery("FROM assessment_module_attempts WHERE attempt_id").
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"open_modules", "terminal_modules"}).AddRow(1, 0))
+	mock.ExpectBegin()
+	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("FROM student_attempts WHERE id").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
+	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
+			AddRow("rt-1", "completed", "legacy_section_v1", nil))
+	mock.ExpectQuery("SELECT UTC_TIMESTAMP").
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
+	mock.ExpectQuery("FROM assessment_module_attempts WHERE attempt_id = ").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason", "entry_confirmed_at", "entry_entered_at"}).
+			AddRow("mrow-1", "mod-1", "active", 60, nil, startedAt, nil, 0, 0, nil, nil, nil))
+	mock.ExpectQuery("FROM assessment_exam_questions eq").
+		WillReturnRows(sqlmock.NewRows([]string{"is_pretest", "answer_definition", "response", "response_v2"}))
+	mock.ExpectExec("UPDATE assessment_module_attempts SET state").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("FROM assessment_modules m JOIN assessment_sections").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "break_after_seconds"}).AddRow("sec-1", 0))
+	mock.ExpectQuery("FROM assessment_modules m JOIN assessment_sections s ON").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "display_order", "adaptive_role", "exam_version_id"}).
+			AddRow("sec-1", "rw", 1, "terminal", "v-1"))
+	deliveryUnscopedAttemptLink(mock)
+	mock.ExpectQuery("FROM assessment_sections WHERE exam_version_id").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectRollback()
+	changed, gotErr := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", time.Now().UTC())
+	if !called || changed || !errors.Is(gotErr, injected) {
+		t.Fatalf("SAT seal must fail atomically: called=%v changed=%v err=%v", called, changed, gotErr)
+	}
+	if got := telemetry.CounterValueForTest(reg, telemetry.MSATTimeoutFinalize); got != 0 {
+		t.Fatalf("rolled-back module must not count as finalized, got %v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -181,11 +181,11 @@ func TestSATTimeoutReconcileCompletesLastModuleAndSecondPassIsNoOp(t *testing.T)
 	f.seedReadingWritingOnlyLink(t)
 
 	ctx := context.Background()
-	completer := sat.NewService(f.db, tx.NewRunner(f.db), clock.System{}, nil).ReconcileAdapter()
+	completer := sat.NewService(f.db, tx.NewRunner(f.db), clock.System{}, nil).ReconcileInTxAdapter()
 	calls := 0
-	svc := f.deliverySvc().SetCompleter(func(ctx context.Context, scheduleID, attemptID string) error {
+	svc := f.deliverySvc().SetSATTerminalizerInTx(func(ctx context.Context, q tx.Tx, scheduleID, attemptID string) (bool, error) {
 		calls++
-		return completer(ctx, scheduleID, attemptID)
+		return completer(ctx, q, scheduleID, attemptID)
 	})
 
 	// Pass 1: the expired Module 1 is finalized and its adaptive branch opens.
@@ -243,6 +243,14 @@ func TestSATTimeoutReconcileCompletesLastModuleAndSecondPassIsNoOp(t *testing.T)
 	}
 	if got := f.countTerminalizations(t, attemptID); got != 1 {
 		t.Fatalf("recovery must record exactly one terminal receipt, got %d", got)
+	}
+	var finalDigest sql.NullString
+	if err := f.db.QueryRowContext(ctx,
+		"SELECT final_response_digest FROM student_attempts WHERE id = ?", attemptID).Scan(&finalDigest); err != nil {
+		t.Fatal(err)
+	}
+	if !finalDigest.Valid || finalDigest.String != expectedSATDigest(t, f.db, attemptID) {
+		t.Fatalf("timeout-first completion must preserve the final V2 digest, got %q", finalDigest.String)
 	}
 	if got := f.countStudentSubmissions(t, attemptID); got != 0 {
 		t.Fatalf("recovery must not manufacture a student_submissions row, got %d", got)

@@ -264,24 +264,35 @@ describe("SatExamShell", () => {
     expect(screen.queryByRole("menu", { name: "More tools" })).not.toBeInTheDocument();
   });
   it("pins Display and More to the top bar when More is available, and keeps Notes out of the overlay layer entirely", () => {
-    render(<SatExamShell {...props({ notesAvailable: true, moreAvailable: true })}><NotesWorkspace /></SatExamShell>);
-    fireEvent.click(screen.getByRole("button", { name: "Display" }));
-    const display = screen.getByRole("dialog", { name: "Display" });
-    expect(display).toHaveAttribute("data-sat-popover-panel", "anchored");
-    expect(display.className).toMatch(/fixed/);
-    fireEvent.keyDown(document, { key: "Escape" });
-    // Notes are a structural column between passage and question, so they are
-    // neither a fixed top-bar panel nor a dialog: nothing floats over the exam.
-    fireEvent.click(screen.getByRole("button", { name: /^Notes/ }));
-    const notes = screen.getByRole('complementary', { name: 'Notes' });
-    expect(notes).not.toHaveAttribute("data-sat-popover-panel");
-    expect(notes.className).not.toMatch(/fixed|absolute/);
-    expect(screen.queryByRole("dialog", { name: /Notes/ })).not.toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" });
-    fireEvent.click(screen.getByRole("button", { name: "More tools" }));
-    const menu = screen.getByRole("menu", { name: "More tools" });
-    expect(menu).toHaveAttribute("data-sat-popover-panel", "anchored");
-    expect(menu.className).toMatch(/fixed/);
+    // A desktop-sized logical exam. Display is the one panel the measured reading
+    // layout is allowed to move — it is a fixed 320px over the question pane —
+    // and at this width the question can spare it. The layering contract this
+    // case is about is unchanged either way; the width is stated so the case says
+    // what it means.
+    vi.stubGlobal("innerWidth", 1440);
+    vi.stubGlobal("innerHeight", 900);
+    try {
+      render(<SatExamShell {...props({ notesAvailable: true, moreAvailable: true })}><NotesWorkspace /></SatExamShell>);
+      fireEvent.click(screen.getByRole("button", { name: "Display" }));
+      const display = screen.getByRole("dialog", { name: "Display" });
+      expect(display).toHaveAttribute("data-sat-popover-panel", "anchored");
+      expect(display.className).toMatch(/fixed/);
+      fireEvent.keyDown(document, { key: "Escape" });
+      // Notes are a structural column between passage and question, so they are
+      // neither a fixed top-bar panel nor a dialog: nothing floats over the exam.
+      fireEvent.click(screen.getByRole("button", { name: /^Notes/ }));
+      const notes = screen.getByRole('complementary', { name: 'Notes' });
+      expect(notes).not.toHaveAttribute("data-sat-popover-panel");
+      expect(notes.className).not.toMatch(/fixed|absolute/);
+      expect(screen.queryByRole("dialog", { name: /Notes/ })).not.toBeInTheDocument();
+      fireEvent.keyDown(document, { key: "Escape" });
+      fireEvent.click(screen.getByRole("button", { name: "More tools" }));
+      const menu = screen.getByRole("menu", { name: "More tools" });
+      expect(menu).toHaveAttribute("data-sat-popover-panel", "anchored");
+      expect(menu.className).toMatch(/fixed/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
   it("shows both annotation controls when available and hides them when unavailable", () => {
     const { rerender } = render(<SatExamShell {...props({ sectionKey: "reading-writing", notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
@@ -408,6 +419,40 @@ describe("SatExamShell", () => {
       textScale: 1.15,
       lineSpacing: "standard",
       splitRatio: 0.5,
+    });
+  });
+
+  it("keeps Text size and Screen zoom independent, so one control never quietly moves the other", () => {
+    // The contract this pins: Text size changes reading content and nothing else,
+    // Screen zoom changes the whole logical plane and nothing else, and neither
+    // touches the split ratio (which is the student's, and is restored when the
+    // panes fit side by side again).
+    const onReadingPreferencesChange = vi.fn();
+    const starting = { ...createSatReadingPreferences(), textScale: 1.5 as const, examZoom: 1.25, splitRatio: 0.38 };
+    render(
+      <SatExamShell
+        {...props({ readingPreferences: starting, onReadingPreferencesChange })}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    const dialog = screen.getByRole("dialog", { name: "Display" });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Increase text size" }));
+    expect(onReadingPreferencesChange).toHaveBeenLastCalledWith({
+      version: 1,
+      textScale: 1.75,
+      lineSpacing: "standard",
+      splitRatio: 0.38,
+      examZoom: 1.25,
+    });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Increase screen zoom" }));
+    expect(onReadingPreferencesChange).toHaveBeenLastCalledWith({
+      version: 1,
+      textScale: 1.5,
+      lineSpacing: "standard",
+      splitRatio: 0.38,
+      examZoom: 1.5,
     });
   });
 

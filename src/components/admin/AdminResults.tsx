@@ -45,7 +45,7 @@ function outcomeLabel(result: AdminResultRow): string {
     case "invalidated_proctor":
       return "Exam terminated by proctor";
     case "invalidated_timeout":
-      return "Exam ended before scoring";
+      return result.providerKey === "sat" ? "Exam ended" : "Exam ended before scoring";
     case "pending":
       return result.providerKey === "sat" ? "Completed · view answers" : "Scoring pending";
     case "scored":
@@ -73,7 +73,6 @@ function scoreLabel(result: AdminResultRow): string {
   ) {
     return "Not scored";
   }
-  if (result.providerKey === "sat") return "—";
   if (
     result.providerKey === "ielts" &&
     typeof result.overallBand === "number" &&
@@ -165,7 +164,7 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
           </button>
         </div>
 
-        <div className={`mt-6 grid grid-cols-2 gap-3 ${isSat ? "sm:grid-cols-3" : "sm:grid-cols-4"}`}>
+        <div className={`mt-6 grid grid-cols-2 gap-3 ${isSat ? "sm:grid-cols-2" : "sm:grid-cols-4"}`}>
           {!isSat ? <div className="rounded-xl bg-slate-50 p-3">
             <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
               Score
@@ -180,14 +179,14 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
               {outcomeLabel(result)}
             </p>
           </div>
-          <div className="rounded-xl bg-slate-50 p-3">
+          {!isSat ? <div className="rounded-xl bg-slate-50 p-3">
             <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
               Release
             </p>
             <p className="mt-1 text-sm font-semibold capitalize text-slate-700">
               {releaseLabel(result.releaseStatus)}
             </p>
-          </div>
+          </div> : null}
           <div className="rounded-xl bg-slate-50 p-3">
             <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
               Version
@@ -447,13 +446,14 @@ export function AdminResults() {
 
   const visibleResults = query.data ?? [];
   const releasedCount = visibleResults.filter(
-    (result) => result.releaseStatus === "released"
+    (result) => result.providerKey !== "sat" && result.releaseStatus === "released"
   ).length;
   const readyCount = visibleResults.filter(
-    (result) => result.releaseStatus === "ready_to_release"
+    (result) => result.providerKey !== "sat" && result.releaseStatus === "ready_to_release"
   ).length;
   const averageBand = analytics.data?.averageOverallBand ?? null;
   const hasActResults = filteredResults.some((result) => result.providerKey === "act");
+  const hasSatResults = filteredResults.some((result) => result.providerKey === "sat");
 
   const exportActResults = async () => {
     setActExportError(null);
@@ -605,7 +605,7 @@ export function AdminResults() {
                   <th className="px-5 py-3 font-medium">Exam</th>
                   <th className="px-5 py-3 font-medium">Provider</th>
                   <th className="px-5 py-3 font-medium">Submitted</th>
-                  <th className="px-5 py-3 text-right font-medium">Score</th>
+                  <th className="px-5 py-3 text-right font-medium">{hasSatResults ? "Result" : "Score"}</th>
                   <th className="px-5 py-3 font-medium">Release</th>
                   <th className="px-5 py-3 text-right font-medium">Action</th>
                 </tr>
@@ -635,7 +635,7 @@ export function AdminResults() {
                     <td
                       className={`px-5 py-4 text-right font-semibold tabular-nums ${scoreTone(result)}`}
                     >
-                      {scoreLabel(result)}
+                      {result.providerKey === "sat" ? <Link to={`/sat/results/attempts/${encodeURIComponent(result.attemptId)}`} className="text-blue-600 hover:text-blue-800">View answers</Link> : scoreLabel(result)}
                     </td>
                     <td className="px-5 py-4 capitalize text-gray-600">{outcomeLabel(result)}</td>
                     <td className="px-5 py-4 text-right">

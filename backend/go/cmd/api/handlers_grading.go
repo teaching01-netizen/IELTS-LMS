@@ -1140,6 +1140,38 @@ func resultsACTScienceDetailHandler(app *App) http.HandlerFunc {
 	}
 }
 
+// resultsSATRawdataExportHandler serves GET /results/sat/export/rawdata with
+// {schemaVersion, headerRows, rows} for one (examId, scheduleId) Student
+// Access group. It reuses the SAT result read roles plus the shared export
+// rate limiter, and exports from student_attempts rather than assessment_results
+// so pending/unscored/active attempts are included.
+func resultsSATRawdataExportHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {
+			return
+		}
+		if !enforceExportRateLimit(app, w, r) {
+			return
+		}
+		if app.Results == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Results service not configured."))
+			return
+		}
+		examID := strings.TrimSpace(r.URL.Query().Get("examId"))
+		scheduleID := strings.TrimSpace(r.URL.Query().Get("scheduleId"))
+		if examID == "" || scheduleID == "" {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "examId and scheduleId are required."))
+			return
+		}
+		out, err := app.Results.ExportSATRawdata(r.Context(), actorOf(r.Context()), examID, scheduleID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
 func resultsSATAttemptAnswersHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {

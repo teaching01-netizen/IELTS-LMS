@@ -734,6 +734,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/sat/access-groups", resultsSATAccessGroupsHandler(app))
 			authzRoute(r, "GET", "/sat/attempts", resultsSATAttemptsHandler(app))
 			authzRoute(r, "GET", "/sat/attempts/{attemptID}/answers", resultsSATAttemptAnswersHandler(app))
+			authzRoute(r, "GET", "/sat/export/rawdata", resultsSATRawdataExportHandler(app))
 			authzRoute(r, "GET", "/sat/{resultID}", resultsSATGetHandler(app))
 			authzRoute(r, "GET", "/act-science", resultsACTScienceHandler(app))
 			authzRoute(r, "GET", "/act-science/{attemptID}", resultsACTScienceDetailHandler(app))

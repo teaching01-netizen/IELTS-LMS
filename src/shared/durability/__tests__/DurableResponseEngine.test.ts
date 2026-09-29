@@ -294,6 +294,49 @@ describe("DurableResponseEngine", () => {
     expect(engine.getQuarantined().length).toBe(1);
   });
 
+  // The adaptive route is already decided, so the delivery layer closes timeout
+  // recovery: a last-second answer that lost the lock race is refused rather
+  // than silently moving the module's score away from its branch. The student
+  // must still be told — terminal quarantine keeps the answer on device and
+  // raises the failure surface instead of dropping it.
+  it("quarantines ASSESSMENT_CONFLICT/TIMEOUT_RECOVERY_CLOSED as terminal (answer kept, never dropped)", async () => {
+    transport.sendBatch = vi.fn().mockRejectedValue({
+      code: "ASSESSMENT_CONFLICT",
+      details: { reason: "TIMEOUT_RECOVERY_CLOSED" },
+      message: "The SAT adaptive route is already decided; timeout recovery is closed.",
+    });
+
+    const engine = new DurableResponseEngine({
+      scheduleId: "sched-1",
+      attemptId: "att-1",
+      leaseEpoch: 1,
+      controlEpoch: 1,
+      transport,
+    });
+
+    await engine.acceptResponse("q-1", {
+      answer: "last_second",
+      markedForReview: false,
+      eliminatedOptions: [],
+      annotations: [],
+    });
+
+    await engine.flush();
+
+    expect(engine.getStatus()).toBe("conflict_terminal");
+    expect(engine.getQuarantined().length).toBe(1);
+    // The write is quarantined, not acknowledged and not discarded: the answer
+    // is retained in the quarantine ledger and in the visible projection, so the
+    // candidate's last-second answer is never silently dropped.
+    expect(engine.getQuarantined()[0]?.questionId).toBe("q-1");
+    expect((engine.getQuarantined()[0]?.payload as { answer?: string } | undefined)?.answer).toBe(
+      "last_second",
+    );
+    // Not retried forever either: a closed recovery window is a verdict, not a
+    // transient.
+    expect(transport.sendBatch).toHaveBeenCalledTimes(1);
+  });
+
   it("retries ASSESSMENT_CONFLICT/SECTION_CLOCK_MISSING (operator state, not terminal)", async () => {
     // A missing cohort section clock is retryable: quarantining would
     // strand answers the next cohort-start bootstrap would accept. The

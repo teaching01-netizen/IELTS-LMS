@@ -27,7 +27,18 @@ describe("bluebook shell (Phase 3)", () => {
   });
 
   it("keeps the rigid auto/minmax/auto shell grid", () => {
-    expect(shellSrc).toMatch(/grid-rows-\[auto_minmax\(0,1fr\)_auto\]/);
+    // The contract is rigidity around ONE flexible band: every row but the
+    // document's is sized by its own content, and the document is the only row
+    // that gives height back. Stated as the shape rather than as a literal, so an
+    // extra chrome band (the shell has gained rows since this was written) adds a
+    // rigid row without quietly turning a second band flexible.
+    const template = shellSrc.match(/grid-rows-\[([^\]]*)\]/)?.[1];
+    expect(template).toBeDefined();
+    const tracks = template!.split("_");
+    expect(tracks.filter((track) => track === "minmax(0,1fr)")).toHaveLength(1);
+    // And no second flexible band beside it: a bare `1fr` anywhere else would be
+    // chrome that grows with the viewport.
+    expect(tracks.filter((track) => track !== "minmax(0,1fr)" && /fr\b/.test(track))).toHaveLength(0);
   });
 
   it("gives the topbar a paper surface closed by the shared spectrum rail", () => {

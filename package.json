@@ -32,6 +32,7 @@
     "sat:rail": "node scripts/sat-rail-pattern.mjs",
     "e2e:sat-annotations": "playwright test --config playwright.sat-annotations.config.ts",
     "e2e:sat-auto-fit": "playwright test --config playwright.sat-auto-fit.config.ts",
+    "e2e:sat-adaptive-reading": "playwright test --config playwright.sat-adaptive-reading.config.ts",
     "e2e:sat-screen-zoom": "playwright test --config playwright.sat-screen-zoom.config.ts",
     "e2e:sat-transition": "playwright test --config playwright.sat-transition.config.ts",
     "e2e:prod-smoke": "playwright test --config playwright.prod-smoke.config.ts",

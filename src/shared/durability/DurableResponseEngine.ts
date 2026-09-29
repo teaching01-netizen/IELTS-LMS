@@ -1780,7 +1780,9 @@ export class DurableResponseEngine {
               errorCode === "LEASE_FENCED"
                 ? "conflict_fenced"
                 : "conflict_terminal";
-            this.lastError = `Terminal error: ${errorCode}`;
+            this.lastError = this.extractConflictReason(error) === "TIMEOUT_RECOVERY_CLOSED"
+              ? "Terminal error: TIMEOUT_RECOVERY_CLOSED"
+              : `Terminal error: ${errorCode}`;
             this.notifyStatusChange();
             if (errorCode === "VERSION_COLLISION") this.emitDurabilityEvent("version_collision", { reason: errorCode });
             break;

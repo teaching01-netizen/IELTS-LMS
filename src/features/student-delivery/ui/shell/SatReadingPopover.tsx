@@ -11,6 +11,7 @@ import {
   previousSatReadingTextScale,
   type SatReadingPreferences,
 } from "../../domain/satReadingPreferences";
+import type { SatDisplayPresentation } from "../../domain/satReadingLayout";
 import { SAT_COPY } from "../../domain/satCopy";
 import { SatPopoverShell } from "../primitives/SatPopoverShell";
 
@@ -27,6 +28,17 @@ export interface SatReadingPopoverProps {
    * wherever a shell renders it, it measures that shell's real panes.
    */
   onFitToScreen?: (() => void) | undefined;
+  /**
+   * How the panel presents itself, from the shared reading layout decision.
+   *
+   * The anchored panel is a fixed 320px wide, and it sits over the question
+   * pane. Where the measured layout says what is left of that pane would no
+   * longer be readable, the student gets the sheet instead — the panel moves out
+   * of the way of the text they are trying to read. Every other popover keeps
+   * its own viewport rule; this is the one panel whose width competes with
+   * reading room, so it is the one panel that gets a say.
+   */
+  presentation?: SatDisplayPresentation | undefined;
 }
 
 /**
@@ -38,7 +50,7 @@ export interface SatReadingPopoverProps {
  * via SatPopoverShell: focus-in on every open, focus-back on every close.
  */
 export function SatReadingPopover(props: SatReadingPopoverProps) {
-  const { open, disabled, preferences, triggerRef, onChange, onClose, onFitToScreen } = props;
+  const { open, disabled, preferences, triggerRef, onChange, onClose, onFitToScreen, presentation = 'anchored' } = props;
   const scaleIndex = SAT_READING_TEXT_SCALES.indexOf(preferences.textScale);
   const canDecrease = scaleIndex > 0 && !disabled;
   const canIncrease = scaleIndex < SAT_READING_TEXT_SCALES.length - 1 && !disabled;
@@ -58,8 +70,13 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
       triggerRef={triggerRef}
       onClose={onClose}
       closeLabel={SAT_COPY.displaySettings.close}
-      anchoredClassName="sat-ui sat-popover-anchored fixed right-[calc(1rem+var(--student-safe-right))] top-[calc(var(--student-safe-top)+98px)] z-[84] w-[320px] max-h-[calc(var(--sat-exam-logical-height,100dvh)-140px)] overflow-y-auto rounded-[8px] border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
-      compactClassName="sat-ui w-full max-w-[520px] max-h-[calc(var(--sat-exam-logical-height,100dvh)-16px)] overflow-y-auto rounded-t-[14px] border border-b-0 border-[var(--sat-divider)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
+      forceCompact={presentation === 'compact'}
+      // Both presentations keep the header (and its Close) fixed and scroll the
+      // body: on a short screen a panel whose whole surface scrolls takes the
+      // way out of the panel off the top of it.
+      bodyClassName="min-h-0 flex-1 overflow-y-auto"
+      anchoredClassName="sat-ui sat-popover-anchored fixed right-[calc(1rem+var(--student-safe-right))] top-[calc(var(--student-safe-top)+98px)] z-[84] flex w-[320px] max-h-[calc(var(--sat-exam-logical-height,100dvh)-140px)] flex-col overflow-hidden rounded-[8px] border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
+      compactClassName="sat-ui flex w-full max-w-[520px] max-h-[calc(var(--sat-exam-logical-height,100dvh)-16px)] flex-col overflow-hidden rounded-t-[14px] border border-b-0 border-[var(--sat-divider)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
       backdropClassName="sat-dialog-backdrop fixed inset-0 z-[83] flex items-end justify-center bg-black/20"
     >
       <div className="px-4 pb-2 pt-1">

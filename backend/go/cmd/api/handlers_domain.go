@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -161,6 +164,20 @@ func v1SessionInner(app *App, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+// The V1 static projection is version content narrowed to assigned modules.
+// Its validator therefore changes when routing opens a branch.
+func staticETagForOpenedModules(versionETag string, opened map[string]bool) string {
+	ids := make([]string, 0, len(opened))
+	for id, assigned := range opened {
+		if assigned {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	digest := sha256.Sum256([]byte(versionETag + "\x00" + strings.Join(ids, "\x00")))
+	return "W/\"static-" + fmt.Sprintf("%x", digest) + "\""
+}
+
 // v1StaticHandler returns the V1 static content snapshot.
 func v1StaticHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -173,20 +190,31 @@ func v1StaticHandler(app *App) http.HandlerFunc {
 
 func v1StaticInner(app *App, w http.ResponseWriter, r *http.Request) {
 	{
-		if requireStudentDeps(w, r, app) == nil {
+		sess := requireStudentDeps(w, r, app)
+		if sess == nil {
 			return
 		}
-		// Plan D1: conditional read — 2 indexed probes before assembly.
+		// This projection changes when routing assigns a branch, even if the
+		// published version does not. Resolve assignment before considering 304.
+		openedModules, err := openedModuleIDsForUser(r.Context(), app, sess, chi.URLParam(r, "scheduleID"), r.URL.Query().Get("candidateId"))
+		if err != nil {
+			httpx.WriteError(w, r, MapDBError(err))
+			return
+		}
 		var staticETag string
 		if app.Delivery != nil {
 			if _, _, etag, terr := app.Delivery.VersionTag(r.Context(), chi.URLParam(r, "scheduleID")); terr == nil {
-				staticETag = etag
-				if writeETagOrNotModified(w, r, etag) {
+				staticETag = staticETagForOpenedModules(etag, openedModules)
+				if writeETagOrNotModified(w, r, staticETag) {
 					return
 				}
 			}
 		}
-		schedule, version, _, err := loadStudentScheduleVersion(r.Context(), app.DB, chi.URLParam(r, "scheduleID"))
+		// The V1 static snapshot is a second projection of the same published
+		// version, so it carries the same adaptive-branch fence as the delivery
+		// payload. An unresolved attempt narrows to base modules (fail closed):
+		// this route has no attempt of its own and must never serve every branch.
+		schedule, version, _, err := loadStudentScheduleVersion(r.Context(), app.DB, chi.URLParam(r, "scheduleID"), openedModules)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				writeStudentNotFound(w, r)

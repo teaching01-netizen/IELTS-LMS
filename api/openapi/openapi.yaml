@@ -3784,6 +3784,43 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SATResultDetail" }
         "404": { $ref: "#/components/responses/Error" }
+  /results/sat/export/rawdata:
+    get:
+      tags: [sat, results]
+      summary: Export the SAT RAWDATA CSV projection for one Student Access group
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: scheduleId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Fixed-width header rows and body rows
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schemaVersion: { type: integer }
+                  examId: { type: string }
+                  scheduleId: { type: string }
+                  columnCount: { type: integer }
+                  rowCount: { type: integer }
+                  headerRows:
+                    type: array
+                    items: { type: array, items: { type: string } }
+                  rows:
+                    type: array
+                    items: { type: array, items: { type: string } }
+        "401": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /results/{resultId}:
     get:
       tags: [results]

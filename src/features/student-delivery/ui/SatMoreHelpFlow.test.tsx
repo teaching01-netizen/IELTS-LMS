@@ -69,6 +69,10 @@ describe("SatMoreHelpFlow", () => {
     render(
       <SatExamShell
         sectionLabel="Section 1: Reading and Writing"
+        // The section key is what makes the R&W-only rows (Line Reader, passage
+        // expansion) available at all: without it the menu item is disabled, and a
+        // disabled control swallows the press instead of reporting it.
+        sectionKey="reading-writing"
         directions={null}
         remainingLabel="28:33"
         candidateName="Ada"

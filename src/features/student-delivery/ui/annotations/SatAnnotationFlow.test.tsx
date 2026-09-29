@@ -736,9 +736,13 @@ describe('SAT annotation Bluebook surfaces (Phase 7)', () => {
     expect(layout).toHaveAttribute('data-sat-notes-placement', 'column');
     expect(column.closest('[data-sat-reading-split]')).not.toBeNull();
     expect(container.querySelector('[data-sat-question-scroll]')).not.toBeNull();
-    // Exactly one column, and it is a direct member of that grid.
+    // Exactly one column, and it is a direct member of that grid — through the
+    // single seat the layout owns, which keeps the pane's identity while a
+    // placement change moves it.
     expect(document.querySelectorAll('[data-sat-notes-column]')).toHaveLength(1);
-    expect(column.parentElement).toBe(layout);
+    const seat = layout.querySelector<HTMLElement>('[data-sat-notes-slot]')!;
+    expect(column.parentElement).toBe(seat);
+    expect(seat.parentElement).toBe(layout);
     // Nothing dims the exam, and no modal takes the work hostage.
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(0);
     expect(document.querySelector('.bg-black\\/20')).toBeNull();

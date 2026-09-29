@@ -1390,8 +1390,43 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   color: #fff;
 }
 
-[data-sat-screen-zoom] .sat-reading-surface {
+/*
+ * Long, unbreakable runs wrap instead of widening a pane.
+ *
+ * This belongs to the reading surface, not to the zoom plane: the panes are
+ * `minmax(0, …fr)` tracks that can shrink, so a token wider than its pane would
+ * either push a horizontal scrollbar into the passage the student is reading or
+ * be clipped — and the pane is exactly where the layout decision says the text
+ * has room. `anywhere` (rather than `break-word`) is what makes it hold: it is
+ * the only value that also lowers min-content width, so intrinsic sizing cannot
+ * be inflated by one long word before the wrap is ever considered. Inherited by
+ * every reading descendant, the notes column and the answer options included.
+ * The rules that used to key this on `[data-sat-screen-zoom]` described the same
+ * intent by accident: reading surfaces only ever appear inside the exam plane.
+ */
+.sat-reading-surface {
   overflow-wrap: anywhere;
+}
+
+/*
+ * Two-dimensional content is asked a different question, and answers it itself.
+ *
+ * Ordinary prose wraps wherever it must — that is what keeps a pane readable at
+ * 200% text without the exam ever scrolling sideways — but a code block or a math
+ * expression has a shape, and its value is precisely that shape: breaking a token
+ * mid-identifier, or an expression mid-symbol, to make a column narrower would
+ * destroy the thing the student is reading. Those keep their own line breaking
+ * and scroll inside their own surface (the content renderer already gives `pre`
+ * and display math their own `overflow-x`), which is the local overflow this rule
+ * is the other half of: the pane scrolls, the workspace never does.
+ *
+ * `[role="math"]` is the delivered equation — KaTeX renders into spans, so the
+ * exemption has to be stated on the element that carries the role rather than on
+ * a tag name. `math-field` is the same idea for the surfaces that use the editor's
+ * field instead.
+ */
+.sat-reading-surface :is(pre, code, [role="math"], math-field) {
+  overflow-wrap: normal;
 }
 
 .sat-ui[data-sat-contrast="high-contrast"] .structured-content-renderer :is(th, td, pre) {
@@ -2016,6 +2051,20 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 .sat-popover-anchored[data-sat-popover-panel="anchored"] {
   position: fixed;
+}
+
+/* The stable presence layer every SAT popover renders inside.
+
+   Both presentations animate the SAME layer element, so a panel that changes
+   presentation while it is open (Display, when the measured reading layout says
+   its anchored width would leave the question unreadable) keeps its dialog node,
+   its focus, and its scroll position. In the anchored presentation the layer is
+   `display: contents`: it paints nothing, traps no pointer, and — because a
+   box-less element is not a transformable one — establishes no containing block,
+   which is what keeps the anchored panel's `fixed` offsets resolving against the
+   exam plane. In the compact presentation the layer is the backdrop. */
+.sat-popover-layer {
+  display: contents;
 }
 
 .sat-exam-footer {

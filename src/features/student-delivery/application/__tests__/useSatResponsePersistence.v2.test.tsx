@@ -249,6 +249,26 @@ describe('SAT V2 response persistence integration', () => {
     reopened.unmount();
   });
 
+  it('explains a timeout recovery closure as an unconfirmed saved answer', async () => {
+    mocks.transport.fetchSnapshot.mockReset().mockResolvedValue([]);
+    mocks.transport.sendBatch.mockReset().mockRejectedValue({
+      code: 'ASSESSMENT_CONFLICT',
+      details: { reason: 'TIMEOUT_RECOVERY_CLOSED' },
+    });
+    const hook = renderHook(() => useSatResponsePersistence({
+      scheduleId: 'schedule', attemptId: 'attempt-closed', gateway: gateway(), onSavedRevision: vi.fn(),
+    }));
+    await waitFor(() => expect(mocks.transport.fetchSnapshot).toHaveBeenCalled());
+    act(() => hook.result.current.save({
+      questionId: 'q1', answer: 'final answer', markedForReview: false,
+      eliminatedOptionIds: [], annotations: { version: 2, annotations: [], legacyQuestionNote: '' },
+    }));
+    await waitFor(() => expect(hook.result.current.failureKind).toBe('expired'));
+    expect(hook.result.current.failure).toMatch(/final answer was not confirmed/i);
+    expect(window.localStorage.getItem('response-checkpoint:v2:attempt-closed:q1')).toContain('final answer');
+    hook.unmount();
+  });
+
   it('surfaces blocked drafts as visible + retryable exam-stress-safe failure and gates submit', async () => {
     // Blocked flow WITHOUT mocking persistence: only the transport is
     // mocked (fetchSnapshot/sendBatch/submit). The real DurableResponseEngine

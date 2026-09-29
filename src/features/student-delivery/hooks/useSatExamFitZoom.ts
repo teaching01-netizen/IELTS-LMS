@@ -56,6 +56,7 @@ const defaultProbe = createSatExamFitProbe();
 
 export function useSatExamFitZoom(input: SatExamFitZoomInput): SatExamFitZoom {
   const { contentRef, onDecide, probe: injectedProbe, ...gate } = input;
+  const automaticFitSuppressed = gate.automaticFitSuppressed;
   const probe = injectedProbe ?? defaultProbe;
   const [walk, setWalk] = useState<{ zoom: number; manual: boolean } | null>(null);
   const attemptedRef = useRef(false);
@@ -79,14 +80,14 @@ export function useSatExamFitZoom(input: SatExamFitZoomInput): SatExamFitZoom {
       enabled: gate.enabled,
       zoomDecided: gate.zoomDecided,
       storedZoom: gate.storedZoom,
-      compact: gate.compact,
+      automaticFitSuppressed,
       blocked: gate.blocked,
       attempted: attemptedRef.current,
     });
     if (!shouldRun) return;
     attemptedRef.current = true;
     setWalk({ zoom: SAT_EXAM_FIT_CEILING, manual: false });
-  }, [walk, gate.enabled, gate.zoomDecided, gate.storedZoom, gate.compact, gate.blocked]);
+  }, [walk, gate.enabled, gate.zoomDecided, gate.storedZoom, automaticFitSuppressed, gate.blocked]);
 
   // Measure the candidate that is rendered right now, then stop or step down.
   useLayoutEffect(() => {

@@ -22,7 +22,7 @@ function gate(overrides: Partial<SatExamFitGateInput> = {}): SatExamFitGateInput
     enabled: true,
     zoomDecided: false,
     storedZoom: null,
-    compact: false,
+    automaticFitSuppressed: false,
     blocked: false,
     attempted: false,
     ...overrides,
@@ -111,7 +111,7 @@ describe("satExamFitShouldRun", () => {
       { enabled: false },
       { zoomDecided: true },
       { storedZoom: 0.75 },
-      { compact: true },
+      { automaticFitSuppressed: true },
       { blocked: true },
       { attempted: true },
     ];

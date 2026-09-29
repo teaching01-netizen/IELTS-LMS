@@ -88,6 +88,7 @@ import {
 import { seedMatchesIdentity, type SatBootstrapSeed } from "../bootstrap/satBootstrapSeed";
 import {
   isEquivalentBootstrap,
+  regressesAttemptState,
   SERVER_NOW_SKIP_TOLERANCE_MS,
 } from "../application/satBootstrapEquality";
 import { useSatIntegrityControl } from "./useSatIntegrityControl";
@@ -320,6 +321,11 @@ export function useSatExamController({
       const incomingRevision = payload.timing?.runtimeRevision ?? 0;
       const currentRevision = current?.timing?.runtimeRevision ?? 0;
       if (incomingRevision < currentRevision) return false;
+      // Stale-bootstrap guard, attempt scope: the runtime revision is
+      // schedule-wide, so it cannot order two payloads that differ only in
+      // module-attempt / break rows (the personal-timing handoff). Per-row
+      // revisions can, and do, order them.
+      if (current && regressesAttemptState(current, payload)) return false;
       // Phase 04 C3 poll-skip: identical polls are no-ops — zero state
       // writes (no setData, no snapshotReceivedAt, no clock recompute).
       // Clock-only drift past tolerance skips routing and result work, but the

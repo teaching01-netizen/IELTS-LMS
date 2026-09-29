@@ -132,8 +132,17 @@ export interface SatExamFitGateInput {
   zoomDecided: boolean;
   /** The attempt's own zoom, or null when it has none. */
   storedZoom: number | null;
-  /** Compact/phone layout: it keeps its own scale, never auto-shrinks. */
-  compact: boolean;
+  /**
+   * The adaptive reading layout owns the widths right now, so there is nothing
+   * for a whole-exam shrink to win.
+   *
+   * Not a screen-size flag: it is the shared reading decision's answer. A pane
+   * pair that had to stack has already given the student readable text by
+   * reflowing, and shrinking the exam on top of that would undo the choice they
+   * just made with Text size. It also covers "not measured yet", where the
+   * honest answer is to wait rather than decide against an unmeasured pane.
+   */
+  automaticFitSuppressed: boolean;
   /** Paused, submitting, or otherwise not interactive. */
   blocked: boolean;
   /** The fit already ran in this mount (the answer for a walk that gave up). */
@@ -146,16 +155,16 @@ export interface SatExamFitGateInput {
  * Each input is a way the fit would be wrong: it would run where the route did
  * not ask, re-decide an attempt that already has, override a zoom the student
  * made their own — an explicit 100% included, since a chosen value is a choice
- * and not an absence — shrink a layout that keeps its own scale, move a display
- * setting under a veil, or try a second time in one mount after a walk that
- * already had its answer.
+ * and not an absence — shrink a layout the reading reflow already solved, move a
+ * display setting under a veil, or try a second time in one mount after a walk
+ * that already had its answer.
  */
 export function satExamFitShouldRun(input: SatExamFitGateInput): boolean {
   return (
     input.enabled &&
     !input.zoomDecided &&
     input.storedZoom === null &&
-    !input.compact &&
+    !input.automaticFitSuppressed &&
     !input.blocked &&
     !input.attempted
   );

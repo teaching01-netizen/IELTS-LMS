@@ -32,6 +32,7 @@ import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext
 import { SatNotesSurfaceHost } from './annotations/SatNotesSurfaceHost';
 import { SatSelectionActionsPanel } from './annotations/SatSelectionActionsPanel';
 import { SatExamViewportOverlay, SatExamZoomPlane } from './zoom/SatExamZoomContext';
+import { SatReadingLayoutProvider, useSatReadingLayout } from './reading/SatReadingLayoutContext';
 import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 
 export interface SatExamShellProps {
@@ -148,7 +149,24 @@ export interface SatExamShellProps {
   isTakingOver?: boolean | undefined;
 }
 
+/**
+ * The exam shell, with the one measured layout truth above it.
+ *
+ * The provider mounts OUTSIDE the shell so the whole exam — the workspace that
+ * registers itself, the Notes host that places the column, Display in the top
+ * bar, and the auto-fit — reads the same decision. It cannot live inside the
+ * shell's own render: a component cannot consume the context it provides, and
+ * the auto-fit has to know what the reading layout decided.
+ */
 export function SatExamShell(props: SatExamShellProps) {
+  return (
+    <SatReadingLayoutProvider preferences={props.readingPreferences}>
+      <SatExamShellContent {...props} />
+    </SatReadingLayoutProvider>
+  );
+}
+
+function SatExamShellContent(props: SatExamShellProps) {
   // Strangler step 1: the interaction machine owns the exclusive surface +
   // the live annotation selection; the runner stays authoritative for exam
   // truth. Context is derived from props every render — never duplicated in
@@ -203,9 +221,17 @@ export function SatExamShell(props: SatExamShellProps) {
     }),
     [coarsePointer, examScope.ownedTouchSelection],
   );
-  // The compact layout stacks the panes and keeps its own scale, so it is the
-  // one place the fit is never allowed to shrink the exam.
-  const compactLayout = useSatMediaQuery('(max-width: 767px)');
+  /*
+   * The reading layout's own answer, read — never re-derived from a viewport.
+   *
+   * A layout whose panes had to stack already gave the student readable text by
+   * reflowing; shrinking the whole exam on top of that would undo the choice
+   * they just made. An unmeasured workspace is not an excuse to shrink either —
+   * it simply is not time to decide yet.
+   */
+  const readingLayout = useSatReadingLayout();
+  const reflowOwnsLayout = readingLayout.decision.presentation === 'stacked';
+  const automaticFitSuppressed = !readingLayout.measured || reflowOwnsLayout;
   const contentRef = useRef<HTMLDivElement>(null);
   /*
    * Auto-fit (once per attempt, before paint).
@@ -221,7 +247,7 @@ export function SatExamShell(props: SatExamShellProps) {
     // the student's own, or an earlier fit's.
     zoomDecided: props.screenZoomDecided === true,
     storedZoom: props.readingPreferences.examZoom ?? null,
-    compact: compactLayout,
+    automaticFitSuppressed,
     blocked: props.blocked,
     contentRef,
     onDecide: (zoom) => {
@@ -231,6 +257,23 @@ export function SatExamShell(props: SatExamShellProps) {
       props.onScreenZoomDecided?.();
     },
   });
+  /**
+   * "Skip the fit" is itself a decision.
+   *
+   * If the layout already owns the widths (stacked panes, nothing to shrink for),
+   * the automatic pass answers "no automatic zoom needed" and reports it —
+   * without touching `examZoom`. Leaving the attempt undecided would mean a later
+   * measurement (a rotation, a width change, a text size the student lowers back
+   * down) could start an automatic fit nobody asked for at that moment. The
+   * student's own "Fit to screen" is a separate, deliberate action and still
+   * runs whenever they press it.
+   */
+  const onScreenZoomDecided = props.onScreenZoomDecided;
+  useEffect(() => {
+    if (props.autoFitScreenZoom !== true || props.screenZoomDecided === true) return;
+    if (!readingLayout.measured || !reflowOwnsLayout) return;
+    onScreenZoomDecided?.();
+  }, [props.autoFitScreenZoom, props.screenZoomDecided, onScreenZoomDecided, readingLayout.measured, reflowOwnsLayout]);
   // Which zoom is showing, and why: one rule, in the domain (resolveSatExamZoom).
   const screenZoom = resolveSatExamZoom({
     probing: fit.zoom,
@@ -568,6 +611,7 @@ export function SatExamShell(props: SatExamShellProps) {
         onCloseReading={closeOverlay}
         onReadingPreferencesChange={props.onReadingPreferencesChange}
         onFitToScreen={fit.fitNow}
+        displayPresentation={readingLayout.decision.displayPresentation}
       />
       </div>
       {/* Bluebook More utility center (Phase 1): fixed-position dropdown

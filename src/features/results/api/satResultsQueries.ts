@@ -89,7 +89,7 @@ export interface SatSectionResult {
 }
 
 export interface SatResultDetail {
-  summary: SatResultSummary;
+  summary: SatResultSummary & { attemptId: string };
   scorePayload: Record<string, unknown>;
   sections: SatSectionResult[];
   questions: SatQuestionResult[];

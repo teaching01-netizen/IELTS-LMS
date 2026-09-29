@@ -14,7 +14,7 @@ export function outcomeLabel(outcomeStatus: string): string {
   switch (outcomeStatus) {
     case 'scored': return 'Completed · view answers';
     case 'invalidated_proctor': return 'Exam terminated by proctor';
-    case 'invalidated_timeout': return 'Exam ended before scoring';
+    case 'invalidated_timeout': return 'Exam ended';
     case 'pending':
     case 'unscored': return 'Completed · view answers';
     default: return 'Completed · view answers';
@@ -26,8 +26,8 @@ function attemptLabel(attempt: SatAttemptRow): string {
   switch (attempt.attemptStatus) {
     case 'running': return 'In progress · view answers';
     case 'submitted': return 'Completed · view answers';
-    case 'terminated': return 'Ended by proctor · not scored';
-    case 'locked': return 'Ended · not scored';
+    case 'terminated': return 'Ended by proctor';
+    case 'locked': return 'Ended';
     default: return 'Completed · view answers';
   }
 }
@@ -56,14 +56,15 @@ export function rollupFor(group: SatExamGroup): ExamRollup {
   return 'invalidated';
 }
 
-export function rollupToneFor(rollup: ExamRollup) {
+export function rollupToneFor(rollup: ExamRollup, group: SatExamGroup) {
   if (rollup === 'ready') return satOutcomeTone('scored');
+  if (group.invalidated < group.total) return satOutcomeTone('unscored');
   return satOutcomeTone('invalidated_proctor');
 }
 
-export function rollupLabelFor(rollup: ExamRollup): string {
+export function rollupLabelFor(rollup: ExamRollup, group: SatExamGroup): string {
   if (rollup === 'ready') return 'Completed';
-  return 'Not scored';
+  return group.invalidated === group.total && group.total > 0 ? 'Ended' : 'In progress';
 }
 
 export function aggregateLineFor(group: SatExamGroup): string {
@@ -98,7 +99,7 @@ export function SatExamGroupRow({
           <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{versionLine ? versionLine + ' · ' : ''}{aggregateLineFor(group)}</span>
           <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{recencyLineFor(group)}</span>
         </span>
-        <span className="shrink-0"><SatStatusPill tone={group.total === 0 ? 'neutral' : rollupToneFor(rollup)}>{group.total === 0 ? 'No attempts' : rollupLabelFor(rollup)}</SatStatusPill></span>
+        <span className="shrink-0"><SatStatusPill tone={group.total === 0 ? 'neutral' : rollupToneFor(rollup, group)}>{group.total === 0 ? 'No attempts' : rollupLabelFor(rollup, group)}</SatStatusPill></span>
         <ArrowRight size={15} className="sat-row-chevron shrink-0 text-slate-400 group-hover:text-slate-500" aria-hidden="true" />
       </span>
     </SatListRow>

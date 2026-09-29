@@ -26,7 +26,13 @@ type studentScheduleContextRow struct {
 	autoStart, autoStop                             bool
 }
 
-func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID string) (map[string]any, map[string]any, string, error) {
+// loadStudentScheduleVersion projects the schedule and its published version for
+// a student. `openedModules` is the attempt's assigned module set (from
+// assessment_module_attempts); the content snapshot is fenced against it so an
+// adaptive branch the candidate was never routed into cannot be read through
+// this route either. A nil/empty set fails closed: base and non-adaptive
+// modules survive, unassigned branches do not.
+func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID string, openedModules map[string]bool) (map[string]any, map[string]any, string, error) {
 	var row studentScheduleContextRow
 	err := db.QueryRowContext(ctx, `
 		SELECT s.id, s.exam_id, s.provider_key, s.exam_title,
@@ -109,6 +115,12 @@ func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID stri
 	if err != nil {
 		return nil, nil, "", err
 	}
+	// SEV-1 content fence, same predicate as the delivery payload: an adaptive
+	// branch only exists for the candidate the server routed into it. The V1
+	// snapshot is a second projection of the same published version, so it needs
+	// the same narrowing; answer-key redaction alone leaves the unassigned
+	// branch's stimulus, prompt and options readable.
+	fenceStudentSnapshotBranches(content, openedModules)
 	if _, exists := content["providerKey"]; !exists {
 		content["providerKey"] = row.providerKey
 	}
@@ -125,6 +137,62 @@ func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID stri
 		version["parentVersionId"] = parentVersionID.String
 	}
 	return schedule, version, row.providerKey, nil
+}
+
+// fenceStudentSnapshotBranches walks a decoded V1 content snapshot in place and
+// removes every adaptive branch module the attempt has no module attempt row
+// for. Branch modules are identified by their authored role (`lower_branch` /
+// `higher_branch`) plus their authored module id, in either key spelling, so
+// the walk does not depend on one authoring generation's nesting.
+//
+// A branch whose id cannot be read is dropped: an unidentifiable branch cannot
+// be proven assigned, and a missing question set is survivable while a leaked
+// one is not.
+func fenceStudentSnapshotBranches(node any, openedModules map[string]bool) {
+	switch v := node.(type) {
+	case map[string]any:
+		for key, child := range v {
+			if list, ok := child.([]any); ok {
+				v[key] = fenceStudentSnapshotList(list, openedModules)
+				continue
+			}
+			fenceStudentSnapshotBranches(child, openedModules)
+		}
+	case []any:
+		for _, child := range v {
+			fenceStudentSnapshotBranches(child, openedModules)
+		}
+	}
+}
+
+func fenceStudentSnapshotList(list []any, openedModules map[string]bool) []any {
+	kept := make([]any, 0, len(list))
+	for _, child := range list {
+		if module, ok := child.(map[string]any); ok && snapshotModuleIsUnassignedBranch(module, openedModules) {
+			continue
+		}
+		fenceStudentSnapshotBranches(child, openedModules)
+		kept = append(kept, child)
+	}
+	return kept
+}
+
+func snapshotModuleIsUnassignedBranch(module map[string]any, openedModules map[string]bool) bool {
+	role := snapshotStringField(module, "adaptiveRole", "adaptive_role")
+	if role != "lower_branch" && role != "higher_branch" {
+		return false
+	}
+	id := snapshotStringField(module, "id", "moduleId", "module_id", "moduleKey", "module_key")
+	return id == "" || !openedModules[id]
+}
+
+func snapshotStringField(node map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := node[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func decodeStudentSnapshot(raw string) map[string]any {
@@ -367,6 +435,30 @@ func resolveStudentAttemptIDForUser(ctx context.Context, db *sql.DB, scheduleID,
 	return attemptID, nil
 }
 
+// openedModuleIDsForAttempt resolves the attempt's assigned module set for a
+// content projection. A nil Delivery service or an unresolved attempt yields
+// nil, which every fence reads as "base modules only" — fail closed.
+func openedModuleIDsForAttempt(ctx context.Context, app *App, attemptID string) (map[string]bool, error) {
+	if app == nil || app.Delivery == nil || strings.TrimSpace(attemptID) == "" {
+		return nil, nil
+	}
+	return app.Delivery.AttemptOpenedModuleIDs(ctx, attemptID)
+}
+
+// openedModuleIDsForUser resolves the signed-in user's attempt on the schedule
+// (optionally narrowed by candidateId) and returns its assigned module set.
+// Anything unresolvable narrows to base modules.
+func openedModuleIDsForUser(ctx context.Context, app *App, sess *auth.Session, scheduleID, candidateID string) (map[string]bool, error) {
+	attemptID, err := resolveStudentAttemptIDForUser(ctx, app.DB, scheduleID, candidateID, sess.UserID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return openedModuleIDsForAttempt(ctx, app, attemptID)
+}
+
 // requireScheduleRegistration reports ErrNoRows when no registration row
 // binds (scheduleID, userID). Both user_id and actor_id count: entry binds
 // either column depending on the flow (see CreateRegistration).
@@ -380,7 +472,18 @@ func requireScheduleRegistration(ctx context.Context, db *sql.DB, scheduleID, us
 }
 
 func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, scheduleID, candidateID, clientSessionID string, includeCredential bool) (map[string]any, error) {
-	schedule, version, _, err := loadStudentScheduleVersion(ctx, app.DB, scheduleID)
+	// Resolve the attempt BEFORE projecting the version: the content fence needs
+	// the attempt's assigned module set, and an unresolved attempt must narrow to
+	// base modules rather than fall back to the whole tree.
+	attemptID, err := resolveStudentAttemptIDForUser(ctx, app.DB, scheduleID, candidateID, sess.UserID)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	openedModules, err := openedModuleIDsForAttempt(ctx, app, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	schedule, version, _, err := loadStudentScheduleVersion(ctx, app.DB, scheduleID, openedModules)
 	if err != nil {
 		return nil, err
 	}
@@ -388,15 +491,11 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 	if err != nil {
 		return nil, err
 	}
-	attemptID, err := resolveStudentAttemptIDForUser(ctx, app.DB, scheduleID, candidateID, sess.UserID)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, err
-	}
 	context := map[string]any{
 		"schedule": schedule, "version": version, "runtime": runtime,
 		"attempt": nil, "attemptCredential": nil, "degradedLiveMode": false,
 	}
-	if err == sql.ErrNoRows {
+	if attemptID == "" {
 		return context, nil
 	}
 	// Round 83 (live rehearsal): the SAT Bootstrap path seeds the base

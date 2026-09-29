@@ -203,6 +203,7 @@ func init() {
 		"GET /sat/access-groups":                {MinRoles: resultsRead},
 		"GET /sat/attempts":                     {MinRoles: resultsRead},
 		"GET /sat/attempts/{attemptID}/answers": {MinRoles: resultsRead},
+		"GET /sat/export/rawdata":               {MinRoles: resultsRead},
 		"GET /sat/{resultID}":                   {MinRoles: resultsRead},
 		"GET /act-science":                      {MinRoles: resultsRW},
 		"GET /act-science/{attemptID}":          {MinRoles: resultsRW},

@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/act"
 	"example.com/ielts-proctoring/internal/assessscore"
+	"example.com/ielts-proctoring/internal/attempts"
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -58,10 +60,13 @@ type Service struct {
 	// liveSinkCount counts hub events for deterministic 1:1000 sampling
 	// (atomic: publishHubEvents runs concurrently per request).
 	liveSinkCount atomic.Uint64
-	// completer runs CompleteAssessment when reconcile finalizes the last open
-	// module (Rust complete_assessment, submission_id=attempt_id). Optional:
-	// nil disables the hook (tests leave it unset); invoked outside the tx.
+	// completer is the ACT/compatibility completion hook after reconciliation.
+	// Production SAT uses satTerminalizerInTx instead.
 	completer AssessmentCompleter
+	// SAT seals on the same transaction that finalizes the last module.
+	satTerminalizerInTx func(context.Context, tx.Tx, string, string) (bool, error)
+	timeoutCursorMu     sync.Mutex
+	timeoutCursorID     string
 }
 
 // NewService wires dependencies explicitly.
@@ -101,6 +106,11 @@ func (s *Service) SetLiveSink(bus *liveupdates.Bus, mode config.LiveBusSinkMode)
 // Callers (BuildApp) pass the sat adapter; nil disables the hook.
 func (s *Service) SetCompleter(c AssessmentCompleter) *Service {
 	s.completer = c
+	return s
+}
+
+func (s *Service) SetSATTerminalizerInTx(seal func(context.Context, tx.Tx, string, string) (bool, error)) *Service {
+	s.satTerminalizerInTx = seal
 	return s
 }
 
@@ -369,6 +379,9 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 		return nil, err
 	}
 	moduleAttempts = filterModuleAttemptsForSections(moduleAttempts, sections)
+	// SEV-1 content fence: the candidate receives only the adaptive branch the
+	// server opened for them (see deliverySectionsForAttempt).
+	sections = deliverySectionsForAttempt(sections, moduleAttempts)
 	responses, err := s.loadResponses(ctx, attemptID)
 	if err != nil {
 		return nil, err
@@ -698,6 +711,50 @@ func deliverySectionsForScope(sections []DeliverySection, scope map[string]bool)
 		}
 	}
 	return filtered
+}
+
+// isAdaptiveBranchRole reports whether an authored module is one of an
+// adaptive section's mutually exclusive branches (Module 2 lower / higher).
+// A base (or "none") module is always deliverable; a branch module is
+// deliverable only to the candidate the server actually routed into it.
+func isAdaptiveBranchRole(role string) bool {
+	return role == "lower_branch" || role == "higher_branch"
+}
+
+// deliverySectionsForOpenedModules drops every adaptive branch module the
+// candidate has no attempt row for. Rows are inserted for the SELECTED branch
+// in the same transaction as the route decision (nextModuleTx), so "has an
+// attempt row" is exactly "was assigned". Both branches share one immutable
+// version tree, so without this fence every candidate received the other
+// branch's stimulus, prompt and options.
+//
+// The returned tree is a fresh copy: only the section structs and their
+// Modules slices are rebuilt, so the version cache's shared tree is never
+// mutated in place.
+func deliverySectionsForOpenedModules(sections []DeliverySection, opened map[string]bool) []DeliverySection {
+	out := make([]DeliverySection, 0, len(sections))
+	for _, section := range sections {
+		modules := make([]DeliveryModule, 0, len(section.Modules))
+		for _, module := range section.Modules {
+			if isAdaptiveBranchRole(module.AdaptiveRole) && !opened[module.ID] {
+				continue
+			}
+			modules = append(modules, module)
+		}
+		section.Modules = modules // section is a copy of the struct
+		out = append(out, section)
+	}
+	return out
+}
+
+// deliverySectionsForAttempt narrows a loaded version tree to the adaptive
+// branch the attempt was actually assigned.
+func deliverySectionsForAttempt(sections []DeliverySection, attempts []ModuleAttempt) []DeliverySection {
+	opened := make(map[string]bool, len(attempts))
+	for _, attempt := range attempts {
+		opened[attempt.ModuleID] = true
+	}
+	return deliverySectionsForOpenedModules(sections, opened)
 }
 
 func filterModuleAttemptsForSections(attempts []ModuleAttempt, sections []DeliverySection) []ModuleAttempt {
@@ -1343,7 +1400,7 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 			if err != nil {
 				return err
 			}
-			if gated.gate == timingGateLegacy {
+			if gated.gate == timingGateLegacy || gated.gate == timingGatePersonal {
 				if err := ensureSaveModuleAdmitted(active, gated.now); err != nil {
 					return err
 				}
@@ -2001,7 +2058,11 @@ func pausedInt(v sql.NullInt64) int64 {
 
 // ensureSaveModuleAdmitted mirrors ensure_module_response_admitted: the
 // legacy personal module clock admits only active/review, started, unpaused
-// rows before their deadline.
+// rows before their deadline, plus the same SATSaveGrace window the reconciler
+// and the V2 batch write gate use. A module is closed by the worker only after
+// deadline + grace, so a save admitted inside that window is never racing a
+// close that has already happened; both write paths must agree on the boundary
+// or one of them accepts what the other rejects for the same instant.
 func ensureSaveModuleAdmitted(m saveActiveModule, now time.Time) error {
 	if m.state != "active" && m.state != "review" {
 		return assessmentConflict("MODULE_NOT_ACTIVE", "The SAT module is not active.")
@@ -2016,7 +2077,7 @@ func ensureSaveModuleAdmitted(m saveActiveModule, now time.Time) error {
 	if deadline == nil {
 		return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT module deadline is unavailable.")
 	}
-	if now.After(*deadline) {
+	if now.After(deadline.Add(attempts.SATSaveGrace)) {
 		return assessmentConflict("DEADLINE_EXPIRED", "The SAT module timer has expired.")
 	}
 	return nil
@@ -2090,6 +2151,21 @@ func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, 
 	}
 	if downstreamStarted != 0 {
 		return assessmentConflict("TIMEOUT_RECOVERY_CLOSED", "A later SAT module has already started; timeout recovery is closed.")
+	}
+	// A base module that already routed has a persisted decision in
+	// assessment_route_decisions. Recovery would rescore the base module while
+	// that stored route stayed fixed, letting the score and the branch
+	// disagree. Close recovery at the routing decision, not only at a started
+	// downstream module: in cohort timing the successor is inserted
+	// not_started, which the downstream check above deliberately ignores.
+	var routeDecided int
+	if err := t.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM assessment_route_decisions WHERE attempt_id = ? AND base_module_attempt_id = ?)",
+		attemptID, module.id).Scan(&routeDecided); err != nil {
+		return err
+	}
+	if routeDecided != 0 {
+		return assessmentConflict("TIMEOUT_RECOVERY_CLOSED", "The SAT adaptive route is already decided; timeout recovery is closed.")
 	}
 	var timingModel sql.NullString
 	if err := t.QueryRowContext(ctx,

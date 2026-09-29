@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, BarChart3 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BarChart3, Download } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { SatPageError } from '../ui/SatPage';
+import { downloadSatRawdataCsv } from '../../../features/results/api/satRawdataExport';
 import { useSatAttemptsQuery, useSatResultsQuery } from '../../../features/results/api/satResultsQueries';
 import { filterSatAttempts, groupSatAccessGroups, type SatExamGroup } from '../../../features/results/domain/satResultsGroups';
 import { SatContainer, SatEmptyState, SatList, SatListSkeleton, SatPageHeader, SatPrimaryButton, SatResultCount, SatSearchField, SatStatStrip, SatStatusPill } from '../ui/SatPage';
@@ -18,6 +19,8 @@ export function SatResultsRoute() {
   const [examSearch, setExamSearch] = useState('');
   const [accessSearch, setAccessSearch] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const query = useSatResultsQuery();
   const attemptsQuery = useSatAttemptsQuery(examIdParam, accessIdParam, offset, studentSearch.trim(), 'all');
   const backButtonRef = useRef<HTMLButtonElement>(null);
@@ -70,7 +73,7 @@ export function SatResultsRoute() {
           <SatPageHeader eyebrow="Digital SAT" title={selectedGroup.examTitle} description={aggregateLineFor(selectedGroup)} />
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
             <p className="text-[11px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{versionLine ? `${versionLine} · ` : ''}{recencyLineFor(selectedGroup)}</p>
-            <SatStatusPill tone={rollupToneFor(rollup)}>{rollupLabelFor(rollup)}</SatStatusPill>
+            <SatStatusPill tone={rollupToneFor(rollup, selectedGroup)}>{rollupLabelFor(rollup, selectedGroup)}</SatStatusPill>
           </div>
           <SatStatStrip label="Results summary" stats={stats} />
           <SatSearchField id="sat-results-access-search" label="Search Student Access" value={accessSearch} onChange={setAccessSearch} placeholder="Search Student Access" widthClassName="mt-5 w-full sm:max-w-[420px]" />
@@ -85,11 +88,29 @@ export function SatResultsRoute() {
     if (!selectedAccess) return <SatContainer>{backButton(`${selectedGroup.examTitle}`, `/sat/results?exam=${encodeURIComponent(examIdParam)}`)}<SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title="Student Access not found" hint="This access schedule is unavailable for the selected exam." /></SatContainer>;
     const rollup = selectedAccess.pendingCount + selectedAccess.scoredCount > 0 ? 'ready' : 'invalidated';
     const currentRows = page?.items ?? [];
+    const runExport = async () => {
+      if (exporting) return;
+      setExporting(true);
+      setExportError(null);
+      try {
+        await downloadSatRawdataCsv(selectedGroup.examId, selectedAccess.scheduleId, selectedAccess.accessLinkName);
+      } catch (error) {
+        setExportError(error instanceof Error ? error.message : 'RAWDATA export failed.');
+      } finally {
+        setExporting(false);
+      }
+    };
     return (
       <SatContainer>
         {backButton(selectedGroup.examTitle, `/sat/results?exam=${encodeURIComponent(examIdParam)}`)}
-        <SatPageHeader eyebrow="Student Access" title={selectedAccess.accessLinkName} description={`${selectedGroup.examTitle} · Version ${selectedAccess.versionNumber}`} />
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2"><p className="text-[11px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{selectedAccess.scoredCount + selectedAccess.pendingCount} completed · {selectedAccess.attemptCount} students</p><SatStatusPill tone={rollup === 'ready' ? 'ready' : 'invalidated'}>{rollup === 'invalidated' ? 'Not scored' : 'Completed'}</SatStatusPill></div>
+        <SatPageHeader
+          eyebrow="Student Access"
+          title={selectedAccess.accessLinkName}
+          description={`${selectedGroup.examTitle} · Version ${selectedAccess.versionNumber}`}
+          actions={<SatPrimaryButton icon={<Download size={15} aria-hidden="true" />} pending={exporting} onClick={() => void runExport()}>{exporting ? 'Exporting...' : 'Export RAWDATA CSV'}</SatPrimaryButton>}
+        />
+        {exportError ? <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--sat-staff-danger,#b42318)]">{exportError}</p> : null}
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2"><p className="text-[11px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{selectedAccess.scoredCount + selectedAccess.pendingCount} completed · {selectedAccess.attemptCount} students</p><SatStatusPill tone={rollup === 'ready' ? 'ready' : selectedAccess.invalidatedCount === selectedAccess.attemptCount && selectedAccess.attemptCount > 0 ? 'invalidated' : 'neutral'}>{rollup === 'ready' ? 'Completed' : selectedAccess.invalidatedCount === selectedAccess.attemptCount && selectedAccess.attemptCount > 0 ? 'Ended' : 'In progress'}</SatStatusPill></div>
         <SatStatStrip label="Results summary" stats={stats} />
         <SatSearchField id="sat-results-student-search" label="Search students" value={studentSearch} onChange={setStudentSearch} placeholder="Search name, ID, cohort" widthClassName="mt-5 w-full sm:max-w-[420px]" />
         {attemptsQuery.isLoading ? <SatListSkeleton rows={5} label="Loading student attempts" /> : visibleAttempts.length ? <>

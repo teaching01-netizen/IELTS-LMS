@@ -163,7 +163,7 @@ func main() {
 		outbox:   outbox.NewRepository(pool).WithClaim(cfg.WorkerClaimPartitions, 0, claimMode),
 		sat:      svc.SAT,
 		act:      svc.ACT,
-		delivery: delivery.NewService(pool, svc.Tx).SetCompleter(shared.Completer(pool, svc)),
+		delivery: delivery.NewService(pool, svc.Tx).SetCompleter(shared.Completer(pool, svc)).SetSATTerminalizerInTx(svc.SAT.ReconcileInTxAdapter()),
 		proctor:  svc.Proctor,
 		student:  svc.Student,
 		terminal: svc.Terminal,
