@@ -334,14 +334,28 @@ func authoringEventMatchesBinding(e liveupdates.Event, b authoringrealtime.Bindi
 type authoringOutbound struct {
 	frame      any
 	closeAfter bool
+	written    chan struct{}
 }
 
 // sendAuthoringOutbound hands a frame to the write pump, abandoning the send if
 // the pump has already exited (otherwise a read pump blocked on a full control
 // channel would leak).
 func sendAuthoringOutbound(control chan<- authoringOutbound, done <-chan struct{}, out authoringOutbound) bool {
+	if out.closeAfter {
+		// The caller stops the write pump as soon as the read pump returns. Wait
+		// for this terminal frame to reach the socket before allowing that stop.
+		out.written = make(chan struct{})
+	}
 	select {
 	case control <- out:
+	case <-done:
+		return false
+	}
+	if out.written == nil {
+		return true
+	}
+	select {
+	case <-out.written:
 		return true
 	case <-done:
 		return false
@@ -375,7 +389,13 @@ func authoringWritePump(writer *authoringWriter, conn *websocket.Conn, sub *live
 				return
 			}
 			if err := writer.write(out.frame); err != nil {
+				if out.written != nil {
+					close(out.written)
+				}
 				return
+			}
+			if out.written != nil {
+				close(out.written)
 			}
 			if out.closeAfter {
 				return

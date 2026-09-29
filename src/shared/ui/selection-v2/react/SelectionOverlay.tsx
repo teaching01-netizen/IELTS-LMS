@@ -1,13 +1,13 @@
-import { useEffect, useRef, type RefObject } from 'react';
-import { SelectionFloatingLayer } from './SelectionFloatingLayer';
-import { SelectionHighlight } from './SelectionHighlight';
-import { SelectionHandle } from './SelectionHandle';
-import { SelectionLoupe } from './SelectionLoupe';
-import type { SelectionPresentation, SelectionPointerState } from '../domain/selectionTypes';
-import { selectionMovesEndpoint } from '../domain/selectionTypes';
-import { selectionContainsPoint } from '../engine/selectionGeometry';
-import type { SelectionHandlePointerEvent } from './useStudentSelectionGesture';
-import '../styles/selection.css';
+import { useEffect, useRef, type RefObject } from "react";
+import { SelectionFloatingLayer } from "./SelectionFloatingLayer";
+import { SelectionHighlight } from "./SelectionHighlight";
+import { SelectionHandle } from "./SelectionHandle";
+import { SelectionLoupe } from "./SelectionLoupe";
+import type { SelectionPresentation, SelectionPointerState } from "../domain/selectionTypes";
+import { selectionMovesEndpoint } from "../domain/selectionTypes";
+import { selectionContainsPoint } from "../engine/selectionGeometry";
+import type { SelectionHandlePointerEvent } from "./useStudentSelectionGesture";
+import "../styles/selection.css";
 
 /**
  * Everything the student sees of a selection the exam owns, and nothing else.
@@ -92,6 +92,8 @@ export interface SelectionOverlaySelection extends SelectionPresentation {
    * text root in the same product scope; controls keep their press in either case.
    */
   wouldBeginGesture: (event: Event) => boolean;
+  /** Keep an action control's press from also beginning a new selection gesture. */
+  ignoreGesturePress: (event: Event) => void;
   /** Whether this outside press would start owned selection in another root. */
   wouldStartOwnedSelection: (event: Event) => boolean;
 }
@@ -122,6 +124,28 @@ function pressOn(event: Event, pressed: Element | null): SelectionHandlePointerE
   };
 }
 
+const ACTION_TARGET_SELECTOR = [
+  "button",
+  "a[href]",
+  "input",
+  "textarea",
+  "select",
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+].join(",");
+
+function isActionTarget(target: EventTarget | null): boolean {
+  const element =
+    target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+  return element?.closest(ACTION_TARGET_SELECTOR) != null;
+}
+
 export interface SelectionOverlayProps {
   selection: SelectionOverlaySelection;
   /** Scale for visible chrome in a product-owned visual space; measured rects stay viewport-based. */
@@ -142,12 +166,12 @@ export function SelectionOverlay({
   selection,
   visualScale = 1,
   portalContainer,
-  handleLabels = { start: 'Adjust selection start', end: 'Adjust selection end' },
+  handleLabels = { start: "Adjust selection start", end: "Adjust selection end" },
   loupe,
   onSelectionCleared,
   onEscape,
 }: SelectionOverlayProps) {
-  const visible = selection.phase !== 'idle' && selection.selectionText.length > 0;
+  const visible = selection.phase !== "idle" && selection.selectionText.length > 0;
   // The finger comes from the selection itself: it is the engine that follows it,
   // and a second place to pass a position would be a second thing to keep in step.
   const pointer = selection.pointer;
@@ -155,12 +179,13 @@ export function SelectionOverlay({
   // precision indicators that answer a change with a tick. Read off the pointer
   // because the caret is: one owner, one fact.
   const snapRevision = pointer?.snapRevision ?? 0;
-  const loupeOpen = visible
-    && loupe !== undefined
-    && loupe.enabled !== false
-    && pointer !== null
-    && pointer.pointerType === 'touch'
-    && selectionMovesEndpoint(selection.phase);
+  const loupeOpen =
+    visible &&
+    loupe !== undefined &&
+    loupe.enabled !== false &&
+    pointer !== null &&
+    pointer.pointerType === "touch" &&
+    selectionMovesEndpoint(selection.phase);
 
   const dismissRef = useRef(selection.dismiss);
   dismissRef.current = selection.dismiss;
@@ -177,7 +202,10 @@ export function SelectionOverlay({
   useEffect(() => {
     if (!visible) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+      if (
+        event.shiftKey &&
+        ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)
+      ) {
         // Hand keyboard text selection back to the browser as its own path. The
         // gesture adapter removes touch ownership in capture; clearing this
         // resting visual range here also keeps its toolbar anchor in sync.
@@ -187,7 +215,7 @@ export function SelectionOverlay({
       }
       // Escape belongs to this surface, not to a menu: one key, one meaning, and
       // it is the same key that dismisses a system selection menu.
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       if (onEscapeRef.current?.() === true) {
         event.preventDefault();
         event.stopPropagation();
@@ -211,7 +239,7 @@ export function SelectionOverlay({
     // press on a handle is a drag — but only from the handle's outward zone.
     const onPointerDown = (event: Event) => {
       const target = event.target;
-      if (target instanceof Element && target.closest('[data-selection-action-menu]')) return;
+      if (target instanceof Element && target.closest("[data-selection-action-menu]")) return;
       const { clientX, clientY } = event as PointerEvent;
       const current = selectionRef.current;
       // Whether the press belongs to this selection is asked only while the
@@ -221,14 +249,13 @@ export function SelectionOverlay({
       // to that branch, which ends the gesture with the same effects the
       // prose's own pointerdown used to produce — while consuming the press, so
       // it cannot double as anything.
-      const resting = current.phase === 'selected';
+      const resting = current.phase === "selected";
       // The selection's OWN chrome — its two endpoint controls — is never
       // "outside" it, gesture or no gesture: a second finger brushing a handle
       // mid-gesture changes nothing, where the same finger on the prose hands the
       // gesture back (below).
-      const pressed = target instanceof Element
-        ? target.closest('[data-student-selection-handle]')
-        : null;
+      const pressed =
+        target instanceof Element ? target.closest("[data-student-selection-handle]") : null;
       const onOwnChrome = pressed !== null;
       if (onOwnChrome && !resting) return;
       if (resting) {
@@ -270,19 +297,23 @@ export function SelectionOverlay({
       // can never also be the beginning of a new one (the prose would
       // otherwise find `idle` and open a hidden `selected → idle → pending`).
       // Presses the gesture would never handle — the product's toolbar, an
-      // answer field, any control — are dismissed but NOT consumed: they
-      // cannot reach the gesture's handler anyway, so consumption would only
-      // break the rest of the page. Menu and handle presses resolved above.
+      // answer field, or a mark's edit control — are dismissed but NOT
+      // consumed: controls own the tap, even when their surface also allows a
+      // drag to begin there. Menu and handle presses resolved above.
       dismissRef.current();
       clearSelectionRef.current?.();
-      if (current.wouldBeginGesture(event) || current.wouldStartOwnedSelection(event)) consume(event);
+      if (isActionTarget(target)) {
+        current.ignoreGesturePress(event);
+      } else if (current.wouldBeginGesture(event) || current.wouldStartOwnedSelection(event)) {
+        consume(event);
+      }
     };
 
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, [visible]);
 
@@ -298,7 +329,7 @@ export function SelectionOverlay({
           label={handleLabels.start}
           // Only the endpoint actually under the finger is "held", so the other
           // one stays settled instead of swelling along with it.
-          held={selection.adjusting && selection.phase === 'adjusting-start'}
+          held={selection.adjusting && selection.phase === "adjusting-start"}
           snapRevision={snapRevision}
           visualScale={visualScale}
         />
@@ -307,7 +338,7 @@ export function SelectionOverlay({
         <SelectionHandle
           handle={selection.endHandle}
           label={handleLabels.end}
-          held={selection.adjusting && selection.phase === 'adjusting-end'}
+          held={selection.adjusting && selection.phase === "adjusting-end"}
           snapRevision={snapRevision}
           visualScale={visualScale}
         />

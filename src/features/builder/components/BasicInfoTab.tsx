@@ -65,21 +65,21 @@ export function BasicInfoTab({ config, onChange }: BasicInfoTabProps) {
         <div className="grid grid-cols-1 gap-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Preset</label>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Preset</label>
               <input
                 type="text"
                 value={config.general.preset}
                 readOnly
-                className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded text-sm text-gray-500 cursor-not-allowed"
+                className="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded text-sm text-slate-700 cursor-not-allowed"
               />
             </div>
             <div>
-              <label htmlFor="exam-type" className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Exam Type</label>
+              <label htmlFor="exam-type" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Exam Type</label>
               <select
                 id="exam-type"
                 value={config.general.type}
                 onChange={(e) => updateExamType(e.target.value as ExamType)}
-                className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"
               >
                 <option value="Academic">Academic</option>
                 <option value="General Training">General Training</option>
@@ -88,30 +88,30 @@ export function BasicInfoTab({ config, onChange }: BasicInfoTabProps) {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Exam Title</label>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Exam Title</label>
             <input
               type="text"
               value={config.general.title}
               onChange={(e) => updateConfig('general', { title: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+              className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
               placeholder="e.g. Academic Practice Test 5"
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Exam Summary</label>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Exam Summary</label>
             <textarea
               value={config.general.summary}
               onChange={(e) => updateConfig('general', { summary: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"
               rows={3}
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Candidate Instructions</label>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Candidate Instructions</label>
             <textarea
               value={config.general.instructions}
               onChange={(e) => updateConfig('general', { instructions: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none h-40"
+              className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none h-40"
             />
           </div>
         </div>

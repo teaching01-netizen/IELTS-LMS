@@ -9,6 +9,8 @@ import { proctorEndSection } from "./support/proctorControls";
 import {
   completePreCheckIfPresent,
   openStudentSessionWithRetry,
+  showQuestionsIfTabbed,
+  startLobbyIfPresent,
   studentCheckIn,
   stubScreenDetails,
 } from "./support/studentUi";
@@ -44,7 +46,7 @@ test.describe("ACT Science workflow", () => {
     page,
   }) => {
     const manifest = readBackendE2EManifest();
-    const { scheduleId, candidateId, questionId, expectedAnswer } = manifest.act;
+    const { scheduleId, candidateId, expectedAnswer } = manifest.act;
     expect(scheduleId).toBeTruthy();
 
     const studentContext = await browser.newContext({
@@ -61,11 +63,16 @@ test.describe("ACT Science workflow", () => {
       });
       await openStudentSessionWithRetry(studentPage, scheduleId, candidateId);
       await completePreCheckIfPresent(studentPage);
+      await startLobbyIfPresent(studentPage);
       await expect(studentPage.getByTestId("student-exam-shell")).toBeVisible({ timeout: 30_000 });
       await expect(studentPage.getByText("ACT", { exact: true }).first()).toBeVisible();
       await expect(studentPage.getByText("Seeded ecology experiment")).toBeVisible();
+      await showQuestionsIfTabbed(studentPage);
       await expect(
-        studentPage.getByText("Which condition produced the greatest plant growth?").first()
+        studentPage
+          .getByText("Which condition produced the greatest plant growth?", { exact: true })
+          .filter({ visible: true })
+          .first()
       ).toBeVisible();
 
       const options = studentPage.locator('input[type="radio"]');
@@ -123,7 +130,7 @@ test.describe("ACT Science workflow", () => {
 
       await studentPage.goto(`/student/${scheduleId}/${candidateId}`);
       await expect(
-        studentPage.getByRole("heading", { name: /Examination Complete!/i })
+        studentPage.getByRole("heading", { name: /ACT Science Complete!/i })
       ).toBeVisible({ timeout: 30_000 });
       await expect(
         studentPage.getByRole("alertdialog", { name: "Submitting your exam" })
@@ -155,9 +162,9 @@ test.describe("ACT Science workflow", () => {
       await page.goto("/admin/results");
       await expect(page.getByRole("heading", { name: /Results & Analytics/i })).toBeVisible();
       await page.getByLabel("Filter by provider").selectOption("act");
-      const resultRow = page
-        .locator("tr[data-result-card]")
-        .filter({ hasText: "ACT Science Backend E2E" });
+      const resultRow = page.locator(
+        `tr[data-result-card][data-result-attempt-id="${report.attemptId}"]`
+      );
       await expect(resultRow).toBeVisible({ timeout: 30_000 });
       await expect(resultRow).toContainText("1/1");
       await resultRow.getByRole("button", { name: "View Report" }).click();

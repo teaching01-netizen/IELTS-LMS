@@ -7,6 +7,45 @@ import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
 import { StudentQuestionBlockSection } from "./StudentQuestionBlockSection";
 import { useStudentQuestionPaneComposition } from "./useStudentQuestionPaneComposition";
 
+function findQuestionScrollTarget(
+  questionContainer: HTMLDivElement | null,
+  questionId: string,
+): HTMLElement | null {
+  const targetId = `question-${questionId}`;
+  if (questionContainer) {
+    const localTarget = Array.from(
+      questionContainer.querySelectorAll<HTMLElement>("[id]"),
+    ).find((element) => element.id === targetId);
+    if (localTarget) {
+      return localTarget;
+    }
+  }
+
+  return document.getElementById(targetId);
+}
+
+function scrollQuestionTarget(
+  questionContainer: HTMLDivElement | null,
+  target: HTMLElement,
+): void {
+  if (
+    questionContainer &&
+    questionContainer.contains(target) &&
+    typeof questionContainer.scrollTo === "function"
+  ) {
+    const containerRect = questionContainer.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const nextScrollTop = Math.max(
+      0,
+      questionContainer.scrollTop + targetRect.top - containerRect.top - 16,
+    );
+    questionContainer.scrollTo({ top: nextScrollTop, behavior: "auto" });
+    return;
+  }
+
+  target.scrollIntoView({ block: "start", behavior: "auto" });
+}
+
 interface StudentQuestionPanelProps {
   blocks: QuestionBlock[];
   allQuestions: StudentQuestionDescriptor[];
@@ -17,6 +56,7 @@ interface StudentQuestionPanelProps {
     meta?: StudentAnswerMutationMeta
   ) => void;
   currentQuestionId: string | null;
+  showOnlyCurrentQuestion?: boolean | undefined;
   /** @deprecated Pane events never dispatch navigation; footer/navigator own it. */
   onNavigate: (id: string) => void;
   flags: Record<string, boolean>;
@@ -48,6 +88,7 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
   answers,
   onAnswerChange,
   currentQuestionId,
+  showOnlyCurrentQuestion = false,
   flags,
   onToggleFlag,
   tabletMode = false,
@@ -90,12 +131,12 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
     if (shouldFocusQuestionRef.current?.() === false) {
       return;
     }
-    const target = document.getElementById(`question-${currentQuestionId}`);
+    const target = findQuestionScrollTarget(questionContainerRef.current, currentQuestionId);
     if (!target) {
       return;
     }
-    target.scrollIntoView({ block: "start", behavior: "auto" });
-  }, [currentQuestionId]);
+    scrollQuestionTarget(questionContainerRef.current, target);
+  }, [currentQuestionId, questionContainerRef]);
 
   const questionsByBlockId = React.useMemo(() => {
     const map = new Map<string, StudentQuestionDescriptor[]>();
@@ -113,7 +154,18 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
   // Long exams can mount hundreds of question cards; virtualize the block list
   // so only visible blocks mount. Below the threshold the plain map preserves
   // exact scroll/anchor behavior.
-  const useVirtualizedBlocks = blocks.length > 40;
+  const visibleBlocks = React.useMemo(() => {
+    if (!showOnlyCurrentQuestion || !currentQuestionId) {
+      return blocks;
+    }
+    const currentBlocks = blocks.filter((block) =>
+      (questionsByBlockId.get(block.id) ?? []).some(
+        (question) => question.id === currentQuestionId,
+      ),
+    );
+    return currentBlocks.length > 0 ? currentBlocks : blocks;
+  }, [blocks, currentQuestionId, questionsByBlockId, showOnlyCurrentQuestion]);
+  const useVirtualizedBlocks = visibleBlocks.length > 40;
 
   const renderQuestionBlock = React.useCallback(
     (block: QuestionBlock) => {
@@ -131,6 +183,7 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
           allQuestions={allQuestions}
           answers={answers}
           activeQuestionId={activeQuestionId}
+          showOnlyCurrentQuestion={showOnlyCurrentQuestion}
           flags={flags}
           onAnswerChange={onAnswerChange}
           onToggleFlag={onToggleFlag}
@@ -170,6 +223,7 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
       questionsByBlockId,
       registerLiveAnswer,
       renderBlockInstruction,
+      showOnlyCurrentQuestion,
       tabletMode,
     ],
   );
@@ -196,13 +250,13 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
       >
         {useVirtualizedBlocks ? (
           <Virtuoso
-            data={blocks}
+            data={visibleBlocks}
             overscan={600}
             itemContent={(_index, block) => renderQuestionBlock(block)}
             computeItemKey={(_index, block) => block.id}
           />
         ) : (
-          blocks.map((block) => renderQuestionBlock(block))
+          visibleBlocks.map((block) => renderQuestionBlock(block))
         )}
       </div>
       {/* P4: there is exactly ONE navigation authority in the exam — the global

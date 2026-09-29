@@ -205,6 +205,18 @@ describe('TimingTab', () => {
     expect(numberInputFor('Duration (min)', 0).disabled).toBe(true);
   });
 
+  it('keeps disabled IELTS timing values and labels readable', () => {
+    const base = createDefaultConfig('Academic', 'Academic');
+    renderTab({ ...base, general: { ...base.general, ieltsMode: true } });
+
+    const durationLabel = screen.getAllByText('Duration (min)')[0];
+    const durationInput = numberInputFor('Duration (min)', 0);
+
+    expect(durationLabel).toHaveClass('text-gray-700');
+    expect(durationInput).toHaveClass('text-gray-900', 'disabled:text-gray-900', 'disabled:opacity-100');
+    expect(screen.getAllByText('Projected End')[0]).toHaveClass('text-gray-700');
+  });
+
   it('renders ACT science timing mode with only the science section', () => {
     renderTab(createDefaultConfig('ACT', 'ACT Science'));
     expect(screen.getByText('ACT Science Timing')).toBeInTheDocument();

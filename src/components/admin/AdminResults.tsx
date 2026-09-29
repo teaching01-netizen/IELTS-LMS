@@ -1,6 +1,15 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { BarChart2, CheckCircle2, Clock3, Download, RefreshCw, Search, Users, X } from "lucide-react";
+import {
+  BarChart2,
+  CheckCircle2,
+  Clock3,
+  Download,
+  RefreshCw,
+  Search,
+  Users,
+  X,
+} from "lucide-react";
 import { ErrorSurface } from "../ui/ErrorSurface";
 import { LoadingSurface } from "../ui/LoadingSurface";
 import {
@@ -11,9 +20,7 @@ import {
   type ResultProviderKey,
 } from "../../features/results/api/resultsQueries";
 import { downloadActScienceCsv } from "../../features/results/api/resultsExport";
-import {
-  useIeltsResultDetailQuery,
-} from "../../features/results/api/ieltsResultDetail";
+import { useIeltsResultDetailQuery } from "../../features/results/api/ieltsResultDetail";
 import { ModuleRawTable } from "../results/ModuleRawTable";
 import { QuestionRawTable } from "../results/QuestionRawTable";
 
@@ -49,7 +56,9 @@ function outcomeLabel(result: AdminResultRow): string {
     case "pending":
       return result.providerKey === "sat" ? "Completed · view answers" : "Scoring pending";
     case "scored":
-      return result.providerKey === "sat" ? "Completed · view answers" : releaseLabel(result.releaseStatus);
+      return result.providerKey === "sat"
+        ? "Completed · view answers"
+        : releaseLabel(result.releaseStatus);
     default:
       return releaseLabel(result.releaseStatus);
   }
@@ -105,7 +114,9 @@ function formatDetailValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
   if (Array.isArray(value)) {
     if (value.length === 0) return "(empty)";
-    return value.map((item) => (typeof item === "string" ? item : JSON.stringify(item))).join(" | ");
+    return value
+      .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
+      .join(" | ");
   }
   if (typeof value === "object") {
     try {
@@ -164,13 +175,17 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
           </button>
         </div>
 
-        <div className={`mt-6 grid grid-cols-2 gap-3 ${isSat ? "sm:grid-cols-2" : "sm:grid-cols-4"}`}>
-          {!isSat ? <div className="rounded-xl bg-slate-50 p-3">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
-              Score
-            </p>
-            <p className="mt-1 text-lg font-semibold text-slate-900">{scoreLabel(result)}</p>
-          </div> : null}
+        <div
+          className={`mt-6 grid grid-cols-2 gap-3 ${isSat ? "sm:grid-cols-2" : "sm:grid-cols-4"}`}
+        >
+          {!isSat ? (
+            <div className="rounded-xl bg-slate-50 p-3">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                Score
+              </p>
+              <p className="mt-1 text-lg font-semibold text-slate-900">{scoreLabel(result)}</p>
+            </div>
+          ) : null}
           <div className="rounded-xl bg-slate-50 p-3">
             <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
               Outcome
@@ -179,14 +194,16 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
               {outcomeLabel(result)}
             </p>
           </div>
-          {!isSat ? <div className="rounded-xl bg-slate-50 p-3">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
-              Release
-            </p>
-            <p className="mt-1 text-sm font-semibold capitalize text-slate-700">
-              {releaseLabel(result.releaseStatus)}
-            </p>
-          </div> : null}
+          {!isSat ? (
+            <div className="rounded-xl bg-slate-50 p-3">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                Release
+              </p>
+              <p className="mt-1 text-sm font-semibold capitalize text-slate-700">
+                {releaseLabel(result.releaseStatus)}
+              </p>
+            </div>
+          ) : null}
           <div className="rounded-xl bg-slate-50 p-3">
             <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
               Version
@@ -196,7 +213,14 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
             </p>
           </div>
         </div>
-        {isSat ? <Link to={`/sat/results/attempts/${encodeURIComponent(result.attemptId)}`} className="mt-4 inline-flex text-sm font-semibold text-blue-600 hover:text-blue-800">View saved answers</Link> : null}
+        {isSat ? (
+          <Link
+            to={`/sat/results/attempts/${encodeURIComponent(result.attemptId)}`}
+            className="mt-4 inline-flex text-sm font-semibold text-blue-600 hover:text-blue-800"
+          >
+            View saved answers
+          </Link>
+        ) : null}
 
         {result.providerKey === "ielts" ? (
           <div className="mt-6 border-y border-black/[0.06] py-4">
@@ -212,7 +236,9 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
               ))}
             </div>
           </div>
-        ) : !isSat && typeof result.percentage === "number" && Number.isFinite(result.percentage) ? (
+        ) : !isSat &&
+          typeof result.percentage === "number" &&
+          Number.isFinite(result.percentage) ? (
           <div className="mt-6 border-y border-black/[0.06] py-4">
             <h3 className="text-sm font-semibold text-slate-900">Objective performance</h3>
             <p className="mt-2 text-sm text-slate-600">
@@ -278,8 +304,14 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
                     percentage: module.percentage,
                     status: module.status,
                     badges: [
-                      ...(module.overrideCount > 0 ? [`${module.overrideCount} override${module.overrideCount === 1 ? "" : "s"}`] : []),
-                      ...(module.unansweredCount > 0 ? [`${module.unansweredCount} unanswered`] : []),
+                      ...(module.overrideCount > 0
+                        ? [
+                            `${module.overrideCount} override${module.overrideCount === 1 ? "" : "s"}`,
+                          ]
+                        : []),
+                      ...(module.unansweredCount > 0
+                        ? [`${module.unansweredCount} unanswered`]
+                        : []),
                     ],
                   }))}
                 />
@@ -308,7 +340,9 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
                 />
               )
             ) : isSat ? (
-              <p className="py-4 text-sm text-slate-500">SAT scores are not generated at completion. Use saved answers for review.</p>
+              <p className="py-4 text-sm text-slate-500">
+                SAT scores are not generated at completion. Use saved answers for review.
+              </p>
             ) : typeof result.percentage === "number" && Number.isFinite(result.percentage) ? (
               <ModuleRawTable
                 caption="SAT objective raw score"
@@ -317,8 +351,7 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
                     key: result.id,
                     label: "Objective sections",
                     sublabel: result.releaseStatus,
-                    correct:
-                      typeof result.totalScore === "number" ? result.totalScore : null,
+                    correct: typeof result.totalScore === "number" ? result.totalScore : null,
                     total: typeof result.maxScore === "number" ? result.maxScore : null,
                     percentage: result.percentage,
                     status: result.outcomeStatus,
@@ -388,7 +421,12 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
               )
             ) : (
               <p className="py-4 text-sm text-slate-500">
-                <Link to={`/sat/results/attempts/${encodeURIComponent(result.attemptId)}`} className="font-semibold text-blue-600 hover:text-blue-800">Completed · view answers</Link>
+                <Link
+                  to={`/sat/results/attempts/${encodeURIComponent(result.attemptId)}`}
+                  className="font-semibold text-blue-600 hover:text-blue-800"
+                >
+                  Completed · view answers
+                </Link>
               </p>
             )}
           </div>
@@ -605,7 +643,9 @@ export function AdminResults() {
                   <th className="px-5 py-3 font-medium">Exam</th>
                   <th className="px-5 py-3 font-medium">Provider</th>
                   <th className="px-5 py-3 font-medium">Submitted</th>
-                  <th className="px-5 py-3 text-right font-medium">{hasSatResults ? "Result" : "Score"}</th>
+                  <th className="px-5 py-3 text-right font-medium">
+                    {hasSatResults ? "Result" : "Score"}
+                  </th>
                   <th className="px-5 py-3 font-medium">Release</th>
                   <th className="px-5 py-3 text-right font-medium">Action</th>
                 </tr>
@@ -615,6 +655,7 @@ export function AdminResults() {
                   <tr
                     key={`${result.providerKey}:${result.id}`}
                     data-result-card
+                    data-result-attempt-id={result.attemptId}
                     className="hover:bg-gray-50"
                   >
                     <td className="px-5 py-4">
@@ -635,7 +676,16 @@ export function AdminResults() {
                     <td
                       className={`px-5 py-4 text-right font-semibold tabular-nums ${scoreTone(result)}`}
                     >
-                      {result.providerKey === "sat" ? <Link to={`/sat/results/attempts/${encodeURIComponent(result.attemptId)}`} className="text-blue-600 hover:text-blue-800">View answers</Link> : scoreLabel(result)}
+                      {result.providerKey === "sat" ? (
+                        <Link
+                          to={`/sat/results/attempts/${encodeURIComponent(result.attemptId)}`}
+                          className="text-blue-600 hover:text-blue-800"
+                        >
+                          View answers
+                        </Link>
+                      ) : (
+                        scoreLabel(result)
+                      )}
                     </td>
                     <td className="px-5 py-4 capitalize text-gray-600">{outcomeLabel(result)}</td>
                     <td className="px-5 py-4 text-right">

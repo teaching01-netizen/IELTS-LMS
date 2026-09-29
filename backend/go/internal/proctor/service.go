@@ -13,7 +13,7 @@
 //	warn inserts a PROCTOR_WARNING violation row and moves the attempt to warned
 //	(non-blocking: delivery_status is untouched).
 //	pause/resume are protocol-aware (V2 delivery + deadline/grace shift) with a
-//	 control_epoch+1 bump and schedule_roster/attempt_changed outbox rows.
+//	 control_epoch+1 bump and roster/attempt_changed wakeups.
 //	terminate seals ONLY via the terminalization service as
 //	 terminated/proctor_terminate/proctor — never a direct status write.
 //	complete-exam completes the runtime and auto-submits via proctor_complete.
@@ -918,18 +918,121 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 // proctor_complete. Call after CompleteExam commits; each seal is its own
 // receipt-first transaction via the injected Terminalizer.
 func (s *Service) AutoSubmitAfterComplete(ctx context.Context, actor Actor, scheduleID, attemptID string) error {
+	return s.autoSubmitAttempt(ctx, actor, scheduleID, attemptID, terminalization.ReasonProctorComplete)
+}
+
+func (s *Service) autoSubmitAttempt(ctx context.Context, actor Actor, scheduleID, attemptID, reason string) error {
 	if s.seal == nil {
 		return &apperrors.Error{Code: apperrors.CodeInternal, Message: "Terminalization service is not configured.", HTTPStatus: 500}
 	}
 	actorID := actor.ID
-	proj, _ := json.Marshal(map[string]any{"autoSubmission": true, "completionReason": terminalization.ReasonProctorComplete, "proctorStatus": "terminated"})
+	proj, _ := json.Marshal(map[string]any{"autoSubmission": true, "completionReason": reason, "proctorStatus": "terminated"})
 	_, err := s.seal.Terminalize(ctx, terminalization.SealCommand{
 		AttemptID: attemptID, ScheduleID: scheduleID,
-		Outcome: terminalization.OutcomeSubmitted, Reason: terminalization.ReasonProctorComplete,
+		Outcome: terminalization.OutcomeSubmitted, Reason: reason,
 		ActorKind: terminalization.ActorProctor, ActorID: &actorID,
 		RequestID: uuid.NewString(), FinalSubmission: proj,
 	})
 	return err
+}
+
+// AutoSubmitACTAfterComplete is a provider-scoped compatibility helper that
+// drains writable ACT attempts synchronously after the cohort state commits.
+// HTTP completion paths use AutoSubmitScheduleAfterComplete so IELTS and ACT
+// both become visible as submitted without waiting for the worker hot cycle.
+func (s *Service) AutoSubmitACTAfterComplete(ctx context.Context, actor Actor, scheduleID string) error {
+	if s == nil || s.seal == nil {
+		return nil
+	}
+	var attemptIDs []string
+	if err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		rows, err := q.QueryContext(ctx, `
+			SELECT a.id
+			FROM student_attempts a
+			JOIN exam_schedules schedule ON schedule.id = a.schedule_id
+			JOIN exam_entities exam ON exam.id = a.exam_id
+			WHERE a.schedule_id = ?
+			  AND (schedule.provider_key = 'act' OR exam.provider_key = 'act' OR UPPER(COALESCE(exam.exam_type, '')) = 'ACT')
+			  AND a.submitted_at IS NULL
+			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			  AND COALESCE(a.proctor_status, 'active') <> 'terminated'
+			ORDER BY a.id ASC`, scheduleID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var attemptID string
+			if err := rows.Scan(&attemptID); err != nil {
+				return err
+			}
+			attemptIDs = append(attemptIDs, attemptID)
+		}
+		return rows.Err()
+	}); err != nil {
+		return err
+	}
+	for _, attemptID := range attemptIDs {
+		if err := s.AutoSubmitAfterComplete(ctx, actor, scheduleID, attemptID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AutoSubmitScheduleAfterComplete drains all writable attempts synchronously
+// after the cohort state has committed. The durable outbox remains the retry
+// path, but the browser can observe a completed result immediately for both
+// IELTS and ACT instead of waiting for the worker's next hot cycle.
+func (s *Service) AutoSubmitScheduleAfterComplete(ctx context.Context, actor Actor, scheduleID string) error {
+	return s.autoSubmitSchedule(ctx, actor, scheduleID, terminalization.ReasonProctorComplete)
+}
+
+// AutoSubmitScheduleAfterEndSection seals writable attempts with the same
+// reason as the durable auto-submit event emitted when EndSectionNow ends the
+// final section. The synchronous path and worker path must agree so the
+// receipt-first race cannot let proctor_complete overwrite proctor_end.
+func (s *Service) AutoSubmitScheduleAfterEndSection(ctx context.Context, actor Actor, scheduleID string) error {
+	return s.autoSubmitSchedule(ctx, actor, scheduleID, terminalization.ReasonProctorEnd)
+}
+
+func (s *Service) autoSubmitSchedule(ctx context.Context, actor Actor, scheduleID, reason string) error {
+	if s == nil || s.seal == nil {
+		return nil
+	}
+	var attemptIDs []string
+	if err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		rows, err := q.QueryContext(ctx, `
+			SELECT a.id
+			FROM student_attempts a
+			JOIN exam_schedules schedule ON schedule.id = a.schedule_id
+			WHERE a.schedule_id = ?
+			  AND schedule.status = 'completed'
+			  AND a.submitted_at IS NULL
+			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			  AND COALESCE(a.proctor_status, 'active') <> 'terminated'
+			ORDER BY a.id ASC`, scheduleID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var attemptID string
+			if err := rows.Scan(&attemptID); err != nil {
+				return err
+			}
+			attemptIDs = append(attemptIDs, attemptID)
+		}
+		return rows.Err()
+	}); err != nil {
+		return err
+	}
+	for _, attemptID := range attemptIDs {
+		if err := s.autoSubmitAttempt(ctx, actor, scheduleID, attemptID, reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RecordPresence upserts proctor presence (join/heartbeat/leave). The
@@ -1058,14 +1161,18 @@ func (s *Service) requireWriterRole(actor Actor) error {
 	return nil
 }
 
-// emitRoster enqueues schedule_roster/roster_changed + schedule_roster/attempt_changed.
+// emitRoster enqueues a schedule roster refresh and, for a targeted attempt,
+// an attempt_changed wakeup on that student's own live-update channel.
 func (s *Service) emitRoster(ctx context.Context, q tx.Tx, scheduleID, event string, attemptID *string, extra map[string]any) error {
 	roster, _ := json.Marshal(rosterPayload(scheduleID, event, attemptID, extra))
 	if err := s.enqueueWakeup(ctx, q, "schedule_roster", scheduleID, 0, "roster_changed", roster); err != nil {
 		return err
 	}
 	attempt, _ := json.Marshal(rosterPayload(scheduleID, "attempt_changed", attemptID, extra))
-	return s.enqueueWakeup(ctx, q, "schedule_roster", scheduleID, 0, "attempt_changed", attempt)
+	if attemptID == nil {
+		return s.enqueueWakeup(ctx, q, "schedule_roster", scheduleID, 0, outbox.FamilyAttemptChanged, attempt)
+	}
+	return s.enqueueWakeup(ctx, q, "attempt", *attemptID, 0, outbox.FamilyAttemptChanged, attempt)
 }
 
 func rosterPayload(scheduleID, event string, attemptID *string, extra map[string]any) map[string]any {

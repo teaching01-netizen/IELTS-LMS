@@ -59,7 +59,7 @@ func sectionGateModes() []sectionGateQuerier {
 					WithArgs("sched-1").
 					WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section"}).
 						AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false))
-				sectionRow(mock, sectionStatus)
+				snapshotSectionRow(mock, sectionStatus)
 				mock.ExpectQuery("SELECT UTC_TIMESTAMP").
 					WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now().UTC()))
 			},

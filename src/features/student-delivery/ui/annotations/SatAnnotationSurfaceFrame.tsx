@@ -1,6 +1,9 @@
-import type { CSSProperties, ReactNode } from 'react';
-import type { SelectionMenuMode, SelectionMenuPlacement } from '@shared/ui/selection-v2/engine/selectionPlacement';
-import { createSatExamZoomGeometry } from '../zoom/satExamZoomGeometry';
+import type { CSSProperties, ReactNode } from "react";
+import type {
+  SelectionMenuMode,
+  SelectionMenuPlacement,
+} from "@shared/ui/selection-v2/engine/selectionPlacement";
+import { createSatExamZoomGeometry } from "../zoom/satExamZoomGeometry";
 
 /**
  * The chrome of the annotation surface, in one place for every surface that has
@@ -49,18 +52,17 @@ export const SAT_ANNOTATION_SURFACE_INSET = 8;
  * region really cannot hold the row, the body scrolls it (see
  * `SatAnnotationSurfaceBody`) rather than stacking it.
  */
-export const SAT_ANNOTATION_PILL_ROW =
-  'flex items-center gap-[var(--sat-annotation-row-gap)]';
+export const SAT_ANNOTATION_PILL_ROW = "flex items-center gap-[var(--sat-annotation-row-gap)]";
 
-const SURFACE_BASE = 'sat-ui absolute z-[80] ';
+const SURFACE_BASE = "sat-ui absolute z-[80] ";
 // The bar is a pill: the reference rounds its ends fully, and the shape is what
 // makes a row of quiet glyphs read as one object hanging off the words rather
 // than as a panel placed near them.
 const SURFACE_FLOATING =
-  'sat-annotation-surface-floating rounded-full'
-  + ' border border-[var(--sat-answer-border)] bg-[var(--sat-surface)]'
-  + ' px-[var(--sat-annotation-surface-padding-x)] py-[var(--sat-annotation-surface-padding-y)]'
-  + ' shadow-[var(--sat-shadow-floating)]';
+  "sat-annotation-surface-floating rounded-full" +
+  " border border-[var(--sat-answer-border)] bg-[var(--sat-surface)]" +
+  " px-[var(--sat-annotation-surface-padding-x)] py-[var(--sat-annotation-surface-padding-y)]" +
+  " shadow-[var(--sat-shadow-floating)]";
 
 export interface SatAnnotationSurfaceChrome {
   mode: SelectionMenuMode | null;
@@ -77,31 +79,35 @@ export interface SatAnnotationSurfaceChrome {
   className: string;
   style: CSSProperties;
 }
-
 export function satAnnotationSurfaceChrome(
   placement: SelectionMenuPlacement | null,
-  visualScale = 1,
+  visualScale = 1
 ): SatAnnotationSurfaceChrome {
   const geometry = createSatExamZoomGeometry(visualScale);
   const mode = placement?.mode ?? null;
-  const floating = mode === 'floating';
-  const hidden = mode === null || mode === 'hidden';
+  const floating = mode === "floating";
+  const hidden = mode === null || mode === "hidden";
   return {
     mode,
     floating,
     hidden,
-    bodyMaxHeight: placement && placement.maxHeight > 0
-      ? geometry.viewportToLogicalLength(placement.maxHeight)
-      : null,
+    bodyMaxHeight:
+      placement && placement.maxHeight > 0
+        ? geometry.viewportToLogicalLength(placement.maxHeight)
+        : null,
     className:
-      SURFACE_BASE
-      + SURFACE_FLOATING
+      SURFACE_BASE +
+      SURFACE_FLOATING +
       // Only a move big enough to notice settles; a nudge is applied directly, so
       // the surface never chases a selection handle.
-      + (floating && placement?.animated ? ' sat-annotation-settle' : ''),
+      (floating && placement?.animated ? " sat-annotation-settle" : ""),
     style: {
-      left: placement ? geometry.viewportToLogicalPoint({ x: placement.left, y: 0 }).x : SAT_ANNOTATION_SURFACE_INSET,
-      top: placement ? geometry.viewportToLogicalPoint({ x: 0, y: placement.top }).y : SAT_ANNOTATION_SURFACE_INSET,
+      left: placement
+        ? geometry.viewportToLogicalPoint({ x: placement.left, y: 0 }).x
+        : SAT_ANNOTATION_SURFACE_INSET,
+      top: placement
+        ? geometry.viewportToLogicalPoint({ x: 0, y: placement.top }).y
+        : SAT_ANNOTATION_SURFACE_INSET,
       // The engine owns the shape once it has measured one: it is the only thing
       // that knows how much of the visible region the surface may have. Until
       // then the capsule hugs its own row and never collapses — a hidden
@@ -111,19 +117,21 @@ export function satAnnotationSurfaceChrome(
       // width: the row inside decides how wide the pill is, the token only caps
       // it, and the cap is a ceiling the placement can always meet because it is
       // narrower than the region the placement guarantees.
-      width: placement && placement.width > 0
-        ? geometry.viewportToLogicalLength(placement.width)
-        : undefined,
-      maxWidth: 'min(var(--sat-annotation-surface-max), 100%)',
+      width:
+        placement && placement.width > 0
+          ? geometry.viewportToLogicalLength(placement.width)
+          : undefined,
+      maxWidth: "min(var(--sat-annotation-surface-max), 100%)",
       // The bound the rows scroll inside. Deliberately NOT `overflow` on this
       // node: the surface keeps its own box (and its rounded ends) visible, and
       // the body below it does the scrolling instead. A scroll container here
       // would also be forced onto both axes by a single `auto` axis, which is
       // how a two-row bar appeared in the first place.
-      maxHeight: placement && placement.maxHeight > 0
-        ? geometry.viewportToLogicalLength(placement.maxHeight)
-        : undefined,
-      visibility: hidden ? 'hidden' : 'visible',
+      maxHeight:
+        placement && placement.maxHeight > 0
+          ? geometry.viewportToLogicalLength(placement.maxHeight)
+          : undefined,
+      visibility: hidden ? "hidden" : "visible",
     },
   };
 }
@@ -156,13 +164,13 @@ export function SatAnnotationSurfaceBody({
       data-sat-annotation-surface-body="true"
       className="overflow-y-auto overscroll-contain"
       style={{
-        maxHeight: maxHeight === null
-          ? undefined
-          : `calc(${maxHeight}px - 2 * var(--sat-annotation-surface-padding-y) - 2 * var(--sat-annotation-surface-border))`,
+        maxHeight:
+          maxHeight === null
+            ? undefined
+            : `calc(${maxHeight}px - 2 * var(--sat-annotation-surface-padding-y) - 2 * var(--sat-annotation-surface-border))`,
       }}
     >
       {children}
     </div>
   );
 }
-

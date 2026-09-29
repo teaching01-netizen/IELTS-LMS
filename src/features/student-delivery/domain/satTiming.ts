@@ -3,7 +3,7 @@ import type {
   AssessmentModuleAttemptSnapshot,
   AssessmentTimingSnapshot,
 } from '../contracts/assessmentDelivery';
-import { isCohortTimingModel, isSectionKeyedCohortModel } from '../../../types/domain';
+import { isCohortTimingModel, isSatPersonalTimingModel, isSectionKeyedCohortModel } from '../../../types/domain';
 
 export function mergeAuthoritativeTiming(
   current: AssessmentTimingSnapshot | null,
@@ -93,6 +93,7 @@ export function personalModuleRemainingSeconds(
   now: number,
   clockOffsetMs = 0,
   cohortRunning = true,
+  timingModel?: string | null,
 ): number {
   if (!attempt) return 0;
   if (attempt.pausedAt || !attempt.startedAt || !cohortRunning) {
@@ -101,7 +102,17 @@ export function personalModuleRemainingSeconds(
   if (attempt.deadlineAt) {
     const deadlineMs = Date.parse(attempt.deadlineAt);
     if (Number.isFinite(deadlineMs) && Number.isFinite(clockOffsetMs)) {
-      return Math.max(0, Math.ceil((deadlineMs - (now + clockOffsetMs)) / 1_000));
+      const exactSeconds = (deadlineMs - (now + clockOffsetMs)) / 1_000;
+      const calculatedSeconds = Math.max(0, Math.ceil(exactSeconds));
+      if (!isSatPersonalTimingModel(timingModel)) return calculatedSeconds;
+      // A live event may publish startedAt before the timing snapshot advances.
+      // If that snapshot predates start, ceil could briefly display more than
+      // this module's authored grant (for example, 2:01 for a 2:00 module).
+      const grantedSeconds = Math.max(
+        0,
+        attempt.allocatedSeconds + attempt.extensionSeconds + attempt.accumulatedPausedSeconds,
+      );
+      return Math.min(grantedSeconds, calculatedSeconds);
     }
   }
   return snapshotRemainingSeconds(attempt, snapshotReceivedAt, now);

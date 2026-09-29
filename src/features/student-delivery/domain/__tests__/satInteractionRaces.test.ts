@@ -119,7 +119,7 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
     assertSatInteractionInvariants(selectingThenNavigate, rwCtx());
   });
 
-  it('SELECTING vs MODULE_TRANSITION converges: leaving R&W drops the anchor and the mode', () => {
+  it('MODULE_SCOPE_CHANGED clears the anchor and mode when a new module starts', () => {
     const captured = run(
       [
         { type: 'ANNOTATION_MODE_ENABLED' },
@@ -128,10 +128,15 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
       rwCtx(),
     );
     expect(captured.annotation.selectionToolsAnchor).not.toBeNull();
-    const normalized = normalizeSatInteractionState(captured, mathCtx());
-    expect(normalized.annotation.selectionToolsAnchor).toBeNull();
-    expect(normalized.annotation.modeEnabled).toBe(false);
-    assertSatInteractionInvariants(normalized, mathCtx());
+    const math = mathCtx();
+    const transitioned = satInteractionReducer(
+      captured,
+      { type: 'MODULE_SCOPE_CHANGED', moduleKey: math.moduleKey, questionId: math.questionId },
+      math,
+    );
+    expect(transitioned.annotation.selectionToolsAnchor).toBeNull();
+    expect(transitioned.annotation.modeEnabled).toBe(false);
+    assertSatInteractionInvariants(transitioned, math);
   });
 
   // The disarm/dismiss race: whichever arrives first, the exam ends the same way

@@ -6,7 +6,7 @@ import { SatPageError } from '../ui/SatPage';
 import { useAuthSession } from '../../../features/auth/authSession';
 import { invalidateExamList, useExamListQuery } from '../../../features/exam-authoring/api/examQueries';
 import { examAuthoringFacade } from '../../../features/exam-authoring/api/examAuthoringFacade';
-import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/application/authoringEntryIntent';
+import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/api/authoringEntryIntent';
 import type { ExamEntity } from '../../../types/domain';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { SatConfirmDialog, SatFormDialog, isSatCreationDirty } from '../ui/ConfirmDialog';

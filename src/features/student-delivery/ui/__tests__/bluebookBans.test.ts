@@ -83,12 +83,15 @@ describe("bluebook bans (Phase 0 skeleton)", () => {
   });
 
   // Phase 10 enforced (verified R32): SatPreviewControls is STAFF chrome
-  // (aria-label "SAT staff preview controls", z-150 outside the contract) —
-  // its backdrop-blur-xl is out of exam scope. Exam surfaces use the flat
-  // 72% scrim / 20% popover backdrops instead (opacity over blur, D11).
+  // (aria-label "SAT staff preview controls", z-150 outside the contract),
+  // and SatImageViewer is an intentional Quick Look-style inspection surface;
+  // their backdrop blur is outside the ordinary exam-surface contract.
   it("forbids backdrop-blur in SAT exam scope", () => {
     for (const file of sources) {
-      if (file.endsWith("ui/SatPreviewControls.tsx")) continue;
+      if (
+        file.endsWith("ui/SatPreviewControls.tsx") ||
+        file.endsWith("ui/media/SatImageViewer.tsx")
+      ) continue;
       expect(readText(file)).not.toMatch(/backdrop-blur/);
     }
   });

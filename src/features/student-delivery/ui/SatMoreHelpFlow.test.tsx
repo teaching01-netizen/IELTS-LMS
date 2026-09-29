@@ -10,6 +10,7 @@ function Harness() {
   const [helpOpen, setHelpOpen] = useState(false);
   return (
     <SatExamShell
+      sectionKey="reading-writing"
       sectionLabel="Section 1: Reading and Writing"
       directions={null}
       remainingLabel="28:33"
@@ -68,6 +69,7 @@ describe("SatMoreHelpFlow", () => {
     const onReadingPreferencesChange = vi.fn();
     render(
       <SatExamShell
+        sectionKey="reading-writing"
         sectionLabel="Section 1: Reading and Writing"
         // The section key is what makes the R&W-only rows (Line Reader, passage
         // expansion) available at all: without it the menu item is disabled, and a

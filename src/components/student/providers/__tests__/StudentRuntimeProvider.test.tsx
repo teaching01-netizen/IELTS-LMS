@@ -613,6 +613,68 @@ describe('StudentRuntimeProvider', () => {
     vi.useRealTimers();
   });
 
+  it('anchors a newly active section to its new authoritative deadline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    const firstSection = {
+      ...createRuntimeSnapshot('listening'),
+      serverNow: '2026-01-01T00:00:00.000Z',
+      currentSectionDeadlineAt: '2026-01-01T00:00:20.000Z',
+      currentSectionRemainingSeconds: 20,
+    };
+    const nextSection = {
+      ...createRuntimeSnapshot('reading'),
+      serverNow: '2026-01-01T00:00:00.000Z',
+      currentSectionDeadlineAt: '2026-01-01T00:01:00.000Z',
+      currentSectionRemainingSeconds: 60,
+    };
+
+    function DisplayProbe() {
+      const { state } = useStudentRuntime();
+      return (
+        <>
+          <span data-testid="runtime-module">{state.currentModule}</span>
+          <span data-testid="runtime-remaining">{state.displayTimeRemaining}</span>
+        </>
+      );
+    }
+
+    const { rerender } = render(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={() => undefined}
+        runtimeBacked
+        runtimeSnapshot={firstSection}
+        attemptSnapshot={{ ...buildCompletedPreCheckAttempt(), phase: 'exam' }}
+      >
+        <DisplayProbe />
+      </StudentRuntimeProvider>,
+    );
+
+    expect(screen.getByTestId('runtime-module')).toHaveTextContent('listening');
+    expect(screen.getByTestId('runtime-remaining')).toHaveTextContent('20');
+
+    await act(async () => {
+      rerender(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={nextSection}
+          attemptSnapshot={{ ...buildCompletedPreCheckAttempt(), phase: 'exam' }}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('runtime-module')).toHaveTextContent('reading');
+    expect(screen.getByTestId('runtime-remaining')).toHaveTextContent('60');
+    vi.useRealTimers();
+  });
+
   it('does not recreate the non-runtime timer interval for every tick', () => {
     vi.useFakeTimers();
     const setIntervalSpy = vi.spyOn(window, 'setInterval');

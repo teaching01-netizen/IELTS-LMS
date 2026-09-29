@@ -50,6 +50,39 @@ describe("student submission commands", () => {
     expect(order).toEqual(["commit", "durability", "flush", "submit"]);
   });
 
+  it("submits after an already-completed barrier without flushing twice", async () => {
+    const order: string[] = [];
+    const commands = createStudentSubmissionCommands({
+      store: createStore(),
+      drafts: {
+        async commitAll() {
+          order.push("commit");
+        },
+        async flushDurability() {
+          order.push("durability");
+        },
+      },
+      transport: {
+        async flushPending() {
+          order.push("flush");
+          return true;
+        },
+        async submit() {
+          order.push("submit");
+          return true;
+        },
+        async submitAfterBarrier() {
+          order.push("submit-after-barrier");
+          return true;
+        },
+      },
+    });
+
+    await expect(commands.flushBarrier()).resolves.toEqual({ kind: "ready" });
+    await expect(commands.submitAfterBarrier()).resolves.toEqual({ kind: "submitted" });
+    expect(order).toEqual(["commit", "durability", "flush", "submit-after-barrier"]);
+  });
+
   it("resolves an ambiguous submit by querying the same submission identity", async () => {
     const submit = vi
       .fn<() => Promise<boolean>>()

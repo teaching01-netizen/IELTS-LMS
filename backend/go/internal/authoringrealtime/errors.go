@@ -26,22 +26,6 @@ var AllDomainCodes = []DomainCode{
 	CodeSubscriptionForbidden,
 }
 
-// httpStatus maps each domain reason to its HTTP status.
-func (c DomainCode) httpStatus() int {
-	switch c {
-	case CodeRevisionConflict, CodeDraftReplaced, CodeDraftNotEditable:
-		return http.StatusConflict // 409: fencing / stale-draft failures
-	case CodePermissionDenied, CodeSubscriptionForbidden:
-		return http.StatusForbidden // 403: ACL failures
-	case CodeEntityDeleted:
-		return http.StatusGone // 410: tombstone (client must drop + refetch)
-	case CodeCursorTooOld:
-		return http.StatusGone // 410: replay window exceeded, take snapshot
-	default:
-		return http.StatusInternalServerError
-	}
-}
-
 // appCode maps each domain reason to the stable apperrors wire code.
 func (c DomainCode) appCode() apperrors.Code {
 	switch c {

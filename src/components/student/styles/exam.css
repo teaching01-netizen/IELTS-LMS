@@ -48,6 +48,20 @@
   color-scheme: light;
 }
 
+/* IELTS answer fields must stay readable even when the host page or browser
+ * applies a muted form-control color.  Keep this scoped to student delivery
+ * so authoring/admin controls retain their own theme. */
+.student-exam-shell :is(input[type='text'], input[type='email'], textarea) {
+  color: var(--exam-text-primary);
+  background-color: var(--exam-surface-raised);
+  caret-color: var(--exam-text-primary);
+}
+
+.student-exam-shell :is(input[type='text'], input[type='email'], textarea)::placeholder {
+  color: var(--exam-text-secondary);
+  opacity: 0.8;
+}
+
 /* Overlay portals created by the exam (selectors, sheets, dialogs) inherit
    the exam tokens even when portalled outside the shell DOM subtree. */
 .student-exam-portal {

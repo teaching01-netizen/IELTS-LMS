@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { resultsGateway } from "../infrastructure/resultsGateway";
+import type { ActScienceSkillCategory } from '../../../types';
 
 export type ResultProviderKey = "ielts" | "sat" | "act";
 export type ResultOutcomeStatus =
@@ -41,6 +42,7 @@ export interface ResultsAnalytics {
 export interface ActScienceQuestion {
   questionId: string;
   displayOrder: number;
+  skillCategory?: ActScienceSkillCategory | null;
   response: unknown;
   correctAnswer: unknown;
   /** Null verdict = unanswered or missing key. Never render null as incorrect. */
@@ -53,6 +55,7 @@ export interface ActScienceDetail {
   scheduleId: string;
   studentId: string;
   studentName: string;
+  course?: string | null;
   totalScore: number;
   maxScore: number;
   percentage: number;

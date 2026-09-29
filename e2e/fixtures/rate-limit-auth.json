@@ -2,14 +2,14 @@
   "sessionCookie": {
     "name": "session",
     "value": "rate-limit-session-fixture",
-    "domain": "localhost",
-    "path": "/"
+    "url": "http://localhost/",
+    "sameSite": "Lax"
   },
   "csrfCookie": {
     "name": "csrf",
     "value": "rate-limit-csrf-fixture",
-    "domain": "localhost",
-    "path": "/"
+    "url": "http://localhost/",
+    "sameSite": "Lax"
   },
   "bearerToken": "rate-limit-attempt-fixture"
 }

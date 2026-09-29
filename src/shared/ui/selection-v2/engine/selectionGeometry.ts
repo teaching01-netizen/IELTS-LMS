@@ -456,4 +456,3 @@ export function selectionAnchorRect(lines: readonly SelectionRect[]): SelectionR
   if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
   return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
 }
-

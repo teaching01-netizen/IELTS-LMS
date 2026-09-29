@@ -84,7 +84,10 @@ func TestSnapshotLockerReadsCurrentStateOnTheTransaction(t *testing.T) {
 					AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false))
 			mock.ExpectQuery("FROM exam_session_runtime_sections").
 				WithArgs("rt-1", "rw").
-				WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(tc.section))
+				WillReturnRows(sqlmock.NewRows([]string{
+					"status", "actual_start_at", "planned_duration_minutes",
+					"extension_minutes", "accumulated_paused_seconds", "paused_at",
+				}).AddRow(tc.section, nil, nil, nil, nil, nil))
 			mock.ExpectQuery("SELECT UTC_TIMESTAMP").
 				WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now().UTC()))
 			mock.ExpectRollback()
@@ -204,7 +207,7 @@ func lockWithSnapshotLocker(t *testing.T, sectionStatus *string) attempts.Runtim
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section"}).
 			AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false))
-	sectionRow(mock, sectionStatus)
+	snapshotSectionRow(mock, sectionStatus)
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now().UTC()))
 	mock.ExpectRollback()
 	sqlTx, err := db.Begin()
@@ -232,3 +235,15 @@ var (
 )
 
 func strptrOrNil(s string) *string { return &s }
+
+func snapshotSectionRow(mock sqlmock.Sqlmock, status *string) {
+	exp := mock.ExpectQuery("FROM exam_session_runtime_sections").WithArgs("rt-1", "rw")
+	if status == nil {
+		exp.WillReturnError(sql.ErrNoRows)
+		return
+	}
+	exp.WillReturnRows(sqlmock.NewRows([]string{
+		"status", "actual_start_at", "planned_duration_minutes",
+		"extension_minutes", "accumulated_paused_seconds", "paused_at",
+	}).AddRow(*status, nil, nil, nil, nil, nil))
+}

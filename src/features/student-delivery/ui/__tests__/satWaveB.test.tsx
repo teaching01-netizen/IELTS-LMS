@@ -22,8 +22,22 @@ function shellProps(overrides: Partial<SatExamShellProps> = {}): SatExamShellPro
     questionCount: 3,
     navigationItems: [
       { id: "q1", index: 0, number: 1, status: "answered", current: true, markedForReview: false },
-      { id: "q2", index: 1, number: 2, status: "unanswered", current: false, markedForReview: false },
-      { id: "q3", index: 2, number: 3, status: "unanswered", current: false, markedForReview: false },
+      {
+        id: "q2",
+        index: 1,
+        number: 2,
+        status: "unanswered",
+        current: false,
+        markedForReview: false,
+      },
+      {
+        id: "q3",
+        index: 2,
+        number: 3,
+        status: "unanswered",
+        current: false,
+        markedForReview: false,
+      },
     ],
     calculatorAvailable: true,
     calculatorOpen: false,
@@ -61,8 +75,8 @@ function stubMatchMedia(matches: boolean): void {
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
           dispatchEvent: vi.fn(),
-        }) satisfies MediaQueryList,
-    ),
+        }) satisfies MediaQueryList
+    )
   );
 }
 
@@ -157,9 +171,16 @@ describe("Wave B R-09 resize grip 44px + keyboard", () => {
   it("grip hit area is 44x44 with the 32px glyph kept visual-only inside", () => {
     stubMatchMedia(false);
     render(
-      <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} resizable onClose={() => undefined}>
+      <SatFloatingTool
+        title="Calculator"
+        open
+        geometryKey={null}
+        defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }}
+        resizable
+        onClose={() => undefined}
+      >
         <div>calc body</div>
-      </SatFloatingTool>,
+      </SatFloatingTool>
     );
     const grip = screen.getByRole("separator", { name: /Resize Calculator/ });
     expect(grip.className).toContain("h-11");
@@ -173,9 +194,16 @@ describe("Wave B R-09 resize grip 44px + keyboard", () => {
   it("ArrowRight grows +8px, Shift+ArrowDown grows +24px", () => {
     stubMatchMedia(false);
     const { container } = render(
-      <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 60, y: 110, w: 420, h: 520 }} resizable onClose={() => undefined}>
+      <SatFloatingTool
+        title="Calculator"
+        open
+        geometryKey={null}
+        defaultGeometry={{ x: 60, y: 110, w: 420, h: 520 }}
+        resizable
+        onClose={() => undefined}
+      >
         <div>calc body</div>
-      </SatFloatingTool>,
+      </SatFloatingTool>
     );
     const panel = container.querySelector("[data-sat-tool-window=Calculator]") as HTMLElement;
     expect(panel.style.width).toBe("420px");
@@ -222,7 +250,9 @@ describe("Wave B R-10/R-17 token swap is size-preserving", () => {
     expect(css).toContain("--sat-type-control-primary: 0.9375rem");
     expect(css).toContain("--sat-type-input: 1.125rem");
     for (const file of scoped) {
-      expect(read(file), file).toMatch(/sat-type-(metadata|control-secondary|control-primary|input)/);
+      expect(read(file), file).toMatch(
+        /sat-type-(metadata|control-secondary|control-primary|input)/
+      );
     }
   });
 

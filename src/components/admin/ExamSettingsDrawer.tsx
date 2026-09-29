@@ -669,7 +669,7 @@ function ExamSettingsDrawerComponent({
                     ['warningMax', 'Warning Max'],
                   ].map(([field, label]) => (
                     <div key={field} className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+                      <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-700">
                         {label}
                       </label>
                       <input
@@ -682,14 +682,14 @@ function ExamSettingsDrawerComponent({
                             parseInt(e.target.value),
                           )
                         }
-                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-100"
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 outline-none focus:ring-2 focus:ring-blue-100"
                       />
                     </div>
                   ))}
                 </div>
 
                 <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
-                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-gray-700">
                     <span>Color Preview</span>
                     <span>{config.standards.passageWordCount.warningMin}-{config.standards.passageWordCount.warningMax} words</span>
                   </div>

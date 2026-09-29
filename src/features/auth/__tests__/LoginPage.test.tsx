@@ -30,6 +30,33 @@ describe('LoginPage', () => {
     global.fetch = originalFetch;
   });
 
+  it('keeps entered credentials and placeholders readable on the light form surface', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      success: false,
+      error: { code: 'UNAUTHORIZED', message: 'Authentication is required.' },
+    }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    })) as typeof fetch;
+
+    render(
+      <MemoryRouter>
+        <AuthSessionProvider>
+          <LoginPage />
+        </AuthSessionProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sign in/i })).not.toBeDisabled();
+    });
+
+    expect(screen.getByLabelText(/email address/i)).toHaveClass('text-gray-900');
+    expect(screen.getByLabelText(/email address/i)).toHaveClass('placeholder:text-gray-400');
+    expect(screen.getByLabelText(/password/i)).toHaveClass('text-gray-900');
+    expect(screen.getByLabelText(/password/i)).toHaveClass('placeholder:text-gray-400');
+  });
+
   it('submits credentials to the auth API and routes admin users to the admin workspace', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

@@ -117,4 +117,31 @@ describe('gradingRepository bundle cache', () => {
     expect(refreshedSections[0]?.id).toBe('section-2');
     expect(backendGet).toHaveBeenCalledTimes(2);
   });
+
+  it('supports a fresh section read for exports after terminal projection', async () => {
+    const initialSection = {
+      id: 'section-3',
+      submissionId: 'sub-3',
+      section: 'listening',
+      answers: { type: 'listening', answers: {} },
+      gradingStatus: 'needs_review',
+      submittedAt: '2026-01-01T09:00:00.000Z',
+    };
+    const projectedSection = {
+      ...initialSection,
+      answers: { type: 'listening', answers: { 'q-1': 'T' } },
+      gradingStatus: 'auto_graded',
+    };
+
+    backendGet.mockResolvedValueOnce([initialSection]).mockResolvedValueOnce([projectedSection]);
+
+    const cachedSections = await gradingRepository.getSectionSubmissionsBySubmissionId('sub-3');
+    const freshSections = await gradingRepository.getSectionSubmissionsBySubmissionId('sub-3', {
+      fresh: true,
+    });
+
+    expect(cachedSections[0]?.answers).toEqual(initialSection.answers);
+    expect(freshSections[0]?.answers).toEqual(projectedSection.answers);
+    expect(backendGet).toHaveBeenCalledTimes(2);
+  });
 });

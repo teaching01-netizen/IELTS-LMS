@@ -20,11 +20,13 @@ interface UseStudentSubmissionOrchestrationOptions {
   attemptId: string | null;
   runtimeCompletionVerified: boolean;
   shouldRenderPostExam: boolean;
+  isFinalModule?: (module: ModuleType) => boolean;
   reconcileLiveAnswerCacheNow: () => void;
   commitWritingDraft: () => void;
   attemptActions: {
     flushPending: () => Promise<boolean>;
     submitAttempt: () => Promise<boolean>;
+    submitAttemptAfterBarrier?: () => Promise<boolean>;
   };
   submissionCommands?: StudentSubmissionCommands;
   runtimeActions: {
@@ -68,6 +70,7 @@ export function useStudentSubmissionOrchestration({
   attemptId,
   runtimeCompletionVerified,
   shouldRenderPostExam,
+  isFinalModule,
   reconcileLiveAnswerCacheNow,
   commitWritingDraft,
   attemptActions,
@@ -153,9 +156,25 @@ export function useStudentSubmissionOrchestration({
             if (cancellationSignal.aborted) {
               return;
             }
-            runtimeActions.submitModule();
-            setModuleSubmitStatus("idle");
-            return;
+            const shouldFinalizeAttempt =
+              fingerprint.startsWith("runtime:") &&
+              runtimeState.runtimeBacked &&
+              isFinalModule?.(moduleKey) === true;
+            if (shouldFinalizeAttempt) {
+              const submitted = submissionCommands
+                ? (await submissionCommands.submitAfterBarrier()).kind === "submitted"
+                : await (
+                    attemptActions.submitAttemptAfterBarrier?.() ?? attemptActions.submitAttempt()
+                  );
+              if (submitted) {
+                setModuleSubmitStatus("idle");
+                return;
+              }
+            } else {
+              runtimeActions.submitModule();
+              setModuleSubmitStatus("idle");
+              return;
+            }
           }
 
           if (attemptIndex >= STUDENT_MODULE_SUBMIT_MAX_RETRIES) {
@@ -202,6 +221,8 @@ export function useStudentSubmissionOrchestration({
       reconcileLiveAnswerCacheNow,
       runtimeActions,
       runtimeStateRef,
+      runtimeState.runtimeBacked,
+      isFinalModule,
       submissionCommands,
     ]
   );

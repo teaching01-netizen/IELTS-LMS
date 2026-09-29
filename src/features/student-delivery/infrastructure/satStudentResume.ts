@@ -1,21 +1,24 @@
-import { backendGet, hasBackendStatusCode } from '@services/backendBridge';
+import { backendGet, hasBackendStatusCode } from "@services/backendBridge";
 import {
   mapBackendStudentAttempt,
   refreshAttemptCredentialForAttempt,
   ensureClientSessionIdForStudentKey,
   createStudentClientSessionId,
   satWriterStudentKey,
-} from '@services/studentAttemptRepository';
-import { storeAttemptCredential } from '@services/attemptCredentialAdapter';
-import { studentSessionTransport } from '@services/studentSessionTransport';
-import type { StudentAttempt } from '../../../types/studentAttempt';
-import { getVerifiedTerminalState } from '../../student/domain/exam-session/terminalState';
+} from "@services/studentAttemptRepository";
+import { storeAttemptCredential } from "@services/attemptCredentialAdapter";
+import { studentSessionTransport } from "@services/studentSessionTransport";
+import type { StudentAttempt } from "../../../types/studentAttempt";
+import { getVerifiedTerminalState } from "../../student/api/verifiedTerminalState";
 import {
   clearSatResumeLocator,
   matchesSatResumeLocator,
   type SatResumeLocatorV1,
-} from '../infrastructure/satResumeLocator';
-import { emitStudentObservabilityMetric, withStudentObservabilityDimensions } from '../../../utils/studentObservability';
+} from "./satResumeLocator";
+import {
+  emitStudentObservabilityMetric,
+  withStudentObservabilityDimensions,
+} from "../../../utils/studentObservability";
 
 interface ResumeSessionResponse {
   attempt?: unknown | null;
@@ -25,25 +28,34 @@ interface ResumeSessionResponse {
 }
 
 export type SatResumeResult =
-  | { kind: 'resumed'; attempt: StudentAttempt; route: string; terminal: boolean }
-  | { kind: 'no-attempt' }
-  | { kind: 'unauthenticated' }
-  | { kind: 'transient-error'; reason: 'network' | 'server_error' };
+  | { kind: "resumed"; attempt: StudentAttempt; route: string; terminal: boolean }
+  | { kind: "no-attempt" }
+  | { kind: "unauthenticated" }
+  | { kind: "transient-error"; reason: "network" | "server_error" };
 
 function statusCode(error: unknown): number | null {
-  if (typeof error !== 'object' || error === null) return null;
+  if (typeof error !== "object" || error === null) return null;
   const record = error as Record<string, unknown>;
-  const value = record['statusCode'] ?? record['status'];
-  return typeof value === 'number' ? value : null;
+  const value = record["statusCode"] ?? record["status"];
+  return typeof value === "number" ? value : null;
 }
 
-function emitResumeMetric(name: string, scheduleId: string, reason: string, attemptId?: string, latencyMs?: number): void {
-  emitStudentObservabilityMetric(name, withStudentObservabilityDimensions({
-    scheduleId,
-    attemptId: attemptId ?? null,
-    reason,
-    ...(latencyMs === undefined ? {} : { latencyMs }),
-  }));
+function emitResumeMetric(
+  name: string,
+  scheduleId: string,
+  reason: string,
+  attemptId?: string,
+  latencyMs?: number
+): void {
+  emitStudentObservabilityMetric(
+    name,
+    withStudentObservabilityDimensions({
+      scheduleId,
+      attemptId: attemptId ?? null,
+      reason,
+      ...(latencyMs === undefined ? {} : { latencyMs }),
+    })
+  );
 }
 
 /**
@@ -57,46 +69,55 @@ export async function resumeSatStudentSession(input: {
 }): Promise<SatResumeResult> {
   const { scheduleId, locator } = input;
   const startedAt = Date.now();
-  emitResumeMetric('student_resume_probe_total', scheduleId, 'probe');
+  emitResumeMetric("student_resume_probe_total", scheduleId, "probe");
 
   // The locator candidate is only a hint for finding this browser's existing
   // writer identity. The server still resolves the attempt from the cookie.
   // When there is no usable hint, send a fresh browser-owned id and bind it to
   // the canonical candidate only after the server returns that identity.
   const hintedCandidateId =
-    locator?.providerKey === 'sat' && locator.scheduleId === scheduleId
+    locator?.providerKey === "sat" && locator.scheduleId === scheduleId
       ? locator.candidateId
       : null;
   const requestedWriterId = hintedCandidateId
     ? ensureClientSessionIdForStudentKey(
         scheduleId,
-        satWriterStudentKey(scheduleId, hintedCandidateId),
+        satWriterStudentKey(scheduleId, hintedCandidateId)
       )
     : createStudentClientSessionId();
 
   try {
     const session = await backendGet<ResumeSessionResponse>(
       studentSessionTransport.paths.resume(scheduleId, requestedWriterId),
-      { retries: 0, timeout: 8_000 },
+      { retries: 0, timeout: 8_000 }
     );
-    if (!session.attempt || typeof session.attempt !== 'object') {
+    if (!session.attempt || typeof session.attempt !== "object") {
       if (matchesSatResumeLocator(locator, { scheduleId })) clearSatResumeLocator();
-      emitResumeMetric('student_resume_failure_total', scheduleId, 'no_active_attempt', undefined, Date.now() - startedAt);
-      return { kind: 'no-attempt' };
+      emitResumeMetric(
+        "student_resume_failure_total",
+        scheduleId,
+        "no_active_attempt",
+        undefined,
+        Date.now() - startedAt
+      );
+      return { kind: "no-attempt" };
     }
 
-    const attempt = mapBackendStudentAttempt(session.attempt as Parameters<typeof mapBackendStudentAttempt>[0]);
-    const terminal = getVerifiedTerminalState({
-      attempt,
-      runtime: session.runtime?.status ? { status: session.runtime.status } : null,
-    }) !== 'not_terminal';
+    const attempt = mapBackendStudentAttempt(
+      session.attempt as Parameters<typeof mapBackendStudentAttempt>[0]
+    );
+    const terminal =
+      getVerifiedTerminalState({
+        attempt,
+        runtime: session.runtime?.status ? { status: session.runtime.status } : null,
+      }) !== "not_terminal";
     const writerKey = satWriterStudentKey(scheduleId, attempt.candidateId);
     const serverWriterId = session.clientSessionId?.trim();
     const canReuseRequestedWriter = hintedCandidateId === attempt.candidateId || !hintedCandidateId;
     const canonicalWriterId = ensureClientSessionIdForStudentKey(
       scheduleId,
       writerKey,
-      canReuseRequestedWriter ? requestedWriterId : null,
+      canReuseRequestedWriter ? requestedWriterId : null
     );
     const credentialBelongsToWriter = serverWriterId === canonicalWriterId;
 
@@ -113,15 +134,21 @@ export async function resumeSatStudentSession(input: {
 
     if (terminal) clearSatResumeLocator();
     emitResumeMetric(
-      'student_resume_success_total',
+      "student_resume_success_total",
       scheduleId,
-      terminal ? 'terminal' : 'resumed',
+      terminal ? "terminal" : "resumed",
       attempt.id,
-      Date.now() - startedAt,
+      Date.now() - startedAt
     );
-    emitResumeMetric('student_resume_recovery_ms', scheduleId, terminal ? 'terminal' : 'resumed', attempt.id, Date.now() - startedAt);
+    emitResumeMetric(
+      "student_resume_recovery_ms",
+      scheduleId,
+      terminal ? "terminal" : "resumed",
+      attempt.id,
+      Date.now() - startedAt
+    );
     return {
-      kind: 'resumed',
+      kind: "resumed",
       attempt,
       route: `/student/${encodeURIComponent(scheduleId)}/${encodeURIComponent(attempt.candidateId)}`,
       terminal,
@@ -129,17 +156,35 @@ export async function resumeSatStudentSession(input: {
   } catch (error) {
     if (hasBackendStatusCode(error, 401) || hasBackendStatusCode(error, 403)) {
       if (matchesSatResumeLocator(locator, { scheduleId })) clearSatResumeLocator();
-      emitResumeMetric('student_resume_failure_total', scheduleId, 'unauthenticated', undefined, Date.now() - startedAt);
-      return { kind: 'unauthenticated' };
+      emitResumeMetric(
+        "student_resume_failure_total",
+        scheduleId,
+        "unauthenticated",
+        undefined,
+        Date.now() - startedAt
+      );
+      return { kind: "unauthenticated" };
     }
     if (hasBackendStatusCode(error, 404)) {
       if (matchesSatResumeLocator(locator, { scheduleId })) clearSatResumeLocator();
-      emitResumeMetric('student_resume_failure_total', scheduleId, 'no_active_attempt', undefined, Date.now() - startedAt);
-      return { kind: 'no-attempt' };
+      emitResumeMetric(
+        "student_resume_failure_total",
+        scheduleId,
+        "no_active_attempt",
+        undefined,
+        Date.now() - startedAt
+      );
+      return { kind: "no-attempt" };
     }
     const code = statusCode(error);
-    const reason = (code !== null && code >= 500) || code === 429 ? 'server_error' : 'network';
-    emitResumeMetric('student_resume_failure_total', scheduleId, reason, undefined, Date.now() - startedAt);
-    return { kind: 'transient-error', reason };
+    const reason = (code !== null && code >= 500) || code === 429 ? "server_error" : "network";
+    emitResumeMetric(
+      "student_resume_failure_total",
+      scheduleId,
+      reason,
+      undefined,
+      Date.now() - startedAt
+    );
+    return { kind: "transient-error", reason };
   }
 }

@@ -25,6 +25,19 @@ import (
 // SnapshotTTL bounds snapshot staleness (plan B2 default 1s).
 const SnapshotTTL = time.Second
 
+func snapshotSectionDeadline(actualStart time.Time, planned, extension, pausedAccum int) time.Time {
+	if planned < 0 {
+		planned = 0
+	}
+	if extension < 0 {
+		extension = 0
+	}
+	if pausedAccum < 0 {
+		pausedAccum = 0
+	}
+	return actualStart.Add(time.Duration((planned+extension)*60+pausedAccum) * time.Second)
+}
+
 // Snapshot is one schedule's runtime view: the fields below are what the V2
 // write gate needs, and they are only trustworthy when the read happened on the
 // writing transaction (LoadSnapshot is called that way by both gate modes). The
@@ -35,11 +48,17 @@ type Snapshot struct {
 	ActiveSectionKey *string
 	Revision         int64
 	TimingModel      string
+	// SectionDeadlineAt lets the student poll contract enter its fast lane
+	// before an automatic section boundary. Without this, a 25-second steady
+	// poll can discover a correctly-timed transition only after the next
+	// section has already lost visible time in the browser.
+	SectionDeadlineAt *time.Time
+	SectionLive       bool
+	SectionPaused     bool
+	SectionStarted    bool
 	// SectionLive/Paused/Started come from SectionLiveness and are consumed by
-	// attempts.ensureWritable: only a live section is writable.
-	SectionLive    bool
-	SectionPaused  bool
-	SectionStarted bool
+	// attempts.ensureWritable: only a live section is writable. SectionDeadlineAt
+	// is a read-only fast-lane hint for student polling.
 	// WaitingForNextSection mirrors exam_session_runtimes.waiting_for_next_section:
 	// the active section is complete and the next has not gone live. Writes are
 	// refused for the whole window (same 422 family as the liveness gate).
@@ -188,9 +207,23 @@ func LoadSnapshot(ctx context.Context, q SnapshotQuerier, scheduleID string, now
 	if active.Valid && active.String != "" {
 		snap.ActiveSectionKey = strptr(active.String)
 		var secStatus sql.NullString
+		var actualStart sql.NullTime
+		var plannedMinutes sql.NullInt64
+		var extensionMinutes sql.NullInt64
+		var accumulatedPausedSeconds sql.NullInt64
+		var pausedAt sql.NullTime
+		// Read the section timing fields without taking a lock. The poll path is
+		// committed-read only; write gates remain authoritative.
 		serr := q.QueryRowContext(ctx,
-			`SELECT status FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ?`,
-			id, active.String).Scan(&secStatus)
+			`SELECT status, actual_start_at, planned_duration_minutes, extension_minutes, accumulated_paused_seconds, paused_at FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ?`,
+			id, active.String).Scan(
+			&secStatus,
+			&actualStart,
+			&plannedMinutes,
+			&extensionMinutes,
+			&accumulatedPausedSeconds,
+			&pausedAt,
+		)
 		if serr != nil && serr != sql.ErrNoRows {
 			return Snapshot{}, serr
 		}
@@ -199,6 +232,23 @@ func LoadSnapshot(ctx context.Context, q SnapshotQuerier, scheduleID string, now
 			// locked section, so the gate refuses a write on a section that has
 			// not begun instead of reading the row's mere existence as a start.
 			snap.SectionStarted, snap.SectionLive, snap.SectionPaused = SectionLiveness(secStatus.String)
+			if snap.SectionLive && actualStart.Valid && plannedMinutes.Valid && !pausedAt.Valid {
+				extension := int64(0)
+				if extensionMinutes.Valid {
+					extension = extensionMinutes.Int64
+				}
+				pausedSeconds := int64(0)
+				if accumulatedPausedSeconds.Valid {
+					pausedSeconds = accumulatedPausedSeconds.Int64
+				}
+				deadline := snapshotSectionDeadline(
+					actualStart.Time,
+					int(plannedMinutes.Int64),
+					int(extension),
+					int(pausedSeconds),
+				)
+				snap.SectionDeadlineAt = &deadline
+			}
 		}
 	} else {
 		snap.ActiveSectionKey = strptr("*")

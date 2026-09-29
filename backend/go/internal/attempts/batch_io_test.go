@@ -474,7 +474,7 @@ func reqHashOf(c ResponseCommand) string {
 // runSave drives one expectation through one strategy and returns the result,
 // the error and the number of statements the stager expected. The threshold
 // forces the strategy: neither value is a deployment knob.
-func runSave(t *testing.T, exp saveExpectation, stage func(mock sqlmock.Sqlmock, exp saveExpectation) int, threshold int) (SaveResult, error, int) {
+func runSave(t *testing.T, exp saveExpectation, stage func(mock sqlmock.Sqlmock, exp saveExpectation) int, threshold int) (SaveResult, int, error) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -493,7 +493,7 @@ func runSave(t *testing.T, exp saveExpectation, stage func(mock sqlmock.Sqlmock,
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
-	return res, saveErr, staged
+	return res, staged, saveErr
 }
 
 func plansFor(n int) []cmdPlan { return make([]cmdPlan, n) }
@@ -517,7 +517,7 @@ const (
 func TestBulkBatchStatementCountIsConstant(t *testing.T) {
 	run := func(n int) (SaveResult, int) {
 		exp := saveExpectation{commands: bulkCommands(n), plans: plansFor(n), attempt: attemptRows, rowFirst: true}
-		res, saveErr, staged := runSave(t, exp, stageBatch, batchStrategyThreshold)
+		res, staged, saveErr := runSave(t, exp, stageBatch, batchStrategyThreshold)
 		if saveErr != nil {
 			t.Fatalf("bulk batch of %d must commit, got %v", n, saveErr)
 		}
@@ -539,7 +539,7 @@ func TestBulkBatchStatementCountIsConstant(t *testing.T) {
 	// be held for. If the batch ever regresses to per-command work this ratio
 	// collapses and the test fails with the two counts.
 	exp := saveExpectation{commands: bulkCommands(large), plans: plansFor(large), attempt: attemptRows, rowFirst: true}
-	_, eachErr, eachStaged := runSave(t, exp, stageSingle, perCommandStrategyThreshold)
+	_, eachStaged, eachErr := runSave(t, exp, stageSingle, perCommandStrategyThreshold)
 	if eachErr != nil {
 		t.Fatalf("max-size batch of %d must commit per-command too, got %v", large, eachErr)
 	}
@@ -581,7 +581,7 @@ func TestBulkBatchReplayIssuesConstantStatements(t *testing.T) {
 			plans[i].dup = &storedLedger{reqHash: reqHashOf(c), hash: fmt.Sprintf("hash-%d", i), revision: uint64(4 + i)}
 		}
 		exp := saveExpectation{commands: commands, plans: plans, attempt: attemptRows, rowFirst: true}
-		res, saveErr, staged := runSave(t, exp, stage, threshold)
+		res, staged, saveErr := runSave(t, exp, stage, threshold)
 		if saveErr != nil {
 			t.Fatalf("replay of %d must succeed, got %v", n, saveErr)
 		}
@@ -709,8 +709,8 @@ func TestBatchIOEquivalenceWithPerCommandIO(t *testing.T) {
 				batchCommands = commands
 			}
 			exp := saveExpectation{commands: batchCommands, plans: s.plans, attempt: attempt, rowFirst: s.rowFirst, unwritable: s.unwritable}
-			batchRes, batchErr, batchStaged := runSave(t, exp, stageBatch, batchStrategyThreshold)
-			eachRes, eachErr, eachStaged := runSave(t, exp, stageSingle, perCommandStrategyThreshold)
+			batchRes, batchStaged, batchErr := runSave(t, exp, stageBatch, batchStrategyThreshold)
+			eachRes, eachStaged, eachErr := runSave(t, exp, stageSingle, perCommandStrategyThreshold)
 
 			if !reflect.DeepEqual(batchErr, eachErr) {
 				t.Fatalf("error mismatch: set-based=%v per-command=%v", batchErr, eachErr)
@@ -789,7 +789,7 @@ func TestBatchIOErrorEnvelopes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			exp := saveExpectation{commands: commands, plans: tc.plans, attempt: tc.attempt, rowFirst: tc.rowFirst, unwritable: tc.unwritable}
-			_, saveErr, _ := runSave(t, exp, stageBatch, batchStrategyThreshold)
+			_, _, saveErr := runSave(t, exp, stageBatch, batchStrategyThreshold)
 			appErr, ok := apperrors.As(saveErr)
 			if !ok {
 				t.Fatalf("expected a typed error, got %v", saveErr)

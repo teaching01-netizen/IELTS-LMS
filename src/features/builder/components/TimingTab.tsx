@@ -253,7 +253,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
                     </div>
                     <div>
                       <span className="text-sm font-medium text-gray-700 block">{section.label}</span>
-                      <span className="text-[10px] text-gray-400 uppercase tracking-wider">
+                      <span className="text-[10px] text-gray-600 uppercase tracking-wider">
                         {planItem ? `Planned start offset ${planItem.startOffsetMinutes} min` : 'Projected from session start'}
                       </span>
                     </div>
@@ -264,38 +264,38 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
                       value={section.order}
                       onChange={(e) => updateSection(m, { order: parseInt(e.target.value) })}
                       disabled={isIeltsMode}
-                      className="w-14 px-2 py-1 border border-gray-200 rounded text-sm text-right outline-none focus:ring-2 focus:ring-blue-100"
+                      className="w-14 px-2 py-1 border border-gray-200 rounded text-sm text-right text-gray-900 disabled:bg-gray-100 disabled:text-gray-900 disabled:opacity-100 outline-none focus:ring-2 focus:ring-blue-100"
                     />
-                    <span className="text-xs text-gray-400 font-medium uppercase">Order</span>
+                    <span className="text-xs text-gray-700 font-medium uppercase">Order</span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Duration (min)</label>
+                    <label className="block text-[9px] font-bold text-gray-700 uppercase mb-1">Duration (min)</label>
                     <input 
                       type="number" 
                       min={1}
                       value={section.duration}
                       onChange={(e) => updateSection(m, { duration: parseInt(e.target.value) })}
                       disabled={isIeltsMode}
-                      className="w-full px-2 py-1 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-blue-100"
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-sm text-gray-900 disabled:bg-gray-100 disabled:text-gray-900 disabled:opacity-100 outline-none focus:ring-2 focus:ring-blue-100"
                     />
                   </div>
                   <div>
-                    <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Gap After (min)</label>
+                    <label className="block text-[9px] font-bold text-gray-700 uppercase mb-1">Gap After (min)</label>
                     <input 
                       type="number" 
                       min={0}
                       value={section.gapAfterMinutes ?? 0}
                       onChange={(e) => updateSection(m, { gapAfterMinutes: parseInt(e.target.value) })}
                       disabled={isIeltsMode}
-                      className="w-full px-2 py-1 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-blue-100"
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-sm text-gray-900 disabled:bg-gray-100 disabled:text-gray-900 disabled:opacity-100 outline-none focus:ring-2 focus:ring-blue-100"
                     />
                   </div>
                   <div>
-                    <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Projected End</label>
-                    <div className="w-full px-2 py-1 border border-dashed border-gray-200 rounded text-sm text-gray-500 bg-gray-50">
+                    <label className="block text-[9px] font-bold text-gray-700 uppercase mb-1">Projected End</label>
+                    <div className="w-full px-2 py-1 border border-dashed border-gray-200 rounded text-sm text-gray-700 bg-gray-50">
                       {planItem ? `${planItem.endOffsetMinutes} min` : 'Derived'}
                     </div>
                   </div>

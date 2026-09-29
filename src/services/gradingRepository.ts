@@ -248,7 +248,10 @@ export interface IGradingRepository {
   deleteSubmission(id: string): Promise<void>;
   getAllSectionSubmissions(): Promise<SectionSubmission[]>;
   getSectionSubmissionById(id: string): Promise<SectionSubmission | null>;
-  getSectionSubmissionsBySubmissionId(submissionId: string): Promise<SectionSubmission[]>;
+  getSectionSubmissionsBySubmissionId(
+    submissionId: string,
+    options?: { fresh?: boolean },
+  ): Promise<SectionSubmission[]>;
   saveSectionSubmission(section: SectionSubmission): Promise<void>;
   deleteSectionSubmission(id: string): Promise<void>;
   getAllWritingSubmissions(): Promise<WritingTaskSubmission[]>;
@@ -508,14 +511,19 @@ class BackendGradingRepository implements IGradingRepository {
 
   private async getSubmissionSectionsPayload(
     submissionId: string,
+    options?: { fresh?: boolean },
   ): Promise<BackendSectionSubmission[]> {
-    const cached = this.submissionSectionsCache.get(submissionId);
-    if (cached) {
-      return await cached;
+    if (!options?.fresh) {
+      const cached = this.submissionSectionsCache.get(submissionId);
+      if (cached) {
+        return await cached;
+      }
     }
 
     const request = backendGet<BackendSectionSubmission[]>(`/v1/grading/submissions/${submissionId}/sections`);
-    this.submissionSectionsCache.set(submissionId, request);
+    if (!options?.fresh) {
+      this.submissionSectionsCache.set(submissionId, request);
+    }
 
     try {
       return await request;
@@ -686,8 +694,11 @@ class BackendGradingRepository implements IGradingRepository {
     return (await this.getAllSectionSubmissions()).find((section) => section.id === id) ?? null;
   }
 
-  async getSectionSubmissionsBySubmissionId(submissionId: string): Promise<SectionSubmission[]> {
-    const sections = await this.getSubmissionSectionsPayload(submissionId);
+  async getSectionSubmissionsBySubmissionId(
+    submissionId: string,
+    options?: { fresh?: boolean },
+  ): Promise<SectionSubmission[]> {
+    const sections = await this.getSubmissionSectionsPayload(submissionId, options);
     return (sections ?? []).map((section) => this.mapSection(section));
   }
 

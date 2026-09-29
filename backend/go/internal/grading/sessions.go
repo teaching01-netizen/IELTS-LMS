@@ -127,7 +127,7 @@ type GradingSessionDetail struct {
 	Pagination  *GradingSessionPagination `json:"pagination,omitempty"`
 }
 
-// GetSubmission returns the complete IELTS submission read model used by the
+// GetSubmission returns the complete IELTS/ACT submission read model used by the
 // student review workspace. Keeping this query beside the session detail query
 // prevents the single-submission path from drifting into a smaller, legacy
 // payload.
@@ -137,7 +137,7 @@ func (s *Service) GetSubmission(ctx context.Context, submissionID string) (Gradi
 		"JSON_UNQUOTE(JSON_EXTRACT(r.metadata, '$.ieltsCourse')) " +
 		"FROM student_submissions s LEFT JOIN schedule_registrations r " +
 		"ON r.schedule_id = s.schedule_id AND r.student_id = s.student_id " +
-		"WHERE s.id = ? AND s.provider_key = 'ielts'"
+		"WHERE s.id = ? AND s.provider_key IN ('ielts','act')"
 	submission, err := scanGradingSubmission(s.db.QueryRowContext(ctx, query, submissionID))
 	if err == sql.ErrNoRows {
 		return GradingSubmission{}, notFoundError("Submission not found.")
@@ -192,13 +192,13 @@ type gradingSessionWhere struct {
 }
 
 // sessionListWhere builds the shared WHERE fragment for the session list:
-// e.provider_key='ielts' + preview-runtime cohort exclusion + optional
+// e.provider_key IN ('ielts','act') + preview-runtime cohort exclusion + optional
 // LIKE search on exam_title/cohort_name + grader IN-list. Empty grader
 // allow-lists (and graders with neither allow-list nor schedule scope)
 // collapse to WHERE 1=0 so no rows leak.
 func sessionListWhere(role string, scheduleScope []string, allowed []string, search string) gradingSessionWhere {
 	exclusion := "grading_sessions.cohort_name NOT LIKE '" + previewRuntimeCohortPrefix + "%'"
-	where := "e.provider_key = 'ielts' AND " + exclusion
+	where := "e.provider_key IN ('ielts','act') AND " + exclusion
 	var args []any
 	if strings.TrimSpace(search) != "" {
 		where += " AND (grading_sessions.exam_title LIKE ? OR grading_sessions.cohort_name LIKE ?)"
@@ -215,7 +215,7 @@ func sessionListWhere(role string, scheduleScope []string, allowed []string, sea
 		sorted := append([]string(nil), allowed...)
 		sort.Strings(sorted)
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(sorted)), ",")
-		where = "e.provider_key = 'ielts' AND grading_sessions.schedule_id IN (" + placeholders + ") AND " + exclusion
+		where = "e.provider_key IN ('ielts','act') AND grading_sessions.schedule_id IN (" + placeholders + ") AND " + exclusion
 		if strings.TrimSpace(search) != "" {
 			where += " AND (grading_sessions.exam_title LIKE ? OR grading_sessions.cohort_name LIKE ?)"
 		}
@@ -228,7 +228,7 @@ func sessionListWhere(role string, scheduleScope []string, allowed []string, sea
 	}
 	if len(scheduleScope) == 1 {
 		return gradingSessionWhere{
-			clause: "e.provider_key = 'ielts' AND grading_sessions.schedule_id = ? AND " + exclusion + searchSuffix(search),
+			clause: "e.provider_key IN ('ielts','act') AND grading_sessions.schedule_id = ? AND " + exclusion + searchSuffix(search),
 			args:   append([]any{scheduleScope[0]}, args...),
 		}
 	}
@@ -432,7 +432,7 @@ func (s *Service) ListSessionsPage(ctx context.Context, role string, allowedSche
 }
 
 // GetSessionDetail mirrors Rust get_session_detail_page: loads the session
-// (ielts provider only), enforces grader schedule scoping on the session's
+// (IELTS/ACT provider), enforces grader schedule scoping on the session's
 // schedule_id, then returns the COUNT plus one submissions page ordered by
 // submitted_at DESC. Page floors at 1; pageSize clamps to 1..100.
 func (s *Service) GetSessionDetail(ctx context.Context, role string, allowedScheduleIDs []string, scheduleScope []string, sessionID string, page, pageSize uint64) (GradingSessionDetail, error) {
@@ -443,7 +443,7 @@ func (s *Service) GetSessionDetail(ctx context.Context, role string, allowedSche
 		scanned, scanErr := scanGradingSession(s.db.QueryRowContext(ctx,
 			"SELECT "+gradingSessionColumns+" FROM grading_sessions "+
 				"JOIN exam_entities e ON e.id = grading_sessions.exam_id "+
-				"WHERE grading_sessions.id = ? AND e.provider_key = 'ielts'", sessionID))
+				"WHERE grading_sessions.id = ? AND e.provider_key IN ('ielts','act')", sessionID))
 		session = scanned
 		return scanErr
 	}()
@@ -458,7 +458,7 @@ func (s *Service) GetSessionDetail(ctx context.Context, role string, allowedSche
 	}
 	var total int64
 	if err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM student_submissions WHERE schedule_id = ? AND provider_key = 'ielts'",
+		"SELECT COUNT(*) FROM student_submissions WHERE schedule_id = ? AND provider_key IN ('ielts','act')",
 		session.ScheduleID).Scan(&total); err != nil {
 		return GradingSessionDetail{}, err
 	}
@@ -468,7 +468,7 @@ func (s *Service) GetSessionDetail(ctx context.Context, role string, allowedSche
 		"JSON_UNQUOTE(JSON_EXTRACT(r.metadata, '$.ieltsCourse')) " +
 		"FROM student_submissions s LEFT JOIN schedule_registrations r " +
 		"ON r.schedule_id = s.schedule_id AND r.student_id = s.student_id " +
-		"WHERE s.provider_key = 'ielts' AND s.schedule_id = ? " +
+		"WHERE s.provider_key IN ('ielts','act') AND s.schedule_id = ? " +
 		"ORDER BY s.submitted_at DESC, s.id DESC LIMIT ? OFFSET ?"
 	rows, err := s.db.QueryContext(ctx, subQuery, session.ScheduleID, int64(pageSize), offset)
 	if err != nil {

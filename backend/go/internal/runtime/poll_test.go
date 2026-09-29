@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -16,7 +17,25 @@ func pollRow(rev int64, status, active string) *sqlmock.Rows {
 }
 
 func sectionRow(status string) *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"status"}).AddRow(status)
+	return sqlmock.NewRows([]string{
+		"status",
+		"actual_start_at",
+		"planned_duration_minutes",
+		"extension_minutes",
+		"accumulated_paused_seconds",
+		"paused_at",
+	}).AddRow(status, nil, nil, nil, nil, nil)
+}
+
+func timedSectionRow(status string, startedAt time.Time, plannedMinutes int64) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"status",
+		"actual_start_at",
+		"planned_duration_minutes",
+		"extension_minutes",
+		"accumulated_paused_seconds",
+		"paused_at",
+	}).AddRow(status, startedAt, plannedMinutes, int64(0), int64(0), sql.NullTime{})
 }
 
 // C3: sinceRevision == current -> notModified (handler renders 304). The
@@ -117,6 +136,41 @@ func TestPollDeltaSteadyState(t *testing.T) {
 	}
 	if view.PollAfterSecs < 20 || view.PollAfterSecs > 30 {
 		t.Fatalf("steady state must poll slowly 20-30s, got %d", view.PollAfterSecs)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A student must poll tightly near the authoritative section deadline even
+// when no proctor command invalidated the runtime cache. Otherwise an
+// automatic section transition can be committed on time but remain invisible
+// in the browser for the 25-second steady-state interval.
+func TestPollDeltaNearSectionDeadlineUsesFastLane(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := NewService(tx.NewRunner(db), nil).SetSnapshotCache(NewSnapshotCache(time.Minute))
+	now := time.Date(2026, 9, 19, 10, 0, 59, 0, time.UTC)
+	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
+		WithArgs("sched-1").
+		WillReturnRows(pollRow(10, "live", "rw"))
+	mock.ExpectQuery("FROM exam_session_runtime_sections").
+		WithArgs("rt-1", "rw").
+		WillReturnRows(timedSectionRow("live", now.Add(-59*time.Second), 1))
+
+	since := int64(9)
+	view, notModified, err := svc.PollView(context.Background(), db, "sched-1", &since, now)
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if notModified {
+		t.Fatalf("new revision must report delta")
+	}
+	if view.PollAfterSecs != PollFastLaneSecs {
+		t.Fatalf("section within fast-lane window must poll every %ds, got %d", PollFastLaneSecs, view.PollAfterSecs)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

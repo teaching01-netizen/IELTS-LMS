@@ -2,6 +2,7 @@ import type { DraftCommitPort } from '../../contracts/exam-session/DraftCommitPo
 import type { StudentExamStore } from './studentExamStoreFactory';
 import {
   runStudentSubmissionCoordinator,
+  runStudentSubmissionAfterBarrier,
   runStudentSubmissionBarrier,
   type StudentSubmissionCoordinatorResult,
   type StudentSubmissionBarrierResult,
@@ -11,6 +12,7 @@ import {
 export interface StudentSubmissionCommands {
   requestSubmit(): Promise<StudentSubmissionCoordinatorResult>;
   flushBarrier(): Promise<StudentSubmissionBarrierResult>;
+  submitAfterBarrier(): Promise<StudentSubmissionCoordinatorResult>;
 }
 
 export interface StudentSubmissionCommandContext {
@@ -25,5 +27,6 @@ export function createStudentSubmissionCommands(
   return {
     requestSubmit: () => runStudentSubmissionCoordinator(context),
     flushBarrier: () => runStudentSubmissionBarrier(context),
+    submitAfterBarrier: () => runStudentSubmissionAfterBarrier(context),
   };
 }

@@ -20,7 +20,7 @@ func NormalizeScope(scope Scope) (Scope, error) {
 	case ScopeFull, ScopeReadingWriting, ScopeMath:
 		return scope, nil
 	default:
-		return "", fmt.Errorf("Unknown SAT publish scope: %s.", scope)
+		return "", fmt.Errorf("unknown SAT publish scope: %s", scope)
 	}
 }
 
@@ -38,6 +38,6 @@ func (scope Scope) SectionKeys() ([]string, error) {
 	case ScopeMath:
 		return []string{"math"}, nil
 	default:
-		return nil, fmt.Errorf("Unknown SAT publish scope: %s.", scope)
+		return nil, fmt.Errorf("unknown SAT publish scope: %s", scope)
 	}
 }

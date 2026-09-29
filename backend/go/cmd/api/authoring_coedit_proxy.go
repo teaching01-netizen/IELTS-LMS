@@ -21,15 +21,15 @@ func coeditWebSocketProxy(app *App) http.HandlerFunc {
 		}
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	director := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		director(r)
-		// Hocuspocus accepts the socket handshake on its root listener. The
-		// public route is intentionally not part of its document identity.
-		r.URL.Path = "/"
-		r.URL.RawPath = ""
-		r.Host = target.Host
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			// Hocuspocus accepts the socket handshake on its root listener. The
+			// public route is intentionally not part of its document identity.
+			pr.Out.URL.Path = "/"
+			pr.Out.URL.RawPath = ""
+			pr.Out.Host = target.Host
+		},
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
 		http.Error(w, "Co-editing service is unavailable.", http.StatusServiceUnavailable)

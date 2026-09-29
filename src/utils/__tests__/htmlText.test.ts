@@ -40,4 +40,11 @@ describe('htmlToPlainText', () => {
     expect(htmlToPlainText('   ')).toBe('');
     expect(htmlToPlainText('<div>  </div>')).toBe('');
   });
+
+  test('treats missing content as empty text instead of throwing', () => {
+    expect(htmlToPlainText(undefined)).toBe('');
+    expect(htmlToPlainText(null)).toBe('');
+    expect(htmlToPlainTextPreserveLineBreaks(undefined)).toBe('');
+    expect(htmlToPlainTextPreserveLineBreaks(null)).toBe('');
+  });
 });

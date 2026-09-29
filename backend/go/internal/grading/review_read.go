@@ -51,7 +51,7 @@ func (s *Service) GetReviewDraft(ctx context.Context, submissionID string) (Revi
 		       d.created_at, d.updated_at, d.revision
 		FROM review_drafts d
 		JOIN student_submissions s ON s.id = d.submission_id
-		WHERE d.submission_id = ? AND s.provider_key = 'ielts'`, submissionID).Scan(
+		WHERE d.submission_id = ? AND s.provider_key IN ('ielts','act')`, submissionID).Scan(
 		&draft.ID, &draft.SubmissionID, &draft.StudentID, &draft.TeacherID, &draft.ReleaseStatus,
 		&sectionDrafts, &annotations, &drawings, &overallFeedback,
 		&studentVisibleNotes, &internalNotes, &teacherSummary, &checklist,

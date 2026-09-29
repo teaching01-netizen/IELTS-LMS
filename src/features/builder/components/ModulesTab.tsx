@@ -114,7 +114,7 @@ export function ModulesTab({ config, onChange }: ModulesTabProps) {
                   <div className="space-y-4 mt-2 pt-4 border-t border-gray-50">
                     <div className="grid grid-cols-3 gap-4">
                       <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                           {m === 'reading'
                             ? 'Passage Count'
                             : m === 'listening'
@@ -153,7 +153,7 @@ export function ModulesTab({ config, onChange }: ModulesTabProps) {
                               updateSection(m, { parts: newParts });
                             }
                           }}
-                          className={`w-full px-2 py-1 border border-gray-100 rounded text-xs outline-none ${m === 'writing' ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : ''}`}
+                          className={`w-full px-2 py-1 border border-slate-300 rounded text-xs text-slate-800 bg-white outline-none ${m === 'writing' ? 'bg-gray-50 text-slate-400 cursor-not-allowed' : ''}`}
                         />
                         {m === 'writing' && (
                           <button
@@ -166,29 +166,29 @@ export function ModulesTab({ config, onChange }: ModulesTabProps) {
                         )}
                       </div>
                       <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Order</label>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">Order</label>
                         <input 
                           type="number" 
                           value={section.order}
                           onChange={(e) => updateSection(m, { order: parseInt(e.target.value) })}
-                          className="w-full px-2 py-1 border border-gray-100 rounded text-xs outline-none"
+                          className="w-full px-2 py-1 border border-slate-300 rounded text-xs text-slate-800 bg-white outline-none"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Gap After (min)</label>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">Gap After (min)</label>
                         <input 
                           type="number" 
                           min={0}
                           value={section.gapAfterMinutes ?? 0}
                           onChange={(e) => updateSection(m, { gapAfterMinutes: parseInt(e.target.value) })}
-                          className="w-full px-2 py-1 border border-gray-100 rounded text-xs outline-none"
+                          className="w-full px-2 py-1 border border-slate-300 rounded text-xs text-slate-800 bg-white outline-none"
                         />
                       </div>
                     </div>
 
                     {(m === 'reading' || m === 'listening') && (
                       <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Allowed Question Types</label>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Allowed Question Types</label>
                         <div className="flex flex-wrap gap-2">
                           {ALL_QUESTION_TYPES.map(type => (
                             <button
@@ -197,7 +197,7 @@ export function ModulesTab({ config, onChange }: ModulesTabProps) {
                               className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-all ${
                                 section.allowedQuestionTypes.includes(type)
                                   ? 'bg-blue-50 border-blue-200 text-blue-700'
-                                  : 'bg-white border-gray-100 text-gray-400 grayscale'
+                                  : 'bg-white border-gray-200 text-slate-500 grayscale'
                               }`}
                             >
                               {type}

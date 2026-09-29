@@ -3,6 +3,7 @@ package grading
 import (
 	"context"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +48,13 @@ func TestGradingListSessionsClampsLimit(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGradingSessionListIncludesACTProvider(t *testing.T) {
+	where := sessionListWhere(auth.RoleAdmin, nil, nil, "")
+	if !strings.Contains(where.clause, "e.provider_key IN ('ielts','act')") {
+		t.Fatalf("grading queue provider scope = %q, want IELTS and ACT", where.clause)
 	}
 }
 

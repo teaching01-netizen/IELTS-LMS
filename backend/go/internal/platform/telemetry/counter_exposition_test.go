@@ -57,3 +57,20 @@ func TestRateLimitFailureCountersAreRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestSATExamDayCountersAreRegisteredAtStartup(t *testing.T) {
+	snapshot := DefaultRegistry.Snapshot()
+	for _, series := range []string{
+		MSATScoreSource + `{source="v2"} 0`,
+		MSATScoreSource + `{source="legacy"} 0`,
+		MSATFinalizeTotal + `{outcome="completed"} 0`,
+		MSATFinalizeTotal + `{outcome="replayed"} 0`,
+		MSATFinalizeTotal + `{outcome="rejected"} 0`,
+		MSATHeartbeatTotal + `{path="memory"} 0`,
+		MSATHeartbeatTotal + `{path="inline"} 0`,
+	} {
+		if !strings.Contains(snapshot, series+"\n") {
+			t.Errorf("startup exposition missing zero-valued SAT counter %q:\n%s", series, snapshot)
+		}
+	}
+}

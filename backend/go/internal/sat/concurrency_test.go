@@ -27,8 +27,6 @@ func satService(db *sql.DB) *Service {
 	return svc
 }
 
-func satTwinService(db *sql.DB) *Service { return satService(db) }
-
 type fakeCompletionSealer struct{}
 
 func (fakeCompletionSealer) SealCompletion(_ context.Context, _ tx.Tx, attempt attemptCore, req CompleteRequest, _ time.Time) (*AssessmentResult, bool, error) {

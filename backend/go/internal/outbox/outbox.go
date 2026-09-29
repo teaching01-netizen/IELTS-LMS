@@ -51,9 +51,8 @@ const (
 	FamilyAttemptTerminalized      = "attempt_terminalized"
 	FamilyRuntimeChanged           = "runtime_changed"
 	FamilyRosterChanged            = "roster_changed"
-	// FamilyAttemptChanged has no in-repo emitter (the Rust side publishes
-	// it); it is named so every wakeup family this router filters is a
-	// constant, never a literal.
+	// FamilyAttemptChanged wakes the student's own live-update subscription for
+	// proctor actions that change a specific attempt.
 	FamilyAttemptChanged = "attempt_changed"
 )
 

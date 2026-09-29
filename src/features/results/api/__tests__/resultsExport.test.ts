@@ -41,6 +41,75 @@ afterEach(() => {
 });
 
 describe('downloadActScienceCsv', () => {
+  it('exports ACT category totals and correct counts after Total Score', async () => {
+    get.mockResolvedValue({
+      attemptId: 'attempt-1',
+      scheduleId: 'schedule-1',
+      studentId: 'ACT-001',
+      studentName: 'Ada Example',
+      course: 'ACT Prep',
+      totalScore: 2,
+      maxScore: 4,
+      percentage: 50,
+      outcomeStatus: 'scored',
+      releaseStatus: 'ready_to_release',
+      questions: [
+        {
+          questionId: 'q-iod-correct',
+          displayOrder: 1,
+          skillCategory: 'interpretation_of_data',
+          response: 'A',
+          correctAnswer: 'A',
+          isCorrect: true,
+          answered: true,
+        },
+        {
+          questionId: 'q-iod-wrong',
+          displayOrder: 2,
+          skillCategory: 'interpretation_of_data',
+          response: 'B',
+          correctAnswer: 'A',
+          isCorrect: false,
+          answered: true,
+        },
+        {
+          questionId: 'q-sin-unanswered',
+          displayOrder: 3,
+          skillCategory: 'scientific_investigation',
+          response: null,
+          correctAnswer: 'C',
+          isCorrect: null,
+          answered: false,
+        },
+        {
+          questionId: 'q-esa-correct',
+          displayOrder: 4,
+          skillCategory: 'evaluating_scientific_arguments_and_models_with_evidence',
+          response: 'D',
+          correctAnswer: 'D',
+          isCorrect: true,
+          answered: true,
+        },
+      ],
+    });
+
+    await expect(downloadActScienceCsv([actRow])).resolves.toBe(1);
+
+    const [filename, headers, rows] = downloadCsv.mock.calls[0];
+    expect(filename).toBe('act-science-results-2026-09-13.csv');
+    expect(headers.slice(4, 12)).toEqual([
+      'Course',
+      'Total Score',
+      'Interpretation of Data (IOD)',
+      'Scientific Investigation (SIN)',
+      'Evaluating Scientific Arguments and Models with Evidence (ESA)',
+      'IOD correct',
+      'SIN correct',
+      'ESA correct',
+    ]);
+    expect(rows[0].slice(4, 12)).toEqual(['ACT Prep', 2, 2, 1, 1, 1, 0, 1]);
+  });
+
   it('loads canonical detail rows and includes aggregate plus question grading data', async () => {
     get.mockResolvedValue({
       attemptId: 'attempt-1',
@@ -113,6 +182,13 @@ describe('downloadActScienceCsv', () => {
       'ACT-001',
       'attempt-1',
       'schedule-1',
+      '',
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
       0,
       0,
       0,

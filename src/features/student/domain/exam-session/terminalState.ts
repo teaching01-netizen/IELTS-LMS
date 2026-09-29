@@ -3,6 +3,31 @@ import type { StudentAttempt } from "../../../../types/studentAttempt";
 
 export type VerifiedTerminalState = "not_terminal" | "completed" | "terminated";
 
+/**
+ * Terminal state confirmed on the persisted attempt itself. Runtime completion
+ * may arrive before the student's final response submission is acknowledged,
+ * so completion UI must wait for one of these attempt fields.
+ */
+export function getAttemptTerminalState(attempt: StudentAttempt | null): VerifiedTerminalState {
+  if (attempt?.proctorStatus === "terminated") {
+    return "terminated";
+  }
+
+  if (
+    attempt?.deliveryStatus === "terminated" ||
+    attempt?.deliveryStatus === "locked" ||
+    attempt?.deliveryStatus === "cancelled"
+  ) {
+    return "terminated";
+  }
+
+  if (attempt?.submittedAt || attempt?.deliveryStatus === "submitted") {
+    return "completed";
+  }
+
+  return "not_terminal";
+}
+
 export function isRuntimeStructurallyCompleted(runtime: ExamSessionRuntime | null): boolean {
   if (!runtime || runtime.status !== "completed") {
     return false;
@@ -23,17 +48,8 @@ export function getVerifiedTerminalState(input: {
   readonly attempt: StudentAttempt | null;
   readonly runtime: { readonly status: string } | null;
 }): VerifiedTerminalState {
-  if (input.attempt?.proctorStatus === "terminated") {
-    return "terminated";
-  }
-
-  if (
-    input.attempt?.deliveryStatus === "terminated" ||
-    input.attempt?.deliveryStatus === "locked" ||
-    input.attempt?.deliveryStatus === "cancelled"
-  ) {
-    return "terminated";
-  }
+  const attemptTerminal = getAttemptTerminalState(input.attempt);
+  if (attemptTerminal !== "not_terminal") return attemptTerminal;
 
   if (
     input.attempt?.submittedAt ||

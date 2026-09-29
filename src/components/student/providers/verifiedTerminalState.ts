@@ -1,11 +1,11 @@
-import type { ExamSessionRuntime } from '../../../types/domain';
-import type { StudentAttempt } from '../../../types/studentAttempt';
+import type { ExamSessionRuntime } from "../../../types/domain";
+import type { StudentAttempt } from "../../../types/studentAttempt";
 import {
-  getVerifiedTerminalState,
+  getAttemptTerminalState,
   isRuntimeStructurallyCompleted,
-} from '@student/domain/exam-session/terminalState';
+} from "@student/domain/exam-session/terminalState";
 
-export type VerifiedTerminalState = 'not_terminal' | 'completed' | 'terminated';
+export type VerifiedTerminalState = "not_terminal" | "completed" | "terminated";
 
 export { isRuntimeStructurallyCompleted };
 
@@ -13,10 +13,7 @@ export function isVerifiedTerminalStudentState(params: {
   attempt: StudentAttempt | null;
   runtimeSnapshot: ExamSessionRuntime | null;
 }): VerifiedTerminalState {
-  return getVerifiedTerminalState({
-    attempt: params.attempt,
-    runtime: params.runtimeSnapshot,
-  });
+  return getAttemptTerminalState(params.attempt);
 }
 
 // Backwards-compatible alias (older call sites)

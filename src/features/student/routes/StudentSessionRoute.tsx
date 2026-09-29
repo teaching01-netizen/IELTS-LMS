@@ -51,25 +51,34 @@ export function StudentSessionRoute() {
   } =
     useStudentSessionRouteData(scheduleId, studentId);
 
-  const navigateToStudentCheckIn = async () => {
-    try {
-      const { clearSatResumeLocator } = await import('../../student-delivery/api/satResumeLocator');
-      clearSatResumeLocator();
-    } catch {
-      // The check-in route must stay reachable if a lazy SAT utility chunk fails to load.
-    }
-    try {
-      await logoutAll();
-    } catch {
-      // Continue to the student check-in flow even if the backend logout request fails.
-    }
-
+  const navigateToStudentCheckIn = () => {
+    void import('../../student-delivery/api/satResumeLocator')
+      .then(({ clearSatResumeLocator }) => clearSatResumeLocator())
+      .catch(() => {
+        // The check-in route must stay reachable if a lazy SAT utility chunk fails to load.
+      });
     if (scheduleId) {
       navigate(`/student/${scheduleId}`);
+    } else {
+      navigate('/');
+    }
+    void logoutAll().catch(() => {
+      // Route transition is already complete; auth cleanup is best-effort.
+    });
+  };
+
+  const handleCompletedExit = () => {
+    // ACT completion is the terminal student surface. Navigating back to the
+    // check-in route after logout would immediately reload this route without
+    // auth and show a misleading "Session expired" error. Keep the completed
+    // surface visible so the user can close the tab after exiting.
+    if (providerKey === 'act') {
+      void logoutAll().catch(() => {
+        // Completion is already settled; auth cleanup is best-effort.
+      });
       return;
     }
-
-    navigate('/');
+    navigateToStudentCheckIn();
   };
 
   // Auth window stays provider-agnostic (excluded from the flicker assertion).
@@ -194,7 +203,7 @@ export function StudentSessionRoute() {
         <React.Suspense fallback={<LoadingSurface label="Loading Exam…" />}>
           <IeltsStudentDeliveryBranch
             state={state}
-            onExit={navigateToStudentCheckIn}
+            onExit={handleCompletedExit}
             scheduleId={scheduleId}
             attemptSnapshot={attemptSnapshot}
             refreshRuntime={refreshRuntime}

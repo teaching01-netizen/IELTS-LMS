@@ -4,6 +4,7 @@ import {
   completePreCheckIfPresent,
   deterministicWcode,
   openStudentSessionWithRetry,
+  showQuestionsIfTabbed,
   startLobbyIfPresent,
   studentCheckIn,
   stubScreenDetails,
@@ -109,7 +110,10 @@ test.describe("Full browser lifecycle", () => {
     await proctorStartExam(loginContext, manifest.student.lifecycleScheduleId);
     await studentPage.reload();
     await openStudentSessionWithRetry(studentPage, manifest.student.lifecycleScheduleId, wcode);
-    await expect(studentPage.getByLabel("Answer for question 1")).toBeVisible();
+    await showQuestionsIfTabbed(studentPage);
+    await expect(
+      studentPage.getByLabel("Answer for question 1").filter({ visible: true })
+    ).toBeVisible();
 
     const resetContext = await browser.newContext();
     const resetPage = await resetContext.newPage();
@@ -162,7 +166,11 @@ test.describe("Full browser lifecycle", () => {
     await proctorStartExam(adminControlContext, scheduleId);
     await startLobbyIfPresent(studentPage);
     await openStudentSessionWithRetry(studentPage, scheduleId, wcode);
-    await studentPage.getByLabel("Answer for question 1").fill("lifecycle test answer");
+    await showQuestionsIfTabbed(studentPage);
+    await studentPage
+      .getByLabel("Answer for question 1")
+      .filter({ visible: true })
+      .fill("lifecycle test answer");
     await waitForAttemptResponse(
       scheduleId,
       email,
@@ -170,10 +178,14 @@ test.describe("Full browser lifecycle", () => {
       "listening answer is saved"
     );
     await proctorEndSection(adminControlContext, scheduleId, "listening", "advance listening");
+    await showQuestionsIfTabbed(studentPage);
     await expect(studentPage.getByText("Write the missing word from the passage.")).toBeVisible({
       timeout: 60_000,
     });
-    await studentPage.getByLabel("Answer for question 1").fill("lifecycle reading answer");
+    await studentPage
+      .getByLabel("Answer for question 1")
+      .filter({ visible: true })
+      .fill("lifecycle reading answer");
     await waitForAttemptResponse(
       scheduleId,
       email,
@@ -181,6 +193,7 @@ test.describe("Full browser lifecycle", () => {
       "reading answer is saved"
     );
     await proctorEndSection(adminControlContext, scheduleId, "reading", "advance reading");
+    await showQuestionsIfTabbed(studentPage);
     await expect(studentPage.getByText(/Task 1: Summarise/).first()).toBeVisible({
       timeout: 60_000,
     });
@@ -294,7 +307,11 @@ test.describe("Full browser lifecycle", () => {
     await proctorStartExam(adminControlContext, scheduleId);
     await startLobbyIfPresent(studentPage);
     await openStudentSessionWithRetry(studentPage, scheduleId, wcode);
-    await studentPage.getByLabel("Answer for question 1").fill("audit trail test");
+    await showQuestionsIfTabbed(studentPage);
+    await studentPage
+      .getByLabel("Answer for question 1")
+      .filter({ visible: true })
+      .fill("audit trail test");
     await waitForAttemptResponse(
       scheduleId,
       `e2e+${wcode.toLowerCase()}@example.com`,
@@ -361,7 +378,7 @@ test.describe("Full browser lifecycle", () => {
     const studentContext = await browser.newContext();
     const studentPage = await studentContext.newPage();
     await studentPage.goto(`/student/${manifest.studentSelfPaced.scheduleId}`);
-    await expect(studentPage.getByLabel("Access code")).toBeVisible();
+    await expect(studentPage.getByLabel("Code")).toBeVisible();
 
     await studentContext.close();
     await proctorContext.close();

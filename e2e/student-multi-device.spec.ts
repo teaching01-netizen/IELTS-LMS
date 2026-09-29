@@ -1,35 +1,33 @@
-import { expect, test, type Page } from '@playwright/test';
-import { readBackendE2EManifest } from './support/backendE2e';
+import { expect, test, type Page } from "@playwright/test";
+import { readBackendE2EManifest } from "./support/backendE2e";
 import {
   completePreCheckIfPresent,
   deterministicWcode,
   openStudentSessionWithRetry,
+  showQuestionsIfTabbed,
   startLobbyIfPresent,
   studentCheckIn,
   stubScreenDetails,
-} from './support/studentUi';
+} from "./support/studentUi";
 
-async function enterRuntimeBackedExam(
-  page: Page,
-  scheduleId: string,
-  wcode: string,
-) {
+async function enterRuntimeBackedExam(page: Page, scheduleId: string, wcode: string) {
   await studentCheckIn(page, scheduleId, {
     wcode,
     email: `e2e+${wcode.toLowerCase()}@example.com`,
-    fullName: 'E2E Candidate',
+    fullName: "E2E Candidate",
   });
   await openStudentSessionWithRetry(page, scheduleId, wcode);
   await completePreCheckIfPresent(page);
   await startLobbyIfPresent(page);
   await openStudentSessionWithRetry(page, scheduleId, wcode);
-  await expect(page.getByLabel('Answer for question 1')).toBeVisible({ timeout: 30_000 });
+  await showQuestionsIfTabbed(page);
+  await expect(page.getByLabel("Answer for question 1")).toBeVisible({ timeout: 30_000 });
 }
 
-test.describe('Student multi-device fingerprint mismatch', () => {
+test.describe("Student multi-device fingerprint mismatch", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test('different user agent triggers device mismatch warning', async ({
+  test("different user agent does not block access to an active attempt", async ({
     browser,
   }, testInfo) => {
     const manifest = readBackendE2EManifest();
@@ -41,18 +39,24 @@ test.describe('Student multi-device fingerprint mismatch', () => {
 
     await enterRuntimeBackedExam(page1, manifest.student.scheduleId, wcode);
 
-    await page1.getByLabel('Answer for question 1').fill('device-test');
+    await page1.getByLabel("Answer for question 1").fill("device-test");
 
     await expect
-      .poll(async () => {
-        const banner = page1.getByRole('banner');
-        return banner.getByText('Saved').isVisible().catch(() => false);
-      }, { timeout: 20_000 })
+      .poll(
+        async () => {
+          const banner = page1.getByRole("banner");
+          return banner
+            .getByText("Saved")
+            .isVisible()
+            .catch(() => false);
+        },
+        { timeout: 20_000 }
+      )
       .toBe(true);
 
     const context2 = await browser.newContext({
       userAgent:
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
     await stubScreenDetails(context2);
     const page2 = await context2.newPage();
@@ -60,25 +64,19 @@ test.describe('Student multi-device fingerprint mismatch', () => {
     await studentCheckIn(page2, manifest.student.scheduleId, {
       wcode,
       email: `e2e+${wcode.toLowerCase()}@example.com`,
-      fullName: 'E2E Candidate',
+      fullName: "E2E Candidate",
     });
     await openStudentSessionWithRetry(page2, manifest.student.scheduleId, wcode);
-
-    await expect
-      .poll(async () => {
-        const deviceWarning = page2.getByText(/device mismatch|different device/i);
-        const answerField = page2.getByLabel('Answer for question 1');
-        if (await deviceWarning.isVisible().catch(() => false)) return 'warning';
-        if (await answerField.isVisible().catch(() => false)) return 'exam';
-        return 'pending';
-      }, { timeout: 30_000 })
-      .not.toBe('pending');
+    await expect(page2.getByTestId("student-exam-shell")).toBeVisible({ timeout: 30_000 });
+    await showQuestionsIfTabbed(page2);
+    await expect(page2.getByLabel("Answer for question 1")).toHaveValue("device-test");
+    await expect(page2.getByText(/device mismatch|different device/i)).not.toBeVisible();
 
     await context1.close();
     await context2.close();
   });
 
-  test('same device reconnection does not trigger device mismatch', async ({
+  test("same device reconnection does not trigger device mismatch", async ({
     browser,
   }, testInfo) => {
     const manifest = readBackendE2EManifest();
@@ -90,22 +88,28 @@ test.describe('Student multi-device fingerprint mismatch', () => {
 
     await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
 
-    await page.getByLabel('Answer for question 1').fill('reconnect-test');
+    await page.getByLabel("Answer for question 1").fill("reconnect-test");
 
     await expect
-      .poll(async () => {
-        const banner = page.getByRole('banner');
-        return banner.getByText('Saved').isVisible().catch(() => false);
-      }, { timeout: 20_000 })
+      .poll(
+        async () => {
+          const banner = page.getByRole("banner");
+          return banner
+            .getByText("Saved")
+            .isVisible()
+            .catch(() => false);
+        },
+        { timeout: 20_000 }
+      )
       .toBe(true);
 
     await context.setOffline(true);
-    await expect(page.getByTestId('student-auto-save-status')).toHaveText('Offline');
+    await expect(page.getByTestId("student-auto-save-status")).toHaveText("Offline");
 
     await context.setOffline(false);
 
-    await expect(page.getByTestId('student-auto-save-status')).toHaveText(/Saved|Syncing/);
-    await expect(page.getByLabel('Answer for question 1')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("student-auto-save-status")).toHaveText(/Saved|Syncing/);
+    await expect(page.getByLabel("Answer for question 1")).toBeVisible({ timeout: 30_000 });
 
     const deviceWarning = page.getByText(/device mismatch|different device/i);
     const hasWarning = await deviceWarning.isVisible().catch(() => false);

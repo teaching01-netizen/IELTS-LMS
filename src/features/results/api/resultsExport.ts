@@ -1,4 +1,5 @@
 import { downloadCsv } from '../../../utils/csvExport';
+import { ACT_SCIENCE_SKILL_CATEGORIES, type ActScienceSkillCategory } from '../../../types';
 import { resultsGateway } from '../infrastructure/resultsGateway';
 import type { ActScienceDetail, AdminResultRow } from './resultsQueries';
 
@@ -7,7 +8,14 @@ const ACT_EXPORT_HEADERS = [
   'studentId',
   'attemptId',
   'scheduleId',
-  'totalScore',
+  'Course',
+  'Total Score',
+  'Interpretation of Data (IOD)',
+  'Scientific Investigation (SIN)',
+  'Evaluating Scientific Arguments and Models with Evidence (ESA)',
+  'IOD correct',
+  'SIN correct',
+  'ESA correct',
   'maxScore',
   'percentage',
   'outcomeStatus',
@@ -19,6 +27,23 @@ const ACT_EXPORT_HEADERS = [
   'correctAnswer',
   'isCorrect',
 ];
+
+type CategoryCounts = Record<ActScienceSkillCategory, { total: number; correct: number }>;
+
+function summarizeActScienceCategories(questions: ActScienceDetail['questions']): CategoryCounts {
+  const counts = Object.fromEntries(
+    ACT_SCIENCE_SKILL_CATEGORIES.map(({ value }) => [value, { total: 0, correct: 0 }]),
+  ) as CategoryCounts;
+
+  for (const question of questions) {
+    const category = question.skillCategory;
+    if (!category || !(category in counts)) continue;
+    counts[category].total += 1;
+    if (question.isCorrect === true) counts[category].correct += 1;
+  }
+
+  return counts;
+}
 
 function csvValue(value: unknown): unknown {
   if (value === null || value === undefined) return '';
@@ -42,12 +67,23 @@ export async function downloadActScienceCsv(results: AdminResultRow[]): Promise<
   );
 
   const rows = details.flatMap((detail) => {
+    const categoryCounts = summarizeActScienceCategories(detail.questions);
+    const iod = categoryCounts.interpretation_of_data;
+    const sin = categoryCounts.scientific_investigation;
+    const esa = categoryCounts.evaluating_scientific_arguments_and_models_with_evidence;
     const base = [
       detail.studentName,
       detail.studentId,
       detail.attemptId,
       detail.scheduleId,
+      detail.course ?? '',
       detail.totalScore,
+      iod.total,
+      sin.total,
+      esa.total,
+      iod.correct,
+      sin.correct,
+      esa.correct,
       detail.maxScore,
       detail.percentage,
       detail.outcomeStatus,

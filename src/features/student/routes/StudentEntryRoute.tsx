@@ -8,17 +8,17 @@ import {
 import { commonSchemas } from "@shared/lib/validateApiResponse";
 import { entryQueueDelayMs, parseEntryQueueError } from "../infrastructure/studentEntryGateway";
 import { SatErrorSurface, SatLoadingSurface } from "../../student-delivery/api/satStateSurfaces";
-import { resumeSatStudentSession } from "../../student-delivery/application/satStudentResume";
+import { resumeSatStudentSession } from "../../student-delivery/api/satResume";
 import {
   loadSatResumeLocator,
   saveSatResumeLocator,
   type SatResumeLocatorV1,
-} from "../../student-delivery/infrastructure/satResumeLocator";
+} from "../../student-delivery/api/satResume";
 import {
   ensureClientSessionIdForStudentKey,
   restoreClientSessionIdForStudentKey,
   satWriterStudentKey,
-} from "@services/studentAttemptRepository";
+} from "@student/application/studentAttemptFacade";
 
 interface EntryFormData {
   wcode: string;
@@ -144,7 +144,12 @@ function queueEtaSeconds(retryAfterMs: number): number {
 
 type ScheduleAvailability =
   | { state: "ready"; providerKey: "ielts" | "sat" | "act" }
-  | { state: "unavailable"; title: string; description: string; providerKey?: "ielts" | "sat" | "act" }
+  | {
+      state: "unavailable";
+      title: string;
+      description: string;
+      providerKey?: "ielts" | "sat" | "act";
+    }
   | { state: "unknown" };
 
 type ResumeState =
@@ -196,11 +201,12 @@ async function loadScheduleAvailability(scheduleId: string): Promise<ScheduleAva
     // Registration is allowed before the proctor starts the runtime. The Go
     // registration transaction accepts both scheduled and live schedules;
     // only terminal/closed schedule states should hide the check-in form.
-    if (
-      schedule.status === "completed" ||
-      schedule.status === "cancelled"
-    ) {
-      return { state: "unavailable", providerKey: schedule.providerKey, ...scheduleStatusCopy(schedule.status) };
+    if (schedule.status === "completed" || schedule.status === "cancelled") {
+      return {
+        state: "unavailable",
+        providerKey: schedule.providerKey,
+        ...scheduleStatusCopy(schedule.status),
+      };
     }
     return { state: "ready", providerKey: schedule.providerKey };
   } catch (error) {
@@ -216,7 +222,9 @@ export function StudentEntryRoute() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { studentEntry, status: authStatus, session, refresh } = useAuthSession();
-  const [resumeLocator, setResumeLocator] = useState<SatResumeLocatorV1 | null>(() => loadSatResumeLocator());
+  const [resumeLocator, setResumeLocator] = useState<SatResumeLocatorV1 | null>(() =>
+    loadSatResumeLocator()
+  );
 
   // S3-C8/M1: direct entry branches by provider. A SAT schedule requires
   // only code + name + email (nickname/IELTS course are hidden and omitted
@@ -226,10 +234,15 @@ export function StudentEntryRoute() {
   const [scheduleAvailability, setScheduleAvailability] = useState<ScheduleAvailability>({
     state: "unknown",
   });
-  const [scheduleAvailabilityLoading, setScheduleAvailabilityLoading] = useState(Boolean(scheduleId));
+  const [scheduleAvailabilityLoading, setScheduleAvailabilityLoading] = useState(
+    Boolean(scheduleId)
+  );
   const [resumeState, setResumeState] = useState<ResumeState>({ kind: "idle" });
   const [resumeRetry, setResumeRetry] = useState(0);
-  const resumePromiseRef = useRef<{ key: string; promise: ReturnType<typeof resumeSatStudentSession> } | null>(null);
+  const resumePromiseRef = useRef<{
+    key: string;
+    promise: ReturnType<typeof resumeSatStudentSession>;
+  } | null>(null);
 
   useEffect(() => {
     setResumeLocator(loadSatResumeLocator());
@@ -255,8 +268,14 @@ export function StudentEntryRoute() {
     (scheduleAvailability.state === "ready" || scheduleAvailability.state === "unavailable") &&
     scheduleAvailability.providerKey === "sat";
   const locatorSuggestsSat = Boolean(resumeLocator && resumeLocator.scheduleId === scheduleId);
-  const isSat = providerOverride === "sat" || isSatSchedule ||
+  const isSat =
+    providerOverride === "sat" ||
+    isSatSchedule ||
     (scheduleAvailability.state === "unknown" && locatorSuggestsSat);
+  const courseLabel =
+    scheduleAvailability.state === "ready" && scheduleAvailability.providerKey === "act"
+      ? "Course"
+      : "IELTS Course";
   const availabilityGate =
     scheduleAvailability.state === "unavailable" ? scheduleAvailability : null;
 
@@ -280,9 +299,10 @@ export function StudentEntryRoute() {
 
     const key = `${scheduleId}:${resumeRetry}`;
     const existing = resumePromiseRef.current;
-    const promise = existing?.key === key
-      ? existing.promise
-      : resumeSatStudentSession({ scheduleId, locator: resumeLocator });
+    const promise =
+      existing?.key === key
+        ? existing.promise
+        : resumeSatStudentSession({ scheduleId, locator: resumeLocator });
     if (!existing || existing.key !== key) resumePromiseRef.current = { key, promise };
     let active = true;
     setResumeState({ kind: "checking" });
@@ -312,7 +332,16 @@ export function StudentEntryRoute() {
     return () => {
       active = false;
     };
-  }, [authStatus, isSat, navigate, resumeLocator, resumeRetry, scheduleAvailabilityLoading, scheduleId, session?.user.role]);
+  }, [
+    authStatus,
+    isSat,
+    navigate,
+    resumeLocator,
+    resumeRetry,
+    scheduleAvailabilityLoading,
+    scheduleId,
+    session?.user.role,
+  ]);
 
   useEffect(() => {
     if (!isSat) return;
@@ -357,27 +386,25 @@ export function StudentEntryRoute() {
     return stored ? normalizeAccessCode(stored) : "";
   }, [scheduleId, searchParams]);
 
-  const [formData, setFormData] = useState<EntryFormData>(
-    () => ({
-        wcode: initialWcode,
-        email:
-          scheduleId && initialWcode
-            ? (loadCandidateProfile(scheduleId, initialWcode)?.email ?? "")
-            : "",
-        studentName:
-          scheduleId && initialWcode
-            ? (loadCandidateProfile(scheduleId, initialWcode)?.studentName ?? "")
-            : "",
-        nickname:
-          scheduleId && initialWcode
-            ? (loadCandidateProfile(scheduleId, initialWcode)?.nickname ?? "")
-            : "",
-        ieltsCourse:
-          scheduleId && initialWcode
-            ? (loadCandidateProfile(scheduleId, initialWcode)?.ieltsCourse ?? "")
-            : "",
-      })
-  );
+  const [formData, setFormData] = useState<EntryFormData>(() => ({
+    wcode: initialWcode,
+    email:
+      scheduleId && initialWcode
+        ? (loadCandidateProfile(scheduleId, initialWcode)?.email ?? "")
+        : "",
+    studentName:
+      scheduleId && initialWcode
+        ? (loadCandidateProfile(scheduleId, initialWcode)?.studentName ?? "")
+        : "",
+    nickname:
+      scheduleId && initialWcode
+        ? (loadCandidateProfile(scheduleId, initialWcode)?.nickname ?? "")
+        : "",
+    ieltsCourse:
+      scheduleId && initialWcode
+        ? (loadCandidateProfile(scheduleId, initialWcode)?.ieltsCourse ?? "")
+        : "",
+  }));
   const [errors, setErrors] = useState<Partial<Record<keyof EntryFormData, string>>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -445,7 +472,7 @@ export function StudentEntryRoute() {
     const newErrors: Partial<Record<keyof EntryFormData, string>> = {};
 
     if (!normalizedWcode) {
-      newErrors.wcode = "Access code is required";
+      newErrors.wcode = "Code is required";
     }
 
     if (!normalizedEmail || !validateEmail(normalizedEmail)) {
@@ -464,7 +491,7 @@ export function StudentEntryRoute() {
       }
 
       if (!normalizedIeltsCourse) {
-        newErrors.ieltsCourse = "IELTS Course is required";
+        newErrors.ieltsCourse = `${courseLabel} is required`;
       }
     }
 
@@ -491,7 +518,10 @@ export function StudentEntryRoute() {
 
     try {
       const clientSessionId = isSat
-        ? ensureClientSessionIdForStudentKey(scheduleId, satWriterStudentKey(scheduleId, normalizedWcode))
+        ? ensureClientSessionIdForStudentKey(
+            scheduleId,
+            satWriterStudentKey(scheduleId, normalizedWcode)
+          )
         : undefined;
       const result = await studentEntry({
         scheduleId,
@@ -538,7 +568,7 @@ export function StudentEntryRoute() {
           restoreClientSessionIdForStudentKey(
             admittedScheduleId,
             satWriterStudentKey(admittedScheduleId, admittedCode),
-            result.clientSessionId,
+            result.clientSessionId
           );
         }
       }
@@ -562,7 +592,9 @@ export function StudentEntryRoute() {
         setQueueRetryAfterMs(entryQueueDelayMs(queue.retryAfterSecs));
         setSubmitError(null);
       } else {
-        setSubmitError(error instanceof Error ? error.message : "Check-in failed. Please try again.");
+        setSubmitError(
+          error instanceof Error ? error.message : "Check-in failed. Please try again."
+        );
       }
     } finally {
       submittingRef.current = false;
@@ -600,7 +632,10 @@ export function StudentEntryRoute() {
       pollAttemptsRef.current += 1;
       try {
         const clientSessionId = isSat
-          ? ensureClientSessionIdForStudentKey(scheduleId, satWriterStudentKey(scheduleId, queuedPayload.wcode))
+          ? ensureClientSessionIdForStudentKey(
+              scheduleId,
+              satWriterStudentKey(scheduleId, queuedPayload.wcode)
+            )
           : undefined;
         const result = await studentEntry({
           scheduleId,
@@ -643,7 +678,7 @@ export function StudentEntryRoute() {
             restoreClientSessionIdForStudentKey(
               admittedScheduleId,
               satWriterStudentKey(admittedScheduleId, admittedCode),
-              result.clientSessionId,
+              result.clientSessionId
             );
           }
         }
@@ -687,8 +722,12 @@ export function StudentEntryRoute() {
 
   if (
     isSat &&
-    (scheduleAvailabilityLoading || authStatus === "loading" || resumeState.kind === "checking" ||
-      (authStatus === "authenticated" && session?.user.role === "student" && resumeState.kind === "idle"))
+    (scheduleAvailabilityLoading ||
+      authStatus === "loading" ||
+      resumeState.kind === "checking" ||
+      (authStatus === "authenticated" &&
+        session?.user.role === "student" &&
+        resumeState.kind === "idle"))
   ) {
     return <SatLoadingSurface label="Reconnecting to your SAT…" />;
   }
@@ -697,9 +736,11 @@ export function StudentEntryRoute() {
     return (
       <SatErrorSurface
         title="We couldn’t reconnect to your SAT"
-        description={resumeState.reason === "server_error"
-          ? "The exam service is temporarily unavailable. Your saved responses are still on this device. Try again shortly."
-          : "Check your connection. Your saved responses are still on this device, and you can retry when you’re back online."}
+        description={
+          resumeState.reason === "server_error"
+            ? "The exam service is temporarily unavailable. Your saved responses are still on this device. Try again shortly."
+            : "Check your connection. Your saved responses are still on this device, and you can retry when you’re back online."
+        }
         actionLabel="Retry"
         onAction={retrySatResume}
       />
@@ -756,8 +797,8 @@ export function StudentEntryRoute() {
               {queuePollFailure.attempts === 1 ? "attempt" : "attempts"}
             </p>
             <p className="mt-1 text-xs text-amber-700">
-              {queuePollFailure.message} Your details are still here — retry to try again or
-              leave to edit the form.
+              {queuePollFailure.message} Your details are still here — retry to try again or leave
+              to edit the form.
             </p>
             <div className="mt-3 flex gap-2">
               <button
@@ -865,14 +906,14 @@ export function StudentEntryRoute() {
                   htmlFor="ieltsCourse"
                   className="block text-sm font-medium text-gray-700 mb-2"
                 >
-                  IELTS Course
+                  {courseLabel}
                   <input
                     id="ieltsCourse"
                     type="text"
                     value={formData.ieltsCourse}
                     onChange={(e) => handleInputChange("ieltsCourse", e.target.value)}
-                    placeholder="IELTS Course"
-                    aria-label="IELTS Course"
+                    placeholder={courseLabel}
+                    aria-label={courseLabel}
                     disabled={isLoading || Boolean(queuedAdmission)}
                     className={`mt-2 w-full px-3 py-2 border rounded-md ${
                       errors.ieltsCourse ? "border-red-300" : "border-gray-300"

@@ -12,6 +12,7 @@ interface StudentExamClockEffectsProps {
   effectivePhase: 'pre-check' | 'lobby' | 'exam' | 'post-exam' | 'submitted';
   autoSubmitEnabled: boolean;
   config: Pick<ExamConfig, 'delivery'>;
+  isFinalModule?: (module: ModuleType) => boolean;
   flushAndSubmitCurrentModuleWithRetry: (fingerprint: string) => Promise<void>;
 }
 
@@ -19,6 +20,7 @@ export function StudentExamClockEffects({
   effectivePhase,
   autoSubmitEnabled,
   config,
+  isFinalModule,
   flushAndSubmitCurrentModuleWithRetry,
 }: StudentExamClockEffectsProps) {
   const displayTimeRemaining = useStudentRuntimeClock();
@@ -141,6 +143,7 @@ export function StudentExamClockEffects({
       currentModule: runtimeState.currentModule,
       runtimeSnapshot: runtimeState.runtimeSnapshot,
     },
+    isFinalModule,
     flushAndSubmitCurrentModuleWithRetry,
   });
 

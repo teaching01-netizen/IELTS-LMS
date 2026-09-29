@@ -12,21 +12,6 @@ import (
 	"example.com/ielts-proctoring/internal/platform/crypto"
 )
 
-func mintReadToken(t *testing.T, cfgSecret string, tokenID string, lease *uint64, exp time.Time) string {
-	t.Helper()
-	tok, err := crypto.SignAttemptToken([]byte(cfgSecret), crypto.AttemptClaims{
-		TokenID: tokenID, UserID: "u-1", ScheduleID: "s-1",
-		AttemptID: "a-1", ClientSessionID: "cs-1", LeaseEpoch: lease,
-		Exp: exp.Unix(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tok
-}
-
-func leasePtr(v uint64) *uint64 { return &v }
-
 // Terminated-bearer replay: the session row is revoked (predicate filters it
 // -> ErrNoRows) so the read fails closed in stateless mode too.
 func TestVerifyAttemptReadRevokedFailsClosed(t *testing.T) {

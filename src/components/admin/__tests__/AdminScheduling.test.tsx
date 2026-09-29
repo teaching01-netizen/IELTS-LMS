@@ -77,6 +77,11 @@ describe('AdminScheduling', () => {
 
     await screen.findByText(/v1 \(ver-1\)/i);
 
+    expect(screen.getByLabelText('Exam')).toHaveClass('text-gray-900');
+    expect(screen.getByLabelText('Select cohort')).toHaveClass('text-gray-900');
+    expect(screen.getByLabelText('Proctor display name')).toHaveClass('text-gray-900');
+    expect(screen.getByLabelText('Grading display name')).toHaveClass('text-gray-900');
+
     expect(screen.queryByLabelText(/start time/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/end time/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/window length/i)).not.toBeInTheDocument();

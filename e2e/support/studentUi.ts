@@ -107,11 +107,11 @@ export async function studentCheckIn(
   await openStudentCheckIn(page, scheduleId);
 
   await page.waitForTimeout(250);
-  const wcodeField = page.getByLabel("Access code");
+  const wcodeField = page.getByLabel("Code");
   const emailField = page.getByLabel("Email");
   const nameField = page.getByLabel("Full Name");
   const nicknameField = page.getByLabel("Nickname");
-  const ieltsCourseField = page.getByLabel("IELTS Course");
+  const courseField = page.getByLabel("Course").or(page.getByLabel("IELTS Course"));
 
   // Prefer typing over a single `fill()` call to avoid hydration races in slower browsers.
   await wcodeField.click();
@@ -126,8 +126,8 @@ export async function studentCheckIn(
   await nicknameField.click();
   await nicknameField.fill("");
   await nicknameField.type(payload.fullName, { delay: 10 });
-  await ieltsCourseField.click();
-  await ieltsCourseField.fill("Academic IELTS");
+  await courseField.click();
+  await courseField.fill((await page.getByLabel("Course").count()) > 0 ? "ACT" : "Academic IELTS");
 
   await page.waitForTimeout(100);
   const continueButton = page.getByRole("button", { name: "Continue" });
@@ -229,20 +229,43 @@ export async function openStudentCheckIn(page: Page, scheduleId: string) {
 export async function completePreCheckIfPresent(page: Page) {
   // The briefing/"Continue to waiting room" step was removed: after check-in the
   // student lands directly in the waiting room while compatibility checks are run
-  // and persisted silently. This helper now only settles on the resulting state
-  // (waiting room, lobby preview, or an already-started exam) without any click.
-  const waitingForStart = page.getByRole("heading", { name: "Waiting for the exam to start" });
-  const startExam = page.getByRole("button", { name: "Start Exam" });
-  const examShell = page.getByTestId("student-exam-shell");
-  const answerField = page.getByLabel(/Answer for question/i).first();
-  const writingEditor = page.locator('[contenteditable="true"]').first();
+  // and persisted silently. The pre-check card and waiting room share a heading,
+  // so the UI heading alone cannot prove that persistence has finished.
+  const scheduleId = page.url().match(/\/student\/([^/]+)/)?.[1];
+  if (!scheduleId) throw new Error("Cannot confirm pre-check without a student schedule route.");
 
   const timeoutMs = Number(process.env["E2E_PROD_PRECHECK_SAVE_TIMEOUT_MS"] ?? "120000");
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request
+          .get(`/api/v1/student/sessions/${scheduleId}`)
+          .catch(() => null);
+        if (!response?.ok()) return false;
+        const session = (await response.json().catch(() => null)) as {
+          attempt?: { integrity?: { preCheck?: { completedAt?: string | null } | null } };
+        } | null;
+        return Boolean(session?.attempt?.integrity?.preCheck?.completedAt);
+      },
+      { timeout: Math.max(30_000, timeoutMs) }
+    )
+    .toBe(true);
+
+  const lobbyHeading = page.getByRole("heading", { name: /Lobby|Exam Overview|Waiting/i });
+  const startExam = page.getByRole("button", { name: "Start Exam" });
+  const examShell = page.getByTestId("student-exam-shell");
+  const answerField = page
+    .getByLabel(/Answer for question/i)
+    .filter({ visible: true })
+    .first();
+  const writingEditor = page.locator('[contenteditable="true"]').filter({ visible: true }).first();
 
   await expect
     .poll(
       async () => {
-        if (await waitingForStart.isVisible().catch(() => false)) return "waiting";
+        // The lobby heading is intentionally screen-reader-only on some routes;
+        // role presence is the reliable mounted-state signal in WebKit.
+        if ((await lobbyHeading.count().catch(() => 0)) > 0) return "lobby";
         if (await startExam.isVisible().catch(() => false)) return "lobby";
         if (await examShell.isVisible().catch(() => false)) return "exam";
         if (await answerField.isVisible().catch(() => false)) return "answer";
@@ -257,19 +280,22 @@ export async function completePreCheckIfPresent(page: Page) {
 export async function startLobbyIfPresent(page: Page) {
   const waiting = page.getByRole("heading", { name: "Waiting for the exam to start" });
   const examShell = page.getByTestId("student-exam-shell");
-  const answerField = page.getByLabel(/Answer for question/i).first();
+  const answerField = page
+    .getByLabel(/Answer for question/i)
+    .filter({ visible: true })
+    .first();
   await expect
     .poll(
       async () => {
         if (await examShell.isVisible().catch(() => false)) return "exam";
         if (await answerField.isVisible().catch(() => false)) return "exam";
-        if (await waiting.isVisible().catch(() => false)) return "waiting";
+        if ((await waiting.count().catch(() => 0)) > 0) return "waiting";
         return "pending";
       },
-      { timeout: 30_000 },
+      { timeout: 30_000 }
     )
     .toMatch(/waiting|exam/);
-  if (!(await waiting.isVisible().catch(() => false))) return;
+  if ((await waiting.count().catch(() => 0)) === 0) return;
   await expect(page.getByRole("button", { name: "Start Exam" })).not.toBeVisible();
 
   const scheduleId = page.url().match(/\/student\/([^/]+)/)?.[1];
@@ -298,7 +324,7 @@ export async function startLobbyIfPresent(page: Page) {
     );
     const responseText = await response.text();
     const runtimeAlreadyExists =
-      response.status() === 409 ||
+      /runtime already exists for this schedule/i.test(responseText) ||
       /duplicate entry.*exam_session_runtimes\.schedule_id/i.test(responseText);
     if (!response.ok() && !runtimeAlreadyExists) {
       throw new Error(
@@ -308,6 +334,11 @@ export async function startLobbyIfPresent(page: Page) {
   } finally {
     await controlContext.close();
   }
+
+  // The seeded runtime may already be live before this student's pre-check
+  // finishes. In that case start_runtime is idempotent and emits no new
+  // transition to wake a route that still holds its pre-check snapshot.
+  await page.reload({ waitUntil: "domcontentloaded" });
 
   await expect
     .poll(
@@ -368,7 +399,7 @@ export async function openStudentSessionWithRetry(
   const loadingError = page.getByRole("heading", { name: "Loading Error" });
   const retryButton = page.getByRole("button", { name: "Retry" });
   const waitingRoomHeading = page.getByRole("heading", { name: "Waiting for the exam to start" });
-  const answerField = page.getByLabel("Answer for question 1");
+  const answerField = page.getByLabel("Answer for question 1").filter({ visible: true });
   const finishButton = page.getByRole("button", { name: "Finish" });
   const reviewButton = page.getByRole("button", { name: "Review & Submit" });
 
@@ -394,7 +425,7 @@ export async function openStudentSessionWithRetry(
         break;
       }
 
-      if (await waitingRoomHeading.isVisible().catch(() => false)) {
+      if ((await waitingRoomHeading.count().catch(() => 0)) > 0) {
         return;
       }
 
@@ -422,6 +453,17 @@ export async function openStudentSessionWithRetry(
   }
 
   throw new Error(`Student session failed to load for ${targetUrl} after retries.`);
+}
+
+/** Select the question pane when compact student delivery separates passage and answers. */
+export async function showQuestionsIfTabbed(page: Page) {
+  const questionsTab = page.getByRole("button", { name: "Questions", exact: true });
+  if (
+    (await questionsTab.isVisible().catch(() => false)) &&
+    (await questionsTab.getAttribute("aria-pressed")) !== "true"
+  ) {
+    await questionsTab.click();
+  }
 }
 
 export interface StudentTouchTargetFailure {

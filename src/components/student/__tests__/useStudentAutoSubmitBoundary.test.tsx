@@ -163,6 +163,41 @@ describe('useStudentAutoSubmitBoundary', () => {
     expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledTimes(1);
   });
 
+  it('submits the final runtime module at the locally derived authoritative deadline', async () => {
+    const flushAndSubmitCurrentModuleWithRetry = vi.fn().mockResolvedValue(undefined);
+    const runtimeState = {
+      blockingActive: false,
+      displayTimeRemaining: 1,
+      runtimeBacked: true,
+      runtimeStatus: 'live' as const,
+      currentModule: 'science' as const,
+      runtimeSnapshot: createRuntimeSnapshot({
+        currentSectionKey: 'science',
+        currentSectionRemainingSeconds: 5,
+      }),
+    };
+    const { rerender } = renderHook(
+      (props: typeof runtimeState) =>
+        useStudentAutoSubmitBoundary({
+          effectivePhase: 'exam',
+          autoSubmitEnabled: true,
+          runtimeState: props,
+          isFinalModule: () => true,
+          flushAndSubmitCurrentModuleWithRetry,
+        }),
+      { initialProps: runtimeState },
+    );
+
+    rerender({ ...runtimeState, displayTimeRemaining: 0 });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledTimes(1);
+    expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledWith('runtime:science');
+  });
+
   it('does not submit in runtime mode when boundary is not confirmed by server', async () => {
     const flushAndSubmitCurrentModuleWithRetry = vi.fn().mockResolvedValue(undefined);
 

@@ -2,7 +2,6 @@ export interface SatExamPoint {
   x: number;
   y: number;
 }
-
 export interface SatExamSize {
   width: number;
   height: number;
@@ -29,4 +28,3 @@ export function createSatExamZoomGeometry(scale: number): SatExamZoomGeometry {
     logicalToViewportLength: (value) => value * safeScale,
   };
 }
-

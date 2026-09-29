@@ -25,12 +25,18 @@ function decodeEntities(text: string): string {
     .replace(/&#39;/gi, "'");
 }
 
-export function htmlToPlainText(content: string): string {
-  if (!HTML_TAG_PATTERN.test(content)) {
-    return normalizePlainText(decodeEntities(content));
+function normalizeHtmlTextInput(content: string | null | undefined): string {
+  return typeof content === 'string' ? content : '';
+}
+
+export function htmlToPlainText(content: string | null | undefined): string {
+  const safeContent = normalizeHtmlTextInput(content);
+
+  if (!HTML_TAG_PATTERN.test(safeContent)) {
+    return normalizePlainText(decodeEntities(safeContent));
   }
 
-  const contentWithBreaks = content
+  const contentWithBreaks = safeContent
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(BLOCK_BREAK_PATTERN, '\n')
@@ -47,12 +53,14 @@ export function htmlToPlainText(content: string): string {
   );
 }
 
-export function htmlToPlainTextPreserveLineBreaks(content: string): string {
-  if (!HTML_TAG_PATTERN.test(content)) {
-    return normalizePlainTextPreservingLineBreaks(decodeEntities(content));
+export function htmlToPlainTextPreserveLineBreaks(content: string | null | undefined): string {
+  const safeContent = normalizeHtmlTextInput(content);
+
+  if (!HTML_TAG_PATTERN.test(safeContent)) {
+    return normalizePlainTextPreservingLineBreaks(decodeEntities(safeContent));
   }
 
-  const contentWithBreaks = content
+  const contentWithBreaks = safeContent
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(BLOCK_BREAK_PATTERN, '\n')

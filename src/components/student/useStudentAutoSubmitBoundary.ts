@@ -15,6 +15,7 @@ interface UseStudentAutoSubmitBoundaryOptions {
     currentModule: ModuleType;
     runtimeSnapshot: ExamSessionRuntime | null;
   };
+  isFinalModule?: ((module: ModuleType) => boolean) | undefined;
   flushAndSubmitCurrentModuleWithRetry: (fingerprint: string) => Promise<void>;
 }
 
@@ -22,6 +23,7 @@ export function useStudentAutoSubmitBoundary({
   effectivePhase,
   autoSubmitEnabled,
   runtimeState,
+  isFinalModule,
   flushAndSubmitCurrentModuleWithRetry,
 }: UseStudentAutoSubmitBoundaryOptions) {
   const autoSubmitFingerprintRef = useRef<string | null>(null);
@@ -53,12 +55,14 @@ export function useStudentAutoSubmitBoundary({
         runtimeState.runtimeSnapshot?.currentSectionKey !== runtimeState.currentModule;
       const serverConfirmedZero =
         runtimeState.runtimeSnapshot?.currentSectionRemainingSeconds === 0;
+      const finalModuleDeadlineReached =
+        runtimeState.displayTimeRemaining === 0 && isFinalModule?.(runtimeState.currentModule) === true;
 
-      // The local countdown may reach zero before the next authoritative runtime poll.
-      // It can drive UI urgency, but only a server-confirmed zero or section transition may
-      // finalize a runtime-backed module. This prevents client clock skew or stale offsets
-      // from submitting while the server still admits work.
-      if (!serverConfirmedZero && !serverSectionChanged) {
+      // The derived display clock is anchored to the server's section deadline. The final
+      // module may submit at that local boundary so students do not wait for the worker's
+      // closing-grace reconciliation; the server write gate remains authoritative. Intermediate
+      // IELTS sections still require a server-confirmed boundary or section transition.
+      if (!serverConfirmedZero && !serverSectionChanged && !finalModuleDeadlineReached) {
         return;
       }
     } else if (runtimeState.displayTimeRemaining !== 0) {
@@ -83,5 +87,6 @@ export function useStudentAutoSubmitBoundary({
     runtimeState.runtimeBacked,
     runtimeState.runtimeSnapshot,
     runtimeState.runtimeStatus,
+    isFinalModule,
   ]);
 }

@@ -53,21 +53,6 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 )
 
-// readPerfShellIdentityRows is the RETIRED two-probe preamble the pre-Phase-03
-// Shell() made (exam row, then draft revision probe). Retired deliberately in
-// Phase 03: the live Shell() uses readPerfBulkIdentityRows (one JOIN) from
-// readperf_bulk_golden_test.go. No live test drives this helper anymore; it
-// stays compiled as the record of the old shape.
-func readPerfShellIdentityRows(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT provider_key, current_draft_version_id FROM exam_entities WHERE id = ?")).
-		WithArgs("exam-1").
-		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id"}).
-			AddRow("sat", "draft-v1"))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE")).
-		WithArgs("draft-v1", "exam-1").
-		WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(7))
-}
-
 // retiredNestedShapeNote keeps the retired per-section/per-module helpers
 // below honest: they pin the pre-Phase-03 N+1 sequence the live path no
 // longer issues. New tests must use the readPerfBulk* helpers instead.
@@ -81,49 +66,6 @@ func readPerfSectionRows(mock sqlmock.Sqlmock) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "revision"}).
 			AddRow("sec-rw", "reading-writing", "Reading & Writing", 0, 3840, 600, 0).
 			AddRow("sec-math", "math", "Math", 1, 4200, 0, 0))
-}
-
-// readPerfModuleRows is one section's authoring modules SELECT payload.
-func readPerfModuleRows(mock sqlmock.Sqlmock, sectionID string, rows [][]driver.Value) {
-	expect := sqlmock.NewRows([]string{"id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "tool_policy", "revision"})
-	for _, row := range rows {
-		expect.AddRow(row...)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules WHERE section_id = ?")).
-		WithArgs(sectionID).
-		WillReturnRows(expect)
-}
-
-// readPerfQuestionRows is one module's question SELECT payload (the N+1 leg).
-func readPerfQuestionRows(mock sqlmock.Sqlmock, moduleID string, rows [][]driver.Value) {
-	expect := sqlmock.NewRows([]string{
-		"id", "question_id", "question_revision_id", "section_key",
-		"display_order", "is_pretest", "question_type",
-		"semantic_revision", "revision",
-		"stimulus", "prompt", "answer_definition", "rationale", "metadata",
-	})
-	for _, row := range rows {
-		expect.AddRow(row...)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).
-		WithArgs(moduleID).
-		WillReturnRows(expect)
-}
-
-// readPerfRoutingRows is one section's routing-policy probe.
-func readPerfRoutingRows(mock sqlmock.Sqlmock, sectionID, baseID, lowerID, higherID string, threshold int) {
-	config := `{"minimumCorrectForHigher":` + strconv.Itoa(threshold) + `,"operationalQuestionCount":` + strconv.Itoa(threshold*2-1) + `}`
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_routing_policies WHERE section_id = ?")).
-		WithArgs(sectionID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "revision"}).
-			AddRow("rp-"+sectionID, baseID, lowerID, higherID, "practice_threshold", config, 2))
-}
-
-// readPerfNoRoutingRows models a section without an adaptive policy.
-func readPerfNoRoutingRows(mock sqlmock.Sqlmock, sectionID string) {
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_routing_policies WHERE section_id = ?")).
-		WithArgs(sectionID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "revision"}))
 }
 
 // readPerfSingleChoiceAnswer builds a valid single_choice answer_definition.

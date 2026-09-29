@@ -125,9 +125,8 @@ export function createStudentRealtimeCoordinator(
       return 'invalidated';
     },
     getPollingPolicy(runtimeStatus, context) {
-      // A terminal runtime has nothing left to observe: rest lazily whatever
-      // the transport is.
-      if (runtimeStatus === 'completed' || runtimeStatus === 'cancelled') {
+      // A cancelled runtime has no transition left for the student poll.
+      if (runtimeStatus === 'cancelled') {
         return { intervalMs: 15_000, maxIntervalMs: 25_000 };
       }
       if (socketConnected) {
@@ -143,6 +142,13 @@ export function createStudentRealtimeCoordinator(
       // nothing — rest lazily there and only there.
       if (runtimeStatus === null && isSelfPacedPastWaiting(context?.attemptPhase)) {
         return { intervalMs: 15_000, maxIntervalMs: 25_000 };
+      }
+      // Without a socket, IELTS/ACT completion and pre-start transitions must
+      // be observed quickly so the student does not sit on a stale exam
+      // surface after an authoritative runtime command or timeout. When the
+      // socket is healthy, the branch above deliberately keeps polling lazy.
+      if (runtimeStatus === 'not_started' || runtimeStatus === 'completed') {
+        return { intervalMs: 1_500, maxIntervalMs: 3_000 };
       }
       // No socket: the poll IS the live channel, and that is as true for a
       // cohort waiting on Start (no runtime row yet, so `null`, or

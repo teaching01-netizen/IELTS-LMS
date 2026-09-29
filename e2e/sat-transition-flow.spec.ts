@@ -1,42 +1,56 @@
-import { expect, test } from '@playwright/test';
-import { regressesAttemptState } from '../src/features/student-delivery/application/satBootstrapEquality';
-import type { AssessmentDeliveryBootstrap } from '../src/features/student-delivery/contracts/assessmentDelivery';
-import { ADMIN_STORAGE_STATE_PATH } from './support/backendE2e';
-import { executeUpdate, queryDb } from './support/db';
-import { createRunningSatSession } from './support/satStudentSession';
+import { expect, test } from "@playwright/test";
+import { regressesAttemptState } from "../src/features/student-delivery/application/satBootstrapEquality";
+import type { AssessmentDeliveryBootstrap } from "../src/features/student-delivery/contracts/assessmentDelivery";
+import { ADMIN_STORAGE_STATE_PATH } from "./support/backendE2e";
+import { executeUpdate, queryDb } from "./support/db";
+import { createRunningSatSession } from "./support/satStudentSession";
 
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
-test.describe('SAT student transitions', () => {
+test.describe("SAT student transitions", () => {
   test.describe.configure({ timeout: 240_000 });
 
-  test('keeps the newer attempt snapshot when bootstrap and state responses finish out of order', async ({ page }) => {
-    await page.goto('/');
-    for (const endpoint of ['bootstrap', 'state']) {
+  test("keeps the newer attempt snapshot when bootstrap and state responses finish out of order", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    for (const endpoint of ["bootstrap", "state"]) {
       const older = {
-        attempt: { id: 'attempt-order', moduleAttempts: [{ id: 'm1-attempt', moduleId: 'm1', state: 'active', revision: 1 }], personalBreaks: [] },
-        timing: { runtimeRevision: 7 }, result: null,
+        attempt: {
+          id: "attempt-order",
+          moduleAttempts: [{ id: "m1-attempt", moduleId: "m1", state: "active", revision: 1 }],
+          personalBreaks: [],
+        },
+        timing: { runtimeRevision: 7 },
+        result: null,
       } as unknown as AssessmentDeliveryBootstrap;
       const newer = {
-        attempt: { id: 'attempt-order', moduleAttempts: [
-          { id: 'm1-attempt', moduleId: 'm1', state: 'locked', revision: 2 },
-          { id: 'm2-attempt', moduleId: 'm2-higher', state: 'active', revision: 1 },
-        ], personalBreaks: [] },
-        timing: { runtimeRevision: 7 }, result: null,
+        attempt: {
+          id: "attempt-order",
+          moduleAttempts: [
+            { id: "m1-attempt", moduleId: "m1", state: "locked", revision: 2 },
+            { id: "m2-attempt", moduleId: "m2-higher", state: "active", revision: 1 },
+          ],
+          personalBreaks: [],
+        },
+        timing: { runtimeRevision: 7 },
+        result: null,
       } as unknown as AssessmentDeliveryBootstrap;
       const olderSeen = deferredSignal();
       const newerSeen = deferredSignal();
       const releaseOlder = deferredSignal();
       const releaseNewer = deferredSignal();
-      const routePattern = new RegExp(`/api/v1/assessment-delivery/schedules/e2e-order/${endpoint}[?]snapshot=(older|newer)$`);
-      const handler = async (route: import('@playwright/test').Route) => {
-        const isOlder = new URL(route.request().url()).searchParams.get('snapshot') === 'older';
+      const routePattern = new RegExp(
+        `/api/v1/assessment-delivery/schedules/e2e-order/${endpoint}[?]snapshot=(older|newer)$`
+      );
+      const handler = async (route: import("@playwright/test").Route) => {
+        const isOlder = new URL(route.request().url()).searchParams.get("snapshot") === "older";
         (isOlder ? olderSeen : newerSeen).resolve();
         await (isOlder ? releaseOlder : releaseNewer).promise;
         await route.fulfill({
           status: 200,
-          contentType: 'application/json',
-          headers: { 'Cache-Control': 'no-store' },
+          contentType: "application/json",
+          headers: { "Cache-Control": "no-store" },
           body: JSON.stringify(isOlder ? older : newer),
         });
       };
@@ -44,21 +58,38 @@ test.describe('SAT student transitions', () => {
       await page.route(routePattern, handler);
       try {
         const path = `/api/v1/assessment-delivery/schedules/e2e-order/${endpoint}`;
-        const olderRequest = page.evaluate(async (url) => (await fetch(url)).text(), `${path}?snapshot=older`);
-        const newerRequest = page.evaluate(async (url) => (await fetch(url)).text(), `${path}?snapshot=newer`);
+        const olderRequest = page.evaluate(
+          async (url) => (await fetch(url)).text(),
+          `${path}?snapshot=older`
+        );
+        const newerRequest = page.evaluate(
+          async (url) => (await fetch(url)).text(),
+          `${path}?snapshot=newer`
+        );
         await Promise.all([olderSeen.promise, newerSeen.promise]);
 
         releaseNewer.resolve();
         const newerBody = await newerRequest;
         let committed = JSON.parse(newerBody) as AssessmentDeliveryBootstrap;
-        expect((await capture.collectedBodies()).map((body) => JSON.parse(body).attempt.moduleAttempts.length)).toEqual([2]);
+        expect(
+          (await capture.collectedBodies()).map(
+            (body) => JSON.parse(body).attempt.moduleAttempts.length
+          )
+        ).toEqual([2]);
 
         releaseOlder.resolve();
         const olderBody = await olderRequest;
         const stale = JSON.parse(olderBody) as AssessmentDeliveryBootstrap;
         if (!regressesAttemptState(committed, stale)) committed = stale;
-        expect(committed.attempt.moduleAttempts.map((module) => module.moduleId)).toEqual(['m1', 'm2-higher']);
-        expect((await capture.collectedBodies()).map((body) => JSON.parse(body).attempt.moduleAttempts.length)).toEqual([2, 1]);
+        expect(committed.attempt.moduleAttempts.map((module) => module.moduleId)).toEqual([
+          "m1",
+          "m2-higher",
+        ]);
+        expect(
+          (await capture.collectedBodies()).map(
+            (body) => JSON.parse(body).attempt.moduleAttempts.length
+          )
+        ).toEqual([2, 1]);
       } finally {
         releaseOlder.resolve();
         releaseNewer.resolve();
@@ -68,105 +99,168 @@ test.describe('SAT student transitions', () => {
     }
   });
 
-  test('moves from pre-start through early branch routing, the scheduled break, and completion', async ({
+  test("moves from pre-start through early branch routing, the scheduled break, and completion", async ({
     page,
     browser,
   }, testInfo) => {
     test.skip(
-      testInfo.project.name !== 'chromium',
-      'The transition flow runs once in desktop Chromium; device sizes are checked in the scenario.',
+      testInfo.project.name !== "chromium",
+      "The transition flow runs once in desktop Chromium; device sizes are checked in the scenario."
     );
-    const { studentContext, studentPage, scheduleId, candidateId } = await createRunningSatSession(browser, page, {
-      label: 'transitions',
-      startRuntime: false,
-      studentContext: { reducedMotion: 'reduce' },
-    });
+    const { studentContext, studentPage, scheduleId, candidateId } = await createRunningSatSession(
+      browser,
+      page,
+      {
+        label: "transitions",
+        startRuntime: false,
+        studentContext: { reducedMotion: "reduce" },
+      }
+    );
 
     const delivery = captureDeliveryResponses(studentPage);
     try {
-      const readingBranches = await readAdaptiveBranches(scheduleId, 'reading-writing');
+      const readingBranches = await readAdaptiveBranches(scheduleId, "reading-writing");
       expect(readingBranches).toHaveLength(2);
       expect(
-        await studentPage.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+        await studentPage.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)
       ).toBe(true);
       await expect(
-        studentPage.getByRole('heading', { name: 'Waiting for your proctor…' }),
+        studentPage.getByRole("heading", { name: /Waiting for your proctor/ })
       ).toBeVisible({ timeout: 30_000 });
-      await expect(studentPage.getByTestId('sat-exam-shell')).toHaveCount(0);
-      await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
-      await studentPage.reload({ waitUntil: 'domcontentloaded' });
+      await expect(studentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+      await studentPage.reload({ waitUntil: "domcontentloaded" });
       await expect(
-        studentPage.getByRole('heading', { name: 'Waiting for your proctor…' }),
+        studentPage.getByRole("heading", { name: /Waiting for your proctor/ })
       ).toBeVisible({ timeout: 30_000 });
 
-      await page.getByRole('button', { name: 'Start' }).click();
-      await expect(page.getByText('Session started.')).toBeVisible({ timeout: 20_000 });
-      await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
-      await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
-      await studentPage.reload({ waitUntil: 'domcontentloaded' });
-      await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
+      await page.getByRole("button", { name: "Start" }).click();
+      await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+      await studentPage.reload({ waitUntil: "domcontentloaded" });
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
       const beforeRoutingBodies = await delivery.collectedBodies();
       expect(beforeRoutingBodies.length).toBeGreaterThan(0);
       const staleStateBody = beforeRoutingBodies.find((body) => {
         const snapshot = JSON.parse(body) as AssessmentDeliveryBootstrap;
-        return snapshot.attempt?.moduleAttempts?.some((module) => module.state === 'active');
+        return snapshot.attempt?.moduleAttempts?.some((module) => module.state === "active");
       });
-      expect(staleStateBody, 'the pre-routing attempt snapshot must be captured').toBeDefined();
+      expect(staleStateBody, "the pre-routing attempt snapshot must be captured").toBeDefined();
       for (const body of beforeRoutingBodies) {
-        for (const branch of readingBranches) {
-          assertBranchAbsent(body, branch);
-        }
+        for (const branch of readingBranches) assertBranchAbsent(body, branch);
       }
 
-      const beforeSubmit = await readSectionModules(studentPage, scheduleId, candidateId, 'reading-writing');
-      expect(beforeSubmit.find((module) => module.adaptiveRole === 'base')?.state).toBe('active');
-      const moduleOneQuestionText = await studentPage.locator('[data-sat-question-scroll]').first().innerText();
+      const beforeSubmit = await readSectionModules(
+        studentPage,
+        scheduleId,
+        candidateId,
+        "reading-writing"
+      );
+      expect(beforeSubmit.find((module) => module.adaptiveRole === "base")?.state).toBe("active");
+      const moduleOneQuestionText = await studentPage
+        .locator("[data-sat-question-scroll]")
+        .first()
+        .innerText();
       await expectEarlyModuleSubmitRejected(studentPage, scheduleId, candidateId);
 
+      const branchEntry = await holdNextModuleStartResponse(studentPage, {
+        failFirstRequest: true,
+      });
       await markExamFrame(studentPage);
-      await reviewAndExpireCurrentModule(studentPage, scheduleId);
-      await expect.poll(
-        async () => {
-          const modules = await readSectionModules(studentPage, scheduleId, candidateId, 'reading-writing');
-          return modules.find((module) => module.adaptiveRole !== 'base' && module.state === 'active')?.state ?? null;
-        },
-        { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] },
-      ).toBe('active');
-      // The server opens the assigned branch. Check the raw responses received
-      // across that handoff for both the unassigned module and its questions.
-      const unassigned = await readUnassignedBranch(scheduleId, candidateId, 'reading-writing');
-      expect(unassigned, 'the fixture must author two adaptive branches').not.toBeNull();
-      const routedBodies = await delivery.collectedBodies();
-      expect(routedBodies.length).toBeGreaterThan(0);
-      for (const body of routedBodies) assertBranchAbsent(body, unassigned!);
-      await expect(studentPage.locator('[data-sat-transition-hold]')).toHaveCount(0);
-      await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible();
-      const unassignedAfterEntry = await readUnassignedBranch(scheduleId, candidateId, 'reading-writing');
+      try {
+        await reviewAndExpireCurrentModule(studentPage, scheduleId);
+        await expect.poll(() => branchEntry.attempts()).toBe(1, { timeout: 15_000 });
+        await branchEntry.failed;
+        await expect.poll(() => branchEntry.attempts()).toBe(2, { timeout: 15_000 });
+        await branchEntry.entered;
+        await expect(studentPage.locator("[data-sat-transition-hold]")).toBeVisible();
+        await assertHeldExamCannotBeInteractedWith(studentPage);
+        // The open handoff stays INSIDE the exam: the finished frame keeps its
+        // place behind one live status, and no section-break surface appears.
+        await expect(
+          studentPage.locator("[data-sat-transition-hold] [data-sat-student-frame]")
+        ).toBeVisible();
+        await expect(studentPage.locator("[data-sat-handoff]")).toBeVisible();
+        await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveCount(0);
+        await assertSingleSatStage(studentPage);
+        // The first request was aborted, so this is the escalating state: the
+        // recovery action lives in the frame, never on its own screen.
+        await expect(studentPage.locator("[data-sat-handoff]")).toHaveAttribute(
+          "data-sat-handoff-state",
+          "retrying"
+        );
+        await expect(studentPage.getByRole("button", { name: "Retry now" })).toBeVisible();
+
+        await expect
+          .poll(
+            async () => {
+              const modules = await readSectionModules(
+                studentPage,
+                scheduleId,
+                candidateId,
+                "reading-writing"
+              );
+              return (
+                modules.find(
+                  (module) => module.adaptiveRole !== "base" && module.state === "active"
+                )?.state ?? null
+              );
+            },
+            { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }
+          )
+          .toBe("active");
+        const unassigned = await readUnassignedBranch(scheduleId, candidateId, "reading-writing");
+        expect(unassigned, "the fixture must author two adaptive branches").not.toBeNull();
+        for (const body of await delivery.collectedBodies()) assertBranchAbsent(body, unassigned!);
+      } finally {
+        branchEntry.release();
+        await branchEntry.remove();
+      }
+      await expect(studentPage.locator("[data-sat-transition-hold]")).toHaveCount(0);
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible();
+      const unassignedAfterEntry = await readUnassignedBranch(
+        scheduleId,
+        candidateId,
+        "reading-writing"
+      );
       expect(unassignedAfterEntry).not.toBeNull();
       for (const body of await delivery.collectedBodies()) {
         assertBranchAbsent(body, unassignedAfterEntry!);
       }
-      const moduleTwoQuestionText = await studentPage.locator('[data-sat-question-scroll]').first().innerText();
+      const moduleTwoQuestionText = await studentPage
+        .locator("[data-sat-question-scroll]")
+        .first()
+        .innerText();
       expect(moduleTwoQuestionText).not.toBe(moduleOneQuestionText);
       const staleSnapshot = JSON.parse(staleStateBody!) as AssessmentDeliveryBootstrap;
       const statePattern = `**/api/v1/assessment-delivery/schedules/${scheduleId}/state`;
       await studentPage.route(statePattern, async (route) => {
         await route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: "application/json",
           body: JSON.stringify({ ...staleSnapshot, sections: [] }),
         });
       });
       try {
         const staleStateResponse = studentPage.waitForResponse(
-          (response) => response.url().includes(`/assessment-delivery/schedules/${scheduleId}/state`) && response.status() === 200,
-          { timeout: 45_000 },
+          (response) =>
+            response.url().includes(`/assessment-delivery/schedules/${scheduleId}/state`) &&
+            response.status() === 200,
+          { timeout: 45_000 }
         );
         const response = await staleStateResponse;
         await response.text();
         await delivery.collectedBodies();
-        await studentPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-        expect(await studentPage.locator('[data-sat-question-scroll]').first().innerText()).toBe(moduleTwoQuestionText);
+        await studentPage.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            )
+        );
+        expect(await studentPage.locator("[data-sat-question-scroll]").first().innerText()).toBe(
+          moduleTwoQuestionText
+        );
       } finally {
         await studentPage.unroute(statePattern);
       }
@@ -174,24 +268,26 @@ test.describe('SAT student transitions', () => {
       // instead of mounting the next module on a fresh one.
       await expectSameExamFrameNode(studentPage);
       await assertSingleSatStage(studentPage);
-      await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
-      await expect(studentPage.getByRole('heading', { name: 'Review your answers' })).toHaveCount(0);
-      await studentPage.reload({ waitUntil: 'domcontentloaded' });
-      await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
-      await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
+      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+      await expect(studentPage.getByRole("heading", { name: "Review your answers" })).toHaveCount(
+        0
+      );
+      await studentPage.reload({ waitUntil: "domcontentloaded" });
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
 
       await reviewAndExpireCurrentModule(studentPage, scheduleId);
-      const scheduledBreak = studentPage.getByTestId('sat-scheduled-break');
+      const scheduledBreak = studentPage.getByTestId("sat-scheduled-break");
       await expect(scheduledBreak).toBeVisible({ timeout: 30_000 });
       await assertSingleSatStage(studentPage);
-      await expect(scheduledBreak).toHaveAttribute('data-sat-break-phase', 'active');
-      await expect(scheduledBreak.getByRole('heading', { level: 1 })).toHaveCount(1);
-      await expect(scheduledBreak.getByRole('timer')).toBeVisible();
-      await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
-      await studentPage.reload({ waitUntil: 'domcontentloaded' });
-      await expect(studentPage.getByTestId('sat-scheduled-break')).toHaveAttribute(
-        'data-sat-break-phase',
-        'active',
+      await expect(scheduledBreak).toHaveAttribute("data-sat-break-phase", "waiting-for-break");
+      await expect(scheduledBreak.getByRole("heading", { level: 1 })).toHaveCount(1);
+      await expect(scheduledBreak.getByRole("timer")).toBeVisible();
+      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+      await studentPage.reload({ waitUntil: "domcontentloaded" });
+      await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveAttribute(
+        "data-sat-break-phase",
+        "waiting-for-break"
       );
       await assertNoHorizontalOverflow(studentPage, [
         { width: 390, height: 844 },
@@ -199,61 +295,117 @@ test.describe('SAT student transitions', () => {
         { width: 1440, height: 900 },
       ]);
 
-      const expiredBreak = await executeUpdate(
-        `UPDATE assessment_attempt_breaks b
-         JOIN student_attempts a ON a.id = b.attempt_id
-            SET b.starts_at = NOW(6) - INTERVAL 11 MINUTE,
-                b.deadline_at = NOW(6) - INTERVAL 1 MINUTE,
-                b.updated_at = NOW(6)
-          WHERE a.schedule_id = ?
-            AND a.candidate_id = ?
-            AND b.state = 'active'`,
-        [scheduleId, candidateId],
+      const expiredSection = await executeUpdate(
+        `UPDATE exam_session_runtime_sections rs
+         JOIN exam_session_runtimes r ON r.id = rs.runtime_id
+            SET rs.actual_start_at = NOW(6) - INTERVAL 2 MINUTE,
+                rs.planned_duration_minutes = 1,
+                rs.gap_after_minutes = 5,
+                rs.extension_minutes = 0,
+                rs.accumulated_paused_seconds = 0
+          WHERE r.schedule_id = ?
+            AND rs.section_key = 'reading-writing'
+            AND rs.status = 'live'`,
+        [scheduleId]
       );
-      expect(expiredBreak).toBe(1);
-      // Math Module 1 was scheduled at the original break deadline. Advance
-      // that availability too when the test moves the personal clock forward.
-      const availableMath = await executeUpdate(
-        `UPDATE assessment_module_attempts ma
-         JOIN student_attempts a ON a.id = ma.attempt_id
-         JOIN assessment_modules m ON m.id = ma.module_id
-         JOIN assessment_sections s ON s.id = m.section_id
-            SET ma.available_at = NOW(6) - INTERVAL 1 MINUTE
-          WHERE a.schedule_id = ?
-            AND a.candidate_id = ?
-            AND s.section_key = 'math'
-            AND m.adaptive_role = 'base'
-            AND ma.state = 'not_started'`,
-        [scheduleId, candidateId],
+      expect(expiredSection).toBe(1);
+      await expect
+        .poll(
+          async () => {
+            const runtime = await readSatRuntime(page, scheduleId);
+            return (
+              runtime.sections.find((section) => section.sectionKey === "reading-writing")
+                ?.status ?? null
+            );
+          },
+          { timeout: 30_000, intervals: [250, 500, 1_000, 2_000] }
+        )
+        .toBe("completed");
+      await expect(scheduledBreak).toHaveAttribute("data-sat-break-phase", "on-break", {
+        timeout: 30_000,
+      });
+      await studentPage.reload({ waitUntil: "domcontentloaded" });
+      await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveAttribute(
+        "data-sat-break-phase",
+        "on-break"
       );
-      expect(availableMath).toBe(1);
-      await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
-      await expect(studentPage.getByTestId('sat-scheduled-break')).toHaveCount(0);
-      await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
-      await studentPage.reload({ waitUntil: 'domcontentloaded' });
-      await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
-      await expect.poll(async () => {
-        const modules = await readSectionModules(studentPage, scheduleId, candidateId, 'math');
-        return modules.find((module) => module.adaptiveRole === 'base')?.state ?? null;
-      }, { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }).toBe('active');
 
+      const skippedBreak = await executeUpdate(
+        `UPDATE exam_session_runtime_sections rs
+         JOIN exam_session_runtimes r ON r.id = rs.runtime_id
+            SET rs.actual_end_at = NOW(6) - INTERVAL 6 MINUTE
+          WHERE r.schedule_id = ?
+            AND rs.section_key = 'reading-writing'
+            AND rs.status = 'completed'`,
+        [scheduleId]
+      );
+      expect(skippedBreak).toBe(1);
+      await expect
+        .poll(async () => (await readSatRuntime(page, scheduleId)).currentSectionKey, {
+          timeout: 30_000,
+          intervals: [250, 500, 1_000, 2_000],
+        })
+        .toBe("math");
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+      await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveCount(0);
+      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+      await studentPage.reload({ waitUntil: "domcontentloaded" });
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+      await expect
+        .poll(
+          async () => {
+            const modules = await readSectionModules(studentPage, scheduleId, candidateId, "math");
+            return modules.find((module) => module.adaptiveRole === "base")?.state ?? null;
+          },
+          { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }
+        )
+        .toBe("active");
+
+      const mathBaseEntry = await holdNextModuleStartResponse(studentPage);
       await markExamFrame(studentPage);
-      await reviewAndExpireCurrentModule(studentPage, scheduleId);
-      await expect(studentPage.locator('[data-sat-transition-hold]')).toHaveCount(0);
+      try {
+        await reviewAndExpireCurrentModule(studentPage, scheduleId);
+        await mathBaseEntry.entered;
+        await expect(studentPage.locator("[data-sat-transition-hold]")).toBeVisible();
+        await assertHeldExamCannotBeInteractedWith(studentPage);
+        // Module 1 → Module 2 in a LATER section is still a module handoff, not
+        // a section boundary: the exam frame stays, the break surface does not
+        // re-appear, and the status does not escalate on a healthy entry.
+        await expect(studentPage.locator("[data-sat-handoff]")).toHaveAttribute(
+          "data-sat-handoff-state",
+          "opening"
+        );
+        await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveCount(0);
+        await assertSingleSatStage(studentPage);
+      } finally {
+        mathBaseEntry.release();
+        await mathBaseEntry.remove();
+      }
+      await expect(studentPage.locator("[data-sat-transition-hold]")).toHaveCount(0);
       await expectSameExamFrameNode(studentPage);
 
-      await expect.poll(async () => {
-        const modules = await readSectionModules(studentPage, scheduleId, candidateId, 'math');
-        return modules.find((module) => module.adaptiveRole !== 'base' && module.state === 'active')?.state ?? null;
-      }, { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }).toBe('active');
-      await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible();
-      await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
-      await studentPage.reload({ waitUntil: 'domcontentloaded' });
-      await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
+      await expect
+        .poll(
+          async () => {
+            const modules = await readSectionModules(studentPage, scheduleId, candidateId, "math");
+            return (
+              modules.find((module) => module.adaptiveRole !== "base" && module.state === "active")
+                ?.state ?? null
+            );
+          },
+          { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }
+        )
+        .toBe("active");
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible();
+      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+      await studentPage.reload({ waitUntil: "domcontentloaded" });
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
 
       await reviewAndExpireCurrentModule(studentPage, scheduleId);
-      await expect(studentPage.getByRole('heading', { name: 'SAT Complete' })).toBeVisible({ timeout: 60_000 });
-      await expect(studentPage.getByRole('button', { name: /Begin module/i })).toHaveCount(0);
+      await expect(studentPage.getByRole("heading", { name: "SAT Complete" })).toBeVisible({
+        timeout: 60_000,
+      });
+      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
     } finally {
       delivery.detach();
       await studentContext.close();
@@ -262,15 +414,15 @@ test.describe('SAT student transitions', () => {
 });
 
 async function reviewAndExpireCurrentModule(
-  page: import('@playwright/test').Page,
-  scheduleId: string,
+  page: import("@playwright/test").Page,
+  scheduleId: string
 ): Promise<void> {
-  await page.getByRole('button', { name: /Open question navigator/ }).click();
-  await page.getByRole('button', { name: 'Review answers', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Review your answers' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Submit module', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Submit anyway', exact: true })).toHaveCount(0);
-  await expect(page.getByTestId('sat-submit-confirm')).toHaveCount(0);
+  await page.getByRole("button", { name: /Open question navigator/ }).click();
+  await page.getByRole("button", { name: "Review answers", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review your answers" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Submit module", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Submit anyway", exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("sat-submit-confirm")).toHaveCount(0);
   const changed = await executeUpdate(
     `UPDATE assessment_module_attempts ma
        JOIN student_attempts a ON a.id = ma.attempt_id
@@ -278,48 +430,57 @@ async function reviewAndExpireCurrentModule(
             ma.updated_at = NOW(6)
       WHERE a.schedule_id = ?
         AND ma.state IN ('active', 'review')`,
-    [scheduleId],
+    [scheduleId]
   );
-  expect(changed, 'the current SAT module clock must expire through server reconciliation').toBe(1);
+  expect(changed, "the current SAT module clock must expire through server reconciliation").toBe(1);
 }
 
 async function expectEarlyModuleSubmitRejected(
-  page: import('@playwright/test').Page,
+  page: import("@playwright/test").Page,
   scheduleId: string,
-  candidateId: string,
+  candidateId: string
 ): Promise<void> {
-  const outcome = await page.evaluate(async ({ scheduleId, candidateId }) => {
-    const liveResponse = await fetch(
-      `/api/v1/student/sessions/${scheduleId}/live?candidateId=${encodeURIComponent(candidateId)}`,
-    );
-    const livePayload = await liveResponse.json();
-    const attemptId = livePayload?.data?.attempt?.id ?? livePayload?.attempt?.id;
-    if (typeof attemptId !== 'string') throw new Error('SAT attempt was unavailable for the early-submit check.');
-    const delivery = await import('/src/features/student-delivery/api/assessmentDeliveryApi.ts');
-    delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
-    const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
-    const active = snapshot.attempt.moduleAttempts.find((item) => item.state === 'active' || item.state === 'review');
-    if (!active) throw new Error('SAT module was not active for the early-submit check.');
-    try {
-      await delivery.assessmentDeliveryApi.submitModule(scheduleId, attemptId, { moduleId: active.moduleId });
-      return { accepted: true, status: 200, reason: null };
-    } catch (error) {
-      const apiError = error as { status?: number; details?: { reason?: string } };
-      return { accepted: false, status: apiError.status ?? null, reason: apiError.details?.reason ?? null };
-    }
-  }, { scheduleId, candidateId });
+  const outcome = await page.evaluate(
+    async ({ scheduleId, candidateId }) => {
+      const liveResponse = await fetch(
+        `/api/v1/student/sessions/${scheduleId}/live?candidateId=${encodeURIComponent(candidateId)}`
+      );
+      const livePayload = await liveResponse.json();
+      const attemptId = livePayload?.data?.attempt?.id ?? livePayload?.attempt?.id;
+      if (typeof attemptId !== "string")
+        throw new Error("SAT attempt was unavailable for the early-submit check.");
+      const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+      delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
+      const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
+      const active = snapshot.attempt.moduleAttempts.find(
+        (item) => item.state === "active" || item.state === "review"
+      );
+      if (!active) throw new Error("SAT module was not active for the early-submit check.");
+      try {
+        await delivery.assessmentDeliveryApi.submitModule(scheduleId, attemptId, {
+          moduleId: active.moduleId,
+        });
+        return { accepted: true, status: 200, reason: null };
+      } catch (error) {
+        const apiError = error as { status?: number; details?: { reason?: string } };
+        return {
+          accepted: false,
+          status: apiError.status ?? null,
+          reason: apiError.details?.reason ?? null,
+        };
+      }
+    },
+    { scheduleId, candidateId }
+  );
   expect(outcome).toEqual({
     accepted: false,
     status: 409,
-    reason: 'STUDENT_MODULE_SUBMIT_DISABLED',
+    reason: "STUDENT_MODULE_SUBMIT_DISABLED",
   });
 }
 
-// Every delivery response the student page receives, so the SEV-1 branch fence
-// can be asserted against the RAW wire bodies rather than only against the
-// rendered surface. The server loads both adaptive branches from one
-// immutable version tree, so a body that carries the unassigned branch means
-// the fence regressed — even if nothing renders it.
+// Capture raw delivery bodies so branch isolation is verified at the API
+// boundary, not only through the rendered student surface.
 interface DeliveryCapture {
   collectedBodies: () => Promise<string[]>;
   detach: () => void;
@@ -327,28 +488,31 @@ interface DeliveryCapture {
 
 function deferredSignal(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
-  const promise = new Promise<void>((done) => { resolve = done; });
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
-function captureDeliveryResponses(page: import('@playwright/test').Page): DeliveryCapture {
+function captureDeliveryResponses(page: import("@playwright/test").Page): DeliveryCapture {
   const bodies: string[] = [];
   const pending: Promise<void>[] = [];
-  const handler = (response: import('@playwright/test').Response): void => {
-    if (!response.url().includes('/api/v1/assessment-delivery/')) return;
+  const handler = (response: import("@playwright/test").Response): void => {
+    if (!response.url().includes("/api/v1/assessment-delivery/")) return;
     if (response.status() !== 200) return;
-    // Keep each body read so assertions wait for the wire response to finish.
-    pending.push(response.text().then((body) => {
-      bodies.push(body);
-    }));
+    pending.push(
+      response.text().then((body) => {
+        bodies.push(body);
+      })
+    );
   };
-  page.on('response', handler);
+  page.on("response", handler);
   return {
     collectedBodies: async () => {
       await Promise.all([...pending]);
       return [...bodies];
     },
-    detach: () => page.off('response', handler),
+    detach: () => page.off("response", handler),
   };
 }
 
@@ -364,7 +528,10 @@ function assertBranchAbsent(body: string, branch: UnassignedBranch): void {
   }
 }
 
-async function readAdaptiveBranches(scheduleId: string, sectionKey: string): Promise<UnassignedBranch[]> {
+async function readAdaptiveBranches(
+  scheduleId: string,
+  sectionKey: string
+): Promise<UnassignedBranch[]> {
   const modules = await queryDb<{ id: string }>(
     `SELECT m.id AS id FROM assessment_modules m
        JOIN assessment_sections s ON s.id = m.section_id
@@ -372,24 +539,26 @@ async function readAdaptiveBranches(scheduleId: string, sectionKey: string): Pro
       WHERE sch.id = ? AND s.section_key = ?
         AND m.adaptive_role IN ('lower_branch', 'higher_branch')
       ORDER BY m.display_order`,
-    [scheduleId, sectionKey],
+    [scheduleId, sectionKey]
   );
-  return Promise.all(modules.map(async ({ id }) => ({
-    moduleId: id,
-    questionIds: (await queryDb<{ id: string }>(
-      `SELECT id FROM assessment_exam_questions WHERE module_id = ?`, [id],
-    )).map((row) => row.id),
-  })));
+  return Promise.all(
+    modules.map(async ({ id }) => ({
+      moduleId: id,
+      questionIds: (
+        await queryDb<{ id: string }>(
+          "SELECT id FROM assessment_exam_questions WHERE module_id = ?",
+          [id]
+        )
+      ).map((row) => row.id),
+    }))
+  );
 }
 
-/**
- * The branch this candidate was NOT routed into: the authored adaptive branch
- * of the section that has no assessment_module_attempts row for the attempt.
- */
+/** The branch with no module-attempt row for this candidate. */
 async function readUnassignedBranch(
   scheduleId: string,
   candidateId: string,
-  sectionKey: string,
+  sectionKey: string
 ): Promise<UnassignedBranch | null> {
   const modules = await queryDb<{ id: string }>(
     `SELECT m.id AS id
@@ -408,41 +577,84 @@ async function readUnassignedBranch(
                         ORDER BY a.updated_at DESC, a.id DESC LIMIT 1))
       ORDER BY m.display_order
       LIMIT 1`,
-    [sectionKey, scheduleId, scheduleId, candidateId],
+    [sectionKey, scheduleId, scheduleId, candidateId]
   );
   if (modules.length === 0) return null;
   const moduleId = modules[0]!.id;
   const questions = await queryDb<{ id: string }>(
-    `SELECT id AS id FROM assessment_exam_questions WHERE module_id = ?`,
-    [moduleId],
+    "SELECT id AS id FROM assessment_exam_questions WHERE module_id = ?",
+    [moduleId]
   );
   return { moduleId, questionIds: questions.map((row) => row.id) };
 }
 
-const EXAM_FRAME_MARKER = 'data-e2e-frame-marker';
+async function holdNextModuleStartResponse(
+  page: import("@playwright/test").Page,
+  options: { failFirstRequest?: boolean } = {}
+) {
+  let failedResolve!: () => void;
+  let enteredResolve!: () => void;
+  let releaseResolve!: () => void;
+  const failed = new Promise<void>((resolve) => {
+    failedResolve = resolve;
+  });
+  const entered = new Promise<void>((resolve) => {
+    enteredResolve = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    releaseResolve = resolve;
+  });
+  let attempts = 0;
+  let held = false;
+  const routePattern = "**/v1/assessment-delivery/schedules/*/modules/start";
+  await page.route(routePattern, async (route) => {
+    attempts += 1;
+    if (options.failFirstRequest && attempts === 1) {
+      await route.abort("internetdisconnected");
+      failedResolve();
+      return;
+    }
+    const response = await route.fetch();
+    if (!held) {
+      held = true;
+      enteredResolve();
+      await released;
+    }
+    await route.fulfill({ response });
+  });
+  return {
+    failed,
+    entered,
+    attempts: () => attempts,
+    release: releaseResolve,
+    remove: () => page.unroute(routePattern),
+  };
+}
+
+const EXAM_FRAME_MARKER = "data-e2e-frame-marker";
 
 /**
  * Marks the mounted exam frame so a later assertion can prove it is the SAME
  * node — the handoff must reconcile the surface the student is on, never mount
  * the next module on a fresh one.
  */
-async function markExamFrame(page: import('@playwright/test').Page): Promise<void> {
+async function markExamFrame(page: import("@playwright/test").Page): Promise<void> {
   const marked = await page.evaluate((attribute) => {
-    const frame = document.querySelector('[data-sat-student-frame]');
+    const frame = document.querySelector("[data-sat-student-frame]");
     if (!frame) return false;
-    frame.setAttribute(attribute, 'same-node');
+    frame.setAttribute(attribute, "same-node");
     return true;
   }, EXAM_FRAME_MARKER);
-  expect(marked, 'the exam frame must be mounted before the handoff').toBe(true);
+  expect(marked, "the exam frame must be mounted before the handoff").toBe(true);
 }
 
-async function expectSameExamFrameNode(page: import('@playwright/test').Page): Promise<void> {
+async function expectSameExamFrameNode(page: import("@playwright/test").Page): Promise<void> {
   const survived = await page.evaluate(
     (attribute) =>
       document.querySelector(`[data-sat-student-frame][${attribute}="same-node"]`) !== null,
-    EXAM_FRAME_MARKER,
+    EXAM_FRAME_MARKER
   );
-  expect(survived, 'the module handoff must not remount the exam frame').toBe(true);
+  expect(survived, "the module handoff must not remount the exam frame").toBe(true);
 }
 
 /**
@@ -450,24 +662,67 @@ async function expectSameExamFrameNode(page: import('@playwright/test').Page): P
  * departing one is inert and hidden from assistive tech — so the student is
  * never shown (or read) two surfaces at once.
  */
-async function assertSingleSatStage(page: import('@playwright/test').Page): Promise<void> {
-  await expect(page.locator('[data-sat-stage]:not([data-sat-stage-exiting])')).toHaveCount(1);
-  const exiting = page.locator('[data-sat-stage-exiting]');
+async function assertSingleSatStage(page: import("@playwright/test").Page): Promise<void> {
+  await expect(page.locator("[data-sat-stage]:not([data-sat-stage-exiting])")).toHaveCount(1);
+  const exiting = page.locator("[data-sat-stage-exiting]");
   if ((await exiting.count()) > 0) {
-    await expect(exiting.first()).toHaveAttribute('aria-hidden', 'true');
-    await expect(exiting.first()).toHaveAttribute('inert');
+    await expect(exiting.first()).toHaveAttribute("aria-hidden", "true");
+    await expect(exiting.first()).toHaveAttribute("inert");
   }
 }
 
+async function assertHeldExamCannotBeInteractedWith(
+  page: import("@playwright/test").Page
+): Promise<void> {
+  const held = page.locator("[data-sat-transition-hold]");
+  const radio = held.locator('input[type="radio"]').first();
+  if (await radio.count()) {
+    const shell = held.getByTestId("sat-exam-shell");
+    const navigator = shell.getByRole("button", {
+      name: /Open question navigator/,
+      includeHidden: true,
+    });
+    const questionPosition = await navigator.getAttribute("aria-label");
+    const radioBounds = await radio.boundingBox();
+    if (!radioBounds) throw new Error("The held module answer control was not visible.");
+    await page.mouse.click(
+      radioBounds.x + radioBounds.width / 2,
+      radioBounds.y + radioBounds.height / 2
+    );
+    await expect(radio).not.toBeChecked();
+
+    await page.keyboard.press("Control+Alt+x");
+    await expect(navigator).toHaveAttribute("aria-label", questionPosition ?? "");
+    const next = shell.getByRole("button", { name: "Next question", includeHidden: true });
+    const nextBounds = await next.boundingBox();
+    if (!nextBounds) throw new Error("The held module navigation control was not visible.");
+    await page.mouse.click(
+      nextBounds.x + nextBounds.width / 2,
+      nextBounds.y + nextBounds.height / 2
+    );
+    await expect(navigator).toHaveAttribute("aria-label", questionPosition ?? "");
+    return;
+  }
+
+  await expect(held.getByRole("heading", { name: "Review your answers" })).toBeVisible();
+  await expect(held.getByRole("button", { name: "Submit module", exact: true })).toHaveCount(0);
+  const backToQuestion = held.getByRole("button", { name: /Back to question/ }).first();
+  const backBounds = await backToQuestion.boundingBox();
+  if (!backBounds) throw new Error("The held review navigation control was not visible.");
+  await page.mouse.click(backBounds.x + backBounds.width / 2, backBounds.y + backBounds.height / 2);
+  await expect(held.getByRole("heading", { name: "Review your answers" })).toBeVisible();
+  await expect(page.getByTestId("sat-submit-confirm")).toHaveCount(0);
+}
+
 async function assertNoHorizontalOverflow(
-  page: import('@playwright/test').Page,
-  viewports: Array<{ width: number; height: number }>,
+  page: import("@playwright/test").Page,
+  viewports: Array<{ width: number; height: number }>
 ): Promise<void> {
   const originalViewport = page.viewportSize();
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
     const hasOverflow = await page.evaluate(
-      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth
     );
     expect(hasOverflow, `horizontal overflow at ${viewport.width}×${viewport.height}`).toBe(false);
   }
@@ -475,29 +730,57 @@ async function assertNoHorizontalOverflow(
 }
 
 async function readSectionModules(
-  page: import('@playwright/test').Page,
+  page: import("@playwright/test").Page,
   scheduleId: string,
   candidateId: string,
-  sectionKey: 'reading-writing' | 'math',
+  sectionKey: "reading-writing" | "math"
 ): Promise<Array<{ adaptiveRole: string; state: string | null }>> {
-  return page.evaluate(async ({ scheduleId: id, candidateId: studentId, sectionKey: requestedSection }) => {
-    const liveResponse = await fetch(
-      `/api/v1/student/sessions/${id}/live?candidateId=${encodeURIComponent(studentId)}`,
-    );
-    const livePayload = await liveResponse.json();
-    const attemptId = livePayload?.data?.attempt?.id ?? livePayload?.attempt?.id;
-    if (typeof attemptId !== 'string') {
-      throw new Error('SAT student attempt was unavailable during the transition.');
-    }
+  return page.evaluate(
+    async ({ scheduleId: id, candidateId: studentId, sectionKey: requestedSection }) => {
+      const liveResponse = await fetch(
+        `/api/v1/student/sessions/${id}/live?candidateId=${encodeURIComponent(studentId)}`
+      );
+      const livePayload = await liveResponse.json();
+      const attemptId = livePayload?.data?.attempt?.id ?? livePayload?.attempt?.id;
+      if (typeof attemptId !== "string") {
+        throw new Error("SAT student attempt was unavailable during the transition.");
+      }
 
-    const delivery = await import('/src/features/student-delivery/api/assessmentDeliveryApi.ts');
-    delivery.configureAssessmentDeliveryAttempt(id, attemptId, studentId);
-    const snapshot = await delivery.assessmentDeliveryApi.bootstrap(id, attemptId);
-    const section = snapshot.sections.find((item) => item.sectionKey === requestedSection);
-    if (!section) throw new Error(`${requestedSection} was missing from the SAT bootstrap.`);
-    return section.modules.map((module) => ({
-      adaptiveRole: module.adaptiveRole,
-      state: snapshot.attempt.moduleAttempts.find((attempt) => attempt.moduleId === module.id)?.state ?? null,
-    }));
-  }, { scheduleId, candidateId, sectionKey });
+      const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+      delivery.configureAssessmentDeliveryAttempt(id, attemptId, studentId);
+      const snapshot = await delivery.assessmentDeliveryApi.bootstrap(id, attemptId);
+      const section = snapshot.sections.find((item) => item.sectionKey === requestedSection);
+      if (!section) throw new Error(`${requestedSection} was missing from the SAT bootstrap.`);
+      return section.modules.map((module) => ({
+        adaptiveRole: module.adaptiveRole,
+        state:
+          snapshot.attempt.moduleAttempts.find((attempt) => attempt.moduleId === module.id)
+            ?.state ?? null,
+      }));
+    },
+    { scheduleId, candidateId, sectionKey }
+  );
+}
+
+async function readSatRuntime(
+  page: import("@playwright/test").Page,
+  scheduleId: string
+): Promise<{
+  currentSectionKey: string | null;
+  sections: Array<{ sectionKey: string; status: string | null }>;
+}> {
+  const response = await page.request.get(`/api/v1/schedules/${scheduleId}/runtime`);
+  if (!response.ok())
+    throw new Error(`Runtime read failed: ${response.status()} ${await response.text()}`);
+  const payload = await response.json();
+  const runtime = payload?.data ?? payload;
+  return {
+    currentSectionKey: runtime.currentSectionKey ?? null,
+    sections: (runtime.sections ?? []).map(
+      (section: { sectionKey: string; status?: string | null }) => ({
+        sectionKey: section.sectionKey,
+        status: section.status ?? null,
+      })
+    ),
+  };
 }

@@ -89,7 +89,7 @@ function createQuestionResult(questionId: string, isCorrect: boolean, awardedSco
 
 function createSectionSubmission(
   submissionId: string,
-  section: 'reading' | 'listening',
+  section: 'reading' | 'listening' | 'science',
   answers: Record<string, unknown>,
   questionResults: ReturnType<typeof createQuestionResult>[],
 ) {
@@ -121,6 +121,149 @@ function createSectionSubmission(
     submittedAt: '2026-01-01T00:00:00.000Z',
   } as any;
 }
+
+test('exports ACT Science answers with category totals and correct counts', () => {
+  const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
+  examState.science.stimuli = [
+    {
+      id: 'stimulus-1',
+      title: 'Science skills',
+      content: 'Experiment content',
+      blocks: [
+        {
+          id: 'science-block-1',
+          type: 'SINGLE_MCQ',
+          instruction: 'Choose the best answer.',
+          stem: 'Use the evidence.',
+          questions: [
+            {
+              id: 'science-iod',
+              stem: 'Interpret the data.',
+              skillCategory: 'interpretation_of_data',
+              options: [
+                { id: 'iod-a', text: 'Answer A', isCorrect: true },
+                { id: 'iod-b', text: 'Answer B', isCorrect: false },
+              ],
+            },
+            {
+              id: 'science-sin',
+              stem: 'Plan an investigation.',
+              skillCategory: 'scientific_investigation',
+              options: [
+                { id: 'sin-a', text: 'Answer A', isCorrect: true },
+                { id: 'sin-b', text: 'Answer B', isCorrect: false },
+              ],
+            },
+          ],
+        },
+      ],
+      images: [],
+    },
+  ] as any;
+
+  const submission = {
+    ...createStudentSubmission('sub-act-1', 'stu-act-1', 'ACT Student'),
+    sectionStatuses: {
+      ...createStudentSubmission('sub-act-1', 'stu-act-1', 'ACT Student').sectionStatuses,
+      science: 'auto_graded',
+    },
+  };
+  const scienceSubmission = createSectionSubmission(
+    'sub-act-1',
+    'science',
+    { 'science-iod': 'iod-b', 'science-sin': 'sin-a' },
+    [
+      { ...createQuestionResult('science-iod', false, 0), correctAnswer: 'iod-a' },
+      { ...createQuestionResult('science-sin', true, 1), correctAnswer: 'sin-a' },
+    ],
+  );
+
+  const exportData = buildWideObjectiveExport({
+    session: { sessionId: 'session-act-1', examTitle: 'ACT Science Practice' },
+    submissions: [submission],
+    sectionSubmissions: [{ submissionId: submission.id, sectionSubmission: scienceSubmission }],
+    examState,
+    moduleType: 'science',
+  });
+
+  const labels = exportData.columns.map((column) => column.label);
+  expect(labels.slice(11, 25)).toEqual([
+    'Submitted At',
+    'Total Score',
+    'Interpretation of Data (IOD)',
+    'Scientific Investigation (SIN)',
+    'Evaluating Scientific Arguments and Models with Evidence (ESA)',
+    'IOD correct',
+    'SIN correct',
+    'ESA correct',
+    'Max Score',
+    'Percentage',
+    'IOD Percentage',
+    'SIN Percentage',
+    'ESA Percentage',
+    'Correct Count',
+  ]);
+  expect(labels).toContain('Course');
+  expect(exportData.rows[0]?.['scienceCategoryQuestionCount:interpretation_of_data']).toBe(1);
+  expect(exportData.rows[0]?.['scienceCategory:scientific_investigation']).toBe(1);
+  expect(exportData.rows[0]?.['answer:science-iod']).toBe('B. Answer B');
+});
+
+test('restores ACT answers from persisted question results when the answer map is missing', () => {
+  const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
+  examState.science.stimuli = [
+    {
+      id: 'stimulus-1',
+      title: 'Science skills',
+      content: 'Experiment content',
+      blocks: [
+        {
+          id: 'science-block-1',
+          type: 'SINGLE_MCQ',
+          instruction: 'Choose the best answer.',
+          stem: 'Use the evidence.',
+          questions: [
+            {
+              id: 'science-q1',
+              stem: 'Interpret the data.',
+              skillCategory: 'interpretation_of_data',
+              options: [
+                { id: 'q1-a', text: 'Answer A', isCorrect: true },
+                { id: 'q1-b', text: 'Answer B', isCorrect: false },
+              ],
+            },
+          ],
+        },
+      ],
+      images: [],
+    },
+  ] as any;
+
+  const submission = createStudentSubmission('sub-act-fallback', 'stu-act-fallback', 'ACT Student');
+  const exportData = buildWideObjectiveExport({
+    session: { sessionId: 'session-act-fallback', examTitle: 'ACT Science Practice' },
+    submissions: [submission],
+    sectionSubmissions: [{
+      submissionId: submission.id,
+      sectionSubmission: createSectionSubmission(
+        submission.id,
+        'science',
+        {},
+        [{
+          ...createQuestionResult('science-q1', true, 1),
+          studentAnswer: 'q1-a',
+          correctAnswer: 'q1-a',
+        }],
+      ),
+    }],
+    examState,
+    moduleType: 'science',
+  });
+
+  expect(exportData.rows[0]?.['answer:science-q1']).toBe('A. Answer A');
+  expect(exportData.rows[0]?.['rightAnswer:science-q1']).toBe('A. Answer A');
+  expect(exportData.rows[0]?.['score:science-q1']).toBe(1);
+});
 
 function createWritingTaskSubmission(
   submissionId: string,

@@ -3,7 +3,6 @@ package authoring
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"strings"
 
 	"example.com/ielts-proctoring/internal/authoringrealtime"
@@ -210,9 +209,4 @@ func (s *Service) appendAuthoringEventTx(ctx context.Context, q tx.Tx, emission 
 		emission.appended = true
 	}
 	return nil
-}
-
-// eventScopeDebug renders a scope for logs without leaking content (ids only).
-func eventScopeDebug(scope authoringScope) string {
-	return fmt.Sprintf("exam=%s draft=%s draftRev=%d", scope.ExamID, scope.DraftVersionID, scope.DraftRevision)
 }

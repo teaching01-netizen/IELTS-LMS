@@ -29,7 +29,28 @@ func NewRegistry() *Registry {
 }
 
 // DefaultRegistry is the process-wide registry served by /metrics.
-var DefaultRegistry = NewRegistry()
+var DefaultRegistry = newDefaultRegistry()
+
+func newDefaultRegistry() *Registry {
+	r := NewRegistry()
+	// These bounded SAT exam-day series back operational alerts and should be
+	// visible before their first increment, including on a fresh deployment.
+	for _, series := range []struct {
+		name   string
+		labels []string
+	}{
+		{MSATScoreSource, []string{"source", SATScoreV2}},
+		{MSATScoreSource, []string{"source", SATScoreLegacy}},
+		{MSATFinalizeTotal, []string{"outcome", FinalizeCompleted}},
+		{MSATFinalizeTotal, []string{"outcome", FinalizeReplayed}},
+		{MSATFinalizeTotal, []string{"outcome", FinalizeRejected}},
+		{MSATHeartbeatTotal, []string{"path", HeartbeatMemory}},
+		{MSATHeartbeatTotal, []string{"path", HeartbeatInline}},
+	} {
+		r.RegisterCounter(series.name, series.labels...)
+	}
+	return r
+}
 
 // IncCounter adds 1 to the counter series name{labelPairs...}.
 // labelPairs are alternating key,value strings; a dangling key is dropped.
@@ -38,6 +59,18 @@ func (r *Registry) IncCounter(name string, labelPairs ...string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.counters[key]++
+	r.names[mname] = "counter"
+}
+
+// RegisterCounter makes a counter series visible at zero before the first
+// event. Incrementing the same name and labels later updates that series.
+func (r *Registry) RegisterCounter(name string, labelPairs ...string) {
+	key, mname := seriesKey(name, labelPairs)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.counters[key]; !exists {
+		r.counters[key] = 0
+	}
 	r.names[mname] = "counter"
 }
 

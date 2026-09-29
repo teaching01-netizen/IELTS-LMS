@@ -595,6 +595,13 @@ func proctorEndSectionHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
+		// End-section-now also completes the runtime when the final section is
+		// ended. Seal the now-completed schedule synchronously so IELTS and ACT
+		// students do not wait for the worker's next hot cycle.
+		if err := app.Proctor.AutoSubmitScheduleAfterEndSection(r.Context(), *actor, chi.URLParam(r, "scheduleID")); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
@@ -654,6 +661,10 @@ func proctorCompleteExamHandler(app *App) http.HandlerFunc {
 			return
 		}
 		if err := app.Proctor.CompleteExam(r.Context(), *actor, chi.URLParam(r, "scheduleID"), proctor.CompleteExamCommand{Reason: body.Reason}); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if err := app.Proctor.AutoSubmitScheduleAfterComplete(r.Context(), *actor, chi.URLParam(r, "scheduleID")); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}

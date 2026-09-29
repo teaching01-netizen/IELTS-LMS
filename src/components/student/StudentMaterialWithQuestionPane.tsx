@@ -43,6 +43,7 @@ interface StudentMaterialWithQuestionPaneProps {
       meta?: StudentAnswerMutationMeta
     ) => void;
     currentQuestionId: string | null;
+    showOnlyCurrentQuestion?: boolean | undefined;
     onNavigate: (id: string) => void;
     flags: Record<string, boolean>;
     onToggleFlag?: ((id: string) => void) | undefined;
@@ -214,6 +215,7 @@ export function StudentMaterialWithQuestionPane({
       answers={questionPanel.answers}
       onAnswerChange={questionPanel.onAnswerChange}
       currentQuestionId={questionPanel.currentQuestionId}
+      showOnlyCurrentQuestion={questionPanel.showOnlyCurrentQuestion}
       onNavigate={questionPanel.onNavigate}
       flags={questionPanel.flags}
       onToggleFlag={questionPanel.onToggleFlag}
@@ -238,7 +240,7 @@ export function StudentMaterialWithQuestionPane({
   );
 
   return (
-    <div className="flex h-full w-full flex-col bg-white">
+    <div className="flex h-full min-h-0 w-full flex-col bg-white">
       {isCompact ? (
         <div
           className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-t border-gray-300"
@@ -301,7 +303,7 @@ export function StudentMaterialWithQuestionPane({
         </div>
       ) : (
         <div
-          className={`relative flex flex-1 overflow-hidden border-t border-gray-300 ${
+          className={`relative flex min-h-0 flex-1 overflow-hidden border-t border-gray-300 ${
             isTabletMode ? "flex-row" : "flex-col md:flex-row"
           }`}
           ref={workspaceRef}

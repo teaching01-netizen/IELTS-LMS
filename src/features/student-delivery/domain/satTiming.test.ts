@@ -41,6 +41,28 @@ describe('SAT timing wire contracts', () => {
     expect(personalModuleRemainingSeconds(started, Date.parse(startedAt), Date.parse(startedAt) + 120_000, 0)).toBe(0);
   });
 
+  it('never displays more than the granted module time when the clock snapshot predates start', () => {
+    const startedAt = '2026-09-10T08:00:00.000Z';
+    const started = {
+      ...attempt,
+      allocatedSeconds: 120,
+      startedAt,
+      deadlineAt: '2026-09-10T08:02:00.000Z',
+      remainingSeconds: 120,
+    };
+
+    // A live event can publish the started row before the next timing snapshot;
+    // that older snapshot can place the projected server clock before startedAt.
+    expect(personalModuleRemainingSeconds(
+      started,
+      Date.parse(startedAt),
+      Date.parse(startedAt) - 50,
+      0,
+      true,
+      'sat_personal_v1',
+    )).toBe(120);
+  });
+
   it('freezes the personal countdown while the cohort stage is paused', () => {
     // The authoritative section clock stops when the stage leaves live;
     // personal must freeze with it or min() reaches zero during a pause.

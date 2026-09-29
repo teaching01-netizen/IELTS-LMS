@@ -39,10 +39,10 @@ func TestAuthMiddlewareRejectsPersistentCookieForExpiredOrRevokedDatabaseSession
 			cfg.RateLimitMode = config.RateLimitModeLocal
 			cfg.SessionCacheEnabled = false
 			app := &App{
-				Config:         cfg,
-				DB:             db,
+				Config:          cfg,
+				DB:              db,
 				SessionResolver: defaultSessionResolver,
-				SessionCache:   auth.NewSessionCache(auth.SessionCacheConfig{Enabled: false}),
+				SessionCache:    auth.NewSessionCache(auth.SessionCacheConfig{Enabled: false}),
 			}
 			router := BuildRouter(app)
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil)

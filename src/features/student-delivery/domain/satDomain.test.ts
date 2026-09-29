@@ -208,6 +208,16 @@ describe('SAT delivery domain', () => {
     const data = {
       scheduleRuntimeStatus: 'live',
       proctorStatus: 'active',
+      timing: {
+        authority: 'cohort_runtime',
+        timingModel: 'sat_personal_v1',
+        stageKey: 'reading-writing',
+        stageStatus: 'live',
+        serverNow: '2026-08-30T03:20:00Z',
+        deadlineAt: '2026-08-30T03:30:00Z',
+        remainingSeconds: 600,
+        runtimeRevision: 4,
+      },
       attempt: { moduleAttempts: [pendingAttempt] },
     } as AssessmentDeliveryBootstrap;
     const entry = (overrides: Partial<SatEntryDecisionInput> = {}) =>
@@ -282,6 +292,16 @@ describe('SAT delivery domain', () => {
     const data = {
       scheduleRuntimeStatus: 'live',
       proctorStatus: 'active',
+      timing: {
+        authority: 'cohort_runtime',
+        timingModel: 'sat_personal_v1',
+        stageKey: 'math',
+        stageStatus: 'live',
+        serverNow: '2026-08-30T03:20:00Z',
+        deadlineAt: '2026-08-30T03:30:00Z',
+        remainingSeconds: 600,
+        runtimeRevision: 4,
+      },
       attempt: { moduleAttempts: [pendingAttempt] },
     } as AssessmentDeliveryBootstrap;
     const entry = (overrides: Partial<SatEntryDecisionInput> = {}) =>

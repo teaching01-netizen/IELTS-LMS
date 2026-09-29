@@ -40,12 +40,12 @@ test.describe("Go-backed grading workflow", () => {
     const search = page.getByRole("textbox", { name: "Search sessions by exam or cohort" });
 
     await search.fill("Backend E2E Lifecycle");
-    const lifecycleRow = page
+    const lifecycleRows = page
       .locator("tbody tr")
       .filter({ hasText: "Backend E2E Lifecycle" })
-      .first();
-    await expect(lifecycleRow).toBeVisible({ timeout: 60_000 });
-    await expect(page.locator("tbody tr")).toHaveCount(1);
+      .filter({ hasNotText: "Prior E2E ·" });
+    await expect(lifecycleRows).toHaveCount(1, { timeout: 60_000 });
+    await expect(lifecycleRows.first()).toBeVisible();
 
     await page.getByRole("button", { name: "Clear search" }).click();
     await expect(search).toHaveValue("");

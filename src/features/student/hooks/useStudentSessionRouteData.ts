@@ -1102,6 +1102,22 @@ export function useStudentSessionRouteData(
             // interop, one probe 404 per session).
             if ((pollError as { status?: number })?.status === 404) {
               runtimePollAvailableRef.current = false;
+              if (
+                studentRealtimeTransport === 'websocket' &&
+                !wsConnectedRef.current &&
+                !pollFallbackReportedRef.current
+              ) {
+                pollFallbackReportedRef.current = true;
+                emitStudentObservabilityMetric(
+                  'poll_fallback_activation',
+                  withStudentObservabilityDimensions({
+                    scheduleId: scheduleId ?? null,
+                    attemptId: attemptSnapshot?.id ?? null,
+                    realtimeTransport: studentRealtimeTransport,
+                    reason: 'socket_unavailable',
+                  }),
+                );
+              }
               try {
                 await refreshBackendSessionSnapshot();
               } catch {
@@ -1118,7 +1134,7 @@ export function useStudentSessionRouteData(
           // one continuous state.
           if (
             studentRealtimeTransport === 'websocket' &&
-            !liveSocketConnected &&
+            !wsConnectedRef.current &&
             !pollFallbackReportedRef.current
           ) {
             pollFallbackReportedRef.current = true;

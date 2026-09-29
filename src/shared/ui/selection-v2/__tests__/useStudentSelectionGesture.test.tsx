@@ -1,21 +1,27 @@
-import { act, createEvent, fireEvent, render, renderHook } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RefObject } from 'react';
-import { useStudentSelectionGesture, type SelectionHandlePointerEvent } from '../react/useStudentSelectionGesture';
-import { SelectionOverlay } from '../react/SelectionOverlay';
-import type { TextPoint } from '../domain/selectionTypes';
+import { act, createEvent, fireEvent, render, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RefObject } from "react";
+import {
+  useStudentSelectionGesture,
+  type SelectionHandlePointerEvent,
+} from "../react/useStudentSelectionGesture";
+import { SelectionOverlay } from "../react/SelectionOverlay";
+import type { TextPoint } from "../domain/selectionTypes";
 
 type Handlers = {
   enabled?: boolean;
   scopeKey?: string;
   ownedPointer?: (event: PointerEvent) => boolean;
-  activation?: 'long-press' | 'drag';
+  activation?: "long-press" | "drag";
   boundaryFor?: (point: TextPoint) => Element | null;
   onSelect?: (range: Range, text: string) => void;
   clearOnSelect?: boolean;
   longPressMs?: number;
   scrollContainer?: (root: HTMLElement) => HTMLElement | null;
-  diagnostics?: { record: (stage: string, details?: Record<string, unknown>) => void; listener: (root: HTMLElement | null) => void };
+  diagnostics?: {
+    record: (stage: string, details?: Record<string, unknown>) => void;
+    listener: (root: HTMLElement | null) => void;
+  };
   /** The haptic seam, injected like every other platform boundary in here. */
   vibrate?: (milliseconds: number) => boolean;
   /** The clock beside it, so the throttle window is driven rather than spied. */
@@ -50,18 +56,18 @@ type Frames = ReturnType<typeof manualFrames>;
 function firstTextNode(scope: ParentNode): Text {
   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   const node = walker.nextNode() as Text | null;
-  if (!node) throw new Error('no text');
+  if (!node) throw new Error("no text");
   return node;
 }
 
 function harness(handlers: Handlers = {}) {
-  const host = document.createElement('div');
+  const host = document.createElement("div");
   host.innerHTML = handlers.boundaryFor
     ? '<p id="first">alpha beta</p><p id="second">gamma delta</p>'
     : '<p id="prose">alpha beta gamma</p>';
   document.body.appendChild(host);
 
-  const prose = host.querySelector('#prose, #first') as HTMLElement;
+  const prose = host.querySelector("#prose, #first") as HTMLElement;
   const proseText = firstTextNode(prose);
   const onSelect = handlers.onSelect ?? vi.fn();
   const frames = manualFrames();
@@ -76,7 +82,7 @@ function harness(handlers: Handlers = {}) {
 
   // Read through a mutable box so a test can disarm the surface between renders,
   // exactly as turning the highlight tool off does in the exam.
-  const state = { enabled: handlers.enabled ?? true, scopeKey: handlers.scopeKey ?? '' };
+  const state = { enabled: handlers.enabled ?? true, scopeKey: handlers.scopeKey ?? "" };
   const rootRef = { current: prose } as RefObject<HTMLElement | null>;
   const view = renderHook(() =>
     useStudentSelectionGesture({
@@ -97,7 +103,7 @@ function harness(handlers: Handlers = {}) {
       now: handlers.now,
       requestFrame: frames.requestFrame,
       cancelFrame: frames.cancelFrame,
-    }),
+    })
   );
 
   return {
@@ -131,16 +137,16 @@ function frame(frames: Frames) {
 }
 
 function touchDown(target: Element, x: number, y = 10, pointerId = 1) {
-  fireEvent.pointerDown(target, { pointerType: 'touch', pointerId, clientX: x, clientY: y });
+  fireEvent.pointerDown(target, { pointerType: "touch", pointerId, clientX: x, clientY: y });
 }
 function touchMove(target: Element, x: number, y = 10, pointerId = 1) {
-  fireEvent.pointerMove(target, { pointerType: 'touch', pointerId, clientX: x, clientY: y });
+  fireEvent.pointerMove(target, { pointerType: "touch", pointerId, clientX: x, clientY: y });
 }
 function touchUp(target: Element, x: number, y = 10, pointerId = 1) {
-  fireEvent.pointerUp(target, { pointerType: 'touch', pointerId, clientX: x, clientY: y });
+  fireEvent.pointerUp(target, { pointerType: "touch", pointerId, clientX: x, clientY: y });
 }
 function touchCancel(target: Element, pointerId = 1) {
-  fireEvent.pointerCancel(target, { pointerType: 'touch', pointerId });
+  fireEvent.pointerCancel(target, { pointerType: "touch", pointerId });
 }
 function hold(frames: Frames, ms = 350) {
   act(() => {
@@ -148,7 +154,12 @@ function hold(frames: Frames, ms = 350) {
   });
   frame(frames);
 }
-function handleEvent(edge: { current: Element | null }, x: number, y: number, pointerId: number): SelectionHandlePointerEvent {
+function handleEvent(
+  edge: { current: Element | null },
+  x: number,
+  y: number,
+  pointerId: number
+): SelectionHandlePointerEvent {
   return { pointerId, clientX: x, clientY: y, currentTarget: edge.current };
 }
 
@@ -164,7 +175,7 @@ function mockMeasuredLines() {
     { left: 10, top: 100, width: 100, height: 20 } as DOMRect,
     { left: 10, top: 124, width: 40, height: 20 } as DOMRect,
   ];
-  vi.spyOn(Range.prototype, 'getClientRects').mockReturnValue(rects as unknown as DOMRectList);
+  vi.spyOn(Range.prototype, "getClientRects").mockReturnValue(rects as unknown as DOMRectList);
 }
 
 /**
@@ -179,7 +190,7 @@ function mockMeasuredLines() {
  */
 function mockShortWordLine() {
   const rects = [{ left: 10, top: 100, width: 20, height: 21 } as DOMRect];
-  vi.spyOn(Range.prototype, 'getClientRects').mockReturnValue(rects as unknown as DOMRectList);
+  vi.spyOn(Range.prototype, "getClientRects").mockReturnValue(rects as unknown as DOMRectList);
 }
 
 beforeEach(() => {
@@ -189,15 +200,42 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
-  document.body.innerHTML = '';
+  document.body.innerHTML = "";
 });
 
-describe('claiming text', () => {
-  it('uses the physical pointer type, independent of the primary pointer media query', () => {
-    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: false } as MediaQueryList);
+describe("claiming text", () => {
+  it("does not claim a press already handed to an action control", () => {
+    const { view, prose, resolveCaretAtPoint } = harness({ activation: "drag" });
+    const action = document.createElement("button");
+    action.textContent = "Edit annotation";
+    prose.append(action);
+    const down = createEvent.pointerDown(action, {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 18,
+      pointerType: "touch",
+      clientX: 3,
+      clientY: 10,
+    });
+
+    act(() => view.result.current.ignoreGesturePress(down));
+    fireEvent(action, down);
+
+    expect(resolveCaretAtPoint).not.toHaveBeenCalled();
+    expect(view.result.current.selected).toBe(false);
+    expect(down.defaultPrevented).toBe(false);
+  });
+
+  it("uses the physical pointer type, independent of the primary pointer media query", () => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
     const mouse = harness();
-    fireEvent.pointerDown(mouse.prose, { pointerType: 'mouse', pointerId: 1, clientX: 7, clientY: 10 });
-    expect(mouse.view.result.current.phase).toBe('idle');
+    fireEvent.pointerDown(mouse.prose, {
+      pointerType: "mouse",
+      pointerId: 1,
+      clientX: 7,
+      clientY: 10,
+    });
+    expect(mouse.view.result.current.phase).toBe("idle");
     expect(mouse.onSelect).not.toHaveBeenCalled();
     mouse.view.unmount();
 
@@ -207,10 +245,10 @@ describe('claiming text', () => {
     touchUp(touch.prose, 7);
     frame(touch.frames);
     expect(touch.onSelect).toHaveBeenCalledTimes(1);
-    expect(touch.onSelect.mock.calls[0]?.[1]).toBe('beta');
+    expect(touch.onSelect.mock.calls[0]?.[1]).toBe("beta");
   });
 
-  it('selects nothing for a tap', () => {
+  it("selects nothing for a tap", () => {
     const { prose, onSelect, frames, view } = harness();
 
     touchDown(prose, 4);
@@ -218,24 +256,24 @@ describe('claiming text', () => {
     frame(frames);
 
     expect(onSelect).not.toHaveBeenCalled();
-    expect(view.result.current.selectionText).toBe('');
+    expect(view.result.current.selectionText).toBe("");
   });
 
-  it('selects the word under a completed hold', () => {
+  it("selects the word under a completed hold", () => {
     const { prose, onSelect, frames, view } = harness();
 
     touchDown(prose, 7);
     hold(frames);
 
-    expect(view.result.current.selectionText).toBe('beta');
-    expect(view.result.current.phase).toBe('selecting');
+    expect(view.result.current.selectionText).toBe("beta");
+    expect(view.result.current.phase).toBe("selecting");
 
     touchUp(prose, 7);
     frame(frames);
-    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('beta');
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe("beta");
   });
 
-  it('extends the selection by whole words as the finger travels', () => {
+  it("extends the selection by whole words as the finger travels", () => {
     const { prose, onSelect, frames, view } = harness();
 
     // The hold claims `alpha`; offset 11 is inside `gamma`, so the run is every
@@ -245,15 +283,15 @@ describe('claiming text', () => {
     touchMove(prose, 11);
     frame(frames);
 
-    expect(view.result.current.selectionText).toBe('alpha beta gamma');
-    expect(view.result.current.phase).toBe('extending');
+    expect(view.result.current.selectionText).toBe("alpha beta gamma");
+    expect(view.result.current.phase).toBe("extending");
 
     touchUp(prose, 11);
     frame(frames);
-    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('alpha beta gamma');
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe("alpha beta gamma");
   });
 
-  it('keeps a mid-word claim whole, and takes whole words on either side of it', () => {
+  it("keeps a mid-word claim whole, and takes whole words on either side of it", () => {
     const { prose, onSelect, frames, view } = harness();
 
     // The spec's own example, through the gesture: a hold in the MIDDLE of
@@ -261,26 +299,26 @@ describe('claiming text', () => {
     // `pha b`, `eta g`) is a partial word, and none of them may appear.
     touchDown(prose, 7);
     hold(frames);
-    expect(view.result.current.selectionText).toBe('beta');
+    expect(view.result.current.selectionText).toBe("beta");
 
     touchMove(prose, 8);
     frame(frames);
-    expect(view.result.current.selectionText).toBe('beta');
+    expect(view.result.current.selectionText).toBe("beta");
 
     touchMove(prose, 2);
     frame(frames);
-    expect(view.result.current.selectionText).toBe('alpha beta');
+    expect(view.result.current.selectionText).toBe("alpha beta");
 
     touchMove(prose, 12);
     frame(frames);
-    expect(view.result.current.selectionText).toBe('beta gamma');
+    expect(view.result.current.selectionText).toBe("beta gamma");
 
     touchUp(prose, 12);
     frame(frames);
-    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('beta gamma');
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe("beta gamma");
   });
 
-  it('orders a right-to-left drag into a forward range', () => {
+  it("orders a right-to-left drag into a forward range", () => {
     const { prose, onSelect, frames } = harness();
 
     touchDown(prose, 16);
@@ -290,24 +328,24 @@ describe('claiming text', () => {
     touchUp(prose, 6);
     frame(frames);
 
-    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('beta gamma');
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe("beta gamma");
   });
 
-  it('claims an early drag on an armed surface rather than handing it back as a scroll', () => {
-    const { prose, view, frames, onSelect } = harness({ activation: 'drag' });
+  it("claims an early drag on an armed surface rather than handing it back as a scroll", () => {
+    const { prose, view, frames, onSelect } = harness({ activation: "drag" });
 
     touchDown(prose, 0);
     touchMove(prose, 20);
     frame(frames);
 
-    expect(view.result.current.selectionText).toBe('alpha beta gamma');
+    expect(view.result.current.selectionText).toBe("alpha beta gamma");
 
     touchUp(prose, 20);
     frame(frames);
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
-  it('cancels a gesture the platform takes over, reporting nothing', () => {
+  it("cancels a gesture the platform takes over, reporting nothing", () => {
     const { prose, onSelect, frames, view } = harness();
 
     touchDown(prose, 0);
@@ -316,11 +354,11 @@ describe('claiming text', () => {
     frame(frames);
 
     expect(onSelect).not.toHaveBeenCalled();
-    expect(view.result.current.phase).toBe('idle');
-    expect(view.result.current.selectionText).toBe('');
+    expect(view.result.current.phase).toBe("idle");
+    expect(view.result.current.selectionText).toBe("");
   });
 
-  it('abandons an unarmed drag before the hold completes, so the page still scrolls', () => {
+  it("abandons an unarmed drag before the hold completes, so the page still scrolls", () => {
     const { prose, onSelect, frames, view } = harness();
 
     touchDown(prose, 0);
@@ -330,12 +368,12 @@ describe('claiming text', () => {
       vi.advanceTimersByTime(2000);
     });
 
-    expect(view.result.current.phase).toBe('idle');
+    expect(view.result.current.phase).toBe("idle");
     touchUp(prose, 30);
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('cancels an owned gesture when a second finger lands', () => {
+  it("cancels an owned gesture when a second finger lands", () => {
     const { prose, onSelect, frames, view } = harness();
 
     touchDown(prose, 0);
@@ -343,12 +381,12 @@ describe('claiming text', () => {
     touchDown(prose, 30, 40, 2);
     frame(frames);
 
-    expect(view.result.current.phase).toBe('idle');
+    expect(view.result.current.phase).toBe("idle");
     touchUp(prose, 30, 40, 2);
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('ignores movement from a pointer that does not own the session', () => {
+  it("ignores movement from a pointer that does not own the session", () => {
     const { prose, frames, view } = harness();
 
     touchDown(prose, 0);
@@ -356,29 +394,29 @@ describe('claiming text', () => {
     touchMove(prose, 16, 10, 2);
     frame(frames);
 
-    expect(view.result.current.selectionText).toBe('alpha');
+    expect(view.result.current.selectionText).toBe("alpha");
   });
 
-  it('clears an owned selection when the surface is disarmed mid-drag', () => {
+  it("clears an owned selection when the surface is disarmed mid-drag", () => {
     const { prose, frames, view, setEnabled, onSelect } = harness();
 
     touchDown(prose, 0);
     hold(frames);
     touchMove(prose, 11);
     frame(frames);
-    expect(view.result.current.selectionText).toBe('alpha beta gamma');
+    expect(view.result.current.selectionText).toBe("alpha beta gamma");
 
     setEnabled(false);
 
-    expect(view.result.current.phase).toBe('idle');
-    expect(view.result.current.selectionText).toBe('');
+    expect(view.result.current.phase).toBe("idle");
+    expect(view.result.current.selectionText).toBe("");
     touchUp(prose, 11);
     expect(onSelect).not.toHaveBeenCalled();
   });
 });
 
-describe('the selection survives the finger', () => {
-  it('stays selected, with handles, after the finger lifts', () => {
+describe("the selection survives the finger", () => {
+  it("stays selected, with handles, after the finger lifts", () => {
     const { prose, frames, view } = harness();
     const rects = [
       { left: 10, top: 100, width: 100, height: 20 } as DOMRect,
@@ -389,25 +427,35 @@ describe('the selection survives the finger', () => {
     hold(frames);
     touchMove(prose, 11);
     frame(frames);
-    vi.spyOn(Range.prototype, 'getClientRects').mockReturnValue(rects as unknown as DOMRectList);
+    vi.spyOn(Range.prototype, "getClientRects").mockReturnValue(rects as unknown as DOMRectList);
     touchUp(prose, 11);
     frame(frames);
 
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
     expect(view.result.current.selected).toBe(true);
     // Word-granular, and still whole words AFTER the release: the run is
     // re-derived from the claim's anchor, not from the last caret the finger
     // happened to be over.
-    expect(view.result.current.selectionText).toBe('alpha beta gamma');
+    expect(view.result.current.selectionText).toBe("alpha beta gamma");
     expect(view.result.current.rects).toEqual([
       { left: 10, top: 100, width: 100, height: 20 },
       { left: 10, top: 124, width: 40, height: 20 },
     ]);
-    expect(view.result.current.startHandle).toMatchObject({ edge: 'start', x: 10, y: 100, stem: 'up' });
-    expect(view.result.current.endHandle).toMatchObject({ edge: 'end', x: 50, y: 144, stem: 'down' });
+    expect(view.result.current.startHandle).toMatchObject({
+      edge: "start",
+      x: 10,
+      y: 100,
+      stem: "up",
+    });
+    expect(view.result.current.endHandle).toMatchObject({
+      edge: "end",
+      x: 50,
+      y: 144,
+      stem: "down",
+    });
   });
 
-  it('dismisses a resting selection without reporting it again', () => {
+  it("dismisses a resting selection without reporting it again", () => {
     const { prose, onSelect, frames, view } = harness();
 
     touchDown(prose, 0);
@@ -422,12 +470,12 @@ describe('the selection survives the finger', () => {
       view.result.current.dismiss();
     });
 
-    expect(view.result.current.phase).toBe('idle');
-    expect(view.result.current.selectionText).toBe('');
+    expect(view.result.current.phase).toBe("idle");
+    expect(view.result.current.selectionText).toBe("");
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
-  it('clears itself once the product has consumed the selection, when asked to', () => {
+  it("clears itself once the product has consumed the selection, when asked to", () => {
     const onSelect = vi.fn();
     const { prose, frames, view } = harness({ clearOnSelect: true, onSelect });
 
@@ -439,10 +487,10 @@ describe('the selection survives the finger', () => {
     frame(frames);
 
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(view.result.current.phase).toBe('idle');
+    expect(view.result.current.phase).toBe("idle");
   });
 
-  it('hands the product a range that includes the last movement before release', () => {
+  it("hands the product a range that includes the last movement before release", () => {
     const { prose, onSelect, frames } = harness();
 
     touchDown(prose, 0);
@@ -452,12 +500,12 @@ describe('the selection survives the finger', () => {
     touchMove(prose, 16);
     touchUp(prose, 16);
 
-    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('alpha beta gamma');
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe("alpha beta gamma");
   });
 
-  it('keeps the exact Range endpoints and geometry when a closed toolbar selection is dragged on its body', () => {
+  it("keeps the exact Range endpoints and geometry when a closed toolbar selection is dragged on its body", () => {
     const onSelect = vi.fn();
-    const { prose, frames, view } = harness({ activation: 'drag', onSelect, scopeKey: 'q1' });
+    const { prose, frames, view } = harness({ activation: "drag", onSelect, scopeKey: "q1" });
     mockMeasuredLines();
 
     touchDown(prose, 0);
@@ -465,7 +513,7 @@ describe('the selection survives the finger', () => {
     frame(frames);
     touchUp(prose, 11);
     frame(frames);
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
     const firstRange = onSelect.mock.calls[0]![0] as Range;
     const endpoints = (range: Range) => ({
       startContainer: range.startContainer,
@@ -489,13 +537,23 @@ describe('the selection survives the finger', () => {
       bubbles: true,
       cancelable: true,
       pointerId: 44,
-      pointerType: 'touch',
+      pointerType: "touch",
       clientX: 30,
       clientY: 110,
     });
     fireEvent(document.body, down);
-    fireEvent.pointerMove(document.body, { pointerId: 44, pointerType: 'touch', clientX: 44, clientY: 116 });
-    fireEvent.pointerUp(document.body, { pointerId: 44, pointerType: 'touch', clientX: 44, clientY: 116 });
+    fireEvent.pointerMove(document.body, {
+      pointerId: 44,
+      pointerType: "touch",
+      clientX: 44,
+      clientY: 116,
+    });
+    fireEvent.pointerUp(document.body, {
+      pointerId: 44,
+      pointerType: "touch",
+      clientX: 44,
+      clientY: 116,
+    });
 
     expect(down.defaultPrevented).toBe(true);
     expect(onSelect).toHaveBeenCalledTimes(2);
@@ -509,21 +567,25 @@ describe('the selection survives the finger', () => {
     overlay.unmount();
   });
 
-  it('resets the Range at the owning boundary when question scope changes', () => {
+  it("resets the Range at the owning boundary when question scope changes", () => {
     const onSelect = vi.fn();
-    const { prose, frames, view, setScopeKey } = harness({ activation: 'drag', onSelect, scopeKey: 'q1' });
+    const { prose, frames, view, setScopeKey } = harness({
+      activation: "drag",
+      onSelect,
+      scopeKey: "q1",
+    });
 
     touchDown(prose, 0);
     touchMove(prose, 11);
     frame(frames);
     touchUp(prose, 11);
     frame(frames);
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
     expect(view.result.current.selectionText).toBeTruthy();
 
-    setScopeKey('q2');
-    expect(view.result.current.phase).toBe('idle');
-    expect(view.result.current.selectionText).toBe('');
+    setScopeKey("q2");
+    expect(view.result.current.phase).toBe("idle");
+    expect(view.result.current.selectionText).toBe("");
     expect(view.result.current.rects).toEqual([]);
 
     touchDown(prose, 0);
@@ -531,14 +593,14 @@ describe('the selection survives the finger', () => {
     frame(frames);
     touchUp(prose, 11);
     frame(frames);
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
     expect(onSelect).toHaveBeenCalledTimes(2);
   });
 });
 
-describe('the browser never learns a selection exists', () => {
-  it('leaves window.getSelection() empty and never installs a range', () => {
-    const addRange = vi.spyOn(Selection.prototype, 'addRange');
+describe("the browser never learns a selection exists", () => {
+  it("leaves window.getSelection() empty and never installs a range", () => {
+    const addRange = vi.spyOn(Selection.prototype, "addRange");
     const { prose, frames, onSelect } = harness();
 
     touchDown(prose, 0);
@@ -554,13 +616,13 @@ describe('the browser never learns a selection exists', () => {
   });
 });
 
-describe('pointer capture, not a document-wide drag listener', () => {
-  it('captures the pointer on the surface and releases it when the gesture ends', () => {
+describe("pointer capture, not a document-wide drag listener", () => {
+  it("captures the pointer on the surface and releases it when the gesture ends", () => {
     const capture = vi.fn();
     const release = vi.fn();
     const { prose, frames } = harness();
-    vi.spyOn(Element.prototype, 'setPointerCapture').mockImplementation(capture);
-    vi.spyOn(Element.prototype, 'releasePointerCapture').mockImplementation(release);
+    vi.spyOn(Element.prototype, "setPointerCapture").mockImplementation(capture);
+    vi.spyOn(Element.prototype, "releasePointerCapture").mockImplementation(release);
 
     touchDown(prose, 0);
     expect(capture).toHaveBeenCalledWith(1);
@@ -573,8 +635,8 @@ describe('pointer capture, not a document-wide drag listener', () => {
     expect(prose.hasPointerCapture(1)).toBe(false);
   });
 
-  it('follows the finger on the captured element and nowhere else while capture is held', () => {
-    vi.spyOn(Element.prototype, 'hasPointerCapture').mockReturnValue(true);
+  it("follows the finger on the captured element and nowhere else while capture is held", () => {
+    vi.spyOn(Element.prototype, "hasPointerCapture").mockReturnValue(true);
     const { prose, frames, view } = harness();
 
     touchDown(prose, 0);
@@ -583,15 +645,15 @@ describe('pointer capture, not a document-wide drag listener', () => {
     // element, so a move that arrives at the document belongs to something else.
     touchMove(document.body, 16);
     frame(frames);
-    expect(view.result.current.selectionText).toBe('alpha');
+    expect(view.result.current.selectionText).toBe("alpha");
 
     touchMove(prose, 16);
     frame(frames);
-    expect(view.result.current.selectionText).toBe('alpha beta gamma');
+    expect(view.result.current.selectionText).toBe("alpha beta gamma");
   });
 
-  it('still follows the pointer through the document when capture is unavailable', () => {
-    vi.spyOn(Element.prototype, 'hasPointerCapture').mockReturnValue(false);
+  it("still follows the pointer through the document when capture is unavailable", () => {
+    vi.spyOn(Element.prototype, "hasPointerCapture").mockReturnValue(false);
     const { prose, frames, view } = harness();
 
     touchDown(prose, 0);
@@ -599,7 +661,7 @@ describe('pointer capture, not a document-wide drag listener', () => {
     touchMove(document.body, 16);
     frame(frames);
 
-    expect(view.result.current.selectionText).toBe('alpha beta gamma');
+    expect(view.result.current.selectionText).toBe("alpha beta gamma");
   });
 });
 
@@ -616,8 +678,8 @@ describe('pointer capture, not a document-wide drag listener', () => {
  */
 function restingSelection(handlers: Handlers = {}) {
   const harnessed = harness(handlers);
-  const end = document.createElement('button');
-  const start = document.createElement('button');
+  const end = document.createElement("button");
+  const start = document.createElement("button");
   document.body.append(start, end);
   mockMeasuredLines();
   touchDown(harnessed.prose, 7);
@@ -631,12 +693,12 @@ function restingSelection(handlers: Handlers = {}) {
   frame(harnessed.frames);
   touchUp(end, 12, 10, 7);
   frame(harnessed.frames);
-  expect(harnessed.view.result.current.selectionText).toBe('beta g');
+  expect(harnessed.view.result.current.selectionText).toBe("beta g");
   harnessed.onSelect.mockClear();
   return { ...harnessed, start, end };
 }
 
-describe('handle adjustment', () => {
+describe("handle adjustment", () => {
   /**
    * The word a hold claimed is a selection the handles can adjust.
    *
@@ -648,11 +710,11 @@ describe('handle adjustment', () => {
    * because the mismatch was symmetric — it hid in whichever direction the finger
    * happened to travel, which is why a suite of geometry assertions missed it.
    */
-  it('adjusts the edge the student grabbed on a word a hold claimed, from either end', () => {
+  it("adjusts the edge the student grabbed on a word a hold claimed, from either end", () => {
     const { prose, frames, view } = harness();
     mockMeasuredLines();
-    const start = document.createElement('button');
-    const end = document.createElement('button');
+    const start = document.createElement("button");
+    const end = document.createElement("button");
     document.body.append(start, end);
 
     const claimWord = () => {
@@ -660,8 +722,8 @@ describe('handle adjustment', () => {
       hold(frames);
       touchUp(prose, 7);
       frame(frames);
-      expect(view.result.current.selectionText).toBe('beta');
-      expect(view.result.current.phase).toBe('selected');
+      expect(view.result.current.selectionText).toBe("beta");
+      expect(view.result.current.phase).toBe("selected");
     };
 
     claimWord();
@@ -672,7 +734,7 @@ describe('handle adjustment', () => {
     frame(frames);
 
     // The word's end (offset 10) is the anchor, so the span grows to its left.
-    expect(view.result.current.selectionText).toBe('ha beta');
+    expect(view.result.current.selectionText).toBe("ha beta");
     touchUp(start, 3, 10, 7);
     frame(frames);
 
@@ -688,10 +750,10 @@ describe('handle adjustment', () => {
     touchMove(end, 13, 10, 8);
     frame(frames);
 
-    expect(view.result.current.selectionText).toBe('beta ga');
+    expect(view.result.current.selectionText).toBe("beta ga");
   });
 
-  it('moves only the endpoint whose handle was grabbed', () => {
+  it("moves only the endpoint whose handle was grabbed", () => {
     const { prose, frames, view, end } = restingSelection();
 
     act(() => {
@@ -701,16 +763,16 @@ describe('handle adjustment', () => {
     expect(view.result.current.adjusting).toBe(true);
     // Grabbing a handle must not move the endpoint: the handle sits on the line
     // edge, not on the character the student aimed at.
-    expect(view.result.current.selectionText).toBe('beta g');
+    expect(view.result.current.selectionText).toBe("beta g");
 
     touchMove(end, 16, 10, 7);
     frame(frames);
 
-    expect(view.result.current.selectionText).toBe('beta gamma');
-    expect(view.result.current.phase).toBe('adjusting-end');
+    expect(view.result.current.selectionText).toBe("beta gamma");
+    expect(view.result.current.phase).toBe("adjusting-end");
   });
 
-  it('keeps the finger on the same endpoint when it drags across the other one', () => {
+  it("keeps the finger on the same endpoint when it drags across the other one", () => {
     const { frames, view, start } = restingSelection();
 
     // The selection rests as offsets 6–12, so the fixed end is 12. Dragging the
@@ -720,18 +782,18 @@ describe('handle adjustment', () => {
       view.result.current.beginHandleAdjustment(handleEvent({ current: start }, 10, 100, 7));
     });
     frame(frames);
-    expect(view.result.current.phase).toBe('adjusting-start');
+    expect(view.result.current.phase).toBe("adjusting-start");
 
     touchMove(start, 16, 10, 7);
     frame(frames);
 
-    expect(view.result.current.phase).toBe('adjusting-end');
-    expect(view.result.current.selectionText).toBe('amma');
+    expect(view.result.current.phase).toBe("adjusting-end");
+    expect(view.result.current.selectionText).toBe("amma");
   });
 
-  it('captures the pointer on the handle, so the drag survives leaving the dot', () => {
+  it("captures the pointer on the handle, so the drag survives leaving the dot", () => {
     const capture = vi.fn();
-    vi.spyOn(Element.prototype, 'setPointerCapture').mockImplementation(capture);
+    vi.spyOn(Element.prototype, "setPointerCapture").mockImplementation(capture);
     const { frames, view, end } = restingSelection();
 
     act(() => {
@@ -741,7 +803,7 @@ describe('handle adjustment', () => {
     expect(capture).toHaveBeenCalledWith(7);
   });
 
-  it('reports the adjusted span and rests again when the handle is released', () => {
+  it("reports the adjusted span and rests again when the handle is released", () => {
     const { frames, view, end, onSelect } = restingSelection();
 
     act(() => {
@@ -752,13 +814,13 @@ describe('handle adjustment', () => {
     touchUp(end, 16, 10, 7);
     frame(frames);
 
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
     expect(view.result.current.adjusting).toBe(false);
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('beta gamma');
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe("beta gamma");
   });
 
-  it('ignores a grab while a finger is still down', () => {
+  it("ignores a grab while a finger is still down", () => {
     const { prose, frames, view, end } = harness();
     mockMeasuredLines();
 
@@ -770,21 +832,21 @@ describe('handle adjustment', () => {
 
     // The acquisition passes — the press is on the outward zone — and it is
     // the MACHINE that refuses, so this asserts the second gate, not the first.
-    expect(view.result.current.phase).toBe('selecting');
+    expect(view.result.current.phase).toBe("selecting");
   });
 
-  it('moves the endpoint whose zone the press is in, not the control it landed on', () => {
+  it("moves the endpoint whose zone the press is in, not the control it landed on", () => {
     const { prose, frames, view } = harness();
     mockShortWordLine();
-    const start = document.createElement('button');
-    const end = document.createElement('button');
+    const start = document.createElement("button");
+    const end = document.createElement("button");
     document.body.append(start, end);
 
     touchDown(prose, 7);
     hold(frames);
     touchUp(prose, 7);
     frame(frames);
-    expect(view.result.current.selectionText).toBe('beta');
+    expect(view.result.current.selectionText).toBe("beta");
 
     // The press is in the START's outward zone, handed to the END control —
     // which is exactly what the browser does on this paint, because the end
@@ -795,16 +857,16 @@ describe('handle adjustment', () => {
     });
     frame(frames);
 
-    expect(view.result.current.phase).toBe('adjusting-start');
+    expect(view.result.current.phase).toBe("adjusting-start");
     touchMove(end, 2, 10, 7);
     frame(frames);
 
     // The START is the endpoint under the finger: the word's end stays at offset
     // 9 and the span grows to its left.
-    expect(view.result.current.selectionText).toBe('pha beta');
+    expect(view.result.current.selectionText).toBe("pha beta");
   });
 
-  it('refuses a grab that does not acquire, even called directly on the gesture', () => {
+  it("refuses a grab that does not acquire, even called directly on the gesture", () => {
     const { frames, view, end } = restingSelection();
 
     // Inside the end handle's 44px box but above its own line's bottom edge:
@@ -815,15 +877,15 @@ describe('handle adjustment', () => {
     });
     frame(frames);
 
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
     expect(view.result.current.adjusting).toBe(false);
-    expect(view.result.current.selectionText).toBe('beta g');
+    expect(view.result.current.selectionText).toBe("beta g");
   });
 });
 
-describe('geometry is coalesced into frames', () => {
-  it('costs one caret resolution per frame no matter how many moves arrive', () => {
-    const { prose, frames, resolveCaretAtPoint, view } = harness({ activation: 'drag' });
+describe("geometry is coalesced into frames", () => {
+  it("costs one caret resolution per frame no matter how many moves arrive", () => {
+    const { prose, frames, resolveCaretAtPoint, view } = harness({ activation: "drag" });
 
     touchDown(prose, 0);
     frame(frames);
@@ -834,7 +896,7 @@ describe('geometry is coalesced into frames', () => {
 
     frame(frames);
     expect(resolveCaretAtPoint).toHaveBeenCalledTimes(1);
-    expect(view.result.current.phase).toBe('extending');
+    expect(view.result.current.phase).toBe("extending");
 
     // And the next frame costs exactly one more.
     touchMove(prose, 10);
@@ -842,7 +904,7 @@ describe('geometry is coalesced into frames', () => {
     expect(resolveCaretAtPoint).toHaveBeenCalledTimes(2);
   });
 
-  it('does not read the caret at all while a gesture is only pending', () => {
+  it("does not read the caret at all while a gesture is only pending", () => {
     const { prose, frames, resolveCaretAtPoint } = harness();
 
     touchDown(prose, 0);
@@ -853,7 +915,7 @@ describe('geometry is coalesced into frames', () => {
     expect(resolveCaretAtPoint).not.toHaveBeenCalled();
   });
 
-  it('re-measures a resting selection when the page moves under it', () => {
+  it("re-measures a resting selection when the page moves under it", () => {
     const { prose, frames, view } = harness();
 
     touchDown(prose, 0);
@@ -865,22 +927,22 @@ describe('geometry is coalesced into frames', () => {
     expect(frames.queued()).toBe(0);
 
     act(() => {
-      window.dispatchEvent(new Event('scroll'));
+      window.dispatchEvent(new Event("scroll"));
     });
 
     expect(frames.queued()).toBe(1);
     frame(frames);
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
   });
 });
 
-describe('scrolling stays the platform’s until the selection is owned', () => {
+describe("scrolling stays the platform’s until the selection is owned", () => {
   function scrollEvent() {
-    return new Event('touchmove', { cancelable: true, bubbles: true });
+    return new Event("touchmove", { cancelable: true, bubbles: true });
   }
 
-  it('allows the page to scroll while a gesture is only a candidate', () => {
-    const { prose, frames } = harness({ activation: 'drag' });
+  it("allows the page to scroll while a gesture is only a candidate", () => {
+    const { prose, frames } = harness({ activation: "drag" });
 
     touchDown(prose, 0);
     const before = scrollEvent();
@@ -900,32 +962,43 @@ describe('scrolling stays the platform’s until the selection is owned', () => 
     expect(after.defaultPrevented).toBe(false);
   });
 
-  it('never marks the surface for a long-press contract, where a drag means reading', () => {
+  it("never marks the surface for a long-press contract, where a drag means reading", () => {
     const { prose } = harness();
 
-    expect(prose.dataset['studentOwnedTouchSelection']).toBeUndefined();
+    expect(prose.dataset["studentOwnedTouchSelection"]).toBeUndefined();
   });
 
-  it('marks the surface before any finger lands when a tool is armed', () => {
-    const { prose } = harness({ activation: 'drag' });
+  it("marks the surface before any finger lands when a tool is armed", () => {
+    const { prose } = harness({ activation: "drag" });
 
-    expect(prose.dataset['studentOwnedTouchSelection']).toBe('true');
+    expect(prose.dataset["studentOwnedTouchSelection"]).toBe("true");
   });
 
-  it('hands the drag back to the browser the moment the tool is put down', () => {
-    const { prose, setEnabled } = harness({ activation: 'drag' });
-    expect(prose.dataset['studentOwnedTouchSelection']).toBe('true');
+  it("hands the drag back to the browser the moment the tool is put down", () => {
+    const { prose, setEnabled } = harness({ activation: "drag" });
+    expect(prose.dataset["studentOwnedTouchSelection"]).toBe("true");
 
     setEnabled(false);
 
-    expect(prose.dataset['studentOwnedTouchSelection']).toBeUndefined();
+    expect(prose.dataset["studentOwnedTouchSelection"]).toBeUndefined();
   });
 });
 
-describe('edge auto-scroll while adjusting', () => {
-  it('scrolls the container and re-measures while the finger holds past an edge', () => {
-    const container = document.createElement('div');
-    container.getBoundingClientRect = () => ({ top: 100, bottom: 700, height: 600, left: 0, right: 0, width: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+describe("edge auto-scroll while adjusting", () => {
+  it("scrolls the container and re-measures while the finger holds past an edge", () => {
+    const container = document.createElement("div");
+    container.getBoundingClientRect = () =>
+      ({
+        top: 100,
+        bottom: 700,
+        height: 600,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
     const scrollBy = vi.fn();
     container.scrollBy = scrollBy;
     document.body.append(container);
@@ -957,9 +1030,11 @@ describe('edge auto-scroll while adjusting', () => {
   });
 });
 
-describe('the exam boundary', () => {
-  it('confines a drag that leaves the block it started in', () => {
-    const { prose, frames, view, onSelect } = harness({ boundaryFor: () => prose.parentElement?.querySelector('#first') ?? null });
+describe("the exam boundary", () => {
+  it("confines a drag that leaves the block it started in", () => {
+    const { prose, frames, view, onSelect } = harness({
+      boundaryFor: () => prose.parentElement?.querySelector("#first") ?? null,
+    });
 
     touchDown(prose, 0);
     hold(frames);
@@ -968,13 +1043,13 @@ describe('the exam boundary', () => {
     touchUp(prose, 11);
     frame(frames);
 
-    expect(view.result.current.selectionText).toBe('alpha beta');
-    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('alpha beta');
+    expect(view.result.current.selectionText).toBe("alpha beta");
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe("alpha beta");
   });
 
-  it('reports the gesture stages to an injected diagnostic sink', () => {
+  it("reports the gesture stages to an injected diagnostic sink", () => {
     const diagnostics = { record: vi.fn(), listener: vi.fn() };
-    const { prose, frames, onSelect } = harness({ activation: 'drag', diagnostics });
+    const { prose, frames, onSelect } = harness({ activation: "drag", diagnostics });
 
     touchDown(prose, 0);
     touchMove(prose, 11);
@@ -986,9 +1061,21 @@ describe('the exam boundary', () => {
     expect(diagnostics.listener).toHaveBeenCalledWith(prose);
     const stages = diagnostics.record.mock.calls.map(([stage]) => stage);
     expect(stages).toEqual(
-      expect.arrayContaining(['pointerdown', 'start-caret', 'pointermove', 'claim', 'focus-caret', 'range', 'pointerup', 'onSelect']),
+      expect.arrayContaining([
+        "pointerdown",
+        "start-caret",
+        "pointermove",
+        "claim",
+        "focus-caret",
+        "range",
+        "pointerup",
+        "onSelect",
+      ])
     );
-    expect(diagnostics.record).toHaveBeenCalledWith('range', expect.objectContaining({ rangeText: 'alpha beta gamma', rangeCollapsed: false }));
+    expect(diagnostics.record).toHaveBeenCalledWith(
+      "range",
+      expect.objectContaining({ rangeText: "alpha beta gamma", rangeCollapsed: false })
+    );
   });
 });
 
@@ -1003,7 +1090,7 @@ describe('the exam boundary', () => {
  * buzz), a crossing ticks EXACTLY once, and the visual and haptic channels
  * differ in cadence but never in cause.
  */
-describe('the snap key: one tick per new caret position', () => {
+describe("the snap key: one tick per new caret position", () => {
   /**
    * Glyph boxes jsdom cannot lay out: irregular widths, one line from x = 10.
    *
@@ -1013,16 +1100,27 @@ describe('the snap key: one tick per new caret position', () => {
    * ranges in other nodes.
    */
   function layoutGlyphs(node: Text, widths: number[]) {
-    return vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(function (this: Range) {
+    return vi.spyOn(Range.prototype, "getClientRects").mockImplementation(function (this: Range) {
       if (this.startContainer !== node || this.startOffset >= this.endOffset) {
         return [] as unknown as DOMRectList;
       }
       let left = 10;
       for (let index = 0; index < this.startOffset; index += 1) left += widths[index] ?? 8;
       let width = 0;
-      for (let index = this.startOffset; index < this.endOffset; index += 1) width += widths[index] ?? 8;
+      for (let index = this.startOffset; index < this.endOffset; index += 1)
+        width += widths[index] ?? 8;
       return [
-        { left, top: 100, width, height: 20, right: left + width, bottom: 120, x: left, y: 100, toJSON: () => ({}) },
+        {
+          left,
+          top: 100,
+          width,
+          height: 20,
+          right: left + width,
+          bottom: 120,
+          x: left,
+          y: 100,
+          toJSON: () => ({}),
+        },
       ] as unknown as DOMRectList;
     });
   }
@@ -1035,9 +1133,9 @@ describe('the snap key: one tick per new caret position', () => {
     return x;
   }
 
-  it('leaves the content untouched while the finger travels inside one glyph', () => {
+  it("leaves the content untouched while the finger travels inside one glyph", () => {
     const vibrate = vi.fn(() => true);
-    const { prose, proseText, frames, view } = harness({ activation: 'drag', vibrate });
+    const { prose, proseText, frames, view } = harness({ activation: "drag", vibrate });
     layoutGlyphs(proseText, widths);
 
     touchDown(prose, 0);
@@ -1063,9 +1161,9 @@ describe('the snap key: one tick per new caret position', () => {
     expect(vibrate).not.toHaveBeenCalled();
   });
 
-  it('snaps exactly once when the finger crosses a character midpoint', () => {
+  it("snaps exactly once when the finger crosses a character midpoint", () => {
     const vibrate = vi.fn(() => true);
-    const { prose, proseText, frames, view } = harness({ activation: 'drag', vibrate });
+    const { prose, proseText, frames, view } = harness({ activation: "drag", vibrate });
     layoutGlyphs(proseText, widths);
 
     touchDown(prose, 0);
@@ -1089,16 +1187,16 @@ describe('the snap key: one tick per new caret position', () => {
     expect(vibrate).toHaveBeenCalledWith(8);
   });
 
-  it('keeps snapping when the platform asks for reduced motion', () => {
+  it("keeps snapping when the platform asks for reduced motion", () => {
     // prefers-reduced-motion reaches the MOTION policy — the spring back is
     // dropped there, asserted in selectionMotion.test — and must not reach the
     // snap: the caret still resolves to the new boundary and the lens's content
     // still jumps to it, which is information rather than decoration. The
     // gesture reads no motion preference; a document answering "reduce" to
     // everything changes nothing here, and if it ever did this would fail.
-    vi.spyOn(window, 'matchMedia').mockReturnValue({
+    vi.spyOn(window, "matchMedia").mockReturnValue({
       matches: true,
-      media: '(prefers-reduced-motion: reduce)',
+      media: "(prefers-reduced-motion: reduce)",
       onchange: null,
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
@@ -1106,7 +1204,7 @@ describe('the snap key: one tick per new caret position', () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     } as unknown as MediaQueryList);
-    const { prose, proseText, frames, view } = harness({ activation: 'drag' });
+    const { prose, proseText, frames, view } = harness({ activation: "drag" });
     layoutGlyphs(proseText, widths);
 
     touchDown(prose, 0);
@@ -1122,14 +1220,14 @@ describe('the snap key: one tick per new caret position', () => {
     expect(after.caret).toMatchObject({ x: boundaryX(11), y: 110 });
   });
 
-  describe('the haptic channel', () => {
-    it('is feature-detected: with no platform vibrate a crossing still snaps, and costs nothing', () => {
+  describe("the haptic channel", () => {
+    it("is feature-detected: with no platform vibrate a crossing still snaps, and costs nothing", () => {
       // jsdom is iOS Safari here: `navigator.vibrate` simply does not exist,
       // which is the ordinary case on the device most likely to be held. The
       // absence must be free — no throw, no retry — and must not disable the
       // snap, which is not the haptic's to disable.
-      Reflect.deleteProperty(navigator, 'vibrate');
-      const { prose, proseText, frames, view } = harness({ activation: 'drag' });
+      Reflect.deleteProperty(navigator, "vibrate");
+      const { prose, proseText, frames, view } = harness({ activation: "drag" });
       layoutGlyphs(proseText, widths);
 
       touchDown(prose, 0);
@@ -1143,11 +1241,11 @@ describe('the snap key: one tick per new caret position', () => {
       expect(view.result.current.pointer!.caret).toMatchObject({ x: boundaryX(11) });
     });
 
-    it('reaches the platform’s own vibrate when one is present', () => {
+    it("reaches the platform’s own vibrate when one is present", () => {
       const platform = vi.fn(() => true);
-      Object.defineProperty(navigator, 'vibrate', { configurable: true, value: platform });
+      Object.defineProperty(navigator, "vibrate", { configurable: true, value: platform });
       try {
-        const { prose, proseText, frames } = harness({ activation: 'drag' });
+        const { prose, proseText, frames } = harness({ activation: "drag" });
         layoutGlyphs(proseText, widths);
 
         touchDown(prose, 0);
@@ -1158,11 +1256,11 @@ describe('the snap key: one tick per new caret position', () => {
 
         expect(platform).toHaveBeenCalledWith(8);
       } finally {
-        Reflect.deleteProperty(navigator, 'vibrate');
+        Reflect.deleteProperty(navigator, "vibrate");
       }
     });
 
-    it('is throttled to a tap per crossing window, and never continuous', () => {
+    it("is throttled to a tap per crossing window, and never continuous", () => {
       const vibrate = vi.fn(() => true);
       // The clock is the INJECTED one, starting at zero: each crossing below
       // moves it by hand, so the window is asserted exactly — no spy on the
@@ -1170,7 +1268,11 @@ describe('the snap key: one tick per new caret position', () => {
       // `lastHapticAt = 0` sentinel (the first crossing at 60ms is past the
       // floor on its own).
       let now = 0;
-      const { prose, proseText, frames, view } = harness({ activation: 'drag', vibrate, now: () => now });
+      const { prose, proseText, frames, view } = harness({
+        activation: "drag",
+        vibrate,
+        now: () => now,
+      });
       layoutGlyphs(proseText, widths);
 
       touchDown(prose, 0);
@@ -1226,23 +1328,23 @@ describe('the snap key: one tick per new caret position', () => {
  * a cancel, and clears the presentation refs in ONE place so a stale
  * `lastPointer` can never stand in for contact that ended.
  */
-describe('a gesture ends on every terminal signal', () => {
-  it('releases exactly once when capture claims to hold but the pointerup arrives at the document', () => {
-    vi.spyOn(Element.prototype, 'hasPointerCapture').mockReturnValue(true);
+describe("a gesture ends on every terminal signal", () => {
+  it("releases exactly once when capture claims to hold but the pointerup arrives at the document", () => {
+    vi.spyOn(Element.prototype, "hasPointerCapture").mockReturnValue(true);
     const { frames, view, end, onSelect } = restingSelection();
 
     act(() => {
       view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
     });
     frame(frames);
-    expect(view.result.current.phase).toBe('adjusting-end');
+    expect(view.result.current.phase).toBe("adjusting-end");
 
     act(() => {
       fireEvent.pointerUp(document, { pointerId: 7 });
     });
     frame(frames);
 
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
     expect(view.result.current.adjusting).toBe(false);
     expect(view.result.current.pointer).toBeNull();
     expect(onSelect).toHaveBeenCalledTimes(1);
@@ -1254,22 +1356,22 @@ describe('a gesture ends on every terminal signal', () => {
     });
     frame(frames);
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
   });
 
-  it('leaves the adjusting phase when the browser loses the pointer capture', () => {
-    vi.spyOn(Element.prototype, 'hasPointerCapture').mockReturnValue(true);
+  it("leaves the adjusting phase when the browser loses the pointer capture", () => {
+    vi.spyOn(Element.prototype, "hasPointerCapture").mockReturnValue(true);
     const { frames, view, end } = restingSelection();
 
     act(() => {
       view.result.current.beginHandleAdjustment(handleEvent({ current: end }, 50, 144, 7));
     });
     frame(frames);
-    expect(view.result.current.phase).toBe('adjusting-end');
+    expect(view.result.current.phase).toBe("adjusting-end");
 
     act(() => {
-      const lost = new Event('lostpointercapture', { bubbles: true });
-      Object.defineProperty(lost, 'pointerId', { value: 7 });
+      const lost = new Event("lostpointercapture", { bubbles: true });
+      Object.defineProperty(lost, "pointerId", { value: 7 });
       end.dispatchEvent(lost);
     });
     frame(frames);
@@ -1277,13 +1379,13 @@ describe('a gesture ends on every terminal signal', () => {
     // The cancel policy (nothing reported, the platform takes the gesture
     // back) with the same presentation cleanup: no adjusting phase, and no
     // pointer for a loupe to be gated on.
-    expect(view.result.current.phase).toBe('idle');
+    expect(view.result.current.phase).toBe("idle");
     expect(view.result.current.adjusting).toBe(false);
-    expect(view.result.current.selectionText).toBe('');
+    expect(view.result.current.selectionText).toBe("");
     expect(view.result.current.pointer).toBeNull();
   });
 
-  it('exposes no pointer the moment the finger lifts, before any frame runs', () => {
+  it("exposes no pointer the moment the finger lifts, before any frame runs", () => {
     const { prose, frames, view } = harness();
 
     touchDown(prose, 0);
@@ -1294,7 +1396,7 @@ describe('a gesture ends on every terminal signal', () => {
 
     touchUp(prose, 11);
 
-    expect(view.result.current.phase).toBe('selected');
+    expect(view.result.current.phase).toBe("selected");
     expect(view.result.current.pointer).toBeNull();
   });
 });

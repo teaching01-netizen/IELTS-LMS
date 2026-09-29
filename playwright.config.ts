@@ -13,9 +13,23 @@ const frontendUrl = `http://localhost:${frontendPort}`;
 // the same local/CI defaults here so the Go API receives a complete config.
 dotenv.config({ path: path.resolve(".env"), override: false });
 dotenv.config({ path: path.resolve("backend/.env"), override: false });
+const configuredStaffIdleMinutes = process.env["SESSION_IDLE_STAFF_MINS"];
+const configuredStudentIdleMinutes = process.env["SESSION_IDLE_STUDENT_MINS"];
+const configuredStudentRealtime = process.env["VITE_STUDENT_REALTIME"];
 dotenv.config({ path: path.resolve("backend/.env.example"), override: false });
 
-const backendApiUrl = process.env["VITE_BACKEND_API_URL"] ?? "http://localhost:4000";
+// The Go-backed E2E suite reuses the sessions created by globalSetup across
+// every browser project. Keep test sessions alive through the CI job while
+// preserving any explicit runner or local override.
+process.env["SESSION_IDLE_STAFF_MINS"] =
+  inheritedEnv["SESSION_IDLE_STAFF_MINS"] ?? configuredStaffIdleMinutes ?? "600";
+process.env["SESSION_IDLE_STUDENT_MINS"] =
+  inheritedEnv["SESSION_IDLE_STUDENT_MINS"] ?? configuredStudentIdleMinutes ?? "600";
+
+const backendApiUrl = (process.env["VITE_BACKEND_API_URL"] ?? "http://localhost:4000").replace(
+  /\/$/,
+  ""
+);
 const backendApiOrigin = new URL(backendApiUrl).origin;
 // The shared E2E seed is destructive to fixture rows, so prefer a dedicated
 // test database when the runner supplies one. Otherwise keep compatibility
@@ -37,24 +51,28 @@ const coeditPublicWSScheme =
   (new URL(frontendUrl).protocol === "https:" ? "wss" : "ws");
 
 function coeditMysqlDsn(databaseUrl: string | undefined): string {
-  if (!databaseUrl) throw new Error("Playwright E2E requires DATABASE_URL for the local co-edit service.");
+  if (!databaseUrl)
+    throw new Error("Playwright E2E requires DATABASE_URL for the local co-edit service.");
   if (/^mysql:\/\//i.test(databaseUrl)) return databaseUrl;
-  const match = /^(?<user>[^:@/]+)(?::(?<password>[^@]*))?@tcp\((?<hostPort>[^)]+)\)\/(?<database>[^?]+)(?:\?.*)?$/.exec(databaseUrl.trim());
+  const match =
+    /^(?<user>[^:@/]+)(?::(?<password>[^@]*))?@tcp\((?<hostPort>[^)]+)\)\/(?<database>[^?]+)(?:\?.*)?$/.exec(
+      databaseUrl.trim()
+    );
   if (!match?.groups) throw new Error("DATABASE_URL is not a supported local MySQL DSN.");
   const user = match.groups["user"];
   const password = match.groups["password"];
   const hostPort = match.groups["hostPort"];
   const database = match.groups["database"];
-  if (!user || !hostPort || !database) throw new Error("DATABASE_URL is not a supported local MySQL DSN.");
-  const credentials = password === undefined
-    ? encodeURIComponent(user)
-    : `${encodeURIComponent(user)}:${encodeURIComponent(password)}`;
+  if (!user || !hostPort || !database)
+    throw new Error("DATABASE_URL is not a supported local MySQL DSN.");
+  const credentials =
+    password === undefined
+      ? encodeURIComponent(user)
+      : `${encodeURIComponent(user)}:${encodeURIComponent(password)}`;
   return `mysql://${credentials}@${hostPort}/${encodeURIComponent(database)}`;
 }
 
-const coeditDatabaseUrl =
-  inheritedEnv["AUTHORING_COEDIT_MYSQL_DSN"] ??
-  coeditMysqlDsn(databaseUrl);
+const coeditDatabaseUrl = inheritedEnv["AUTHORING_COEDIT_MYSQL_DSN"] ?? coeditMysqlDsn(databaseUrl);
 const backendCookieEnv = {
   COOKIE_SECURE: process.env["COOKIE_SECURE"] ?? "false",
   SESSION_COOKIE_NAME: process.env["SESSION_COOKIE_NAME"] ?? "session",
@@ -70,6 +88,10 @@ const backendRuntimeEnv = {
   AUTHORING_COEDIT_PUBLIC_URL: coeditPublicUrl,
   AUTHORING_COEDIT_PUBLIC_WS_SCHEME: coeditPublicWSScheme,
   AUTHORING_COEDIT_ALLOWED_ORIGIN: inheritedEnv["AUTHORING_COEDIT_ALLOWED_ORIGIN"] ?? frontendUrl,
+  // The embedded service calls back into Go to hydrate authorized documents.
+  // Local E2E often runs the API on a dynamically assigned port, so keep this
+  // internal callback aligned with the same backend origin advertised to Vite.
+  AUTHORING_COEDIT_GO_BASE_URL: inheritedEnv["AUTHORING_COEDIT_GO_BASE_URL"] ?? backendApiOrigin,
   AUTHORING_COEDIT_MYSQL_DSN: coeditDatabaseUrl,
   PORT: process.env["PORT"] ?? "4000",
   API_PORT: process.env["API_PORT"] ?? "4000",
@@ -84,6 +106,10 @@ const backendRuntimeEnv = {
 };
 const backendFeatureEnv = {
   VITE_BACKEND_API_URL: backendApiUrl,
+  // Exercise the authoritative event path in E2E by default, while preserving
+  // an explicit shell or .env override for polling-mode runs.
+  VITE_STUDENT_REALTIME:
+    inheritedEnv["VITE_STUDENT_REALTIME"] ?? configuredStudentRealtime ?? "websocket",
   VITE_FEATURE_USE_BACKEND_BUILDER: "true",
   VITE_FEATURE_USE_BACKEND_SCHEDULING: "true",
   VITE_FEATURE_USE_BACKEND_DELIVERY: "true",
@@ -102,7 +128,12 @@ export default defineConfig({
   // scratch audits, not product regression tests; the spectrum-rail suite runs
   // against the dev harness with no backend (`bun run e2e:sat-spectrum`). The
   // default CI suite is Go-backed local integration coverage.
-  testIgnore: ["**/prod-load/**", "**/prod-smoke/**", "**/.generated/**", "**/sat-spectrum-rail.spec.ts"],
+  testIgnore: [
+    "**/prod-load/**",
+    "**/prod-smoke/**",
+    "**/.generated/**",
+    "**/sat-spectrum-rail.spec.ts",
+  ],
   fullyParallel: false,
   forbidOnly: !!process.env["CI"],
   retries: process.env["CI"] ? 2 : 0,
@@ -156,7 +187,7 @@ export default defineConfig({
     {
       command: "cd backend/go && exec go run ./cmd/api",
       env: backendRuntimeEnv,
-      url: "http://localhost:4000/healthz",
+      url: `${backendApiUrl}/healthz`,
       timeout: 180_000,
       reuseExistingServer: !process.env["CI"],
     },
@@ -165,6 +196,7 @@ export default defineConfig({
       env: backendRuntimeEnv,
       wait: { stderr: /worker: starting job set=/ },
       stderr: "pipe",
+      stdout: "pipe",
       timeout: 180_000,
       reuseExistingServer: false,
     },

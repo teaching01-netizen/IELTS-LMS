@@ -99,6 +99,8 @@ describe('student realtime coordinator', () => {
     coordinator.handleSocketDisconnected();
 
     expect(coordinator.getPollingPolicy('live')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    expect(coordinator.getPollingPolicy('not_started')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    expect(coordinator.getPollingPolicy('completed')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
   });
 
   // A cohort waiting on Start has no runtime row yet (`null`) or a
@@ -121,8 +123,9 @@ describe('student realtime coordinator', () => {
     for (const phase of ['lobby', 'pre-check'] as const) {
       expect(coordinator.getPollingPolicy(null, { attemptPhase: phase })).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
     }
-    // A terminal runtime has nothing left to observe.
-    expect(coordinator.getPollingPolicy('completed')).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
+    // Completion remains fast when polling is the only live channel, so the
+    // student reaches the post-exam surface promptly after auto-submit.
+    expect(coordinator.getPollingPolicy('completed')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
     expect(coordinator.getPollingPolicy('cancelled')).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
   });
 

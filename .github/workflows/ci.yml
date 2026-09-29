@@ -5,6 +5,11 @@ on:
     branches: [main, develop]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # E2E checks can take close to two hours; don't cancel an active run on push.
+  cancel-in-progress: false
+
 jobs:
   go-backend:
     runs-on: ubuntu-latest
@@ -290,8 +295,46 @@ jobs:
             exit 1
           fi
 
-  e2e-tests:
+  e2e-test-shards:
+    name: e2e-tests (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: "1/16"
+            label: 1-of-16
+          - shard: "2/16"
+            label: 2-of-16
+          - shard: "3/16"
+            label: 3-of-16
+          - shard: "4/16"
+            label: 4-of-16
+          - shard: "5/16"
+            label: 5-of-16
+          - shard: "6/16"
+            label: 6-of-16
+          - shard: "7/16"
+            label: 7-of-16
+          - shard: "8/16"
+            label: 8-of-16
+          - shard: "9/16"
+            label: 9-of-16
+          - shard: "10/16"
+            label: 10-of-16
+          - shard: "11/16"
+            label: 11-of-16
+          - shard: "12/16"
+            label: 12-of-16
+          - shard: "13/16"
+            label: 13-of-16
+          - shard: "14/16"
+            label: 14-of-16
+          - shard: "15/16"
+            label: 15-of-16
+          - shard: "16/16"
+            label: 16-of-16
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     services:
       mysql:
         image: mysql:8.4
@@ -312,6 +355,8 @@ jobs:
       DATABASE_WORKER_URL: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
       TEST_DATABASE_URL: "mysql://root:root@127.0.0.1:3306/ielts"
       AUTH_SECRET: ci-only-secret-with-at-least-32-characters
+      # E2E scrapes the private Prometheus endpoint with this test-only bearer token.
+      METRICS_TOKEN: "ci-only-e2e-metrics-token"
       API_HOST: 127.0.0.1
       PORT: 4000
       API_PORT: 4000
@@ -350,16 +395,63 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Apply migrations for E2E
+        working-directory: backend/go
+        run: go run ./cmd/migrate
+
       - name: Run E2E Tests
-        run: bunx playwright test
+        run: |
+          # Each browser project and each selected test file gets its own
+          # globalSetup/seed cycle. A test file can terminalize or pause a
+          # schedule, so sharing one destructive MySQL fixture across files
+          # makes later files inherit the earlier file's state. Balance whole
+          # files by test count because native file sharding leaves some shards
+          # empty and gives others more than twice the work. The actual file run
+          # omits --shard because each whole file has already been assigned.
+          projects=(chromium mobile-chromium mobile-webkit tablet-portrait tablet-landscape firefox webkit)
+          E2E_SHARD="${{ matrix.shard }}"
+          status=0
+          for project in "${projects[@]}"; do
+            test_list=$(bunx playwright test --project="${project}" --list 2>/dev/null)
+            selected_files=$(printf '%s\n' "$test_list" | node scripts/ci/assign-e2e-files-to-shards.mjs "$E2E_SHARD")
+            mapfile -t files <<< "$selected_files"
+            if ((${#files[@]} == 0)); then
+              echo "No E2E files assigned to ${project} in shard ${{ matrix.shard }}"
+              exit 1
+            fi
+            for file in "${files[@]}"; do
+              safe_file="${file//\//__}"
+              safe_file="${safe_file//./_}"
+              echo "Running E2E file: ${project} ${file}"
+              if ! PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${project}/${safe_file}" \
+                bunx playwright test "${file}" --project="${project}"; then
+                status=1
+              fi
+            done
+          done
+          exit "$status"
 
       - name: Upload E2E Test Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.label }}
           path: playwright-report/
           retention-days: 30
+
+  e2e-tests:
+    if: always()
+    needs: e2e-test-shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all E2E shards passed
+        run: |
+          if [[ "${{ needs.e2e-test-shards.result }}" != "success" ]]; then
+            echo "E2E shard result: ${{ needs.e2e-test-shards.result }}"
+            exit 1
+          fi
+          echo "All E2E shards passed."
 
   # The authoring lifecycle gate (plan Phase 16).
   #
@@ -429,10 +521,24 @@ jobs:
       - name: Run Performance Tests
         run: bun run test:performance
 
+      - name: Start preview server for Lighthouse
+        run: |
+          bun run preview -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/lighthouse-preview.log" 2>&1 &
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/lighthouse-preview.log"
+          exit 1
+
       - name: Lighthouse CI
         uses: treosh/lighthouse-ci-action@v10
         with:
-          uploadArtifacts: true
+          urls: |
+            http://127.0.0.1:4173/
+          uploadArtifacts: false
           temporaryPublicStorage: true
 
   railway-deploy:
