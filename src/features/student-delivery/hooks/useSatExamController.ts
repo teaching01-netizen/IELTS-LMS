@@ -50,6 +50,7 @@ import {
 } from "../application/satCommitRouting";
 import { createSatFinalizationGate } from "../application/satFinalizationGate";
 import { applyEntryAck, isEntryAck } from "../application/satEntryAck";
+import { adoptEntryControlEpochFromAck } from "../application/satEntryControlEpoch";
 // Clock + cadence policy (pure): display allotment vs expiry authority, stage
 // readiness, break/wait countdowns, and the recovery-poll cadence.
 import {
@@ -868,15 +869,74 @@ export function useSatExamController({
     [data, pendingModule],
   );
 
-  const resolveEntryPayload = useCallback(async (
-    base: AssessmentDeliveryBootstrap,
-    response: AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck,
-  ): Promise<AssessmentDeliveryBootstrap> => {
-    if (!isEntryAck(response)) return response;
-    const merged = applyEntryAck(base, response);
-    if (merged) return merged;
-    return satDeliveryGateway.bootstrap(scheduleId, attemptId);
-  }, [attemptId, scheduleId]);
+  /**
+   * Adopt the control epoch the server reported on a transition ack before the
+   * payload is committed.
+   *
+   * The server bumps `student_attempts.control_epoch` inside the same
+   * transaction that opens the module (`markProviderAttemptExamPhaseInTx`) and
+   * then answers with the post-commit epoch read back by `entryStateBound`. The
+   * client used to drop it: `applyEntryAck` merges the ack into a bootstrap
+   * object that has no epoch field, and the parent's attempt projection only
+   * catches up on its own poll cadence. The first answer sent in between rode
+   * the pre-bump fence and was refused 409 CONTROL_EPOCH_STALE — a
+   * fail-then-heal round trip on the one path every student takes.
+   *
+   * The decision table lives in `application/satEntryControlEpoch` and serves
+   * the current single-operation startModule path for every timing model.
+   * The legacy `enterModule` and `entry-state` endpoints have no client caller;
+   * a future caller must pass its raw ack through this resolver. The engine
+   * re-checks every guard (idle, monotonic, recovery,
+   * conflict posture) and refuses while work is outstanding, so this can only
+   * ever skip, never strand a draft.
+   */
+  const adoptEntryControlEpoch = useCallback(
+    (
+      response: AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck,
+      source: string,
+    ): void => {
+      adoptEntryControlEpochFromAck(
+        response,
+        {
+          scheduleId,
+          attemptId,
+          currentControlEpoch: entryControlEpochRef.current,
+          adopt: (epoch, adoptionSource) => {
+            entryControlEpochRef.current = epoch;
+            persistenceRef.current.adoptControlEpoch?.(epoch, adoptionSource);
+          },
+          onSkipped: (reason, skippedSource) =>
+            emitStudentObservabilityMetric("control_epoch_adopt_skipped", {
+              reason,
+              source: skippedSource,
+              scheduleId,
+              attemptId,
+            }),
+        },
+        source,
+      );
+    },
+    [attemptId, scheduleId],
+  );
+
+  const resolveEntryPayload = useCallback(
+    async (
+      base: AssessmentDeliveryBootstrap,
+      response: AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck,
+      /** Telemetry label for the entry path that produced this ack. */
+      source: string,
+    ): Promise<AssessmentDeliveryBootstrap> => {
+      // Offer the startModule ack's post-commit control epoch to the engine
+      // BEFORE the payload is merged or committed, so no answer can be accepted
+      // under the pre-bump fence.
+      adoptEntryControlEpoch(response, source);
+      if (!isEntryAck(response)) return response;
+      const merged = applyEntryAck(base, response);
+      if (merged) return merged;
+      return satDeliveryGateway.bootstrap(scheduleId, attemptId);
+    },
+    [adoptEntryControlEpoch, attemptId, scheduleId],
+  );
 
   /**
    * Single-operation StartModule: one idempotent mutation that activates
@@ -894,11 +954,18 @@ export function useSatExamController({
     setIsStarting(true);
     setError(null);
     try {
-      const payload = await resolveEntryPayload(data, await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
+      // Capture the RAW start response before resolveEntryPayload merges it
+      // into the bootstrap: the ack's control epoch is dropped by the merge.
+      const startResponse = await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
         moduleId: pendingModule.id,
         ...(data.sections.some((section) => section.modules.some((module) => module.id === pendingModule.id)) ? {} : { needContent: true as const }),
         ...controlEpochField(epoch),
-      })));
+      }));
+      if (identityGenerationRef.current !== generation) return "noop";
+      // Ordering is the guarantee: resolveEntryPayload offers the ack's epoch
+      // before the payload is merged/committed, so no answer can be accepted
+      // under the old fence.
+      const payload = await resolveEntryPayload(data, startResponse, "module_start");
       if (identityGenerationRef.current !== generation) return "noop";
       if (payload.scheduleId !== scheduleId || payload.attempt.id !== attemptId) return "noop";
       // SAT-005: one monotonic commit path. The startModule hint commits the

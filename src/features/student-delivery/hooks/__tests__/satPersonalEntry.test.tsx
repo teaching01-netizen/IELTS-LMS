@@ -37,6 +37,7 @@ const persistenceMock = vi.hoisted(() => ({
   retryFailed: vi.fn(),
   takeOverLease: vi.fn(),
   isTakingOver: false,
+  adoptControlEpoch: vi.fn(),
 }));
 
 vi.mock("../../infrastructure/satDeliveryGateway", () => ({
@@ -140,6 +141,27 @@ function payload(attempts: unknown[], serverNow = SERVER_NOW): AssessmentDeliver
   } as unknown as AssessmentDeliveryBootstrap;
 }
 
+function entryAck(overrides: Record<string, unknown> = {}) {
+  return {
+    scheduleId: "schedule",
+    attemptId: ATTEMPT_ID,
+    moduleId: MODULE_ID,
+    moduleAttemptId: `ma-${MODULE_ID}`,
+    moduleRevision: 2,
+    state: "active",
+    timingModel: "sat_personal_v1",
+    entryState: "entered",
+    entryGeneration: 1,
+    startedAt: SERVER_NOW,
+    deadlineAt: new Date(Date.parse(SERVER_NOW) + AUTHORED_SECONDS * 1000).toISOString(),
+    remainingSeconds: AUTHORED_SECONDS,
+    serverNow: SERVER_NOW,
+    controlEpoch: 3,
+    runtimeRevision: 1,
+    ...overrides,
+  };
+}
+
 function renderController() {
   return renderHook(() =>
     useSatExamController({
@@ -150,6 +172,31 @@ function renderController() {
       liveSocketConnected: false,
     }),
   );
+}
+
+/** Props-capable variant so a test can rotate the attempt identity mid-flight. */
+function renderIdentityController(initialAttemptId: string, strictMode = false) {
+  return renderHook(
+    ({ attemptId }: { attemptId: string }) =>
+      useSatExamController({
+        scheduleId: "schedule",
+        attemptId,
+        candidateId: "candidate",
+        attemptUpdateToken: 0,
+        liveSocketConnected: false,
+      }),
+    { initialProps: { attemptId: initialAttemptId }, reactStrictMode: strictMode },
+  );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("SAT personal single-operation entry", () => {
@@ -228,6 +275,139 @@ describe("SAT personal single-operation entry", () => {
     await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
     expect(hook.result.current.stateModule?.id).toBe(MODULE_ID);
     expect(gatewayMocks.startModule).not.toHaveBeenCalled();
+    hook.unmount();
+  });
+
+  it("adopts the control epoch from the StartModule ack before the module commits", async () => {
+    const seeded = payload([moduleAttempt(MODULE_ID, "not_started", false)]);
+    gatewayMocks.bootstrap.mockResolvedValue(seeded);
+    // The server bumped control_epoch when it opened the module; the compact
+    // ack carries the post-commit value while applyEntryAck drops it.
+    gatewayMocks.startModule.mockResolvedValue(entryAck({ controlEpoch: 3 }));
+
+    const hook = renderController();
+    await waitFor(() =>
+      expect(persistenceMock.adoptControlEpoch).toHaveBeenCalledWith(3, "module_start")
+    );
+    // Ordering: adoption happens BEFORE the payload is resolved and committed,
+    // so the module surface only appears once the engine's fence is updated.
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(hook.result.current.stateModule?.id).toBe(MODULE_ID);
+    hook.unmount();
+  });
+
+  it("never adopts an ack for another attempt (and reports the skip)", async () => {
+    const seeded = payload([moduleAttempt(MODULE_ID, "not_started", false)]);
+    const active = payload([moduleAttempt(MODULE_ID, "active", true)]);
+    gatewayMocks.bootstrap.mockResolvedValueOnce(seeded).mockResolvedValue(active);
+    // A foreign ack: applyEntryAck refuses it, so entry falls back to a full
+    // bootstrap. Its epoch must never move this engine's fence.
+    gatewayMocks.startModule.mockResolvedValue(
+      entryAck({ attemptId: "attempt-other", controlEpoch: 9 })
+    );
+    const metrics: Array<{ name: string; reason?: unknown }> = [];
+    const onMetric = (event: Event) =>
+      metrics.push((event as CustomEvent).detail as { name: string; reason?: unknown });
+    window.addEventListener("student-observability-metric", onMetric);
+    try {
+      const hook = renderController();
+      await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+      expect(persistenceMock.adoptControlEpoch).not.toHaveBeenCalled();
+      expect(
+        metrics.some(
+          (metric) =>
+            metric.name === "control_epoch_adopt_skipped" &&
+            metric.reason === "ack_identity_mismatch"
+        )
+      ).toBe(true);
+      hook.unmount();
+    } finally {
+      window.removeEventListener("student-observability-metric", onMetric);
+    }
+  });
+
+  it("never adopts when the attempt identity rotates while StartModule is in flight", async () => {
+    const seeded = payload([moduleAttempt(MODULE_ID, "not_started", false)]);
+    gatewayMocks.bootstrap.mockResolvedValue(seeded);
+    const pending = deferred<ReturnType<typeof entryAck>>();
+    gatewayMocks.startModule.mockReturnValue(pending.promise);
+
+    const hook = renderIdentityController(ATTEMPT_ID);
+    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
+    // The student's session moved to a different attempt before the ack landed.
+    hook.rerender({ attemptId: "attempt-2" });
+    pending.resolve(entryAck({ controlEpoch: 3 }));
+
+    await waitFor(() => expect(hook.result.current.isStarting).toBe(false));
+    expect(persistenceMock.adoptControlEpoch).not.toHaveBeenCalled();
+    hook.unmount();
+  });
+
+  it("never adopts from a full-bootstrap response, and adopts before the fallback fetch", async () => {
+    const seeded = payload([moduleAttempt(MODULE_ID, "not_started", false)]);
+    const active = payload([moduleAttempt(MODULE_ID, "active", true)]);
+
+    // (a) A full bootstrap response carries no epoch on the wire at all.
+    gatewayMocks.bootstrap.mockResolvedValue(seeded);
+    gatewayMocks.startModule.mockResolvedValue(active);
+    const bootstrapOnly = renderController();
+    await waitFor(() => expect(bootstrapOnly.result.current.state.phase).toBe("module"));
+    expect(persistenceMock.adoptControlEpoch).not.toHaveBeenCalled();
+    bootstrapOnly.unmount();
+
+    // (b) An ack that cannot be merged (unknown module attempt) falls back to a
+    // full bootstrap read — the epoch must already be adopted before that read,
+    // never after it.
+    persistenceMock.adoptControlEpoch.mockClear();
+    const bootstrapCallsWhenAdopted: number[] = [];
+    persistenceMock.adoptControlEpoch.mockImplementation(() => {
+      bootstrapCallsWhenAdopted.push(gatewayMocks.bootstrap.mock.calls.length);
+    });
+    gatewayMocks.bootstrap.mockReset();
+    gatewayMocks.bootstrap.mockResolvedValueOnce(seeded).mockResolvedValue(active);
+    gatewayMocks.startModule.mockResolvedValue(
+      entryAck({ moduleAttemptId: "ma-unknown", moduleId: "module-unknown", controlEpoch: 4 })
+    );
+    const fallback = renderController();
+    await waitFor(() => expect(persistenceMock.adoptControlEpoch).toHaveBeenCalled());
+    expect(persistenceMock.adoptControlEpoch).toHaveBeenCalledWith(4, "module_start");
+    // The initial load had already happened; the fallback fetch had not.
+    await waitFor(() => expect(gatewayMocks.bootstrap.mock.calls.length).toBeGreaterThan(1));
+    expect(bootstrapCallsWhenAdopted).toEqual([1]);
+    fallback.unmount();
+  });
+
+  it("adopts the raised epoch when the entry retry answers the second call", async () => {
+    const seeded = payload([moduleAttempt(MODULE_ID, "not_started", false)]);
+    gatewayMocks.bootstrap.mockResolvedValue(seeded);
+    // First StartModule crosses a pause boundary: the server says the attempt
+    // is already at epoch 5, and the retry's ack comes back at 5.
+    gatewayMocks.startModule
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Command crossed a pause/resume control boundary."), {
+          code: "CONTROL_EPOCH_STALE",
+          status: 409,
+          details: { currentControlEpoch: 5, requestControlEpoch: 2 },
+        })
+      )
+      .mockResolvedValue(entryAck({ controlEpoch: 5 }));
+
+    const hook = renderController();
+    await waitFor(() => expect(persistenceMock.adoptControlEpoch).toHaveBeenCalledWith(5, "module_start"));
+    expect(gatewayMocks.startModule).toHaveBeenCalledTimes(2);
+    hook.unmount();
+  });
+
+  it("adopts once under React StrictMode", async () => {
+    const seeded = payload([moduleAttempt(MODULE_ID, "not_started", false)]);
+    gatewayMocks.bootstrap.mockResolvedValue(seeded);
+    gatewayMocks.startModule.mockResolvedValue(entryAck({ controlEpoch: 3 }));
+
+    const hook = renderIdentityController(ATTEMPT_ID, true);
+    await waitFor(() => expect(persistenceMock.adoptControlEpoch).toHaveBeenCalledWith(3, "module_start"));
+    // Idempotent under the double-invoked effect: the same epoch, once.
+    expect(persistenceMock.adoptControlEpoch).toHaveBeenCalledTimes(1);
+    expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1);
     hook.unmount();
   });
 

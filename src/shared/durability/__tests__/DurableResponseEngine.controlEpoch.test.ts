@@ -369,3 +369,369 @@ describe('DurableResponseEngine × CONTROL_EPOCH_STALE', () => {
     expect(engine.getBlockedQuestionIds()).toEqual(['q1']);
   });
 });
+
+describe('DurableResponseEngine × adoptControlEpochIfIdle (entry-ack adoption)', () => {
+  /**
+   * The entry ack carries the post-commit control epoch the server bumped in
+   * the same transaction that opened the module. Adopting it while the engine
+   * is idle removes the guaranteed first-batch 409 without ever blocking,
+   * quarantining, or rolling back a draft — every skipped guard falls back to
+   * the refuse-then-heal path this engine already owns.
+   */
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  it('adopts a newer epoch while idle, so the first batch already carries it', async () => {
+    const server = fencingServer(3);
+    const { engine, events } = createEngine(
+      {
+        fetchSnapshot: vi.fn().mockResolvedValue(snapshot({ controlEpoch: 2 })),
+        sendBatch: server.sendBatch,
+      },
+      2
+    );
+    await engine.recover();
+
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: true,
+      controlEpoch: 3,
+    });
+    expect(engine.getControlEpoch()).toBe(3);
+
+    await engine.acceptResponse('q1', payload('B'));
+    await engine.flush();
+
+    // Exactly one send, already under the adopted fence: no 409, no heal.
+    expect(server.requests.map((request) => request.controlEpoch)).toEqual([3]);
+    expect(server.sendBatch).toHaveBeenCalledTimes(1);
+    expect(engine.getStatus()).toBe('synced');
+    expect(engine.getPendingCount()).toBe(0);
+    expect(events.map((event) => event.name)).toContain('control_epoch_adopted');
+    expect(events.map((event) => event.name)).not.toContain('control_epoch_blocked');
+    expect(events.map((event) => event.name)).not.toContain('control_epoch_recovered');
+    // Adoption moves ONLY the control fence: lease, quarantine and lifecycle
+    // posture are untouched (it is not a lease takeover and not a heal).
+    expect(engine.getLeaseEpoch()).toBe(1);
+    expect(engine.getQuarantined()).toEqual([]);
+    const adopted = events.filter((event) => event.name === 'control_epoch_adopted');
+    expect(adopted[0]?.fields).toMatchObject({
+      source: 'module_start',
+      previousControlEpoch: 2,
+      controlEpoch: 3,
+    });
+  });
+
+  it('refuses to adopt while an accepted draft has no issued version yet, and never blocks it', async () => {
+    // The gap `getPendingCount()` alone cannot see: the intent is in `states`
+    // (already visible to the student) but its durable write has not issued,
+    // so the outbox is still empty. Adopting here would block the keystroke.
+    const gate = deferred<void>();
+    storage.save.mockReturnValueOnce(gate.promise);
+    const server = fencingServer(2);
+    const fetchSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(snapshot({ controlEpoch: 2 }))
+      .mockResolvedValue(snapshot({ controlEpoch: 3 }));
+    const { engine, events } = createEngine({ fetchSnapshot, sendBatch: server.sendBatch }, 2);
+    await engine.recover();
+    // The server opened the module: epoch 3 on the wire, while the engine still
+    // holds 2 because this ack was refused above.
+    server.bumpTo(3);
+
+    const acceptance = engine.acceptResponse('q1', payload('A'));
+    expect(engine.getPendingCount()).toBe(0);
+    expect(engine.getStates().get('q1')?.pending).toBeTruthy();
+
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'not_idle',
+    });
+    expect(engine.getControlEpoch()).toBe(2);
+    expect(engine.getBlockedQuestionIds()).toEqual([]);
+    expect(engine.getQuarantined()).toEqual([]);
+    expect(events.filter((event) => event.name === 'control_epoch_blocked')).toEqual([]);
+
+    gate.resolve();
+    await acceptance;
+    await engine.flush();
+    // The draft still went out untouched — under the old epoch, which the
+    // server answers with the existing refuse-then-heal path. Never blocked.
+    expect(server.requests.map((request) => request.controlEpoch)).toEqual([2, 3]);
+  });
+
+  it('refuses to adopt while a draft is queued or blocked', async () => {
+    const server = fencingServer(2);
+    const { engine } = createEngine(
+      {
+        fetchSnapshot: vi.fn().mockResolvedValue(snapshot({ controlEpoch: 2 })),
+        sendBatch: server.sendBatch,
+      },
+      2
+    );
+    await engine.recover();
+
+    await engine.acceptResponse('q1', payload('B'));
+    expect(engine.getPendingCount()).toBeGreaterThan(0);
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'not_idle',
+    });
+
+    // A blocked draft (which is never in the outbox) also refuses: adoption
+    // must not be able to strand visible work behind a new fence.
+    engine.updateEpochs(1, 4);
+    expect(engine.getBlockedQuestionIds()).toEqual(['q1']);
+    expect(engine.adoptControlEpochIfIdle(5, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'not_idle',
+    });
+    expect(engine.getBlockedQuestionIds()).toEqual(['q1']);
+    expect(engine.getQuarantined()).toEqual([]);
+  });
+
+  it('refuses an in-flight batch, then adopts after its acknowledgement clears command bookkeeping', async () => {
+    const sending = deferred<void>();
+    const release = deferred<void>();
+    const server = fencingServer(2);
+    const sendBatch = vi.fn(async (attemptId: string, request: ResponseBatchRequestV2) => {
+      sending.resolve();
+      await release.promise;
+      return server.sendBatch(attemptId, request);
+    });
+    const { engine } = createEngine(
+      { fetchSnapshot: vi.fn().mockResolvedValue(snapshot({ controlEpoch: 2 })), sendBatch },
+      2
+    );
+    await engine.recover();
+    await engine.acceptResponse('q1', payload('A'));
+
+    const draining = engine.flush();
+    await sending.promise;
+    expect(engine.getPendingCount()).toBeGreaterThan(0);
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'not_idle',
+    });
+    expect(engine.getControlEpoch()).toBe(2);
+
+    release.resolve();
+    await draining;
+    expect(engine.getPendingCount()).toBe(0);
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: true,
+      controlEpoch: 3,
+    });
+  });
+
+  it('treats an equal or older epoch as a no-op (StrictMode double-invoke is idempotent)', async () => {
+    const server = fencingServer(2);
+    const { engine, events } = createEngine(
+      {
+        fetchSnapshot: vi.fn().mockResolvedValue(snapshot({ controlEpoch: 2 })),
+        sendBatch: server.sendBatch,
+      },
+      2
+    );
+    await engine.recover();
+
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: true,
+      controlEpoch: 3,
+    });
+    // A double-invoked effect (or a retried start) must not re-adopt, re-emit,
+    // or move the fence.
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'not_advanced',
+    });
+    expect(engine.adoptControlEpochIfIdle(2, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'not_advanced',
+    });
+    expect(engine.getControlEpoch()).toBe(3);
+    expect(events.filter((event) => event.name === 'control_epoch_adopted')).toHaveLength(1);
+  });
+
+  it('rejects an unusable epoch value', async () => {
+    const server = fencingServer(2);
+    const { engine, events } = createEngine(
+      {
+        fetchSnapshot: vi.fn().mockResolvedValue(snapshot({ controlEpoch: 2 })),
+        sendBatch: server.sendBatch,
+      },
+      2
+    );
+    await engine.recover();
+
+    for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(engine.adoptControlEpochIfIdle(bad, 'module_start')).toEqual({
+        adopted: false,
+        reason: 'invalid_epoch',
+      });
+    }
+    expect(engine.getControlEpoch()).toBe(2);
+    expect(events.filter((event) => event.fields?.reason === 'invalid_epoch')).toHaveLength(5);
+  });
+
+  it('skips before the first recovery has seeded versions', async () => {
+    const { engine } = createEngine({ sendBatch: vi.fn() }, 2);
+    // No recover(): adopting here could mismatch a persisted draft that the
+    // snapshot is about to replay.
+    expect(engine.isRecoveryInitialized()).toBe(false);
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'recovery_pending',
+    });
+    expect(engine.getControlEpoch()).toBe(2);
+  });
+
+  it('skips on a destroyed engine', async () => {
+    const server = fencingServer(2);
+    const { engine } = createEngine(
+      {
+        fetchSnapshot: vi.fn().mockResolvedValue(snapshot({ controlEpoch: 2 })),
+        sendBatch: server.sendBatch,
+      },
+      2
+    );
+    await engine.recover();
+    engine.destroy();
+
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'engine_not_writable',
+    });
+    expect(engine.getControlEpoch()).toBe(2);
+  });
+
+  it('never adopts over a fenced conflict posture', async () => {
+    const { engine, events } = createEngine(
+      {
+        fetchSnapshot: vi.fn().mockResolvedValue(snapshot({ controlEpoch: 2 })),
+        sendBatch: vi
+          .fn()
+          .mockRejectedValue(
+            Object.assign(new Error('Fenced by newer session'), {
+              code: 'LEASE_FENCED',
+              status: 409,
+            })
+          ),
+      },
+      2
+    );
+    await engine.recover();
+    await engine.acceptResponse('q1', payload('B'));
+    await engine.flush();
+    expect(engine.getStatus()).toBe('conflict_fenced');
+
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'conflict_fenced',
+    });
+    expect(engine.getControlEpoch()).toBe(2);
+    expect(events.find((event) => event.fields?.reason === 'conflict_fenced')?.name).toBe(
+      'control_epoch_adopt_skipped'
+    );
+  });
+
+  it('skips once the attempt is terminal, and while a submit is in flight', async () => {
+    const receipt = {
+      attemptId: 'late-attempt',
+      submissionId: 'sub-1',
+      status: 'submitted',
+      attemptRevision: 2,
+      finalResponseDigest: 'digest',
+      submittedAt: new Date().toISOString(),
+      acknowledgements: [],
+    };
+    const server = fencingServer(2);
+    const recovery = vi.fn().mockResolvedValue(snapshot({ controlEpoch: 2 }));
+
+    // (a) terminal: the receipt landed, the attempt can no longer be written.
+    const { engine: terminalEngine } = createEngine(
+      { fetchSnapshot: recovery, sendBatch: server.sendBatch, submit: vi.fn().mockResolvedValue(receipt) },
+      2
+    );
+    await terminalEngine.recover();
+    await terminalEngine.submit('sub-1', 0);
+    expect(terminalEngine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'engine_not_writable',
+    });
+
+    // (b) submitting: a receipt is outstanding, so nothing may change fence.
+    const gate = deferred<typeof receipt>();
+    const { engine: submittingEngine } = createEngine(
+      { fetchSnapshot: recovery, sendBatch: server.sendBatch, submit: vi.fn().mockReturnValue(gate.promise) },
+      2
+    );
+    await submittingEngine.recover();
+    const inFlight = submittingEngine.submit('sub-2', 0);
+    expect(submittingEngine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'engine_not_writable',
+    });
+    gate.resolve(receipt);
+    await inFlight.catch(() => undefined);
+    expect(submittingEngine.getControlEpoch()).toBe(2);
+  });
+
+  it('skips while the engine cannot trust its own storage', async () => {
+    const server = fencingServer(2);
+    const { engine } = createEngine(
+      {
+        fetchSnapshot: vi.fn().mockResolvedValue(snapshot({ controlEpoch: 2 })),
+        sendBatch: server.sendBatch,
+      },
+      2
+    );
+    await engine.recover();
+    await engine.acceptResponse('q1', payload('A'));
+    // A lease fence quarantines the draft; with the archive write failing the
+    // engine keeps the source and fails closed instead of losing the last copy.
+    storage.save.mockRejectedValue(new Error('quota exceeded'));
+    engine.updateEpochs(2, 2);
+    await vi.waitFor(() => expect(engine.getStatus()).toBe('durability_fault'));
+
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: false,
+      reason: 'durability_fault',
+    });
+    expect(engine.getControlEpoch()).toBe(2);
+  });
+
+  it('keeps the proctor-pause refusal authoritative for a draft sent under an adopted epoch', async () => {
+    // The composition the plan asked for: enter the module (adopt), answer, and
+    // then have the proctor pause. The adopted epoch is what the batch carries,
+    // so the refusal comes from the writability gate — and the heal must still
+    // refuse to re-send, leaving the recoverable blocked posture in place.
+    const server = fencingServer(3);
+    const fetchSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(snapshot({ controlEpoch: 2 }))
+      .mockResolvedValue(snapshot({ controlEpoch: 4, deliveryStatus: 'paused' }));
+    const { engine, events } = createEngine({ fetchSnapshot, sendBatch: server.sendBatch }, 2);
+    await engine.recover();
+    expect(engine.adoptControlEpochIfIdle(3, 'module_start')).toEqual({
+      adopted: true,
+      controlEpoch: 3,
+    });
+
+    // Proctor pause right after entry: the epoch moves again under the client.
+    server.bumpTo(4);
+    await engine.acceptResponse('q1', payload('B'));
+    await engine.flush();
+
+    expect(server.requests.map((request) => request.controlEpoch)).toEqual([3]);
+    expect(engine.getStatus()).toBe('blocked_attention');
+    expect(engine.getBlockedQuestionIds()).toEqual(['q1']);
+    expect(engine.getQuarantined()).toEqual([]);
+    const failed = events.filter((event) => event.name === 'control_epoch_recovery_failed');
+    expect(failed[0]?.fields?.reason).toBe('attempt_not_running');
+  });
+});

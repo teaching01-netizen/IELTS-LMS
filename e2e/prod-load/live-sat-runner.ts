@@ -6,7 +6,7 @@ import { isSatJoinError, type SatJoinError } from './sat-join-failure';
 import { parseSatJoinUrl } from './sat-join-url';
 import { loadUsersFromFile, type VirtualUser } from './user-source';
 import { startLiveDashboardServer, type DashboardEvent } from './live-dashboard-server';
-import { satAnswerUntilComplete, satCaptureAnswerableFrames, satJoinViaAccessLink, satReadAnswerableFrames, satWaitForExamLive, type SatAnswerableFrame } from './sat-live-scenario';
+import { controlEpochRecoveredPerModuleStart, EMPTY_CONTROL_EPOCH_COUNTERS, satAnswerUntilComplete, satCaptureAnswerableFrames, satCaptureControlEpochMetrics, satJoinViaAccessLink, satReadAnswerableFrames, satReadControlEpochCounters, satWaitForExamLive, sumControlEpochCounters, type SatAnswerableFrame, type SatControlEpochCounters } from './sat-live-scenario';
 
 interface RunnerConfig {
   joinUrl: string;
@@ -53,6 +53,8 @@ interface UserResult {
   answered: number;
   recoveryScreens?: number;
   answerableFrames?: SatAnswerableFrame[];
+  /** Entry control-epoch funnel: adoption vs the heal it replaces. */
+  controlEpoch?: SatControlEpochCounters;
   error?: string;
 }
 
@@ -297,6 +299,7 @@ async function run(): Promise<void> {
       context = opened.context;
       page = await context.newPage();
       await satCaptureAnswerableFrames(page);
+      await satCaptureControlEpochMetrics(page);
 
       setPhase('joining', 'starting');
       let joined = false;
@@ -399,6 +402,9 @@ async function run(): Promise<void> {
       );
       answered = outcome.answered;
       const answerableFrames = await satReadAnswerableFrames(page);
+      const controlEpoch = await satReadControlEpochCounters(page).catch(
+        () => EMPTY_CONTROL_EPOCH_COUNTERS
+      );
       if (bool('SAT_ASSERT_ENTRY_FRAME', false) &&
           (recoveryScreens > 0 || answerableFrames.length === 0 ||
             answerableFrames.some((frame) => frame.latencyMs >= 5000 || frame.latencyMs < 0))) {
@@ -417,6 +423,7 @@ async function run(): Promise<void> {
         answered,
         recoveryScreens,
         answerableFrames,
+        controlEpoch,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -487,6 +494,11 @@ async function run(): Promise<void> {
   const percentile = (fraction: number) => sortedFrameLatencies.length
     ? sortedFrameLatencies[Math.ceil(fraction * sortedFrameLatencies.length) - 1]
     : null;
+  // Entry control-epoch funnel across the whole run: `recovered` is the heal
+  // round trip a first answer used to pay on every module entry. `adopted` should
+  // account for the entries, and the ratio is the success metric the entry-epoch
+  // change is judged by (read per phase when the rehearsal pauses the room).
+  const controlEpochTotals = sumControlEpochCounters(ok);
   const summary = {
     accessLinkId: parsed.accessLinkId,
     joinUrl: config.joinUrl,
@@ -495,6 +507,8 @@ async function run(): Promise<void> {
     passed: ok.length,
     failed: failures.length,
     skipped: skipped.length,
+    controlEpochTotals,
+    controlEpochRecoveredPerModuleStart: controlEpochRecoveredPerModuleStart(controlEpochTotals),
     ...(abort.reason ? { aborted: true, abortReason: abort.reason } : {}),
     medianJoinMs: computeMedian(ok.map((r) => r.joinMs)),
     medianAnswered: computeMedian(ok.map((r) => r.answered)),

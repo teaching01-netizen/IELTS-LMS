@@ -44,6 +44,129 @@ export async function satReadAnswerableFrames(page: Page): Promise<SatAnswerable
     (window as Window & { __satAnswerableFrames?: SatAnswerableFrame[] }).__satAnswerableFrames ?? []);
 }
 
+/**
+ * Control-epoch telemetry collected per student page.
+ *
+ * `moduleStarts` counts the entry funnel step the adoption exists for;
+ * `recovered` is the heal round trip that a first answer used to pay on every
+ * module entry (`409 CONTROL_EPOCH_STALE` -> snapshot -> re-issue under a new
+ * writeId). `recoveredPerModuleStart` is the comparison the entry-epoch change
+ * is judged by: it should sit at ~0 for a fresh entry, while `blocked` and
+ * `recoveryFailed` must not rise. Note that a genuine proctor pause ALSO emits
+ * `recovered`, so a rehearsal that pauses the room mid-run must be read per
+ * phase, never as a single ratio.
+ */
+export interface SatControlEpochCounters {
+  moduleStarts: number;
+  adopted: number;
+  skipped: number;
+  recovered: number;
+  blocked: number;
+  recoveryFailed: number;
+}
+
+const EMPTY_CONTROL_EPOCH_COUNTERS: SatControlEpochCounters = {
+  moduleStarts: 0,
+  adopted: 0,
+  skipped: 0,
+  recovered: 0,
+  blocked: 0,
+  recoveryFailed: 0,
+};
+
+/** Install before navigation so the entry ack's adoption is never missed. */
+export async function satCaptureControlEpochMetrics(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const counters = {
+      moduleStarts: 0,
+      adopted: 0,
+      skipped: 0,
+      recovered: 0,
+      blocked: 0,
+      recoveryFailed: 0,
+    };
+    Object.defineProperty(window, '__satControlEpochCounters', { value: counters });
+    window.addEventListener('student-observability-metric', (event) => {
+      const detail = (event as CustomEvent).detail as { name?: unknown } | undefined;
+      switch (detail?.name) {
+        case 'sat_module_advance':
+          counters.moduleStarts += 1;
+          break;
+        case 'control_epoch_adopted':
+          counters.adopted += 1;
+          break;
+        case 'control_epoch_adopt_skipped':
+          counters.skipped += 1;
+          break;
+        case 'control_epoch_recovered':
+          counters.recovered += 1;
+          break;
+        case 'control_epoch_blocked':
+          counters.blocked += 1;
+          break;
+        case 'control_epoch_recovery_failed':
+          counters.recoveryFailed += 1;
+          break;
+        default:
+          break;
+      }
+    });
+  });
+}
+
+export async function satReadControlEpochCounters(page: Page): Promise<SatControlEpochCounters> {
+  return page.evaluate(
+    () =>
+      (window as Window & { __satControlEpochCounters?: SatControlEpochCounters })
+        .__satControlEpochCounters ?? {
+        moduleStarts: 0,
+        adopted: 0,
+        skipped: 0,
+        recovered: 0,
+        blocked: 0,
+        recoveryFailed: 0,
+      }
+  );
+}
+
+export { EMPTY_CONTROL_EPOCH_COUNTERS };
+
+/**
+ * Reduce the per-student counters into the run's funnel totals.
+ *
+ * Pure and exported so the arithmetic behind the entry-epoch success metric can
+ * be pinned by `sat-live-scenario.unit.test.ts` without a deployment to point
+ * the rehearsals at (the runners themselves need a live environment).
+ */
+export function sumControlEpochCounters(
+  results: Iterable<{ controlEpoch?: SatControlEpochCounters }>
+): SatControlEpochCounters {
+  const totals = { ...EMPTY_CONTROL_EPOCH_COUNTERS };
+  for (const result of results) {
+    const counters = result.controlEpoch ?? EMPTY_CONTROL_EPOCH_COUNTERS;
+    totals.moduleStarts += counters.moduleStarts;
+    totals.adopted += counters.adopted;
+    totals.skipped += counters.skipped;
+    totals.recovered += counters.recovered;
+    totals.blocked += counters.blocked;
+    totals.recoveryFailed += counters.recoveryFailed;
+  }
+  return totals;
+}
+
+/**
+ * The entry-epoch success metric: heal round trips per module entry.
+ *
+ * `null` (never `0`, never `Infinity`) when no module entry was observed, so a
+ * rehearsal that never reached the funnel cannot be read as a perfect score.
+ */
+export function controlEpochRecoveredPerModuleStart(
+  counters: SatControlEpochCounters
+): number | null {
+  if (counters.moduleStarts === 0) return null;
+  return Number((counters.recovered / counters.moduleStarts).toFixed(4));
+}
+
 function studentCodeFor(user: VirtualUser): string {
   return (user.candidateId ?? user.userId).trim();
 }

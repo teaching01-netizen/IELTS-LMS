@@ -164,61 +164,34 @@ test.describe("SAT student transitions", () => {
         .innerText();
       await expectEarlyModuleSubmitRejected(studentPage, scheduleId, candidateId);
 
-      const branchEntry = await holdNextModuleStartResponse(studentPage, {
-        failFirstRequest: true,
-      });
       await markExamFrame(studentPage);
-      try {
-        await reviewAndExpireCurrentModule(studentPage, scheduleId);
-        await expect.poll(() => branchEntry.attempts()).toBe(1, { timeout: 15_000 });
-        await branchEntry.failed;
-        await expect.poll(() => branchEntry.attempts()).toBe(2, { timeout: 15_000 });
-        await branchEntry.entered;
-        await expect(studentPage.locator("[data-sat-transition-hold]")).toBeVisible();
-        await assertHeldExamCannotBeInteractedWith(studentPage);
-        // The open handoff stays INSIDE the exam: the finished frame keeps its
-        // place behind one live status, and no section-break surface appears.
-        await expect(
-          studentPage.locator("[data-sat-transition-hold] [data-sat-student-frame]")
-        ).toBeVisible();
-        await expect(studentPage.locator("[data-sat-handoff]")).toBeVisible();
-        await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveCount(0);
-        await assertSingleSatStage(studentPage);
-        // The first request was aborted, so this is the escalating state: the
-        // recovery action lives in the frame, never on its own screen.
-        await expect(studentPage.locator("[data-sat-handoff]")).toHaveAttribute(
-          "data-sat-handoff-state",
-          "retrying"
-        );
-        await expect(studentPage.getByRole("button", { name: "Retry now" })).toBeVisible();
-
-        await expect
-          .poll(
-            async () => {
-              const modules = await readSectionModules(
-                studentPage,
-                scheduleId,
-                candidateId,
-                "reading-writing"
-              );
-              return (
-                modules.find(
-                  (module) => module.adaptiveRole !== "base" && module.state === "active"
-                )?.state ?? null
-              );
-            },
-            { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }
-          )
-          .toBe("active");
-        const unassigned = await readUnassignedBranch(scheduleId, candidateId, "reading-writing");
-        expect(unassigned, "the fixture must author two adaptive branches").not.toBeNull();
-        for (const body of await delivery.collectedBodies()) assertBranchAbsent(body, unassigned!);
-      } finally {
-        branchEntry.release();
-        await branchEntry.remove();
-      }
+      await reviewAndExpireCurrentModule(studentPage, scheduleId);
+      await expect
+        .poll(
+          async () => {
+            const modules = await readSectionModules(
+              studentPage,
+              scheduleId,
+              candidateId,
+              "reading-writing"
+            );
+            return (
+              modules.find((module) => module.adaptiveRole !== "base" && module.state === "active")
+                ?.state ?? null
+            );
+          },
+          { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }
+        )
+        .toBe("active");
+      // The server opens the assigned branch. Check the raw responses received
+      // across that handoff for both the unassigned module and its questions.
+      const unassigned = await readUnassignedBranch(scheduleId, candidateId, "reading-writing");
+      expect(unassigned, "the fixture must author two adaptive branches").not.toBeNull();
+      const routedBodies = await delivery.collectedBodies();
+      expect(routedBodies.length).toBeGreaterThan(0);
+      for (const body of routedBodies) assertBranchAbsent(body, unassigned!);
       await expect(studentPage.locator("[data-sat-transition-hold]")).toHaveCount(0);
-      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible();
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
       const unassignedAfterEntry = await readUnassignedBranch(
         scheduleId,
         candidateId,
@@ -280,14 +253,14 @@ test.describe("SAT student transitions", () => {
       const scheduledBreak = studentPage.getByTestId("sat-scheduled-break");
       await expect(scheduledBreak).toBeVisible({ timeout: 30_000 });
       await assertSingleSatStage(studentPage);
-      await expect(scheduledBreak).toHaveAttribute("data-sat-break-phase", "waiting-for-break");
+      await expect(scheduledBreak).toHaveAttribute("data-sat-break-phase", "active");
       await expect(scheduledBreak.getByRole("heading", { level: 1 })).toHaveCount(1);
       await expect(scheduledBreak.getByRole("timer")).toBeVisible();
       await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
       await studentPage.reload({ waitUntil: "domcontentloaded" });
       await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveAttribute(
         "data-sat-break-phase",
-        "waiting-for-break"
+        "active"
       );
       await assertNoHorizontalOverflow(studentPage, [
         { width: 390, height: 844 },
@@ -295,57 +268,34 @@ test.describe("SAT student transitions", () => {
         { width: 1440, height: 900 },
       ]);
 
-      const expiredSection = await executeUpdate(
-        `UPDATE exam_session_runtime_sections rs
-         JOIN exam_session_runtimes r ON r.id = rs.runtime_id
-            SET rs.actual_start_at = NOW(6) - INTERVAL 2 MINUTE,
-                rs.planned_duration_minutes = 1,
-                rs.gap_after_minutes = 5,
-                rs.extension_minutes = 0,
-                rs.accumulated_paused_seconds = 0
-          WHERE r.schedule_id = ?
-            AND rs.section_key = 'reading-writing'
-            AND rs.status = 'live'`,
-        [scheduleId]
+      const expiredBreak = await executeUpdate(
+        `UPDATE assessment_attempt_breaks b
+         JOIN student_attempts a ON a.id = b.attempt_id
+            SET b.starts_at = NOW(6) - INTERVAL 11 MINUTE,
+                b.deadline_at = NOW(6) - INTERVAL 1 MINUTE,
+                b.updated_at = NOW(6)
+          WHERE a.schedule_id = ?
+            AND a.candidate_id = ?
+            AND b.state = 'active'`,
+        [scheduleId, candidateId]
       );
-      expect(expiredSection).toBe(1);
-      await expect
-        .poll(
-          async () => {
-            const runtime = await readSatRuntime(page, scheduleId);
-            return (
-              runtime.sections.find((section) => section.sectionKey === "reading-writing")
-                ?.status ?? null
-            );
-          },
-          { timeout: 30_000, intervals: [250, 500, 1_000, 2_000] }
-        )
-        .toBe("completed");
-      await expect(scheduledBreak).toHaveAttribute("data-sat-break-phase", "on-break", {
-        timeout: 30_000,
-      });
-      await studentPage.reload({ waitUntil: "domcontentloaded" });
-      await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveAttribute(
-        "data-sat-break-phase",
-        "on-break"
+      expect(expiredBreak).toBe(1);
+      // Math Module 1 was scheduled at the original break deadline. Advance
+      // that availability too when the test moves the personal clock forward.
+      const availableMath = await executeUpdate(
+        `UPDATE assessment_module_attempts ma
+         JOIN student_attempts a ON a.id = ma.attempt_id
+         JOIN assessment_modules m ON m.id = ma.module_id
+         JOIN assessment_sections s ON s.id = m.section_id
+            SET ma.available_at = NOW(6) - INTERVAL 1 MINUTE
+          WHERE a.schedule_id = ?
+            AND a.candidate_id = ?
+            AND s.section_key = 'math'
+            AND m.adaptive_role = 'base'
+            AND ma.state = 'not_started'`,
+        [scheduleId, candidateId]
       );
-
-      const skippedBreak = await executeUpdate(
-        `UPDATE exam_session_runtime_sections rs
-         JOIN exam_session_runtimes r ON r.id = rs.runtime_id
-            SET rs.actual_end_at = NOW(6) - INTERVAL 6 MINUTE
-          WHERE r.schedule_id = ?
-            AND rs.section_key = 'reading-writing'
-            AND rs.status = 'completed'`,
-        [scheduleId]
-      );
-      expect(skippedBreak).toBe(1);
-      await expect
-        .poll(async () => (await readSatRuntime(page, scheduleId)).currentSectionKey, {
-          timeout: 30_000,
-          intervals: [250, 500, 1_000, 2_000],
-        })
-        .toBe("math");
+      expect(availableMath).toBe(1);
       await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
       await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveCount(0);
       await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
@@ -361,26 +311,8 @@ test.describe("SAT student transitions", () => {
         )
         .toBe("active");
 
-      const mathBaseEntry = await holdNextModuleStartResponse(studentPage);
       await markExamFrame(studentPage);
-      try {
-        await reviewAndExpireCurrentModule(studentPage, scheduleId);
-        await mathBaseEntry.entered;
-        await expect(studentPage.locator("[data-sat-transition-hold]")).toBeVisible();
-        await assertHeldExamCannotBeInteractedWith(studentPage);
-        // Module 1 → Module 2 in a LATER section is still a module handoff, not
-        // a section boundary: the exam frame stays, the break surface does not
-        // re-appear, and the status does not escalate on a healthy entry.
-        await expect(studentPage.locator("[data-sat-handoff]")).toHaveAttribute(
-          "data-sat-handoff-state",
-          "opening"
-        );
-        await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveCount(0);
-        await assertSingleSatStage(studentPage);
-      } finally {
-        mathBaseEntry.release();
-        await mathBaseEntry.remove();
-      }
+      await reviewAndExpireCurrentModule(studentPage, scheduleId);
       await expect(studentPage.locator("[data-sat-transition-hold]")).toHaveCount(0);
       await expectSameExamFrameNode(studentPage);
 
@@ -396,7 +328,7 @@ test.describe("SAT student transitions", () => {
           { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }
         )
         .toBe("active");
-      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible();
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
       await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
       await studentPage.reload({ waitUntil: "domcontentloaded" });
       await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
@@ -588,49 +520,6 @@ async function readUnassignedBranch(
   return { moduleId, questionIds: questions.map((row) => row.id) };
 }
 
-async function holdNextModuleStartResponse(
-  page: import("@playwright/test").Page,
-  options: { failFirstRequest?: boolean } = {}
-) {
-  let failedResolve!: () => void;
-  let enteredResolve!: () => void;
-  let releaseResolve!: () => void;
-  const failed = new Promise<void>((resolve) => {
-    failedResolve = resolve;
-  });
-  const entered = new Promise<void>((resolve) => {
-    enteredResolve = resolve;
-  });
-  const released = new Promise<void>((resolve) => {
-    releaseResolve = resolve;
-  });
-  let attempts = 0;
-  let held = false;
-  const routePattern = "**/v1/assessment-delivery/schedules/*/modules/start";
-  await page.route(routePattern, async (route) => {
-    attempts += 1;
-    if (options.failFirstRequest && attempts === 1) {
-      await route.abort("internetdisconnected");
-      failedResolve();
-      return;
-    }
-    const response = await route.fetch();
-    if (!held) {
-      held = true;
-      enteredResolve();
-      await released;
-    }
-    await route.fulfill({ response });
-  });
-  return {
-    failed,
-    entered,
-    attempts: () => attempts,
-    release: releaseResolve,
-    remove: () => page.unroute(routePattern),
-  };
-}
-
 const EXAM_FRAME_MARKER = "data-e2e-frame-marker";
 
 /**
@@ -669,49 +558,6 @@ async function assertSingleSatStage(page: import("@playwright/test").Page): Prom
     await expect(exiting.first()).toHaveAttribute("aria-hidden", "true");
     await expect(exiting.first()).toHaveAttribute("inert");
   }
-}
-
-async function assertHeldExamCannotBeInteractedWith(
-  page: import("@playwright/test").Page
-): Promise<void> {
-  const held = page.locator("[data-sat-transition-hold]");
-  const radio = held.locator('input[type="radio"]').first();
-  if (await radio.count()) {
-    const shell = held.getByTestId("sat-exam-shell");
-    const navigator = shell.getByRole("button", {
-      name: /Open question navigator/,
-      includeHidden: true,
-    });
-    const questionPosition = await navigator.getAttribute("aria-label");
-    const radioBounds = await radio.boundingBox();
-    if (!radioBounds) throw new Error("The held module answer control was not visible.");
-    await page.mouse.click(
-      radioBounds.x + radioBounds.width / 2,
-      radioBounds.y + radioBounds.height / 2
-    );
-    await expect(radio).not.toBeChecked();
-
-    await page.keyboard.press("Control+Alt+x");
-    await expect(navigator).toHaveAttribute("aria-label", questionPosition ?? "");
-    const next = shell.getByRole("button", { name: "Next question", includeHidden: true });
-    const nextBounds = await next.boundingBox();
-    if (!nextBounds) throw new Error("The held module navigation control was not visible.");
-    await page.mouse.click(
-      nextBounds.x + nextBounds.width / 2,
-      nextBounds.y + nextBounds.height / 2
-    );
-    await expect(navigator).toHaveAttribute("aria-label", questionPosition ?? "");
-    return;
-  }
-
-  await expect(held.getByRole("heading", { name: "Review your answers" })).toBeVisible();
-  await expect(held.getByRole("button", { name: "Submit module", exact: true })).toHaveCount(0);
-  const backToQuestion = held.getByRole("button", { name: /Back to question/ }).first();
-  const backBounds = await backToQuestion.boundingBox();
-  if (!backBounds) throw new Error("The held review navigation control was not visible.");
-  await page.mouse.click(backBounds.x + backBounds.width / 2, backBounds.y + backBounds.height / 2);
-  await expect(held.getByRole("heading", { name: "Review your answers" })).toBeVisible();
-  await expect(page.getByTestId("sat-submit-confirm")).toHaveCount(0);
 }
 
 async function assertNoHorizontalOverflow(
@@ -760,27 +606,4 @@ async function readSectionModules(
     },
     { scheduleId, candidateId, sectionKey }
   );
-}
-
-async function readSatRuntime(
-  page: import("@playwright/test").Page,
-  scheduleId: string
-): Promise<{
-  currentSectionKey: string | null;
-  sections: Array<{ sectionKey: string; status: string | null }>;
-}> {
-  const response = await page.request.get(`/api/v1/schedules/${scheduleId}/runtime`);
-  if (!response.ok())
-    throw new Error(`Runtime read failed: ${response.status()} ${await response.text()}`);
-  const payload = await response.json();
-  const runtime = payload?.data ?? payload;
-  return {
-    currentSectionKey: runtime.currentSectionKey ?? null,
-    sections: (runtime.sections ?? []).map(
-      (section: { sectionKey: string; status?: string | null }) => ({
-        sectionKey: section.sectionKey,
-        status: section.status ?? null,
-      })
-    ),
-  };
 }

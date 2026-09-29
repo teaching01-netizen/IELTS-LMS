@@ -71,6 +71,15 @@ export interface SatResponsePersistence {
    */
   reconcileBlocked?: (questionId: string) => Promise<ReconcileBlockedResult>;
   /**
+   * Adopt an authoritative control epoch read off a transition ack (module
+   * entry) ahead of the attempt projection that carries it. No-op when no
+   * engine is installed yet — the entry ack's epoch is a latency optimization,
+   * never a fence, so a missing engine falls back to the existing 409 -> heal
+   * path. The engine re-checks every guard and refuses when work is
+   * outstanding (a draft is never blocked in order to adopt).
+   */
+  adoptControlEpoch?: (epoch: number, source: string) => void;
+  /**
    * SAT-004 boundary barrier: refuses while any visible answer is unsettled
    * (blocked, quarantined, queued, or awaiting a version). Module submission
    * and terminal submit share it; never infer safety from queue length.
@@ -512,6 +521,33 @@ export function useSatResponsePersistence({
     }
   }, [assertBoundarySettled, attemptId, waitForV2Acceptances]);
 
+  // Entry-ack control-epoch adoption. The controller reads the epoch off the
+  // start/entry ack (the server bumps control_epoch in the same transaction
+  // that opens the module, then answers with the post-commit value) and hands
+  // it here BEFORE any answer can be accepted, so the first batch no longer
+  // rides the pre-bump fence. The engine owns every guard; this wrapper owns
+  // only the engine lookup, so a missing engine degrades to the existing
+  // 409 -> heal path instead of throwing on the entry path.
+  const adoptControlEpoch = useCallback(
+    (epoch: number, source: string) => {
+      const engine = v2EngineRef.current;
+      if (!engine) {
+        emitStudentObservabilityMetric(
+          'control_epoch_adopt_skipped',
+          withStudentObservabilityDimensions({
+            scheduleId,
+            attemptId,
+            reason: 'engine_unavailable',
+            source,
+          })
+        );
+        return;
+      }
+      engine.adoptControlEpochIfIdle(epoch, source);
+    },
+    [attemptId, scheduleId]
+  );
+
   // Best-effort reconcile of one blocked question. Returns a reason union
   // ('reconciled' | 'not-blocked' | 'refusal' | `error:${string}`) so
   // callers can distinguish refusal (lease fence / terminal / server-newer /
@@ -645,6 +681,7 @@ export function useSatResponsePersistence({
     blockedQuestionIds: blockedDrafts,
     blockedCount: blockedDrafts.length,
     reconcileBlocked,
+    adoptControlEpoch,
     assertBoundarySettled,
     failure,
     failureKind,

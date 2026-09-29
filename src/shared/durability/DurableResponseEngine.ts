@@ -8,6 +8,8 @@
 
 import type {
   ConfirmedResponseState,
+  ControlEpochAdoptionResult,
+  ControlEpochAdoptionSkipReason,
   DurabilitySyncStatus,
   PendingResponseState,
   QuarantinedWrite,
@@ -504,11 +506,27 @@ export class DurableResponseEngine {
     if (this.quarantined.length > 0) {
       throw new Error("Some saved answers were quarantined and need attention before submit.");
     }
-    if (this.getPendingCount() > 0 || this.hasUnacknowledgedIntent()) {
+    if (this.hasOutstandingWork()) {
       throw new Error(
         this.getLastError() ?? "One or more responses have not been durably saved."
       );
     }
+  }
+
+  /**
+   * The single definition of "something is still outstanding": a queued or
+   * in-flight command, or a visible draft the server has not acknowledged.
+   *
+   * Queue size alone is never enough — a provisional intent awaiting its
+   * version is deliberately NOT in the outbox or in-flight maps, and a blocked
+   * draft never is either. Both the boundary barrier and control-epoch
+   * adoption read this, so "idle" cannot drift between the two callers.
+   */
+  private hasOutstandingWork(): boolean {
+    return this.getPendingCount() > 0 ||
+      this.issuedCommands.size > 0 ||
+      this.commandEpochs.size > 0 ||
+      this.hasUnacknowledgedIntent();
   }
 
   /**
@@ -569,6 +587,82 @@ export class DurableResponseEngine {
     // conflict back to synced. The conflict persists until a user-visible
     // reconcile/discard or a fresh server ack resolves it (see
     // clearConflictOnExplicitResolution). Epoch adoption still proceeds above.
+  }
+
+  /**
+   * Adopt an authoritative control epoch read off a transition ack (module
+   * entry), before the next answer is accepted.
+   *
+   * Why this exists: the server bumps control_epoch in the same transaction
+   * that opens a module and then answers with the post-commit epoch. The client
+   * used to drop it, so the first batch after entry still carried the pre-bump
+   * fence and was refused 409 CONTROL_EPOCH_STALE — one avoidable
+   * fail-then-heal round trip on the exact path every student takes.
+   *
+   * This is an optimization, never a fence: every guard below is conservative
+   * and falls back to today's behaviour (refuse, block, heal). Adoption is
+   * DELIBERATELY not updateEpochs: a control bump normally parks in-flight
+   * drafts as blocked, but an ack can only be adopted while nothing is
+   * outstanding (see `not_idle`), so the bump cannot strand a draft — and
+   * `blockPendingOnControlBump()` is provably a no-op here (it acts only on
+   * unblocked pending intent). The lease is passed through unchanged, so the
+   * strict lease fence is never crossed by this path.
+   *
+   * @param epoch The epoch the server reported on the ack.
+   * @param source Reason-coded caller tag for telemetry (e.g. `module_start`).
+   */
+  public adoptControlEpochIfIdle(epoch: number, source: string): ControlEpochAdoptionResult {
+    const skip = (reason: ControlEpochAdoptionSkipReason): ControlEpochAdoptionResult => {
+      this.emitDurabilityEvent("control_epoch_adopt_skipped", {
+        reason,
+        source,
+        controlEpoch: this.controlEpoch,
+      });
+      return { adopted: false, reason };
+    };
+
+    // Same rule updateEpochs applies before it touches the fence.
+    if (!Number.isSafeInteger(epoch) || epoch <= 0) return skip("invalid_epoch");
+    // A destroyed, terminal or submitting engine must not start sending under
+    // a new epoch (mirrors recoverControlEpochSkew's writability guard).
+    if (this.isDestroyed || this.terminalState || this.submissionPromise) {
+      return skip("engine_not_writable");
+    }
+    // Before the first recovery the version trackers are unseeded; adopting
+    // here could mismatch a persisted draft the snapshot is about to replay.
+    if (!this.recoveryInitialized) return skip("recovery_pending");
+    // Never adopt over an explicit conflict posture: the fence is the reason
+    // the client is refusing to write, and adopting would mask it. Checked
+    // before `not_idle` because a fenced attempt usually also has a quarantined
+    // or blocked draft — the permanent posture is the honest reason there.
+    if (this.syncStatus === "conflict_fenced" || this.syncStatus === "conflict_terminal") {
+      return skip("conflict_fenced");
+    }
+    // A storage fault is a fail-closed posture too: while the engine cannot
+    // trust its own durability, it must not start sending under a new fence.
+    if (this.syncStatus === "durability_fault") return skip("durability_fault");
+    // Epochs are database-owned monotonic fences: an equal or older ack (a
+    // stale read, a repeated idempotent start) is a no-op. This is also what
+    // makes a double-invoked effect (React StrictMode) idempotent.
+    if (epoch <= this.controlEpoch) return skip("not_advanced");
+    // THE load-bearing guard. Idle means nothing visible is outstanding: queue
+    // + in-flight is not enough, because an accepted draft can sit in `states`
+    // before its durable write issues, and a blocked draft is never in either
+    // map. Blocking or quarantining such a draft to adopt an epoch would trade
+    // a benign 409 for a student-visible "needs re-check".
+    if (this.hasOutstandingWork()) return skip("not_idle");
+
+    const previousControlEpoch = this.controlEpoch;
+    // One owner for the fence arithmetic (monotonic clamp, events, state
+    // publish). With no pending intent, the control-bump branch cannot block
+    // anything — the guard above is what makes this safe to delegate to.
+    this.updateEpochs(this.leaseEpoch, epoch);
+    this.emitDurabilityEvent("control_epoch_adopted", {
+      source,
+      previousControlEpoch,
+      controlEpoch: this.controlEpoch,
+    });
+    return { adopted: true, controlEpoch: this.controlEpoch };
   }
 
   /**

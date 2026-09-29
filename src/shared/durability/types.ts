@@ -130,3 +130,25 @@ export interface QuarantinedWrite {
   reason: string;
   quarantinedAt: string;
 }
+
+/**
+ * Why an authoritative control epoch offered by a transition ack was not
+ * adopted. One closed vocabulary so the telemetry counter and the tests agree
+ * on the same names: `invalid_epoch` (unusable value), `engine_not_writable`
+ * (destroyed / terminal / submitting), `recovery_pending` (versions not seeded
+ * yet), `not_advanced` (equal or older fence), `not_idle` (work still
+ * outstanding), `conflict_fenced` (fenced or terminal conflict posture),
+ * `durability_fault` (the engine cannot trust its own storage).
+ */
+export type ControlEpochAdoptionSkipReason =
+  | 'invalid_epoch'
+  | 'engine_not_writable'
+  | 'recovery_pending'
+  | 'not_advanced'
+  | 'not_idle'
+  | 'conflict_fenced'
+  | 'durability_fault';
+
+export type ControlEpochAdoptionResult =
+  | { adopted: true; controlEpoch: number }
+  | { adopted: false; reason: ControlEpochAdoptionSkipReason };

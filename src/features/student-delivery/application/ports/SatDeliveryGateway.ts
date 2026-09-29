@@ -33,6 +33,12 @@ export interface SatDeliveryGateway {
     attemptId: string,
     request: AssessmentModuleStartRequest,
   ): Promise<AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck>;
+  /**
+   * Legacy personal-timing offer confirmation. The SAT client uses the
+   * single-operation `startModule` path instead. If this endpoint is wired
+   * again, its raw ack must be passed through the controller's entry resolver
+   * before the payload is merged (application/satEntryControlEpoch).
+   */
   enterModule?(
     scheduleId: string,
     attemptId: string,
