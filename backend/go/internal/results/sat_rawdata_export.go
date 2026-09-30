@@ -428,13 +428,15 @@ func assembleSATRawdata(attempts []satRawdataAttempt, modulesByAttempt map[strin
 			if module.State != satRawdataModuleStateNotStarted {
 				byOrder := map[int]string{}
 				for _, cell := range cellsByModule[satRawdataCellGroupKey(module.AttemptID, module.ModuleID)] {
-					if cell.DisplayOrder >= 1 && cell.DisplayOrder <= questionCount {
+					// assessment_exam_questions.display_order is zero-based:
+					// order 0 is Q1 and order 26 is Q27.
+					if cell.DisplayOrder >= 0 && cell.DisplayOrder < questionCount {
 						byOrder[cell.DisplayOrder] = cell.Value
 					}
 				}
 				received := 0
 				for i := 0; i < questionCount; i++ {
-					value := byOrder[i+1]
+					value := byOrder[i]
 					values[i] = value
 					if value == SATRawdataAnswerCorrect {
 						received++

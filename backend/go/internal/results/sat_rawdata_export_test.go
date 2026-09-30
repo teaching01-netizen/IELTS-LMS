@@ -68,14 +68,14 @@ func TestExportSATRawdataMixedStatesQuestionRangesAndV2Priority(t *testing.T) {
 	mock.ExpectQuery(satRawdataCellQueryPattern).
 		WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
-			AddRow("attempt-rw", "mod-rw-1", "eq-1", 1, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-rw", "mod-rw-1", "eq-2", 2, singleChoice("A"), nil, `"C"`).
-			AddRow("attempt-rw", "mod-rw-1", "eq-3", 3, singleChoice("D"), nil, nil).
-			AddRow("attempt-rw", "mod-rw-1", "eq-4", 4, `{"kind":"single_choice"}`, nil, `"A"`).
-			AddRow("attempt-math", "mod-math-1", "eq-5", 1, singleChoice("B"), `{"answer":"B"}`, nil).
-			AddRow("attempt-math", "mod-math-1", "eq-6", 2, singleChoice("B"), `{"answer":"B"}`, `"A"`).
-			AddRow("attempt-math", "mod-math-1", "eq-7", 23, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-notstarted", "mod-rw-2", "eq-8", 1, singleChoice("B"), nil, `"B"`))
+			AddRow("attempt-rw", "mod-rw-1", "eq-1", 0, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-rw", "mod-rw-1", "eq-2", 1, singleChoice("A"), nil, `"C"`).
+			AddRow("attempt-rw", "mod-rw-1", "eq-3", 2, singleChoice("D"), nil, nil).
+			AddRow("attempt-rw", "mod-rw-1", "eq-4", 3, `{"kind":"single_choice"}`, nil, `"A"`).
+			AddRow("attempt-math", "mod-math-1", "eq-5", 0, singleChoice("B"), `{"answer":"B"}`, nil).
+			AddRow("attempt-math", "mod-math-1", "eq-6", 1, singleChoice("B"), `{"answer":"B"}`, `"A"`).
+			AddRow("attempt-math", "mod-math-1", "eq-7", 22, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-notstarted", "mod-rw-2", "eq-8", 0, singleChoice("B"), nil, `"B"`))
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -211,18 +211,18 @@ func TestExportSATRawdataFullMixedCohort(t *testing.T) {
 
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
-			AddRow("attempt-B", "b-m1", "q1", 1, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-C", "c-m1", "q1", 1, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-C", "c-m2h", "q1", 1, singleChoice("B"), nil, `"A"`).
-			AddRow("attempt-D", "d-m1", "q1", 1, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-D", "d-m2l", "q1", 1, singleChoice("B"), nil, nil).
-			AddRow("attempt-E", "e-m1", "q1", 1, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-E", "e-m2l", "q1", 1, singleChoice("B"), nil, `"A"`).
-			AddRow("attempt-F", "f-m1", "q1", 1, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-G", "g-m2h", "q1", 1, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-H", "h-m1", "q1", 1, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-H", "h-m1", "q2", 2, singleChoice("B"), nil, `"A"`).
-			AddRow("attempt-H", "h-m1", "q3", 3, singleChoice("B"), nil, nil))
+			AddRow("attempt-B", "b-m1", "q1", 0, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-C", "c-m1", "q1", 0, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-C", "c-m2h", "q1", 0, singleChoice("B"), nil, `"A"`).
+			AddRow("attempt-D", "d-m1", "q1", 0, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-D", "d-m2l", "q1", 0, singleChoice("B"), nil, nil).
+			AddRow("attempt-E", "e-m1", "q1", 0, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-E", "e-m2l", "q1", 0, singleChoice("B"), nil, `"A"`).
+			AddRow("attempt-F", "f-m1", "q1", 0, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-G", "g-m2h", "q1", 0, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-H", "h-m1", "q1", 0, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-H", "h-m1", "q2", 1, singleChoice("B"), nil, `"A"`).
+			AddRow("attempt-H", "h-m1", "q3", 2, singleChoice("B"), nil, nil))
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -281,7 +281,7 @@ func TestExportSATRawdataProjectionIsPaginationIndependent(t *testing.T) {
 		id := "attempt-" + itoa(i)
 		attempts.AddRow(id, "C-"+itoa(i), "", itoa(i)+"@example.com", satRawdataTestVersion, base.Add(time.Duration(i)*time.Second))
 		modules.AddRow(id, "mod-"+itoa(i), "reading-writing", "rw-m1", "base", "submitted", satRawdataTestVersion, 1, 1)
-		cells.AddRow(id, "mod-"+itoa(i), "eq-"+itoa(i), 1, singleChoice("B"), nil, `"B"`)
+		cells.AddRow(id, "mod-"+itoa(i), "eq-"+itoa(i), 0, singleChoice("B"), nil, `"B"`)
 	}
 	mock.ExpectBegin()
 	mock.ExpectQuery(satRawdataAttemptQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(attempts)
@@ -326,8 +326,8 @@ func TestExportSATRawdataIgnoresModulesFromAnotherVersion(t *testing.T) {
 			AddRow("attempt-v12", "mod-v20", "math", "m-m1", "higher_branch", "submitted", "version-20", 2, 1))
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
-			AddRow("attempt-v12", "mod-v12", "q-v12", 1, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-v12", "mod-v20", "q-v20", 1, singleChoice("B"), nil, `"B"`))
+			AddRow("attempt-v12", "mod-v12", "q-v12", 0, singleChoice("B"), nil, `"B"`).
+			AddRow("attempt-v12", "mod-v20", "q-v20", 0, singleChoice("B"), nil, `"B"`))
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -520,7 +520,7 @@ func TestExportSATRawdataTreatsLockedModuleAsAdministered(t *testing.T) {
 			AddRow("attempt-locked", "mod-locked", "reading-writing", "rw-m1", "base", "locked", satRawdataTestVersion, 1, 1))
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
-			AddRow("attempt-locked", "mod-locked", "eq-1", 1, singleChoice("B"), nil, `"B"`))
+			AddRow("attempt-locked", "mod-locked", "eq-1", 0, singleChoice("B"), nil, `"B"`))
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -741,10 +741,10 @@ func TestExportSATRawdataDeduplicatesV2AliasMatches(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
 			// Q1: the canonical eq.id match first (correct), then the alias
 			// match carrying a stale, different answer.
-			AddRow("attempt-1", "mod-rw", "eq-1", 1, singleChoice("B"), `{"answer":"B"}`, nil).
-			AddRow("attempt-1", "mod-rw", "eq-1", 1, singleChoice("B"), `{"answer":"A"}`, nil).
+			AddRow("attempt-1", "mod-rw", "eq-1", 0, singleChoice("B"), `{"answer":"B"}`, nil).
+			AddRow("attempt-1", "mod-rw", "eq-1", 0, singleChoice("B"), `{"answer":"A"}`, nil).
 			// Q2: an unrelated question must be unaffected by the fold.
-			AddRow("attempt-1", "mod-rw", "eq-2", 2, singleChoice("B"), nil, `"B"`))
+			AddRow("attempt-1", "mod-rw", "eq-2", 1, singleChoice("B"), nil, `"B"`))
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -920,18 +920,18 @@ func TestExportSATRawdataDoesNotFilterAttemptState(t *testing.T) {
 	}
 	// The active attempt answered Q1-Q3; the rest of its module was administered
 	// with no response.
-	for q := 1; q <= SATRawdataReadingWritingQuestions; q++ {
-		if q <= 3 {
-			cells.AddRow("attempt-active", "mod-active", "q"+itoa(q), q, singleChoice("B"), nil, `"B"`)
+	for q := 0; q < SATRawdataReadingWritingQuestions; q++ {
+		if q < 3 {
+			cells.AddRow("attempt-active", "mod-active", "q"+itoa(q+1), q, singleChoice("B"), nil, `"B"`)
 			continue
 		}
-		cells.AddRow("attempt-active", "mod-active", "q"+itoa(q), q, singleChoice("B"), nil, nil)
+		cells.AddRow("attempt-active", "mod-active", "q"+itoa(q+1), q, singleChoice("B"), nil, nil)
 	}
 	for _, state := range states {
 		if state.name == "active" || state.moduleState == "not_started" {
 			continue
 		}
-		cells.AddRow("attempt-"+state.name, "mod-"+state.name, "q1", 1, singleChoice("B"), nil, `"B"`)
+		cells.AddRow("attempt-"+state.name, "mod-"+state.name, "q1", 0, singleChoice("B"), nil, `"B"`)
 	}
 	mock.ExpectQuery("").WillReturnRows(attempts)
 	mock.ExpectQuery("").WillReturnRows(modules)
@@ -1001,9 +1001,9 @@ func TestExportSATRawdataDoesNotFilterAttemptState(t *testing.T) {
 }
 
 // TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder covers TC-QUESTION-001
-// and TC-QUESTION-002: the question a cell lands in is decided by
-// assessment_exam_questions.display_order, never by the order the rows arrive
-// in (or by question UUID).
+// and TC-QUESTION-002: the question a cell lands in is decided by the
+// zero-based assessment_exam_questions.display_order, never by arrival order
+// (or question UUID).
 func TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1022,11 +1022,11 @@ func TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder(t *testing.T) {
 			AddRow("attempt-1", "mod-rw", "reading-writing", "rw-m1", "base", "submitted", satRawdataTestVersion, 1, 1))
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
-			// Delivered in reverse/UUID order: uuid-z (order 3) first, then the
-			// order-1 and order-2 questions.
-			AddRow("attempt-1", "mod-rw", "uuid-z", 3, key, nil, `"B"`).
-			AddRow("attempt-1", "mod-rw", "uuid-a", 1, key, nil, nil).
-			AddRow("attempt-1", "mod-rw", "uuid-b", 2, key, nil, `"A"`))
+			// Delivered out of order: Q3 and Q27 arrive before Q1 and Q2.
+			AddRow("attempt-1", "mod-rw", "uuid-z", 2, key, nil, `"B"`).
+			AddRow("attempt-1", "mod-rw", "uuid-q27", 26, key, nil, `"B"`).
+			AddRow("attempt-1", "mod-rw", "uuid-a", 0, key, nil, nil).
+			AddRow("attempt-1", "mod-rw", "uuid-b", 1, key, nil, `"A"`))
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -1035,15 +1035,21 @@ func TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder(t *testing.T) {
 	}
 	row := out.Rows[0]
 	if row[satRawdataColFirstQuestion] != SATRawdataAnswerNoAnswer {
-		t.Fatalf("display_order 1 (uuid-a) must land in Q1, got %q", row[satRawdataColFirstQuestion])
+		t.Fatalf("display_order 0 (uuid-a) must land in Q1, got %q", row[satRawdataColFirstQuestion])
 	}
 	if row[satRawdataColFirstQuestion+1] != SATRawdataAnswerIncorrect {
-		t.Fatalf("display_order 2 (uuid-b) must land in Q2, got %q", row[satRawdataColFirstQuestion+1])
+		t.Fatalf("display_order 1 (uuid-b) must land in Q2, got %q", row[satRawdataColFirstQuestion+1])
 	}
 	if row[satRawdataColFirstQuestion+2] != SATRawdataAnswerCorrect {
-		t.Fatalf("display_order 3 (uuid-z) must land in Q3, got %q", row[satRawdataColFirstQuestion+2])
+		t.Fatalf("display_order 2 (uuid-z) must land in Q3, got %q", row[satRawdataColFirstQuestion+2])
 	}
-	for q := 3; q < SATRawdataReadingWritingQuestions; q++ {
+	if row[satRawdataColFirstQuestion+SATRawdataReadingWritingQuestions-1] != SATRawdataAnswerCorrect {
+		t.Fatalf("display_order 26 (uuid-q27) must land in Q27, got %q", row[satRawdataColFirstQuestion+SATRawdataReadingWritingQuestions-1])
+	}
+	if row[satRawdataColPointsReceived] != "2" {
+		t.Fatalf("Q3 and Q27 should both count as correct, got %q points", row[satRawdataColPointsReceived])
+	}
+	for q := 3; q < SATRawdataReadingWritingQuestions-1; q++ {
 		if row[satRawdataColFirstQuestion+q] != "" {
 			t.Fatalf("Q%d was never administered and must stay blank, got %q", q+1, row[satRawdataColFirstQuestion+q])
 		}
@@ -1074,8 +1080,8 @@ func TestExportSATRawdataLeavesGappedQuestionBlankWithoutShifting(t *testing.T) 
 		WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns).
 			AddRow("attempt-1", "mod-rw", "reading-writing", "rw-m1", "base", "submitted", satRawdataTestVersion, 1, 1))
 	cells := sqlmock.NewRows(satRawdataCellColumns)
-	for q := 1; q < SATRawdataReadingWritingQuestions; q++ {
-		cells.AddRow("attempt-1", "mod-rw", "q"+itoa(q), q, singleChoice("B"), nil, `"B"`)
+	for q := 0; q < SATRawdataReadingWritingQuestions-1; q++ {
+		cells.AddRow("attempt-1", "mod-rw", "q"+itoa(q+1), q, singleChoice("B"), nil, `"B"`)
 	}
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(cells)
 	mock.ExpectCommit()
@@ -1124,9 +1130,9 @@ func TestExportSATRawdataModuleCodeIgnoresScore(t *testing.T) {
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
 			// The Higher branch got everything wrong...
-			AddRow("attempt-1", "mod-h", "h1", 1, singleChoice("B"), nil, `"A"`).
+			AddRow("attempt-1", "mod-h", "h1", 0, singleChoice("B"), nil, `"A"`).
 			// ...and the Lower branch got everything right.
-			AddRow("attempt-1", "mod-l", "l1", 1, singleChoice("B"), nil, `"B"`))
+			AddRow("attempt-1", "mod-l", "l1", 0, singleChoice("B"), nil, `"B"`))
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -1235,7 +1241,7 @@ func TestExportSATRawdataTenThousandAttempts(t *testing.T) {
 		id := "attempt-" + itoa(i)
 		attempts.AddRow(satRawdataAttemptRow(id, "C-"+itoa(i), itoa(i)+"@example.com", base.Add(time.Duration(i)*time.Second))...)
 		modules.AddRow(id, "mod-"+itoa(i), "reading-writing", "rw-m1", "base", "submitted", satRawdataTestVersion, 1, 1)
-		cells.AddRow(id, "mod-"+itoa(i), "q"+itoa(i), 1, singleChoice("B"), nil, `"B"`)
+		cells.AddRow(id, "mod-"+itoa(i), "q"+itoa(i), 0, singleChoice("B"), nil, `"B"`)
 	}
 	mock.ExpectBegin()
 	mock.ExpectQuery("").WillReturnRows(attempts)

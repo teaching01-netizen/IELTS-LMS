@@ -24,18 +24,18 @@ func sampleSATRawdataExport(candidateName string) *SATRawdataExport {
 		{AttemptID: attempt.ID, ModuleID: "math-2", SectionKey: SATRawdataSectionMath, AdaptiveRole: "lower_branch", State: "submitted", ExamVersionID: attempt.PublishedVersionID, SectionOrder: 2, ModuleOrder: 2},
 	}
 	readingWritingCells := make([]satRawdataCell, 0, SATRawdataReadingWritingQuestions)
-	for order := 1; order <= SATRawdataReadingWritingQuestions; order++ {
+	for order := 0; order < SATRawdataReadingWritingQuestions; order++ {
 		value := SATRawdataAnswerNoAnswer
-		if order <= 18 {
+		if order < 18 {
 			value = SATRawdataAnswerCorrect
 		}
 		readingWritingCells = append(readingWritingCells, satRawdataCell{DisplayOrder: order, Value: value})
 	}
 	mathCells := make([]satRawdataCell, 0, 13)
-	for order := 1; order <= 12; order++ {
+	for order := 0; order < 12; order++ {
 		mathCells = append(mathCells, satRawdataCell{DisplayOrder: order, Value: SATRawdataAnswerCorrect})
 	}
-	mathCells = append(mathCells, satRawdataCell{DisplayOrder: 13, Value: SATRawdataAnswerIncorrect})
+	mathCells = append(mathCells, satRawdataCell{DisplayOrder: 12, Value: SATRawdataAnswerIncorrect})
 	cells := map[string][]satRawdataCell{
 		satRawdataCellGroupKey(attempt.ID, "rw-1"):   readingWritingCells,
 		satRawdataCellGroupKey(attempt.ID, "math-1"): mathCells,
@@ -184,6 +184,7 @@ func TestBuildSATRawdataXLSXUsesSafeTextAndNumericCells(t *testing.T) {
 		"C3":  "candidate@example.com",
 		"D3":  "66.70%",
 		"AN3": "No answer",
+		"AV3": "No answer", // Q27 must survive the XLSX writer.
 	} {
 		if got, err := book.GetCellValue("SAT Verbal", cell); err != nil || got != want {
 			t.Fatalf("text cell %s = %q, %v; want %q", cell, got, err, want)
