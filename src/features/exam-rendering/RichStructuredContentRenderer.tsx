@@ -592,7 +592,7 @@ function RichNode({ node, renderText, enlarge, ...mediaProps }: { node: RichText
     case "image":
       return <StaticStructuredImage node={node} enlarge={enlarge} {...mediaProps} />;
     case "table":
-      return <table><tbody>{children("table")}</tbody></table>;
+      return <table data-cell-alignment={node.attrs?.["cellAlignment"] === "center" ? "center" : undefined}><tbody>{children("table")}</tbody></table>;
     case "tableRow":
       return <tr>{children("table-row")}</tr>;
     case "tableHeader":

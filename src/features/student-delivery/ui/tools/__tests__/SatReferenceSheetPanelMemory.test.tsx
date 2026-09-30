@@ -10,7 +10,7 @@
  */
 import { fireEvent, render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SatReferenceSheetPanel,
   defaultSatReferenceGeometry,
@@ -52,10 +52,14 @@ async function flushScrollRestore() {
   });
 }
 
+afterEach(() => vi.restoreAllMocks());
+
 describe("SatReferenceSheetPanel memory (R-04 Step 6)", () => {
   beforeEach(() => {
     matchMediaMock(false);
     window.localStorage.clear();
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(560);
     vi.unstubAllGlobals();
     matchMediaMock(false);
   });
@@ -84,7 +88,7 @@ describe("SatReferenceSheetPanel memory (R-04 Step 6)", () => {
     const scroller = document.querySelector("[data-sat-tool-scroll]") as HTMLElement;
     expect(scroller.scrollTop).toBe(240);
     const dialog = screen.getByRole("dialog", { name: "Reference Sheet" });
-    expect(dialog.style.width).toBe("666px");
+    expect(dialog.style.width).toBe("700px");
     first.unmount();
     render(<SatReferenceSheetPanel open onClose={() => undefined} {...ids} />);
     await flushScrollRestore();
@@ -142,7 +146,7 @@ describe("SatReferenceSheetPanel memory (R-04 Step 6)", () => {
       { w: 768, h: 600 },
       { top: 112, right: 16, bottom: 86, left: 16 },
     );
-    expect(narrow.w).toBe(566);
+    expect(narrow.w).toBe(700);
     expect(narrow.h).toBe(402);
     render(<SatReferenceSheetPanel open onClose={() => undefined} {...ids} />);
     const dialog = screen.getByRole("dialog", { name: "Reference Sheet" });
@@ -191,11 +195,11 @@ describe("SatReferenceSheetPanel memory (R-04 Step 6)", () => {
     const leftBefore = Number.parseFloat(dialog.style.left || "0");
     const grip = screen.getByRole("button", { name: /Move Reference Sheet/ });
     grip.focus();
-    await user.keyboard("{ArrowRight}");
+    await user.keyboard("{ArrowLeft}");
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(Number.parseFloat(dialog.style.left || "0")).toBe(leftBefore + 8);
+    expect(Number.parseFloat(dialog.style.left || "0")).toBe(leftBefore - 8);
     expect(loadSatToolViewState(viewKey).hasBeenMoved).toBe(true);
     // R-06 B1: the panel passes the Reference maxSize (>= default width),
     // so a keyboard resize step commits exactly instead of folding to the
@@ -229,8 +233,8 @@ describe("SatReferenceSheetPanel memory (R-04 Step 6)", () => {
       }),
     );
     render(<SatReferenceSheetPanel open onClose={() => undefined} {...ids} />);
-    expect(screen.getByText("100%")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
+    expect(screen.getByText("Fit", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zoom out" })).toBeNull();
   });
 
   it("corrupt stores degrade without blocking the exam", async () => {
@@ -238,7 +242,7 @@ describe("SatReferenceSheetPanel memory (R-04 Step 6)", () => {
     window.localStorage.setItem(geometryKey, JSON.stringify({ x: 300, y: 150, w: 666, h: 500, v: 2 }));
     const first = render(<SatReferenceSheetPanel open onClose={() => undefined} {...ids} />);
     await flushScrollRestore();
-    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.getByText("Fit", { exact: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse Reference Sheet" })).toBeInTheDocument();
     first.unmount();
     window.localStorage.clear();
@@ -256,17 +260,14 @@ describe("SatReferenceSheetPanel memory (R-04 Step 6)", () => {
     expect(loadSatToolViewState(viewKey).scrollTop).toBe(77);
   });
 
-  // R-07 §8 memory fit vectors: fit opens whole-visible (scroll 0, hidden
-  // overflow); zoom 1.5 pans (scrollable + persists); Fit sheet returns to
-  // whole-visible. jsdom never lays out the stage (client 0), so the stage
-  // hook falls back to { 1000, 560 } — fit = 1 there, exactly the vectors.
+  // Fit stays scrollable; zoom and scroll anchors survive close and reopen.
   it("fit opens whole-visible, zoom pans and persists, Fit sheet resets", async () => {
     const user = userEvent.setup();
     render(<SatReferenceSheetPanel open onClose={() => undefined} {...ids} />);
     await flushScrollRestore();
     const scroller = document.querySelector("[data-sat-tool-scroll]") as HTMLElement;
-    // Fit default: nothing to scroll — hidden overflow, scroll 0.
-    expect(scroller.style.overflow).toBe("hidden");
+    // Fit default: scroll safety stays enabled, starting at the origin.
+    expect(scroller.style.overflow).toBe("auto");
     expect(scroller.scrollTop).toBe(0);
     // Zoom 1.5 past fit: pan affordance appears and zoom persists.
     await user.click(screen.getByRole("button", { name: "Zoom in" }));
@@ -276,8 +277,8 @@ describe("SatReferenceSheetPanel memory (R-04 Step 6)", () => {
     expect(loadSatToolViewState(viewKey).zoom).toBeCloseTo(1.5);
     // Fit sheet: back to whole-visible, scroll cleared to 0.
     await user.click(screen.getByRole("button", { name: "Fit sheet" }));
-    expect(screen.getByText("100%")).toBeInTheDocument();
-    expect(scroller.style.overflow).toBe("hidden");
+    expect(screen.getByText("Fit", { exact: true })).toBeInTheDocument();
+    expect(scroller.style.overflow).toBe("auto");
     expect(scroller.scrollTop).toBe(0);
     // Persisted scrollTop is ignored at fit on reopen (not deleted): seed a
     // stale anchor with fit zoom and reopen — render still lands on 0 while

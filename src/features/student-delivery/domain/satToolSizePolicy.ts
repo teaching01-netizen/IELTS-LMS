@@ -14,14 +14,9 @@
  * window never resizes on mode switch. Phase 03 consumes
  * resolveSatToolSize exactly this way.
  *
- * D3 Reference override (R-04): Reference rows below are the overall-plan D3
- * ruling (spec wins over shipped: defaultWidth = min(920, vw-96), min
- * 480x320 — the brief screenshot math 666x458 at 768x528 only reproduces
- * with these numbers). R-06 fit-all: first-open height is
- * 32 + toolbar + ceil(560 * w/1000), shrinking w first when short.
- * Reference-scoped ONLY: Calculator rows, the shared
- * maxWidthFraction/Cap + maxHeightFraction constants, and every Calculator
- * test expectation stay byte-identical.
+ * Reference opens within the safe area at up to 920px wide, with a
+ * 700x477 readable minimum. Its canvas scrolls when the viewport is smaller.
+ * Header and toolbar budgets are also exposed as CSS tokens by the panel.
  */
 
 import type { SatSafeArea, SatViewport } from './satToolPlacement';
@@ -70,17 +65,15 @@ const SAT_REFERENCE_MAX_HEIGHT_FRACTION = 1;
  * (measure-nicer accepted, constant chosen — see Step 3.1).
  */
 export const SAT_REFERENCE_HEADER_HEIGHT = 32;
+export const SAT_REFERENCE_TOUCH_HEADER_HEIGHT = 44;
 export const SAT_REFERENCE_TOOLBAR_HEIGHT = 53;
 export const SAT_REFERENCE_DOC_W = 1000;
 export const SAT_REFERENCE_DOC_H = 560;
 
 const REFERENCE_POLICY: SatToolSizePolicy = {
-  // R-04 D3 override (Reference-only): the static no-viewport fallback row is
-  // illustrative — the 768px worked example min(920, 768-96) = 672 folded to
-  // the safe span (~= 666 after side insets). The panel never uses this row
-  // directly; it calls resolveSatReferenceDefaultGeometry below.
-  default: { w: 666, h: 500 },
-  min: { w: 480, h: 320 },
+  // Fallback for callers without viewport measurements.
+  default: { w: 700, h: 477 },
+  min: { w: 700, h: 477 },
   maxWidthFraction: SAT_REFERENCE_MAX_WIDTH_FRACTION,
   maxWidthCap: SAT_REFERENCE_MAX_WIDTH_CAP,
   maxHeightFraction: SAT_REFERENCE_MAX_HEIGHT_FRACTION,
@@ -118,44 +111,33 @@ export function resolveSatToolSize(kind: SatToolKind, mode?: SatToolMode): SatTo
 }
 
 /** Minimum useful size for the tool. */
-export function resolveSatToolMinSize(kind: SatToolKind): SatToolSize {
+export function resolveSatToolMinSize(kind: SatToolKind, examScale = 1): SatToolSize {
   const found = resolveSatToolSizePolicy(kind).min;
-  return { w: found.w, h: found.h };
+  const scale = kind === 'reference' ? examScale : 1;
+  return { w: found.w / scale, h: found.h / scale };
 }
 
 /**
- * D3 default geometry for first-open Reference (pure numbers in/out — no
- * React, no DOM, no storage; unit-testable without jsdom).
- *
- * R-06 B3 fit-all (Reference-only):
- * need(w) = 32 (header) + toolbar + ceil(560 * w/1000) (scaled document).
- * w0 = min(920, viewport.w - 96), folded to clamp(w0, min.w, max(min.w, safeW))
- * where safeW = viewport.w - safeArea.left - safeArea.right.
- * h = clamp(need(w), min.h, max(min.h, safeH))
- * where safeH = viewport.h - safeArea.top - safeArea.bottom.
- * When safeH < need(w) (short viewport): shrink w first until need fits or
- * w hits min.w (fit-all beats max-wide), then accept scroll.
- * Floored to integers; never below min, never above the safe span (a 0-size
- * safe area yields the min size; the clamp layer keeps it reachable).
- *
- * Worked checks (pinned in satToolSizePolicy.test.ts): 1280x800 standard
- * chrome -> { 920, 601 } (cap binds; 32 + 53 + ceil(560*920/1000) = 601);
- * 768x528 exam viewport -> { 666, 458 } (need(666) = 458 fits safeH 458);
- * 300x300 degenerate -> { 480, 320 } (min floor wins over the safe span).
+ * First-open Reference size: reserve the real header and toolbar budgets,
+ * then fit the fixed canvas by width. Narrow short windows only as far as
+ * the readable minimum; the stage provides scrolling below that floor.
+ * The geometry clamp folds the result into the available safe area.
  */
 export function resolveSatReferenceDefaultGeometry(
   viewport: SatViewport,
   safeArea: SatSafeArea,
+  headerHeight = SAT_REFERENCE_HEADER_HEIGHT,
+  examScale = 1,
 ): SatToolSize {
-  const min = resolveSatToolMinSize('reference');
+  const min = resolveSatToolMinSize('reference', examScale);
   const safeW = viewport.w - safeArea.left - safeArea.right;
   const safeH = viewport.h - safeArea.top - safeArea.bottom;
   const need = (w: number): number =>
-    SAT_REFERENCE_HEADER_HEIGHT +
-    SAT_REFERENCE_TOOLBAR_HEIGHT +
+    headerHeight +
+    SAT_REFERENCE_TOOLBAR_HEIGHT / examScale +
     Math.ceil((SAT_REFERENCE_DOC_H * w) / SAT_REFERENCE_DOC_W);
   const maxSafeW = Math.max(min.w, safeW);
-  let w = Math.floor(Math.min(Math.max(Math.min(SAT_REFERENCE_DEFAULT_WIDTH_CAP, viewport.w - SAT_REFERENCE_DEFAULT_WIDTH_MARGIN), min.w), maxSafeW));
+  let w = Math.floor(Math.min(Math.max(Math.min(SAT_REFERENCE_DEFAULT_WIDTH_CAP / examScale, viewport.w - SAT_REFERENCE_DEFAULT_WIDTH_MARGIN / examScale), min.w), maxSafeW));
   const maxSafeH = Math.max(min.h, safeH);
   // Short viewport: shrink width first until the need fits (fit-all
   // priority), stopping at min.w; scroll is accepted only then.
@@ -172,9 +154,11 @@ export function resolveSatReferenceDefaultGeometry(
  * each floored at the tool minimum so a tiny safe area still yields the
  * minimum useful size (the clamp layer keeps that window reachable).
  */
-export function resolveSatToolMaxSize(kind: SatToolKind, safeArea: SatToolSize): SatToolSize {
+export function resolveSatToolMaxSize(kind: SatToolKind, safeArea: SatToolSize, examScale = 1): SatToolSize {
   const policy = resolveSatToolSizePolicy(kind);
-  const w = Math.min(policy.maxWidthCap, Math.floor(safeArea.w * policy.maxWidthFraction));
+  const scale = kind === 'reference' ? examScale : 1;
+  const min = resolveSatToolMinSize(kind, scale);
+  const w = Math.min(policy.maxWidthCap / scale, Math.floor(safeArea.w * policy.maxWidthFraction));
   const h = Math.floor(safeArea.h * policy.maxHeightFraction);
-  return { w: Math.max(policy.min.w, w), h: Math.max(policy.min.h, h) };
+  return { w: Math.max(min.w, w), h: Math.max(min.h, h) };
 }

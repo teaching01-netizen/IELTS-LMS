@@ -10,7 +10,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "sat-auto-fit.spec.ts",
+  testMatch: ["sat-auto-fit.spec.ts", "sat-reference-fit.spec.ts", "sat-reference-ipad.spec.ts"],
   fullyParallel: false,
   // One engine at a time: a cold Vite dev server transforming this app is slow
   // enough that two browsers competing for the same server turn a slow first
@@ -26,8 +26,10 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+    { name: "chromium", testMatch: ["sat-auto-fit.spec.ts", "sat-reference-fit.spec.ts"], use: { ...devices["Desktop Chrome"] } },
+    { name: "webkit", testMatch: ["sat-auto-fit.spec.ts", "sat-reference-fit.spec.ts"], use: { ...devices["Desktop Safari"] } },
+    { name: "ipad-mini", testMatch: "sat-reference-ipad.spec.ts", use: { ...devices["iPad Mini landscape"], viewport: { width: 1133, height: 744 } } },
+    { name: "ipad-pro-11", testMatch: "sat-reference-ipad.spec.ts", use: { ...devices["iPad Pro 11 landscape"], viewport: { width: 1194, height: 834 } } },
   ],
   webServer: {
     command: "bun run dev -- --host 127.0.0.1",

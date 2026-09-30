@@ -720,7 +720,8 @@ func mergeWorkspaceAnswer(current, incoming json.RawMessage, incomingPresent boo
 	} else if err := json.Unmarshal(nonEmptyJSON(current), &answer); err != nil || answer == nil {
 		return nil, authoringcoedit.New(authoringcoedit.CodeOversized, "SAT answer settings are invalid.")
 	}
-	if len(choices) == 0 {
+	// Choice roots outlive response-type changes; only merge them into choice answers.
+	if len(choices) == 0 || answer["kind"] != "single_choice" {
 		return json.Marshal(answer)
 	}
 

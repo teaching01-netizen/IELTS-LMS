@@ -62,6 +62,8 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
       history: typeof e.can().undo === 'function',
       mergeCells: e.can().mergeCells(),
       splitCell: e.can().splitCell(),
+      inTable: e.isActive('table'),
+      centeredTable: e.getAttributes('table')['cellAlignment'] === 'center',
     }),
   });
   const context = state.context;
@@ -215,7 +217,7 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
         {moreGroup}
         {historyGroup}
       </div>
-      {context.kind === 'table' ? (
+      {state.inTable ? (
         // Table structure lives one row below the shared controls, inside the
         // same toolbar: the main row never changes shape, and the strip still
         // reads as "these actions belong to the table I am in".
@@ -227,6 +229,29 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
             </EditorControl>
             <EditorControl className="sat-rich-editor__table-action" label="Add column" onSelect={() => table(() => { editor.chain().focus().addColumnAfter().run(); })}>
               Add column
+            </EditorControl>
+            <EditorControl
+              className="sat-rich-editor__toolbar-button sat-rich-editor__table-action"
+              label="Center all cells"
+              tooltipLabel="Center every cell horizontally and vertically"
+              active={state.centeredTable}
+              disabled={!editor.isEditable}
+              onSelect={() => {
+                const applied = editor.chain().focus().command(({ tr }) => {
+                  const $from = tr.selection.$from;
+                  for (let depth = $from.depth; depth > 0; depth--) {
+                    if ($from.node(depth).type.name !== 'table') continue;
+                    tr.setNodeAttribute($from.before(depth), 'cellAlignment', state.centeredTable ? null : 'center');
+                    return true;
+                  }
+                  return false;
+                }).run();
+                if (!applied) return;
+                onTableMutation();
+                onFeedback({ message: state.centeredTable ? 'Table cell alignment restored' : 'All table cells centered horizontally and vertically', undoable: true });
+              }}
+            >
+              Center all cells
             </EditorControl>
             <span className="sat-rich-editor__table-divider" aria-hidden="true" />
             <SatMenu

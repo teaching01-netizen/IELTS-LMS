@@ -455,13 +455,11 @@ describe("SatFloatingTool reference variant (R-01 Bluebook chrome, append-only)"
     expect(grip.getAttribute("aria-label")).toContain("Use arrow keys to resize");
     grip.focus();
     await user.keyboard("{ArrowRight}");
-    // R-06 B5: the stale 360x420 fallback is now the D3 480x320 minimum, so
-    // the 380-wide mount clamps to min.w 480 on the first commit and the
-    // +8 ArrowRight step applies on the next commit (user-event sends one
-    // keydown per await; the clamp consumes this one).
-    expect(dialog.style.width).toBe("480px");
+    // Legacy geometry reaches the readable minimum on load; keys then
+    // move by the normal eight-pixel step.
+    expect(dialog.style.width).toBe("708px");
     await user.keyboard("{ArrowRight}");
-    expect(dialog.style.width).toBe("488px");
+    expect(dialog.style.width).toBe("716px");
   });
 
   it("resize never snaps for Reference: 1px SE drag moves ~1px (R-06 B1 no-jump, pointer)", async () => {
@@ -583,7 +581,7 @@ describe("SatFloatingTool reference variant (R-01 Bluebook chrome, append-only)"
 describe("R-03 reference collapse + motion (append-only; R-01 asserts above untouched)", () => {
   function renderReference(children?: React.ReactNode) {
     return render(
-      <SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 666, h: 458 }} resizable onClose={() => undefined}>
+      <SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 700, h: 477 }} resizable onClose={() => undefined}>
         {children ?? (
           <div data-sat-tool-scroll style={{ height: 300, overflowY: "auto" }}>
             <div style={{ height: 1200 }}>doc</div>
@@ -653,7 +651,7 @@ describe("R-03 reference collapse + motion (append-only; R-01 asserts above unto
     matchMediaMock(false);
     const user = userEvent.setup();
     const onClose = vi.fn();
-    render(<SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 666, h: 458 }} resizable onClose={onClose}><div>body</div></SatFloatingTool>);
+    render(<SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 700, h: 477 }} resizable onClose={onClose}><div>body</div></SatFloatingTool>);
     const dialog = screen.getByRole("dialog", { name: "Reference Sheet" });
     const collapse = screen.getByRole("button", { name: /Collapse Reference Sheet/i });
     collapse.focus();
@@ -668,7 +666,7 @@ describe("R-03 reference collapse + motion (append-only; R-01 asserts above unto
   it("Escape still cancels drag AND resize for Reference (gesture-cancel preserved)", async () => {
     matchMediaMock(false);
     const onClose = vi.fn();
-    render(<SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 666, h: 458 }} resizable onClose={onClose}><div>ref body</div></SatFloatingTool>);
+    render(<SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 700, h: 477 }} resizable onClose={onClose}><div>ref body</div></SatFloatingTool>);
     const dialog = screen.getByRole("dialog", { name: "Reference Sheet" });
     const header = dialog.querySelector("[data-sat-tool-header]") as HTMLElement;
     pointer(header, "pointerdown", 200, 120, 11);
@@ -676,7 +674,7 @@ describe("R-03 reference collapse + motion (append-only; R-01 asserts above unto
     expect(dialog.style.left).toBe("108px");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(dialog.style.left).toBe("48px");
-    expect(dialog.style.top).toBe("110px");
+    expect(dialog.style.top).toBe("112px");
     expect(onClose).not.toHaveBeenCalled();
     pointer(header, "pointerup", 260, 180, 11);
     // Resize half: SE pointerdown -> rAF flush -> Escape restores origin.
@@ -819,7 +817,7 @@ describe("R-03 reference collapse + motion (append-only; R-01 asserts above unto
     expect(dialog).toHaveAttribute("data-collapsed", "true");
     fireEvent.animationEnd(body);
     expect(dialog.style.left).toBe("56px");
-    expect(dialog.style.top).toBe("118px");
+    expect(dialog.style.top).toBe("120px");
   });
 
   // E2 — Collapse-while-resizing defers; north-edge while collapsed retargets open geometry.
@@ -915,19 +913,19 @@ describe("R-03 reference collapse + motion (append-only; R-01 asserts above unto
     matchMediaMock(false);
     const user = userEvent.setup();
     const { rerender, unmount } = render(
-      <SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 666, h: 458 }} resizable onClose={() => undefined}>
+      <SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 700, h: 477 }} resizable onClose={() => undefined}>
         <div>ref body</div>
       </SatFloatingTool>
     );
     await user.click(screen.getByRole("button", { name: /Collapse Reference Sheet/i }));
     rerender(
-      <SatFloatingTool title="Reference Sheet" open={false} geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 666, h: 458 }} resizable onClose={() => undefined}>
+      <SatFloatingTool title="Reference Sheet" open={false} geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 700, h: 477 }} resizable onClose={() => undefined}>
         <div>ref body</div>
       </SatFloatingTool>
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     rerender(
-      <SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 666, h: 458 }} resizable onClose={() => undefined}>
+      <SatFloatingTool title="Reference Sheet" open geometryKey={null} defaultGeometry={{ x: 48, y: 110, w: 700, h: 477 }} resizable onClose={() => undefined}>
         <div>ref body</div>
       </SatFloatingTool>
     );

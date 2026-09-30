@@ -8,7 +8,7 @@
  * Never a modal, never a focus trap, never blocks input.
  */
 
-export function SatToolDiscoveryHint(props: { onAnimationEnd?: () => void }) {
+export function SatToolDiscoveryHint(props: { onAnimationEnd?: () => void; cornerOnly?: boolean }) {
   return (
     <div
       data-sat-tool-hint
@@ -17,7 +17,7 @@ export function SatToolDiscoveryHint(props: { onAnimationEnd?: () => void }) {
       className="sat-tool-hint pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center pb-2"
     >
       <span className="sat-tool-hint-chip rounded-full border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] px-3 py-1 text-[12px] font-medium text-[var(--sat-text-secondary)] shadow-[var(--sat-shadow-floating)]">
-        Drag the top to move &middot; Resize from corners
+        Drag the top to move &middot; {props.cornerOnly ? 'Resize from the bottom-right corner' : 'Resize from corners'}
       </span>
     </div>
   );

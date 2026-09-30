@@ -1,19 +1,12 @@
 import {readFileSync} from 'node:fs';
 import {act,fireEvent,render,screen} from '@testing-library/react';
 import { Editor } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import { TableKit } from '@tiptap/extension-table';
-import Subscript from '@tiptap/extension-subscript';
-import Superscript from '@tiptap/extension-superscript';
 import {afterEach,describe,it,expect,vi} from 'vitest';
-import {EditableBlockMath,EditableInlineMath} from '../EditableMathExtension';
-import {SatImage} from '../SatImageExtension';
 import {ComposerToolbar} from '../ComposerToolbar';
-import {SAT_RICH_COMPOSER_CAPABILITIES as capabilities, SAT_CHOICE_COMPOSER_CAPABILITIES as choiceCapabilities} from '../RichQuestionComposer';
+import {composerBaseExtensions, SAT_RICH_COMPOSER_CAPABILITIES as capabilities, SAT_CHOICE_COMPOSER_CAPABILITIES as choiceCapabilities} from '../RichQuestionComposer';
 import type { EditorFeedbackInput } from '../editorFeedbackCopy';
 const editors:Editor[]=[];afterEach(()=>editors.splice(0).forEach(e=>e.destroy()));
-// StarterKit v3 already ships Underline; the script marks are what it does not.
-function make(content:object){const e=new Editor({extensions:[StarterKit,TableKit,Subscript,Superscript,EditableInlineMath,EditableBlockMath,SatImage],content});editors.push(e);return e;}
+function make(content:object|string){const e=new Editor({extensions:composerBaseExtensions(false),content});editors.push(e);return e;}
 function renderToolbar(editor:Editor, caps=capabilities, onFeedback=vi.fn()){
  render(<ComposerToolbar editor={editor} capabilities={caps} onOpenDialog={vi.fn()} onTableMutation={vi.fn()} onFeedback={onFeedback}/>);
  return onFeedback;
@@ -61,6 +54,64 @@ describe('stable composer toolbar',()=>{
   fireEvent.click(screen.getByRole('menuitem',{name:'Delete table'}));
   expect(screen.queryByRole('group',{name:'Table tools'})).toBeNull();
   expect(screen.getByRole('button',{name:'Insert content'})).toBeInTheDocument();
+ });
+ it('centers only the current table and restores its alignment through Undo and the toggle',()=>{
+  const table={type:'table',content:[
+   {type:'tableRow',content:[{type:'tableHeader',content:[{type:'paragraph',content:[{type:'text',text:'Header'}]}]}]},
+   {type:'tableRow',content:[{type:'tableCell',attrs:{align:'right'},content:[{type:'paragraph',content:[{type:'text',text:'Value'}]}]}]},
+  ]};
+  const editor=make({type:'doc',content:[table,{type:'paragraph',content:[{type:'text',text:'Between tables'}]},table]});
+  editor.commands.setTextSelection(4);
+  const onFeedback=renderToolbar(editor);
+  const button=screen.getByRole('button',{name:'Center all cells'});
+  expect(button).toHaveAttribute('aria-pressed','false');
+  fireEvent.mouseDown(button);
+  fireEvent.click(button);
+  const tables=editor.view.dom.querySelectorAll('table');
+  expect(tables[0]).toHaveAttribute('data-cell-alignment','center');
+  expect(tables[1]).not.toHaveAttribute('data-cell-alignment');
+  expect(button).toHaveAttribute('aria-pressed','true');
+  expect(tables[0]?.querySelector('td')).toHaveStyle({textAlign:'right'});
+  expect(onFeedback).toHaveBeenCalledWith({message:'All table cells centered horizontally and vertically',undoable:true});
+  fireEvent.click(screen.getByRole('button',{name:'Undo (⌘Z)'}));
+  expect(tables[0]).not.toHaveAttribute('data-cell-alignment');
+  expect(button).toHaveAttribute('aria-pressed','false');
+  fireEvent.click(screen.getByRole('button',{name:'Redo (⇧⌘Z)'}));
+  expect(tables[0]).toHaveAttribute('data-cell-alignment','center');
+  fireEvent.click(button);
+  expect(tables[0]).not.toHaveAttribute('data-cell-alignment');
+  expect(tables[1]).not.toHaveAttribute('data-cell-alignment');
+ });
+ it('keeps every cell centered after adding rows and columns and reopening saved content',()=>{
+  const editor=make({type:'doc',content:[{type:'paragraph'}]});
+  editor.commands.insertTable({rows:2,cols:2,withHeaderRow:true});
+  renderToolbar(editor);
+  fireEvent.click(screen.getByRole('button',{name:'Center all cells'}));
+  fireEvent.click(screen.getByRole('button',{name:'Add row'}));
+  fireEvent.click(screen.getByRole('button',{name:'Add column'}));
+  const table=editor.view.dom.querySelector('table');
+  expect(table).toHaveAttribute('data-cell-alignment','center');
+  expect(table?.querySelectorAll('td,th')).toHaveLength(9);
+  for(const saved of [editor.getJSON(),editor.getHTML()]){
+   const reopened=make(saved);
+   expect(reopened.getJSON().content?.find(node=>node.type==='table')?.attrs?.['cellAlignment']).toBe('center');
+   expect(reopened.view.dom.querySelector('table')).toHaveAttribute('data-cell-alignment','center');
+   expect(reopened.view.dom.querySelectorAll('td,th')).toHaveLength(9);
+  }
+ });
+ it('offers table-wide centering when a formula inside a cell is selected',()=>{
+  const editor=make({type:'doc',content:[
+   {type:'table',content:[{type:'tableRow',content:[{type:'tableCell',content:[{type:'paragraph',content:[{type:'inlineMath',attrs:{latex:'4'}}]}]}]}]},
+   {type:'blockMath',attrs:{latex:'x^2'}},
+  ]});
+  editor.commands.setNodeSelection(4);
+  renderToolbar(editor);
+  expect(document.querySelector('.sat-rich-editor__toolbar')).toHaveAttribute('data-composer-context','equation');
+  fireEvent.click(screen.getByRole('button',{name:'Center all cells'}));
+  expect(editor.view.dom.querySelector('table')).toHaveAttribute('data-cell-alignment','center');
+  expect(screen.getByRole('button',{name:'Center all cells'})).toHaveAttribute('aria-pressed','true');
+  act(()=>{editor.commands.setNodeSelection(editor.state.doc.child(0).nodeSize);});
+  expect(screen.queryByRole('group',{name:'Table tools'})).toBeNull();
  });
  it('teaches the text styles by rendering them at the size and weight they apply',()=>{
   const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]}]});

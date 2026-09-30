@@ -88,11 +88,13 @@ export function clampSatToolGeometry(
   geometry: SatToolGeometry,
   viewport: SatViewport,
   safeArea: SatSafeArea,
+  minimum?: { w: number; h: number },
 ): SatToolGeometry;
 export function clampSatToolGeometry(
   geometry: SatToolGeometry,
   viewport: SatViewport,
   safeArea?: SatSafeArea,
+  minimum?: { w: number; h: number },
 ): SatToolGeometry {
   if (!safeArea) {
     const maxW = Math.max(SAT_TOOL_GEOMETRY_MIN_W, viewport.w - 32);
@@ -105,8 +107,12 @@ export function clampSatToolGeometry(
   }
   const safeW = viewport.w - safeArea.left - safeArea.right;
   const safeH = viewport.h - safeArea.top - safeArea.bottom;
-  const w = Math.min(Math.max(geometry.w, SAT_TOOL_GEOMETRY_MIN_W), Math.max(SAT_TOOL_GEOMETRY_MIN_W, safeW));
-  const h = Math.min(Math.max(geometry.h, SAT_TOOL_GEOMETRY_MIN_H), Math.max(SAT_TOOL_GEOMETRY_MIN_H, safeH));
+  // A zoom-aware minimum can exceed the available space after rotation.
+  // Fold it into the safe span; the Reference stage scrolls at readable size.
+  const minW = minimum ? Math.min(minimum.w, Math.max(1, safeW)) : SAT_TOOL_GEOMETRY_MIN_W;
+  const minH = minimum ? Math.min(minimum.h, Math.max(1, safeH)) : SAT_TOOL_GEOMETRY_MIN_H;
+  const w = Math.min(Math.max(geometry.w, minW), Math.max(minW, safeW));
+  const h = Math.min(Math.max(geometry.h, minH), Math.max(minH, safeH));
   const minX = safeArea.left;
   const maxX = viewport.w - safeArea.right - w;
   const minY = safeArea.top;

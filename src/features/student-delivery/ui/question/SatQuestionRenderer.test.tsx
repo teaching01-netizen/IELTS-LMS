@@ -31,6 +31,42 @@ const mathQuestion: DeliveredQuestion = {
   metadata: { ...question.metadata, sectionKey: 'math' },
 };
 
+describe('SAT Math student-response rendering', () => {
+  it('renders a response input instead of choices and reports the typed answer', () => {
+    const studentResponseQuestion: DeliveredQuestion = {
+      ...mathQuestion,
+      questionType: 'student_produced_response',
+      answer: { kind: 'student_produced_response', normalizeFraction: true, normalizeDecimal: true, numericTolerance: null },
+    };
+    const onAnswerChange = vi.fn();
+    const props = {
+      sectionKey: 'math' as const,
+      questionNumber: 1,
+      question: studentResponseQuestion,
+      eliminationMode: false,
+      disabled: false,
+      readingPreferences: createSatReadingPreferences(),
+      onReadingSplitRatioChange: vi.fn(),
+      onAnswerChange,
+      onToggleReview: vi.fn(),
+      onToggleEliminationMode: vi.fn(),
+      onToggleEliminatedOption: vi.fn(),
+    };
+    const response = emptySatQuestionResponse('q1');
+    const { rerender } = render(<SatQuestionRenderer {...props} response={response} />);
+
+    const input = screen.getByRole('textbox', { name: 'Enter your answer' });
+    expect(input).toHaveValue('');
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '4' } });
+    expect(onAnswerChange).toHaveBeenCalledWith('4');
+
+    rerender(<SatQuestionRenderer {...props} response={{ ...response, answer: '4' }} />);
+    expect(input).toHaveValue('4');
+  });
+});
+
 describe('SAT annotated question rendering', () => {
   it('renders saved passage highlights without marking the identical prompt or answer text', () => {
     const response = emptySatQuestionResponse('q1');

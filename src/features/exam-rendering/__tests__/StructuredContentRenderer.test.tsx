@@ -199,4 +199,32 @@ describe("StructuredContentRenderer", () => {
     expect(screen.getByText("Legacy prompt")).toBeInTheDocument();
     expect(container.querySelector('[role="math"]')).toBeInTheDocument();
   });
+
+  it("preserves table-wide centering, merged cells, and equations in the student view", () => {
+    const table = {
+      type: "table",
+      content: [{
+        type: "tableRow",
+        content: [
+          { type: "tableHeader", content: [{ type: "paragraph", content: [{ type: "text", text: "Answer" }] }] },
+          { type: "tableCell", attrs: { rowspan: 2, colspan: 2 }, content: [{ type: "paragraph", content: [{ type: "inlineMath", attrs: { latex: "\\frac{7}{2}" } }] }] },
+        ],
+      }],
+    };
+    const value: StructuredContent = {
+      version: 2, nodes: [], document: { type: "doc", content: [
+        { ...table, attrs: { cellAlignment: "center" } },
+        { ...table, attrs: { cellAlignment: "unsupported" } },
+      ] },
+    };
+    const { container } = render(<StructuredContentRenderer content={value} />);
+    const tables = screen.getAllByRole("table");
+    expect(tables[0]).toHaveAttribute("data-cell-alignment", "center");
+    expect(tables[1]).not.toHaveAttribute("data-cell-alignment");
+    expect(tables[0]?.querySelector("th")).toHaveAttribute("scope", "col");
+    expect(tables[0]?.querySelector("td")).toHaveAttribute("rowspan", "2");
+    expect(tables[0]?.querySelector("td")).toHaveAttribute("colspan", "2");
+    expect(tables[0]?.querySelector('[role="math"]')).toHaveAttribute("aria-label", "Equation: \\frac{7}{2}");
+    expect(container.querySelector("[contenteditable]")).not.toBeInTheDocument();
+  });
 });

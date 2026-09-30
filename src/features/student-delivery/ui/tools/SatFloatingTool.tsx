@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type TransitionEvent as ReactTransitionEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type TransitionEvent as ReactTransitionEvent } from "react";
 import { ChevronDown, ChevronUp, GripVertical, X } from "lucide-react";
 import { satOverlayZClass } from "../primitives/satOverlayZ";
 import { useSatMediaQuery } from "../useSatMediaQuery";
@@ -7,7 +7,7 @@ import {
   saveSatToolViewState,
   type SatToolViewState,
 } from "../../infrastructure/satToolStateStore";
-import type { SatToolKind } from "../../domain/satToolSizePolicy";
+import { resolveSatToolMinSize, resolveSatToolMaxSize, type SatToolKind } from "../../domain/satToolSizePolicy";
 import {
   SAT_FLOATING_TOOL_CHROME,
   SAT_TOOL_GEOMETRY_MIN_H,
@@ -26,6 +26,7 @@ import {
 } from "./satToolPointer";
 import { SatToolDiscoveryHint } from "./SatToolDiscoveryHint";
 import { useSatExamZoom } from "../zoom/SatExamZoomContext";
+import { readSatToolSafeArea } from "./satToolPlacementRuntime";
 
 export interface SatFloatingToolProps {
   title: string;
@@ -34,6 +35,8 @@ export interface SatFloatingToolProps {
   defaultGeometry: SatToolGeometry;
   resizable?: boolean | undefined;
   disabled?: boolean | undefined;
+  /** Window tokens; geometry remains owned by the shell. */
+  style?: CSSProperties | undefined;
   /**
    * Keep one mounted tree while closed (hidden + inert + aria-hidden) so
    * open only flips visibility — never remounts. Required for the Desmos
@@ -157,12 +160,13 @@ function writeHintSeen(title: string, viewStateKey: string | null): void {
  */
 function defaultMinSizeForTitle(title: string): { w: number; h: number } {
   if (title === "Calculator") return { w: 400, h: 480 };
-  if (title === "Reference Sheet") return { w: 480, h: 320 };
+  if (title === "Reference Sheet") return resolveSatToolMinSize("reference");
   return { w: SAT_TOOL_GEOMETRY_MIN_W, h: SAT_TOOL_GEOMETRY_MIN_H };
 }
 
 /** Content maximum fallback: narrower of 620px and 48vw by safe height. */
-function defaultMaxSizeForViewport(viewport: { w: number; h: number }): { w: number; h: number } {
+function defaultMaxSizeForViewport(viewport: { w: number; h: number }, title?: string): { w: number; h: number } {
+  if (title === "Reference Sheet") return resolveSatToolMaxSize("reference", satToolSafeArea(viewport));
   return {
     w: Math.max(SAT_TOOL_GEOMETRY_MIN_W, Math.min(620, Math.floor(viewport.w * 0.48))),
     h: Math.max(SAT_TOOL_GEOMETRY_MIN_H, viewport.h - 32),
@@ -256,9 +260,15 @@ const SAT_RESIZE_EDGES: readonly SatResizeEdge[] = ["n", "s", "e", "w", "ne", "n
  * optional; Escape cancels an active drag and restores the pre-drag rect.
  */
 export function SatFloatingTool(props: SatFloatingToolProps) {
-  const { logicalSize, viewportToLogicalLength } = useSatExamZoom();
+  const isReference = props.title === "Reference Sheet";
+  const { logicalSize, viewportToLogicalLength, scale } = useSatExamZoom();
   const { minSize: toolMinSize, maxSize: toolMaxSize, title: toolTitle, onManualResize } = props;
+  // Presentation uses the physical viewport on both axes. Window lengths
+  // and pointer deltas convert to logical coordinates exactly once.
   const compact = useSatMediaQuery("(max-width: 639px), (max-height: 560px)");
+  const coarsePointer = useSatMediaQuery("(pointer: coarse)");
+  const [sheetDetent, setSheetDetent] = useState<"medium" | "large">("large");
+  const sheetDrag = useRef<{ y: number; moved: boolean } | null>(null);
   // Wave A R-02 option (ii): the compact tool sheet is an explicitly
   // non-modal bottom sheet like the desktop panel — no aria-modal, no Tab
   // trap. The exclusive machine keeps owning popover modality, so at most
@@ -279,7 +289,6 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   // existing helpers (toolKindForTitle, defaultMinSizeForTitle). Every R-01
   // JSX/className/style delta sits behind isReference; the Calculator path
   // stays character-identical.
-  const isReference = props.title === "Reference Sheet";
   const dragRef = useRef<DragSession | null>(null);
   const resizeRef = useRef<ResizeSession | null>(null);
   const lastCommittedRef = useRef(geometry);
@@ -340,12 +349,34 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     };
   }, []);
 
+  const clampGeometry = useCallback((next: SatToolGeometry) => {
+    const viewport = viewportSize(logicalSize);
+    return isReference
+      ? clampSatToolGeometry(next, viewport, readSatToolSafeArea(viewportToLogicalLength), toolMinSize ?? resolveSatToolMinSize('reference', scale))
+      : clampSatToolGeometry(next, viewport);
+  }, [isReference, logicalSize, viewportToLogicalLength, toolMinSize, scale]);
+
   useEffect(() => {
     const saved = props.geometryKey ? loadSatToolGeometry(props.geometryKey) : null;
-    const next = clampSatToolGeometry(saved ?? lastCommittedRef.current, viewportSize(logicalSize));
+    const next = clampGeometry(saved ?? (isReference && props.geometryKey ? props.defaultGeometry : lastCommittedRef.current));
     lastCommittedRef.current = next;
     setGeometry(next);
-  }, [logicalSize, props.geometryKey]);
+  // Default identity changes as the measured stage updates; only viewport,
+  // Display zoom, tool identity and open/close should reload geometry.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clampGeometry, props.geometryKey, isReference && props.open]);
+
+  useEffect(() => {
+    if (!isReference || !props.open) return;
+    const onResize = () => {
+      const next = clampGeometry(lastCommittedRef.current);
+      lastCommittedRef.current = next;
+      setGeometry(next);
+      if (props.geometryKey) saveSatToolGeometry(props.geometryKey, next);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [isReference, props.open, props.geometryKey, clampGeometry]);
 
   // Re-arm the open motion every time the window opens (including the
   // keepAlive closed -> open flip). The class clears on animationend; where
@@ -354,11 +385,12 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     if (props.open) setEnterMotion(true);
   }, [props.open]);
 
-  const persist = useCallback((next: SatToolGeometry) => {
+  const persist = useCallback((candidate: SatToolGeometry) => {
+    const next = clampGeometry(candidate);
     lastCommittedRef.current = next;
     setGeometry(next);
     if (props.geometryKey) saveSatToolGeometry(props.geometryKey, next);
-  }, [props.geometryKey]);
+  }, [props.geometryKey, clampGeometry]);
 
   const markHintSeen = useCallback(() => {
     if (hintSeenRef.current) return;
@@ -398,8 +430,10 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   const measureCollapsedH = useCallback((): number => {
     const measured = headerRef.current?.offsetHeight;
     if (typeof measured === "number" && Number.isFinite(measured) && measured > 0) {
-      collapsedHRef.current = measured;
-      return measured;
+      const panel = panelRef.current;
+      const border = panel ? panel.offsetHeight - panel.clientHeight : 0;
+      collapsedHRef.current = measured + border;
+      return collapsedHRef.current;
     }
     if (typeof collapsedHRef.current === "number" && collapsedHRef.current > 0) {
       return collapsedHRef.current;
@@ -487,7 +521,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       ? (openGeometryRef.current as SatToolGeometry)
       : session.origin;
     const min = toolMinSize ?? defaultMinSizeForTitle(toolTitle);
-    const max = toolMaxSize ?? defaultMaxSizeForViewport(viewport);
+    const max = toolMaxSize ?? defaultMaxSizeForViewport(viewport, toolTitle);
     const next = resizeGeometry(
       baseOrigin,
       session.edge,
@@ -668,7 +702,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     if (compact || !interactive || !props.resizable) return;
     const viewport = viewportSize(logicalSize);
     const min = props.minSize ?? defaultMinSizeForTitle(props.title);
-    const max = props.maxSize ?? defaultMaxSizeForViewport(viewport);
+    const max = props.maxSize ?? defaultMaxSizeForViewport(viewport, toolTitle);
     const current = lastCommittedRef.current;
     persist(clampSatToolGeometry(
       {
@@ -816,11 +850,40 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           inert={props.disabled}
           data-sat-tool-window={props.title}
           data-sat-tool-presentation="compact-sheet"
+          data-sat-tool-detent={isReference ? sheetDetent : undefined}
+          data-sat-tool-variant={isReference ? "reference" : undefined}
           data-sat-tool-interaction-disabled={props.disabled ? "true" : undefined}
           className="sat-ui flex max-h-[85%] w-full max-w-[520px] flex-col overflow-hidden rounded-t-[14px] border border-b-0 border-[var(--sat-divider)] bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-[0_-18px_60px_rgba(0,0,0,0.22)]"
+          style={{ ...props.style, ...(isReference ? {
+            height: `calc(var(--sat-exam-logical-height, 100dvh) * ${sheetDetent === "large" ? 0.85 : 0.5})`,
+            maxWidth: 'var(--sat-ref-compact-width, 520px)',
+            marginBottom: `calc(var(--student-safe-bottom, 0px) * ${1 / scale})`,
+          } : {}) }}
         >
-          <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-[var(--sat-divider-soft)] px-4">
-            <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">{props.title}</span>
+          <div data-sat-tool-compact-header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-[var(--sat-divider-soft)] px-4">
+            <span data-sat-tool-title className="min-w-0 flex-1 truncate text-[15px] font-semibold">{props.title}</span>
+            {isReference ? <button
+              type="button"
+              aria-label={sheetDetent === "large" ? "Reduce sheet" : "Expand sheet"}
+              aria-expanded={sheetDetent === "large"}
+              className="sat-touch-target grid shrink-0 touch-none place-items-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+              onClick={() => {
+                if (sheetDrag.current?.moved) { sheetDrag.current = null; return; }
+                setSheetDetent((current) => current === "large" ? "medium" : "large");
+              }}
+              onPointerDown={(event) => {
+                sheetDrag.current = { y: event.clientY, moved: false };
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerUp={(event) => {
+                const drag = sheetDrag.current;
+                if (drag && Math.abs(event.clientY - drag.y) > 24) {
+                  drag.moved = true;
+                  setSheetDetent(event.clientY < drag.y ? "large" : "medium");
+                }
+              }}
+              onPointerCancel={() => { sheetDrag.current = null; }}
+            ><span aria-hidden="true" className="h-1 w-8 rounded-full bg-[var(--sat-text-secondary)]" /></button> : null}
             <button type="button" onClick={props.onClose} aria-label={"Close " + props.title} data-sat-tool-close disabled={props.disabled} className="sat-touch-target grid w-11 place-items-center rounded hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed disabled:opacity-50">
               <X className="h-5 w-5" aria-hidden="true" />
             </button>
@@ -855,7 +918,10 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   const resizeMin = props.minSize ?? defaultMinSizeForTitle(props.title);
   const resizeMax =
     props.maxSize ??
-    defaultMaxSizeForViewport(typeof window === "undefined" ? { w: 0, h: 0 } : viewportSize(logicalSize));
+    defaultMaxSizeForViewport(typeof window === "undefined" ? { w: 0, h: 0 } : viewportSize(logicalSize), props.title);
+  const availableWidth = isReference && typeof window !== 'undefined'
+    ? Math.max(1, viewportSize(logicalSize).w - readSatToolSafeArea(viewportToLogicalLength).left - readSatToolSafeArea(viewportToLogicalLength).right)
+    : resizeMax.w;
   const collapseClass = !isReference || compact
     ? ""
     : collapsing
@@ -882,7 +948,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       onAnimationEnd={handleEnterAnimationEnd}
       onTransitionEnd={handleAlignTransitionEnd}
       className={"sat-ui fixed " + satOverlayZClass("toolSheet") + " sat-tool-window flex flex-col overflow-hidden " + (isReference ? "rounded-none border border-[var(--sat-ref-border)] bg-white" : "rounded-[6px] border border-[var(--sat-tool-border)] bg-[var(--sat-surface)]") + " text-[var(--sat-text)] shadow-[var(--sat-shadow-floating)]" + (showActive ? " sat-tool-active" : " sat-tool-inactive") + (dragging ? " sat-tool-dragging sat-tool-window-lift" : "") + (resizing ? " sat-tool-resizing sat-tool-window-lift" : "") + (aligning ? " sat-tool-aligning" : "") + (props.open && enterMotion ? " sat-tool-enter" : "") + (props.disabled ? " opacity-70" : "") + (isReference ? " sat-tool-ref" : "") + collapseClass}
-      style={{ left: geometry.x, top: geometry.y, width: geometry.w, height: renderedH }}
+      style={{ ...props.style, left: geometry.x, top: geometry.y, width: geometry.w, height: renderedH }}
     >
       {isReference ? (
         <div
@@ -904,7 +970,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
             <GripVertical className="h-4 w-4" aria-hidden="true" />
             <span className="sat-tool-tip" aria-hidden="true">Move {props.title}</span>
           </span>
-          <span className="min-w-0 flex-1 truncate text-start text-[12px] font-semibold leading-4">{props.title}</span>
+          <span data-sat-tool-title className="min-w-0 flex-1 truncate text-start text-[12px] font-semibold leading-4">{props.title}</span>
           <span aria-hidden="true" className="sat-ref-dotgrip">
             <i /><i /><i /><i /><i /><i /><i /><i /><i />
           </span>
@@ -954,7 +1020,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       )}
       <div id={isReference ? "reference-sheet-content" : undefined} hidden={collapsedSettled ? true : undefined} onAnimationEnd={isReference ? handleCollapseAnimationEnd : undefined} className={"relative min-h-0 flex-1 overflow-hidden" + (isReference && !compact ? " sat-ref-collapsible sat-ref-fade sat-ref-clip" : "")}>
         {props.children}
-        {showHint ? <SatToolDiscoveryHint onAnimationEnd={handleHintAnimationEnd} /> : null}
+        {showHint ? <SatToolDiscoveryHint cornerOnly={isReference && coarsePointer} onAnimationEnd={handleHintAnimationEnd} /> : null}
       </div>
       {props.resizable && !compact ? (
         // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- separator is the ARIA resize-handle role; keyboard support is provided via tabIndex + Arrow keys (Wave B R-09).
@@ -963,8 +1029,8 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           tabIndex={props.disabled ? -1 : 0}
           aria-label={"Resize " + props.title + ". Use arrow keys to resize."}
           aria-orientation="vertical"
-          aria-valuemin={Math.round(resizeMin.w)}
-          aria-valuemax={Math.round(resizeMax.w)}
+          aria-valuemin={Math.round(Math.min(resizeMin.w, availableWidth))}
+          aria-valuemax={Math.round(Math.min(resizeMax.w, availableWidth))}
           aria-valuenow={Math.round(geometry.w)}
           aria-valuetext={`${Math.round(geometry.w)} by ${Math.round(renderedH)} pixels`}
           data-sat-resize-handle="se"
@@ -983,7 +1049,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           <span className="sat-tool-tip" aria-hidden="true">Resize {props.title}</span>
         </div>
       ) : null}
-      {props.resizable && !compact ? SAT_RESIZE_EDGES.map((edge) => (
+      {props.resizable && !compact && !(isReference && coarsePointer) ? SAT_RESIZE_EDGES.map((edge) => (
         <div
           key={edge}
           data-sat-resize-edge={edge}

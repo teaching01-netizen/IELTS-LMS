@@ -8,27 +8,33 @@ import {
 } from './satToolSizePolicy';
 
 describe('satToolSizePolicy', () => {
+  it.each([0.5, 0.75, 1, 1.25, 1.5, 1.75, 2])('keeps Reference window limits physical at Display %s', (scale) => {
+    const min = resolveSatToolMinSize('reference', scale);
+    const max = resolveSatToolMaxSize('reference', { w: 2500 / scale, h: 1800 / scale }, scale);
+    expect(min.w * scale).toBeCloseTo(700);
+    expect(min.h * scale).toBeCloseTo(477);
+    expect(max.w * scale).toBeCloseTo(920);
+    const def = resolveSatReferenceDefaultGeometry({ w: 1800 / scale, h: 1400 / scale }, { top: 112, bottom: 86, left: 16, right: 16 }, 44 / scale, scale);
+    expect(def.w * scale).toBeLessThanOrEqual(920);
+    expect(def.w * scale).toBeGreaterThan(920 - scale);
+    if (scale === 0.5) expect(def.w).toBeGreaterThan(920);
+  });
   it('resolves the smallest-useful first-open defaults per tool and mode', () => {
-    // R-04 D3 override (Reference-only): the static fallback row documents the
-    // 768px worked example min(920, 768-96) = 672 folded to the safe span.
-    expect(resolveSatToolSize('reference')).toEqual({ w: 666, h: 500 });
+    expect(resolveSatToolSize('reference')).toEqual({ w: 700, h: 477 });
     expect(resolveSatToolSize('calculator', 'scientific')).toEqual({ w: 460, h: 560 });
     expect(resolveSatToolSize('calculator', 'graphing')).toEqual({ w: 520, h: 640 });
   });
 
-  it('resolves minimum useful sizes (Reference = D3 480x320)', () => {
-    expect(resolveSatToolMinSize('reference')).toEqual({ w: 480, h: 320 });
+  it('resolves minimum useful sizes (readable Reference minimum)', () => {
+    expect(resolveSatToolMinSize('reference')).toEqual({ w: 700, h: 477 });
     expect(resolveSatToolMinSize('calculator')).toEqual({ w: 400, h: 480 });
   });
 
   it('caps the max width at min(620, floor(safeW * 0.48))', () => {
-    // 1280 - 16 - 16 = 1248 safe px: 0.48 * 1248 = 599.04 -> 599 < 620 cap.
     expect(resolveSatToolMaxSize('calculator', { w: 1248, h: 634 })).toEqual({ w: 599, h: 634 });
   });
 
   it('gives Reference its own max (R-06 B1): full safe width up to the 920 default cap', () => {
-    // Reference allows the full safe width (fraction 1) up to 920 so the
-    // default-first-open width never exceeds the enforced maximum.
     expect(resolveSatToolMaxSize('reference', { w: 1248, h: 602 })).toEqual({ w: 920, h: 602 });
     expect(resolveSatToolMaxSize('reference', { w: 2000, h: 900 })).toEqual({ w: 920, h: 900 });
   });
@@ -52,7 +58,7 @@ describe('satToolSizePolicy', () => {
   });
 
   it('floors the max at the tool minimum on tiny safe areas (D3 Reference minimum)', () => {
-    expect(resolveSatToolMaxSize('reference', { w: 100, h: 100 })).toEqual({ w: 480, h: 320 });
+    expect(resolveSatToolMaxSize('reference', { w: 100, h: 100 })).toEqual({ w: 700, h: 477 });
   });
 
   it('uses the full safe height for the max (fraction 1)', () => {
@@ -78,48 +84,32 @@ describe('satToolSizePolicy', () => {
   });
 
   it('resolves the fit-all Reference default at 1280x800 standard chrome (cap binds)', () => {
-    // R-06 B3: w = min(920, 1280-96) = 920; need(920) = 32 + 53 +
-    // ceil(560*920/1000) = 601; safeH = 800-112-86 = 602 fits -> 601.
     expect(
       resolveSatReferenceDefaultGeometry({ w: 1280, h: 800 }, { top: 112, right: 16, bottom: 86, left: 16 }),
     ).toEqual({ w: 920, h: 601 });
   });
 
-  it('resolves the fit-all Reference default at a 768px exam viewport (brief screenshot math)', () => {
-    // Brief derivation: min(920, 768-96) = 672, folded to the safe span
-    // 768-51-51 = 666 -> 666; need(666) = 32 + 53 + ceil(560*666/1000) =
-    // 32 + 53 + 373 = 458 = safeH (528-40-30) -> 458, no scroll.
-    // Reproduces the brief screenshot rect 666x458 at 768x528.
+  it('resolves the keeps the readable minimum on a narrow viewport', () => {
     expect(
       resolveSatReferenceDefaultGeometry({ w: 768, h: 528 }, { top: 40, right: 51, bottom: 30, left: 51 }),
-    ).toEqual({ w: 666, h: 458 });
+    ).toEqual({ w: 700, h: 477 });
   });
 
   it('shrinks width first on a short landscape viewport (R-06 B3 fit-all priority)', () => {
-    // 844x390 short landscape, 16px side insets + 96/70 chrome:
-    // safeW = 812, safeH = 208 < min.h 320 -> h folds to 320; w0 = 748
-    // needs 32+53+ceil(560*748/1000) = 504 > 320, so w shrinks to min 480
-    // (need(480) = 354 still > 320) and scroll is accepted at the floor.
     expect(
       resolveSatReferenceDefaultGeometry({ w: 844, h: 390 }, { top: 112, right: 16, bottom: 70, left: 16 }),
-    ).toEqual({ w: 480, h: 320 });
+    ).toEqual({ w: 700, h: 477 });
   });
 
-  it('shrinks (not scrolls) when a modest shortfall fits by narrowing (R-06 B3)', () => {
-    // 1000x560 viewport, 16px side insets + 112/70 chrome: safeW = 968,
-    // safeH = 378. w0 = min(920, 904) = 904 needs 592 > 378; shrinking to
-    // w = 524 gives need = 32+53+ceil(560*524/1000) = 379 > 378, w = 523
-    // gives 378 <= 378 -> fits with zero scroll (width traded for height).
+  it('accepts scrolling when narrowing would violate the readable minimum', () => {
     expect(
       resolveSatReferenceDefaultGeometry({ w: 1000, h: 560 }, { top: 112, right: 16, bottom: 70, left: 16 }),
-    ).toEqual({ w: 523, h: 378 });
+    ).toEqual({ w: 700, h: 477 });
   });
 
   it('floors degenerate viewports at the D3 Reference minimum', () => {
-    // 300x300: raw w = min(920, 204) = 204 < min 480 -> 480; raw h = 500 but
-    // safeH = 300-112-86 = 102 < min 320 -> 320. Min floor wins over the safe span.
     expect(
       resolveSatReferenceDefaultGeometry({ w: 300, h: 300 }, { top: 112, right: 16, bottom: 86, left: 16 }),
-    ).toEqual({ w: 480, h: 320 });
+    ).toEqual({ w: 700, h: 477 });
   });
 });

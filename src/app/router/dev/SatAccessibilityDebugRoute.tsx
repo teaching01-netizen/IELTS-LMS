@@ -345,6 +345,13 @@ export function SatAccessibilityDebugRoute() {
         onAnnotationsChange={(annotations) => setResponse((current) => ({ ...current, annotations }))}
         answered={Boolean(response.answer.trim())}
         educationKey="debug-attempt"
+        floatingToolChildren={math ? (
+          <SatReferenceSheetPanel
+            open={activeTools.referenceSheet}
+            disabled={paused}
+            onClose={() => setActiveTools((current) => ({ ...current, referenceSheet: false }))}
+          />
+        ) : null}
       >
         <SatQuestionRenderer
           sectionKey={math ? "math" : "reading-writing"}
@@ -383,11 +390,6 @@ export function SatAccessibilityDebugRoute() {
             disabled={paused}
             prewarmWhenClosed
             onClose={() => setActiveTools((current) => ({ ...current, calculator: false }))}
-          />
-          <SatReferenceSheetPanel
-            open={activeTools.referenceSheet}
-            disabled={paused}
-            onClose={() => setActiveTools((current) => ({ ...current, referenceSheet: false }))}
           />
         </>
       ) : null}

@@ -13,7 +13,7 @@
 import { Extension, getSchema, type Extensions } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
-import { TableKit } from "@tiptap/extension-table";
+import { TableKit, type TableOptions } from "@tiptap/extension-table";
 import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 import { RICH_TEXT_BLOCK_TYPES } from "../richContentIdentity";
@@ -46,6 +46,22 @@ export const RichContentIdentitySchema = Extension.create({
   },
 });
 
+const TableCellAlignment = Extension.create({
+  name: "tableCellAlignment",
+  addGlobalAttributes() {
+    return [{
+      types: ["table"],
+      attributes: {
+        cellAlignment: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-cell-alignment") === "center" ? "center" : null,
+          renderHTML: (attributes) => attributes["cellAlignment"] === "center" ? { "data-cell-alignment": "center" } : {},
+        },
+      },
+    }];
+  },
+});
+
 export interface RichTextSchemaOptions {
   /**
    * Include StarterKit's undo/redo history. The collaborative editor MUST
@@ -67,6 +83,8 @@ export interface RichTextSchemaOptions {
   math?: boolean;
   /** Same as `math`, for the image node. */
   image?: boolean;
+  /** Browser node view; the service only needs the shared table attributes. */
+  tableView?: TableOptions["View"];
 }
 
 /** The shared extension list, in the order both runtimes build it. */
@@ -82,7 +100,12 @@ export function richTextSchemaExtensions(options: RichTextSchemaOptions = {}): E
   );
   if (options.math !== false) extensions.push(InlineMathNode, BlockMathNode);
   extensions.push(
-    TableKit.configure({ table: { resizable: true, lastColumnResizable: false } }),
+    TableCellAlignment,
+    TableKit.configure({ table: {
+      resizable: true,
+      lastColumnResizable: false,
+      ...(options.tableView ? { View: options.tableView } : {}),
+    } }),
     Subscript,
     Superscript
   );

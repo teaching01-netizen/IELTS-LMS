@@ -1,5 +1,5 @@
 import { memo, useMemo, type ReactNode } from "react";
-import { clampSatReferenceZoom } from "../SatReferenceSheetPanel";
+import { clampSatReferenceZoom, SAT_REFERENCE_ZOOM_MAX } from "../SatReferenceSheetPanel";
 
 /* ------------------------------------------------------------------ */
 /* R-02 frozen constants (phase plan section 5, Step 1)                */
@@ -7,6 +7,8 @@ import { clampSatReferenceZoom } from "../SatReferenceSheetPanel";
 
 export const SAT_REF_CANVAS_W = 1000;
 export const SAT_REF_CANVAS_H = 560;
+/** 16px body text stays at least 11.2px; smaller stages scroll. */
+export const SAT_REF_READABLE_SCALE_MIN = 0.7;
 export const SAT_REF_PAD_X = 32;
 export const SAT_REF_PAD_TOP = 24;
 export const SAT_REF_DIVIDER_Y1 = 236;
@@ -18,60 +20,48 @@ export const SAT_REF_INK = "#202124";
 export const SAT_REF_STROKE = 1.25;
 
 /**
- * Pure scale math — unit-tested, no DOM (phase plan section 6.1; R-07
- * contain-fit revision).
- *
- * fitScale(viewportWidth, zoom, stageHeight?) =
- *   min(fit, 1) * max(clampZoom(zoom), 1)
- * where fit = min(vw / 1000, vh / 560) when vh is a finite positive
- * number, else vw / 1000 (backward-compat: existing 2-arg calls behave
- * exactly as today). The cap keeps huge windows quiet (the sheet centers
- * at 1x on white); the effective floor keeps legacy persisted zooms < 1
- * rendering as fit with no migration.
- *
- * Non-finite / non-positive widths return 1 (first frame before R-01
- * measures). Zoom clamps through the existing clampSatReferenceZoom import.
+ * Contain the canvas in the measured stage, rounded down to avoid subpixel
+ * overflow. Stop shrinking at the readable floor and scroll instead. Stored
+ * zoom is a multiplier over fit; rendering stops at 200% actual size.
+ * Invalid heights use width only; invalid widths fall back to actual size.
  */
 export function satRefFitScale(
   viewportWidth: unknown,
   zoom: unknown,
   stageHeight?: unknown,
+  examScale = 1,
 ): number {
   const vw =
     typeof viewportWidth === "number" && Number.isFinite(viewportWidth)
       ? viewportWidth
       : Number.NaN;
   const z = clampSatReferenceZoom(zoom);
-  if (!Number.isFinite(vw) || vw <= 0) return 1;
-  // Backward-compat: 2-arg calls (stageHeight absent/degenerate) behave
-  // exactly as today — fit-width scale with no cap and no zoom floor.
-  if (
-    typeof stageHeight !== "number" ||
-    !Number.isFinite(stageHeight) ||
-    stageHeight <= 0
-  ) {
-    return (vw / SAT_REF_CANVAS_W) * z;
-  }
-  const fit = Math.min(vw / SAT_REF_CANVAS_W, stageHeight / SAT_REF_CANVAS_H);
-  return Math.min(fit, 1) * Math.max(z, 1);
+  const screenScale = Number.isFinite(examScale) && examScale > 0 ? examScale : 1;
+  if (!Number.isFinite(vw) || vw <= 0) return 1 / screenScale;
+  const heightScale =
+    typeof stageHeight === "number" && Number.isFinite(stageHeight) && stageHeight > 0
+      ? stageHeight / SAT_REF_CANVAS_H
+      : 1 / screenScale;
+  const fit = Math.min(vw / SAT_REF_CANVAS_W, heightScale, 1 / screenScale);
+  const roundedFit = Math.floor(fit * 1000) / 1000;
+  return Math.min(SAT_REFERENCE_ZOOM_MAX / screenScale, Math.max(SAT_REF_READABLE_SCALE_MIN / screenScale, roundedFit) * z);
 }
 
-/** R-07: epsilon for the panel's overflow-hidden-at-fit switch. */
+/** Tolerance for the fit-mode label; never used to hide overflow. */
 export const SAT_REF_FIT_EPSILON = 1e-9;
 
 /**
- * R-07: true when the rendered sheet is at fit (nothing to scroll), so the
- * panel can switch the stage to overflow hidden without a scrollbar flash.
- * Pure (no DOM): compares renderScale against fitScale with an epsilon.
+ * True in fit mode, including a readable sheet that needs scrolling.
  */
 export function isSatRefAtFit(
   viewportWidth: unknown,
   zoom: unknown,
   stageHeight?: unknown,
+  examScale = 1,
 ): boolean {
   return (
-    satRefFitScale(viewportWidth, zoom, stageHeight) <=
-    satRefFitScale(viewportWidth, 1, stageHeight) + SAT_REF_FIT_EPSILON
+    satRefFitScale(viewportWidth, zoom, stageHeight, examScale) <=
+    satRefFitScale(viewportWidth, 1, stageHeight, examScale) + SAT_REF_FIT_EPSILON
   );
 }
 
@@ -84,10 +74,11 @@ export function useFitScale(
   viewportWidth: number,
   zoom: number,
   stageHeight?: number,
+  examScale = 1,
 ): number {
   return useMemo(
-    () => satRefFitScale(viewportWidth, zoom, stageHeight),
-    [viewportWidth, zoom, stageHeight],
+    () => satRefFitScale(viewportWidth, zoom, stageHeight, examScale),
+    [viewportWidth, zoom, stageHeight, examScale],
   );
 }
 
@@ -789,13 +780,15 @@ function SatReferenceSheetInner({
   zoom = 1,
   stageWidth,
   stageHeight,
+  examScale = 1,
 }: {
   viewportWidth?: number;
   zoom?: number;
   stageWidth?: number | undefined;
   stageHeight?: number | undefined;
+  examScale?: number;
 }) {
-  const scale = useFitScale(viewportWidth, zoom, stageHeight);
+  const scale = useFitScale(viewportWidth, zoom, stageHeight, examScale);
   const hasStage =
     typeof stageWidth === "number" &&
     Number.isFinite(stageWidth) &&

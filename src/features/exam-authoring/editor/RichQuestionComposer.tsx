@@ -3,6 +3,8 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { Extensions, JSONContent } from "@tiptap/core";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
+import { TableView } from "@tiptap/extension-table";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import { Sigma } from "lucide-react";
@@ -47,13 +49,35 @@ import { suggestAltText } from "./ingestion/domain/altTextSuggestion";
 import { SAT_IMAGE_POLICY, validateDurableImageSource } from "./ingestion/domain/imagePolicy";
 import { isCollaborativeTransaction } from "../realtime/coedit";
 
+// The resizable table view updates columns, but not custom table attributes.
+class AlignedTableView extends TableView {
+  constructor(...args: ConstructorParameters<typeof TableView>) {
+    super(...args);
+    this.syncCellAlignment();
+  }
+
+  override update(node: ProseMirrorNode) {
+    const updated = super.update(node);
+    if (updated) this.syncCellAlignment();
+    return updated;
+  }
+
+  private syncCellAlignment() {
+    if (this.node.attrs["cellAlignment"] === "center") {
+      this.table.setAttribute("data-cell-alignment", "center");
+    } else {
+      this.table.removeAttribute("data-cell-alignment");
+    }
+  }
+}
+
 // The node/mark vocabulary comes from ./schema/richTextSchema.ts, the exact
 // same list the Hocuspocus co-editing service builds. The browser substitutes
 // its node-view variants for math and images (same node names and attributes)
 // and its identity extension (same attribute, plus the id-assignment plugin).
 const baseExtensions = [
   RichContentIdentity,
-  ...richTextSchemaExtensions({ identity: false, math: false, image: false }),
+  ...richTextSchemaExtensions({ identity: false, math: false, image: false, tableView: AlignedTableView }),
   EditableInlineMath,
   EditableBlockMath,
   SatImage,
@@ -64,7 +88,7 @@ const baseExtensions = [
 // corrupt each other's undo ("Frontend ownership", docs/sat-authoring-coedit.md).
 const collaborativeBaseExtensions = [
   RichContentIdentity,
-  ...richTextSchemaExtensions({ identity: false, math: false, image: false, history: false }),
+  ...richTextSchemaExtensions({ identity: false, math: false, image: false, history: false, tableView: AlignedTableView }),
   EditableInlineMath,
   EditableBlockMath,
   SatImage,

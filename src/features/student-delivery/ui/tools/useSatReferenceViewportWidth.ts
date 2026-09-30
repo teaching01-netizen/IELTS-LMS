@@ -117,14 +117,16 @@ function sanitizeStageSize(size: SatReferenceStageSize): SatReferenceStageSize {
   return { w, h, measured: size.measured === true };
 }
 
+/** Pass the callback-ref node for conditional mounts; legacy RefObjects remain supported. */
 export function useSatReferenceStageSize(
-  ref: RefObject<HTMLElement | null>,
+  target: RefObject<HTMLElement | null> | HTMLElement | null,
   seed?: Partial<Pick<SatReferenceStageSize, "w" | "h">>,
 ): SatReferenceStageSize {
+  const node = target && "current" in target ? target.current : target;
   const [size, setSize] = useState<SatReferenceStageSize>(() => {
     const fallback = fallbackStageSize(seed);
     if (typeof window === "undefined") return fallback;
-    const measured = readContentBoxSize(ref.current ?? null);
+    const measured = readContentBoxSize(node);
     return {
       w: measured.w ?? fallback.w,
       h: measured.h ?? fallback.h,
@@ -133,7 +135,7 @@ export function useSatReferenceStageSize(
   });
 
   useLayoutEffect(() => {
-    const node = ref.current;
+    const node = target && "current" in target ? target.current : target;
     if (!node || typeof window === "undefined") return;
     // Sync-measure on mount: the first commit after mount already reflects
     // the live content-box size instead of waiting for an observer tick.
@@ -157,7 +159,7 @@ export function useSatReferenceStageSize(
       // adding an avoidable requestAnimationFrame of visual lag. This node's
       // dimensions are owned by the window, not by the transformed canvas, so
       // the update cannot create a resize-observer feedback loop.
-      const next = readContentBoxSize(ref.current ?? node);
+      const next = readContentBoxSize(node);
       if (next.w === null && next.h === null) return;
       setSize((prev) => {
         const w = next.w ?? prev.w;
@@ -177,7 +179,7 @@ export function useSatReferenceStageSize(
       disposed = true;
       observer.disconnect();
     };
-  }, [ref]);
+  }, [target, node]);
 
   return sanitizeStageSize(size);
 }

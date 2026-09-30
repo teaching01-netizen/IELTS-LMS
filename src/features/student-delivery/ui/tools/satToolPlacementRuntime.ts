@@ -33,11 +33,20 @@ function readCssPixel(variable: string, fallback: number): number {
   }
 }
 
-export function readSatToolSafeArea(): SatSafeArea {
+export function readSatToolSafeArea(
+  viewportToLogicalLength: (physicalLength: number) => number = (length) => length,
+): SatSafeArea {
   const inset = readCssPixel('--sat-tool-safe-inset', SAT_TOOL_SAFE_INSET_FALLBACK);
   const header = readCssPixel('--sat-exam-header-height', SAT_TOOL_HEADER_HEIGHT_FALLBACK);
   const footer = readCssPixel('--sat-exam-footer-height', SAT_TOOL_FOOTER_HEIGHT_FALLBACK);
-  return { top: header + inset, right: inset, bottom: footer + inset, left: inset };
+  // These root tokens resolve env(safe-area-inset-*). Insets are physical
+  // viewport lengths; exam chrome and stored geometry are logical lengths.
+  return {
+    top: header + inset + viewportToLogicalLength(readCssPixel('--student-safe-top', 0)),
+    right: inset + viewportToLogicalLength(readCssPixel('--student-safe-right', 0)),
+    bottom: footer + inset + viewportToLogicalLength(readCssPixel('--student-safe-bottom', 0)),
+    left: inset + viewportToLogicalLength(readCssPixel('--student-safe-left', 0)),
+  };
 }
 
 export function readSatToolViewport(

@@ -108,6 +108,29 @@ describe("prompt schema", () => {
 });
 
 describe("prompt JSON -> Y.Doc -> prompt JSON", () => {
+  it("preserves table-wide centering through collaborative saves and binary reloads", () => {
+    const content = documentWith([
+      { type: "table", attrs: { cellAlignment: "center" }, content: [
+        { type: "tableRow", content: [
+          { type: "tableHeader", content: [{ type: "paragraph", content: [text("Answer")] }] },
+          { type: "tableCell", content: [{ type: "paragraph", content: [text("4")] }] },
+        ] },
+      ] },
+    ]);
+    const seeded = seedYDocFromPrompt(content);
+    const reloaded = new Y.Doc();
+    try {
+      applyBinaryState(reloaded, encodeStateAsUpdate(seeded));
+      const projection = projectPrompt(reloaded);
+      expect(projection.document?.content?.[0]?.attrs?.["cellAlignment"]).toBe("center");
+      expect(collect(projection.document as RichTextDocument).tables).toEqual([[['Answer'], ['4']]]);
+      expect(projectPrompt(seedYDocFromPrompt(projection))).toEqual(projection);
+    } finally {
+      seeded.destroy();
+      reloaded.destroy();
+    }
+  });
+
   it("preserves the canonical projection for the whole node vocabulary", () => {
     const once: StructuredContent = projectPrompt(seedYDocFromPrompt(FULL_VOCABULARY));
     const twice = projectPrompt(seedYDocFromPrompt(once));

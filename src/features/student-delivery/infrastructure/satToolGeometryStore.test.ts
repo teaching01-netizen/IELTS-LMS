@@ -83,4 +83,13 @@ describe('satToolGeometryStore', () => {
   it('enforces minimum sizes', () => {
     expect(normalizeSatToolGeometry({ x: 0, y: 0, w: 10, h: 10 })).toMatchObject({ w: 320, h: 360 });
   });
+  it('folds a physical Reference minimum into a short iPad safe area at 200% Display zoom', () => {
+    const viewport = { w: 1133 / 2, h: 744 / 2 };
+    const safe = { top: 112, bottom: 86 + 34 / 2, left: 16, right: 16 };
+    const result = clampSatToolGeometry({ x: 1000, y: 1000, w: 460, h: 360 }, viewport, safe, { w: 700 / 2, h: 477 / 2 });
+    expect(result.h).toBe(viewport.h - safe.top - safe.bottom);
+    expect(result.y + result.h).toBe(viewport.h - safe.bottom);
+    expect(result.w).toBe(460);
+    expect(result.x + result.w).toBe(viewport.w - safe.right);
+  });
 });
