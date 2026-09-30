@@ -115,9 +115,9 @@ func workspaceIdentity(doc CoeditWorkspaceDocument) authoringcoedit.Identity {
 	}
 }
 
-// CoeditEnsureWorkspace resolves the current editable SAT draft and creates a
-// single v2 row for it. A draft replacement naturally gets a new room because
-// draft_version_id participates in the unique scope.
+// CoeditEnsureWorkspace resolves the current editable SAT draft and ensures its
+// newest workspace generation is open. A draft replacement gets a separate
+// scope; a closed room on the same draft is retained and followed by a new row.
 func (s *Service) CoeditEnsureWorkspace(ctx context.Context, examID, actorID string) (authoringcoedit.Identity, error) {
 	var out authoringcoedit.Identity
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
@@ -142,17 +142,21 @@ func (s *Service) CoeditEnsureWorkspace(ctx context.Context, examID, actorID str
 		var existing CoeditWorkspaceDocument
 		existing, err = scanCoeditWorkspace(q.QueryRowContext(ctx, `SELECT `+coeditWorkspaceColumns+`
  FROM authoring_coedit_workspaces
- WHERE draft_version_id = ? AND exam_id = ? AND schema_version = ? FOR UPDATE`,
+ WHERE draft_version_id = ? AND exam_id = ? AND schema_version = ?
+ ORDER BY generation DESC LIMIT 1 FOR UPDATE`,
 			draftID, examID, authoringcoedit.WorkspaceSchemaVersion))
+		generation := 1
 		if err == nil {
-			if existing.LifecycleState == authoringcoedit.StateClosed {
-				return authoringcoedit.New(authoringcoedit.CodeDocumentClosed,
-					"This SAT draft collaboration session was closed.")
+			if existing.LifecycleState != authoringcoedit.StateClosed {
+				out = workspaceIdentity(existing)
+				return nil
 			}
-			out = workspaceIdentity(existing)
-			return nil
+			if err := q.QueryRowContext(ctx, `SELECT generation FROM authoring_coedit_workspaces WHERE id = ? FOR UPDATE`, existing.ID).Scan(&generation); err != nil {
+				return err
+			}
+			generation++
 		}
-		if err != sql.ErrNoRows {
+		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
 		id := uuid.NewString()
@@ -161,16 +165,17 @@ func (s *Service) CoeditEnsureWorkspace(ctx context.Context, examID, actorID str
 			organization = org.String
 		}
 		_, err = q.ExecContext(ctx, `INSERT INTO authoring_coedit_workspaces
- (id, organization_id, exam_id, draft_version_id, schema_version, field_set,
+ (id, organization_id, exam_id, draft_version_id, generation, schema_version, field_set,
   lifecycle_state, materialized_revision, last_actor_id, created_at, updated_at)
- VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, NOW(6), NOW(6))`, id, organization, examID,
-			draftID, authoringcoedit.WorkspaceSchemaVersion, authoringcoedit.FieldSetWorkspace,
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW(6), NOW(6))`, id, organization, examID,
+			draftID, generation, authoringcoedit.WorkspaceSchemaVersion, authoringcoedit.FieldSetWorkspace,
 			string(authoringcoedit.StateInitializing), actorID)
 		if err != nil {
-			// The unique scope makes concurrent tabs converge on one row.
+			// The exam lock and unique generation key make concurrent tabs converge.
 			winner, readErr := scanCoeditWorkspace(q.QueryRowContext(ctx, `SELECT `+coeditWorkspaceColumns+`
  FROM authoring_coedit_workspaces
- WHERE draft_version_id = ? AND exam_id = ? AND schema_version = ? FOR UPDATE`,
+ WHERE draft_version_id = ? AND exam_id = ? AND schema_version = ?
+ ORDER BY generation DESC LIMIT 1 FOR UPDATE`,
 				draftID, examID, authoringcoedit.WorkspaceSchemaVersion))
 			if readErr != nil {
 				return err

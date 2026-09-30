@@ -8,13 +8,13 @@ import (
 	"strings"
 )
 
-// SAT RAWDATA CSV export schema.
+// SAT RAWDATA export schema.
 //
 // This file owns the *external compatibility contract* for the SAT Student
-// Access "Export RAWDATA CSV" surface: the two header rows, the fixed
+// Access "Export RAWDATA XLSX" surface: the two header rows, the fixed
 // 50-column width, the per-section question counts, and the
 // assessment_modules.adaptive_role -> เติมชุดข้อสอบ code mapping. The exporter
-// (and its tests) read the same constants so the CSV cannot drift per caller.
+// (and its tests) read the same constants so the workbook cannot drift per caller.
 //
 // The template is shared by Reading & Writing (Verbal) and Math; only the
 // populated Q-column range differs. Columns are never added or removed — a
@@ -22,7 +22,7 @@ import (
 
 const (
 	// SATRawdataSchemaVersion is bumped whenever the column contract changes.
-	SATRawdataSchemaVersion = 1
+	SATRawdataSchemaVersion = 2
 	// SATRawdataColumns is the exact width of every exported row. The
 	// template is a fixed-width contract; missing values are "".
 	SATRawdataColumns = 50
@@ -62,6 +62,7 @@ const (
 // entered: an entered module with no administered questions is a score of zero,
 // not a missing score.
 const (
+	satRawdataColFirstName       = 0  // full candidate name (kept unsplit)
 	satRawdataColEmail           = 2  // email
 	satRawdataColPercentage      = 3  // Percentage
 	satRawdataColPointsReceived  = 4  // Points received

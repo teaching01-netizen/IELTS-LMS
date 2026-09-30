@@ -1,3 +1,5 @@
+import { downloadBlob } from './downloadBlob';
+
 /**
  * CSV export helpers. `escapeCsvCell` always quotes (RFC 4180) so commas,
  * quotes, and newlines round-trip; embedded quotes double. A leading
@@ -27,23 +29,7 @@ function emitCsv(filename: string, rows: Array<Array<unknown>>): void {
   const csvContent = rows.map((row) => row.map(escapeCsvCell).join(',')).join('\r\n');
 
   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-
-  link.href = url;
-  link.download = filename;
-  // `click()` on a detached anchor is ignored by some browsers (notably
-  // Firefox); the node must be in the document for the download to start.
-  document.body.appendChild(link);
-  try {
-    link.click();
-  } finally {
-    link.remove();
-  }
-
-  // Revoke asynchronously (0ms): revoking synchronously can abort the download
-  // in Chrome before the navigation captures the blob URL.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  downloadBlob(filename, blob);
 }
 
 export function downloadCsv(

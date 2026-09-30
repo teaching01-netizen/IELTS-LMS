@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, BarChart3, Download } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { SatPageError } from '../ui/SatPage';
-import { downloadSatRawdataCsv } from '../../../features/results/api/satRawdataExport';
+import { downloadSatRawdataXlsx } from '../../../features/results/api/satRawdataExport';
 import { useSatAttemptsQuery, useSatResultsQuery } from '../../../features/results/api/satResultsQueries';
 import { filterSatAttempts, groupSatAccessGroups, type SatExamGroup } from '../../../features/results/domain/satResultsGroups';
 import { SatContainer, SatEmptyState, SatList, SatListSkeleton, SatPageHeader, SatPrimaryButton, SatResultCount, SatSearchField, SatStatStrip, SatStatusPill } from '../ui/SatPage';
@@ -93,7 +93,7 @@ export function SatResultsRoute() {
       setExporting(true);
       setExportError(null);
       try {
-        await downloadSatRawdataCsv(selectedGroup.examId, selectedAccess.scheduleId, selectedAccess.accessLinkName);
+        await downloadSatRawdataXlsx(selectedGroup.examId, selectedAccess.scheduleId, selectedAccess.accessLinkName);
       } catch (error) {
         setExportError(error instanceof Error ? error.message : 'RAWDATA export failed.');
       } finally {
@@ -107,7 +107,7 @@ export function SatResultsRoute() {
           eyebrow="Student Access"
           title={selectedAccess.accessLinkName}
           description={`${selectedGroup.examTitle} · Version ${selectedAccess.versionNumber}`}
-          actions={<SatPrimaryButton icon={<Download size={15} aria-hidden="true" />} pending={exporting} onClick={() => void runExport()}>{exporting ? 'Exporting...' : 'Export RAWDATA CSV'}</SatPrimaryButton>}
+          actions={<SatPrimaryButton icon={<Download size={15} aria-hidden="true" />} pending={exporting} onClick={() => void runExport()}>{exporting ? 'Exporting...' : 'Export RAWDATA XLSX'}</SatPrimaryButton>}
         />
         {exportError ? <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--sat-staff-danger,#b42318)]">{exportError}</p> : null}
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2"><p className="text-[11px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{selectedAccess.scoredCount + selectedAccess.pendingCount} completed · {selectedAccess.attemptCount} students</p><SatStatusPill tone={rollup === 'ready' ? 'ready' : selectedAccess.invalidatedCount === selectedAccess.attemptCount && selectedAccess.attemptCount > 0 ? 'invalidated' : 'neutral'}>{rollup === 'ready' ? 'Completed' : selectedAccess.invalidatedCount === selectedAccess.attemptCount && selectedAccess.attemptCount > 0 ? 'Ended' : 'In progress'}</SatStatusPill></div>

@@ -16,16 +16,25 @@ import (
 // GET /v1/results/sat/export/rawdata.
 //
 // The backend owns the schema, ordering, row generation, and validation: the
-// header rows and the 50-column body are produced here so the client only has
-// to serialize them (UTF-8 BOM + RFC 4180 escaping) and download the file.
+// header rows and the 50-column body are produced here for both the legacy JSON
+// projection and the workbook download.
 type SATRawdataExport struct {
-	SchemaVersion int        `json:"schemaVersion"`
-	ExamID        string     `json:"examId"`
-	ScheduleID    string     `json:"scheduleId"`
-	HeaderRows    [][]string `json:"headerRows"`
-	Rows          [][]string `json:"rows"`
-	ColumnCount   int        `json:"columnCount"`
-	RowCount      int        `json:"rowCount"`
+	SchemaVersion int               `json:"schemaVersion"`
+	ExamID        string            `json:"examId"`
+	ScheduleID    string            `json:"scheduleId"`
+	HeaderRows    [][]string        `json:"headerRows"`
+	Rows          [][]string        `json:"rows"`
+	Sheets        []SATRawdataSheet `json:"sheets"`
+	ColumnCount   int               `json:"columnCount"`
+	RowCount      int               `json:"rowCount"`
+}
+
+// SATRawdataSheet is one section-specific sheet in the RAWDATA workbook.
+type SATRawdataSheet struct {
+	Name       string     `json:"name"`
+	SectionKey string     `json:"sectionKey"`
+	HeaderRows [][]string `json:"headerRows"`
+	Rows       [][]string `json:"rows"`
 }
 
 // satRawdataModuleStateNotStarted: a module that exists but was never entered.
@@ -46,13 +55,14 @@ const satRawdataModuleStateNotStarted = "not_started"
 type satRawdataAttempt struct {
 	ID                 string
 	CandidateID        string
+	CandidateName      string
 	Email              string
 	PublishedVersionID string
 	OrderKey           time.Time
 }
 
 // satRawdataModule is one administered module placement (assessment module
-// attempt). A CSV row is one attempt + one module.
+// attempt). A data row is one attempt + one module.
 type satRawdataModule struct {
 	AttemptID     string
 	ModuleID      string
@@ -84,7 +94,7 @@ type satRawdataCell struct {
 	Value        string
 }
 
-// ExportSATRawdata builds the complete RAWDATA CSV projection for one SAT
+// ExportSATRawdata builds the complete RAWDATA projection for one SAT
 // Student Access group.
 //
 // Scope is the attempt itself, not its result: every student_attempts row for
@@ -129,6 +139,14 @@ func (s *Service) ExportSATRawdata(ctx context.Context, actor auth.ActorContext,
 	if err := validateSATRawdataRows(out.Rows); err != nil {
 		return nil, err
 	}
+	for _, sheet := range out.Sheets {
+		if err := validateSATRawdataHeaders(sheet.HeaderRows); err != nil {
+			return nil, err
+		}
+		if err := validateSATRawdataRows(sheet.Rows); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -140,7 +158,7 @@ func (s *Service) ExportSATRawdata(ctx context.Context, actor auth.ActorContext,
 func satRawdataAttempts(ctx context.Context, tx *sql.Tx, actor auth.ActorContext, examID, scheduleID string) ([]satRawdataAttempt, error) {
 	scope, scopeArgs := resultScope("sch", actor)
 	query := `
-		SELECT a.id, a.candidate_id, a.candidate_email, a.published_version_id,
+		SELECT a.id, a.candidate_id, COALESCE(a.candidate_name, ''), a.candidate_email, a.published_version_id,
 			COALESCE(a.submitted_at, a.created_at)
 		FROM student_attempts a
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
@@ -157,7 +175,7 @@ func satRawdataAttempts(ctx context.Context, tx *sql.Tx, actor auth.ActorContext
 	out := []satRawdataAttempt{}
 	for rows.Next() {
 		var attempt satRawdataAttempt
-		if err := rows.Scan(&attempt.ID, &attempt.CandidateID, &attempt.Email, &attempt.PublishedVersionID, &attempt.OrderKey); err != nil {
+		if err := rows.Scan(&attempt.ID, &attempt.CandidateID, &attempt.CandidateName, &attempt.Email, &attempt.PublishedVersionID, &attempt.OrderKey); err != nil {
 			return nil, err
 		}
 		out = append(out, attempt)
@@ -341,7 +359,7 @@ func satRawdataCellGroupKey(attemptID, moduleID string) string {
 	return attemptID + "\x1f" + moduleID
 }
 
-// assembleSATRawdata projects the loaded attempts/modules/cells into CSV rows
+// assembleSATRawdata projects the loaded attempts/modules/cells into rows
 // in memory. Row = one attempt + one section module.
 func assembleSATRawdata(attempts []satRawdataAttempt, modulesByAttempt map[string][]satRawdataModule, cellsByModule map[string][]satRawdataCell, examID, scheduleID string) *SATRawdataExport {
 	out := &SATRawdataExport{
@@ -350,14 +368,38 @@ func assembleSATRawdata(attempts []satRawdataAttempt, modulesByAttempt map[strin
 		ScheduleID:    scheduleID,
 		HeaderRows:    SATRawdataHeaderRows(),
 		Rows:          [][]string{},
-		ColumnCount:   SATRawdataColumns,
+		Sheets: []SATRawdataSheet{
+			{Name: "SAT Math", SectionKey: SATRawdataSectionMath, HeaderRows: SATRawdataHeaderRows(), Rows: [][]string{}},
+			{Name: "SAT Verbal", SectionKey: SATRawdataSectionReadingWriting, HeaderRows: SATRawdataHeaderRows(), Rows: [][]string{}},
+		},
+		ColumnCount: SATRawdataColumns,
+	}
+	sheetBySection := map[string]int{
+		SATRawdataSectionMath:           0,
+		SATRawdataSectionReadingWriting: 1,
+	}
+	appendRow := func(sheetIndex int, row []string) {
+		out.Rows = append(out.Rows, row)
+		out.Sheets[sheetIndex].Rows = append(out.Sheets[sheetIndex].Rows, row)
+	}
+	identityRow := func(attempt satRawdataAttempt) []string {
+		row := make([]string, SATRawdataColumns)
+		row[satRawdataColFirstName] = strings.TrimSpace(attempt.CandidateName)
+		row[satRawdataColEmail] = attempt.Email
+		row[satRawdataColCandidateID] = attempt.CandidateID
+		return row
 	}
 	for _, attempt := range attempts {
 		modules := modulesByAttempt[attempt.ID]
 		if len(modules) == 0 {
-			// Attempt existence is the export boundary: an attempt that never
-			// entered a module still emits one blank row.
-			out.Rows = append(out.Rows, make([]string, SATRawdataColumns))
+			// Attempt existence is the export boundary: preserve identity even
+			// when the student never entered a module. There is no section to
+			// assign, so include that identity row on both section sheets.
+			row := identityRow(attempt)
+			out.Rows = append(out.Rows, row)
+			for i := range out.Sheets {
+				out.Sheets[i].Rows = append(out.Sheets[i].Rows, row)
+			}
 			continue
 		}
 		emitted := 0
@@ -369,12 +411,14 @@ func assembleSATRawdata(attempts []satRawdataAttempt, modulesByAttempt map[strin
 			if module.ExamVersionID != attempt.PublishedVersionID {
 				continue
 			}
-			questionCount := satRawdataQuestionCount(module.SectionKey)
+			sectionKey := strings.TrimSpace(module.SectionKey)
+			questionCount := satRawdataQuestionCount(sectionKey)
 			if questionCount == 0 {
 				// Unknown section: nothing to project, never infer a range.
 				continue
 			}
 			row := make([]string, SATRawdataColumns)
+			row[satRawdataColFirstName] = strings.TrimSpace(attempt.CandidateName)
 			row[satRawdataColEmail] = attempt.Email
 			row[satRawdataColCandidateID] = attempt.CandidateID
 			row[satRawdataColModuleCode] = satRawdataModuleCode(module.AdaptiveRole)
@@ -412,7 +456,7 @@ func assembleSATRawdata(attempts []satRawdataAttempt, modulesByAttempt map[strin
 			for i, value := range values {
 				row[satRawdataColFirstQuestion+i] = value
 			}
-			out.Rows = append(out.Rows, row)
+			appendRow(sheetBySection[sectionKey], row)
 			emitted++
 		}
 		if emitted == 0 {
@@ -420,7 +464,11 @@ func assembleSATRawdata(attempts []satRawdataAttempt, modulesByAttempt map[strin
 			// (unmapped section or a foreign version). Attempt existence is
 			// still the export boundary, so keep one blank row rather than
 			// silently dropping the student.
-			out.Rows = append(out.Rows, make([]string, SATRawdataColumns))
+			row := identityRow(attempt)
+			out.Rows = append(out.Rows, row)
+			for i := range out.Sheets {
+				out.Sheets[i].Rows = append(out.Sheets[i].Rows, row)
+			}
 		}
 	}
 	out.RowCount = len(out.Rows)

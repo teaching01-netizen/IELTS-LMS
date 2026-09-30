@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	satRawdataAttemptColumns = []string{"id", "candidate_id", "candidate_email", "published_version_id", "order_key"}
+	satRawdataAttemptColumns = []string{"id", "candidate_id", "candidate_name", "candidate_email", "published_version_id", "order_key"}
 	satRawdataModuleColumns  = []string{"attempt_id", "module_id", "section_key", "module_key", "adaptive_role", "state", "exam_version_id", "section_order", "module_order"}
 	satRawdataCellColumns    = []string{"attempt_id", "module_id", "exam_question_id", "display_order", "answer_definition", "v2_response", "legacy_response"}
 )
@@ -26,7 +26,7 @@ const satRawdataTestVersion = "version-1"
 // Patterns pin both which query is being matched and the version fence: every
 // module/question read must be pinned to the attempt's published version.
 const (
-	satRawdataAttemptQueryPattern = `SELECT a\.id, a\.candidate_id, a\.candidate_email`
+	satRawdataAttemptQueryPattern = `SELECT a\.id, a\.candidate_id, COALESCE\(a\.candidate_name, ''\), a\.candidate_email`
 	satRawdataModuleQueryPattern  = `(?s)SELECT ma\.attempt_id, m\.id, s\.section_key, m\.module_key, m\.adaptive_role, ma\.state.*s\.exam_version_id = a\.published_version_id`
 	satRawdataCellQueryPattern    = `(?s)SELECT ma\.attempt_id, m\.id AS module_id, eq\.id AS exam_question_id.*s\.exam_version_id = a\.published_version_id`
 )
@@ -36,7 +36,11 @@ func singleChoice(option string) string {
 }
 
 func satRawdataAttemptRow(id, candidate, email string, order time.Time) []driver.Value {
-	return []driver.Value{id, candidate, email, satRawdataTestVersion, order}
+	return satRawdataAttemptRowWithName(id, candidate, "", email, order)
+}
+
+func satRawdataAttemptRowWithName(id, candidate, name, email string, order time.Time) []driver.Value {
+	return []driver.Value{id, candidate, name, email, satRawdataTestVersion, order}
 }
 
 func TestExportSATRawdataMixedStatesQuestionRangesAndV2Priority(t *testing.T) {
@@ -93,10 +97,17 @@ func TestExportSATRawdataMixedStatesQuestionRangesAndV2Priority(t *testing.T) {
 		}
 	}
 
-	// Attempt with no module attempt still emits one blank row.
-	for i, cell := range out.Rows[0] {
+	// Attempt with no module attempt still emits identity in its blank row.
+	blank := out.Rows[0]
+	if blank[satRawdataColFirstName] != "" || blank[satRawdataColEmail] != "blank@example.com" || blank[satRawdataColCandidateID] != "C-BLANK" {
+		t.Fatalf("blank attempt row must keep identity: %#v", blank[:13])
+	}
+	for i, cell := range blank {
+		if i == satRawdataColFirstName || i == satRawdataColEmail || i == satRawdataColCandidateID {
+			continue
+		}
 		if cell != "" {
-			t.Fatalf("blank attempt row must be empty, column %d = %q", i, cell)
+			t.Fatalf("blank attempt row has an unexpected value at column %d = %q", i, cell)
 		}
 	}
 
@@ -268,7 +279,7 @@ func TestExportSATRawdataProjectionIsPaginationIndependent(t *testing.T) {
 	cells := sqlmock.NewRows(satRawdataCellColumns)
 	for i := 0; i < students; i++ {
 		id := "attempt-" + itoa(i)
-		attempts.AddRow(id, "C-"+itoa(i), itoa(i)+"@example.com", satRawdataTestVersion, base.Add(time.Duration(i)*time.Second))
+		attempts.AddRow(id, "C-"+itoa(i), "", itoa(i)+"@example.com", satRawdataTestVersion, base.Add(time.Duration(i)*time.Second))
 		modules.AddRow(id, "mod-"+itoa(i), "reading-writing", "rw-m1", "base", "submitted", satRawdataTestVersion, 1, 1)
 		cells.AddRow(id, "mod-"+itoa(i), "eq-"+itoa(i), 1, singleChoice("B"), nil, `"B"`)
 	}
@@ -308,7 +319,7 @@ func TestExportSATRawdataIgnoresModulesFromAnotherVersion(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(satRawdataAttemptQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataAttemptColumns).
-			AddRow("attempt-v12", "C-1", "v12@example.com", "version-12", base))
+			AddRow("attempt-v12", "C-1", "", "v12@example.com", "version-12", base))
 	mock.ExpectQuery(satRawdataModuleQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns).
 			AddRow("attempt-v12", "mod-v12", "reading-writing", "rw-m1", "base", "submitted", "version-12", 1, 1).
@@ -348,11 +359,12 @@ func TestExportSATRawdataKeepsBlankRowForUnmappedSection(t *testing.T) {
 	}
 	defer db.Close()
 	base := time.Date(2026, 9, 5, 8, 0, 0, 0, time.UTC)
+	const candidateName = "  Unmapped Student  "
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(satRawdataAttemptQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataAttemptColumns).
-			AddRow("attempt-science", "C-1", "s@example.com", satRawdataTestVersion, base))
+			AddRow(satRawdataAttemptRowWithName("attempt-science", "C-1", candidateName, "s@example.com", base)...))
 	mock.ExpectQuery(satRawdataModuleQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns).
 			AddRow("attempt-science", "mod-sci", "science", "sci-m1", "base", "submitted", satRawdataTestVersion, 1, 1))
@@ -367,10 +379,75 @@ func TestExportSATRawdataKeepsBlankRowForUnmappedSection(t *testing.T) {
 	if out.RowCount != 1 {
 		t.Fatalf("expected one retained row, got %d", out.RowCount)
 	}
-	for i, cell := range out.Rows[0] {
-		if cell != "" {
-			t.Fatalf("unmapped-section row must stay blank, column %d = %q", i, cell)
+	row := out.Rows[0]
+	if row[satRawdataColFirstName] != "Unmapped Student" || row[satRawdataColEmail] != "s@example.com" || row[satRawdataColCandidateID] != "C-1" {
+		t.Fatalf("unmapped-section row must preserve attempt identity: %#v", row[:13])
+	}
+	for i, cell := range row {
+		if i == satRawdataColFirstName || i == satRawdataColEmail || i == satRawdataColCandidateID {
+			continue
 		}
+		if cell != "" {
+			t.Fatalf("unmapped-section row has an unexpected value at column %d = %q", i, cell)
+		}
+	}
+}
+
+func TestExportSATRawdataCandidateNamesAndNoModuleIdentity(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	base := time.Date(2026, 9, 5, 9, 0, 0, 0, time.UTC)
+	cases := []struct {
+		id, candidateID, input, want, email string
+	}{
+		{"attempt-1", "S2", `Nguyễn Văn "Nam", Jr.`, `Nguyễn Văn "Nam", Jr.`, "s2@example.com"},
+		{"attempt-2", "S3", "สมชาย ใจดี", "สมชาย ใจดี", "s3@example.com"},
+		{"attempt-3", "S4", `=HYPERLINK("http://x","x")`, `=HYPERLINK("http://x","x")`, "s4@example.com"},
+		{"attempt-4", "S5", "  Leading  and trailing  ", "Leading  and trailing", "s5@example.com"},
+		{"attempt-5", "S6", strings.Repeat("N", 255), strings.Repeat("N", 255), "s6@example.com"},
+	}
+	attempts := sqlmock.NewRows(satRawdataAttemptColumns)
+	for i, c := range cases {
+		attempts.AddRow(satRawdataAttemptRowWithName(c.id, c.candidateID, c.input, c.email, base.Add(time.Duration(i)*time.Minute))...)
+	}
+	mock.ExpectBegin()
+	mock.ExpectQuery(satRawdataAttemptQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(attempts)
+	mock.ExpectQuery(satRawdataModuleQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns))
+	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(sqlmock.NewRows(satRawdataCellColumns))
+	mock.ExpectCommit()
+
+	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.RowCount != len(cases) || len(out.Rows) != len(cases) || len(out.Sheets) != 2 {
+		t.Fatalf("unexpected no-module export dimensions: rows=%d flat=%d sheets=%d", out.RowCount, len(out.Rows), len(out.Sheets))
+	}
+	for i, c := range cases {
+		row := out.Rows[i]
+		if row[satRawdataColFirstName] != c.want || row[1] != "" || row[satRawdataColEmail] != c.email || row[satRawdataColCandidateID] != c.candidateID {
+			t.Fatalf("attempt %s identity = %q / %q / %q / %q", c.id, row[0], row[1], row[2], row[12])
+		}
+		for column, cell := range row {
+			if column == satRawdataColFirstName || column == satRawdataColEmail || column == satRawdataColCandidateID {
+				continue
+			}
+			if cell != "" {
+				t.Fatalf("attempt %s no-module column %d = %q, want blank", c.id, column, cell)
+			}
+		}
+		for _, sheet := range out.Sheets {
+			sheetRow := sheet.Rows[i]
+			if sheetRow[satRawdataColFirstName] != c.want || sheetRow[satRawdataColEmail] != c.email || sheetRow[satRawdataColCandidateID] != c.candidateID {
+				t.Fatalf("attempt %s missing from %q identity row", c.id, sheet.Name)
+			}
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -437,7 +514,7 @@ func TestExportSATRawdataTreatsLockedModuleAsAdministered(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(satRawdataAttemptQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataAttemptColumns).
-			AddRow("attempt-locked", "C-1", "locked@example.com", satRawdataTestVersion, base))
+			AddRow("attempt-locked", "C-1", "", "locked@example.com", satRawdataTestVersion, base))
 	mock.ExpectQuery(satRawdataModuleQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns).
 			AddRow("attempt-locked", "mod-locked", "reading-writing", "rw-m1", "base", "locked", satRawdataTestVersion, 1, 1))
@@ -480,6 +557,10 @@ func TestExportSATRawdataEmptyScheduleKeepsHeaders(t *testing.T) {
 	}
 	if len(out.HeaderRows) != 2 {
 		t.Fatalf("headers must survive an empty schedule: %#v", out.HeaderRows)
+	}
+	if len(out.Sheets) != 2 || out.Sheets[0].Name != "SAT Math" || out.Sheets[1].Name != "SAT Verbal" ||
+		len(out.Sheets[0].HeaderRows) != 2 || len(out.Sheets[1].HeaderRows) != 2 {
+		t.Fatalf("both section sheets and their headers must survive an empty schedule: %#v", out.Sheets)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -1187,11 +1268,9 @@ func TestExportSATRawdataTenThousandAttempts(t *testing.T) {
 	}
 }
 
-// TestExportSATRawdataTransportKeepsCellsVerbatim documents where CSV safety
-// lives (TC-CSV-SEC-001 / TC-CSV-002): the API transports cell values exactly as
-// stored — commas, quotes, newlines and formula-looking prefixes included — and
-// the client's shared serializer is the single place that quotes, BOMs and
-// neutralizes them (escapeCsvCell / downloadCsvRows tests).
+// TestExportSATRawdataTransportKeepsCellsVerbatim pins the backend projection:
+// names and identifiers remain exact, and workbook serialization is responsible
+// for writing formula-looking text as inline strings.
 func TestExportSATRawdataTransportKeepsCellsVerbatim(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1200,14 +1279,15 @@ func TestExportSATRawdataTransportKeepsCellsVerbatim(t *testing.T) {
 	defer db.Close()
 	base := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
 	const (
-		email       = "=cmd(),\"two\"\nlines@example.com"
-		candidateID = "candidate,1"
+		email         = "=cmd(),\"two\"\nlines@example.com"
+		candidateID   = "candidate,1"
+		candidateName = `=HYPERLINK("https://example.invalid"), "Full Name"`
 	)
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(satRawdataAttemptQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataAttemptColumns).
-			AddRow(satRawdataAttemptRow("attempt-1", candidateID, email, base)...))
+			AddRow(satRawdataAttemptRowWithName("attempt-1", candidateID, candidateName, email, base)...))
 	mock.ExpectQuery(satRawdataModuleQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns).
 			AddRow("attempt-1", "mod-rw", "reading-writing", "rw-m1", "base", "submitted", satRawdataTestVersion, 1, 1))
@@ -1225,6 +1305,9 @@ func TestExportSATRawdataTransportKeepsCellsVerbatim(t *testing.T) {
 	}
 	if row[satRawdataColCandidateID] != candidateID {
 		t.Fatalf("the transport must not rewrite the candidate cell: got %q want %q", row[satRawdataColCandidateID], candidateID)
+	}
+	if row[satRawdataColFirstName] != candidateName || row[1] != "" {
+		t.Fatalf("the transport must keep the full name verbatim in First name: got %q / %q", row[0], row[1])
 	}
 	if len(row) != SATRawdataColumns {
 		t.Fatalf("a hostile cell must not change the row width: got %d", len(row))

@@ -1,76 +1,72 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const get = vi.hoisted(() => vi.fn());
-const downloadCsvRows = vi.hoisted(() => vi.fn());
+const downloadBlob = vi.hoisted(() => vi.fn());
+const fetchMock = vi.hoisted(() => vi.fn());
 
-vi.mock('../../infrastructure/resultsGateway', () => ({ resultsGateway: { get } }));
-vi.mock('../../../../utils/csvExport', () => ({ downloadCsvRows }));
+vi.mock('../../../../utils/downloadBlob', () => ({ downloadBlob }));
 
-import { downloadSatRawdataCsv, satRawdataExportFilename } from '../satRawdataExport';
+import { downloadSatRawdataXlsx, satRawdataExportFilename } from '../satRawdataExport';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal('fetch', fetchMock);
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-09-28T09:00:00Z'));
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
-describe('downloadSatRawdataCsv', () => {
-  it('requests the scoped export and downloads a multi-header CSV', async () => {
-    get.mockResolvedValue({
-      schemaVersion: 1,
-      examId: 'exam-1',
-      scheduleId: 'schedule-1',
-      columnCount: 50,
-      rowCount: 2,
-      headerRows: [['A', 'B'], ['email', 'Percentage']],
-      rows: [['a@example.com', '50%'], ['', '']],
-    });
+describe('downloadSatRawdataXlsx', () => {
+  it('fetches the scoped workbook with same-origin credentials and downloads the blob', async () => {
+    const blob = new Blob(['xlsx-data']);
+    fetchMock.mockResolvedValue({ ok: true, blob: vi.fn().mockResolvedValue(blob) });
 
-    await expect(downloadSatRawdataCsv('exam-1', 'schedule-1', 'Practice Test 06')).resolves.toBe(2);
+    await expect(downloadSatRawdataXlsx('exam-1', 'schedule-1', 'Practice Test 06')).resolves.toBeUndefined();
 
-    expect(get).toHaveBeenCalledWith(
-      '/v1/results/sat/export/rawdata?examId=exam-1&scheduleId=schedule-1',
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/results/sat/export/rawdata?examId=exam-1&scheduleId=schedule-1&format=xlsx',
+      { credentials: 'same-origin' },
     );
-    expect(downloadCsvRows).toHaveBeenCalledWith(
-      'sat-rawdata-practice-test-06-2026-09-28.csv',
-      [['A', 'B'], ['email', 'Percentage']],
-      [['a@example.com', '50%'], ['', '']],
+    expect(downloadBlob).toHaveBeenCalledWith(
+      'sat-rawdata-practice-test-06-2026-09-28.xlsx',
+      blob,
     );
   });
 
   it('encodes ids and falls back to a title-less filename', async () => {
-    get.mockResolvedValue({
-      schemaVersion: 1,
-      examId: 'exam 1',
-      scheduleId: 'sched/1',
-      columnCount: 50,
-      rowCount: 0,
-      headerRows: [[], []],
-      rows: [],
-    });
+    const blob = new Blob(['xlsx-data']);
+    fetchMock.mockResolvedValue({ ok: true, blob: vi.fn().mockResolvedValue(blob) });
 
-    await expect(downloadSatRawdataCsv('exam 1', 'sched/1')).resolves.toBe(0);
+    await downloadSatRawdataXlsx('exam 1', 'sched/1');
 
-    expect(get).toHaveBeenCalledWith(
-      '/v1/results/sat/export/rawdata?examId=exam%201&scheduleId=sched%2F1',
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/results/sat/export/rawdata?examId=exam%201&scheduleId=sched%2F1&format=xlsx',
+      { credentials: 'same-origin' },
     );
-    expect(downloadCsvRows).toHaveBeenCalledWith('sat-rawdata-2026-09-28.csv', [[], []], []);
+    expect(downloadBlob).toHaveBeenCalledWith('sat-rawdata-2026-09-28.xlsx', blob);
   });
 
-  it('falls back to the row array length when rowCount is absent', async () => {
-    get.mockResolvedValue({ schemaVersion: 1, headerRows: [[], []], rows: [['x'], ['y'], ['z']] });
-    await expect(downloadSatRawdataCsv('exam-1', 'schedule-1')).resolves.toBe(3);
+  it('surfaces the backend message when the download request fails', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: vi.fn().mockResolvedValue({ code: 'RATE_LIMITED', message: 'Export rate limited. Try again shortly.' }),
+    });
+
+    await expect(downloadSatRawdataXlsx('exam-1', 'schedule-1')).rejects.toThrow(
+      'Export rate limited. Try again shortly.',
+    );
+    expect(downloadBlob).not.toHaveBeenCalled();
   });
 });
 
 describe('satRawdataExportFilename', () => {
   it('slugifies the exam title and stamps the date', () => {
     expect(satRawdataExportFilename('SAT Simulation Test (May - Aug 2026)', new Date('2026-09-28T00:00:00Z')))
-      .toBe('sat-rawdata-sat-simulation-test-may-aug-2026-2026-09-28.csv');
-    expect(satRawdataExportFilename(undefined, new Date('2026-09-28T00:00:00Z'))).toBe('sat-rawdata-2026-09-28.csv');
+      .toBe('sat-rawdata-sat-simulation-test-may-aug-2026-2026-09-28.xlsx');
+    expect(satRawdataExportFilename(undefined, new Date('2026-09-28T00:00:00Z'))).toBe('sat-rawdata-2026-09-28.xlsx');
   });
 });

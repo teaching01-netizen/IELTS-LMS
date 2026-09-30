@@ -1,20 +1,4 @@
-import { downloadCsvRows } from '../../../utils/csvExport';
-import { resultsGateway } from '../infrastructure/resultsGateway';
-
-/**
- * Wire payload for GET /v1/results/sat/export/rawdata. The backend owns the
- * schema, ordering, row generation, and 50-column validation; this client only
- * serializes the rows through the shared CSV utility.
- */
-export interface SatRawdataExportPayload {
-  schemaVersion: number;
-  examId: string;
-  scheduleId: string;
-  columnCount: number;
-  rowCount: number;
-  headerRows: string[][];
-  rows: string[][];
-}
+import { downloadBlob } from '../../../utils/downloadBlob';
 
 function slugify(value: string): string {
   return value
@@ -28,21 +12,39 @@ function slugify(value: string): string {
 export function satRawdataExportFilename(examTitle: string | undefined, date: Date): string {
   const stamp = date.toISOString().slice(0, 10);
   const slug = slugify(examTitle ?? '');
-  return slug ? `sat-rawdata-${slug}-${stamp}.csv` : `sat-rawdata-${stamp}.csv`;
+  return slug ? `sat-rawdata-${slug}-${stamp}.xlsx` : `sat-rawdata-${stamp}.xlsx`;
 }
 
-/**
- * Fetches the RAWDATA projection for one Student Access group and triggers the
- * download. Returns the exported row count so the caller can surface feedback.
- */
-export async function downloadSatRawdataCsv(
+async function responseErrorMessage(response: Response): Promise<string> {
+  try {
+    const payload: unknown = await response.json();
+    if (
+      payload !== null &&
+      typeof payload === 'object' &&
+      'message' in payload &&
+      typeof payload.message === 'string' &&
+      payload.message.trim()
+    ) {
+      return payload.message;
+    }
+  } catch {
+    // Fall through to a status-based error for non-JSON responses.
+  }
+  return `SAT RAWDATA export could not be downloaded (${response.status}).`;
+}
+
+/** Fetches and downloads the section-specific SAT RAWDATA workbook. */
+export async function downloadSatRawdataXlsx(
   examId: string,
   scheduleId: string,
   examTitle?: string,
-): Promise<number> {
-  const payload = await resultsGateway.get<SatRawdataExportPayload>(
-    `/v1/results/sat/export/rawdata?examId=${encodeURIComponent(examId)}&scheduleId=${encodeURIComponent(scheduleId)}`,
+): Promise<void> {
+  const response = await fetch(
+    `/api/v1/results/sat/export/rawdata?examId=${encodeURIComponent(examId)}&scheduleId=${encodeURIComponent(scheduleId)}&format=xlsx`,
+    { credentials: 'same-origin' },
   );
-  downloadCsvRows(satRawdataExportFilename(examTitle, new Date()), payload.headerRows, payload.rows);
-  return payload.rowCount ?? payload.rows.length;
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  downloadBlob(satRawdataExportFilename(examTitle, new Date()), await response.blob());
 }

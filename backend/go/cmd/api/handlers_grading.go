@@ -1165,9 +1165,28 @@ func resultsSATRawdataExportHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "examId and scheduleId are required."))
 			return
 		}
+		format := strings.TrimSpace(r.URL.Query().Get("format"))
+		if format != "" && format != "xlsx" {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "format must be xlsx when provided."))
+			return
+		}
 		out, err := app.Results.ExportSATRawdata(r.Context(), actorOf(r.Context()), examID, scheduleID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
+			return
+		}
+		if format == "xlsx" {
+			workbook, err := resultsdomain.BuildSATRawdataXLSX(out)
+			if err != nil {
+				log.Printf("sat rawdata workbook generation failed: %v", err)
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeInternal, "SAT RAWDATA workbook could not be generated."))
+				return
+			}
+			w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+			w.Header().Set("Content-Disposition", `attachment; filename="sat-rawdata.xlsx"`)
+			w.Header().Set("Cache-Control", "private, no-store")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(workbook)
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, out)

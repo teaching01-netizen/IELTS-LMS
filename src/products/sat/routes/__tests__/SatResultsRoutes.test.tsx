@@ -9,9 +9,9 @@ const useSatResultsQueryMock = vi.hoisted(() => vi.fn());
 const useSatAttemptsQueryMock = vi.hoisted(() => vi.fn());
 const useSatResultQueryMock = vi.hoisted(() => vi.fn());
 const useSatAttemptAnswersQueryMock = vi.hoisted(() => vi.fn());
-const downloadSatRawdataCsvMock = vi.hoisted(() => vi.fn());
+const downloadSatRawdataXlsxMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/results/api/satRawdataExport', () => ({
-  downloadSatRawdataCsv: downloadSatRawdataCsvMock,
+  downloadSatRawdataXlsx: downloadSatRawdataXlsxMock,
 }));
 vi.mock('../../../../features/results/api/satResultsQueries', () => ({
   useSatResultsQuery: useSatResultsQueryMock,
@@ -51,7 +51,7 @@ function renderResultsRoute(initialEntry = '/sat/results') {
 describe('SAT Results hierarchy', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    downloadSatRawdataCsvMock.mockResolvedValue(4);
+    downloadSatRawdataXlsxMock.mockResolvedValue(undefined);
     useSatResultsQueryMock.mockReturnValue({ data: accessGroups, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
     useSatAttemptsQueryMock.mockImplementation((_examId: string, scheduleId: string, offset: number) => ({
       data: scheduleId === 'schedule-1' ? (offset === 0 ? pageOne : pageTwo) : { items: [], total: 0, offset, limit: 50, hasMore: false },
@@ -76,42 +76,42 @@ describe('SAT Results hierarchy', () => {
     expect(screen.queryByText('John Smith')).not.toBeInTheDocument();
   });
 
-  it('exports the RAWDATA CSV for the selected Student Access group', async () => {
+  it('exports the RAWDATA workbook for the selected Student Access group', async () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
-    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA CSV/ }));
-    await waitFor(() => expect(downloadSatRawdataCsvMock).toHaveBeenCalledWith('sat-1', 'schedule-1', 'Saturday 9 AM'));
+    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA XLSX/ }));
+    await waitFor(() => expect(downloadSatRawdataXlsxMock).toHaveBeenCalledWith('sat-1', 'schedule-1', 'Saturday 9 AM'));
   });
 
   it('surfaces a failed RAWDATA export and offers the button again', async () => {
-    downloadSatRawdataCsvMock.mockRejectedValue(new Error('Export failed: 500'));
+    downloadSatRawdataXlsxMock.mockRejectedValue(new Error('Export failed: 500'));
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
-    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA CSV/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA XLSX/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Export failed: 500');
-    await waitFor(() => expect(screen.getByRole('button', { name: /Export RAWDATA CSV/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export RAWDATA XLSX/ })).toBeEnabled());
   });
 
   it('blocks a second RAWDATA export while the first is still running', async () => {
-    let finishExport: (rows: number) => void = () => undefined;
-    downloadSatRawdataCsvMock.mockImplementation(
-      () => new Promise<number>((resolve) => { finishExport = resolve; }),
+    let finishExport: () => void = () => undefined;
+    downloadSatRawdataXlsxMock.mockImplementation(
+      () => new Promise<void>((resolve) => { finishExport = resolve; }),
     );
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
 
-    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA CSV/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA XLSX/ }));
 
     const pendingButton = await screen.findByRole('button', { name: /Exporting/ });
     expect(pendingButton).toBeDisabled();
     fireEvent.click(pendingButton);
-    expect(downloadSatRawdataCsvMock).toHaveBeenCalledTimes(1);
+    expect(downloadSatRawdataXlsxMock).toHaveBeenCalledTimes(1);
 
-    finishExport(4);
-    await waitFor(() => expect(screen.getByRole('button', { name: /Export RAWDATA CSV/ })).toBeEnabled());
+    finishExport();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export RAWDATA XLSX/ })).toBeEnabled());
   });
 
   it('only offers the RAWDATA export inside a Student Access group', () => {
     renderResultsRoute('/sat/results?exam=sat-1');
-    expect(screen.queryByRole('button', { name: /Export RAWDATA CSV/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Export RAWDATA XLSX/ })).not.toBeInTheDocument();
   });
 
   it('keeps attempts inside their schedule and opens the existing detail by result id', () => {

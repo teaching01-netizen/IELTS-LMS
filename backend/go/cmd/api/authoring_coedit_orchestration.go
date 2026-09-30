@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"strings"
@@ -419,8 +420,10 @@ func coeditScopeCloseGuard(app *App, reason authoringcoedit.CloseReason, param s
 	}
 }
 
-// coeditQuestionDeleteGuard freezes the target question's room (if any) before
-// the fenced delete, then closes it with question_deleted.
+// coeditQuestionDeleteGuard freezes only the target question's legacy prompt
+// room before the fenced delete, then closes it with question_deleted. The v2
+// workspace room is exam-wide and remains open; its materializer ignores a
+// question that the structural delete has removed.
 func coeditQuestionDeleteGuard(app *App, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !app.CoeditCapability() {
@@ -437,23 +440,42 @@ func coeditQuestionDeleteGuard(app *App, next http.HandlerFunc) http.HandlerFunc
 			next(w, r)
 			return
 		}
-		// Resolve the room via its exam so the control call carries a name the
-		// service already knows about.
+		// Resolve the question's exam, then select only its question-scoped
+		// documents. CoeditActiveForQuestion also counts an exam-wide workspace,
+		// which must not be closed for a single-question deletion.
 		var examID string
-		if app.DB != nil {
-			_ = app.DB.QueryRowContext(r.Context(), `SELECT e.id FROM assessment_exam_questions eq
+		if app.DB == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
+			return
+		}
+		if err := app.DB.QueryRowContext(r.Context(), `SELECT e.id FROM assessment_exam_questions eq
  JOIN assessment_modules m ON m.id = eq.module_id
  JOIN assessment_sections s ON s.id = m.section_id
  JOIN exam_versions v ON v.id = s.exam_version_id
- JOIN exam_entities e ON e.id = v.exam_id WHERE eq.id = ?`, examQuestionID).Scan(&examID)
+ JOIN exam_entities e ON e.id = v.exam_id WHERE eq.id = ?`, examQuestionID).Scan(&examID); err != nil {
+			if err == sql.ErrNoRows {
+				next(w, r)
+				return
+			}
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
+			return
 		}
-		var names []authoringcoedit.DocumentName
-		if examID != "" {
-			names, err = coeditActiveDocuments(r.Context(), app, examID)
-			if err != nil {
+		documents, err := app.Authoring.CoeditDocumentsForExam(r.Context(), examID)
+		if err != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
+			return
+		}
+		names := make([]authoringcoedit.DocumentName, 0, 1)
+		for _, document := range documents {
+			if document.ExamQuestionID != examQuestionID {
+				continue
+			}
+			name, nameErr := authoringcoedit.NewDocumentName(document.ID)
+			if nameErr != nil {
 				httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
 				return
 			}
+			names = append(names, name)
 		}
 		if len(names) == 0 {
 			next(w, r)
