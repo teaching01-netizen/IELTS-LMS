@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Editor } from "@tiptap/react";
 import type { StructuredContent } from "../../contracts/assessment";
@@ -59,12 +59,13 @@ function deferred<T>() {
   return { promise, resolve };
 }
 async function mountComposer(
-  capabilities: Readonly<RichComposerCapabilities> = SAT_RICH_COMPOSER_CAPABILITIES
+  capabilities: Readonly<RichComposerCapabilities> = SAT_RICH_COMPOSER_CAPABILITIES,
+  initial: StructuredContent = plainContentFromText("")
 ) {
   const changed = vi.fn<(value: StructuredContent) => void>();
   const notice = vi.fn();
   function ControlledComposer() {
-    const [value, setValue] = useState(() => plainContentFromText(""));
+    const [value, setValue] = useState(() => initial);
     return (
       <FastQuestionComposer
         label="SAT paste regression"
@@ -80,7 +81,7 @@ async function mountComposer(
     );
   }
   const rendered = render(<ControlledComposer />);
-  const textbox = await screen.findByRole("textbox", { name: "SAT paste regression" });
+  const textbox = await within(rendered.container).findByRole("textbox", { name: "SAT paste regression" });
   const editor = (textbox as HTMLElement & { editor: Editor }).editor;
   editors.push(editor);
   act(() => {
@@ -128,6 +129,93 @@ afterEach(() => {
 });
 
 describe("SAT production composer clipboard integration", () => {
+  it("copies the whole current table and pastes its values, math, marks, spans, widths, and alignment", async () => {
+    const copied: Record<string, Blob>[] = [];
+    const write = vi.fn(async (items: { data: Record<string, Blob> }[]) => {
+      copied.push(items[0]!.data);
+    });
+    vi.stubGlobal("ClipboardItem", class {
+      constructor(public data: Record<string, Blob>) {}
+    });
+    vi.stubGlobal("navigator", new Proxy(navigator, {
+      get: (target, property) => property === "clipboard" ? { write } : Reflect.get(target, property, target),
+    }));
+    const p = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+    const initial: StructuredContent = { version: 2, nodes: [], document: { type: "doc", content: [
+      { type: "table", attrs: { cellAlignment: "center" }, content: [
+        { type: "tableRow", content: [
+          { type: "tableHeader", attrs: { colwidth: [140] }, content: [p("Answer")] },
+          { type: "tableHeader", attrs: { colwidth: [180] }, content: [p("Accepted")] },
+        ] },
+        { type: "tableRow", content: [
+          { type: "tableCell", attrs: { align: "right", colwidth: [140] }, content: [
+            { type: "paragraph", content: [{ type: "inlineMath", attrs: { latex: "\\frac{7}{2}" } }] },
+            p("3.5"),
+          ] },
+          { type: "tableCell", attrs: { colwidth: [180] }, content: [
+            { type: "paragraph", content: [{ type: "text", text: "3.50", marks: [{ type: "bold" }, { type: "italic" }] }] },
+          ] },
+        ] },
+        { type: "tableRow", content: [
+          { type: "tableCell", attrs: { colspan: 2, colwidth: [140, 180] }, content: [p("Merged answer")] },
+        ] },
+        { type: "tableRow", content: [
+          { type: "tableCell", content: [{ type: "paragraph" }] },
+          { type: "tableCell", content: [p("4")] },
+        ] },
+      ] },
+      p("Other content must not be copied"),
+      { type: "table", content: [{ type: "tableRow", content: [
+        { type: "tableCell", content: [p("Sibling table")] },
+      ] }] },
+    ] } };
+    const source = await mountComposer(SAT_RICH_COMPOSER_CAPABILITIES, initial);
+    // Select the formula itself, so copying cannot accidentally copy only it.
+    act(() => { source.editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "inlineMath") source.editor.commands.setNodeSelection(pos);
+    }); });
+    const original = source.editor.getJSON();
+    const selection = source.editor.state.selection.toJSON();
+    source.changed.mockClear();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy table" })); });
+    expect(screen.getByText("Table copied with contents and formatting")).toBeInTheDocument();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(source.editor.getJSON()).toEqual(original);
+    expect(source.editor.state.selection.toJSON()).toEqual(selection);
+    expect(source.changed).not.toHaveBeenCalled();
+    const read = (blob: Blob) => new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(blob);
+    });
+    const html = await read(copied[0]!["text/html"]!);
+    const text = await read(copied[0]!["text/plain"]!);
+    expect(html).toContain('data-cell-alignment="center"');
+    expect(html).not.toMatch(/Other content|Sibling table|contenteditable/);
+    expect(text).toContain("\\frac{7}{2}");
+    expect(text).toContain("3.5\t3.50");
+    expect(text).toContain("Merged answer");
+    const target = await mountComposer();
+    await act(async () => { paste(target.textbox, { html, text }); });
+    await waitFor(() => expect(target.textbox.querySelector("table")).toHaveAttribute("data-cell-alignment", "center"));
+    const withoutIds = (value: unknown) => JSON.parse(JSON.stringify(value), (key, item: unknown) => key === "id" ? null : item);
+    expect(withoutIds(target.editor.getJSON().content?.[0])).toEqual(withoutIds(original.content?.[0]));
+    act(() => { target.editor.commands.undo(); });
+    expect(target.textbox.querySelector("table")).toBeNull();
+    expect(target.editor.getText()).toBe("");
+    await act(async () => { paste(source.textbox, { html, text }); });
+    const tables = source.editor.getJSON().content?.filter(node => node.type === "table");
+    expect(tables).toHaveLength(3);
+    expect(withoutIds(tables?.[1])).toEqual(withoutIds(original.content?.[0]));
+    expect(source.textbox.querySelector('td table')).toBeNull();
+    expect(source.editor.state.selection.$from.before(1)).toBe(source.editor.state.doc.child(0).nodeSize);
+    const ids: string[] = [];
+    source.editor.state.doc.descendants(node => { if (node.attrs['id']) ids.push(String(node.attrs['id'])); });
+    expect(new Set(ids).size).toBe(ids.length);
+    act(() => { source.editor.commands.undo(); });
+    expect(source.editor.getJSON()).toEqual(original);
+  });
+
   it.each([SAT_RICH_COMPOSER_CAPABILITIES, SAT_CHOICE_COMPOSER_CAPABILITIES])(
     "formats HTML-wrapped Markdown and emits bold marks",
     async (capabilities) => {

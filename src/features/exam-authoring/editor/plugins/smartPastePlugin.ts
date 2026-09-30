@@ -9,6 +9,7 @@
  */
 import { Extension, type Editor } from "@tiptap/react";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
+import { closeHistory } from "@tiptap/pm/history";
 import type { Slice } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
 import type { RichComposerCapabilities } from "../RichQuestionComposer";
@@ -19,6 +20,7 @@ import type {
 } from "../ingestion/application/ingestClipboard";
 import type { ImportDocument } from "../ingestion/domain/importDocument";
 import { destroyTransientUploads } from "../ingestionImagePipe";
+import { copiedTableSlice, currentTable } from "../tableClipboard";
 
 export interface SmartPasteTarget {
   inTable: boolean;
@@ -122,6 +124,30 @@ export const SmartPastePlugin = Extension.create<SmartPastePluginOptions>({
             if (files.length === 0 && !html && !text) return false;
             event.preventDefault();
             const target = targetFromView(view, opts.capabilities);
+            if (files.length === 0 && opts.capabilities.table && !target.inCodeBlock) {
+              const table = copiedTableSlice(view, html, opts.capabilities);
+              if (table) {
+                let mathCount = 0;
+                let imageCount = 0;
+                table.content.descendants(node => {
+                  if (node.type.name === 'inlineMath' || node.type.name === 'blockMath') mathCount++;
+                  if (node.type.name === 'image') imageCount++;
+                });
+                const tr = closeHistory(view.state.tr);
+                // A whole-table copy pasted from a cell belongs after that table,
+                // keeping the copy intact instead of nesting it inside a cell.
+                const parent = currentTable(view);
+                if (parent) {
+                  const position = parent.pos + parent.node.nodeSize;
+                  tr.insert(position, table.content);
+                  tr.setSelection(TextSelection.near(tr.doc.resolve(position + 1)));
+                } else tr.replaceSelection(table);
+                view.dispatch(tr.scrollIntoView());
+                opts.onSmartPaste?.({ source: "html", mathCount, imageCount,
+                  tableCount: 1, canUndo: true, warnings: [] });
+                return true;
+              }
+            }
             void (async () => {
               if (view.isDestroyed) return;
               try {

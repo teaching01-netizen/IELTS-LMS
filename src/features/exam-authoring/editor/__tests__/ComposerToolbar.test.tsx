@@ -5,7 +5,8 @@ import {afterEach,describe,it,expect,vi} from 'vitest';
 import {ComposerToolbar} from '../ComposerToolbar';
 import {composerBaseExtensions, SAT_RICH_COMPOSER_CAPABILITIES as capabilities, SAT_CHOICE_COMPOSER_CAPABILITIES as choiceCapabilities} from '../RichQuestionComposer';
 import type { EditorFeedbackInput } from '../editorFeedbackCopy';
-const editors:Editor[]=[];afterEach(()=>editors.splice(0).forEach(e=>e.destroy()));
+import * as tableClipboard from '../tableClipboard';
+const editors:Editor[]=[];afterEach(()=>{editors.splice(0).forEach(e=>e.destroy());vi.restoreAllMocks();});
 function make(content:object|string){const e=new Editor({extensions:composerBaseExtensions(false),content});editors.push(e);return e;}
 function renderToolbar(editor:Editor, caps=capabilities, onFeedback=vi.fn()){
  render(<ComposerToolbar editor={editor} capabilities={caps} onOpenDialog={vi.fn()} onTableMutation={vi.fn()} onFeedback={onFeedback}/>);
@@ -112,6 +113,28 @@ describe('stable composer toolbar',()=>{
   expect(screen.getByRole('button',{name:'Center all cells'})).toHaveAttribute('aria-pressed','true');
   act(()=>{editor.commands.setNodeSelection(editor.state.doc.child(0).nodeSize);});
   expect(screen.queryByRole('group',{name:'Table tools'})).toBeNull();
+ });
+ it('disables Copy table during a write and reports a failed copy before allowing a retry',async()=>{
+  const editor=make({type:'doc',content:[{type:'paragraph'}]});
+  editor.commands.insertTable({rows:2,cols:2,withHeaderRow:true});
+  let reject!:(reason:Error)=>void;
+  const copy=vi.spyOn(tableClipboard,'copyCurrentTable')
+   .mockImplementationOnce(()=>new Promise<void>((_resolve,fail)=>{reject=fail;}))
+   .mockResolvedValueOnce(undefined);
+  const feedback=renderToolbar(editor);
+  const button=screen.getByRole('button',{name:'Copy table'});
+  const original=editor.getJSON();
+  fireEvent.click(button);
+  expect(button).toBeDisabled();
+  expect(button).toHaveTextContent('Copying…');
+  expect(feedback).not.toHaveBeenCalled();
+  await act(async()=>{reject(new Error('denied'));});
+  expect(button).toBeEnabled();
+  expect(feedback).toHaveBeenLastCalledWith({message:'Could not copy the table. Check clipboard access and try again.'});
+  await act(async()=>{fireEvent.click(button);});
+  expect(copy).toHaveBeenCalledTimes(2);
+  expect(feedback).toHaveBeenLastCalledWith({message:'Table copied with contents and formatting'});
+  expect(editor.getJSON()).toEqual(original);
  });
  it('teaches the text styles by rendering them at the size and weight they apply',()=>{
   const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]}]});

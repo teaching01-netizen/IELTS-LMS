@@ -1,4 +1,5 @@
 import { useEditorState, type Editor } from '@tiptap/react';
+import { useState } from 'react';
 import {
   Bold,
   Code,
@@ -17,6 +18,7 @@ import { EditorControl } from './EditorControl';
 import type { RichComposerCapabilities } from './RichQuestionComposer';
 import { resolveComposerContext, selectionKindOf, type ComposerContext } from './composerContext';
 import type { EditorFeedbackPublisher } from './editorFeedbackCopy';
+import { copyCurrentTable } from './tableClipboard';
 
 export interface ComposerToolbarProps {
   editor: Editor;
@@ -43,6 +45,7 @@ export interface ComposerToolbarProps {
  * there is one button recipe in the editor, not one per surface.
  */
 export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTableMutation, onFeedback }: ComposerToolbarProps) {
+  const [copyingTable, setCopyingTable] = useState(false);
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -252,6 +255,25 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
               }}
             >
               Center all cells
+            </EditorControl>
+            <EditorControl
+              className="sat-rich-editor__toolbar-button sat-rich-editor__table-action"
+              label="Copy table"
+              tooltipLabel="Copy the entire table with contents and formatting"
+              disabled={copyingTable}
+              onSelect={async () => {
+                setCopyingTable(true);
+                try {
+                  await copyCurrentTable(editor.view);
+                  onFeedback({ message: 'Table copied with contents and formatting' });
+                } catch {
+                  onFeedback({ message: 'Could not copy the table. Check clipboard access and try again.' });
+                } finally {
+                  setCopyingTable(false);
+                }
+              }}
+            >
+              {copyingTable ? 'Copying…' : 'Copy table'}
             </EditorControl>
             <span className="sat-rich-editor__table-divider" aria-hidden="true" />
             <SatMenu
