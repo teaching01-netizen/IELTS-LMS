@@ -65,17 +65,22 @@ func TestExportSATRawdataMixedStatesQuestionRangesAndV2Priority(t *testing.T) {
 			AddRow("attempt-rw", "mod-rw-1", "reading-writing", "rw-1", "base", "submitted", satRawdataTestVersion, 1, 1).
 			AddRow("attempt-math", "mod-math-1", "math", "m-1", "base", "active", satRawdataTestVersion, 2, 1).
 			AddRow("attempt-notstarted", "mod-rw-2", "reading-writing", "rw-2", "higher_branch", "not_started", satRawdataTestVersion, 1, 2))
+	cells := sqlmock.NewRows(satRawdataCellColumns).
+		AddRow("attempt-rw", "mod-rw-1", "eq-1", 0, singleChoice("B"), nil, `"B"`).
+		AddRow("attempt-rw", "mod-rw-1", "eq-2", 1, singleChoice("A"), nil, `"C"`).
+		AddRow("attempt-rw", "mod-rw-1", "eq-3", 2, singleChoice("D"), nil, nil).
+		AddRow("attempt-rw", "mod-rw-1", "eq-4", 3, `{"kind":"single_choice"}`, nil, `"A"`).
+		AddRow("attempt-math", "mod-math-1", "eq-5", 0, singleChoice("B"), `{"answer":"B"}`, nil).
+		AddRow("attempt-math", "mod-math-1", "eq-6", 1, singleChoice("B"), `{"answer":"B"}`, `"A"`).
+		AddRow("attempt-math", "mod-math-1", "eq-7", 22, singleChoice("B"), nil, `"B"`).
+		AddRow("attempt-notstarted", "mod-rw-2", "eq-8", 0, singleChoice("B"), nil, `"B"`)
+	// Keep all 22 Math placements present; the extra placement is Q23 and
+	// cannot fit the section's fixed range, regardless of its answer.
+	for q := 2; q < SATRawdataMathQuestions; q++ {
+		cells.AddRow("attempt-math", "mod-math-1", "math-q"+itoa(q+1), q, nil, nil, nil)
+	}
 	mock.ExpectQuery(satRawdataCellQueryPattern).
-		WithArgs("exam-1", "schedule-1").
-		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
-			AddRow("attempt-rw", "mod-rw-1", "eq-1", 0, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-rw", "mod-rw-1", "eq-2", 1, singleChoice("A"), nil, `"C"`).
-			AddRow("attempt-rw", "mod-rw-1", "eq-3", 2, singleChoice("D"), nil, nil).
-			AddRow("attempt-rw", "mod-rw-1", "eq-4", 3, `{"kind":"single_choice"}`, nil, `"A"`).
-			AddRow("attempt-math", "mod-math-1", "eq-5", 0, singleChoice("B"), `{"answer":"B"}`, nil).
-			AddRow("attempt-math", "mod-math-1", "eq-6", 1, singleChoice("B"), `{"answer":"B"}`, `"A"`).
-			AddRow("attempt-math", "mod-math-1", "eq-7", 22, singleChoice("B"), nil, `"B"`).
-			AddRow("attempt-notstarted", "mod-rw-2", "eq-8", 0, singleChoice("B"), nil, `"B"`))
+		WithArgs("exam-1", "schedule-1").WillReturnRows(cells)
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -1001,8 +1006,8 @@ func TestExportSATRawdataDoesNotFilterAttemptState(t *testing.T) {
 }
 
 // TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder covers TC-QUESTION-001
-// and TC-QUESTION-002: the question a cell lands in is decided by the
-// zero-based assessment_exam_questions.display_order, never by arrival order
+// and TC-QUESTION-002: the question a cell lands in is decided by sorting
+// assessment_exam_questions.display_order, never by arrival order
 // (or question UUID).
 func TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -1020,13 +1025,17 @@ func TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder(t *testing.T) {
 	mock.ExpectQuery(satRawdataModuleQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns).
 			AddRow("attempt-1", "mod-rw", "reading-writing", "rw-m1", "base", "submitted", satRawdataTestVersion, 1, 1))
-	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
-		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
-			// Delivered out of order: Q3 and Q27 arrive before Q1 and Q2.
-			AddRow("attempt-1", "mod-rw", "uuid-z", 2, key, nil, `"B"`).
-			AddRow("attempt-1", "mod-rw", "uuid-q27", 26, key, nil, `"B"`).
-			AddRow("attempt-1", "mod-rw", "uuid-a", 0, key, nil, nil).
-			AddRow("attempt-1", "mod-rw", "uuid-b", 1, key, nil, `"A"`))
+	cells := sqlmock.NewRows(satRawdataCellColumns).
+		// Delivered out of order: Q3 and Q27 arrive before Q1 and Q2.
+		AddRow("attempt-1", "mod-rw", "uuid-z", 2, key, nil, `"B"`).
+		AddRow("attempt-1", "mod-rw", "uuid-q27", 26, key, nil, `"B"`).
+		AddRow("attempt-1", "mod-rw", "uuid-a", 0, key, nil, nil).
+		AddRow("attempt-1", "mod-rw", "uuid-b", 1, key, nil, `"A"`)
+	for q := 3; q < SATRawdataReadingWritingQuestions-1; q++ {
+		// Unknown keys reserve their delivered positions with blank cells.
+		cells.AddRow("attempt-1", "mod-rw", "uuid-q"+itoa(q+1), q, nil, nil, nil)
+	}
+	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(cells)
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -1051,7 +1060,7 @@ func TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder(t *testing.T) {
 	}
 	for q := 3; q < SATRawdataReadingWritingQuestions-1; q++ {
 		if row[satRawdataColFirstQuestion+q] != "" {
-			t.Fatalf("Q%d was never administered and must stay blank, got %q", q+1, row[satRawdataColFirstQuestion+q])
+			t.Fatalf("Q%d has an unknown key and must stay blank, got %q", q+1, row[satRawdataColFirstQuestion+q])
 		}
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -1059,12 +1068,65 @@ func TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder(t *testing.T) {
 	}
 }
 
-// TestExportSATRawdataLeavesGappedQuestionBlankWithoutShifting covers
+func TestAssembleSATRawdataMatchesDeliveredQuestionPositionsWithGaps(t *testing.T) {
+	for _, section := range []struct {
+		key   string
+		count int
+	}{
+		{SATRawdataSectionReadingWriting, 27},
+		{SATRawdataSectionMath, 22},
+	} {
+		t.Run(section.key, func(t *testing.T) {
+			attempt := satRawdataAttempt{ID: "attempt", PublishedVersionID: satRawdataTestVersion}
+			module := satRawdataModule{
+				AttemptID: attempt.ID, ModuleID: "module", SectionKey: section.key,
+				State: "submitted", ExamVersionID: satRawdataTestVersion,
+			}
+			cells := make([]satRawdataCell, 0, section.count)
+			want := make([]string, section.count)
+			correct := 0
+			for q := section.count - 1; q >= 0; q-- {
+				order := q
+				if q >= 2 {
+					order++ // A replaced question leaves sort key 2 absent.
+				}
+				value := []string{"1", "0", "No answer", ""}[q%4]
+				if q == section.count-1 {
+					value = "1"
+				}
+				want[q] = value
+				if value == "1" {
+					correct++
+				}
+				cells = append(cells, satRawdataCell{DisplayOrder: order, Value: value})
+			}
+			out := assembleSATRawdata([]satRawdataAttempt{attempt},
+				map[string][]satRawdataModule{attempt.ID: {module}},
+				map[string][]satRawdataCell{satRawdataCellGroupKey(attempt.ID, module.ModuleID): cells}, "exam", "schedule")
+			row := out.Rows[0]
+			for q, value := range want {
+				if got := row[satRawdataColFirstQuestion+q]; got != value {
+					t.Fatalf("delivered Q%d = %q, want %q", q+1, got, value)
+				}
+			}
+			if row[satRawdataColPointsReceived] != itoa(correct) || row[satRawdataColPointsAvailable] != itoa(section.count) {
+				t.Fatalf("points = %q/%q, want %d/%d", row[satRawdataColPointsReceived], row[satRawdataColPointsAvailable], correct, section.count)
+			}
+			for q := section.count; q < 27; q++ {
+				if row[satRawdataColFirstQuestion+q] != "" {
+					t.Fatalf("Q%d outside section range must stay blank", q+1)
+				}
+			}
+		})
+	}
+}
+
+// TestExportSATRawdataLeavesMissingFinalQuestionBlank covers
 // TC-QUESTION-003: a version whose module is missing Q27 exports Q27 blank and
 // never slides Q26 (or any earlier question) up a slot. Points keep the
 // section's fixed denominator, so "26 of 27" stays visible rather than looking
 // like a complete paper.
-func TestExportSATRawdataLeavesGappedQuestionBlankWithoutShifting(t *testing.T) {
+func TestExportSATRawdataLeavesMissingFinalQuestionBlank(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)

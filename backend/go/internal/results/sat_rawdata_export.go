@@ -3,6 +3,7 @@ package results
 import (
 	"context"
 	"database/sql"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -426,19 +427,17 @@ func assembleSATRawdata(attempts []satRawdataAttempt, modulesByAttempt map[strin
 
 			values := make([]string, questionCount)
 			if module.State != satRawdataModuleStateNotStarted {
-				byOrder := map[int]string{}
-				for _, cell := range cellsByModule[satRawdataCellGroupKey(module.AttemptID, module.ModuleID)] {
-					// assessment_exam_questions.display_order is zero-based:
-					// order 0 is Q1 and order 26 is Q27.
-					if cell.DisplayOrder >= 0 && cell.DisplayOrder < questionCount {
-						byOrder[cell.DisplayOrder] = cell.Value
-					}
-				}
+				cells := append([]satRawdataCell(nil), cellsByModule[satRawdataCellGroupKey(module.AttemptID, module.ModuleID)]...)
+				// Student delivery numbers the sorted questions sequentially.
+				// display_order is a sort key and can have gaps after authoring edits.
+				sort.Slice(cells, func(i, j int) bool { return cells[i].DisplayOrder < cells[j].DisplayOrder })
 				received := 0
-				for i := 0; i < questionCount; i++ {
-					value := byOrder[i]
-					values[i] = value
-					if value == SATRawdataAnswerCorrect {
+				for i, cell := range cells {
+					if i >= questionCount {
+						break
+					}
+					values[i] = cell.Value
+					if cell.Value == SATRawdataAnswerCorrect {
 						received++
 					}
 				}
