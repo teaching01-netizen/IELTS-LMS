@@ -11,6 +11,9 @@ type StudentZoomableMediaProps = {
   modalImageClassName?: string | undefined;
   zoomStep?: number | undefined;
   renderOverlay?: ((zoom: number) => React.ReactNode) | undefined;
+  openOnMount?: boolean | undefined;
+  renderTrigger?: boolean | undefined;
+  onDismiss?: (() => void) | undefined;
 };
 
 const MIN_ZOOM = 1;
@@ -31,6 +34,9 @@ export function StudentZoomableMedia({
   modalImageClassName,
   zoomStep = 0.2,
   renderOverlay,
+  openOnMount = false,
+  renderTrigger = true,
+  onDismiss,
 }: StudentZoomableMediaProps) {
   // Memoize on contents, not array identity: callers typically pass a freshly
   // built array each render, which would defeat the memo and retrigger effects.
@@ -41,7 +47,7 @@ export function StudentZoomableMedia({
     [sourcesKey],
   );
   const [sourceIndex, setSourceIndex] = useState(0);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(openOnMount);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [intrinsicSize, setIntrinsicSize] = useState<IntrinsicSize | null>(null);
   const [fitScale, setFitScale] = useState(1);
@@ -179,6 +185,7 @@ export function StudentZoomableMedia({
       focusRestoreTimerRef.current = null;
       triggerButtonRef.current?.focus();
     }, 0);
+    onDismiss?.();
   };
 
   const handleImageError = () => {
@@ -225,39 +232,41 @@ export function StudentZoomableMedia({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleOpen}
-        onContextMenu={handleContextMenu}
-        ref={triggerButtonRef}
-        className={`group relative block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 text-left ${className ?? ''}`}
-        aria-label={label}
-      >
-        <div className="relative">
-          <img
-            src={currentSource}
-            alt={alt}
-            className={`h-auto w-full object-contain select-none ${imageClassName ?? ''}`}
-            loading="lazy"
-            draggable={false}
-            referrerPolicy="no-referrer"
-            onError={handleImageError}
-            onContextMenu={handleContextMenu}
-            onDragStart={handleContextMenu}
-            style={{
-              WebkitTouchCallout: 'none',
-              WebkitUserSelect: 'none',
-              userSelect: 'none',
-              touchAction: 'manipulation',
-            }}
-          />
-          {renderOverlay ? (
-            <div className="pointer-events-none absolute inset-0">
-              {renderOverlay(1)}
-            </div>
-          ) : null}
-        </div>
-      </button>
+      {renderTrigger ? (
+        <button
+          type="button"
+          onClick={handleOpen}
+          onContextMenu={handleContextMenu}
+          ref={triggerButtonRef}
+          className={`group relative block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 text-left ${className ?? ''}`}
+          aria-label={label}
+        >
+          <div className="relative">
+            <img
+              src={currentSource}
+              alt={alt}
+              className={`h-auto w-full object-contain select-none ${imageClassName ?? ''}`}
+              loading="lazy"
+              draggable={false}
+              referrerPolicy="no-referrer"
+              onError={handleImageError}
+              onContextMenu={handleContextMenu}
+              onDragStart={handleContextMenu}
+              style={{
+                WebkitTouchCallout: 'none',
+                WebkitUserSelect: 'none',
+                userSelect: 'none',
+                touchAction: 'manipulation',
+              }}
+            />
+            {renderOverlay ? (
+              <div className="pointer-events-none absolute inset-0">
+                {renderOverlay(1)}
+              </div>
+            ) : null}
+          </div>
+        </button>
+      ) : null}
 
       {isOpen ? (
         <div

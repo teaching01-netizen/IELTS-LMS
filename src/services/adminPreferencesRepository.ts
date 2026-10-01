@@ -10,6 +10,8 @@ import { ApiError } from '../shared/api-client/errors';
 let defaultsRevision: number | undefined;
 let inFlightLoad: Promise<ExamConfig> | null = null;
 
+const DEFAULTS_LOAD_TIMEOUT_MS = 10_000;
+
 function isConflict(error: unknown): boolean {
   if (error instanceof ApiError) {
     return error.status === 409;
@@ -44,13 +46,16 @@ class AdminPreferencesRepository {
       const payload = await backendGet<{
         configSnapshot: ExamConfig;
         revision?: number | undefined;
-      }>('/v1/settings/exam-defaults');
+      }>('/v1/settings/exam-defaults', { timeout: DEFAULTS_LOAD_TIMEOUT_MS, retries: 0 });
       // Revision refresh: always adopt the server's latest revision so the
       // next save carries a fresh base instead of a stale cached number.
       defaultsRevision = payload.revision;
       return payload.configSnapshot;
     } catch (error) {
       if (!isBackendNotFound(error)) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error('Loading saved exam defaults timed out. Check the backend connection and retry.');
+        }
         throw error;
       }
 

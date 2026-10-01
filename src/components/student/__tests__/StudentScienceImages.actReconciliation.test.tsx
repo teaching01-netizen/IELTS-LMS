@@ -79,6 +79,52 @@ describe("Phase 04 ACT science runtime images", () => {
     expect(vi.mocked(onChange).mock.calls[0]![0]).toBe("opt-a");
   });
 
+  it("crosses out choice figures with their option and restores the figure with Undo", () => {
+    const block = singleMcqBlock();
+
+    function Harness() {
+      const [eliminatedOptionIds, setEliminatedOptionIds] = React.useState<string[]>([]);
+      const toggleElimination = (optionId: string) => {
+        setEliminatedOptionIds((current) =>
+          current.includes(optionId)
+            ? current.filter((candidate) => candidate !== optionId)
+            : [...current, optionId],
+        );
+      };
+
+      return (
+        <QuestionRenderer
+          question={block.questions![0]!}
+          block={block}
+          number={1}
+          answer=""
+          onChange={() => {}}
+          eliminatedOptionIds={eliminatedOptionIds}
+          onToggleOptionElimination={toggleElimination}
+        />
+      );
+    }
+
+    render(<Harness />);
+    const optionFigure = screen.getByAltText("Option A figure");
+    expect(optionFigure).toBeInTheDocument();
+    expect(screen.queryByTestId("choice-elimination-overlay")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Eliminate option A" }));
+    const eliminationOverlay = screen.getByTestId("choice-elimination-overlay");
+    expect(eliminationOverlay.parentElement).toContainElement(optionFigure);
+    expect(eliminationOverlay.querySelectorAll('[data-testid="choice-elimination-mark"]')).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Option A figure for question 1" }));
+    expect(
+      screen.getByRole("dialog", { name: "Option A figure for question 1 zoomed view" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close image zoom" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore option A" }));
+    expect(screen.queryByTestId("choice-elimination-overlay")).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId("choice-elimination-mark")).toHaveLength(0);
+  });
+
   it("mounts no image for unsafe question/choice schemes (XSS-safe)", () => {
     const block = singleMcqBlock();
     block.questions![0]!.imageUrl = "javascript:alert(1)";

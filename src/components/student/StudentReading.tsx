@@ -1,9 +1,8 @@
-import React, { useCallback, useRef, useMemo } from "react";
+import React, { useCallback, useRef, useMemo, useState } from "react";
 import { ExamState, QuestionAnswer } from "../../types";
 import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
 import { getBlockQuestionCount } from "../../utils/examUtils";
 import { getStudentQuestionsForModule } from "@student/application/studentExamContentFacade";
-import { FormattedText } from "./FormattedText";
 import { RichTextHighlighter } from "./RichTextHighlighter";
 import { StudentQuestionText } from "./StudentQuestionText";
 import { StudentZoomableMedia } from "./StudentZoomableMedia";
@@ -13,13 +12,13 @@ import { useSplitPaneResize } from "./useSplitPaneResize";
 import { sanitizeReadingPassageHtml } from "./sanitizeReadingPassageHtml";
 import {
   hasHtmlMarkup,
-  normalizeReadingContentForHighlightedFormattedText,
   normalizeReadingPlainTextForDisplay,
 } from "./normalizeReadingPassageText";
 import { isInstructionReferencePlacement } from "../../utils/referenceImagePlacement";
 import { StudentMaterialWithQuestionPane } from "./StudentMaterialWithQuestionPane";
 import { StudentModuleEmptyState } from "./StudentModuleEmptyState";
 import type { StudentLayoutMode } from "./layout/studentLayoutMode";
+import { getImageUrlCandidates } from "../../utils/imageUrl";
 
 interface StudentReadingProps {
   state: ExamState;
@@ -53,7 +52,6 @@ interface ReadingPassagePaneProps {
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor | undefined;
   highlightClassName: string | undefined;
-  highlightPassageText: string;
   renderedPassageContent: string;
   passageImages: ExamState["reading"]["passages"][number]["images"];
   renderPassageImageAnnotations: (
@@ -71,11 +69,22 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
   highlightEnabled,
   highlightColor,
   highlightClassName,
-  highlightPassageText,
   renderedPassageContent,
   passageImages,
   renderPassageImageAnnotations,
 }: ReadingPassagePaneProps) {
+  const [inlineImageToZoom, setInlineImageToZoom] = useState<{ src: string; alt: string } | null>(null);
+  const handleInlineImageClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const image = target.closest("img");
+    const src = image?.getAttribute("src")?.trim();
+    if (!src || !image || !event.currentTarget.contains(image) || getImageUrlCandidates(src).length === 0) {
+      return;
+    }
+    setInlineImageToZoom({ src, alt: image.getAttribute("alt")?.trim() || "Passage image" });
+  };
+
   return (
     <div
       className={`student-reading-passage-pane student-scroll-breathe h-full overflow-y-auto font-sans text-gray-900 ${
@@ -105,37 +114,44 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
       <div
         className={`student-passage-measure ${materialCompact ? "space-y-3" : "space-y-5"} break-normal text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-[0.5em] [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7`}
       >
-        {highlightEnabled ? (
-          <FormattedText
-            as="div"
-            text={highlightPassageText}
-            className="whitespace-pre-wrap break-normal"
-            highlightEnabled
-            highlightColor={highlightColor}
-            highlightClassName={highlightClassName}
-            highlightSurfaceId={`reading:passage:${passageId}`}
-            preserveInlineEmphasis
-          />
-        ) : (
+        <div onClick={handleInlineImageClick}>
           <RichTextHighlighter
             content={renderedPassageContent}
             contentType="html"
-            enabled={false}
-            className="whitespace-pre-wrap break-normal"
+            enabled={highlightEnabled}
+            className="whitespace-pre-wrap break-normal [&_img]:cursor-zoom-in"
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
+            highlightSurfaceId={`reading:passage:${passageId}`}
           />
-        )}
-        {(passageImages ?? []).map((image) => (
+        </div>
+        {inlineImageToZoom ? (
           <StudentZoomableMedia
-            key={image.id}
-            sources={[image.src]}
-            alt={image.alt}
-            label={image.alt || "Passage image"}
+            key={`${inlineImageToZoom.src}:${inlineImageToZoom.alt}`}
+            sources={getImageUrlCandidates(inlineImageToZoom.src)}
+            alt={inlineImageToZoom.alt}
+            label={inlineImageToZoom.alt}
             hint="Tap to zoom the passage image"
-            className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
-            renderOverlay={(zoom) => renderPassageImageAnnotations(image.annotations, zoom)}
+            openOnMount
+            renderTrigger={false}
+            onDismiss={() => setInlineImageToZoom(null)}
           />
+        ) : null}
+        {(passageImages ?? []).map((image) => (
+          <div
+            key={image.id}
+            className="max-w-full"
+            style={{ width: `${image.displayWidthPercent ?? 100}%` }}
+          >
+            <StudentZoomableMedia
+              sources={[image.src]}
+              alt={image.alt}
+              label={image.alt || "Passage image"}
+              hint="Tap to zoom the passage image"
+              className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
+              renderOverlay={(zoom) => renderPassageImageAnnotations(image.annotations, zoom)}
+            />
+          </div>
         ))}
       </div>
     </div>
@@ -221,10 +237,6 @@ export function StudentReading({
       ? sanitizeReadingPassageHtml(content)
       : normalizeReadingPlainTextForDisplay(content);
   }, [activePassage?.content, passageHasHtml]);
-  const highlightPassageText = useMemo(
-    () => normalizeReadingContentForHighlightedFormattedText(activePassage?.content ?? ""),
-    [activePassage?.content]
-  );
   const blockStartNumbers = useMemo(() => {
     const map = new Map<string, number>();
     let nextNumber = 1;
@@ -373,7 +385,6 @@ export function StudentReading({
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
           highlightClassName={highlightClassName}
-          highlightPassageText={highlightPassageText}
           renderedPassageContent={renderedPassageContent}
           passageImages={activePassage.images}
           renderPassageImageAnnotations={renderPassageImageAnnotations}

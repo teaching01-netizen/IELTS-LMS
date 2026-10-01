@@ -66,6 +66,10 @@ function readNonEmptyString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function readImageWidthPercent(value: unknown): 25 | 50 | 75 | 100 | null {
+  return value === 25 || value === 50 || value === 75 || value === 100 ? value : null;
+}
+
 function normalizeDiagramImageUrl(block: DiagramLabelingBlock): DiagramLabelingBlock {
   const normalizedImageUrl =
     readNonEmptyString(block.imageUrl) ??
@@ -95,6 +99,9 @@ function normalizeMcqOptions(
   return options.map((option, optionIndex) => {
     const optionValue = option as Partial<MCQOption> | undefined;
     const imageUrl = preserveImageUrl ? readNonEmptyString(optionValue?.imageUrl) : null;
+    const imageWidthPercent = preserveImageUrl
+      ? readImageWidthPercent(optionValue?.imageWidthPercent)
+      : null;
     const label = readNonEmptyString(optionValue?.label);
     return {
       id: readNonEmptyString(optionValue?.id) ?? `${idPrefix}:opt${optionIndex + 1}`,
@@ -102,6 +109,7 @@ function normalizeMcqOptions(
       isCorrect: Boolean(optionValue?.isCorrect),
       ...(label ? { label } : {}),
       ...(imageUrl ? { imageUrl } : {}),
+      ...(imageWidthPercent ? { imageWidthPercent } : {}),
     };
   });
 }
@@ -118,6 +126,9 @@ function normalizeSingleMcqBlock(block: SingleMCQBlock, preserveImageUrl = false
       (questionIndex === 0 ? block.id : `${block.id}:q${questionIndex + 1}`);
     const questionStem = readNonEmptyString(questionValue?.stem) ?? "";
     const questionImageUrl = preserveImageUrl ? readNonEmptyString(questionValue?.imageUrl) : null;
+    const imageWidthPercent = preserveImageUrl
+      ? readImageWidthPercent(questionValue?.imageWidthPercent)
+      : null;
     const questionOptions = normalizeMcqOptions(
       questionValue?.options,
       questionId,
@@ -135,6 +146,7 @@ function normalizeSingleMcqBlock(block: SingleMCQBlock, preserveImageUrl = false
           ? questionValue.skillCategory
           : undefined,
       ...(questionImageUrl ? { imageUrl: questionImageUrl } : {}),
+      ...(imageWidthPercent ? { imageWidthPercent } : {}),
     } satisfies SingleMCQQuestion;
   });
 
@@ -427,6 +439,61 @@ export function createInitialExamState(
     },
     science: {
       stimuli: [],
+    },
+  };
+}
+
+/** Creates the editor's clean starting content while preserving configured IELTS sections. */
+export function createBlankIeltsExamState(
+  title: string,
+  type: ExamType,
+  preset: ExamPreset = "Academic",
+  baseConfig?: ExamConfig,
+): ExamState {
+  const state = createInitialExamState(title, type, preset, baseConfig);
+
+  return {
+    ...state,
+    reading: {
+      ...state.reading,
+      passages: state.reading.passages.map((passage) => ({
+        ...passage,
+        content: "",
+        blocks: [],
+        images: [],
+        wordCount: 0,
+      })),
+    },
+    listening: {
+      ...state.listening,
+      parts: state.listening.parts.map((part) => ({
+        ...part,
+        pins: [],
+        blocks: [],
+      })),
+    },
+    writing: {
+      ...state.writing,
+      task1Prompt: "",
+      task2Prompt: "",
+      task1Chart: undefined,
+      tasks: (state.writing.tasks ?? []).map(({ taskId }) => ({ taskId, prompt: "" })),
+    },
+    speaking: {
+      ...state.speaking,
+      part1Topics: [],
+      cueCard: "",
+      cueCardDetails: state.speaking.cueCardDetails
+        ? {
+            ...state.speaking.cueCardDetails,
+            topic: "",
+            bullets: [],
+            timeAllocation: "",
+            evaluatorNotes: "",
+          }
+        : undefined,
+      part3Discussion: [],
+      evaluatorNotes: "",
     },
   };
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Upload, Move, CircleDot, ArrowRight, Type, Square, ZoomIn } from 'lucide-react';
+import { Upload, Move, CircleDot, ArrowRight, Type, Square, ZoomIn, RotateCcw, RotateCw } from 'lucide-react';
 import { Dialog } from './ui/Dialog';
 import type {
   StimulusAnnotation,
@@ -7,10 +7,12 @@ import type {
   StimulusImageAsset,
 } from '../types';
 import { createId } from '../utils/idUtils';
+import { rotateImageFile } from '../services/actScienceChoiceImageService';
 
 interface StimulusImageEditorProps {
   initialImage?: StimulusImageAsset;
   isOpen: boolean;
+  allowRotation?: boolean | undefined;
   onClose: () => void;
   onSave: (image: StimulusImageAsset) => void;
 }
@@ -42,11 +44,15 @@ const createEmptyImage = (): StimulusImageAsset => ({
   src: '',
   width: 840,
   zoom: 1,
+  displayWidthPercent: 100,
 });
+
+const DISPLAY_WIDTH_PRESETS = [25, 50, 75, 100] as const;
 
 export function StimulusImageEditor({
   initialImage,
   isOpen,
+  allowRotation = false,
   onClose,
   onSave,
 }: StimulusImageEditorProps) {
@@ -55,6 +61,8 @@ export function StimulusImageEditor({
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [pendingTextPoint, setPendingTextPoint] = useState<{ x: number; y: number } | null>(null);
   const [pendingTextLabel, setPendingTextLabel] = useState('Label');
+  const [isRotating, setIsRotating] = useState(false);
+  const [rotationError, setRotationError] = useState('');
   const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -62,6 +70,7 @@ export function StimulusImageEditor({
       setDraft(initialImage ?? createEmptyImage());
       setTool('pointer');
       setSelectedAnnotationId(null);
+      setRotationError('');
     }
   }, [initialImage, isOpen]);
 
@@ -113,6 +122,50 @@ export function StimulusImageEditor({
       }));
     };
     reader.readAsDataURL(file);
+  };
+
+  const rotateDraftImage = async (direction: 'left' | 'right') => {
+    if (!draft.src || isRotating) return;
+    setIsRotating(true);
+    setRotationError('');
+    try {
+      const response = await fetch(draft.src);
+      const sourceBlob = await response.blob();
+      const sourceFile = new File([sourceBlob], draft.alt || 'passage-image.jpg', {
+        type: sourceBlob.type,
+      });
+      const rotatedFile = await rotateImageFile(sourceFile, direction);
+      const reader = new FileReader();
+      const rotatedDataUrl = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => typeof reader.result === 'string'
+          ? resolve(reader.result)
+          : reject(new Error('Unable to read the rotated image.'));
+        reader.onerror = () => reject(new Error('Unable to read the rotated image.'));
+        reader.readAsDataURL(rotatedFile);
+      });
+      setDraft((current) => {
+        const rotatePoint = direction === 'right'
+          ? (x: number, y: number) => ({ x: 100 - y, y: x })
+          : (x: number, y: number) => ({ x: y, y: 100 - x });
+        return {
+          ...current,
+          src: rotatedDataUrl,
+          crop: { x: 0, y: 0, width: 100, height: 100 },
+          annotations: current.annotations.map((annotation) => ({
+            ...annotation,
+            ...rotatePoint(annotation.x, annotation.y),
+            width: annotation.height,
+            height: annotation.width,
+          })),
+        };
+      });
+    } catch (error) {
+      setRotationError(
+        error instanceof Error ? error.message : 'Unable to rotate this image.',
+      );
+    } finally {
+      setIsRotating(false);
+    }
   };
 
   const addAnnotation = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -228,6 +281,32 @@ export function StimulusImageEditor({
             <p className="text-xs font-black text-gray-400 uppercase tracking-[0.22em]">
               Crop / Resize
             </p>
+            {allowRotation && draft.src ? (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500">Rotate image</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    aria-label="Rotate image left 90 degrees"
+                    disabled={isRotating}
+                    onClick={() => void rotateDraftImage('left')}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    <RotateCcw size={14} aria-hidden="true" /> Left 90°
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Rotate image right 90 degrees"
+                    disabled={isRotating}
+                    onClick={() => void rotateDraftImage('right')}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    <RotateCw size={14} aria-hidden="true" /> Right 90°
+                  </button>
+                </div>
+                {rotationError ? <p role="alert" className="text-xs text-red-700">{rotationError}</p> : null}
+              </div>
+            ) : null}
             <label className="block text-xs text-gray-500">
               Zoom
               <input
@@ -277,6 +356,29 @@ export function StimulusImageEditor({
                 className="mt-2 w-full"
               />
             </label>
+            <div role="group" aria-label="Image display width" className="space-y-2">
+              <p className="text-xs text-gray-500">Display width</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                {DISPLAY_WIDTH_PRESETS.map((percent) => (
+                  <button
+                    key={percent}
+                    type="button"
+                    aria-pressed={(draft.displayWidthPercent ?? 100) === percent}
+                    onClick={() => setDraft((current) => ({
+                      ...current,
+                      displayWidthPercent: percent,
+                    }))}
+                    className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+                      (draft.displayWidthPercent ?? 100) === percent
+                        ? 'border-blue-300 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {percent}%
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div className="rounded-3xl border border-gray-200 bg-white p-4 space-y-3">
@@ -344,9 +446,12 @@ export function StimulusImageEditor({
                 <img
                   src={draft.src}
                   alt={draft.alt}
-                  className="absolute inset-0 h-full w-full object-contain"
+                  className="absolute left-1/2 top-1/2 max-w-full object-contain"
                   style={{
-                    transform: `scale(${draft.zoom})`,
+                    width: `${draft.displayWidthPercent ?? 100}%`,
+                    height: 'auto',
+                    maxHeight: '100%',
+                    transform: `translate(-50%, -50%) scale(${draft.zoom})`,
                   }}
                 />
               </div>

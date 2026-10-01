@@ -538,7 +538,10 @@ export function QuestionRenderer({
           />
         </legend>
         {questionImageSources.length > 0 ? (
-          <div className={`${fieldIndentClass}`}>
+          <div
+            className={`${fieldIndentClass} max-w-full`}
+            style={{ width: `${questionLevel?.imageWidthPercent ?? 100}%` }}
+          >
             <StudentZoomableMedia
               sources={questionImageSources}
               alt={`Question ${blockNum} figure`}
@@ -577,7 +580,7 @@ export function QuestionRenderer({
                     onChange={() => commitAnswerChange(option.id)}
                     className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus-visible:ring-blue-500"
                   />
-                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <div className="relative flex min-w-0 flex-1 flex-col gap-2">
                     <div
                       className={`relative flex min-w-0 gap-2 ${isEliminated ? "text-gray-500" : ""}`}
                     >
@@ -605,7 +608,7 @@ export function QuestionRenderer({
                           "option-text"
                         )}
                       />
-                      {isEliminated ? (
+                      {isEliminated && optionImageSources.length === 0 ? (
                         <>
                           <span
                             aria-hidden="true"
@@ -621,13 +624,34 @@ export function QuestionRenderer({
                       ) : null}
                     </div>
                     {optionImageSources.length > 0 ? (
-                      <StudentZoomableMedia
-                        sources={optionImageSources}
-                        alt={`Option ${letter} figure`}
-                        label={`Option ${letter} figure for question ${blockNum}`}
-                        hint="Tap to zoom the option image"
-                        className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50"
-                      />
+                      <div
+                        className="max-w-full"
+                        style={{ width: `${option.imageWidthPercent ?? 100}%` }}
+                      >
+                        <StudentZoomableMedia
+                          sources={optionImageSources}
+                          alt={`Option ${letter} figure`}
+                          label={`Option ${letter} figure for question ${blockNum}`}
+                          hint="Tap to zoom the option image"
+                          className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50"
+                        />
+                      </div>
+                    ) : null}
+                    {isEliminated && optionImageSources.length > 0 ? (
+                      <div
+                        aria-hidden="true"
+                        data-testid="choice-elimination-overlay"
+                        className="pointer-events-none absolute inset-0 z-10"
+                      >
+                        <span
+                          data-testid="choice-elimination-mark"
+                          className="absolute inset-x-0 top-1/2 h-0.5 -rotate-6 bg-gray-500/80"
+                        />
+                        <span
+                          data-testid="choice-elimination-mark"
+                          className="absolute inset-x-0 top-1/2 h-0.5 rotate-6 bg-gray-500/80"
+                        />
+                      </div>
                     ) : null}
                   </div>
                 </label>

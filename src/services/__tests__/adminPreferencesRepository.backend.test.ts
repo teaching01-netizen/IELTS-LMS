@@ -68,4 +68,17 @@ describe('adminPreferencesRepository backend mode', () => {
 
     await expect(adminPreferencesRepository.loadDefaults()).rejects.toThrow('settings offline');
   });
+
+  it('turns an aborted defaults request into a retryable timeout message', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_BUILDER', 'true');
+    const abortError = new Error('signal is aborted without reason');
+    abortError.name = 'AbortError';
+    const fetchMock = vi.fn().mockRejectedValue(abortError);
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(adminPreferencesRepository.loadDefaults()).rejects.toThrow(
+      'Loading saved exam defaults timed out. Check the backend connection and retry.',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

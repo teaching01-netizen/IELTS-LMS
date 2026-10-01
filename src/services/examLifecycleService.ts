@@ -36,7 +36,7 @@ import {
   getActScienceTotalQuestions,
 } from '../utils/examUtils';
 import { normalizeExamStateTableCompletionBlocks } from '../utils/tableCompletion';
-import { createInitialExamState, hydrateExamState } from './examAdapterService';
+import { createBlankIeltsExamState, createInitialExamState, hydrateExamState } from './examAdapterService';
 import { getWritingTaskContent } from '../utils/writingTaskUtils';
 import { getExamIdCollisionIssues } from '../utils/examIdCollisionCheck';
 import {
@@ -363,7 +363,7 @@ export class ExamLifecycleService {
   private createInitialStateForProvider(
     input: Extract<CreateExamInput, { providerKey: 'ielts' }>,
   ): ExamState {
-    return createInitialExamState(
+    return createBlankIeltsExamState(
       input.title,
       input.providerExamType,
       input.preset,

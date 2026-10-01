@@ -14,12 +14,11 @@ import { passageLibraryService } from '../features/content-library/infrastructur
 import { createId } from '../utils/idUtils';
 import { countWords } from '../utils/builderEnhancements';
 
-export function Workspace({
-  state,
-  setState,
-}: {
+
+export function Workspace({ state, setState, examId }: {
   state: ExamState;
   setState: (next: ExamState | ((previous: ExamState) => ExamState)) => void | Promise<void>;
+  examId?: string | undefined;
 }) {
   const [editingPassageId, setEditingPassageId] = useState<string | null>(null);
   const [isPassageListCollapsed, setIsPassageListCollapsed] = useState(() => {
@@ -124,7 +123,11 @@ export function Workspace({
     return <SpeakingWorkspace state={state} setState={stableSetState} />;
   }
   if (state.activeModule === 'science') {
-    return <ActScienceWorkspace state={state} setState={stableSetState} />;
+    return <ActScienceWorkspace
+      examId={examId}
+      state={state}
+      setState={stableSetState}
+    />;
   }
 
   const handlePassageAdd = () => {
@@ -332,7 +335,7 @@ export function Workspace({
 
       {/* Stimulus Pane (Center) */}
       <div className={`flex-shrink-0 transition-all duration-300 ease-in-out ${isQuestionFocusMode || isStimulusPaneCollapsed ? 'w-0 overflow-hidden' : 'flex-1 min-w-0'}`}>
-        <StimulusPane passage={activePassage} state={state} setState={stableSetState} />
+        <StimulusPane passage={activePassage} state={state} setState={stableSetState} examId={examId} />
       </div>
 
       {!isQuestionFocusMode && (

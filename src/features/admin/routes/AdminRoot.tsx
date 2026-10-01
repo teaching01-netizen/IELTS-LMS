@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { Bell, ChevronDown, Menu, Search, ShieldCheck } from 'lucide-react';
-import { ErrorSurface, LoadingSurface } from '@components/ui';
+import { LoadingSurface } from '@components/ui';
 import { useAdminRootController } from '@admin/hooks/useAdminRootController';
 import { useAuthSession } from '../../auth/api/authSession';
 import { AdminProvider } from './AdminContext';
@@ -19,7 +19,7 @@ export function AdminRoot() {
   const {
     contextValue,
     currentView,
-    initError,
+    defaultsLoadError,
     isInitialized,
     navItems,
     notificationCount,
@@ -41,19 +41,6 @@ export function AdminRoot() {
 
   if (!isInitialized) {
     return <LoadingSurface label="Loading Admin..." />;
-  }
-
-  if (initError) {
-    return (
-      <ErrorSurface
-        title="Loading Error"
-        description={initError}
-        actionLabel="Retry"
-        onAction={() => {
-          void reload();
-        }}
-      />
-    );
   }
 
   return (
@@ -215,6 +202,20 @@ export function AdminRoot() {
           </header>
 
           <main id="main-content" className="min-w-0 flex-1 overflow-y-auto bg-gray-50 p-3 sm:p-6" role="main">
+            {defaultsLoadError ? (
+              <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                <p>
+                  Saved exam defaults could not be loaded. The Admin workspace is still available; verify defaults before creating a new exam. {defaultsLoadError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void reload()}
+                  className="rounded-md border border-amber-400 bg-white px-3 py-1.5 font-semibold hover:bg-amber-100"
+                >
+                  Retry defaults
+                </button>
+              </div>
+            ) : null}
             <Outlet />
           </main>
         </div>

@@ -3,6 +3,7 @@ import { backendPost } from "../backendBridge";
 import {
   ACT_SCIENCE_CHOICE_IMAGE_MAX_BYTES,
   uploadActScienceChoiceImage,
+  uploadActScienceStimulusImage,
 } from "../actScienceChoiceImageService";
 
 vi.mock("../backendBridge", () => ({
@@ -35,12 +36,7 @@ describe("uploadActScienceChoiceImage", () => {
     const imageUrl = await uploadActScienceChoiceImage(file, "act-science-choice:q1:option-a");
 
     expect(imageUrl).toBe("https://media.example/assets/asset-1");
-    expect(backendPost).toHaveBeenNthCalledWith(1, "/v1/media/uploads", {
-      ownerKind: "act_science_choice",
-      ownerId: "act-science-choice:q1:option-a",
-      contentType: "image/png",
-      fileName: "option-a.png",
-    });
+    expect(backendPost).toHaveBeenNthCalledWith(1, "/v1/media/uploads", expect.objectContaining({ ownerKind: "act_science_choice", ownerId: "act-science-choice:q1:option-a", contentType: "image/png", fileName: "option-a.png", sizeBytes: file.size, checksumSha256: expect.any(String) }));
     expect(uploadResponse).toHaveBeenCalledWith(
       "https://media.example/uploads/asset-1",
       expect.objectContaining({
@@ -49,9 +45,7 @@ describe("uploadActScienceChoiceImage", () => {
         body: file,
       })
     );
-    expect(backendPost).toHaveBeenNthCalledWith(2, "/v1/media/uploads/asset-1/complete", {
-      sizeBytes: file.size,
-    });
+    expect(backendPost).toHaveBeenNthCalledWith(2, "/v1/media/uploads/asset-1/complete", expect.objectContaining({ sizeBytes: file.size, checksumSha256: expect.any(String) }));
   });
 
   it("rejects unsupported image types before creating a media asset", async () => {
@@ -128,12 +122,7 @@ describe("uploadActScienceChoiceImage", () => {
     await expect(uploadActScienceChoiceImage(file, "choice-owner")).resolves.toBe(
       "https://media.example/assets/asset-large"
     );
-    expect(backendPost).toHaveBeenNthCalledWith(1, "/v1/media/uploads", {
-      ownerKind: "act_science_choice",
-      ownerId: "choice-owner",
-      contentType: "image/png",
-      fileName: "large.png",
-    });
+    expect(backendPost).toHaveBeenNthCalledWith(1, "/v1/media/uploads", expect.objectContaining({ ownerKind: "act_science_choice", ownerId: "choice-owner", contentType: "image/png", fileName: "large.png", sizeBytes: 1024, checksumSha256: expect.any(String) }));
     expect(uploadResponse).toHaveBeenCalledWith(
       "https://media.example/uploads/asset-large",
       expect.objectContaining({
@@ -144,5 +133,35 @@ describe("uploadActScienceChoiceImage", () => {
     expect(toBlob).toHaveBeenCalled();
     expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, expect.any(Number), expect.any(Number));
     expect(bitmap.close).toHaveBeenCalled();
+  });
+
+
+  it("uploads ACT Science passage images as managed exam assets with a checksum", async () => {
+    const uploadResponse = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", uploadResponse);
+    vi.mocked(backendPost)
+      .mockResolvedValueOnce({
+        asset: { id: "passage-asset" },
+        uploadUrl: "/api/v1/media/uploads/passage-asset",
+        headers: { "content-type": "image/png" },
+      })
+      .mockResolvedValueOnce({ downloadUrl: "/api/v1/media/passage-asset/content" });
+    const file = new File(["fake-image"], "passage.png", { type: "image/png" });
+
+    await expect(uploadActScienceStimulusImage(file, "exam-123")).resolves.toBe(
+      "/api/v1/media/passage-asset/content"
+    );
+    expect(backendPost).toHaveBeenNthCalledWith(1, "/v1/media/uploads", expect.objectContaining({
+      ownerKind: "assessment_exam",
+      ownerId: "exam-123",
+      contentType: "image/png",
+      fileName: "passage.png",
+      sizeBytes: file.size,
+      checksumSha256: expect.any(String),
+    }));
+    expect(backendPost).toHaveBeenNthCalledWith(2, "/v1/media/uploads/passage-asset/complete", expect.objectContaining({
+      sizeBytes: file.size,
+      checksumSha256: expect.any(String),
+    }));
   });
 });

@@ -23,7 +23,7 @@ interface AdminNavItem {
 interface AdminRootController {
   contextValue: AdminContextValue;
   currentView: AdminNavItem['id'];
-  initError: string | null;
+  defaultsLoadError: string | null;
   isInitialized: boolean;
   navItems: AdminNavItem[];
   notificationCount: number;
@@ -42,7 +42,7 @@ export function useAdminRootController(): AdminRootController {
     examAuthoringFacade.preferences.getDefaults(),
   );
   const [isInitialized, setIsInitialized] = useState(false);
-  const [initError, setInitError] = useState<string | null>(null);
+  const [defaultsLoadError, setDefaultsLoadError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window === 'undefined' ? true : window.innerWidth >= 768,
   );
@@ -93,7 +93,7 @@ export function useAdminRootController(): AdminRootController {
 
   const initialize = useCallback(async () => {
     setIsInitialized(false);
-    setInitError(null);
+    setDefaultsLoadError(null);
 
     try {
       const shouldLoadDefaults = role === 'admin' || role === 'builder';
@@ -103,7 +103,9 @@ export function useAdminRootController(): AdminRootController {
 
       setDefaultsState(loadedDefaults);
     } catch (loadError) {
-      setInitError(loadError instanceof Error ? loadError.message : 'Failed to load admin data');
+      setDefaultsLoadError(
+        loadError instanceof Error ? loadError.message : 'Failed to load saved exam defaults.',
+      );
     } finally {
       setIsInitialized(true);
     }
@@ -128,12 +130,11 @@ export function useAdminRootController(): AdminRootController {
       defaults,
       setDefaults,
       isInitialized,
-      initError,
+      initError: null,
     }),
     [
       defaults,
       handleNavigate,
-      initError,
       isInitialized,
       setDefaults,
     ],
@@ -142,7 +143,7 @@ export function useAdminRootController(): AdminRootController {
   return {
     contextValue,
     currentView,
-    initError,
+    defaultsLoadError,
     isInitialized,
     navItems,
     notificationCount: 0,

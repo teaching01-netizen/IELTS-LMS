@@ -233,6 +233,36 @@ describe('ExamLifecycleService - Phase 3: Versioning', () => {
     service = new ExamLifecycleService(mockRepo);
   });
 
+  describe('createProviderExam', () => {
+    it('creates a blank IELTS exam by default', async () => {
+      const result = await service.createProviderExam(
+        {
+          providerKey: 'ielts',
+          title: 'New IELTS Exam',
+          providerExamType: 'Academic',
+          preset: 'Academic',
+        },
+        'TestUser',
+      );
+
+      expect(result.success).toBe(true);
+      const state = result.version?.contentSnapshot as ExamState;
+      expect(state.reading.passages.length).toBeGreaterThan(0);
+      expect(state.reading.passages.every((passage) =>
+        passage.content === '' && passage.blocks.length === 0 && passage.images.length === 0,
+      )).toBe(true);
+      expect(state.listening.parts.every((part) =>
+        part.pins.length === 0 && part.blocks.length === 0,
+      )).toBe(true);
+      expect(state.writing.task1Prompt).toBe('');
+      expect(state.writing.task2Prompt).toBe('');
+      expect(state.writing.tasks?.every((task) => task.prompt === '' && !task.chart)).toBe(true);
+      expect(state.speaking.part1Topics).toEqual([]);
+      expect(state.speaking.cueCard).toBe('');
+      expect(state.speaking.part3Discussion).toEqual([]);
+    });
+  });
+
   describe('saveAsNewVersion', () => {
     it('should create a new version with incremented version number', async () => {
       const initialState = createMockExamState();

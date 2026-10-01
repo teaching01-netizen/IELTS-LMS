@@ -100,6 +100,7 @@ export interface MCQOption {
   text: string;
   isCorrect: boolean;
   imageUrl?: string | undefined;
+  imageWidthPercent?: 25 | 50 | 75 | 100 | undefined;
   label?: string | undefined;
 }
 
@@ -133,6 +134,7 @@ export interface StimulusImageAsset {
   src: string;
   width: number;
   zoom: number;
+  displayWidthPercent?: 25 | 50 | 75 | 100 | undefined;
 }
 
 export interface WritingChartData {
@@ -263,6 +265,7 @@ export interface SingleMCQQuestion {
   id: string;
   stem: string;
   imageUrl?: string | undefined;
+  imageWidthPercent?: 25 | 50 | 75 | 100 | undefined;
   options: MCQOption[];
   skillCategory?: ActScienceSkillCategory | undefined;
 }

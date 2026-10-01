@@ -37,6 +37,7 @@ import { getActScienceTotalQuestions } from '../../../utils/examUtils';
 import { useOptionalAuthSession } from '../../auth/api/authSession';
 import { buildStaffDraftKey } from '../../../utils/staffDraftKey';
 
+
 const nowLabel = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 function ScoringAside({
@@ -900,6 +901,7 @@ export function BuilderRoot() {
         />
         <div className="flex flex-1 min-w-0 overflow-hidden">
           <Workspace
+            examId={examId}
             state={currentState}
             setState={(next) => updateBuilderState(next, 'Update workspace')}
           />

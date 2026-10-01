@@ -13,6 +13,39 @@ import { getImageUrlCandidates } from "../utils/imageUrl";
 import { getMcqOptionLabel } from "../utils/mcqOptionLabel";
 
 const OPTION_LABELS = ["A", "B", "C", "D"] as const;
+const IMAGE_WIDTH_PRESETS = [25, 50, 75, 100] as const;
+
+type ImageWidthPercent = (typeof IMAGE_WIDTH_PRESETS)[number];
+
+interface ImageWidthControlsProps {
+  label: string;
+  value: ImageWidthPercent | undefined;
+  onChange: (value: ImageWidthPercent) => void;
+}
+
+function ImageWidthControls({ label, value, onChange }: ImageWidthControlsProps) {
+  return (
+    <div role="group" aria-label={`${label} display width`} className="flex flex-wrap items-center gap-1">
+      <span className="mr-1 text-[11px] font-medium text-gray-500">Display size</span>
+      {IMAGE_WIDTH_PRESETS.map((percent) => (
+        <button
+          key={percent}
+          type="button"
+          aria-label={`Set ${label} width to ${percent}%`}
+          aria-pressed={(value ?? 100) === percent}
+          onClick={() => onChange(percent)}
+          className={`rounded-md border px-2 py-1 text-[11px] font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+            (value ?? 100) === percent
+              ? "border-blue-300 bg-blue-50 text-blue-700"
+              : "border-gray-200 bg-white text-gray-600 hover:bg-blue-50"
+          }`}
+        >
+          {percent}%
+        </button>
+      ))}
+    </div>
+  );
+}
 
 interface ActImagePreviewProps {
   src: string;
@@ -33,9 +66,14 @@ function ActImagePreview({ src, alt, className }: ActImagePreviewProps) {
 
   if (!resolvedSrc || hasError) {
     return (
-      <p className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-xs text-gray-500">
-        Preview unavailable. Check the image URL.
-      </p>
+      <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+        <p className="font-medium">Preview unavailable.</p>
+        <p className="mt-1">
+          {candidates.length > 1
+            ? "Make sure the Google Drive file is shared with anyone who has the link."
+            : "Check that this is a public, direct image URL."}
+        </p>
+      </div>
     );
   }
 
@@ -352,11 +390,27 @@ export function ActScienceQuestionBuilderPane({
                       ) : null}
                     </div>
                     {question.imageUrl ? (
-                      <ActImagePreview
-                        src={question.imageUrl}
-                        alt={`Question ${questionNumber} stem preview`}
-                        className="max-h-40 max-w-full rounded-md border border-gray-200 object-contain"
-                      />
+                      <div
+                        className="flex max-w-full flex-col items-start gap-2"
+                        style={{ width: `${question.imageWidthPercent ?? 100}%` }}
+                      >
+                        <ActImagePreview
+                          key={question.imageUrl}
+                          src={question.imageUrl}
+                          alt={`Question ${questionNumber} stem preview`}
+                          className="max-h-40 w-full rounded-md border border-gray-200 object-contain"
+                        />
+                        <ImageWidthControls
+                          label={`Question ${questionNumber} image`}
+                          value={question.imageWidthPercent}
+                          onChange={(imageWidthPercent) =>
+                            updateQuestion(blockIndex, questionIndex, (current) => ({
+                              ...current,
+                              imageWidthPercent,
+                            }))
+                          }
+                        />
+                      </div>
                     ) : null}
                     <label
                       className="text-[11px] font-semibold uppercase tracking-wider text-gray-500"
@@ -485,11 +539,31 @@ export function ActScienceQuestionBuilderPane({
                               ) : null}
                             </div>
                             {option.imageUrl ? (
-                              <ActImagePreview
-                                src={option.imageUrl}
-                                alt={`Option ${label} preview`}
-                                className="max-h-32 max-w-full rounded-md border border-gray-200 object-contain"
-                              />
+                              <div
+                                className="flex max-w-full flex-col items-start gap-2"
+                                style={{ width: `${option.imageWidthPercent ?? 100}%` }}
+                              >
+                                <ActImagePreview
+                                  key={option.imageUrl}
+                                  src={option.imageUrl}
+                                  alt={`Option ${label} preview`}
+                                  className="max-h-32 w-full rounded-md border border-gray-200 object-contain"
+                                />
+                                <ImageWidthControls
+                                  label={`Option ${label} image for question ${questionNumber}`}
+                                  value={option.imageWidthPercent}
+                                  onChange={(imageWidthPercent) =>
+                                    updateQuestion(blockIndex, questionIndex, (current) => ({
+                                      ...current,
+                                      options: current.options.map((candidate) =>
+                                        candidate.id === option.id
+                                          ? { ...candidate, imageWidthPercent }
+                                          : candidate
+                                      ),
+                                    }))
+                                  }
+                                />
+                              </div>
                             ) : null}
                             <label
                               className="text-[11px] font-semibold uppercase tracking-wider text-gray-500"

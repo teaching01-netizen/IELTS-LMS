@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type { ActScienceStimulus, ExamState, QuestionAnswer, StimulusAnnotation } from '../../types';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import {
@@ -130,10 +130,19 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
   highlightColor,
   highlightClassName,
 }: ScienceStimulusPaneProps) {
+  const [inlineImageToZoom, setInlineImageToZoom] = useState<{ src: string; alt: string } | null>(null);
   const contentHasHtml = hasHtmlMarkup(stimulus.content);
   const renderedContent = contentHasHtml
     ? sanitizeReadingPassageHtml(stimulus.content)
     : normalizeReadingPlainTextForDisplay(stimulus.content);
+  const handleInlineImageClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const image = target.closest('img');
+    const src = image?.getAttribute('src')?.trim();
+    if (!src || !image || !event.currentTarget.contains(image)) return;
+    setInlineImageToZoom({ src, alt: image.getAttribute('alt')?.trim() || 'Passage image' });
+  };
 
   return (
     <div
@@ -158,25 +167,44 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
         {stimulus.title}
       </h2>
       <div className="student-passage-measure break-normal text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-[0.5em] [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:p-2 [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-50 [&_th]:p-2 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7]">
-        <RichTextHighlighter
-          content={renderedContent}
-          contentType="html"
-          enabled={highlightEnabled}
-          className="whitespace-pre-wrap break-normal"
-          highlightColor={highlightColor}
-          highlightClassName={highlightClassName}
-          highlightSurfaceId={`science:stimulus:${stimulus.id}`}
-        />
-        {(stimulus.images ?? []).map((image) => (
-          <StudentZoomableMedia
-            key={image.id}
-            sources={getImageUrlCandidates(image.src ?? '')}
-            alt={image.alt}
-            label={image.alt || 'Stimulus image'}
-            hint="Tap to zoom the stimulus image"
-            className="mt-4 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
-            renderOverlay={(zoom) => renderScienceImageAnnotations(image.annotations, zoom)}
+        <div onClick={handleInlineImageClick}>
+          <RichTextHighlighter
+            content={renderedContent}
+            contentType="html"
+            enabled={highlightEnabled}
+            className="whitespace-pre-wrap break-normal [&_img]:cursor-zoom-in"
+            highlightColor={highlightColor}
+            highlightClassName={highlightClassName}
+            highlightSurfaceId={`science:stimulus:${stimulus.id}`}
           />
+        </div>
+        {inlineImageToZoom ? (
+          <StudentZoomableMedia
+            key={`${inlineImageToZoom.src}:${inlineImageToZoom.alt}`}
+            sources={getImageUrlCandidates(inlineImageToZoom.src)}
+            alt={inlineImageToZoom.alt}
+            label={inlineImageToZoom.alt}
+            hint="Tap to zoom the passage image"
+            openOnMount
+            renderTrigger={false}
+            onDismiss={() => setInlineImageToZoom(null)}
+          />
+        ) : null}
+        {(stimulus.images ?? []).map((image) => (
+          <div
+            key={image.id}
+            className="mt-4 max-w-full"
+            style={{ width: `${image.displayWidthPercent ?? 100}%` }}
+          >
+            <StudentZoomableMedia
+              sources={getImageUrlCandidates(image.src ?? '')}
+              alt={image.alt}
+              label={image.alt || 'Stimulus image'}
+              hint="Tap to zoom the stimulus image"
+              className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
+              renderOverlay={(zoom) => renderScienceImageAnnotations(image.annotations, zoom)}
+            />
+          </div>
         ))}
       </div>
     </div>

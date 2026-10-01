@@ -166,6 +166,50 @@ describe('StudentReading passage readability controls', () => {
     expect(highlightContainer?.textContent).toContain('Second paragraph keeps emphasis.');
   });
 
+  it('keeps inline passage images and their position when highlight mode is enabled', () => {
+    const state = createState();
+    state.reading.passages[0].content =
+      '<p>Text before the figure.</p><p><img src="/api/v1/media/inline-figure/content" alt="Inline diagram"></p><p>Text after the figure.</p>';
+
+    const { container } = render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+        highlightEnabled
+      />,
+    );
+
+    const passage = container.querySelector('.student-reading-passage-pane [data-student-highlightable="true"]');
+    expect(passage?.querySelector('img[alt="Inline diagram"]')).toBeInTheDocument();
+    expect(passage?.innerHTML.indexOf('Text before the figure.'))
+      .toBeLessThan(passage?.innerHTML.indexOf('Inline diagram') ?? -1);
+    expect(passage?.innerHTML.indexOf('Inline diagram'))
+      .toBeLessThan(passage?.innerHTML.indexOf('Text after the figure.') ?? -1);
+  });
+
+  it('opens inline passage images in the zoomed view', () => {
+    const state = createState();
+    state.reading.passages[0].content =
+      '<p>Text before the figure.</p><p><img src="/api/v1/media/inline-figure/content" alt="Inline diagram"></p><p>Text after the figure.</p>';
+
+    render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByAltText('Inline diagram'));
+
+    expect(screen.getByRole('dialog', { name: /inline diagram zoomed view/i })).toBeInTheDocument();
+  });
+
   it('normalizes passage html typography to the standard reading font settings', () => {
     const state = createState();
     state.reading.passages[0].content = `

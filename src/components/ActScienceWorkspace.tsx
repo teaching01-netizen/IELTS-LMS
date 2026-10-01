@@ -14,6 +14,7 @@ type ExamStateUpdate = ExamState | ((previous: ExamState) => ExamState);
 export interface ActScienceWorkspaceProps {
   state: ExamState;
   setState: (next: ExamStateUpdate) => void | Promise<void>;
+  examId?: string | undefined;
 }
 
 function createActScienceStimulus(index: number): ActScienceStimulus {
@@ -27,7 +28,7 @@ function createActScienceStimulus(index: number): ActScienceStimulus {
   };
 }
 
-export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProps) {
+export function ActScienceWorkspace({ state, setState, examId }: ActScienceWorkspaceProps) {
   const stimuli = state.science.stimuli;
   const activeStimulus = stimuli.find((stimulus) => stimulus.id === state.activeScienceStimulusId);
 
@@ -205,6 +206,7 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
         </div>
         <div className="min-h-0 flex-1">
           <StimulusPane
+            examId={examId}
             passage={activeStimulus}
             state={state}
             setState={setState}
