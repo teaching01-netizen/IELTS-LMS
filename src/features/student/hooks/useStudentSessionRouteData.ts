@@ -833,7 +833,7 @@ export function useStudentSessionRouteData(
 
       try {
         if (!candidateId) {
-        throw new Error('Invalid access code. Please check in again.');
+        throw new Error('Invalid Student ID/WCODE. Please check in again.');
         }
 
       if (!studentKey) {

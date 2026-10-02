@@ -9,6 +9,7 @@ import { SatDirectionsPopover } from "./SatDirectionsPopover";
 import { SatReadingPopover } from "./SatReadingPopover";
 import { formatSatTime, shouldAutoRevealTimer } from "../../domain/satTiming";
 import { useSatTemporalSnapshot } from "../../timing/SatTemporalRuntime";
+import { useSatReferenceViewportWidth } from "../tools/useSatReferenceViewportWidth";
 
 export interface SatExamTopBarProps {
   sectionLabel: string;
@@ -114,9 +115,15 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
   const directionsId = useId();
   const directionsButtonRef = useRef<HTMLButtonElement>(null);
   const readingButtonRef = useRef<HTMLButtonElement>(null);
+  // Measured, not a CSS container query: `container-type` would make the header
+  // the containing block for its fixed Directions/Reading popovers.
+  const headerRef = useRef<HTMLElement>(null);
+  const compact = useSatReferenceViewportWidth(headerRef) < 800;
 
   return (
     <header
+      ref={headerRef}
+      data-sat-topbar-compact={compact ? "true" : undefined}
       // Paper white (the question strip keeps the reference's light gray) and a
       // transparent reserved border: the rail below owns the bar's bottom edge,
       // so no divider colour contributes its own pixels to it.

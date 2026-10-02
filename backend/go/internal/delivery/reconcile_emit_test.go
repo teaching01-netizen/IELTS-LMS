@@ -69,6 +69,7 @@ func TestReconcileCompleterFailureEmitsAndRetries(t *testing.T) {
 	// set means no follow-up (assessment complete -> arms completion).
 	mock.ExpectQuery("FROM assessment_sections WHERE exam_version_id").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	deliveryReconcileWakeup(mock, 1)
 	mock.ExpectCommit()
 	changed, rerr := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", time.Now().UTC())
 	if rerr == nil {

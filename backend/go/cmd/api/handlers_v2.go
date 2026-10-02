@@ -1003,7 +1003,6 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			StudentName     string  `json:"studentName"`
 			ScheduleID      string  `json:"scheduleId"`
 			AccessLinkID    string  `json:"accessLinkId"`
-			AccessCode      string  `json:"accessCode"`
 			LinkToken       string  `json:"linkToken"`
 			CaptchaToken    string  `json:"captchaToken"`
 			EntrySession    string  `json:"entrySession"`
@@ -1024,7 +1023,7 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			body.ClientSessionID = clientSessionID.String()
 		}
 		if (strings.TrimSpace(body.Wcode) == "" && strings.TrimSpace(body.AccessLinkID) == "") || strings.TrimSpace(body.Email) == "" || strings.TrimSpace(body.StudentName) == "" {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Code, email and student name are required."))
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Student ID/WCODE, email and student name are required."))
 			return
 		}
 		// Round 64 fail-fast: malformed email 400s here, before link
@@ -1058,7 +1057,7 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			scheduleID = resolved.ScheduleID
 			linkMode = string(resolved.AccessMode)
 			if linkMode == string(accesslinks.ModeStudentCode) && strings.TrimSpace(body.Wcode) == "" {
-				httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Student code is required for this Student Link."))
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Student ID/WCODE is required for this Student Link."))
 				return
 			}
 		}

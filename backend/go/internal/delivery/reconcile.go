@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"example.com/ielts-proctoring/internal/attempts"
+	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -80,10 +81,12 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 	var shouldComplete, completedInTx, satCreated bool
 	changed := false
 	finalizedModules := 0
+	var hubEvents []liveupdates.Event
 	// B1: reconcile locks attempt + runtime rows explicitly; it never depends
 	// on a repeatable snapshot, so RC only shrinks its gap-lock footprint.
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		shouldComplete, completedInTx, satCreated, changed, finalizedModules = false, false, false, false, 0
+		hubEvents = nil
 		var attemptRow, providerKey string
 		if err := t.QueryRowContext(ctx,
 			"SELECT id, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), '') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
@@ -268,10 +271,22 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			completedInTx = true
 			satCreated = created
 		}
+		// Students cannot submit a module, so these server-driven transitions
+		// (module close, routed M2 or next M1 opened, break ended) are the only
+		// module events left. Without a wake-up the client sits out the poll
+		// cadence while the server-started clock is already running.
+		if changed {
+			rev, err := s.appendModuleEventsTx(ctx, t, scheduleID, attemptID, liveEventModuleSubmitted)
+			if err != nil {
+				return err
+			}
+			hubEvents = dualModuleEvents(scheduleID, attemptID, rev, liveEventModuleSubmitted)
+		}
 		return nil
 	}); err != nil {
 		return false, err
 	}
+	s.publishHubEvents(hubEvents)
 	for i := 0; i < finalizedModules; i++ {
 		telemetry.IncCounter(telemetry.MSATTimeoutFinalize)
 	}

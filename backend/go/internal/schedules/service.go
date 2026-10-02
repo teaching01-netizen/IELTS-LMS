@@ -1217,7 +1217,7 @@ func NormalizeAccessCode(raw string) string {
 // codes pass through trimmed).
 func ValidateWcode(wcode string) error {
 	if NormalizeAccessCode(wcode) == "" {
-		return validationError("Code is required.")
+		return validationError("Student ID/WCODE is required.")
 	}
 	return nil
 }

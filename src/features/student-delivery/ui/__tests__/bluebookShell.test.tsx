@@ -44,7 +44,7 @@ describe("bluebook shell (Phase 3)", () => {
     );
     expect(template).toBe("auto_auto_minmax(0,1fr)_auto_auto");
     expect(shellSrc).toContain('data-testid="sat-exam-notices"');
-    expect(shellSrc).toContain('className="relative row-start-3 min-h-0 min-w-0 overflow-hidden');
+    expect(shellSrc).toContain('className="relative row-start-3 grid min-h-0 min-w-0 overflow-hidden');
   });
 
   it("gives the topbar a paper surface closed by the shared spectrum rail", () => {

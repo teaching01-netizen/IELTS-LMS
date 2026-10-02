@@ -668,7 +668,9 @@ function SatExamShellContent(props: SatExamShellProps) {
         data-sat-question-presentation="instant"
         data-sat-annotation-bounds="true"
       >
-        <div className="relative h-full min-h-0 min-w-0 overflow-hidden" data-sat-question-seat
+        {/* Overlaid by the reference sheet: isolate so z-indexed children
+            (e.g. the split handle's z-10) cannot paint above the overlay. */}
+        <div className={`relative h-full min-h-0 min-w-0 overflow-hidden${referenceOverlaysQuestion ? ' isolate' : ''}`} data-sat-question-seat
           inert={referenceOverlaysQuestion} aria-hidden={referenceOverlaysQuestion || undefined}>
         <SatAnnotationViewContext.Provider value={annotationView}>
           {/* The Notes column rides inside the zoom wrapper on purpose: it is

@@ -579,7 +579,7 @@ describe("StudentEntryRoute", () => {
     });
   });
 
-  it("requires only code, name, and email for SAT schedules via ?provider=sat", async () => {
+  it("requires only Student ID/WCODE, name, and email for SAT schedules via ?provider=sat", async () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440140";
     studentEntryMock.mockResolvedValue({
       user: {
@@ -609,7 +609,7 @@ describe("StudentEntryRoute", () => {
     expect(screen.queryByLabelText(/nickname/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/ielts course/i)).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/code|wcode/i), {
+    fireEvent.change(screen.getByLabelText("Student ID/WCODE"), {
       target: { value: "W250334" },
     });
     fireEvent.change(screen.getByLabelText(/email/i), {

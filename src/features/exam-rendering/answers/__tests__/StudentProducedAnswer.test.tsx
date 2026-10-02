@@ -9,11 +9,12 @@ function Harness() {
 }
 
 describe("student-produced SAT answer input", () => {
-  it("filters unsupported characters and enforces the SAT field length", () => {
+  it("preserves typed text for validation instead of filtering it", () => {
     render(<Harness />);
     const input = screen.getByLabelText("Student-produced response");
     fireEvent.change(input, { target: { value: "$123456%" } });
-    expect(input).toHaveValue("12345");
+    expect(input).toHaveValue("$123456%");
+    expect(input).not.toHaveAttribute("maxlength");
   });
 
   it("preserves valid fraction syntax", () => {

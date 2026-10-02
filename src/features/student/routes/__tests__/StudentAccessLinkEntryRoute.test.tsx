@@ -188,7 +188,7 @@ describe("StudentAccessLinkEntryRoute", () => {
     });
     renderRoute();
 
-    expect(screen.queryByLabelText("Student code")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Student ID/WCODE")).not.toBeInTheDocument();
     enterIdentity();
     fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
 
@@ -226,11 +226,11 @@ describe("StudentAccessLinkEntryRoute", () => {
     enterIdentity();
     fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
     expect(
-      await screen.findByText("Enter the student code provided by your teacher.")
+      await screen.findByText("Enter your Student ID/WCODE.")
     ).toBeInTheDocument();
     expect(mocks.studentEntry).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText("Student code"), { target: { value: "w123456" } });
+    fireEvent.change(screen.getByLabelText("Student ID/WCODE"), { target: { value: "w123456" } });
     fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
     await waitFor(() =>
       expect(mocks.studentEntry).toHaveBeenCalledWith(

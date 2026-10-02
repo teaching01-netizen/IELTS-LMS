@@ -78,7 +78,7 @@ describe("bluebook overlays (Phases 8-9 source contract)", () => {
   it("floating tools tokenize border/radius/shadow and keep probe attributes", () => {
     const tool = read("tools/SatFloatingTool.tsx");
     expect(tool).toContain("var(--sat-tool-border)");
-    expect(tool).toContain("rounded-[6px]");
+    expect(tool).toContain("sat-tool-calculator rounded-none");
     expect(tool).toContain("var(--sat-shadow-floating)");
     expect(tool).not.toContain("shadow-2xl");
     expect(tool).not.toContain("backdrop-blur");

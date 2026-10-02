@@ -136,6 +136,9 @@ func TestPersonalEnteredModuleExpiresOnItsOwnDeadline(t *testing.T) {
 	deliveryUnscopedAttemptLink(mock)
 	mock.ExpectQuery("FROM assessment_sections WHERE exam_version_id").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	// The server-driven close must wake the student and the roster in the same
+	// transaction; unchanged passes (the not-expired tests above) append nothing.
+	deliveryReconcileWakeup(mock, 1)
 	mock.ExpectCommit()
 
 	changed, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", time.Now().UTC())

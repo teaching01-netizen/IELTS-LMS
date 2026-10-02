@@ -512,6 +512,7 @@ func TestDeliveryReconcileLegacyExpiryFinalizes(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id = ? AND display_order > ?")).
 		WithArgs("pv-1", 1).
 		WillReturnError(sql.ErrNoRows)
+	deliveryReconcileWakeup(mock, 1)
 	mock.ExpectCommit()
 	changed, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", now)
 	if err != nil {

@@ -4989,33 +4989,29 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   background-color: var(--sat-ref-header-bg);
 }
 
-/* Display zoom shrinks the logical header even on a wide physical viewport. */
-.sat-exam-topbar {
-  container-type: inline-size;
+/* Display zoom shrinks the logical header even on a wide physical viewport;
+   SatExamTopBar measures its width and sets data-sat-topbar-compact. */
+.sat-exam-topbar[data-sat-topbar-compact] > div {
+  height: auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  gap: 0.5rem;
+  padding-block: 0.25rem;
 }
-@container (width < 800px) {
-  .sat-exam-topbar > div {
-    height: auto;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto auto;
-    gap: 0.5rem;
-    padding-block: 0.25rem;
-  }
-  .sat-exam-topbar > div > div:first-child {
-    display: flex;
-    grid-column: 1;
-    grid-row: 1;
-    padding-block: 0;
-  }
-  .sat-exam-topbar > div > div:nth-child(2) {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .sat-exam-topbar [aria-label="Test tools"] {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    flex-wrap: wrap;
-  }
+.sat-exam-topbar[data-sat-topbar-compact] > div > div:first-child {
+  display: flex;
+  grid-column: 1;
+  grid-row: 1;
+  padding-block: 0;
+}
+.sat-exam-topbar[data-sat-topbar-compact] > div > div:nth-child(2) {
+  grid-column: 2;
+  grid-row: 1;
+}
+.sat-exam-topbar[data-sat-topbar-compact] [aria-label="Test tools"] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  flex-wrap: wrap;
 }
 .sat-ui.sat-viewport-overlay-root {
   background: transparent;

@@ -96,7 +96,7 @@ describe("StudentSessionRoute", () => {
     });
   });
 
-  it("routes invalid access code errors back to check-in", async () => {
+  it("routes invalid Student ID/WCODE errors back to check-in", async () => {
     vi.spyOn(authService, "getSession").mockResolvedValue(null);
     vi.spyOn(authService, "logoutAll").mockResolvedValue();
     useStudentSessionRouteDataMock.mockReturnValue({

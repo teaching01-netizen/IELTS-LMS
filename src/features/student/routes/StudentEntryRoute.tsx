@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Clock3, RefreshCw } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuthSession } from "../../auth/api/authSession";
 import {
@@ -8,6 +9,15 @@ import {
 import { commonSchemas } from "@shared/lib/validateApiResponse";
 import { entryQueueDelayMs, parseEntryQueueError } from "../infrastructure/studentEntryGateway";
 import { SatErrorSurface, SatLoadingSurface } from "../../student-delivery/api/satStateSurfaces";
+import {
+  SatEntryButton,
+  SatEntryField,
+  SatEntryLayout,
+  SatEntryNotice,
+  SatEntryStatus,
+  SatEntrySubmit,
+  focusFirstInvalidField,
+} from "../../student-delivery/api/satEntryPortal";
 import { resumeSatStudentSession } from "../../student-delivery/api/satResume";
 import {
   loadSatResumeLocator,
@@ -452,11 +462,19 @@ export function StudentEntryRoute() {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: "" }));
 
-    if (field === "email" && value && !validateEmail(value)) {
+    if (!isSat && field === "email" && value && !validateEmail(value)) {
       setErrors((prev) => ({
         ...prev,
         email: "Invalid email format",
       }));
+    }
+  };
+
+  // SAT validates an email when the student leaves the field, not mid-typing.
+  const handleEmailBlur = () => {
+    const email = formData.email.trim();
+    if (email && !validateEmail(email)) {
+      setErrors((prev) => ({ ...prev, email: "Enter a valid email address" }));
     }
   };
 
@@ -472,7 +490,7 @@ export function StudentEntryRoute() {
     const newErrors: Partial<Record<keyof EntryFormData, string>> = {};
 
     if (!normalizedWcode) {
-      newErrors.wcode = "Code is required";
+      newErrors.wcode = isSat ? "Student ID/WCODE is required" : "Code is required";
     }
 
     if (!normalizedEmail || !validateEmail(normalizedEmail)) {
@@ -497,6 +515,7 @@ export function StudentEntryRoute() {
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
+      if (isSat) focusFirstInvalidField(e.currentTarget as HTMLFormElement);
       return;
     }
 
@@ -748,6 +767,15 @@ export function StudentEntryRoute() {
   }
 
   if (availabilityGate && !queuedAdmission && !queuePollFailure) {
+    if (isSat) {
+      return (
+        <SatEntryStatus
+          icon={<Clock3 size={24} />}
+          title={availabilityGate.title}
+          description={availabilityGate.description}
+        />
+      );
+    }
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8 text-center">
@@ -755,6 +783,90 @@ export function StudentEntryRoute() {
           <p className="text-sm text-gray-600">{availabilityGate.description}</p>
         </div>
       </div>
+    );
+  }
+
+  if (isSat) {
+    const locked = isLoading || Boolean(queuedAdmission);
+    return (
+      <SatEntryLayout title="Exam Check-in">
+        {submitError ? <SatEntryNotice tone="error">{submitError}</SatEntryNotice> : null}
+
+        {queuedAdmission ? (
+          <SatEntryNotice
+            tone="info"
+            icon={<RefreshCw size={18} className="motion-safe:animate-spin" />}
+            title={`High traffic; retrying in ${queueEtaSeconds(queueRetryAfterMs)} seconds.`}
+            actions={
+              <SatEntryButton variant="link" onClick={handleLeaveQueue}>
+                Leave and edit
+              </SatEntryButton>
+            }
+          >
+            We&apos;ll retry automatically. You can leave and try again later.
+          </SatEntryNotice>
+        ) : null}
+
+        {queuePollFailure ? (
+          <SatEntryNotice
+            tone="warning"
+            title={`Retry failed after ${queuePollFailure.attempts} ${
+              queuePollFailure.attempts === 1 ? "attempt" : "attempts"
+            }`}
+            actions={
+              <>
+                <SatEntryButton onClick={handleRetryQueue} disabled={isLoading}>
+                  Retry
+                </SatEntryButton>
+                <SatEntryButton variant="secondary" onClick={handleLeaveQueue}>
+                  Leave and edit
+                </SatEntryButton>
+              </>
+            }
+          >
+            {queuePollFailure.message} Your details are still here — retry to try again or leave to
+            edit the form.
+          </SatEntryNotice>
+        ) : null}
+
+        <form onSubmit={handleSubmit} noValidate className="space-y-5">
+          <SatEntryField
+            id="wcode"
+            label="Student ID/WCODE"
+            code
+            value={formData.wcode}
+            onChange={(value) => handleInputChange("wcode", value)}
+            error={errors.wcode}
+            autoComplete="off"
+            disabled={locked}
+          />
+          <SatEntryField
+            id="studentName"
+            label="Full name"
+            value={formData.studentName}
+            onChange={(value) => handleInputChange("studentName", value)}
+            error={errors.studentName}
+            placeholder="Your full name"
+            autoComplete="name"
+            disabled={locked}
+          />
+          <SatEntryField
+            id="email"
+            label="Email"
+            type="email"
+            value={formData.email}
+            onChange={(value) => handleInputChange("email", value)}
+            onBlur={handleEmailBlur}
+            error={errors.email}
+            placeholder="you@example.com"
+            autoComplete="email"
+            disabled={locked}
+          />
+          <SatEntrySubmit disabled={locked} busy={isLoading || Boolean(queuedAdmission)}>
+            {queuedAdmission ? "Waiting for admission…" : isLoading ? "Checking in…" : "Continue"}
+          </SatEntrySubmit>
+        </form>
+      </SatEntryLayout>
     );
   }
 

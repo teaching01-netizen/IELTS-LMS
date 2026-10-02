@@ -11,6 +11,15 @@ import {
 } from "lucide-react";
 import { useAuthSession, type StudentQueuedAdmission } from "../../auth/api/authSession";
 import { SatErrorSurface, SatLoadingSurface } from "../../student-delivery/api/satStateSurfaces";
+import {
+  SatEntryButton,
+  SatEntryField,
+  SatEntryLayout,
+  SatEntryNotice,
+  SatEntryStatus,
+  SatEntrySubmit,
+  focusFirstInvalidField,
+} from "../../student-delivery/api/satEntryPortal";
 import { resumeSatStudentSession } from "../../student-delivery/api/satResume";
 import {
   clearSatResumeLocator,
@@ -434,12 +443,16 @@ export function StudentAccessLinkEntryRoute() {
     const normalizedEmail = form.email.trim();
     const normalizedCode = normalizeStudentCode(form.studentCode);
     if (link.accessMode === "student_code" && !normalizedCode)
-      nextErrors.studentCode = "Enter the student code provided by your teacher.";
+      nextErrors.studentCode =
+        link.providerKey === "sat"
+          ? "Enter your Student ID/WCODE."
+          : "Enter the student code provided by your teacher.";
     if (!normalizedName) nextErrors.studentName = "Enter your full name.";
     if (!normalizedEmail || !isValidEmail(normalizedEmail))
       nextErrors.email = "Enter a valid email address.";
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
+      if (link.providerKey === "sat") focusFirstInvalidField(event.currentTarget as HTMLFormElement);
       return;
     }
     submittingRef.current = true;
@@ -591,24 +604,127 @@ export function StudentAccessLinkEntryRoute() {
       />
     );
   }
-  if (!canEnter)
-    return (
-      <EntryShell>
-        <LinkAvailabilityState link={link} />
-      </EntryShell>
-    );
+  if (!canEnter) return <LinkAvailabilityState link={link} />;
 
   const scopeCopy = accessLinkScopeCopy(link);
   if (effectiveStudentAccessLinkSections(link.enabledSections, link.publishScope).length === 0) {
     return (
-      <EntryShell>
-        <UnavailableState
-          icon={<AlertCircle size={24} />}
-          title="This exam isn’t available"
-          description={scopeCopy ?? "Ask your teacher for a corrected Student Link."}
-          eyebrow={`${link.examTitle} · Version ${link.versionNumber}`}
-        />
-      </EntryShell>
+      <UnavailableScreen
+        sat={link.providerKey === "sat"}
+        icon={<AlertCircle size={24} />}
+        title="This exam isn’t available"
+        description={scopeCopy ?? "Ask your teacher for a corrected Student Link."}
+        eyebrow={`${link.examTitle} · Version ${link.versionNumber}`}
+      />
+    );
+  }
+
+  if (link.providerKey === "sat") {
+    const locked = submitting || Boolean(queued);
+    return (
+      <SatEntryLayout
+        eyebrow={`${link.examTitle} · Version ${link.versionNumber}`}
+        title={link.name}
+        description="Check your details, then continue to the exam."
+        helpText="Need help? Ask your teacher."
+        meta={
+          link.audienceLabel ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] px-3 py-1.5 text-[13px] font-medium text-[var(--sat-text-secondary)]">
+              <LockKeyhole size={13} aria-hidden="true" />
+              {link.audienceLabel}
+            </span>
+          ) : null
+        }
+      >
+        {scopeCopy ? (
+          <SatEntryNotice tone="info" icon={<Clock3 size={18} />}>
+            {scopeCopy}
+          </SatEntryNotice>
+        ) : null}
+        {submitError ? <SatEntryNotice tone="error">{submitError}</SatEntryNotice> : null}
+        {queued ? (
+          <SatEntryNotice
+            tone="info"
+            icon={<LoaderCircle size={18} className="motion-safe:animate-spin" />}
+            title="You're in the admission queue"
+            actions={
+              <SatEntryButton variant="link" onClick={handleLeaveQueue}>
+                Leave queue
+              </SatEntryButton>
+            }
+          >
+            Position {queued.position} · Ticket ref {queued.ticketId}. Checking again in ~
+            {queueEtaSeconds(queued.pollAfterMs)}s — keep this tab open.
+          </SatEntryNotice>
+        ) : null}
+        {queuePollFailure ? (
+          <SatEntryNotice
+            tone="warning"
+            title={`Queue check failed after ${queuePollFailure.attempts} ${
+              queuePollFailure.attempts === 1 ? "attempt" : "attempts"
+            }`}
+            actions={
+              <>
+                <SatEntryButton onClick={handleRetryQueue}>Retry</SatEntryButton>
+                <SatEntryButton variant="secondary" onClick={handleLeaveQueue}>
+                  Leave queue
+                </SatEntryButton>
+              </>
+            }
+          >
+            Ticket ref {queuePollFailure.ticketId} · Position at failure {queuePollFailure.position}
+            . Your details are saved — retry to keep your place or leave the queue to edit the form.
+          </SatEntryNotice>
+        ) : null}
+
+        <form onSubmit={handleSubmit} noValidate className="space-y-5">
+          {link.accessMode === "student_code" ? (
+            <SatEntryField
+              id="student-link-code"
+              label="Student ID/WCODE"
+              code
+              value={form.studentCode}
+              error={errors.studentCode}
+              disabled={locked}
+              onChange={(value) => {
+                setForm((current) => ({ ...current, studentCode: value }));
+                clearFieldError("studentCode");
+              }}
+              autoComplete="off"
+            />
+          ) : null}
+          <SatEntryField
+            id="student-link-name"
+            label="Full name"
+            value={form.studentName}
+            error={errors.studentName}
+            disabled={locked}
+            onChange={(value) => {
+              setForm((current) => ({ ...current, studentName: value }));
+              clearFieldError("studentName");
+            }}
+            placeholder="Your full name"
+            autoComplete="name"
+          />
+          <SatEntryField
+            id="student-link-email"
+            label="Email"
+            type="email"
+            value={form.email}
+            error={errors.email}
+            disabled={locked}
+            onChange={(value) => {
+              setForm((current) => ({ ...current, email: value }));
+              clearFieldError("email");
+            }}
+            placeholder="you@example.com"
+            autoComplete="email"
+          />
+          <SatEntrySubmit disabled={locked} busy={locked}>
+            {queued ? "Waiting…" : submitting ? "Checking…" : "Continue"}
+          </SatEntrySubmit>
+        </form>
+      </SatEntryLayout>
     );
   }
 
@@ -816,7 +932,31 @@ function LinkAvailabilityState({ link }: { link: PublicStudentAccessLink }) {
               description: "Ask your teacher for a current Student Link.",
               icon: <AlertCircle size={24} />,
             };
-  return <UnavailableState {...content} eyebrow={`${link.examTitle} · ${link.name}`} />;
+  return (
+    <UnavailableScreen
+      {...content}
+      sat={link.providerKey === "sat"}
+      eyebrow={`${link.examTitle} · ${link.name}`}
+    />
+  );
+}
+
+function UnavailableScreen({
+  sat,
+  ...state
+}: {
+  sat: boolean;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  eyebrow?: string;
+}) {
+  if (sat) return <SatEntryStatus {...state} />;
+  return (
+    <EntryShell>
+      <UnavailableState {...state} />
+    </EntryShell>
+  );
 }
 
 function UnavailableState({

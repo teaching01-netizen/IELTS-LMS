@@ -1452,12 +1452,12 @@ func (s *Service) ResolveEntry(ctx context.Context, linkID, studentCode, student
 		if audience == AudienceSelectedStudents {
 			code := NormalizeAccessCode(studentCode)
 			if code == "" {
-				return unavailable("A student code is required for this Student Link.")
+				return unavailable("A Student ID/WCODE is required for this Student Link.")
 			}
 			var expectedName, expectedEmail sql.NullString
 			if err := q.QueryRowContext(ctx, "SELECT student_name, student_email FROM assessment_access_link_members WHERE link_id = ? AND student_code = ? LIMIT 1", linkID, code).Scan(&expectedName, &expectedEmail); err != nil {
 				if err == sql.ErrNoRows {
-					return unavailable("This student code is not included in this Student Link.")
+					return unavailable("This Student ID/WCODE is not included in this Student Link.")
 				}
 				return err
 			}

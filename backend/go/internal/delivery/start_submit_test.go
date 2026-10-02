@@ -9,6 +9,7 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
+	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
@@ -102,6 +103,14 @@ func deliveryBusInsert(mock sqlmock.Sqlmock, kind, target, name string, rev int6
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO live_update_events")).
 		WithArgs(sqlmock.AnyArg(), kind, target, rev, name, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+}
+
+// deliveryReconcileWakeup stages the attempt + roster live wake-up a reconcile
+// pass appends inside its transaction whenever it changed module state.
+func deliveryReconcileWakeup(mock sqlmock.Sqlmock, rev int64) {
+	deliveryMaxRevision(mock, rev)
+	deliveryBusInsert(mock, liveupdates.KindAttempt, "att-1", liveEventModuleSubmitted, rev)
+	deliveryBusInsert(mock, liveupdates.KindScheduleRoster, "sched-1", liveEventModuleSubmitted, rev)
 }
 
 // deliveryUnscopedLink stages the Student Access scope read as "no link" — the
