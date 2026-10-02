@@ -1,4 +1,4 @@
-package main
+package background
 
 // Plan E3/§7: pool waits split API/worker. The worker pool (RoleWorker)
 // reports its Stats() every hot cycle via db.ReportPoolStats — the

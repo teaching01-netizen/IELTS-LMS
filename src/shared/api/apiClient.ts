@@ -4,6 +4,7 @@
  */
 
 import { ApiError } from "../api-client/errors";
+import { connectionRecovery } from "./connectionRecovery";
 import { logError, logInfo, logWarn } from "../observability/errorLogger";
 
 /**
@@ -36,6 +37,9 @@ export interface ApiRequestConfig {
   body?: unknown;
   timeout?: number;
   retries?: number;
+  /** Writes may retry only with an existing backend idempotency guarantee.
+   * The caller must create the operation identifier before this request. */
+  retrySafe?: boolean;
   signal?: AbortSignal;
   skipUnauthorizedHandler?: boolean;
   /**
@@ -200,16 +204,13 @@ class ApiClient {
    * Make an HTTP request with retry logic.
    * Public for the `apiRequest` adapter; prefer the typed verb helpers.
    */
-  async request<T>(
-    endpoint: string,
-    config: ApiRequestConfig = {}
-  ): Promise<ApiResponse<T>> {
+  async request<T>(endpoint: string, config: ApiRequestConfig = {}): Promise<ApiResponse<T>> {
     const {
       method = "GET",
       headers = {},
       body,
       timeout = this.defaultTimeout,
-      retries = 3,
+      retries: requestedRetries = 3,
       signal,
       skipUnauthorizedHandler = false,
     } = config;
@@ -217,12 +218,38 @@ class ApiClient {
     const url = endpoint.startsWith("/api/") ? endpoint : `${this.baseURL}${endpoint}`;
     const requestId = this.generateRequestId();
 
+    const retries =
+      method === "GET" || config.retrySafe === true
+        ? Math.min(3, Math.max(0, Math.floor(requestedRetries)))
+        : 0;
+    const deadline = Date.now() + 60_000;
+    const serializedBody =
+      body === undefined
+        ? undefined
+        : typeof FormData !== "undefined" && body instanceof FormData
+          ? body
+          : JSON.stringify(body);
+    let recovering = false;
+    let transient = false;
     let lastError: Error | null = null;
     let completedAttempts = 0;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
+      if (signal?.aborted) {
+        lastError = new DOMException("Request cancelled", "AbortError");
+        transient = false;
+        break;
+      }
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      let timedOut = false;
+      const remaining = Math.max(1, deadline - Date.now());
+      const timeoutId = setTimeout(
+        () => {
+          timedOut = true;
+          controller.abort();
+        },
+        Math.min(timeout, remaining)
+      );
       // Named handler so the external-signal subscription can be removed in
       // `finally`: an anonymous `{ once: true }` listener is never removed on
       // the non-abort path and leaks a closure per attempt on reused signals.
@@ -274,28 +301,11 @@ class ApiClient {
           signal: controller.signal,
         };
 
-        if (body !== undefined) {
-          requestInit.body = isFormDataBody ? body : JSON.stringify(body);
+        if (serializedBody !== undefined) {
+          requestInit.body = serializedBody;
         }
 
-        let response: Response;
-        try {
-          response = await fetch(url, requestInit);
-        } catch (fetchError) {
-          // Some test environments ship an AbortController/AbortSignal implementation that is
-          // incompatible with the fetch implementation (e.g. jsdom + undici), causing fetch() to
-          // throw synchronously when `signal` is provided. Fall back to a no-signal request.
-          if (
-            fetchError instanceof TypeError &&
-            typeof fetchError.message === "string" &&
-            fetchError.message.includes("Expected signal")
-          ) {
-            const { signal: _signal, ...withoutSignal } = requestInit;
-            response = await fetch(url, withoutSignal);
-          } else {
-            throw fetchError;
-          }
-        }
+        const response = await fetch(url, requestInit);
 
         // Timeout always cleared exactly once, on every path (success,
         // HTTP error, thrown fetch, abort) via the finally below.
@@ -339,33 +349,50 @@ class ApiClient {
           apiResponse.data = data;
         }
 
+        if (method === "GET") connectionRecovery.finish(requestId, endpoint, false);
         return apiResponse;
       } catch (error) {
-        lastError = error as Error;
-
-        // Don't retry on abort or certain status codes
-        if (error instanceof Error && error.name === "AbortError") {
-          break;
-        }
-
-        if (error instanceof Error && this.shouldNotRetry(error)) {
-          break;
-        }
-
-        // Log retry
-        if (attempt < retries) {
-          const delay = this.calculateRetryDelay(attempt);
-          logWarn(`Retrying request ${attempt + 1}/${retries} after ${delay}ms`, {
-            endpoint,
-            requestId,
+        lastError = error instanceof Error ? error : new Error("Request failed");
+        const cancelled = signal?.aborted || (lastError.name === "AbortError" && !timedOut);
+        if (!cancelled && (timedOut || lastError instanceof TypeError)) {
+          lastError = new ApiClientError({
+            message: timedOut ? "Connection timed out." : "Unable to connect.",
+            statusCode: 0,
+            backendCode: "NETWORK_ERROR",
           });
-          await this.delay(delay);
+          (lastError as ApiError).category = "network";
         }
+        transient = !cancelled && !this.shouldNotRetry(lastError);
+        if (!transient || attempt >= retries || Date.now() >= deadline) break;
       } finally {
         completedAttempts += 1;
         clearTimeout(timeoutId);
         signal?.removeEventListener("abort", forwardExternalAbort);
       }
+      const delay = this.calculateRetryDelay(attempt);
+      if (Date.now() + delay >= deadline) break;
+      if (method === "GET") {
+        connectionRecovery.begin(requestId, endpoint);
+        recovering = true;
+      }
+      logWarn(`Retrying request ${attempt + 1}/${retries} after ${delay}ms`, {
+        endpoint,
+        requestId,
+      });
+      try {
+        await this.delay(delay, signal);
+      } catch (error) {
+        lastError = error as Error;
+        transient = false;
+        break;
+      }
+    }
+    if (lastError instanceof ApiError) {
+      lastError.transportRetryHandled = true;
+      lastError.requestMethod = method;
+    }
+    if (method === "GET" && (recovering || retries > 0)) {
+      connectionRecovery.finish(requestId, endpoint, transient);
     }
 
     // All retries failed
@@ -470,12 +497,13 @@ class ApiClient {
     // details lack either the canonical or legacy field.
     let details = parsed.details;
     if (status === 429) {
-      const headerRetry = response.headers.get("Retry-After") ?? response.headers.get("retry-after");
+      const headerRetry =
+        response.headers.get("Retry-After") ?? response.headers.get("retry-after");
       const retrySecs = headerRetry !== null ? Number(headerRetry) : NaN;
       if (Number.isFinite(retrySecs) && retrySecs > 0) {
         const merged: Record<string, unknown> = { ...(details ?? {}) };
-        if (merged['retryAfterSeconds'] === undefined && merged['retryAfterSecs'] === undefined) {
-          merged['retryAfterSeconds'] = Math.floor(retrySecs);
+        if (merged["retryAfterSeconds"] === undefined && merged["retryAfterSecs"] === undefined) {
+          merged["retryAfterSeconds"] = Math.floor(retrySecs);
         }
         details = merged;
       }
@@ -579,17 +607,10 @@ class ApiClient {
   private shouldNotRetry(error: Error): boolean {
     const statusCode = ApiClient.getStatusCode(error);
 
-    // Don't retry on client errors (4xx)
-    if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
-      return true;
-    }
-
-    // Don't retry on abort
-    if (error.name === "AbortError") {
-      return true;
-    }
-
-    return false;
+    return (
+      error.name === "AbortError" ||
+      !(statusCode === 0 || statusCode === 502 || statusCode === 503 || statusCode === 504)
+    );
   }
 
   private static getStatusCode(error: Error): number | undefined {
@@ -609,8 +630,20 @@ class ApiClient {
   /**
    * Delay helper
    */
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  private delay(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const abort = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        reject(new DOMException("Request cancelled", "AbortError"));
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", abort);
+        resolve();
+      }, ms);
+      if (signal?.aborted) abort();
+      else signal?.addEventListener("abort", abort, { once: true });
+    });
   }
 
   /**
@@ -725,7 +758,7 @@ export async function del<T>(endpoint: string, config?: ApiRequestConfig): Promi
  * in `ApiClient.request`, and errors are always `ApiError`.
  */
 export async function apiRequest<T>(path: string, opts: RequestOpts = {}): Promise<T> {
-  const config: ApiRequestConfig = { retries: 0 };
+  const config: ApiRequestConfig = {};
   const method = opts.method as ApiRequestConfig["method"] | undefined;
   if (method !== undefined) {
     config.method = method;

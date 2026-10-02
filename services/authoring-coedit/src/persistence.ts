@@ -155,6 +155,7 @@ function optionalDurabilityFields(input: {
 export class CoeditPersistence {
   private readonly go: GoAuthoringClient;
   private readonly commits = new Map<string, CoeditCommit>();
+  private readonly durableUpdates = new Map<string, Uint8Array>();
   private readonly inflight = new Map<string, Promise<CoeditCommit>>();
   /**
    * Authentication loads happen before Hocuspocus creates a document. Keep
@@ -175,6 +176,18 @@ export class CoeditPersistence {
 
   lastCommit(documentName: string): CoeditCommit | null {
     return this.commits.get(documentName) ?? null;
+  }
+
+  isClean(documentName: string, document: Y.Doc): boolean {
+    const durable = this.durableUpdates.get(documentName);
+    return (
+      durable !== undefined &&
+      Buffer.from(durable).equals(Buffer.from(encodeStateAsUpdate(document)))
+    );
+  }
+
+  hasPendingStores(): boolean {
+    return this.inflight.size > 0;
   }
 
   /**
@@ -316,12 +329,15 @@ export class CoeditPersistence {
             ...metadata,
             ...(durability.stateEpoch ? { stateEpoch: durability.stateEpoch } : {}),
             ...(durability.commitSequence ? { commitSequence: durability.commitSequence } : {}),
-            ...(durability.workspaceRevision !== undefined ? { workspaceRevision: durability.workspaceRevision } : {}),
+            ...(durability.workspaceRevision !== undefined
+              ? { workspaceRevision: durability.workspaceRevision }
+              : {}),
           };
         }
       } finally {
         durable.destroy();
       }
+      this.durableUpdates.set(documentName, encodeStateAsUpdate(document));
       return metadata;
     }
 
@@ -340,7 +356,10 @@ export class CoeditPersistence {
         stateHash,
         prompt: null,
         workspace: projectWorkspace(document),
-        actorId: typeof input.context?.["actorId"] === "string" ? input.context["actorId"] as string : "",
+        actorId:
+          typeof input.context?.["actorId"] === "string"
+            ? (input.context["actorId"] as string)
+            : "",
       });
       this.commits.set(documentName, {
         stateHash,
@@ -355,6 +374,7 @@ export class CoeditPersistence {
         acknowledgedAt: Date.now(),
       });
       metrics.incCounter("authoring_coedit_store_total", { outcome: "accepted" });
+      this.durableUpdates.set(documentName, state);
       return {
         ...metadata,
         lifecycleState: "active",
@@ -384,7 +404,8 @@ export class CoeditPersistence {
     }
     const state = encodeStateAsUpdate(document);
     assertStateWithinLimit(state);
-    const actorId = typeof input.context?.["actorId"] === "string" ? (input.context["actorId"] as string) : "";
+    const actorId =
+      typeof input.context?.["actorId"] === "string" ? (input.context["actorId"] as string) : "";
     const initialized = await this.go.initialize({
       documentName,
       ydocState: toBase64(state),
@@ -405,6 +426,7 @@ export class CoeditPersistence {
       }),
       acknowledgedAt: Date.now(),
     });
+    this.durableUpdates.set(documentName, state);
     metrics.incCounter("authoring_coedit_store_total", { outcome: "accepted" });
     metadata = {
       ...metadata,
@@ -441,7 +463,7 @@ export class CoeditPersistence {
       input,
       `final:${operationID}:${input.documentName}`,
       true,
-      operationID,
+      operationID
     );
   }
 
@@ -449,7 +471,7 @@ export class CoeditPersistence {
     input: StoreHookInput,
     inflightKey: string,
     finalStore: boolean,
-    freezeOperationId: string,
+    freezeOperationId: string
   ): Promise<CoeditCommit> {
     const existing = this.inflight.get(inflightKey);
     if (existing) return existing;
@@ -460,7 +482,11 @@ export class CoeditPersistence {
     return running;
   }
 
-  private async runStore(input: StoreHookInput, finalStore: boolean, freezeOperationId: string): Promise<CoeditCommit> {
+  private async runStore(
+    input: StoreHookInput,
+    finalStore: boolean,
+    freezeOperationId: string
+  ): Promise<CoeditCommit> {
     const { documentName, document } = input;
     const started = Date.now();
     let encoded: CoeditStorePayload;
@@ -516,6 +542,7 @@ export class CoeditPersistence {
         acknowledgedAt: Date.now(),
       };
       this.commits.set(documentName, commit);
+      this.durableUpdates.set(documentName, state);
       metrics.incCounter("authoring_coedit_store_total", {
         outcome: result.duplicate ? "accepted" : "accepted",
       });
@@ -591,14 +618,16 @@ export class CoeditPersistence {
   private compactedState(documentName: string, source: Y.Doc): CompactionCandidate | null {
     const parsed = parseAnyDocumentName(documentName);
     try {
-      if (encodeStateVector(source).byteLength <= COMPACTION_STATE_VECTOR_THRESHOLD_BYTES) return null;
+      if (encodeStateVector(source).byteLength <= COMPACTION_STATE_VECTOR_THRESHOLD_BYTES)
+        return null;
       const original = contentSignature(source);
       if (original === null) return this.skipCompaction("unprojected_root");
       const rebuilt = this.rebuild(source, parsed?.fieldSet === FIELD_SET_WORKSPACE);
       try {
         if (contentSignature(rebuilt) !== original) return this.skipCompaction("content_mismatch");
         const state = encodeStateAsUpdate(rebuilt);
-        if (state.byteLength >= encodeStateAsUpdate(source).byteLength) return this.skipCompaction("no_reduction");
+        if (state.byteLength >= encodeStateAsUpdate(source).byteLength)
+          return this.skipCompaction("no_reduction");
         return {
           state,
           vector: encodeStateVector(rebuilt),
@@ -677,7 +706,7 @@ export class CoeditPersistence {
   /** The private failure frame the editor maps onto a visible, actionable state. */
   private broadcastFailure(
     documentName: string,
-    failure: { retryable: boolean; reason: string | null; requiresResync: boolean },
+    failure: { retryable: boolean; reason: string | null; requiresResync: boolean }
   ): void {
     this.broadcaster?.(
       documentName,
@@ -687,7 +716,7 @@ export class CoeditPersistence {
         retryable: failure.retryable,
         reason: failure.reason,
         requiresResync: failure.requiresResync,
-      }),
+      })
     );
   }
 
@@ -699,6 +728,7 @@ export class CoeditPersistence {
 
   /** Clears the in-memory commit record for a closed room. */
   forget(documentName: string): void {
+    this.durableUpdates.delete(documentName);
     this.commits.delete(documentName);
     this.preloaded.delete(documentName);
     for (const key of this.inflight.keys()) {
@@ -714,7 +744,9 @@ function loadMetadata(result: Awaited<ReturnType<GoAuthoringClient["load"]>>): C
     documentName: result.documentName,
     lifecycleState: result.lifecycleState,
     closedReason: result.closedReason,
-    ...(result.freezeOperationId === undefined ? {} : { freezeOperationId: result.freezeOperationId }),
+    ...(result.freezeOperationId === undefined
+      ? {}
+      : { freezeOperationId: result.freezeOperationId }),
     ...(result.freezeExpiresAt === undefined ? {} : { freezeExpiresAt: result.freezeExpiresAt }),
     ...optionalDurabilityFields(result),
   };

@@ -57,18 +57,18 @@ export class SingletonLock {
     try {
       const [rows] = await connection.query<mysql.RowDataPacket[]>(
         "SELECT GET_LOCK(?, ?) AS acquired",
-        [this.options.lockName, this.options.lockTimeoutSeconds],
+        [this.options.lockName, this.options.lockTimeoutSeconds]
       );
       const acquired = Number(rows[0]?.["acquired"] ?? 0);
       if (acquired !== 1) {
-        throw new Error(
-          `another authoring-coedit process already owns ${this.options.lockName}`,
-        );
+        throw new Error(`another authoring-coedit process already owns ${this.options.lockName}`);
       }
       this.held = true;
       metrics.setGauge("authoring_coedit_singleton_lock", 1);
       connection.on("error", (error: Error) => {
-        this.markLost(`lock connection error: ${error.message}`);
+        if (this.connection === connection && this.held) {
+          this.markLost(`lock connection error: ${error.message}`);
+        }
       });
       this.armConfirmation();
     } catch (error) {
@@ -92,12 +92,15 @@ export class SingletonLock {
    * trustworthy ownership check available to MySQL clients.
    */
   async confirmOwnership(): Promise<void> {
-    if (!this.connection || this.lost) return;
+    const connection = this.connection;
+    if (!connection || !this.held || this.lost) return;
     try {
-      const [rows] = await this.connection.query<mysql.RowDataPacket[]>(
+      const [rows] = await connection.query<mysql.RowDataPacket[]>(
         "SELECT IS_USED_LOCK(?) AS owner, CONNECTION_ID() AS self",
-        [this.options.lockName],
+        [this.options.lockName]
       );
+      // Parking can close the session while its last confirmation is in flight.
+      if (this.connection !== connection || !this.held) return;
       const owner = rows[0]?.["owner"];
       const self = rows[0]?.["self"];
       if (owner === null || owner === undefined) {
@@ -108,7 +111,9 @@ export class SingletonLock {
         this.markLost("singleton lock is owned by another session");
       }
     } catch (error) {
-      this.markLost(`lock confirmation failed: ${(error as Error).message}`);
+      if (this.connection === connection && this.held) {
+        this.markLost(`lock confirmation failed: ${(error as Error).message}`);
+      }
     }
   }
 
@@ -143,7 +148,7 @@ export class SingletonLock {
     try {
       await connection.end();
     } catch {
-      // Ignore.
+      connection.destroy();
     }
   }
 }

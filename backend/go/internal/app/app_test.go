@@ -21,10 +21,9 @@ func TestBuildNilPoolYieldsZeroServices(t *testing.T) {
 }
 
 func TestCompleterIsSharedProviderSwitch(t *testing.T) {
-	// Both mains must construct domain services from the shared graph
-	// (the provider switch lives inside shared.Build): assert the two
-	// call sites reference shared.Build (grep-level drift pin).
-	for _, f := range []string{"../../cmd/api/main.go", "../../cmd/worker/main.go"} {
+	// API and reusable runner construct services from the shared graph.
+	// The worker command delegates to that runner.
+	for _, f := range []string{"../../cmd/api/main.go", "../background/runner.go"} {
 		raw, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
@@ -36,7 +35,7 @@ func TestCompleterIsSharedProviderSwitch(t *testing.T) {
 	// And the worker must not paste its own timeout provider switch: the
 	// SAT/ACT completion routing (ReconcileAdapter vs Terminalize) may
 	// exist only inside internal/app.
-	raw, err := os.ReadFile("../../cmd/worker/main.go")
+	raw, err := os.ReadFile("../background/runner.go")
 	if err != nil {
 		t.Fatal(err)
 	}

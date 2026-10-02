@@ -89,10 +89,13 @@ func (p *PresenceMap) Touch(attemptID, scheduleID, clientSession, status string,
 	p.sweepLocked(now)
 	e, ok := p.items[attemptID]
 	if !ok {
-		p.items[attemptID] = &presenceEntry{
-			snap:  PresenceSnapshot{AttemptID: attemptID, ScheduleID: scheduleID, ClientSession: clientSession, Status: status, LastSeen: now},
-			dirty: true,
-		}
+		e = &presenceEntry{}
+		p.items[attemptID] = e
+	}
+	// RememberMutation can create the ledger before the first heartbeat.
+	if e.snap.AttemptID == "" {
+		e.snap = PresenceSnapshot{AttemptID: attemptID, ScheduleID: scheduleID, ClientSession: clientSession, Status: status, LastSeen: now}
+		e.dirty = true
 		return
 	}
 	if e.snap.ClientSession != clientSession {
@@ -161,6 +164,21 @@ func (p *PresenceMap) DrainDirty() []PresenceDirty {
 	return out
 }
 
+// RestoreDirty retains failed flushes without replacing a newer heartbeat.
+func (p *PresenceMap) RestoreDirty(batch []PresenceDirty) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, d := range batch {
+		e := p.items[d.AttemptID]
+		if e == nil {
+			e = &presenceEntry{snap: PresenceSnapshot{AttemptID: d.AttemptID, ScheduleID: d.ScheduleID,
+				ClientSession: d.ClientSession, Status: d.Status, LastSeen: d.LastSeen}}
+			p.items[d.AttemptID] = e
+		}
+		e.dirty = true
+	}
+}
+
 // Len reports live entry count (observability).
 func (p *PresenceMap) Len() int {
 	p.mu.Lock()
@@ -184,34 +202,34 @@ func (s *Service) FlushPresence(ctx context.Context, dirty []PresenceDirty) erro
 		if _, err := s.db.ExecContext(ctx, `
 			INSERT INTO student_heartbeat_events
 			(id, attempt_id, schedule_id, mutation_id, event_type, payload, client_timestamp, server_received_at)
-			VALUES (?, ?, ?, ?, ?, 'null', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+			VALUES (?, ?, ?, ?, ?, 'null', ?, UTC_TIMESTAMP(6))
+			ON DUPLICATE KEY UPDATE id = id`,
 			uuid.NewString(), d.AttemptID, d.ScheduleID, "flush-"+d.AttemptID+"-"+d.LastSeen.UTC().Format(time.RFC3339Nano), d.Status, d.LastSeen.UTC()); err != nil {
 			return err
 		}
-		var integrityRaw, recoveryRaw string
-		if err := s.db.QueryRowContext(ctx,
-			`SELECT integrity, recovery FROM student_attempts WHERE id = ?`,
-			d.AttemptID).Scan(&integrityRaw, &recoveryRaw); err != nil {
-			return err
-		}
-		integrity, recovery := flushIntegrityRecovery(integrityRaw, recoveryRaw, d)
+		integrity, recovery := presencePatches(d)
+		// Merge under the UPDATE's row lock, and preserve a newer client's
+		// ownership. A flush must preserve other answer recovery fields and
+		// never reclaim an attempt for a superseded heartbeat session.
 		if _, err := s.db.ExecContext(ctx, `
 			UPDATE student_attempts
-			SET integrity = ?, recovery = ?, active_client_session_id = ?, revision = revision + 1, updated_at = UTC_TIMESTAMP(6)
-			WHERE id = ? AND schedule_id = ?`,
-			integrity, recovery, d.ClientSession, d.AttemptID, d.ScheduleID); err != nil {
+			SET integrity = JSON_MERGE_PATCH(CASE WHEN JSON_TYPE(integrity) = 'OBJECT' THEN integrity ELSE JSON_OBJECT() END, CAST(? AS JSON)),
+			    recovery = JSON_MERGE_PATCH(CASE WHEN JSON_TYPE(recovery) = 'OBJECT' THEN recovery ELSE JSON_OBJECT() END, CAST(? AS JSON)),
+			    active_client_session_id = COALESCE(NULLIF(active_client_session_id, ''), NULLIF(?, '')),
+			    revision = revision + 1, updated_at = UTC_TIMESTAMP(6)
+			WHERE id = ? AND schedule_id = ?
+			  AND (NULLIF(active_client_session_id, '') IS NULL OR active_client_session_id = ?)`,
+			integrity, recovery, d.ClientSession, d.AttemptID, d.ScheduleID, d.ClientSession); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// flushIntegrity folds a transition into the attempt integrity JSON (same
-// keys the per-beat tx writes: lastHeartbeatAt/Status + disconnect/reconnect
-// markers) plus the recovery clientSessionId. The session comes from the
-// presence snapshot (PresenceDirty carries the owning session).
-func flushIntegrityRecovery(integrityRaw, recoveryRaw string, d PresenceDirty) (string, string) {
-	integrity := telemetryObject(integrityRaw)
+// presencePatches contains only heartbeat metadata; SQL merges it with the
+// current row so concurrent answer recovery remains intact.
+func presencePatches(d PresenceDirty) (string, string) {
+	integrity := map[string]any{}
 	now := d.LastSeen.UTC().Format(time.RFC3339Nano)
 	integrity["lastHeartbeatAt"] = now
 	integrity["lastHeartbeatStatus"] = d.Status
@@ -221,7 +239,7 @@ func flushIntegrityRecovery(integrityRaw, recoveryRaw string, d PresenceDirty) (
 	if d.Status == "reconnect" {
 		integrity["lastReconnectAt"] = now
 	}
-	recovery := telemetryObject(recoveryRaw)
+	recovery := map[string]any{}
 	recovery["clientSessionId"] = d.ClientSession
 	recovery["lastPersistedAt"] = now
 	return encodeTelemetryObject(integrity), encodeTelemetryObject(recovery)
@@ -268,7 +286,9 @@ func (p *PresenceMap) sweepLocked(now time.Time) {
 		if e.snap.AttemptID == "" {
 			continue
 		}
-		if now.Sub(e.snap.LastSeen) > p.ttl {
+		// A stale liveness view may expire, but an unflushed transition is
+		// still required work (including one restored after a failed drain).
+		if !e.dirty && now.Sub(e.snap.LastSeen) > p.ttl {
 			delete(p.items, id)
 		}
 	}

@@ -1,4 +1,4 @@
-package main
+package background
 
 // WS-09 per-attempt fan-out pins (sqlmock scope; no live DB needed).
 //
@@ -50,9 +50,9 @@ func (c *captureSealer) Terminalize(_ context.Context, cmd terminalization.SealC
 	return &terminalization.SealResult{Created: true, TerminalizationID: "term-" + cmd.AttemptID}, nil
 }
 
-func fanoutWorker(db *sql.DB, seal *captureSealer) *worker {
+func fanoutWorker(db *sql.DB, seal *captureSealer) *Runner {
 	repo := outbox.NewRepository(db)
-	return (&worker{db: db, outbox: repo, workerID: "test-worker"}).setTerminalSealer(seal)
+	return (&Runner{db: db, outbox: repo, workerID: "test-worker"}).setTerminalSealer(seal)
 }
 
 func loadRow(mock sqlmock.Sqlmock, attempt, provider, proctor string) {
@@ -175,29 +175,6 @@ func TestLateArrivalMidFanOutPickedUp(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestRequeueFlagParsing(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"long id", []string{"requeue-dead-letter", "--id", "dlq-1"}, "dlq-1"},
-		{"equals", []string{"requeue-dead-letter", "--id=dlq-2"}, "dlq-2"},
-		{"alias", []string{"requeue", "--requeue", "dlq-3"}, "dlq-3"},
-		{"alias equals", []string{"requeue", "--requeue=dlq-4"}, "dlq-4"},
-		{"positional", []string{"requeue-dead-letter", "dlq-5"}, "dlq-5"},
-		{"no command", []string{}, ""},
-		{"other args", []string{"--verbose"}, ""},
-		{"missing value", []string{"requeue-dead-letter"}, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := requeueDeadLetterID(tc.args); got != tc.want {
-				t.Fatalf("requeueDeadLetterID(%v) = %q, want %q", tc.args, got, tc.want)
-			}
-		})
 	}
 }
 

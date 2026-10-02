@@ -66,73 +66,81 @@ func (a *App) stopLiveForwarder() {
 		return
 	}
 	a.LiveForwardMu.Lock()
-	stop := a.stopLiveForward
-	a.stopLiveForward = nil
+	stop, done := a.stopLiveForward, a.liveForwardDone
 	a.LiveForwardMu.Unlock()
 	if stop != nil {
 		stop()
+		<-done
+		a.LiveForwardMu.Lock()
+		if a.liveForwardDone == done {
+			a.stopLiveForward = nil
+			a.liveForwardDone = nil
+		}
+		a.LiveForwardMu.Unlock()
 	}
 }
 
 func startLiveBusForwarder(app *App) {
-	if app == nil || app.LiveBus == nil || app.LiveHub == nil || app.DB == nil {
+	if app == nil || app.LiveBus == nil || app.LiveHub == nil || app.DB == nil || !liveForwarderEnabled(app.Config) {
 		return
 	}
-	if !liveForwarderEnabled(app.Config) {
+	app.LiveForwardMu.Lock()
+	defer app.LiveForwardMu.Unlock()
+	if app.stopLiveForward != nil {
 		return
 	}
-	app.LiveForwardOnce.Do(func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		app.LiveForwardMu.Lock()
-		app.stopLiveForward = cancel
-		app.LiveForwardMu.Unlock()
-		go func() {
-			defer cancel()
-			cursor, err := app.LiveBus.LatestSequence(ctx)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	app.stopLiveForward, app.liveForwardDone = cancel, done
+	cursor, initialized := app.LiveForwardCursor, app.LiveForwardInitialized
+	go func() {
+		defer close(done)
+		defer cancel()
+		if !initialized {
+			var err error
+			cursor, err = app.LiveBus.LatestSequence(ctx)
 			if err != nil {
 				log.Printf("api: live-update cursor initialization failed: %v", err)
 				cursor = 0
 			}
-			interval := time.Duration(app.Config.LiveUpdatePollIntervalMs) * time.Millisecond
-			if interval <= 0 {
-				interval = liveupdates.PollInterval
-			}
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-				}
-				events, err := app.LiveBus.PollNew(ctx, cursor, liveupdates.PollLimit)
-				if err != nil {
-					if ctx.Err() != nil {
-						return
-					}
-					// Phase 06: a poll error is a delivery failure, not a silent
-					// retry. The cursor deliberately does NOT advance past unpolled
-					// rows, so the next tick re-reads them and the gap self-heals;
-					// the two series exist so "the forwarder is blind" is visible.
-					authoringrealtime.EmitDeliveryFailure(authoringrealtime.DeliveryStageForwarder)
-					authoringrealtime.EmitDropped(authoringrealtime.DropForwardPollErr)
-					continue
-				}
-				for _, event := range events {
-					if event.SequenceID > cursor {
-						cursor = event.SequenceID
-					}
-					app.LiveHub.Publish(event)
-					// Age at fan-out: the event is already stale by the time it
-					// reaches a socket, and that staleness is what the freshness
-					// SLO bounds. Sampled per delivered event into fixed buckets.
-					if !event.CreatedAt.IsZero() {
-						authoringrealtime.ObserveDeliveryLatency(float64(time.Since(event.CreatedAt).Milliseconds()))
-					}
-				}
-			}
+		}
+		defer func() {
+			app.LiveForwardMu.Lock()
+			app.LiveForwardCursor, app.LiveForwardInitialized = cursor, true
+			app.LiveForwardMu.Unlock()
 		}()
-	})
+		interval := time.Duration(app.Config.LiveUpdatePollIntervalMs) * time.Millisecond
+		if interval <= 0 {
+			interval = liveupdates.PollInterval
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			events, err := app.LiveBus.PollNew(ctx, cursor, liveupdates.PollLimit)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				authoringrealtime.EmitDeliveryFailure(authoringrealtime.DeliveryStageForwarder)
+				authoringrealtime.EmitDropped(authoringrealtime.DropForwardPollErr)
+				continue
+			}
+			for _, event := range events {
+				if event.SequenceID > cursor {
+					cursor = event.SequenceID
+				}
+				app.LiveHub.Publish(event)
+				if !event.CreatedAt.IsZero() {
+					authoringrealtime.ObserveDeliveryLatency(float64(time.Since(event.CreatedAt).Milliseconds()))
+				}
+			}
+		}
+	}()
 }
 
 // liveWebSocketHandler authenticates and authorizes the requested topic

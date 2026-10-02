@@ -7,6 +7,7 @@ import {router} from './app/router/createRouter';
 import {ErrorBoundary} from './app/error/ErrorBoundary';
 import {queryClient} from './app/data/queryClient';
 import {AuthSessionProvider} from './features/auth/authSession';
+import {ConnectionRecoveryNotice} from './app/ConnectionRecoveryNotice';
 import './index.css';
 
 // Reset transient UI chrome (scroll, focus) on navigation so a new route
@@ -30,6 +31,7 @@ createRoot(document.getElementById('root')!).render(
       <MotionConfig reducedMotion="user">
         <AuthSessionProvider>
           <QueryClientProvider client={queryClient}>
+            <ConnectionRecoveryNotice />
             <RouterProvider router={router} />
           </QueryClientProvider>
         </AuthSessionProvider>

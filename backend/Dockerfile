@@ -8,10 +8,8 @@
 # existing Hocuspocus/Yjs implementation owns the singleton rooms, while Go
 # remains the authorization and durable-persistence boundary.
 #
-# The Go API has no embedded background runner (no ApiBackgroundJobs
-# equivalent), so activity_driven must not skip the worker — otherwise
-# auto-submit, grading projection, and background recovery stop running in
-# exactly the topology that needs them.
+# activity_driven embeds every background job in the API and parks co-edit;
+# continuous retains the standalone worker child in the same container.
 
 FROM node:22-bookworm-slim AS frontend-builder
 
@@ -50,6 +48,8 @@ RUN apt-get update && apt-get install -y \
 ENV FRONTEND_DIST_DIR=/app/frontend/dist
 ENV MIGRATIONS_DIR=/app/migrations
 ENV ENVIRONMENT=production
+ENV BACKGROUND_RUNTIME_MODE=activity_driven
+ENV IDLE_GRACE_SECS=60
 
 COPY --from=backend-builder /out/api /app/api
 COPY --from=backend-builder /out/migrate /app/migrate
@@ -89,73 +89,60 @@ RUN cat > /app/start.sh << 'EOF'
 #!/bin/bash
 set -euo pipefail
 
-echo "Starting IELTS Backend Service..."
+# Normalize before migrate, API, co-edit, or worker inherits the environment.
+BACKGROUND_RUNTIME_MODE="$(/app/normalize-background-runtime-mode.sh "${BACKGROUND_RUNTIME_MODE:-continuous}")"
+export BACKGROUND_RUNTIME_MODE
+export IDLE_GRACE_SECS="${IDLE_GRACE_SECS:-60}"
 
-/app/migrate
-
-# SAT authoring co-editing runs inside this backend service. These values must
-# be exported before the Go API starts so both the API and Hocuspocus receive
-# the same topology. The public URL is intentionally supplied by the operator;
-# it is the browser-facing proxy URL, not the loopback control URL.
 coedit_api_port="${PORT:-${API_PORT:-4000}}"
 export AUTHORING_COEDIT_SERVICE_URL="${AUTHORING_COEDIT_SERVICE_URL:-http://127.0.0.1:1235}"
 export AUTHORING_COEDIT_GO_BASE_URL="${AUTHORING_COEDIT_GO_BASE_URL:-http://127.0.0.1:${coedit_api_port}}"
 export AUTHORING_COEDIT_PROXY_ENABLED="${AUTHORING_COEDIT_PROXY_ENABLED:-true}"
+export AUTHORING_COEDIT_HOST="${AUTHORING_COEDIT_HOST:-127.0.0.1}"
 
-# API-only memory tuning knobs.
-# Allows either generic MALLOC_* env vars or API_* overrides.
-API_MALLOC_ARENA_MAX="${API_MALLOC_ARENA_MAX:-${MALLOC_ARENA_MAX:-1}}"
-API_MALLOC_TRIM_THRESHOLD="${API_MALLOC_TRIM_THRESHOLD:-${MALLOC_TRIM_THRESHOLD_:-131072}}"
-API_MALLOC_MMAP_THRESHOLD="${API_MALLOC_MMAP_THRESHOLD:-${MALLOC_MMAP_THRESHOLD_:-131072}}"
+pids=()
+stop_children() {
+  trap - INT TERM EXIT
+  if [ -n "${COEDIT_PID:-}" ]; then
+    # Flush collaborative writes while the Go persistence boundary still serves.
+    kill "$COEDIT_PID" 2>/dev/null || true
+    wait "$COEDIT_PID" || true
+  fi
+  if [ "${#pids[@]}" -gt 0 ]; then
+    kill "${pids[@]}" 2>/dev/null || true
+    wait || true
+  fi
+}
+trap 'stop_children; exit 0' INT TERM
+trap 'stop_children' EXIT
 
-# NOTE (WS-10a): the OTEL_EXPORTER_OTLP_ENDPOINT forward was dead — no OTel
-# SDK is vendored (trace is X-Trace-Id echo only). Removed; the endpoint
-# env is no longer consumed anywhere.
-MALLOC_ARENA_MAX="${API_MALLOC_ARENA_MAX}" \
-MALLOC_TRIM_THRESHOLD_="${API_MALLOC_TRIM_THRESHOLD}" \
-MALLOC_MMAP_THRESHOLD_="${API_MALLOC_MMAP_THRESHOLD}" \
+/app/migrate
+
+MALLOC_ARENA_MAX="${API_MALLOC_ARENA_MAX:-${MALLOC_ARENA_MAX:-1}}" \
+MALLOC_TRIM_THRESHOLD_="${API_MALLOC_TRIM_THRESHOLD:-${MALLOC_TRIM_THRESHOLD_:-131072}}" \
+MALLOC_MMAP_THRESHOLD_="${API_MALLOC_MMAP_THRESHOLD:-${MALLOC_MMAP_THRESHOLD_:-131072}}" \
 /app/api &
-API_PID=$!
+pids+=("$!")
 
-# The process has its own singleton lock and exits on lock loss, so duplicate
-# backend replicas must not both claim the same authoring rooms.
 /usr/local/bin/node /app/node_modules/tsx/dist/cli.mjs /app/services/authoring-coedit/src/main.ts &
 COEDIT_PID=$!
+pids+=("$COEDIT_PID")
 
-# BACKGROUND_RUNTIME_MODE mirrors the Rust topology. Activity-driven mode is
-# API-only; continuous mode owns the background job set in the worker.
-BACKGROUND_RUNTIME_MODE="$(/app/normalize-background-runtime-mode.sh "${BACKGROUND_RUNTIME_MODE:-continuous}")"
-export BACKGROUND_RUNTIME_MODE
-
-if [ "$BACKGROUND_RUNTIME_MODE" = "activity_driven" ]; then
-  # Activity-driven deployments still need the server-owned timeout finalizer:
-  # a disconnected SAT candidate must progress without another API request.
-  /app/worker --sat-timeouts-only &
-  TIMEOUT_WORKER_PID=$!
-  trap 'kill "$API_PID" "$COEDIT_PID" "$TIMEOUT_WORKER_PID" 2>/dev/null || true' INT TERM EXIT
-  set +e
-  wait -n "$API_PID" "$COEDIT_PID" "$TIMEOUT_WORKER_PID"
-  STATUS=$?
-  set -e
-  echo "One process exited, shutting down..."
-  kill "$API_PID" "$COEDIT_PID" "$TIMEOUT_WORKER_PID" 2>/dev/null || true
-  wait || true
-  exit "$STATUS"
+if [ "$BACKGROUND_RUNTIME_MODE" = "continuous" ]; then
+  /app/worker &
+  pids+=("$!")
 fi
 
-/app/worker &
-WORKER_PID=$!
-trap 'kill "$API_PID" "$WORKER_PID" "$COEDIT_PID" 2>/dev/null || true' INT TERM EXIT
-
+# Intentional co-edit parking keeps Node alive. Any child exit is a container
+# failure so Railway's on-failure restart policy can recover the whole runtime.
 set +e
-wait -n "$API_PID" "$WORKER_PID" "$COEDIT_PID"
+wait -n "${pids[@]}"
 STATUS=$?
 set -e
-
-echo "One process exited, shutting down..."
-kill "$API_PID" "$WORKER_PID" "$COEDIT_PID" 2>/dev/null || true
-wait || true
+if [ "$STATUS" -eq 0 ]; then STATUS=1; fi
+echo "A runtime process exited; shutting down the container."
 exit "$STATUS"
+
 EOF
 
 RUN chmod +x /app/start.sh /app/normalize-background-runtime-mode.sh

@@ -800,7 +800,7 @@ func Load() Config {
 	if v := strings.TrimSpace(os.Getenv("DB_POOL_MAX_CONNECTIONS")); v == "" && profile == "low" {
 		poolMax = 3
 	}
-	mode := BackgroundMode(strings.ToLower(strings.TrimSpace(os.Getenv("BACKGROUND_RUNTIME_MODE"))))
+	mode := BackgroundMode(strings.ReplaceAll(strings.ToLower(strings.TrimSpace(os.Getenv("BACKGROUND_RUNTIME_MODE"))), "-", "_"))
 	if mode == "" {
 		mode = BackgroundContinuous
 	}

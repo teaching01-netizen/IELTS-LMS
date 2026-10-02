@@ -27,6 +27,7 @@ import (
 	"example.com/ielts-proctoring/internal/authoringcoedit"
 	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/authz"
+	"example.com/ielts-proctoring/internal/background"
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/grading"
@@ -131,10 +132,13 @@ type App struct {
 	Leases          *liveupdates.LeaseRepository
 	// Admission is the plan-C2 in-memory WS gate. Always non-nil (db mode
 	// leaves it unused; memory mode serves acquires with zero SQL).
-	Admission       *liveupdates.Admission
-	Outbox          *outbox.Repository
-	Secret          []byte
-	LiveForwardOnce sync.Once
+	Admission              *liveupdates.Admission
+	Outbox                 *outbox.Repository
+	Secret                 []byte
+	Background             *background.Lifecycle
+	LiveForwardCursor      int64
+	LiveForwardInitialized bool
+	liveForwardDone        chan struct{}
 	// LiveForwardMu guards stopLiveForward (start/stop cross goroutines).
 	LiveForwardMu sync.Mutex
 	// stopLiveForward halts the bus poll loop; nil when never started.
@@ -377,15 +381,23 @@ func main() {
 	if app.CoeditConfigErr != nil {
 		log.Fatalf("api: prompt co-editing misconfigured: %v", app.CoeditConfigErr)
 	}
-	// Recover expired durable freezes before admitting HTTP traffic, then keep
-	// the idempotent pass running while the API is alive. Token handlers repeat
-	// the pass immediately before issuing a room token as a request-path guard.
-	if app.CoeditCapability() {
-		if err := recoverExpiredCoeditFreezes(context.Background(), app); err != nil {
-			log.Printf("api: co-edit freeze recovery unavailable at startup: %v", err)
+	var stopBackground func()
+	if cfg.BackgroundMode == config.BackgroundActivityDriven {
+		workerPool, err := db.OpenRole(cfg, db.RoleWorker)
+		if err != nil {
+			log.Fatalf("api: open background db: %v", err)
 		}
+		defer workerPool.Close()
+		app.Background = startActivityRuntime(app, workerPool)
+		stopBackground = app.Background.Close
+	} else {
+		if app.CoeditCapability() {
+			if err := recoverExpiredCoeditFreezes(context.Background(), app); err != nil {
+				log.Printf("api: co-edit freeze recovery unavailable at startup: %v", err)
+			}
+		}
+		stopBackground = startCoeditRecoveryLoop(context.Background(), app)
 	}
-	stopCoeditRecovery := startCoeditRecoveryLoop(context.Background(), app)
 	// Plan E3: report absorbed tx transients on db_deadlocks_total{kind}.
 	defer installTxRetryHook()()
 	srvCfg := httpx.DefaultServerConfig()
@@ -418,7 +430,7 @@ func main() {
 	// (forwarder) and no reaper ticks (admission) while in-flight
 	// requests finish.
 	app.stopLiveForwarder()
-	stopCoeditRecovery()
+	stopBackground()
 	if app.Admission != nil {
 		app.Admission.Stop()
 	}
@@ -455,7 +467,9 @@ func main() {
 // the access line.
 func BuildRouter(app *App) http.Handler {
 	r := chi.NewRouter()
-	startLiveBusForwarder(app)
+	if app.Config.BackgroundMode != config.BackgroundActivityDriven {
+		startLiveBusForwarder(app)
+	}
 
 	buildTierSet(app)
 
@@ -476,6 +490,7 @@ func BuildRouter(app *App) http.Handler {
 	// it must run before auth so rejected cookie traffic does not touch the
 	// session store.
 	r.Use(app.Tiers.Middleware(httpx.TierBackstop, httpx.ClientIPKey))
+	r.Use(activityMiddleware(app))
 	r.Use(authMiddleware(app))
 	r.Use(csrfMiddleware(app))
 	// authorize wraps one route handler with the authz first-layer gate
@@ -1061,7 +1076,7 @@ func authMiddleware(app *App) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
-			if app.DB == nil {
+			if app.DB == nil || !applicationPath(r.URL.Path) {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, httpx.CtxActorClass, "anonymous")))
 				return
 			}

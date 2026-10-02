@@ -321,6 +321,7 @@ class FakeLock implements LockLike {
   async acquire(): Promise<void> {
     await this.acquireImpl();
     this.acquired = true;
+    this.released = false;
   }
   async release(): Promise<void> {
     this.released = true;
@@ -345,6 +346,7 @@ afterEach(async () => {
 async function startService(
   options: {
     lock?: FakeLock;
+    activityDriven?: boolean;
     lifecycle?: "initializing" | "active" | "closed";
     go?: FakeGo;
     /** A short retry ladder, so the backoff is exercised without waiting it out. */
@@ -355,6 +357,7 @@ async function startService(
   const lock = options.lock ?? new FakeLock();
   const config: CoeditServiceConfig = {
     environment: "test",
+    activityDriven: options.activityDriven ?? false,
     port: 0,
     host: "127.0.0.1",
     mysqlDsn: "mysql://user:pass@127.0.0.1:3306/app",
@@ -1624,6 +1627,7 @@ describe("convergence under randomized operations", () => {
         10_000,
         `cycle ${cycle} room unload`,
       );
+      expect(running.service.persistence.lastCommit(name)).toBeNull();
       const closed = await controlCall(running, "/control/close", {
         documentNames: [name],
         reason: "draft_replaced",
@@ -1676,3 +1680,61 @@ async function controlCall(
   const text = await response.text();
   return { status: response.status, body: text ? (JSON.parse(text) as Record<string, unknown>) : {} };
 }
+
+
+describe("activity-driven collaboration", () => {
+  it("starts parked, authenticates control, and repeatedly reacquires the lock", async () => {
+    const running = await startService({ activityDriven: true });
+    expect(running.lock.acquired).toBe(false);
+    expect(running.service.isReady()).toBe(false);
+    const unsigned = await fetch(`http://127.0.0.1:${running.port}/control/activate`, {
+      method: "POST", body: "{}",
+    });
+    expect(unsigned.status).toBe(403);
+    for (let i = 0; i < 2; i++) {
+      const activations = await Promise.all(Array.from({ length: 8 }, () => controlCall(running, "/control/activate", {})));
+      expect(activations.every((result) => result.status === 200)).toBe(true);
+      expect(running.service.isReady()).toBe(true);
+      expect((await controlCall(running, "/control/park", {})).status).toBe(200);
+      expect(running.lock.released).toBe(true);
+      expect(running.service.isReady()).toBe(false);
+    }
+  });
+
+  it("refuses parking while an author is connected, then reloads after reactivation", async () => {
+    const running = await startService({ activityDriven: true });
+    await controlCall(running, "/control/activate", {});
+    const provider = connect(running, { token: mintToken() });
+    await waitFor(() => running.service.server.hocuspocus.getConnectionsCount() === 1);
+    expect((await controlCall(running, "/control/park", {})).status).toBe(409);
+    provider.destroy();
+    await waitFor(() => running.service.server.hocuspocus.getDocumentsCount() === 0);
+    expect((await controlCall(running, "/control/park", {})).status).toBe(200);
+    await controlCall(running, "/control/activate", {});
+    connect(running, { token: mintToken() });
+    await waitFor(() => running.service.server.hocuspocus.getConnectionsCount() === 1);
+  });
+
+  it("refuses parking after a disconnected author's final store fails", async () => {
+    const running = await startService({ activityDriven: true, retryDelaysMs: [] });
+    await controlCall(running, "/control/activate", {});
+    const author = connect(running, { token: mintToken(workspaceClaims()), documentName: WORKSPACE_DOCUMENT_NAME });
+    await waitFor(() => author.isSynced);
+    const storesBefore = running.go.stores.length;
+    running.go.refuseStores = true;
+    author.document.getMap("workspace").set("ui/selectedQuestionId", JSON.stringify("dirty"));
+    await waitFor(() => running.go.stores.length > storesBefore);
+    author.destroy();
+    await waitFor(() => running.service.server.hocuspocus.getConnectionsCount() === 0);
+    expect((await controlCall(running, "/control/park", {})).status).toBe(409);
+    expect(running.lock.released).toBe(false);
+    // Leave cleanup able to durably flush the held room.
+    running.go.refuseStores = false;
+  });
+
+  it("keeps collaboration unavailable when lock acquisition fails", async () => {
+    const running = await startService({ activityDriven: true, lock: new FakeLock(async () => { throw new Error("contended"); }) });
+    expect((await controlCall(running, "/control/activate", {})).status).toBe(503);
+    expect(running.service.isReady()).toBe(false);
+  });
+});

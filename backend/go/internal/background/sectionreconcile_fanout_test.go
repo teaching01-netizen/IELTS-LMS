@@ -1,4 +1,4 @@
-package main
+package background
 
 // The section-reconcile outbox family hands a finished cohort section's open
 // module attempts to delivery, one attempt at a time. These cases pin the
@@ -62,8 +62,8 @@ func sectionReconcileEvent(t *testing.T, payload any) outbox.Event {
 	}
 }
 
-func sectionReconcileWorker(delivery *captureDelivery) *worker {
-	return &worker{workerID: "test-worker", delivery: delivery}
+func sectionReconcileWorker(delivery *captureDelivery) *Runner {
+	return &Runner{workerID: "test-worker", delivery: delivery}
 }
 
 // One transient failure must not stop the cohort from closing: the remaining
@@ -136,15 +136,6 @@ func TestTimeoutReconcileCycleUsesTheProvidedServerInstant(t *testing.T) {
 	}
 }
 
-func TestSATTimeoutOnlyWorkerModeFlag(t *testing.T) {
-	if !satTimeoutsOnlyRequested([]string{"--sat-timeouts-only"}) {
-		t.Fatal("activity-driven timeout worker flag was not recognized")
-	}
-	if satTimeoutsOnlyRequested([]string{"requeue-dead-letter", "--id", "dead-letter"}) {
-		t.Fatal("operator requeue command must not select timeout-only mode")
-	}
-}
-
 // A payload written before the schedule id was duplicated onto the payload
 // falls back to the aggregate id; with neither, the event is unusable.
 func TestSectionReconcileScheduleIDFallbackAndMissing(t *testing.T) {
@@ -184,7 +175,7 @@ func TestSectionReconcileEmptyFanOutIsNoOp(t *testing.T) {
 // Without a delivery surface the family is a benign no-op (tests and the
 // maintenance-only worker topology never wire one).
 func TestSectionReconcileWithoutDeliveryIsNoOp(t *testing.T) {
-	w := &worker{workerID: "test-worker"}
+	w := &Runner{workerID: "test-worker"}
 	event := sectionReconcileEvent(t, map[string]any{"scheduleId": "sched-1", "attemptIds": []string{"att-1"}})
 
 	if err := w.executeOutboxEvent(context.Background(), event); err != nil {

@@ -299,7 +299,9 @@ func startCoeditRecoveryLoop(ctx context.Context, app *App) context.CancelFunc {
 		return func() {}
 	}
 	loopCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(time.Duration(authoringcoedit.FreezeLeaseSeconds) * time.Second)
 		defer ticker.Stop()
 		for {
@@ -318,7 +320,7 @@ func startCoeditRecoveryLoop(ctx context.Context, app *App) context.CancelFunc {
 			}
 		}
 	}()
-	return cancel
+	return func() { cancel(); <-done }
 }
 
 // coeditFreeze freezes rooms, marks rows freezing, and verifies the manifest

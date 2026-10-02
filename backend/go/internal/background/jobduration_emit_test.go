@@ -1,4 +1,4 @@
-package main
+package background
 
 // Plan E-exam-day: every worker cycle must report its wall-clock duration
 // on worker_job_duration_seconds{job} — the stalled-worker signal. The

@@ -1,4 +1,4 @@
-package main
+package background
 
 import (
 	"context"
@@ -15,7 +15,7 @@ func TestListAutoSubmitAttemptsPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	w := &worker{db: db}
+	w := &Runner{db: db}
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE schedule_id = ? AND submitted_at IS NULL")+".*"+regexp.QuoteMeta("AND a.id > ?")+".*"+regexp.QuoteMeta("ORDER BY a.id")+".*"+regexp.QuoteMeta("LIMIT ?")).
 		WithArgs("sched-1", "", 2).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1").AddRow("att-2"))
@@ -44,7 +44,7 @@ func TestListAutoSubmitAttemptsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	w := &worker{db: db}
+	w := &Runner{db: db}
 	mock.ExpectQuery("ORDER BY a.id").
 		WithArgs("sched-1", "", 50).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))

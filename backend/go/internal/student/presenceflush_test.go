@@ -34,11 +34,8 @@ func TestFlushDirtyBatch(t *testing.T) {
 	mock.ExpectExec("INSERT INTO student_heartbeat_events").
 		WithArgs(sqlmock.AnyArg(), "att-1", "sched-1", sqlmock.AnyArg(), "disconnect", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectQuery("SELECT integrity, recovery FROM student_attempts").
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"integrity", "recovery"}).AddRow(`{}`, `{}`))
 	mock.ExpectExec("UPDATE student_attempts SET integrity").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "sess-a", "att-1", "sched-1").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "sess-a", "att-1", "sched-1", "sess-a").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := svc.FlushPresence(context.Background(), dirty); err != nil {
 		t.Fatalf("flush: %v", err)

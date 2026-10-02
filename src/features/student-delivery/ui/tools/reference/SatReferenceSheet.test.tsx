@@ -68,6 +68,33 @@ describe('SatReferenceSheet', () => {
     expect(screen.getByRole('img', { name: /45 45 90 triangle/i })).toBeInTheDocument();
   });
 
+  it('matches the reference information and two-row arrangement', () => {
+    const { container } = render(<SatReferenceSheet />);
+    const figures = [...container.querySelectorAll('figure')];
+    expect(figures.map((figure) => figure.querySelector('.sr-only')?.textContent)).toEqual([
+      'Circle. ', 'Rectangle. ', 'Triangle. ', 'Right triangle. ',
+      'Rectangular prism. ', 'Cylinder. ', 'Sphere. ', 'Cone. ', 'Rectangular pyramid. ',
+    ]);
+    expect(figures.slice(0, 4).every((figure) => figure.style.top === '24px')).toBe(true);
+    expect(figures.slice(4).every((figure) => figure.style.top === '210px')).toBe(true);
+    expect(figures.map((figure) => [...figure.querySelectorAll('math')].map((formula) => formula.textContent))).toEqual([
+      ['A=πr2', 'C=2πr'], ['A=ℓw'], ['A=12bh'], ['c2=a2+b2'],
+      ['V=ℓwh'], ['V=πr2h'], ['V=43πr3'], ['V=13πr2h'], ['V=13ℓwh'],
+    ]);
+    expect(screen.getByRole('img', { name: /45 45 90 triangle/ })).toHaveAccessibleName(
+      '45 45 90 triangle with sides s, s, and s square root 2',
+    );
+    const special = screen.getByRole('region', { name: 'Special Right Triangles' });
+    expect(special.style.top).toBe('24px');
+    expect(special.querySelectorAll('svg')).toHaveLength(2);
+    const facts = screen.getByRole('region', { name: 'Angle and circle facts' });
+    expect([...facts.querySelectorAll('p')].map((fact) => fact.textContent?.trim())).toEqual([
+      'The number of degrees of arc in a circle is 360.',
+      'The number of radians of arc in a circle is 2π.',
+      'The sum of the measures in degrees of the angles of a triangle is 180.',
+    ]);
+  });
+
   it('is a fixed-canonical canvas: no container/viewport breakpoints, 1000x560 inline geometry', () => {
     const { container } = render(<SatReferenceSheet />);
     const article = screen.getByRole('article', { name: 'SAT Math reference sheet' });

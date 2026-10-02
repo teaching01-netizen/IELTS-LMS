@@ -20,6 +20,7 @@ export const DEFAULT_TOKEN_SECRET = "local-coedit-token-secret-not-for-productio
 export const DEFAULT_SERVICE_SECRET = "local-coedit-service-secret-not-for-production-2026";
 
 export interface CoeditServiceConfig {
+  activityDriven?: boolean;
   environment: string;
   port: number;
   host: string;
@@ -48,7 +49,7 @@ function required(env: Record<string, string | undefined>, name: string): string
 
 function productionLike(environment: string): boolean {
   return ["production", "prod", "staging", "stage", "preview"].includes(
-    environment.trim().toLowerCase(),
+    environment.trim().toLowerCase()
   );
 }
 
@@ -56,7 +57,7 @@ function valueOrLocalDefault(
   env: Record<string, string | undefined>,
   name: string,
   fallback: string,
-  environment: string,
+  environment: string
 ): string {
   const value = (env[name] ?? "").trim();
   if (value) return value;
@@ -68,7 +69,7 @@ function secret(
   env: Record<string, string | undefined>,
   name: string,
   fallback: string,
-  environment: string,
+  environment: string
 ): string {
   const value = valueOrLocalDefault(env, name, fallback, environment);
   if (value.length < MIN_SECRET_BYTES) {
@@ -100,47 +101,47 @@ function absoluteUrl(raw: string, name: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
-export function loadConfig(env: Record<string, string | undefined> = process.env): CoeditServiceConfig {
+export function loadConfig(
+  env: Record<string, string | undefined> = process.env
+): CoeditServiceConfig {
   const environment =
-    (env["AUTHORING_COEDIT_ENVIRONMENT"] ?? env["APP_ENV"] ?? env["ENVIRONMENT"] ?? "")
-      .trim() || DEFAULT_ENVIRONMENT;
+    (env["AUTHORING_COEDIT_ENVIRONMENT"] ?? env["APP_ENV"] ?? env["ENVIRONMENT"] ?? "").trim() ||
+    DEFAULT_ENVIRONMENT;
   const inheritedMysqlDsn = (env["DATABASE_URL"] ?? "").trim();
   const mysqlDsn = valueOrLocalDefault(
     env,
     "AUTHORING_COEDIT_MYSQL_DSN",
     inheritedMysqlDsn.startsWith("mysql://") ? inheritedMysqlDsn : DEFAULT_MYSQL_DSN,
-    environment,
+    environment
   );
   return {
+    activityDriven: ["activity_driven", "activity-driven"].includes(
+      (env["BACKGROUND_RUNTIME_MODE"] ?? "").trim().toLowerCase()
+    ),
     environment,
     port: intOr(env, "AUTHORING_COEDIT_PORT", DEFAULT_PORT),
     host: (env["AUTHORING_COEDIT_HOST"] ?? "").trim() || "0.0.0.0",
     mysqlDsn,
     goBaseUrl: absoluteUrl(
       valueOrLocalDefault(env, "AUTHORING_COEDIT_GO_BASE_URL", DEFAULT_GO_BASE_URL, environment),
-      "AUTHORING_COEDIT_GO_BASE_URL",
+      "AUTHORING_COEDIT_GO_BASE_URL"
     ),
-    tokenSecret: secret(
-      env,
-      "AUTHORING_COEDIT_TOKEN_SECRET",
-      DEFAULT_TOKEN_SECRET,
-      environment,
-    ),
+    tokenSecret: secret(env, "AUTHORING_COEDIT_TOKEN_SECRET", DEFAULT_TOKEN_SECRET, environment),
     serviceSecret: secret(
       env,
       "AUTHORING_COEDIT_SERVICE_SECRET",
       DEFAULT_SERVICE_SECRET,
-      environment,
+      environment
     ),
     shutdownTimeoutMs: intOr(
       env,
       "AUTHORING_COEDIT_SHUTDOWN_TIMEOUT_MS",
-      DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      DEFAULT_SHUTDOWN_TIMEOUT_MS
     ),
     lockTimeoutSeconds: intOr(
       env,
       "AUTHORING_COEDIT_LOCK_TIMEOUT_SECONDS",
-      DEFAULT_LOCK_TIMEOUT_SECONDS,
+      DEFAULT_LOCK_TIMEOUT_SECONDS
     ),
     allowedOrigin: (env["AUTHORING_COEDIT_ALLOWED_ORIGIN"] ?? "").trim(),
   };

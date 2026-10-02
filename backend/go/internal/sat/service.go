@@ -351,16 +351,7 @@ func (s *Service) ReconcileProvisional(ctx context.Context) (int64, error) {
 	return s.ReconcileProvisionalBatch(ctx, 250)
 }
 
-// ReconcileProvisionalBatch bounds one watchdog pass to batchSize candidates.
-func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64) (int64, error) {
-	if batchSize < 1 {
-		batchSize = 250
-	}
-	type candidate struct{ attemptID, scheduleID string }
-	var cands []candidate
-	// Candidate scan runs outside a transaction (read-only sweep); each
-	// candidate is re-locked and re-checked inside its own transaction.
-	rows, err := s.db.QueryContext(ctx, `
+const provisionalCandidates = `
 		SELECT a.id, a.schedule_id
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
@@ -376,7 +367,26 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 		  AND NOT EXISTS (
 			SELECT 1 FROM assessment_module_attempts ma
 			WHERE ma.attempt_id = a.id AND ma.state NOT IN (?, ?)
-		  )
+		  )`
+
+// HasPendingProvisionalCompletion uses the same predicate as the reconciler.
+// Pending human score-release outcomes are deliberately outside this query.
+func (s *Service) HasPendingProvisionalCompletion(ctx context.Context) (bool, error) {
+	var pending bool
+	err := s.db.QueryRowContext(ctx, "SELECT EXISTS("+provisionalCandidates+")", attempts.SATModuleSubmitted, attempts.SATModuleLocked).Scan(&pending)
+	return pending, err
+}
+
+// ReconcileProvisionalBatch bounds one watchdog pass to batchSize candidates.
+func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64) (int64, error) {
+	if batchSize < 1 {
+		batchSize = 250
+	}
+	type candidate struct{ attemptID, scheduleID string }
+	var cands []candidate
+	// Candidate scan runs outside a transaction (read-only sweep); each
+	// candidate is re-locked and re-checked inside its own transaction.
+	rows, err := s.db.QueryContext(ctx, provisionalCandidates+`
 		ORDER BY a.updated_at ASC
 		LIMIT ?`, attempts.SATModuleSubmitted, attempts.SATModuleLocked, batchSize)
 	if err != nil {

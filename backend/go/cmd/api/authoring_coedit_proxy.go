@@ -41,6 +41,10 @@ func coeditWebSocketProxy(app *App) http.HandlerFunc {
 			http.Error(w, "WebSocket upgrade required.", http.StatusUpgradeRequired)
 			return
 		}
+		if err := activateCoedit(r.Context(), app); err != nil {
+			http.Error(w, "Co-editing service is unavailable.", http.StatusServiceUnavailable)
+			return
+		}
 		proxy.ServeHTTP(w, r)
 	}
 }

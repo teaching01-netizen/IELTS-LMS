@@ -33,6 +33,8 @@ import type {
  *      publish cannot leave a draft permanently read-only.
  */
 export const CONTROL_PATHS = {
+  activate: "/control/activate",
+  park: "/control/park",
   freeze: "/control/freeze",
   unfreeze: "/control/unfreeze",
   renew: "/control/renew",
@@ -44,6 +46,8 @@ export const CONTROL_PATHS = {
 } as const;
 
 export interface LifecycleControllerOptions {
+  activate?: () => Promise<void>;
+  park?: () => Promise<boolean>;
   serviceSecret: string;
   hocuspocus: Hocuspocus<CoeditConnectionContext>;
   persistence: CoeditPersistence;
@@ -152,8 +156,12 @@ export class LifecycleController {
   hydrateDurableState(documentName: string, metadata: CoeditLoadMetadata): void {
     this.durable.set(documentName, {
       state: metadata.lifecycleState,
-      ...(metadata.freezeOperationId === undefined ? {} : { freezeOperationId: metadata.freezeOperationId }),
-      ...(metadata.freezeExpiresAt === undefined ? {} : { freezeExpiresAt: metadata.freezeExpiresAt }),
+      ...(metadata.freezeOperationId === undefined
+        ? {}
+        : { freezeOperationId: metadata.freezeOperationId }),
+      ...(metadata.freezeExpiresAt === undefined
+        ? {}
+        : { freezeExpiresAt: metadata.freezeExpiresAt }),
     });
   }
 
@@ -161,7 +169,7 @@ export class LifecycleController {
     documentName: string,
     state: string,
     operationId?: string,
-    expiresAt?: number,
+    expiresAt?: number
   ): void {
     this.durable.set(documentName, {
       state,
@@ -239,11 +247,35 @@ export class LifecycleController {
 
     try {
       switch (path) {
+        case CONTROL_PATHS.activate:
+          if (!this.options.activate) {
+            respond(res, 503, { error: "activation_unavailable" });
+            return;
+          }
+          await this.options.activate();
+          respond(res, 200, { state: "active" });
+          return;
+        case CONTROL_PATHS.park:
+          if (!this.options.park) {
+            respond(res, 503, { error: "parking_unavailable" });
+            return;
+          }
+          if (!(await this.options.park())) {
+            respond(res, 409, { error: "busy" });
+            return;
+          }
+          respond(res, 200, { state: "parked" });
+          return;
         case CONTROL_PATHS.freeze:
           await this.freeze(parsed, res);
           return;
         case CONTROL_PATHS.unfreeze:
-          if (!this.unfreeze(String(parsed["freezeToken"] ?? ""), optionalString(parsed["freezeOperationId"]))) {
+          if (
+            !this.unfreeze(
+              String(parsed["freezeToken"] ?? ""),
+              optionalString(parsed["freezeOperationId"])
+            )
+          ) {
             respond(res, 409, { error: "freeze_owner_mismatch" });
             return;
           }
@@ -256,7 +288,7 @@ export class LifecycleController {
           await this.flush(
             asStringArray(parsed["documentNames"]),
             optionalString(parsed["freezeOperationId"]),
-            res,
+            res
           );
           return;
         case CONTROL_PATHS.close:
@@ -275,10 +307,7 @@ export class LifecycleController {
     }
   }
 
-  private async freeze(
-    payload: Record<string, unknown>,
-    res: ServerResponse,
-  ): Promise<void> {
+  private async freeze(payload: Record<string, unknown>, res: ServerResponse): Promise<void> {
     const names = uniqueNames(asStringArray(payload["documentNames"]));
     if (names.length === 0) {
       respond(res, 422, { error: "no_documents" });
@@ -303,7 +332,7 @@ export class LifecycleController {
   private async freezeLocked(
     names: string[],
     payload: Record<string, unknown>,
-    res: ServerResponse,
+    res: ServerResponse
   ): Promise<void> {
     if (names.some((name) => this.isFrozen(name) || this.leaseFor(name) !== undefined)) {
       respond(res, 409, { error: "freeze_conflict" });
@@ -333,8 +362,12 @@ export class LifecycleController {
           materializedRevision: commit?.materializedRevision ?? 0,
           questionRevision: commit?.questionRevision ?? 0,
           ...(commit?.stateEpoch === undefined ? {} : { stateEpoch: commit.stateEpoch }),
-          ...(commit?.commitSequence === undefined ? {} : { commitSequence: commit.commitSequence }),
-          ...(commit?.workspaceRevision === undefined ? {} : { workspaceRevision: commit.workspaceRevision }),
+          ...(commit?.commitSequence === undefined
+            ? {}
+            : { commitSequence: commit.commitSequence }),
+          ...(commit?.workspaceRevision === undefined
+            ? {}
+            : { workspaceRevision: commit.workspaceRevision }),
         });
       }
     } catch (error) {
@@ -342,10 +375,13 @@ export class LifecycleController {
       throw error;
     }
     const freezeToken = randomUUID();
-    const expiresAt = requestedExpiry ?? this.nowSeconds() + (this.options.freezeLeaseSeconds ?? FREEZE_LEASE_SECONDS);
+    const expiresAt =
+      requestedExpiry ??
+      this.nowSeconds() + (this.options.freezeLeaseSeconds ?? FREEZE_LEASE_SECONDS);
     const timer = this.scheduleLease(freezeToken, operationId, expiresAt);
     this.leases.set(freezeToken, { documentNames: names, timer, operationId, expiresAt });
-    for (const name of names) this.setDurableState(name, "frozen", operationId || undefined, expiresAt);
+    for (const name of names)
+      this.setDurableState(name, "frozen", operationId || undefined, expiresAt);
     metrics.incCounter("authoring_coedit_freeze_total", { outcome: "accepted" });
     respond(res, 200, {
       freezeToken,
@@ -385,7 +421,8 @@ export class LifecycleController {
       return;
     }
     const expiresAt = positiveInteger(payload["freezeExpiresAt"]);
-    const nextExpiresAt = expiresAt ?? this.nowSeconds() + (this.options.freezeLeaseSeconds ?? FREEZE_LEASE_SECONDS);
+    const nextExpiresAt =
+      expiresAt ?? this.nowSeconds() + (this.options.freezeLeaseSeconds ?? FREEZE_LEASE_SECONDS);
     if (nextExpiresAt <= this.nowSeconds()) {
       respond(res, 422, { error: "freeze_expired" });
       return;
@@ -400,7 +437,11 @@ export class LifecycleController {
     });
   }
 
-  private async flush(names: string[], operationId: string | undefined, res: ServerResponse): Promise<void> {
+  private async flush(
+    names: string[],
+    operationId: string | undefined,
+    res: ServerResponse
+  ): Promise<void> {
     const unique = uniqueNames(names);
     if (unique.length === 0) {
       respond(res, 422, { error: "no_documents" });
@@ -443,12 +484,14 @@ export class LifecycleController {
     names: string[],
     reason: string,
     operationId: string | undefined,
-    res: ServerResponse,
+    res: ServerResponse
   ): Promise<void> {
-    if (names.some((name) => {
-      const lease = this.leaseFor(name);
-      return lease !== undefined && lease.operationId !== (operationId ?? "");
-    })) {
+    if (
+      names.some((name) => {
+        const lease = this.leaseFor(name);
+        return lease !== undefined && lease.operationId !== (operationId ?? "");
+      })
+    ) {
       respond(res, 409, { error: "freeze_owner_mismatch" });
       return;
     }
@@ -512,16 +555,14 @@ export class LifecycleController {
     if (!document) return;
     for (const connection of document.getConnections()) {
       const context = connection.context as CoeditConnectionContext | undefined;
-      const effectiveReadOnly = readOnly || context?.mode === "read" || this.isReadOnly(documentName);
+      const effectiveReadOnly =
+        readOnly || context?.mode === "read" || this.isReadOnly(documentName);
       (connection as unknown as { readOnly: boolean }).readOnly = effectiveReadOnly;
       if (!effectiveReadOnly) this.resyncConnection(document, connection);
     }
   }
 
-  private broadcastPublishLifecycle(
-    documentName: string,
-    phase: "freezing" | "active",
-  ): void {
+  private broadcastPublishLifecycle(documentName: string, phase: "freezing" | "active"): void {
     const document = this.options.hocuspocus.documents.get(documentName);
     if (!document) return;
     document.broadcastStateless(
@@ -530,7 +571,7 @@ export class LifecycleController {
         documentName,
         phase,
         reason: "publish",
-      }),
+      })
     );
   }
 
@@ -563,8 +604,7 @@ export class LifecycleController {
   /** Forces a store for one room, returning once it has settled. */
   private async flushDocument(documentName: string, freezeOperationId?: string): Promise<void> {
     const document = this.options.hocuspocus.documents.get(documentName) as
-      | (Document & { lastContext?: CoeditConnectionContext })
-      | undefined;
+      (Document & { lastContext?: CoeditConnectionContext }) | undefined;
     if (!document) {
       const metadata = await this.options.persistence.refreshCommit(documentName);
       if (metadata) this.hydrateDurableState(documentName, metadata);
@@ -614,7 +654,8 @@ export class LifecycleController {
 
   private releaseLease(documentName: string, operationId?: string): void {
     for (const [freezeToken, lease] of this.leases) {
-      if (lease.operationId !== (operationId ?? "") || !lease.documentNames.includes(documentName)) continue;
+      if (lease.operationId !== (operationId ?? "") || !lease.documentNames.includes(documentName))
+        continue;
       clearTimeout(lease.timer);
       this.leases.delete(freezeToken);
     }
@@ -623,7 +664,7 @@ export class LifecycleController {
   private scheduleLease(
     freezeToken: string,
     operationId: string,
-    expiresAt: number,
+    expiresAt: number
   ): ReturnType<typeof setTimeout> {
     const delay = Math.max(1, expiresAt * 1000 - (this.options.now?.() ?? Date.now()));
     const timer = setTimeout(() => {

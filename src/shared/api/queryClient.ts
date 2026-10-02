@@ -5,6 +5,7 @@
 
 import { QueryClient, QueryCache, MutationCache } from '@tanstack/react-query';
 import { logError } from '../observability/errorLogger';
+import { ApiError } from '../api-client/errors';
 
 /**
  * Default stale time for queries (5 minutes)
@@ -44,18 +45,15 @@ export const DO_NOT_RETRY_STATUS = 429;
 
 /** Retry predicate: fail fast on 429, keep default retries otherwise. */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
-  if (isRateLimitedError(error)) {
+  if ((error instanceof Error && error.name === "AbortError") || (error instanceof ApiError && error.transportRetryHandled) || isRateLimitedError(error)) {
     return false;
   }
   return failureCount < DEFAULT_RETRY_CONFIG.retry;
 }
 
-/** Mutation retry policy: one retry for transient failures, never for 429s. */
-export function shouldRetryMutation(failureCount: number, error: unknown): boolean {
-  if (isRateLimitedError(error)) {
-    return false;
-  }
-  return failureCount < 1;
+/** Write replay belongs to an explicitly idempotent transport or durability engine. */
+export function shouldRetryMutation(_failureCount: number, _error: unknown): boolean {
+  return false;
 }
 
 function isRateLimitedError(error: unknown): boolean {

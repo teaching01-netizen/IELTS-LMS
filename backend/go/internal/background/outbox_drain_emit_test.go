@@ -1,4 +1,4 @@
-package main
+package background
 
 // Plan E3: the outbox drain slice (claimed vs acked-by-family) proves
 // arrival-vs-drain health beyond the pending gauge. RED: drain emits
@@ -27,7 +27,7 @@ func TestDrainOutboxEmitsClaimed(t *testing.T) {
 	}
 	defer db.Close()
 	repo := outbox.NewRepository(db)
-	w := &worker{db: db, outbox: repo, workerID: "test-worker"}
+	w := &Runner{db: db, outbox: repo, workerID: "test-worker"}
 
 	// Claim one wakeup event; without a liveBus publishWakeup fails and
 	// the event retries via MarkFailed. Assert claimed counting.
@@ -45,7 +45,7 @@ func TestDrainOutboxEmitsClaimed(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "ev-1", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	claimed, _, failed, _ := w.drainOutbox(context.Background(), repo, 10)
+	claimed, _, failed, _, _ := w.drainOutbox(context.Background(), repo, 10)
 	if claimed != 1 || failed != 1 {
 		t.Fatalf("drain = claimed %d failed %d, want 1/1", claimed, failed)
 	}

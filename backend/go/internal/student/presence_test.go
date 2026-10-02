@@ -82,3 +82,48 @@ func TestPresenceExpiry(t *testing.T) {
 		t.Fatalf("stale entry must expire")
 	}
 }
+
+func TestPresenceRestorePreservesNewerHeartbeat(t *testing.T) {
+	p := NewPresenceMap(time.Minute)
+	now := time.Now().UTC()
+	p.Touch("attempt", "schedule", "old", "disconnect", now)
+	batch := p.DrainDirty()
+	p.Touch("attempt", "schedule", "new", "heartbeat", now.Add(time.Second))
+	p.RestoreDirty(batch)
+	restored := p.DrainDirty()
+	if len(restored) != 1 || restored[0].ClientSession != "new" || restored[0].Status != "heartbeat" {
+		t.Fatalf("restore overwrote new state: %+v", restored)
+	}
+}
+
+func TestUnflushedPresenceSurvivesLivenessExpiry(t *testing.T) {
+	p := NewPresenceMap(10 * time.Second)
+	now := time.Now().UTC()
+	p.Touch("old", "schedule", "client", "disconnect", now)
+	p.Touch("new", "schedule", "client", "heartbeat", now.Add(11*time.Second))
+	if _, live := p.LookupAt("old", now.Add(11*time.Second)); live {
+		t.Fatal("expired presence appeared live")
+	}
+	if batch := p.DrainDirty(); len(batch) != 2 {
+		t.Fatalf("TTL lost an unflushed transition: %+v", batch)
+	}
+	p.Touch("new", "schedule", "client", "heartbeat", now.Add(12*time.Second))
+	if p.Len() != 1 {
+		t.Fatal("clean stale entry was not released")
+	}
+}
+
+func TestMutationLedgerBeforeHeartbeatRetainsFlushIdentity(t *testing.T) {
+	p := NewPresenceMap(time.Minute)
+	if p.RememberMutation("attempt", "mutation") {
+		t.Fatal("first mutation was already remembered")
+	}
+	p.Touch("attempt", "schedule", "client", "heartbeat", time.Now().UTC())
+	dirty := p.DrainDirty()
+	if len(dirty) != 1 || dirty[0].AttemptID != "attempt" || dirty[0].ScheduleID != "schedule" {
+		t.Fatalf("first API heartbeat lost its flush identity: %+v", dirty)
+	}
+	if !p.RememberMutation("attempt", "mutation") {
+		t.Fatal("initializing presence lost the mutation ledger")
+	}
+}

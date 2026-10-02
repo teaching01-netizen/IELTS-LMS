@@ -171,7 +171,7 @@ export function useAssessmentReleaseReadiness(
     // A short stale window plus no focus refetch avoids hammering it while
     // still keeping the current draft's report reasonably fresh.
     staleTime: 15_000,
-    retry: 1,
+    retry: false,
     refetchOnWindowFocus: false,
   });
 }

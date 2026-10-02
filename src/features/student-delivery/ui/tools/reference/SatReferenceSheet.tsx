@@ -2,21 +2,16 @@ import { memo, useMemo, type ReactNode } from "react";
 import { clampSatReferenceZoom, SAT_REFERENCE_ZOOM_MAX } from "../SatReferenceSheetPanel";
 
 /* ------------------------------------------------------------------ */
-/* R-02 frozen constants (phase plan section 5, Step 1)                */
+/* Reference canvas dimensions and fit behavior                       */
 /* ------------------------------------------------------------------ */
 
 export const SAT_REF_CANVAS_W = 1000;
 export const SAT_REF_CANVAS_H = 560;
 /** 16px body text stays at least 11.2px; smaller stages scroll. */
 export const SAT_REF_READABLE_SCALE_MIN = 0.7;
-export const SAT_REF_PAD_X = 32;
-export const SAT_REF_PAD_TOP = 24;
-export const SAT_REF_DIVIDER_Y1 = 236;
-export const SAT_REF_DIVIDER_Y2 = 428;
-export const SAT_REF_MATH_FONT =
-  '"STIX Two Math", "Cambria Math", Georgia, "Times New Roman", serif';
-export const SAT_REF_SVG_LABEL_FONT = "Georgia, 'Times New Roman', serif";
-export const SAT_REF_INK = "#202124";
+export const SAT_REF_MATH_FONT = '"Times New Roman", "Cambria Math", serif';
+export const SAT_REF_SVG_LABEL_FONT = SAT_REF_MATH_FONT;
+export const SAT_REF_INK = "currentColor";
 export const SAT_REF_STROKE = 1.25;
 
 /**
@@ -126,13 +121,26 @@ function Figure({
   label,
   art,
   formula,
+  x,
+  y,
 }: {
   label: string;
   art: ReactNode;
   formula: ReactNode;
+  x: number;
+  y: number;
 }) {
   return (
-    <figure style={{ margin: 0, minWidth: 0, textAlign: "center" }}>
+    <figure
+      style={{
+        position: "absolute",
+        left: x,
+        top: y,
+        width: 160,
+        margin: 0,
+        textAlign: "center",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -146,7 +154,8 @@ function Figure({
       <figcaption
         className="sat-type-reference"
         style={{
-          marginTop: 8,
+          marginTop: 4,
+          fontSize: 16,
           color: "var(--sat-text)",
           fontFamily: SAT_REF_MATH_FONT,
         }}
@@ -160,7 +169,7 @@ function Figure({
 const MemoFigure = memo(Figure);
 
 /* ------------------------------------------------------------------ */
-/* SVG label helper: Georgia italic 14 in user units, ink fill.        */
+/* Diagram labels use the same serif face as the formulas.             */
 /* ------------------------------------------------------------------ */
 
 function SvgLabel({
@@ -180,6 +189,7 @@ function SvgLabel({
       fontStyle="italic"
       fontFamily={SAT_REF_SVG_LABEL_FONT}
       fill={SAT_REF_INK}
+      stroke="none"
     >
       {children}
     </text>
@@ -187,421 +197,156 @@ function SvgLabel({
 }
 
 function SvgFrame({
-  viewBox,
-  width,
-  height,
   label,
   children,
 }: {
-  viewBox: string;
-  width: number;
-  height: number;
   label: string;
   children: ReactNode;
 }) {
   return (
-    <svg
-      viewBox={viewBox}
-      width={width}
-      height={height}
-      role="img"
-      aria-label={label}
-    >
-      {children}
+    <svg viewBox="0 0 160 120" width={160} height={120} role="img" aria-label={label}>
+      <g
+        fill="none"
+        stroke={SAT_REF_INK}
+        strokeWidth={SAT_REF_STROKE}
+        strokeLinejoin="round"
+      >
+        {children}
+      </g>
     </svg>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* 9 diagrams + 2 special triangles (fixed coords, 1.25px ink strokes,  */
-/* Georgia italic labels; topology + aria-labels verbatim from shipped) */
-/* ------------------------------------------------------------------ */
-
 const CircleArt = memo(function CircleArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 174 120"
-      width={174}
-      height={120}
-      label="Circle with radius r"
-    >
-      <circle
-        cx={87}
-        cy={60}
-        r={44}
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <circle cx={87} cy={60} r={2.5} fill={SAT_REF_INK} stroke="none" />
-      <line
-        x1={87}
-        y1={60}
-        x2={131}
-        y2={60}
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <SvgLabel x={106} y={50}>
-        r
-      </SvgLabel>
+    <SvgFrame label="Circle with radius r">
+      <circle cx={80} cy={52} r={38} />
+      <circle cx={80} cy={52} r={3} fill={SAT_REF_INK} stroke="none" />
+      <path d="M80 52 H118" />
+      <SvgLabel x={95} y={47}>r</SvgLabel>
     </SvgFrame>
   );
 });
 
 const RectangleArt = memo(function RectangleArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 174 120"
-      width={174}
-      height={120}
-      label="Rectangle with length l and width w"
-    >
-      <rect
-        x={37}
-        y={30}
-        width={100}
-        height={56}
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <SvgLabel x={82} y={100}>
-        ℓ
-      </SvgLabel>
-      <SvgLabel x={143} y={62}>
-        w
-      </SvgLabel>
+    <SvgFrame label="Rectangle with length l and width w">
+      <rect x={46} y={50} width={68} height={35} />
+      <SvgLabel x={78} y={45}>ℓ</SvgLabel>
+      <SvgLabel x={118} y={70}>w</SvgLabel>
     </SvgFrame>
   );
 });
 
 const TriangleArt = memo(function TriangleArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 174 120"
-      width={174}
-      height={120}
-      label="Triangle with base b and height h"
-    >
-      <path
-        d="M27 96 L147 96 L100 18 Z"
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <line
-        x1={100}
-        y1={18}
-        x2={100}
-        y2={96}
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-        strokeDasharray="3 2"
-      />
-      <SvgLabel x={88} y={110}>
-        b
-      </SvgLabel>
-      <SvgLabel x={106} y={60}>
-        h
-      </SvgLabel>
+    <SvgFrame label="Triangle with base b and height h">
+      <path d="M42 72 L67 19 L118 72 Z" />
+      <path d="M67 19 V72" strokeDasharray="3 2" />
+      <path d="M67 62 H77 V72" strokeWidth={0.8} />
+      <SvgLabel x={73} y={50}>h</SvgLabel>
+      <SvgLabel x={74} y={87}>b</SvgLabel>
     </SvgFrame>
   );
 });
 
 const RightTriangleArt = memo(function RightTriangleArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 174 120"
-      width={174}
-      height={120}
-      label="Right triangle with sides a b and c"
-    >
-      <path
-        d="M37 96 L37 26 L143 96 Z"
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <path
-        d="M37 84 L49 84 L49 96"
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={1}
-      />
-      <SvgLabel x={22} y={62}>
-        b
-      </SvgLabel>
-      <SvgLabel x={84} y={110}>
-        a
-      </SvgLabel>
-      <SvgLabel x={94} y={54}>
-        c
-      </SvgLabel>
+    <SvgFrame label="Right triangle with sides a b and c">
+      <path d="M50 80 V26 L118 80 Z" />
+      <path d="M50 71 H59 V80" strokeWidth={0.8} />
+      <SvgLabel x={37} y={59}>b</SvgLabel>
+      <SvgLabel x={77} y={94}>a</SvgLabel>
+      <SvgLabel x={88} y={53}>c</SvgLabel>
     </SvgFrame>
   );
 });
 
 const PrismArt = memo(function PrismArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 174 120"
-      width={174}
-      height={120}
-      label="Rectangular prism with length width and height"
-    >
-      <rect
-        x={28}
-        y={46}
-        width={82}
-        height={50}
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <path
-        d="M28 46 L50 24 L132 24 L110 46 M110 46 L132 24 L132 74 L110 96"
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <SvgLabel x={64} y={110}>
-        ℓ
-      </SvgLabel>
-      <SvgLabel x={118} y={92}>
-        w
-      </SvgLabel>
-      <SvgLabel x={12} y={72}>
-        h
-      </SvgLabel>
+    <SvgFrame label="Rectangular prism with length width and height">
+      <path d="M36 55 H91 V83 H36 Z M36 55 L58 41 H113 L91 55 M113 41 V69 L91 83" />
+      <SvgLabel x={60} y={98}>ℓ</SvgLabel>
+      <SvgLabel x={104} y={81}>w</SvgLabel>
+      <SvgLabel x={116} y={58}>h</SvgLabel>
     </SvgFrame>
   );
 });
 
 const CylinderArt = memo(function CylinderArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 216 120"
-      width={216}
-      height={120}
-      label="Cylinder with radius r and height h"
-    >
-      <ellipse
-        cx={108}
-        cy={30}
-        rx={44}
-        ry={14}
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <path
-        d="M64 30 V90 M152 30 V90"
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <ellipse
-        cx={108}
-        cy={90}
-        rx={44}
-        ry={14}
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <line
-        x1={108}
-        y1={30}
-        x2={152}
-        y2={30}
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <SvgLabel x={127} y={24}>
-        r
-      </SvgLabel>
-      <SvgLabel x={158} y={64}>
-        h
-      </SvgLabel>
+    <SvgFrame label="Cylinder with radius r and height h">
+      <ellipse cx={80} cy={53} rx={34} ry={11} />
+      <path d="M46 53 V88 A34 11 0 0 0 114 88 V53" />
+      <circle cx={80} cy={53} r={3} fill={SAT_REF_INK} stroke="none" />
+      <path d="M80 53 L102 47" />
+      <SvgLabel x={94} y={54}>r</SvgLabel>
+      <SvgLabel x={118} y={77}>h</SvgLabel>
     </SvgFrame>
   );
 });
 
 const SphereArt = memo(function SphereArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 216 120"
-      width={216}
-      height={120}
-      label="Sphere with radius r"
-    >
-      <circle
-        cx={108}
-        cy={60}
-        r={44}
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <ellipse
-        cx={108}
-        cy={60}
-        rx={44}
-        ry={14}
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={1}
-      />
-      <line
-        x1={108}
-        y1={60}
-        x2={152}
-        y2={60}
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <SvgLabel x={127} y={54}>
-        r
-      </SvgLabel>
+    <SvgFrame label="Sphere with radius r">
+      <circle cx={80} cy={60} r={38} />
+      <path d="M42 60 A38 15 0 0 1 118 60" strokeDasharray="3 2" strokeWidth={0.8} />
+      <path d="M42 60 A38 15 0 0 0 118 60 M80 60 H118" strokeWidth={0.8} />
+      <circle cx={80} cy={60} r={3} fill={SAT_REF_INK} stroke="none" />
+      <SvgLabel x={89} y={55}>r</SvgLabel>
     </SvgFrame>
   );
 });
 
 const ConeArt = memo(function ConeArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 216 120"
-      width={216}
-      height={120}
-      label="Cone with radius r and height h"
-    >
-      <ellipse
-        cx={108}
-        cy={92}
-        rx={44}
-        ry={12}
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <path
-        d="M64 92 L108 18 L152 92"
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <line
-        x1={108}
-        y1={18}
-        x2={108}
-        y2={92}
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-        strokeDasharray="3 2"
-      />
-      <SvgLabel x={114} y={58}>
-        h
-      </SvgLabel>
-      <SvgLabel x={127} y={88}>
-        r
-      </SvgLabel>
+    <SvgFrame label="Cone with radius r and height h">
+      <path d="M46 91 L80 19 L114 91 A34 11 0 0 1 46 91 Z M80 19 V91" />
+      <path d="M46 91 A34 11 0 0 1 114 91 M80 91 H114" strokeDasharray="3 2" strokeWidth={0.8} />
+      <path d="M80 81 H89 V91" strokeWidth={0.8} />
+      <SvgLabel x={84} y={65}>h</SvgLabel>
+      <SvgLabel x={96} y={86}>r</SvgLabel>
     </SvgFrame>
   );
 });
 
 const PyramidArt = memo(function PyramidArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 216 120"
-      width={216}
-      height={120}
-      label="Rectangular pyramid with length width and height"
-    >
-      <path
-        d="M40 96 L150 96 L182 74 L72 74 Z M111 16 L40 96 M111 16 L150 96 M111 16 L182 74 M111 16 L72 74"
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <line
-        x1={111}
-        y1={16}
-        x2={111}
-        y2={85}
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-        strokeDasharray="3 2"
-      />
-      <SvgLabel x={117} y={52}>
-        h
-      </SvgLabel>
+    <SvgFrame label="Rectangular pyramid with length width and height">
+      <path d="M42 83 H94 L118 64 L80 29 Z M80 29 L94 83" />
+      <path d="M42 83 L66 64 H118 M66 64 L80 29 V74" strokeDasharray="3 2" strokeWidth={0.8} />
+      <path d="M80 74 H88 V66" strokeWidth={0.8} />
+      <SvgLabel x={72} y={62}>h</SvgLabel>
+      <SvgLabel x={65} y={98}>ℓ</SvgLabel>
+      <SvgLabel x={108} y={80}>w</SvgLabel>
     </SvgFrame>
   );
 });
 
 const ThirtySixtyNinetyArt = memo(function ThirtySixtyNinetyArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 180 110"
-      width={124}
-      height={76}
-      label="30 60 90 triangle with sides x, x square root 3, and 2x"
-    >
-      <path
-        d="M15 85 L157 85 L113 14 Z"
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <SvgLabel x={36} y={76}>
-        30°
-      </SvgLabel>
-      <SvgLabel x={115} y={30}>
-        60°
-      </SvgLabel>
-      <SvgLabel x={80} y={100}>
-        x√3
-      </SvgLabel>
-      <SvgLabel x={137} y={54}>
-        x
-      </SvgLabel>
-      <SvgLabel x={52} y={44}>
-        2x
-      </SvgLabel>
+    <SvgFrame label="30 60 90 triangle with sides x, x square root 3, and 2x">
+      <path d="M38 88 H116 V43 Z" />
+      <path d="M108 88 V80 H116" strokeWidth={0.8} />
+      <SvgLabel x={60} y={84}>30°</SvgLabel>
+      <SvgLabel x={94} y={67}>60°</SvgLabel>
+      <SvgLabel x={69} y={106}>x√3</SvgLabel>
+      <SvgLabel x={121} y={72}>x</SvgLabel>
+      <SvgLabel x={61} y={62}>2x</SvgLabel>
     </SvgFrame>
   );
 });
 
 const FortyFiveArt = memo(function FortyFiveArt() {
   return (
-    <SvgFrame
-      viewBox="0 0 150 110"
-      width={104}
-      height={76}
-      label="45 45 90 triangle with sides x, x, and x square root 2"
-    >
-      <path
-        d="M30 85 L30 17 L120 85 Z"
-        fill="none"
-        stroke={SAT_REF_INK}
-        strokeWidth={SAT_REF_STROKE}
-      />
-      <SvgLabel x={34} y={32}>
-        45°
-      </SvgLabel>
-      <SvgLabel x={85} y={78}>
-        45°
-      </SvgLabel>
-      <SvgLabel x={12} y={56}>
-        x
-      </SvgLabel>
-      <SvgLabel x={72} y={100}>
-        x
-      </SvgLabel>
-      <SvgLabel x={79} y={50}>
-        x√2
-      </SvgLabel>
+    <SvgFrame label="45 45 90 triangle with sides s, s, and s square root 2">
+      <path d="M38 96 V29 L105 96 Z" />
+      <path d="M38 88 H46 V96" strokeWidth={0.8} />
+      <SvgLabel x={40} y={60}>45°</SvgLabel>
+      <SvgLabel x={73} y={92}>45°</SvgLabel>
+      <SvgLabel x={28} y={67}>s</SvgLabel>
+      <SvgLabel x={68} y={109}>s</SvgLabel>
+      <SvgLabel x={74} y={62}>s√2</SvgLabel>
     </SvgFrame>
   );
 });
@@ -667,20 +412,11 @@ const TriangleFormula = memo(function TriangleFormula() {
 const RightTriangleFormula = memo(function RightTriangleFormula() {
   return (
     <math>
-      <msup>
-        <mi>a</mi>
-        <mn>2</mn>
-      </msup>
-      <mo>+</mo>
-      <msup>
-        <mi>b</mi>
-        <mn>2</mn>
-      </msup>
+      <msup><mi>c</mi><mn>2</mn></msup>
       <mo>=</mo>
-      <msup>
-        <mi>c</mi>
-        <mn>2</mn>
-      </msup>
+      <msup><mi>a</mi><mn>2</mn></msup>
+      <mo>+</mo>
+      <msup><mi>b</mi><mn>2</mn></msup>
     </math>
   );
 });
@@ -766,13 +502,8 @@ const PyramidFormula = memo(function PyramidFormula() {
 });
 
 /* ------------------------------------------------------------------ */
-/* Fixed 1000x560 canvas, absolute layout (phase plan Step 1/Step 5)   */
-/*                                                                     */
-/* Planar row   y 24-228: 5 cells, col w 174, x 32/222/412/602/792     */
-/* Divider 1    y = 236                                               */
-/* Solids row   y 244-420: 4 cells, col w 216, x 32/272/512/752       */
-/* Divider 2    y = 428                                               */
-/* Special row  y 436-544: triangles x 32-500, statements x 524-968    */
+/* Fixed canvas: four plane figures and two special triangles above five
+   solids, followed by the three angle/circle facts from the reference. */
 /* ------------------------------------------------------------------ */
 
 function SatReferenceSheetInner({
@@ -857,220 +588,113 @@ function SatReferenceSheetInner({
     >
       <div style={wrapperStyle}>
         <div style={canvasStyle} data-sat-ref-canvas>
-          {/* Planar row: 5 figures in Bluebook order */}
-          <div
-            style={{
-              position: "absolute",
-              left: 32,
-              top: 24,
-              width: 174,
-              height: 204,
-            }}
-          >
-            <MemoFigure label="Circle" art={<CircleArt />} formula={<CircleFormula />} />
-          </div>
-          <div
-            style={{
-              position: "absolute",
-              left: 222,
-              top: 24,
-              width: 174,
-              height: 204,
-            }}
-          >
-            <MemoFigure
-              label="Rectangle"
-              art={<RectangleArt />}
-              formula={<RectangleFormula />}
-            />
-          </div>
-          <div
-            style={{
-              position: "absolute",
-              left: 412,
-              top: 24,
-              width: 174,
-              height: 204,
-            }}
-          >
-            <MemoFigure
-              label="Triangle"
-              art={<TriangleArt />}
-              formula={<TriangleFormula />}
-            />
-          </div>
-          <div
-            style={{
-              position: "absolute",
-              left: 602,
-              top: 24,
-              width: 174,
-              height: 204,
-            }}
-          >
-            <MemoFigure
-              label="Right triangle"
-              art={<RightTriangleArt />}
-              formula={<RightTriangleFormula />}
-            />
-          </div>
-          <div
-            style={{
-              position: "absolute",
-              left: 792,
-              top: 24,
-              width: 174,
-              height: 204,
-            }}
-          >
-            <MemoFigure label="Rectangular prism" art={<PrismArt />} formula={<PrismFormula />} />
-          </div>
-
-          <div
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              left: 32,
-              top: SAT_REF_DIVIDER_Y1,
-              width: 936,
-              height: 1,
-              background: "var(--sat-divider-soft)",
-            }}
+          <MemoFigure
+            x={0}
+            y={24}
+            label="Circle"
+            art={<CircleArt />}
+            formula={<CircleFormula />}
           />
-
-          {/* Solids row: 4 figures */}
-          <div
-            style={{
-              position: "absolute",
-              left: 32,
-              top: 244,
-              width: 216,
-              height: 176,
-            }}
-          >
-            <MemoFigure
-              label="Cylinder"
-              art={<CylinderArt />}
-              formula={<CylinderFormula />}
-            />
-          </div>
-          <div
-            style={{
-              position: "absolute",
-              left: 272,
-              top: 244,
-              width: 216,
-              height: 176,
-            }}
-          >
-            <MemoFigure label="Sphere" art={<SphereArt />} formula={<SphereFormula />} />
-          </div>
-          <div
-            style={{
-              position: "absolute",
-              left: 512,
-              top: 244,
-              width: 216,
-              height: 176,
-            }}
-          >
-            <MemoFigure label="Cone" art={<ConeArt />} formula={<ConeFormula />} />
-          </div>
-          <div
-            style={{
-              position: "absolute",
-              left: 752,
-              top: 244,
-              width: 216,
-              height: 176,
-            }}
-          >
-            <MemoFigure
-              label="Rectangular pyramid"
-              art={<PyramidArt />}
-              formula={<PyramidFormula />}
-            />
-          </div>
-
-          <div
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              left: 32,
-              top: SAT_REF_DIVIDER_Y2,
-              width: 936,
-              height: 1,
-              background: "var(--sat-divider-soft)",
-            }}
+          <MemoFigure
+            x={160}
+            y={24}
+            label="Rectangle"
+            art={<RectangleArt />}
+            formula={<RectangleFormula />}
           />
-
-          {/* Special row */}
+          <MemoFigure
+            x={320}
+            y={24}
+            label="Triangle"
+            art={<TriangleArt />}
+            formula={<TriangleFormula />}
+          />
+          <MemoFigure
+            x={480}
+            y={24}
+            label="Right triangle"
+            art={<RightTriangleArt />}
+            formula={<RightTriangleFormula />}
+          />
           <section
             aria-labelledby="sat-special-triangles"
-            style={{
-              position: "absolute",
-              left: 32,
-              top: 436,
-              width: 468,
-              height: 108,
-            }}
+            style={{ position: "absolute", left: 640, top: 24, width: 320 }}
           >
-            <h2
-              id="sat-special-triangles"
-              style={{
-                margin: 0,
-                textAlign: "center",
-                fontWeight: 600,
-                fontFamily: SAT_REF_MATH_FONT,
-                color: "var(--sat-text)",
-              }}
-              className="sat-type-control-primary"
-            >
-              Special Right Triangles
-            </h2>
-            <div
-              style={{
-                marginTop: 4,
-                display: "flex",
-                alignItems: "flex-end",
-                justifyContent: "center",
-                gap: 24,
-              }}
-            >
+            <div style={{ display: "flex" }}>
               <ThirtySixtyNinetyArt />
               <FortyFiveArt />
             </div>
+            <h2
+              id="sat-special-triangles"
+              style={{
+                margin: "4px 0 0",
+                textAlign: "center",
+                fontSize: 16,
+                fontWeight: 700,
+                fontFamily: SAT_REF_MATH_FONT,
+              }}
+            >
+              Special Right Triangles
+            </h2>
           </section>
+
+          <MemoFigure
+            x={0}
+            y={210}
+            label="Rectangular prism"
+            art={<PrismArt />}
+            formula={<PrismFormula />}
+          />
+          <MemoFigure
+            x={160}
+            y={210}
+            label="Cylinder"
+            art={<CylinderArt />}
+            formula={<CylinderFormula />}
+          />
+          <MemoFigure
+            x={320}
+            y={210}
+            label="Sphere"
+            art={<SphereArt />}
+            formula={<SphereFormula />}
+          />
+          <MemoFigure
+            x={480}
+            y={210}
+            label="Cone"
+            art={<ConeArt />}
+            formula={<ConeFormula />}
+          />
+          <MemoFigure
+            x={640}
+            y={210}
+            label="Rectangular pyramid"
+            art={<PyramidArt />}
+            formula={<PyramidFormula />}
+          />
+
           <section
             aria-label="Angle and circle facts"
             style={{
               position: "absolute",
-              left: 524,
-              top: 436,
-              width: 444,
-              height: 108,
-              display: "flex",
-              alignItems: "center",
+              left: 42,
+              top: 440,
+              width: 916,
+              fontFamily: SAT_REF_MATH_FONT,
+              fontSize: 20,
+              lineHeight: 1.4,
             }}
           >
-            <div
-              className="sat-type-reference"
-              style={{
-                color: "var(--sat-text)",
-                fontFamily: SAT_REF_MATH_FONT,
-              }}
-            >
-              <p style={{ margin: "0 0 12px" }}>
-                The number of degrees of arc in a circle is 360.
-              </p>
-              <p style={{ margin: "0 0 12px" }}>
-                The number of radians of arc in a circle is 2π.
-              </p>
-              <p style={{ margin: 0 }}>
-                The sum of the measures in degrees of the angles of a triangle
-                is 180.
-              </p>
-            </div>
+            <p style={{ margin: "0 0 10px" }}>
+              The number of degrees of arc in a circle is 360.
+            </p>
+            <p style={{ margin: "0 0 10px" }}>
+              The number of radians of arc in a circle is <math><mn>2</mn><mi>π</mi></math>.
+            </p>
+            <p style={{ margin: 0 }}>
+              The sum of the measures in degrees of the angles of a triangle is 180.
+            </p>
           </section>
         </div>
       </div>

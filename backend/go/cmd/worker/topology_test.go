@@ -2,50 +2,86 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
 
-func TestDockerEntrypointKeepsSATTimeoutWorkerInActivityDrivenMode(t *testing.T) {
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller did not return the test path")
-	}
-	dockerfile, err := os.ReadFile(filepath.Join(filepath.Dir(sourceFile), "../../../Dockerfile"))
+func TestSingleContainerStartupModes(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(source), "../../../Dockerfile"))
 	if err != nil {
-		t.Fatalf("read Dockerfile: %v", err)
+		t.Fatal(err)
 	}
-	script := string(dockerfile)
-	activity := strings.Index(script, `if [ "$BACKGROUND_RUNTIME_MODE" = "activity_driven" ]`)
-	if activity < 0 {
-		t.Fatal("Dockerfile entrypoint has no activity_driven branch")
+	dockerfile := string(raw)
+	start := strings.Index(dockerfile, "#!/bin/bash\n")
+	end := strings.Index(dockerfile[start:], "\nEOF") + start
+	script := dockerfile[start:end]
+	if strings.Contains(script, "--sat-timeouts-only") {
+		t.Fatal("activity-driven mode must own every job inside the API")
 	}
-	coedit := strings.Index(script, "/usr/local/bin/node /app/node_modules/tsx/dist/cli.mjs /app/services/authoring-coedit/src/main.ts &")
-	if coedit < 0 {
-		// The co-edit runtime moved to the Node/tsx runner because its
-		// Hocuspocus Node adapter rejects Bun. Keep the topology guard
-		// compatible with both supported image generations.
-		coedit = strings.Index(script, "/usr/local/bin/node /app/node_modules/tsx/dist/cli.mjs /app/services/authoring-coedit/src/main.ts &")
+	exportAt := strings.Index(script, "export BACKGROUND_RUNTIME_MODE\n")
+	if exportAt < 0 || exportAt > strings.Index(script, "/app/migrate\n") {
+		t.Fatal("mode must be inherited by every process")
 	}
-	if coedit < 0 {
-		t.Fatal("Dockerfile entrypoint must start embedded SAT co-editing")
-	}
-	timeoutWorker := strings.Index(script[activity:], "/app/worker --sat-timeouts-only &")
-	if timeoutWorker < 0 {
-		t.Fatal("activity_driven mode must keep server-owned SAT timeout reconciliation active")
-	}
-	timeoutWorker += activity
-	worker := strings.Index(script[activity:], "/app/worker &")
-	if worker < 0 {
-		t.Fatal("Dockerfile entrypoint no longer starts the worker in continuous mode")
-	}
-	worker += activity
-	if timeoutWorker > worker {
-		t.Fatal("SAT timeout worker must be confined to activity_driven mode")
-	}
-	if !strings.Contains(script[activity:worker], `wait -n "$API_PID" "$COEDIT_PID" "$TIMEOUT_WORKER_PID"`) {
-		t.Fatal("activity_driven branch must supervise API, embedded co-editing, and timeout reconciliation")
+	for _, mode := range []string{"activity-driven", "continuous"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			record := filepath.Join(dir, "calls")
+			// Execute the actual entrypoint with local processes; no Docker daemon needed.
+			for _, name := range []string{"migrate", "api", "worker", "node"} {
+				child := "#!/bin/bash\necho '" + name + "'\" $BACKGROUND_RUNTIME_MODE\" >> '" + record + "'\n"
+				if name != "migrate" {
+					count := "3"
+					if mode == "continuous" {
+						count = "4"
+					}
+					child += "for i in {1..200}; do\n  if [ \"$(wc -l < '" + record + "')\" -ge " + count + " ]; then break; fi\n  sleep 0.02\ndone\nsleep 0.05\nexit 0\n"
+				}
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(child), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			normalizer, err := os.ReadFile(filepath.Join(filepath.Dir(source), "../../../scripts/normalize-background-runtime-mode.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "normalize-background-runtime-mode.sh"), normalizer, 0755); err != nil {
+				t.Fatal(err)
+			}
+			local := strings.ReplaceAll(script, "/app/", dir+"/")
+			local = strings.ReplaceAll(local, "/usr/local/bin/node", filepath.Join(dir, "node"))
+			entry := filepath.Join(dir, "start.sh")
+			if err := os.WriteFile(entry, []byte(local), 0755); err != nil {
+				t.Fatal(err)
+			}
+			bash := "/bin/bash"
+			if _, err := os.Stat("/opt/homebrew/bin/bash"); err == nil {
+				bash = "/opt/homebrew/bin/bash"
+			}
+			if out, _ := exec.Command(bash, "-c", "help wait").Output(); !strings.Contains(string(out), "-n") {
+				t.Skip("entrypoint needs Bash 4.3+")
+			}
+			cmd := exec.Command(bash, entry)
+			cmd.Env = append(os.Environ(), "BACKGROUND_RUNTIME_MODE="+mode)
+			if err := cmd.Run(); err == nil {
+				t.Fatal("unexpected child exit must fail the container")
+			}
+			calls, err := os.ReadFile(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonical := strings.ReplaceAll(mode, "-", "_")
+			for _, name := range []string{"migrate", "api", "node"} {
+				if !strings.Contains(string(calls), name+" "+canonical) {
+					t.Fatalf("missing %s with canonical mode: %s", name, calls)
+				}
+			}
+			if strings.Contains(string(calls), "worker ") != (mode == "continuous") {
+				t.Fatalf("wrong worker topology: %s", calls)
+			}
+		})
 	}
 }

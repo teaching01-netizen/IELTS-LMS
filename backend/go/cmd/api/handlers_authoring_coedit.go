@@ -68,6 +68,10 @@ func authorCoeditTokenHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, authoringcoedit.ErrServiceDisabled.ToAppError())
 			return
 		}
+		if err := activateCoedit(r.Context(), app); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		if err := recoverExpiredCoeditFreezes(r.Context(), app); err != nil {
 			authoringcoedit.EmitToken(authoringcoedit.OutcomeUnavailable)
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
@@ -141,6 +145,10 @@ func authorWorkspaceCoeditTokenHandler(app *App) http.HandlerFunc {
 		if !app.CoeditCapability() || app.Authoring == nil {
 			authoringcoedit.EmitToken(authoringcoedit.OutcomeUnavailable)
 			httpx.WriteError(w, r, authoringcoedit.ErrServiceDisabled.ToAppError())
+			return
+		}
+		if err := activateCoedit(r.Context(), app); err != nil {
+			httpx.WriteError(w, r, err)
 			return
 		}
 		if err := recoverExpiredCoeditFreezes(r.Context(), app); err != nil {

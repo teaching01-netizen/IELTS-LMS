@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -222,7 +223,7 @@ func (s *Subscription) Channel() <-chan Event { return s.ch }
 
 // Dropped reports events dropped for this subscriber (buffer full;
 // non-blocking publish never stalls the publisher).
-func (s *Subscription) Dropped() int64 { return s.dropped }
+func (s *Subscription) Dropped() int64 { return atomic.LoadInt64(&s.dropped) }
 
 // Hub fans bus events out to in-process subscribers. It never blocks the
 // publisher: a full subscriber buffer drops the event and counts it.
@@ -396,7 +397,7 @@ func (h *Hub) Publish(e Event) {
 			select {
 			case sub.ch <- e:
 			default:
-				sub.dropped++
+				atomic.AddInt64(&sub.dropped, 1)
 				telemetry.IncCounter(telemetry.MWSSlowDisconnect)
 			}
 		}
@@ -424,7 +425,7 @@ func (h *Hub) Publish(e Event) {
 		select {
 		case sub.ch <- e:
 		default:
-			sub.dropped++
+			atomic.AddInt64(&sub.dropped, 1)
 			telemetry.IncCounter(telemetry.MWSSlowDisconnect)
 		}
 	}

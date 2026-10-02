@@ -15,6 +15,8 @@ import (
 // Control API paths on the singleton Hocuspocus service. Every one of them is
 // signed with the service secret; none of them is reachable from a browser.
 const (
+	ControlPathActivate = "/control/activate"
+	ControlPathPark     = "/control/park"
 	ControlPathFreeze   = "/control/freeze"
 	ControlPathUnfreeze = "/control/unfreeze"
 	ControlPathRenew    = "/control/renew"
@@ -118,12 +120,29 @@ func NewControlClient(baseURL string, signer *ServiceSigner) (*ControlClient, er
 	}, nil
 }
 
+// CloseIdleConnections releases local control sockets before the API idles.
+func (c *ControlClient) CloseIdleConnections() {
+	if c != nil {
+		c.client.CloseIdleConnections()
+	}
+}
+
 // BaseURL exposes the configured base (assertable without exposing secrets).
 func (c *ControlClient) BaseURL() string {
 	if c == nil {
 		return ""
 	}
 	return c.baseURL
+}
+
+// Activate acquires the singleton before browser admission in sleeping mode.
+func (c *ControlClient) Activate(ctx context.Context) error {
+	return c.do(ctx, http.MethodPost, ControlPathActivate, struct{}{}, nil)
+}
+
+// Park refuses busy rooms; only a successful response permits API idling.
+func (c *ControlClient) Park(ctx context.Context) error {
+	return c.do(ctx, http.MethodPost, ControlPathPark, struct{}{}, nil)
 }
 
 // Freeze flushes and freezes the listed rooms.

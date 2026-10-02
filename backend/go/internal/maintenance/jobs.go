@@ -528,6 +528,8 @@ func saveProjectionState(ctx context.Context, db *sql.DB, state ProjectionState,
 // INSERT ... ON DUPLICATE KEY UPDATE, then returns the next cursors.
 func syncProjectionBatch(ctx context.Context, db *sql.DB, scheduleCursor, attemptCursor *Cursor, since time.Time) (ProjectionReport, *Cursor, *Cursor, *time.Time, error) {
 	var rep ProjectionReport
+	scheduleSince, scheduleID := projectionPosition(scheduleCursor, since)
+	attemptSince, attemptID := projectionPosition(attemptCursor, since)
 	// Schedules are the parent read model. The IELTS provider filter is
 	// important: SAT/ACT attempts use their own result projections and must not
 	// appear in the IELTS grading queue.
@@ -537,7 +539,7 @@ func syncProjectionBatch(ctx context.Context, db *sql.DB, scheduleCursor, attemp
 		  AND exam_id IN (SELECT id FROM exam_entities WHERE provider_key = 'ielts')
 		ORDER BY updated_at ASC, id ASC
 		LIMIT ?`,
-		since, since, cursorID(scheduleCursor), ProjectionBatch)
+		scheduleSince, scheduleSince, scheduleID, ProjectionBatch)
 	if err != nil {
 		return rep, nil, nil, nil, err
 	}
@@ -600,7 +602,7 @@ func syncProjectionBatch(ctx context.Context, db *sql.DB, scheduleCursor, attemp
 		  AND (a.updated_at > ? OR (a.updated_at = ? AND a.id > ?))
 		ORDER BY a.updated_at ASC, a.id ASC
 		LIMIT ?`,
-		since, since, cursorID(attemptCursor), ProjectionBatch)
+		attemptSince, attemptSince, attemptID, ProjectionBatch)
 	if err != nil {
 		return rep, nil, nil, nil, err
 	}
@@ -681,13 +683,6 @@ func refreshProjectionCounters(ctx context.Context, db *sql.DB, scheduleID strin
 			in_progress_reviews = ?, finalized_reviews = ?, overdue_reviews = ?, updated_at = NOW()
 		WHERE schedule_id = ?`, total, submitted, pending, inProgress, finalized, overdue, scheduleID)
 	return err
-}
-
-func cursorID(c *Cursor) string {
-	if c == nil {
-		return ""
-	}
-	return c.ID
 }
 
 func isMissingTable(err error) bool {

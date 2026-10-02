@@ -19,8 +19,8 @@ describe('shouldRetryQuery (rate-limit tiers)', () => {
     expect(shouldRetryMutation(0, { statusCode: 429 })).toBe(false);
   });
 
-  it('allows one mutation retry for other failures', () => {
-    expect(shouldRetryMutation(0, { status: 503 })).toBe(true);
+  it('never automatically repeats an ambiguous mutation', () => {
+    expect(shouldRetryMutation(0, { status: 503 })).toBe(false);
     expect(shouldRetryMutation(1, { status: 503 })).toBe(false);
   });
 });

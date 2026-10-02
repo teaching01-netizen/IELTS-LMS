@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "node:http";
+import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { SkipFurtherHooksError } from "@hocuspocus/common";
 import {
@@ -109,6 +110,8 @@ export const CONTROL_REQUEST_PATHS = new Set<string>([
   CONTROL_PATHS.renew,
   CONTROL_PATHS.flush,
   CONTROL_PATHS.close,
+  CONTROL_PATHS.activate,
+  CONTROL_PATHS.park,
 ]);
 
 /**
@@ -154,9 +157,8 @@ export interface LockLike {
 /**
  * The addressable service object.
  *
- * `start()` is the only method that binds a port, and it never binds before the
- * singleton lock is held — a process that cannot own the lock must not accept a
- * single socket, or two processes would serve the same rooms.
+ * Collaboration is admitted only while the singleton lock is held. In
+ * activity-driven mode the local control listener remains available while parked.
  */
 export class CoeditService {
   readonly config: CoeditServiceConfig;
@@ -169,6 +171,10 @@ export class CoeditService {
   private shuttingDown = false;
   private listening = false;
   private lockLost = false;
+  private parked = true;
+  private parking = false;
+  private transition: Promise<unknown> = Promise.resolve();
+  private readonly sockets = new Set<Duplex>();
   /**
    * Connections awaiting an answer to a token refresh, keyed by document and
    * socket.
@@ -242,7 +248,12 @@ export class CoeditService {
       maxUnauthenticatedQueueSize: MAX_UNAUTHENTICATED_QUEUE_BYTES,
       websocketOptions: { maxPayload: MAX_FRAME_BYTES },
       extensions: [this.hooks()],
-    });    this.lifecycle = new LifecycleController({
+    });
+    this.server.httpServer.on("upgrade", (_request, socket) => {
+      this.sockets.add(socket);
+      socket.once("close", () => this.sockets.delete(socket));
+    });
+    this.lifecycle = new LifecycleController({
       serviceSecret: config.serviceSecret,
       hocuspocus: this.server.hocuspocus,
       persistence: this.persistence,
@@ -250,6 +261,8 @@ export class CoeditService {
       isShuttingDown: () => this.shuttingDown,
       allowedOrigin: config.allowedOrigin,
       now: this.now,
+      activate: () => this.activate(),
+      park: () => this.park(),
     });
     this.persistence.setBroadcaster((documentName, payload) => {
       this.server.hocuspocus.documents.get(documentName)?.broadcastStateless(payload);
@@ -258,20 +271,91 @@ export class CoeditService {
   }
 
   isReady(): boolean {
-    return this.listening && !this.shuttingDown && !this.lockLost && this.lock.isReady();
+    return (
+      this.listening &&
+      !this.parked &&
+      !this.parking &&
+      !this.shuttingDown &&
+      !this.lockLost &&
+      this.lock.isReady()
+    );
   }
 
-  /** Acquires the singleton lock, then binds the port. Throws on lock contention. */
+  /** Activity-driven startup exposes control while collaboration stays parked. */
   async start(): Promise<void> {
-    await this.lock.acquire();
+    if (!this.config.activityDriven) await this.activate();
     await this.server.listen();
     this.listening = true;
-    this.refreshTimer = setInterval(() => this.requestTokenRefreshes(), TOKEN_REFRESH_INTERVAL_MS);
-    this.refreshTimer.unref?.();
     log("info", "authoring-coedit listening", {
       event: "listen",
       port: this.config.port,
       environment: this.config.environment,
+    });
+  }
+
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.transition.then(operation);
+    this.transition = next.catch(() => undefined);
+    return next;
+  }
+
+  activate(): Promise<void> {
+    return this.serialize(async () => {
+      if (this.shuttingDown || this.lockLost) throw new Error("coedit_unavailable");
+      if (!this.parked && this.lock.isReady()) return;
+      await this.lock.acquire();
+      if (this.shuttingDown || this.lockLost) {
+        await this.lock.release();
+        throw new Error("coedit_unavailable");
+      }
+      this.parked = false;
+      this.refreshTimer = setInterval(
+        () => this.requestTokenRefreshes(),
+        TOKEN_REFRESH_INTERVAL_MS
+      );
+      this.refreshTimer.unref?.();
+      log("info", "authoring-coedit active", { event: "activate" });
+    });
+  }
+
+  park(): Promise<boolean> {
+    return this.serialize(async () => {
+      if (this.shuttingDown || this.lockLost) throw new Error("coedit_unavailable");
+      if (this.parked) return true;
+      const busy = () =>
+        this.sockets.size > 0 ||
+        this.persistence.hasPendingStores() ||
+        this.seedOperations.size > 0 ||
+        this.storeRetries.size > 0 ||
+        this.server.hocuspocus.loadingDocuments.size > 0 ||
+        this.server.hocuspocus.unloadingDocuments.size > 0;
+      if (busy()) return false;
+      for (const [name, document] of this.server.hocuspocus.documents) {
+        if (
+          !this.persistence.isClean(name, document) ||
+          !this.server.hocuspocus.shouldUnloadDocument(document)
+        )
+          return false;
+      }
+      this.parking = true;
+      try {
+        for (const [name, document] of this.server.hocuspocus.documents) {
+          await this.server.hocuspocus.unloadDocument(document);
+          if (this.server.hocuspocus.documents.has(name)) return false;
+        }
+        if (busy()) return false;
+        this.lifecycle.clearLeases();
+        this.pendingTokenSync.clear();
+        if (this.refreshTimer) clearInterval(this.refreshTimer);
+        this.refreshTimer = null;
+        await this.lock.release();
+        this.parked = true;
+        this.refreshGauges();
+        log("info", "authoring-coedit parked", { event: "park" });
+        return true;
+      } finally {
+        this.parking = false;
+      }
     });
   }
 
@@ -296,7 +380,7 @@ export class CoeditService {
       const timer = setTimeout(() => resolve("timeout"), this.config.shutdownTimeoutMs);
       timer.unref?.();
     });
-    const drain = (async (): Promise<"clean"> => {
+    const drain = (async (): Promise<"clean" | "timeout"> => {
       // 1. Stop accepting new connections. The callback only settles once every
       //    open socket is gone, so the promise is created here and awaited after
       //    the rooms are closed below (awaiting it now would deadlock against
@@ -335,7 +419,7 @@ export class CoeditService {
       await this.lock.release().catch(() => undefined);
       this.listening = false;
       this.refreshGauges();
-      return "clean";
+      return flushed.failed === 0 ? "clean" : "timeout";
     })();
     const outcome = await Promise.race([drain, deadline]);
     if (outcome === "timeout") {
@@ -345,7 +429,7 @@ export class CoeditService {
       // after this branch reported a breach made every timed-out shutdown
       // report success as well as failure.
       metrics.incCounter("authoring_coedit_shutdown_flush_total", { outcome: "rejected" });
-      log("error", "authoring-coedit shutdown deadline exceeded", {
+      log("error", "authoring-coedit shutdown flush failed or exceeded its deadline", {
         event: "shutdown",
         stage: "flush",
         outcome: "rejected",
@@ -421,11 +505,11 @@ export class CoeditService {
   private refreshGauges(): void {
     metrics.setGauge(
       "authoring_coedit_connections_current",
-      this.server.hocuspocus.getConnectionsCount(),
+      this.server.hocuspocus.getConnectionsCount()
     );
     metrics.setGauge(
       "authoring_coedit_documents_current",
-      this.server.hocuspocus.getDocumentsCount(),
+      this.server.hocuspocus.getDocumentsCount()
     );
   }
 
@@ -438,6 +522,7 @@ export class CoeditService {
         context,
         requestHeaders,
       }: onAuthenticatePayload<CoeditConnectionContext>) => {
+        if (!this.isReady()) throw new Error("coedit_parked");
         this.assertOrigin(requestHeaders);
         let claims: TokenClaims;
         try {
@@ -467,7 +552,9 @@ export class CoeditService {
         }
         if (claims.mode === "write" && this.lifecycle.isReadOnly(name)) {
           metrics.incCounter("authoring_coedit_auth_total", { outcome: "frozen" });
-          throw permissionDenied(new TokenError("Co-edit document is read-only during its lifecycle transition."));
+          throw permissionDenied(
+            new TokenError("Co-edit document is read-only during its lifecycle transition.")
+          );
         }
         if (this.server.hocuspocus.documents.has(name)) this.persistence.discardPreloaded(name);
         // Only server-signed identity reaches the connection context. A client
@@ -519,20 +606,25 @@ export class CoeditService {
         } catch (error) {
           throw permissionDenied(error);
         } finally {
-          if (this.server.hocuspocus.documents.has(documentName)) this.persistence.discardPreloaded(documentName);
+          if (this.server.hocuspocus.documents.has(documentName))
+            this.persistence.discardPreloaded(documentName);
         }
         if (this.lifecycle.isClosed(documentName) || durable.lifecycleState === "closed") {
           throw permissionDenied(new TokenError("Co-edit document is closed."));
         }
         if (claims.mode === "write" && this.lifecycle.isReadOnly(documentName)) {
-          throw permissionDenied(new TokenError("Co-edit document is read-only during its lifecycle transition."));
+          throw permissionDenied(
+            new TokenError("Co-edit document is read-only during its lifecycle transition.")
+          );
         }
-        connectionConfig.readOnly = claims.mode === "read" || this.lifecycle.isReadOnly(documentName);
+        connectionConfig.readOnly =
+          claims.mode === "read" || this.lifecycle.isReadOnly(documentName);
         connection.readOnly = connectionConfig.readOnly;
         context.displayName = claims.displayName;
       },
 
       onConnect: async ({ requestHeaders }: onConnectPayload<CoeditConnectionContext>) => {
+        if (!this.isReady()) throw new Error("coedit_parked");
         this.assertOrigin(requestHeaders);
         metrics.incCounter("authoring_coedit_reconnect_total", { outcome: "accepted" });
         this.refreshGauges();
@@ -557,11 +649,15 @@ export class CoeditService {
                 questionRevision: commit.questionRevision,
                 materializedRevision: commit.materializedRevision,
                 ...(commit.stateEpoch === undefined ? {} : { stateEpoch: commit.stateEpoch }),
-                ...(commit.commitSequence === undefined ? {} : { commitSequence: commit.commitSequence }),
-                ...(commit.workspaceRevision === undefined ? {} : { workspaceRevision: commit.workspaceRevision }),
-              }),
+                ...(commit.commitSequence === undefined
+                  ? {}
+                  : { commitSequence: commit.commitSequence }),
+                ...(commit.workspaceRevision === undefined
+                  ? {}
+                  : { workspaceRevision: commit.workspaceRevision }),
+              })
             )
-            .toUint8Array(),
+            .toUint8Array()
         );
       },
 
@@ -661,7 +757,7 @@ export class CoeditService {
           connection.send(
             new OutgoingMessage(connection.messageAddress)
               .writeStateless(JSON.stringify(frame))
-              .toUint8Array(),
+              .toUint8Array()
           );
           metrics.incCounter("authoring_coedit_store_total", { outcome: "rejected" });
         } catch {
@@ -676,6 +772,21 @@ export class CoeditService {
       }: onDisconnectPayload<CoeditConnectionContext>) => {
         this.pendingTokenSync.delete(refreshKey(documentName, socketId));
         this.refreshGauges();
+      },
+
+      beforeUnloadDocument: async ({ documentName, document }) => {
+        // A failed store must retain the only server copy, including deletes
+        // that leave the state vector unchanged. Park checks the same binary.
+        if (
+          !this.lifecycle.isClosed(documentName) &&
+          !this.persistence.isClean(documentName, document)
+        ) {
+          throw new Error("coedit_store_pending");
+        }
+      },
+
+      afterUnloadDocument: async ({ documentName }) => {
+        this.persistence.forget(documentName);
       },
 
       onLoadDocument: async ({
@@ -752,7 +863,11 @@ export class CoeditService {
     if (!allowed) return;
     const origin = requestHeaders.get("origin") ?? "";
     if (origin !== allowed) {
-      log("warn", "co-edit origin rejected", { event: "auth", outcome: "rejected", reason: "client" });
+      log("warn", "co-edit origin rejected", {
+        event: "auth",
+        outcome: "rejected",
+        reason: "client",
+      });
       throw permissionDenied(new TokenError("Co-edit origin is not allowed."));
     }
   }
@@ -786,7 +901,7 @@ export class CoeditService {
     connection: Connection<CoeditConnectionContext>,
     seed: WorkspaceSeedIdentity,
     outcome: WorkspaceSeedOutcome,
-    retryable: boolean,
+    retryable: boolean
   ): void {
     try {
       const frame = createWorkspaceSeedResultFrame({
@@ -800,7 +915,7 @@ export class CoeditService {
       connection.send(
         new OutgoingMessage(connection.messageAddress)
           .writeStateless(JSON.stringify(frame))
-          .toUint8Array(),
+          .toUint8Array()
       );
     } catch (error) {
       log("warn", "co-edit seed result could not be sent", {
@@ -817,7 +932,7 @@ export class CoeditService {
     documentName: string,
     document: Y.Doc,
     connection: Connection<CoeditConnectionContext>,
-    seed: WorkspaceSeedFrame,
+    seed: WorkspaceSeedFrame
   ): Promise<void> {
     // One lock per document + root, so two proposals for the SAME root are
     // serialized while proposals for different roots still make progress
@@ -857,9 +972,9 @@ export class CoeditService {
         prosemirrorJSONToYXmlFragment(
           promptSchema(),
           documentFromStructuredContent(
-            seed.value as Parameters<typeof documentFromStructuredContent>[0],
+            seed.value as Parameters<typeof documentFromStructuredContent>[0]
           ),
-          fragment,
+          fragment
         );
       }
       // A seed is not acknowledged merely because it entered the live Y.Doc.
@@ -895,7 +1010,7 @@ export class CoeditService {
         connection,
         seed,
         "failed",
-        error instanceof GoRequestError && error.retryable,
+        error instanceof GoRequestError && error.retryable
       );
       // Deliberately NOT rethrown. This runs inside the `onStateless` hook, and
       // Hocuspocus does not catch a rejected stateless hook: the rejection
@@ -921,7 +1036,7 @@ export class CoeditService {
   private async storeOnRequest(
     documentName: string,
     document: Y.Doc,
-    connection: Connection<CoeditConnectionContext>,
+    connection: Connection<CoeditConnectionContext>
   ): Promise<void> {
     if (connection.readOnly || this.lifecycle.isReadOnly(documentName)) {
       // A room that may not be written to has nothing to commit: the refusal
@@ -1023,13 +1138,15 @@ export class CoeditService {
       this.cancelStoreRetry(input.documentName);
       return;
     }
-    if (this.lifecycle.isClosed(input.documentName) || this.lifecycle.isReadOnly(input.documentName)) {
+    if (
+      this.lifecycle.isClosed(input.documentName) ||
+      this.lifecycle.isReadOnly(input.documentName)
+    ) {
       this.cancelStoreRetry(input.documentName);
       return;
     }
     const live = this.server.hocuspocus.documents.get(input.documentName) as unknown as
-      | Y.Doc
-      | undefined;
+      Y.Doc | undefined;
     if (live !== input.document) {
       // The room was unloaded and reopened; its ladder belongs to a document
       // that no longer exists.
@@ -1171,7 +1288,7 @@ function permissionDenied(error: unknown): Error {
 
 export function createCoeditService(
   config: CoeditServiceConfig,
-  deps: CoeditServiceDeps = {},
+  deps: CoeditServiceDeps = {}
 ): CoeditService {
   return new CoeditService(config, deps);
 }
