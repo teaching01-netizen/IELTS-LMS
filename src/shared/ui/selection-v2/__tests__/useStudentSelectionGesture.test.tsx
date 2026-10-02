@@ -15,6 +15,7 @@ type Handlers = {
   activation?: "long-press" | "drag";
   boundaryFor?: (point: TextPoint) => Element | null;
   onSelect?: (range: Range, text: string) => void;
+  onTap?: (press: PointerEvent) => boolean;
   clearOnSelect?: boolean;
   longPressMs?: number;
   scrollContainer?: (root: HTMLElement) => HTMLElement | null;
@@ -91,6 +92,7 @@ function harness(handlers: Handlers = {}) {
       rootRef,
       resolveCaretAtPoint,
       onSelect,
+      onTap: handlers.onTap,
       isOwnedPointer: handlers.ownedPointer,
       longPressMs: handlers.longPressMs ?? 350,
       moveTolerancePx: 8,
@@ -204,6 +206,49 @@ afterEach(() => {
 });
 
 describe("claiming text", () => {
+  it("reports an unclaimed tap on its original target and consumes its compatibility click", () => {
+    const onTap = vi.fn((_press: PointerEvent) => true);
+    const { prose, onSelect } = harness({ activation: "drag", onTap });
+    const word = document.createElement("span");
+    word.textContent = "answer";
+    prose.append(word);
+    touchDown(word, 4);
+    // Capture retargets the release to the selection root.
+    touchUp(prose, 4);
+    expect(onTap).toHaveBeenCalledTimes(1);
+    expect(onTap.mock.calls[0]?.[0].target).toBe(word);
+    expect(onSelect).not.toHaveBeenCalled();
+    const click = createEvent.click(prose, { bubbles: true, cancelable: true, detail: 1 });
+    fireEvent(prose, click);
+    expect(click.defaultPrevented).toBe(true);
+    const keyboard = createEvent.click(prose, { bubbles: true, cancelable: true, detail: 0 });
+    fireEvent(prose, keyboard);
+    expect(keyboard.defaultPrevented).toBe(false);
+  });
+
+  it.each(["hold", "drag", "cancel", "second-pointer"] as const)("never reports %s as an answer tap", (gesture) => {
+    const onTap = vi.fn(() => true);
+    const { prose, frames } = harness({ activation: "drag", onTap });
+    touchDown(prose, 4);
+    if (gesture === "hold") hold(frames);
+    if (gesture === "drag") { touchMove(prose, 14); frame(frames); }
+    if (gesture === "cancel") touchCancel(prose);
+    if (gesture === "second-pointer") touchDown(prose, 4, 10, 2);
+    touchUp(prose, 4);
+    expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it("does not suppress a new physical press after a handled tap", () => {
+    const onTap = vi.fn(() => true);
+    const { prose } = harness({ activation: "drag", onTap });
+    touchDown(prose, 4);
+    touchUp(prose, 4);
+    fireEvent.pointerDown(prose, { pointerType: "mouse", pointerId: 2 });
+    const click = createEvent.click(prose, { bubbles: true, cancelable: true, detail: 1 });
+    fireEvent(prose, click);
+    expect(click.defaultPrevented).toBe(false);
+  });
+
   it("does not claim a press already handed to an action control", () => {
     const { view, prose, resolveCaretAtPoint } = harness({ activation: "drag" });
     const action = document.createElement("button");

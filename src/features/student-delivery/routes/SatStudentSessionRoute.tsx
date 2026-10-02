@@ -32,10 +32,6 @@ import { responseForQuestion } from "../domain/satResponses";
 import { SAT_COPY } from "../domain/satCopy";
 import { satAnnotationEducationKey } from "../infrastructure/satAnnotationEducationStore";
 import {
-  hasSatExamZoomDecision,
-  saveSatExamZoomDecision,
-} from "../infrastructure/satReadingPreferencesStore";
-import {
   loadSatNotesColumnOpen,
   saveSatNotesColumnOpen,
 } from "../infrastructure/satNotesColumnStore";
@@ -122,28 +118,6 @@ export function SatStudentSessionRoute({
   });
   const reading = useSatReadingPreferences(scheduleId, attemptId);
   /**
-   * The attempt's own memory of its automatic screen-zoom decision, in two
-   * halves, because it has to survive two different things.
-   *
-   * The durable half (`hasSatExamZoomDecision`) survives a page reload: an
-   * attempt whose first module needed no shrink stores no zoom at all, so
-   * without it a refreshed page would find "nothing stored" and decide again on
-   * whatever module it reloaded into. The in-memory half covers what storage
-   * cannot — a page session whose decision was taken while storage was
-   * unavailable (blocked or private-mode localStorage), where the write fails
-   * silently. It remembers WHICH attempt decided rather than a bare boolean, so
-   * the same route carrying a different attempt starts undecided by comparison —
-   * no reset effect that could race the decision it is meant to record.
-   *
-   * The durable flag belongs to the attempt, not to the candidate identity that
-   * happens to be showing: one decision per attempt, which is the rule.
-   */
-  const [screenZoomDecidedFor, setScreenZoomDecidedFor] = useState<string | null>(null);
-  const screenZoomDecisionStored = useMemo(
-    () => hasSatExamZoomDecision(scheduleId, attemptId),
-    [attemptId, scheduleId],
-  );
-  /**
    * Questions whose eliminator is OPEN, keyed by module attempt + question.
    *
    * The choices a student actually crossed out are data and live in the
@@ -226,8 +200,6 @@ export function SatStudentSessionRoute({
       pendingSection?.displayOrder === 0 &&
       data.attempt.moduleAttempts.every((moduleAttempt) => moduleAttempt.state === "not_started"),
   );
-  const screenZoomDecided =
-    screenZoomDecidedFor === identityKey || screenZoomDecisionStored;
   const prevIdentityKeyRef = useRef<string | null>(null);
   if (prevIdentityKeyRef.current !== identityKey) {
     prevIdentityKeyRef.current = identityKey;
@@ -805,12 +777,6 @@ export function SatStudentSessionRoute({
         questionNote={response.annotations.legacyQuestionNote}
         readingPreferences={reading.preferences}
         onReadingPreferencesChange={reading.setPreferences}
-        autoFitScreenZoom
-        screenZoomDecided={screenZoomDecided}
-        onScreenZoomDecided={() => {
-          setScreenZoomDecidedFor(identityKey);
-          saveSatExamZoomDecision(scheduleId, attemptId);
-        }}
         onSelectQuestion={commands.selectQuestion}
         onToggleCalculator={commands.toggleCalculator}
         onToggleReference={commands.toggleReference}

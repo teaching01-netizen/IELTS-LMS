@@ -57,6 +57,123 @@ async function openHarness(page: Page, query = "?ownedTouchSelection=1"): Promis
  */
 const PHRASE = "canopy density";
 
+const ANSWER_A = "Tree cover can affect heat differently depending on local conditions.";
+const ANSWER_B = "All cities experience identical temperature changes from tree cover.";
+
+test.describe("SAT answer text taps", () => {
+  for (const viewport of [{ width: 820, height: 1180 }, { width: 1024, height: 768 }]) {
+    test(`${viewport.width}px: selects answer text with Highlights on and off`, async ({ page, hasTouch }) => {
+      await page.setViewportSize(viewport);
+      await openHarness(page);
+      await armHighlights(page);
+      await page.evaluate(() => {
+        (window as unknown as { answerChanges: string[] }).answerChanges = [];
+        document.addEventListener("change", (event) => {
+          if (event.target instanceof HTMLInputElement && event.target.type === "radio") {
+            (window as unknown as { answerChanges: string[] }).answerChanges.push(event.target.value);
+          }
+        });
+      });
+      const a = page.getByRole("radio", { name: /Option A/ });
+      const b = page.getByRole("radio", { name: /Option B/ });
+      for (const [text, radio] of [[ANSWER_A, a], [ANSWER_B, b], [ANSWER_A, a], [ANSWER_B, b]] as const) {
+        const target = page.getByText(text, { exact: true });
+        if (hasTouch) await target.tap(); else await target.click();
+        await expect(radio).toBeChecked();
+      }
+      expect(await page.evaluate(() => (window as unknown as { answerChanges: string[] }).answerChanges)).toEqual(["a", "b", "a", "b"]);
+      await b.focus();
+      await page.keyboard.press("ArrowUp");
+      await expect(a).toBeChecked();
+      await page.getByRole("button", { name: /^Highlights & Notes/ }).click();
+      const plain = page.getByText(ANSWER_B, { exact: true });
+      if (hasTouch) await plain.tap(); else await plain.click();
+      await expect(b).toBeChecked();
+      await b.focus();
+      await page.keyboard.press("ArrowUp");
+      await expect(a).toBeChecked();
+    });
+
+    test(`${viewport.width}px: tapping highlighted answer text selects and opens its tools`, async ({ page, hasTouch }) => {
+      await page.setViewportSize(viewport);
+      await openHarness(page);
+      await page.getByText(ANSWER_B, { exact: true }).click();
+      await armHighlights(page);
+      await selectTextInRegion(page, '[data-sat-annotation-region="choice.a"]', "Tree cover");
+      await page.getByRole("button", { name: "Highlight Yellow", exact: true }).click();
+      const edit = page.getByRole("toolbar", { name: "Edit annotation" });
+      await expect(edit).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(edit).toHaveCount(0);
+      const mark = page.locator('[data-sat-annotation-region="choice.a"] [data-sat-highlight="true"]');
+      if (hasTouch) await mark.tap(); else await mark.click();
+      await expect(page.getByRole("radio", { name: /Option A/ })).toBeChecked();
+      await expect(edit).toBeVisible();
+      await edit.getByRole("button", { name: "Remove highlight" }).click();
+      await expect(mark).toHaveCount(0);
+      await expect(page.getByRole("radio", { name: /Option A/ })).toBeChecked();
+    });
+  }
+
+  for (const sameChoice of [true, false]) {
+    test(`a text selection leaves the answer unchanged and a tap on ${sameChoice ? "the same choice" : "another choice"} chooses immediately`, async ({ page, hasTouch }) => {
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await openHarness(page);
+      await page.getByText(ANSWER_B, { exact: true }).click();
+      await armHighlights(page);
+      const aText = page.getByText(ANSWER_A, { exact: true });
+      const box = await aText.boundingBox();
+      if (!box) throw new Error("Answer text has no bounds");
+      await page.mouse.move(box.x + 2, box.y + 8);
+      await page.mouse.down();
+      await page.mouse.move(box.x + Math.min(box.width - 2, 120), box.y + 8, { steps: 6 });
+      await page.mouse.up();
+      await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toBeVisible();
+      await expect(page.getByRole("radio", { name: /Option B/ })).toBeChecked();
+      // Tap actual unselected text, clear of the selection's endpoint handles.
+      if (sameChoice) {
+        const position = await aText.evaluate((element) => {
+          const text = element.firstChild!;
+          const range = document.createRange();
+          range.setStart(text, text.textContent!.length - 2);
+          range.setEnd(text, text.textContent!.length - 1);
+          const rect = range.getBoundingClientRect();
+          const bounds = element.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2 - bounds.left, y: rect.top + rect.height / 2 - bounds.top };
+        });
+        if (hasTouch) await aText.tap({ position }); else await aText.click({ position });
+      } else {
+        const c = page.getByText("Built environments have no relationship to urban temperature.", { exact: true });
+        if (hasTouch) await c.tap(); else await c.click();
+      }
+      await expect(page.getByRole("radio", { name: sameChoice ? /Option A/ : /Option C/ })).toBeChecked();
+    });
+  }
+
+  test("holding answer text and adjusting its selection handle keep the answer unchanged", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openHarness(page);
+    await page.getByText(ANSWER_B, { exact: true }).click();
+    await armHighlights(page);
+    const box = await page.getByText(ANSWER_A, { exact: true }).boundingBox();
+    if (!box) throw new Error("Answer text has no bounds");
+    await page.mouse.move(box.x + 15, box.y + 8);
+    await page.mouse.down();
+    const handle = page.getByRole("button", { name: "Adjust selection end" });
+    await expect(handle).toBeVisible();
+    await page.mouse.up();
+    await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toBeVisible();
+    const endpoint = await handle.boundingBox();
+    if (!endpoint) throw new Error("Selection handle has no bounds");
+    await page.mouse.move(endpoint.x + endpoint.width / 2, endpoint.y + endpoint.height - 4);
+    await page.mouse.down();
+    await page.mouse.move(box.x + Math.min(box.width - 2, 160), box.y + 8, { steps: 6 });
+    await page.mouse.up();
+    await expect(page.getByRole("radio", { name: /Option B/ })).toBeChecked();
+    await expect(page.getByRole("toolbar", { name: "Selected text actions" })).toBeVisible();
+  });
+});
+
 /**
  * Arm annotation the way the student does: press the labeled top-bar control.
  *

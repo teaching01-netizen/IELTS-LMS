@@ -1034,6 +1034,7 @@ type scoringRow struct {
 	isPretest        bool
 	answerDefinition sql.NullString
 	response         sql.NullString
+	scoringPolicy    string
 }
 
 // loadScoringRowsTx loads the scoring join for finalizeModuleTx.
@@ -1064,7 +1065,7 @@ func loadScoringRowsTx(ctx context.Context, t tx.Tx, moduleAttemptID, moduleID s
 // Go-side dedup keeps exactly one row per eq.id.
 func loadScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, moduleID string) ([]scoringRow, error) {
 	rows, err := t.QueryContext(ctx,
-		"SELECT eq.id, eq.is_pretest, qr.answer_definition, ar.response, CAST(v.response AS CHAR), CAST(v.question_id AS CHAR) FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id LEFT JOIN assessment_question_responses ar ON ar.module_attempt_id = ? AND ar.exam_question_id = eq.id LEFT JOIN attempt_responses_v2 v ON v.question_id IN (eq.id, eq.question_id) AND v.module_id = eq.module_id AND v.attempt_id = (SELECT attempt_id FROM assessment_module_attempts WHERE id = ?) WHERE eq.module_id = ? ORDER BY eq.display_order, CASE WHEN (CAST(v.question_id AS CHAR) COLLATE utf8mb4_unicode_ci) = eq.id THEN 0 ELSE 1 END",
+		"SELECT eq.id, eq.is_pretest, qr.answer_definition, ar.response, CAST(v.response AS CHAR), CAST(v.question_id AS CHAR), CAST(ev.config_snapshot AS CHAR) FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections sec ON sec.id = m.section_id JOIN exam_versions ev ON ev.id = sec.exam_version_id LEFT JOIN assessment_question_responses ar ON ar.module_attempt_id = ? AND ar.exam_question_id = eq.id LEFT JOIN attempt_responses_v2 v ON v.question_id IN (eq.id, eq.question_id) AND v.module_id = eq.module_id AND v.attempt_id = (SELECT attempt_id FROM assessment_module_attempts WHERE id = ?) WHERE eq.module_id = ? ORDER BY eq.display_order, CASE WHEN (CAST(v.question_id AS CHAR) COLLATE utf8mb4_unicode_ci) = eq.id THEN 0 ELSE 1 END",
 		moduleAttemptID, moduleAttemptID, moduleID)
 	if err != nil {
 		return nil, err
@@ -1085,8 +1086,13 @@ func loadScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, mod
 		var r scoringRow
 		var canonical sql.NullString
 		var vQuestionID sql.NullString
-		if err := rows.Scan(&eqID, &r.isPretest, &r.answerDefinition, &r.response, &canonical, &vQuestionID); err != nil {
+		var config sql.NullString
+		if err := rows.Scan(&eqID, &r.isPretest, &r.answerDefinition, &r.response, &canonical, &vQuestionID, &config); err != nil {
 			return nil, err
+		}
+		r.scoringPolicy = assessscore.SATSPRPolicy(config.String)
+		if r.scoringPolicy == "invalid" {
+			return nil, apperrors.New(apperrors.CodeValidation, "Published SAT student-response scoring policy is invalid.")
 		}
 		if _, dup := seen[eqID]; dup {
 			// Second V2 match for the same question (eq.id + eq.question_id
@@ -1164,7 +1170,7 @@ func scoreScoringRows(rows []scoringRow) (rawCorrect, operationalCount int) {
 			continue
 		}
 		operationalCount++
-		if responseIsCorrect(answerString(r.answerDefinition), r.response) {
+		if assessscore.SATResponseCorrectWithPolicy(answerString(r.answerDefinition), r.response.Valid, r.response.String, r.scoringPolicy) {
 			rawCorrect++
 		}
 	}
@@ -1176,14 +1182,6 @@ func answerString(v sql.NullString) string {
 		return ""
 	}
 	return v.String
-}
-
-// responseIsCorrect is the write-path verdict: one canonical import, not a
-// fork. Exam-day re-audit defect 7 collapsed the verbatim duplicate into
-// assessscore.SATResponseCorrect so seal-time scoring and result-review
-// verdicts cannot drift on a one-line tolerance fix.
-func responseIsCorrect(answerJSON string, response sql.NullString) bool {
-	return assessscore.SATResponseCorrect(answerJSON, response.Valid, response.String)
 }
 
 // nextModuleTx mirrors next_module (Rust assessment_delivery.rs:2219): base

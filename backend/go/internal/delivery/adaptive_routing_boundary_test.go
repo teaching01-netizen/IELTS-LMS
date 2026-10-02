@@ -46,13 +46,13 @@ func TestChooseAdaptiveRouteBoundary(t *testing.T) {
 // first `correct` questions answer B (the correct option), the rest answer C.
 func boundaryScoringRows(mock sqlmock.Sqlmock, correct, total int) {
 	singleChoice := `{"kind":"single_choice","correctOptionId":"B"}`
-	rows := sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id"})
+	rows := sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id", "config_snapshot"})
 	for i := 0; i < total; i++ {
 		response := `"C"`
 		if i < correct {
 			response = `"B"`
 		}
-		rows.AddRow("eq-boundary-"+string(rune('a'+i/26))+string(rune('a'+i%26)), false, singleChoice, response, nil, nil)
+		rows.AddRow("eq-boundary-"+string(rune('a'+i/26))+string(rune('a'+i%26)), false, singleChoice, response, nil, nil, nil)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions")).
 		WithArgs("ma-base", "ma-base", "mod-base").

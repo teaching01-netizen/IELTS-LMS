@@ -2,7 +2,7 @@ import type { ChoiceOption } from "../../../exam-rendering/api/assessmentContrac
 import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import { isSatSelectionGestureEcho } from "../annotations/satSelectionDragGuard";
 import { SatCutChoiceGlyph } from "./SatCutChoiceGlyph";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 export interface SatSingleChoiceAnswerProps {
   questionId: string;
@@ -16,14 +16,16 @@ export interface SatSingleChoiceAnswerProps {
   onBlur?: (() => void) | undefined;
   onToggleElimination: (optionId: string) => void;
   /** Reuse the question's text surface while keeping radio controls outside it. */
-  renderOptionContent?: ((option: ChoiceOption) => ReactNode) | undefined;
+  renderOptionContent?: ((option: ChoiceOption, activate: () => void) => ReactNode) | undefined;
 }
 
 export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
+  const fieldset = useRef<HTMLFieldSetElement>(null);
   return (
     // Phase 6d: the blocked fieldset keeps its disabled treatment AND names
     // the reason — a greyed control with no explanation reads as broken.
     <fieldset
+      ref={fieldset}
       className="space-y-3"
       disabled={props.disabled}
       aria-describedby={props.disabled ? "sat-answers-blocked-reason" : undefined}
@@ -110,7 +112,14 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                   className={`min-w-0 flex-1 sat-type-body ${eliminated ? "text-[var(--sat-text-secondary)]" : "text-[var(--sat-text)]"}`}
                 >
                   {props.renderOptionContent
-                    ? props.renderOptionContent(option)
+                    ? props.renderOptionContent(option, () => {
+                        if (props.disabled) return;
+                        const radio = fieldset.current?.elements.namedItem(inputId);
+                        if (radio instanceof HTMLInputElement) {
+                          radio.focus({ preventScroll: true });
+                          radio.click();
+                        }
+                      })
                     : <StructuredContentRenderer content={option.content} />}
                 </div>
                 {eliminated ? (

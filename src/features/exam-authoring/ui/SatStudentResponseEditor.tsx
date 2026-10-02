@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { CheckCircle2, Plus, X } from "lucide-react";
-import { validateSatStudentResponse } from "../providers/sat/studentResponse";
+import { validateSatAnswerKey } from "../providers/sat/studentResponse";
 
 export interface SatStudentResponseEditorProps {
   acceptedResponses: string[];
@@ -19,7 +19,7 @@ export function SatStudentResponseEditor({
   const [equivalentDraft, setEquivalentDraft] = useState("");
   const [equivalentError, setEquivalentError] = useState<string | null>(null);
   const primary = acceptedResponses[0] ?? "";
-  const primaryValidation = validateSatStudentResponse(primary);
+  const primaryValidation = validateSatAnswerKey(primary);
   const equivalents = acceptedResponses.slice(1).filter(Boolean);
 
   const updatePrimary = (value: string) => {
@@ -27,7 +27,7 @@ export function SatStudentResponseEditor({
   };
 
   const addEquivalent = () => {
-    const validation = validateSatStudentResponse(equivalentDraft);
+    const validation = validateSatAnswerKey(equivalentDraft);
     if (!validation.valid) {
       setEquivalentError(validation.message);
       return;
@@ -51,7 +51,7 @@ export function SatStudentResponseEditor({
         <div className="block">
           <span className="mb-1.5 flex items-baseline justify-between gap-3">
             <span className="text-[12px] font-semibold text-slate-800">Primary answer</span>
-            <span className="text-[11px] text-slate-400">5 characters · 6 with a minus sign</span>
+            <span className="text-[11px] text-slate-400">Exact numeric answer</span>
           </span>
           <input
             id={primaryResponseId}
@@ -62,7 +62,7 @@ export function SatStudentResponseEditor({
             inputMode="decimal"
             autoComplete="off"
             spellCheck={false}
-            maxLength={32}
+            maxLength={256}
             aria-invalid={Boolean(primary && !primaryValidation.valid)}
             aria-describedby={primaryResponseHelpId}
             className={`w-full rounded-[12px] border bg-au-surface px-3.5 py-3 font-mono text-[16px] text-slate-950 outline-none transition focus:ring-4 ${primary && !primaryValidation.valid ? "border-au-danger/40 focus:border-au-danger focus:ring-au-danger/10" : "border-au-separator-strong focus:border-au-accent/35 focus:ring-au-accent/10"}`}
@@ -75,7 +75,7 @@ export function SatStudentResponseEditor({
           ) : primaryValidation.valid ? (
             <span className="inline-flex items-center gap-1 text-au-success-text">
               <CheckCircle2 size={12} aria-hidden="true" />
-              Valid SAT student response
+              Valid numeric answer key
             </span>
           ) : (
             <span className="text-slate-500">
@@ -128,7 +128,7 @@ export function SatStudentResponseEditor({
             inputMode="decimal"
             autoComplete="off"
             spellCheck={false}
-            maxLength={32}
+            maxLength={256}
             aria-label="Add accepted equivalent"
             className="min-w-0 flex-1 rounded-[12px] border border-au-separator-strong bg-au-surface px-3 py-2.5 font-mono text-[13px] text-slate-900 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
             placeholder="Example: 24/2"
@@ -147,8 +147,8 @@ export function SatStudentResponseEditor({
           <p role="alert" className="mt-1.5 text-[11px] text-au-danger-text">{equivalentError}</p>
         ) : null}
         <p className="text-[11px] leading-4 text-slate-500">
-          Scoring compares numbers when both sides parse (fractions like 24/2 match 12); otherwise{" "}
-          answers must match exactly apart from spacing and letter case.
+          New publications use exact numeric equivalence and SAT decimal rounding.
+          Enter the exact answer; equivalent fractions and decimals are accepted automatically.
         </p>
       </div>
     </div>

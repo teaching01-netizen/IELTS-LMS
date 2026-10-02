@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { createSatReadingPreferences } from "../../domain/satReadingPreferences";
@@ -9,17 +9,6 @@ import {
   saveSatReadingPreferences,
 } from "../../infrastructure/satReadingPreferencesStore";
 import { SatStudentSessionRoute } from "../SatStudentSessionRoute";
-
-/**
- * The automatic screen-zoom fit, on the delivery route a student actually loads.
- *
- * The policy, the walk and the shell are tested where they live; what only these
- * tests can show is that the fit ENGAGES for a student at all — the route's
- * opt-in was otherwise a line of code with a browser proof from the dev harness.
- *
- * The second test is the one that matters most: a module boundary unmounts and
- * remounts the exam, and an attempt that already decided must not decide again.
- */
 
 const controllerMock = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -272,7 +261,7 @@ function renderRoute(attemptId = "attempt-1") {
 const contentBox = () => document.querySelector("[data-sat-zoom-plane]")!;
 const fitRoot = () => document.querySelector("[data-sat-fit-root]")!;
 
-describe("SatStudentSessionRoute auto-fit screen zoom", () => {
+describe("SatStudentSessionRoute default screen zoom", () => {
   beforeEach(() => {
     cleanup();
     window.localStorage.clear();
@@ -287,102 +276,70 @@ describe("SatStudentSessionRoute auto-fit screen zoom", () => {
     vi.unstubAllGlobals();
   });
 
-  it("fits the question it opens on and stores the decision against the attempt", () => {
+  it.each([0.75, 0.5])("opens at 100% even when the question only fits at %s", (fitsAt) => {
     seedModulePhase();
-    const measurements = stubPaneLayout((zoom) => zoom <= 0.75);
+    const measurements = stubPaneLayout((zoom) => zoom <= fitsAt);
 
     renderRoute();
 
-    // Both panes measured at the resting zoom, then again at the candidate that
-    // fits (4 = 2 panes x 2 candidates) — and the exam is rendering that
-    // decision.
-    expect(measurements.count).toBe(4);
-    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "0.75");
+    expect(measurements.count).toBe(0);
+    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "1");
     expect(fitRoot()).toHaveAttribute("data-sat-fit-probing", "false");
-    expect(loadSatReadingPreferences("schedule-1", "attempt-1").examZoom).toBe(0.75);
+    expect(loadSatReadingPreferences("schedule-1", "attempt-1").examZoom).toBeUndefined();
+    expect(hasSatExamZoomDecision("schedule-1", "attempt-1")).toBe(false);
   });
 
-  it("decides once per attempt: the next module does not decide again", async () => {
+  it("keeps the 100% default across module boundaries", async () => {
     seedModulePhase();
-    const measurements = stubPaneLayout(() => true);
-
-    const { rerender, unmount } = renderRoute();
-
-    // Module 1 fits at the resting zoom, so the decision stores no zoom at all.
-    expect(measurements.count).toBe(2);
-    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "1");
-    expect(loadSatReadingPreferences("schedule-1", "attempt-1").examZoom).toBeUndefined();
+    const measurements = stubPaneLayout(() => false);
+    const { rerender } = renderRoute();
     const firstShell = contentBox();
 
-    // A section boundary: the exam leaves for the scheduled break. It departs
-    // through the stage cross-fade, so the zoom plane is gone once that settles
-    // — no exam surface is left behind.
     (controllerMock.current as { state: { phase: string } }).state.phase = "break";
     rerender(routeElement());
     await waitFor(() =>
       expect(document.querySelector("[data-sat-screen-zoom]")).toBeNull(),
     );
 
-    // ...and comes back as a NEW shell inside the SAME attempt.
     (controllerMock.current as { state: { phase: string } }).state.phase = "module";
     rerender(routeElement());
 
     expect(screen.getByTestId("sat-exam-shell")).toBeInTheDocument();
     expect(contentBox()).not.toBe(firstShell);
-    // Nothing was measured a second time: the attempt remembered its decision,
-    // which is the only thing that could have stopped this — module 1 stored no
-    // zoom to gate on.
-    expect(measurements.count).toBe(2);
+    expect(measurements.count).toBe(0);
     expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "1");
-    unmount();
   });
 
-  it("keeps the decision across a page reload that stored no zoom", () => {
+  it("opens at 100% after a reload and for a new attempt", () => {
     seedModulePhase();
-    const beforeReload = stubPaneLayout(() => true);
-
+    const measurements = stubPaneLayout(() => false);
     const view = renderRoute();
-
-    // Module 1 fits at the resting zoom: the attempt decided, and the decision
-    // stored nothing at all — which is exactly the case an in-memory latch could
-    // not carry, because there was no value to carry it in.
-    expect(beforeReload.count).toBe(2);
+    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "1");
     expect(
       window.localStorage.getItem(satReadingPreferencesKey("schedule-1", "attempt-1")),
     ).toBeNull();
-    expect(hasSatExamZoomDecision("schedule-1", "attempt-1")).toBe(true);
 
-    // Reload: same attempt, same storage, brand-new page. The panes now report
-    // overflow, so a fresh decision would measure to find that out and shrink.
     view.unmount();
-    seedModulePhase();
-    const afterReload = stubPaneLayout(() => false);
-
-    renderRoute();
-
-    expect(afterReload.count).toBe(0);
+    const { rerender } = renderRoute();
     expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "1");
+
+    rerender(routeElement("attempt-2"));
+    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "1");
+    expect(measurements.count).toBe(0);
   });
 
-  it("starts a new attempt undecided", () => {
+  it("still fits the screen when the student requests it", () => {
     seedModulePhase();
-    const measurements = stubPaneLayout(() => true);
+    const measurements = stubPaneLayout((zoom) => zoom <= 0.75);
+    renderRoute();
+    expect(measurements.count).toBe(0);
 
-    const { rerender } = renderRoute();
-    // Attempt 1 decides that nothing needs to change.
-    expect(measurements.count).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fit to screen" }));
 
-    // The same route carries a different attempt, and that attempt reaches its
-    // own module boundary. It has decided nothing, so its exam fits for itself —
-    // a decision must never leak from one attempt into the next.
-    rerender(routeElement("attempt-2"));
-    (controllerMock.current as { state: { phase: string } }).state.phase = "break";
-    rerender(routeElement("attempt-2"));
-    (controllerMock.current as { state: { phase: string } }).state.phase = "module";
-    rerender(routeElement("attempt-2"));
-
-    expect(screen.getByTestId("sat-exam-shell")).toBeInTheDocument();
     expect(measurements.count).toBe(4);
+    expect(contentBox()).toHaveAttribute("data-sat-screen-zoom", "0.75");
+    expect(loadSatReadingPreferences("schedule-1", "attempt-1").examZoom).toBe(0.75);
   });
 
   it("never overrides the zoom the student chose, at any value", () => {

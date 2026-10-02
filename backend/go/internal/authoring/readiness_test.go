@@ -53,15 +53,15 @@ func TestValidateSATPublishQuestionIgnoresOptionalAuthoringFields(t *testing.T) 
 	}
 }
 
-func TestValidateSATPublishQuestionAllowsLooseSPRResponses(t *testing.T) {
+func TestValidateSATPublishQuestionRequiresNumericSPRResponses(t *testing.T) {
 	issues := validateSATPublishQuestion(questionValidationRow{
 		questionType: "student_produced_response",
 		prompt:       validPrompt(),
-		answer:       `{"kind":"student_produced_response","acceptedResponses":["any non-empty accepted response"]}`,
+		answer:       `{"kind":"student_produced_response","acceptedResponses":["2/3"]}`,
 		metadata:     `{}`,
 	})
 	if len(issues) != 0 {
-		t.Fatalf("SPR publish validation should only require a non-empty response: %+v", issues)
+		t.Fatalf("valid numeric SPR publish validation should pass: %+v", issues)
 	}
 }
 

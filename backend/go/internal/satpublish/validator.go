@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"example.com/ielts-proctoring/internal/assessscore"
 )
 
 // Queryer is the smallest database boundary needed to validate a draft. It is
@@ -255,20 +257,27 @@ func validateChoiceAnswer(answer map[string]any, issues *[]Issue) {
 }
 
 func validateSPRAnswer(answer map[string]any, issues *[]Issue) {
-	values, ok := answer["acceptedResponses"].([]any)
-	if !ok {
+	values, _ := answer["acceptedResponses"].([]any)
+	if values == nil {
 		values, _ = answer["accepted_responses"].([]any)
 	}
+	hasResponse := false
 	for _, value := range values {
-		if response, ok := value.(string); ok && strings.TrimSpace(response) != "" {
-			return
+		if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+			hasResponse = true
 		}
 	}
-	*issues = append(*issues, issue(
-		"sat.spr.answer.required",
-		"answer.acceptedResponses",
-		"At least one accepted response is required.",
-	))
+	if !hasResponse {
+		*issues = append(*issues, issue("sat.spr.answer.required", "answer.acceptedResponses", "At least one numeric accepted response is required."))
+		return
+	}
+	raw, err := json.Marshal(answer)
+	if err == nil {
+		err = assessscore.ValidateSATSPRDefinition(string(raw))
+	}
+	if err != nil {
+		*issues = append(*issues, issue("sat.spr.answer.invalid", "answer", err.Error()))
+	}
 }
 
 func jsonObject(raw string) map[string]any {

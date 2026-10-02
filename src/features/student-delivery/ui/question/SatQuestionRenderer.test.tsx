@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DeliveredQuestion } from '../../contracts/assessmentDelivery';
 import { createSatTextAnnotation, emptySatQuestionResponse } from '../../domain/satResponses';
@@ -6,7 +6,7 @@ import { createSatReadingPreferences } from '../../domain/satReadingPreferences'
 import { SatAnnotationViewContext } from '../annotations/SatAnnotationViewContext';
 import { SatQuestionRenderer } from './SatQuestionRenderer';
 import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
-import { clearSatGestureOrigin, clearSatSelectionGesture, isSatSelectionGestureEcho, SAT_SELECTION_GUARD_MS } from '../annotations/satSelectionDragGuard';
+import { clearSatGestureOrigin, clearSatSelectionGesture, isSatSelectionGestureEcho } from '../annotations/satSelectionDragGuard';
 
 let restoreGestureEnvironment: (() => void) | null = null;
 
@@ -278,9 +278,14 @@ describe('SAT choice annotations', () => {
     fireEvent.click(selectionRoot.querySelector('[data-content-text-node]')!);
     expect(onAnswerChange).not.toHaveBeenCalled();
 
-    act(() => { vi.advanceTimersByTime(SAT_SELECTION_GUARD_MS + 1); });
-    fireEvent.click(selectionRoot.querySelector('[data-content-text-node]')!);
+    // A separate measured tap is deliberate, even inside the echo window.
+    fireEvent.pointerDown(block, { pointerType: 'touch', pointerId: 2, clientX: 6, clientY: 10 });
+    fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 2, clientX: 6, clientY: 10 });
     expect(onAnswerChange).toHaveBeenCalledWith('option-a');
+    expect(onAnswerChange).toHaveBeenCalledTimes(1);
+    expect(isSatSelectionGestureEcho()).toBe(false);
+    fireEvent.click(block, { detail: 1 });
+    expect(onAnswerChange).toHaveBeenCalledTimes(1);
   });
 });
 

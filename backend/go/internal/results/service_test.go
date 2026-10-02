@@ -250,7 +250,7 @@ func TestGetSATResultReturnsEmptyQuestionsOnlyAfterSuccessfulQuery(t *testing.T)
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"section_key", "module_key", "module_display_order", "question_display_order", "exam_question_id", "question_id",
-			"is_pretest", "marked_for_review", "response", "answer_definition", "response_v2", "v2_present", "v_question_id",
+			"is_pretest", "marked_for_review", "response", "answer_definition", "response_v2", "v2_present", "v_question_id", "config_snapshot",
 		}))
 
 	svc := NewService(db)
@@ -363,13 +363,13 @@ func TestSATQuestionsApplyNullVerdictRule(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"section_key", "module_key", "module_display_order", "question_display_order",
 			"exam_question_id", "question_id", "is_pretest", "marked_for_review", "response", "answer_definition",
-			"response_v2", "v2_present", "v_question_id",
+			"response_v2", "v2_present", "v_question_id", "config_snapshot",
 		}).
-			AddRow("reading-writing", "rw-base", 1, 1, "eq-1", "q-scored", false, false, `"B"`, singleChoice, nil, false, nil).
-			AddRow("reading-writing", "rw-base", 1, 2, "eq-2", "q-wrong", false, true, `"A"`, singleChoice, nil, false, nil).
-			AddRow("reading-writing", "rw-base", 1, 3, "eq-3", "q-blank", false, false, nil, singleChoice, nil, false, nil).
-			AddRow("math", "m-base", 1, 1, "eq-4", "q-pre", true, false, `"B"`, singleChoice, nil, false, nil).
-			AddRow("math", "m-base", 1, 2, "eq-5", "q-nokey", false, false, `"B"`, `{"kind":"single_choice"}`, nil, false, nil))
+			AddRow("reading-writing", "rw-base", 1, 1, "eq-1", "q-scored", false, false, `"B"`, singleChoice, nil, false, nil, nil).
+			AddRow("reading-writing", "rw-base", 1, 2, "eq-2", "q-wrong", false, true, `"A"`, singleChoice, nil, false, nil, nil).
+			AddRow("reading-writing", "rw-base", 1, 3, "eq-3", "q-blank", false, false, nil, singleChoice, nil, false, nil, nil).
+			AddRow("math", "m-base", 1, 1, "eq-4", "q-pre", true, false, `"B"`, singleChoice, nil, false, nil, nil).
+			AddRow("math", "m-base", 1, 2, "eq-5", "q-nokey", false, false, `"B"`, `{"kind":"single_choice"}`, nil, false, nil, nil))
 	svc := NewService(db)
 	questions, err := svc.satQuestions(context.Background(), "attempt-1")
 	if err != nil {
@@ -416,10 +416,10 @@ func TestSATQuestionsV2WinsOverLegacy(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"section_key", "module_key", "module_display_order", "question_display_order",
 			"exam_question_id", "question_id", "is_pretest", "marked_for_review", "response", "answer_definition",
-			"response_v2", "v2_present", "v_question_id",
+			"response_v2", "v2_present", "v_question_id", "config_snapshot",
 		}).
-			AddRow("reading-writing", "rw-base", 1, 1, "eq-v2-1", "q-v2correct", false, false, `"A"`, singleChoice, `{"answer":"B","markedForReview":true}`, true, "q-v2correct").
-			AddRow("reading-writing", "rw-base", 1, 2, "eq-v2-2", "q-v2stale", false, false, `"B"`, singleChoice, `{"answer":null}`, true, "q-v2stale"))
+			AddRow("reading-writing", "rw-base", 1, 1, "eq-v2-1", "q-v2correct", false, false, `"A"`, singleChoice, `{"answer":"B","markedForReview":true}`, true, "q-v2correct", nil).
+			AddRow("reading-writing", "rw-base", 1, 2, "eq-v2-2", "q-v2stale", false, false, `"B"`, singleChoice, `{"answer":null}`, true, "q-v2stale", nil))
 	svc := NewService(db)
 	questions, err := svc.satQuestions(context.Background(), "attempt-1")
 	if err != nil {
@@ -460,10 +460,10 @@ func TestSATQuestionsDeduplicateByAdministeredQuestion(t *testing.T) {
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"section_key", "module_key", "module_display_order", "question_display_order", "exam_question_id", "question_id",
-			"is_pretest", "marked_for_review", "response", "answer_definition", "response_v2", "v2_present", "v_question_id",
+			"is_pretest", "marked_for_review", "response", "answer_definition", "response_v2", "v2_present", "v_question_id", "config_snapshot",
 		}).
-			AddRow("reading-writing", "rw-base", 1, 1, "exam-q-1", "shared-bank-q", false, false, `"B"`, singleChoice, nil, false, nil).
-			AddRow("math", "m-higher", 2, 1, "exam-q-2", "shared-bank-q", false, false, `"A"`, singleChoice, nil, false, nil))
+			AddRow("reading-writing", "rw-base", 1, 1, "exam-q-1", "shared-bank-q", false, false, `"B"`, singleChoice, nil, false, nil, nil).
+			AddRow("math", "m-higher", 2, 1, "exam-q-2", "shared-bank-q", false, false, `"A"`, singleChoice, nil, false, nil, nil))
 
 	questions, err := NewService(db).satQuestions(context.Background(), "attempt-1")
 	if err != nil {

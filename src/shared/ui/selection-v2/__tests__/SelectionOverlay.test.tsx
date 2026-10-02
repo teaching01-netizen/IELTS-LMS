@@ -589,4 +589,22 @@ describe("a resting selection is resized only by acquiring a visible handle", ()
     expect(event.defaultPrevented).toBe(false);
     action.remove();
   });
+
+  it("delivers a press on answer-label text while dismissing the selection", () => {
+    const selection = resting({ wouldBeginGesture: vi.fn(() => true) });
+    render(<SelectionOverlay selection={selection} />);
+    const label = document.createElement("label");
+    label.innerHTML = '<input type="radio" /><span>Answer A</span>';
+    document.body.append(label);
+    const text = label.querySelector("span")!;
+    const received = vi.fn();
+    text.addEventListener("pointerdown", received);
+    const event = createEvent.pointerDown(text, { bubbles: true, cancelable: true, clientX: 300, clientY: 300 });
+    fireEvent(text, event);
+    expect(selection.dismiss).toHaveBeenCalledOnce();
+    expect(selection.ignoreGesturePress).not.toHaveBeenCalled();
+    expect(received).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(false);
+    label.remove();
+  });
 });

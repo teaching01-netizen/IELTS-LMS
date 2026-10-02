@@ -10,23 +10,15 @@ export type SatStudentResponseValidation =
 
 const ALLOWED_CHARACTER = /[0-9./-]/;
 
-export function sanitizeSatStudentResponseInput(input: string): string {
-  let result = "";
-  for (const character of input) {
-    if (!ALLOWED_CHARACTER.test(character)) continue;
-    if (character === "-" && (result.length > 0 || result.includes("-"))) break;
-    if (character === "." && (result.includes(".") || result.includes("/"))) break;
-    if (character === "/" && (result.includes("/") || result.includes("."))) break;
-    result += character;
-    const limit = result.startsWith("-")
-      ? SAT_SPR_MAX_NEGATIVE_CHARACTERS
-      : SAT_SPR_MAX_POSITIVE_CHARACTERS;
-    if (result.length >= limit) break;
-  }
-  return result;
+export function validateSatStudentResponse(input: string): SatStudentResponseValidation {
+  return validateNumericResponse(input, false);
 }
 
-export function validateSatStudentResponse(input: string): SatStudentResponseValidation {
+export function validateSatAnswerKey(input: string): SatStudentResponseValidation {
+  return validateNumericResponse(input, true);
+}
+
+function validateNumericResponse(input: string, canonical: boolean): SatStudentResponseValidation {
   const value = input.trim();
   if (!value) return invalid(value, "empty", "Enter an accepted SAT response.");
   if (![...value].every((character) => ALLOWED_CHARACTER.test(character))) {
@@ -36,14 +28,16 @@ export function validateSatStudentResponse(input: string): SatStudentResponseVal
       "Use only digits, a decimal point, a fraction bar, or a leading minus sign."
     );
   }
-  const limit = value.startsWith("-")
-    ? SAT_SPR_MAX_NEGATIVE_CHARACTERS
-    : SAT_SPR_MAX_POSITIVE_CHARACTERS;
+  const limit = canonical
+    ? 256
+    : value.startsWith("-")
+      ? SAT_SPR_MAX_NEGATIVE_CHARACTERS
+      : SAT_SPR_MAX_POSITIVE_CHARACTERS;
   if (value.length > limit) {
     return invalid(
       value,
       "length",
-      `SAT responses allow at most ${limit} characters${value.startsWith("-") ? " including the minus sign" : ""}.`
+      `${canonical ? "Answer keys" : "SAT responses"} allow at most ${limit} characters${value.startsWith("-") ? " including the minus sign" : ""}.`
     );
   }
   if ((value.match(/-/g) ?? []).length > 1 || (value.includes("-") && !value.startsWith("-"))) {

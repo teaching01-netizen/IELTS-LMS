@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/media"
@@ -916,6 +917,18 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 				rejection := validationError("SAT publish requirements are not met: " + first.Message)
 				rejection.Details = map[string]any{"code": first.Code, "path": first.Path}
 				return rejection
+			}
+			var sealedConfig map[string]json.RawMessage
+			if json.Unmarshal([]byte(config), &sealedConfig) != nil || sealedConfig == nil {
+				return validationError("SAT draft configuration must be a JSON object.")
+			}
+			sealedConfig[assessscore.SATSPRPolicyConfigKey] = json.RawMessage(`"strict_v1"`)
+			pinnedConfig, err := json.Marshal(sealedConfig)
+			if err != nil {
+				return err
+			}
+			if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET config_snapshot = ? WHERE id = ?", string(pinnedConfig), draftID); err != nil {
+				return err
 			}
 		}
 		var persistedScope any

@@ -1,5 +1,3 @@
-import { sanitizeSatStudentResponseInput } from "../../exam-authoring/api/renderingPublic";
-
 export interface StudentProducedAnswerProps {
   value?: string | undefined;
   onChange?: ((value: string) => void) | undefined;
@@ -17,12 +15,11 @@ export function StudentProducedAnswer({
       <input
         id="sat-student-response"
         value={value}
-        onChange={(event) => onChange?.(sanitizeSatStudentResponseInput(event.target.value))}
+        onChange={(event) => onChange?.(event.target.value)}
         disabled={disabled}
         inputMode="decimal"
         autoComplete="off"
         spellCheck={false}
-        maxLength={6}
         aria-describedby="sat-student-response-help"
         className="w-full rounded-xl border border-slate-300 px-4 py-3 font-mono text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
         aria-label="Student-produced response"

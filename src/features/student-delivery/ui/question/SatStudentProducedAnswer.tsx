@@ -1,9 +1,6 @@
 /* eslint-disable jsx-a11y/control-has-associated-label -- wrapping label + htmlFor double-associates the input; the rule misreads the nested-input pattern (same as the pre-existing notes/annotation editors). */
 import { useId, useState } from "react";
-import {
-  sanitizeSatStudentResponseInput,
-  validateSatStudentResponse,
-} from "../../../exam-authoring/api/renderingPublic";
+import { validateSatStudentResponse } from "../../../exam-authoring/api/renderingPublic";
 
 export interface SatStudentProducedAnswerProps {
   questionId: string;
@@ -17,7 +14,7 @@ export interface SatStudentProducedAnswerProps {
 /**
  * Student-produced response input (Phase 6a: validate-then-announce).
  *
- * Typing stays forgiving (sanitize-only on change — never error mid-key).
+ * Typing stays forgiving (preserve text on change — never error mid-key).
  * Validation runs on BLUR against the committed draft and announces through
  * a single describedby chain: format help + error (role=alert when present).
  * Single label source: the wrapping label; no redundant aria-label.
@@ -59,7 +56,7 @@ export function SatStudentProducedAnswer({
           value={value}
           onChange={(event) => {
             if (error !== null) setError(null);
-            onChange(sanitizeSatStudentResponseInput(event.target.value));
+            onChange(event.target.value);
           }}
           onBlur={commitOnBlur}
           disabled={disabled}
@@ -67,7 +64,6 @@ export function SatStudentProducedAnswer({
           enterKeyHint="done"
           autoComplete="off"
           spellCheck={false}
-          maxLength={6}
           aria-invalid={error !== null ? true : undefined}
           aria-describedby={error !== null ? helpId + " " + errorId : helpId}
           // Bluebook SPR input (Phase 6): answer-grade border + 8px

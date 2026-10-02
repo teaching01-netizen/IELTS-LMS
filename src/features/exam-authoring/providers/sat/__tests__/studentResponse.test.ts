@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeSatStudentResponseInput, validateSatStudentResponse } from "../studentResponse";
+import { validateSatAnswerKey, validateSatStudentResponse } from "../studentResponse";
 
 describe("SAT student-produced response contract", () => {
   it.each(["12", ".5", "3/4", "-2.5", "-2/3"])("accepts %s", (value) => {
@@ -21,10 +21,10 @@ describe("SAT student-produced response contract", () => {
     if (!result.valid) expect(result.code).toBe(code);
   });
 
-  it("sanitizes student typing without allowing illegal structure or overflow", () => {
-    expect(sanitizeSatStudentResponseInput("$-12.3%4")).toBe("-12.34");
-    expect(sanitizeSatStudentResponseInput("123456789")).toBe("12345");
-    expect(sanitizeSatStudentResponseInput("-123456789")).toBe("-12345");
-    expect(sanitizeSatStudentResponseInput("1/2.3")).toBe("1/2");
+  it("allows longer canonical answer keys while retaining student entry limits", () => {
+    expect(validateSatAnswerKey("100/333").valid).toBe(true);
+    expect(validateSatAnswerKey("3.14159265").valid).toBe(true);
+    expect(validateSatStudentResponse("100/333").valid).toBe(false);
+    expect(validateSatAnswerKey("1 1/2").valid).toBe(false);
   });
 });

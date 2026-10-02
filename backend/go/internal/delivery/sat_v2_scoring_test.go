@@ -50,8 +50,8 @@ func TestFinalizeModuleScoresV2AnswersWithoutLegacyRows(t *testing.T) {
 	v2correct := `{"answer":"B","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions")).
 		WithArgs("ma-base", "ma-base", "mod-base").
-		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id"}).
-			AddRow("eq-1", false, singleChoice, nil, v2correct, "eq-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id", "config_snapshot"}).
+			AddRow("eq-1", false, singleChoice, nil, v2correct, "eq-1", nil))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = ?")).
 		WithArgs("locked", true, "time_expired", 1, 1, "ma-base").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -117,8 +117,8 @@ func TestFinalizeModuleLegacyFallbackWithoutV2Rows(t *testing.T) {
 	singleChoice := `{"kind":"single_choice","correctOptionId":"B"}`
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions")).
 		WithArgs("ma-base", "ma-base", "mod-base").
-		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id"}).
-			AddRow("eq-1", false, singleChoice, `"B"`, nil, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id", "config_snapshot"}).
+			AddRow("eq-1", false, singleChoice, `"B"`, nil, nil, nil))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = ?")).
 		WithArgs("locked", true, "time_expired", 1, 1, "ma-base").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -188,9 +188,9 @@ func TestFinalizeModuleDedupsDualV2IdentityRows(t *testing.T) {
 	v2correct := `{"answer":"B","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions")).
 		WithArgs("ma-base", "ma-base", "mod-base").
-		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id"}).
-			AddRow("eq-1", false, singleChoice, nil, v2correct, "eq-1").
-			AddRow("eq-1", false, singleChoice, nil, v2correct, "q-stable-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id", "config_snapshot"}).
+			AddRow("eq-1", false, singleChoice, nil, v2correct, "eq-1", nil).
+			AddRow("eq-1", false, singleChoice, nil, v2correct, "q-stable-1", nil))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = ?")).
 		WithArgs("locked", true, "time_expired", 1, 1, "ma-base").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -258,9 +258,9 @@ func TestFinalizeModuleZeroAnswerPassRoutesLower(t *testing.T) {
 	singleChoice := `{"kind":"single_choice","correctOptionId":"B"}`
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions")).
 		WithArgs("ma-base", "ma-base", "mod-base").
-		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id"}).
-			AddRow("eq-1", false, singleChoice, nil, nil, nil).
-			AddRow("eq-2", false, singleChoice, nil, nil, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"eq_id", "is_pretest", "answer_definition", "response", "response_v2", "v_question_id", "config_snapshot"}).
+			AddRow("eq-1", false, singleChoice, nil, nil, nil, nil).
+			AddRow("eq-2", false, singleChoice, nil, nil, nil, nil))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = ?")).
 		WithArgs("locked", true, "time_expired", 0, 2, "ma-base").
 		WillReturnResult(sqlmock.NewResult(0, 1))

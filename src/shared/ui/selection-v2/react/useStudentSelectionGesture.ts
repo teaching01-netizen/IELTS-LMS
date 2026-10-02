@@ -122,6 +122,8 @@ export interface StudentSelectionGestureOptions {
   resolveCaretAtPoint: (x: number, y: number, root: HTMLElement) => TextPoint | null;
   /** Called once per completed selection, with the range the exam owns. */
   onSelect: (range: Range, text: string) => void;
+  /** A completed, unclaimed tap. Return true to consume its browser click. */
+  onTap?: ((press: PointerEvent) => boolean) | undefined;
   /**
    * The text the selection may not leave — a paragraph, a surface. A drag that
    * crosses it selects up to the edge it crossed.
@@ -407,6 +409,7 @@ export function useStudentSelectionGesture(
     scopeKey = "",
     resolveCaretAtPoint,
     onSelect,
+    onTap,
     boundaryFor,
     isExcludedTarget = defaultIsExcludedTarget,
     isOwnedPointer = defaultIsOwnedPointer,
@@ -432,6 +435,7 @@ export function useStudentSelectionGesture(
     activation,
     resolveCaretAtPoint,
     onSelect,
+    onTap,
     boundaryFor,
     isExcludedTarget,
     isOwnedPointer,
@@ -449,6 +453,7 @@ export function useStudentSelectionGesture(
     activation,
     resolveCaretAtPoint,
     onSelect,
+    onTap,
     boundaryFor,
     isExcludedTarget,
     isOwnedPointer,
@@ -472,6 +477,8 @@ export function useStudentSelectionGesture(
   const graphemes = useMemo(() => defaultGraphemeSegmenter(), []);
   const session = useRef<SelectionSession | null>(null);
   const ignoredGesturePresses = useRef(new WeakSet<Event>());
+  const tapPress = useRef<PointerEvent | null>(null);
+  const handledTapAt = useRef<number | null>(null);
   const scopeKeyRef = useRef(scopeKey);
   /** Legacy highlightable surfaces keep touch ownership only while their range rests. */
   const satTouchOwnership = useRef(false);
@@ -739,6 +746,7 @@ export function useStudentSelectionGesture(
   }, []);
 
   const detachAll = useCallback(() => {
+    tapPress.current = null;
     releaseBinding();
     clearHoldTimer();
     detachScrollSuppressor();
@@ -979,6 +987,7 @@ export function useStudentSelectionGesture(
       // The session's options are the CURRENT ones: disarming or re-arming the tool
       // between gestures must change the next gesture, not the one that ended.
       active.adoptOptions(config.activation, config.moveTolerancePx);
+      tapPress.current = event;
       lastPointer.current = {
         x: event.clientX,
         y: event.clientY,
@@ -1062,17 +1071,19 @@ export function useStudentSelectionGesture(
    * physical release, exactly one end.
    */
   const finishPointer = useCallback(
-    (pointerId: number, reason: "release" | "cancel") => {
+    (pointerId: number, reason: "release" | "cancel", releaseEvent?: PointerEvent) => {
       live.current.diagnostics?.record(reason === "release" ? "pointerup" : "pointercancel", {
         [reason === "release" ? "pointerUpSeen" : "pointerCancelSeen"]: true,
       });
       const active = ensureSession();
       if (active.pointerId() === null || pointerId !== active.pointerId()) return;
 
+      let completedTap: PointerEvent | null = null;
       if (reason === "release") {
         // THE frame that must not wait — see the scheduler: a release that let
         // the last move draw itself would commit one frame of stale geometry.
         ensureScheduler().flush();
+        if (active.phase() === "pending") completedTap = tapPress.current;
         currentEffects.current(active.release(pointerId));
       } else {
         currentEffects.current(active.cancel(pointerId));
@@ -1083,6 +1094,7 @@ export function useStudentSelectionGesture(
       pointerIsText.current = false;
       resolvedCaret.current = null;
       handleTarget.current = null;
+      tapPress.current = null;
       // Publish NOW — the resting state is what the next paint must show — and
       // queue ONE more frame for a release. The commit that follows this handler
       // (the product raising its toolbar, a mark being applied) can move the
@@ -1093,6 +1105,10 @@ export function useStudentSelectionGesture(
       // none, because it ends in `clear` with everything re-measured from idle.
       publish();
       if (reason === "release") ensureScheduler().schedule();
+      if (completedTap && live.current.onTap?.(completedTap)) {
+        handledTapAt.current = live.current.now();
+        releaseEvent?.preventDefault();
+      }
     },
     [ensureScheduler, ensureSession, publish]
   );
@@ -1105,7 +1121,7 @@ export function useStudentSelectionGesture(
       // event, a browser that reports zeroes for a lifted pointer — would otherwise
       // yank the selection back to the coordinate (0, 0) at the exact moment it is
       // committed.
-      finishPointer(event.pointerId, "release");
+      finishPointer(event.pointerId, "release", event);
     },
     [finishPointer]
   );
@@ -1211,6 +1227,7 @@ export function useStudentSelectionGesture(
 
   const onDocumentPointerDown = useCallback(
     (event: PointerEvent) => {
+      handledTapAt.current = null;
       const root = rootRef.current;
       if (!root || !isAppOwnedSelectionRoot(root)) return;
       const config = live.current;
@@ -1438,6 +1455,16 @@ export function useStudentSelectionGesture(
     const config = live.current;
     config.diagnostics?.record("listener:effect", { rootExistsAtEffect: !!root });
     config.diagnostics?.listener(root);
+    const consumeHandledClick = (event: MouseEvent) => {
+      const at = handledTapAt.current;
+      // Keyboard/programmatic activation stays native; a new physical press
+      // clears this token before its click, even within the echo window.
+      if (at === null || event.detail === 0 || live.current.now() - at > 500) return;
+      handledTapAt.current = null;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    root?.addEventListener("click", consumeHandledClick, true);
     root?.addEventListener("pointerdown", handleDown);
     document.addEventListener("pointerdown", onDocumentPointerDown, true);
     root?.addEventListener("selectstart", onSatSelectStart, true);
@@ -1450,6 +1477,8 @@ export function useStudentSelectionGesture(
 
     return () => {
       live.current.diagnostics?.listener(null);
+      root?.removeEventListener("click", consumeHandledClick, true);
+      handledTapAt.current = null;
       root?.removeEventListener("pointerdown", handleDown);
       document.removeEventListener("pointerdown", onDocumentPointerDown, true);
       root?.removeEventListener("selectstart", onSatSelectStart, true);

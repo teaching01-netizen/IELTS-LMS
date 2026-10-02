@@ -367,6 +367,17 @@ func TestSATPublishUsesConfiguredQuestionCountsMySQL(t *testing.T) {
 	if published.ID != f.draftID || !published.IsPublished || published.IsDraft {
 		t.Fatalf("unexpected published version: %+v", published)
 	}
+	var config string
+	if err := f.h.db.QueryRow("SELECT CAST(config_snapshot AS CHAR) FROM exam_versions WHERE id = ?", published.ID).Scan(&config); err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(config), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["satStudentResponseScoring"] != "strict_v1" {
+		t.Fatalf("publication did not pin strict scoring: %s", config)
+	}
 	if published.PublishScope == nil || *published.PublishScope != exams.SATPublishScopeFull {
 		t.Fatalf("an omitted scope must publish Full SAT, got %+v", published.PublishScope)
 	}
@@ -577,6 +588,39 @@ func TestSATPublishRejectsEachContentViolationMySQL(t *testing.T) {
 			assertSATPublishRejected(t, f, test.code, path)
 		})
 	}
+}
+
+func TestSATPublishStrictSPRValidationMySQL(t *testing.T) {
+	for _, answer := range []string{
+		`{"kind":"student_produced_response","acceptedResponses":["twelve"]}`,
+		`{"kind":"student_produced_response","acceptedResponses":["12","bad"]}`,
+		`{"kind":"student_produced_response","acceptedResponses":["1/0"]}`,
+		`{"kind":"student_produced_response","acceptedResponses":["123456"]}`,
+		`{"kind":"student_produced_response","acceptedResponses":["12"],"numericTolerance":"0.1"}`,
+		`{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeFraction":false}`,
+		`{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeDecimal":false}`,
+	} {
+		t.Run(answer, func(t *testing.T) {
+			f := newSATPublishFixture(t, false)
+			eqID := f.modules[0].questions[0]
+			f.setQuestion(t, eqID, "student_produced_response", string(validSATPublishSPR().Prompt), answer)
+			assertSATPublishRejected(t, f, "sat.spr.answer.invalid", "examQuestion:"+eqID+":answer")
+			var marker any
+			if err := f.h.db.QueryRow("SELECT JSON_EXTRACT(config_snapshot, '$.satStudentResponseScoring') FROM exam_versions WHERE id = ?", f.draftID).Scan(&marker); err != nil {
+				t.Fatal(err)
+			}
+			if marker != nil {
+				t.Fatal("failed publication stamped scoring policy")
+			}
+		})
+	}
+	t.Run("long canonical numeric key", func(t *testing.T) {
+		f := newSATPublishFixture(t, false)
+		f.setQuestion(t, f.modules[0].questions[0], "student_produced_response", string(validSATPublishSPR().Prompt), `{"kind":"student_produced_response","acceptedResponses":["100/333"]}`)
+		if _, err := f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, f.publishRequest()); err != nil {
+			t.Fatalf("representable canonical key rejected: %v", err)
+		}
+	})
 }
 
 func TestSATPublishIgnoresLegacyReadinessFieldsMySQL(t *testing.T) {

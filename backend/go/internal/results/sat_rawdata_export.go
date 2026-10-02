@@ -234,13 +234,14 @@ func satRawdataCells(ctx context.Context, tx *sql.Tx, actor auth.ActorContext, e
 	scope, scopeArgs := resultScope("sch", actor)
 	query := `
 		SELECT ma.attempt_id, m.id AS module_id, eq.id AS exam_question_id, eq.display_order,
-			CAST(qr.answer_definition AS CHAR), CAST(v.response AS CHAR), CAST(ar.response AS CHAR)
+			CAST(qr.answer_definition AS CHAR), CAST(v.response AS CHAR), CAST(ar.response AS CHAR), CAST(ev.config_snapshot AS CHAR)
 		FROM assessment_module_attempts ma
 		JOIN student_attempts a ON a.id = ma.attempt_id
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		JOIN exam_entities exam ON exam.id = a.exam_id AND exam.provider_key = 'sat'
 		JOIN assessment_modules m ON m.id = ma.module_id
 		JOIN assessment_sections s ON s.id = m.section_id
+		JOIN exam_versions ev ON ev.id = s.exam_version_id
 		JOIN assessment_exam_questions eq ON eq.module_id = m.id
 		JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id
 		LEFT JOIN assessment_question_responses ar
@@ -265,9 +266,9 @@ func satRawdataCells(ctx context.Context, tx *sql.Tx, actor auth.ActorContext, e
 	for rows.Next() {
 		var attemptID, moduleID, examQuestionID string
 		var displayOrder int
-		var answerDef, v2Canonical, legacy sql.NullString
+		var answerDef, v2Canonical, legacy, config sql.NullString
 		if err := rows.Scan(&attemptID, &moduleID, &examQuestionID, &displayOrder,
-			&answerDef, &v2Canonical, &legacy); err != nil {
+			&answerDef, &v2Canonical, &legacy, &config); err != nil {
 			return nil, err
 		}
 		key := satRawdataCellKey{AttemptID: attemptID, ModuleID: moduleID, ExamQuestionID: examQuestionID}
@@ -279,9 +280,11 @@ func satRawdataCells(ctx context.Context, tx *sql.Tx, actor auth.ActorContext, e
 		}
 		seen[key] = struct{}{}
 		group := satRawdataCellGroupKey(attemptID, moduleID)
+		policy := assessscore.SATSPRPolicy(config.String)
+		value := satRawdataAnswerCellWithPolicy(answerDef.String, v2Canonical, legacy, policy)
 		out[group] = append(out[group], satRawdataCell{
 			DisplayOrder: displayOrder,
-			Value:        satRawdataAnswerCell(answerDef.String, v2Canonical, legacy),
+			Value:        value,
 		})
 	}
 	return out, rows.Err()
@@ -313,17 +316,24 @@ const (
 //
 // It never converts an unknown row to "0": "0" means incorrect.
 func satRawdataAnswerCell(answerJSON string, v2Canonical sql.NullString, legacy sql.NullString) string {
-	if !assessscore.SATHasKey(answerJSON) {
+	return satRawdataAnswerCellWithPolicy(answerJSON, v2Canonical, legacy, "")
+}
+
+func satRawdataAnswerCellWithPolicy(answerJSON string, v2Canonical sql.NullString, legacy sql.NullString, policy string) string {
+	if !assessscore.SATHasKeyWithPolicy(answerJSON, policy) {
 		return ""
 	}
 	response, state := satRawdataResponse(v2Canonical, legacy)
+	if state == satRawdataResponseAnswered && !assessscore.SATResponsePresent(response) {
+		state = satRawdataResponseNone
+	}
 	switch state {
 	case satRawdataResponseNone:
 		return SATRawdataAnswerNoAnswer
 	case satRawdataResponseUnreadable:
 		return ""
 	}
-	if assessscore.SATResponseCorrect(answerJSON, true, response) {
+	if assessscore.SATResponseCorrectWithPolicy(answerJSON, true, response, policy) {
 		return SATRawdataAnswerCorrect
 	}
 	return SATRawdataAnswerIncorrect

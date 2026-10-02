@@ -25,7 +25,7 @@ import { useSatAnnotationView } from "./SatAnnotationViewContext";
 import { useSatAnnotationSelection } from "./useSatAnnotationSelection";
 import { SelectionOverlay } from "@shared/ui/selection-v2/react/SelectionOverlay";
 import { useSatExamZoom } from "../zoom/SatExamZoomContext";
-import { isSatDragRelease, markSatPointerDown } from "./satSelectionDragGuard";
+import { clearSatSelectionGesture, isSatDragRelease, markSatPointerDown } from "./satSelectionDragGuard";
 
 /**
  * Renders SAT text with saved annotations and note markers.
@@ -43,6 +43,7 @@ export function SatAnnotatedContent({
   loadMediaUrl,
   onMediaFailure,
   questionId,
+  onActivateChoice,
 }: {
   content: StructuredContent;
   annotations: SatQuestionAnnotations;
@@ -53,12 +54,25 @@ export function SatAnnotatedContent({
   loadMediaUrl?: ((assetId: string) => Promise<string | null>) | undefined;
   onMediaFailure?: ((assetId: string, questionId: string) => void) | undefined;
   questionId?: string | undefined;
+  /** A confirmed text tap activates the choice through its native radio. */
+  onActivateChoice?: (() => void) | undefined;
   /** Announced + inline notice when the 200-annotation cap drops a gesture. */
   onLimitReached?: (() => void) | undefined;
 }) {
   const { scale: visualScale, viewportOverlayRoot } = useSatExamZoom();
   const root = useRef<HTMLDivElement>(null);
   const view = useSatAnnotationView();
+  const onTap = useCallback((press: PointerEvent): boolean => {
+    const target = press.target instanceof Element ? press.target : null;
+    const markId = target?.closest('[data-sat-annotation-control="true"]')?.getAttribute('data-sat-annotation-id');
+    const mark = markId ? annotations.annotations.find((annotation) => annotation.id === markId) : undefined;
+    if (!onActivateChoice && !mark) return false;
+    // This is a new, measured tap, never the release of a text selection.
+    clearSatSelectionGesture();
+    onActivateChoice?.();
+    if (mark && view.openEditorActive && view.annotationModeEnabled) view.openEditor(mark);
+    return true;
+  }, [annotations, onActivateChoice, view]);
   const { selection: touchSelection, limitNotice } = useSatAnnotationSelection({
     rootRef: root,
     region,
@@ -66,6 +80,7 @@ export function SatAnnotatedContent({
     enabled,
     annotationCount: annotations.annotations.length,
     onLimitReached,
+    onTap,
   });
 
   const dismissTouchSelection = touchSelection.dismiss;
@@ -210,6 +225,7 @@ export function SatAnnotatedContent({
                     // Treat a stationary touch release as the same tap; a drag
                     // through a saved mark remains a new selection.
                     if (
+                      event.defaultPrevented ||
                       event.pointerType !== "touch" ||
                       isSatDragRelease(event.clientX, event.clientY)
                     )

@@ -54,13 +54,14 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
   const eliminated = new Set(props.response.eliminatedOptionIds);
   const policy = resolveSatExamToolPolicy(props.sectionKey, []);
   const selectionScopeKey = props.selectionScopeKey ?? `${props.sectionKey}::${props.question.examQuestionId}`;
-  const renderContent = (content: StructuredContent, region: SatAnnotationRegion) => (
+  const renderContent = (content: StructuredContent, region: SatAnnotationRegion, onActivateChoice?: () => void) => (
     <SatAnnotatedContent
       content={content}
       region={region}
       selectionScopeKey={selectionScopeKey}
       annotations={props.response.annotations}
       enabled={policy.highlight || policy.underline}
+      onActivateChoice={onActivateChoice}
       // Figure inspection follows the same policy shape as annotation: a module
       // whose policy does not advertise image zoom gets a plain, unlensed
       // figure rather than a disabled strip.
@@ -110,8 +111,8 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
                 onChange={props.onAnswerChange}
                 onBlur={props.onAnswerBlur}
                 onToggleElimination={props.onToggleEliminatedOption}
-                renderOptionContent={(option) =>
-                  renderContent(option.content, satChoiceAnnotationRegion(option.id))
+                renderOptionContent={(option, activate) =>
+                  renderContent(option.content, satChoiceAnnotationRegion(option.id), activate)
                 }
               />
             ) : (

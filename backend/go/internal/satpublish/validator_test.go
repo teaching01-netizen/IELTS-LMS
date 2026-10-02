@@ -79,14 +79,14 @@ func TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule(t *testing.T) {
 	}
 }
 
-func TestValidateQuestionSPRRequiresOnlyAnAcceptedResponse(t *testing.T) {
+func TestValidateQuestionSPRRequiresNumericAcceptedResponses(t *testing.T) {
 	valid := ValidateQuestion(Question{
 		QuestionType: "student_produced_response",
 		Prompt:       content("Solve for x."),
-		Answer:       `{"kind":"student_produced_response","acceptedResponses":["not a SAT numeric response"]}`,
+		Answer:       `{"kind":"student_produced_response","acceptedResponses":["100/333"]}`,
 	})
 	if len(valid) != 0 {
-		t.Fatalf("non-empty accepted response should pass: %+v", valid)
+		t.Fatalf("representable numeric accepted response should pass: %+v", valid)
 	}
 	missing := ValidateQuestion(Question{
 		QuestionType: "student_produced_response",

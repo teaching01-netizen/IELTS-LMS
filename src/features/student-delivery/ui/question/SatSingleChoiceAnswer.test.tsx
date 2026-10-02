@@ -9,6 +9,19 @@ const options = [
 ];
 
 describe('SatSingleChoiceAnswer', () => {
+  it.each([false, true])('routes annotated-text activation through the native radio (disabled=%s)', (disabled) => {
+    const onChange = vi.fn();
+    render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set()} eliminationMode={false} disabled={disabled} onChange={onChange} onToggleElimination={vi.fn()}
+      renderOptionContent={(option, activate) => <span onPointerUp={activate}>{option.id}</span>} />);
+    fireEvent.pointerUp(screen.getByText('a', { selector: 'span' }));
+    if (disabled) expect(onChange).not.toHaveBeenCalled();
+    else {
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith('a');
+      expect(screen.getByRole('radio', { name: /Option A/i })).toHaveFocus();
+    }
+  });
+
   it('keeps a native labelled radio inside the visible focus surface', () => {
     const onChange = vi.fn();
     render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set()} eliminationMode={false} disabled={false} onChange={onChange} onToggleElimination={vi.fn()} />);

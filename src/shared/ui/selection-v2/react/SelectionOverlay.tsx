@@ -140,10 +140,14 @@ const ACTION_TARGET_SELECTOR = [
   '[role="option"]',
 ].join(",");
 
-function isActionTarget(target: EventTarget | null): boolean {
+function actionTargetKind(target: EventTarget | null): "control" | "label-text" | null {
   const element =
     target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
-  return element?.closest(ACTION_TARGET_SELECTOR) != null;
+  const label = element?.closest("label");
+  const control = element?.closest(ACTION_TARGET_SELECTOR);
+  if (label instanceof HTMLLabelElement && label.control !== null
+    && (!control || control.matches('[data-sat-annotation-control="true"]'))) return "label-text";
+  return control ? "control" : null;
 }
 
 export interface SelectionOverlayProps {
@@ -302,11 +306,14 @@ export function SelectionOverlay({
       // drag to begin there. Menu and handle presses resolved above.
       dismissRef.current();
       clearSelectionRef.current?.();
-      if (isActionTarget(target)) {
+      const action = actionTargetKind(target);
+      if (action === "control") {
         current.ignoreGesturePress(event);
-      } else if (current.wouldBeginGesture(event) || current.wouldStartOwnedSelection(event)) {
+      } else if (action !== "label-text" && (current.wouldBeginGesture(event) || current.wouldStartOwnedSelection(event))) {
         consume(event);
       }
+      // Label prose still needs its tap measured: iPad suppresses the native
+      // click there. Only a completed tap may activate the associated radio.
     };
 
     document.addEventListener("keydown", onKeyDown);

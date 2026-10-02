@@ -43,6 +43,7 @@ interface UseSatAnnotationSelectionOptions {
   enabled: boolean;
   annotationCount: number;
   onLimitReached?: (() => void) | undefined;
+  onTap?: ((press: PointerEvent) => boolean) | undefined;
 }
 
 /** Owns browser/app selection capture and the annotation-cap notice. */
@@ -53,6 +54,7 @@ export function useSatAnnotationSelection({
   enabled,
   annotationCount,
   onLimitReached,
+  onTap,
 }: UseSatAnnotationSelectionOptions) {
   const view = useSatAnnotationView();
   const { ownedTouchSelection } = useStudentExamInteractionScope();
@@ -199,6 +201,7 @@ export function useSatAnnotationSelection({
     diagnostics,
     resolveCaretAtPoint,
     onSelect: reportOwnedRange,
+    onTap,
     boundaryFor: satAnnotationBlockForPoint,
     wouldStartOwnedSelection,
     scrollContainer: nearestScrollableAncestor,

@@ -28,6 +28,15 @@ import (
 // counts as incorrect. Callers decide the null-vs-incorrect display rule
 // (pretest / unanswered / missing key render as null, never incorrect).
 func SATResponseCorrect(answerJSON string, responseValid bool, responseRaw string) bool {
+	return SATResponseCorrectWithPolicy(answerJSON, responseValid, responseRaw, "")
+}
+
+// SATResponseCorrectWithPolicy uses the scoring policy pinned at publication.
+// An absent policy preserves historical verdicts; unknown policies fail closed.
+func SATResponseCorrectWithPolicy(answerJSON string, responseValid bool, responseRaw, policy string) bool {
+	if policy != "" && policy != SATSPRStrictV1 {
+		return false
+	}
 	if !responseValid || strings.TrimSpace(responseRaw) == "" {
 		return false
 	}
@@ -58,6 +67,9 @@ func SATResponseCorrect(answerJSON string, responseValid bool, responseRaw strin
 		}
 		return correct == respStr
 	case "student_produced_response":
+		if policy == SATSPRStrictV1 {
+			return strictSPRCorrect(def, respStr)
+		}
 		var accepted []string
 		if raw, ok := answerField(def, "acceptedResponses", "accepted_responses"); ok {
 			_ = json.Unmarshal(raw, &accepted)
@@ -127,6 +139,47 @@ func SATCorrectAnswer(answerJSON string) (correct any, ok bool) {
 func SATHasKey(answerJSON string) bool {
 	_, ok := SATCorrectAnswer(answerJSON)
 	return ok
+}
+
+// SATHasKeyWithPolicy prevents review/export from claiming a verdict when
+// the pinned policy or strict answer definition cannot be interpreted safely.
+func SATHasKeyWithPolicy(answerJSON, policy string) bool {
+	if policy == "" {
+		return SATHasKey(answerJSON)
+	}
+	if policy != SATSPRStrictV1 {
+		return false
+	}
+	var def map[string]json.RawMessage
+	if json.Unmarshal([]byte(answerJSON), &def) != nil {
+		return false
+	}
+	var kind string
+	_ = json.Unmarshal(def["kind"], &kind)
+	if kind == "student_produced_response" {
+		return validateStrictSPRDefinition(def) == nil
+	}
+	return SATHasKey(answerJSON)
+}
+
+// SATResponsePresent treats an empty or whitespace-only string as unanswered
+// without changing the saved text. Other JSON values remain present and are
+// rejected by the grader if they are not a usable string response.
+func SATResponsePresent(responseRaw string) bool {
+	if strings.TrimSpace(responseRaw) == "" {
+		return false
+	}
+	var value any
+	if json.Unmarshal([]byte(responseRaw), &value) != nil {
+		return true
+	}
+	if value == nil {
+		return false
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text) != ""
+	}
+	return true
 }
 
 func answerField(def map[string]json.RawMessage, camel, snake string) (json.RawMessage, bool) {

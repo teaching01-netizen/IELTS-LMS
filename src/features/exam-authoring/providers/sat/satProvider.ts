@@ -5,7 +5,7 @@ import type {
   StructuredContent,
 } from "../../contracts/assessment";
 import { isSatDomain, isSatSkill } from "./taxonomy";
-import { validateSatStudentResponse } from "./studentResponse";
+import { validateSatAnswerKey } from "./studentResponse";
 
 export interface SatBlueprintModule {
   key: string;
@@ -308,7 +308,7 @@ export function validateSatQuestion(
       });
     }
     nonEmptyResponses.forEach(({ response, index }) => {
-      const validation = validateSatStudentResponse(response);
+      const validation = validateSatAnswerKey(response);
       if (!validation.valid) {
         issues.push({
           code: `sat.spr.${validation.code}`,

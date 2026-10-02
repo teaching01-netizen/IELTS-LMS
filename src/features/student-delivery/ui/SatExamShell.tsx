@@ -111,7 +111,7 @@ export interface SatExamShellProps {
   onZoomOut?: (() => void) | undefined;
   onZoomReset?: (() => void) | undefined;
   /**
-   * Auto-fit the screen zoom when the exam opens (real delivery opts in).
+   * Auto-fit the screen zoom when explicitly enabled; defaults to 100%.
    * The fit runs once per attempt, only when that attempt has neither decided
    * nor a zoom of its own, and writes a smaller zoom only when a pane would
    * otherwise have to scroll.

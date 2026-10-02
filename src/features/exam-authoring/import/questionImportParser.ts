@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { BatchQuestionDraft, Difficulty } from "../contracts/assessment";
 import { plainContentFromText } from "../editor/richContent";
 import { isSatDomain, isSatSkill } from "../providers/sat/taxonomy";
-import { validateSatStudentResponse } from "../providers/sat/studentResponse";
+import { validateSatAnswerKey } from "../providers/sat/studentResponse";
 
 export interface QuestionImportIssue {
   row: number;
@@ -263,7 +263,7 @@ export function parseQuestionImport(input: string, sectionKey: string): Question
           message: "At least one accepted response is required.",
         });
       accepted.forEach((response) => {
-        const validation = validateSatStudentResponse(response);
+        const validation = validateSatAnswerKey(response);
         if (!validation.valid) {
           rowIssues.push({
             row: rowNumber,

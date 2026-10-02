@@ -1045,10 +1045,11 @@ func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQues
 		SELECT s.section_key, m.module_key, m.display_order, eq.display_order,
 			eq.id AS exam_question_id, eq.question_id, eq.is_pretest, ar.marked_for_review, ar.response,
 			CAST(qr.answer_definition AS CHAR), CAST(v.response AS CHAR), v.response IS NOT NULL,
-			CAST(v.question_id AS CHAR)
+			CAST(v.question_id AS CHAR), CAST(ev.config_snapshot AS CHAR)
 		FROM assessment_module_attempts ma
 		JOIN assessment_modules m ON m.id = ma.module_id
 		JOIN assessment_sections s ON s.id = m.section_id
+		JOIN exam_versions ev ON ev.id = s.exam_version_id
 		JOIN assessment_exam_questions eq ON eq.module_id = m.id
 		JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id
 		LEFT JOIN assessment_question_responses ar
@@ -1073,9 +1074,9 @@ func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQues
 		var marked sql.NullBool
 		var response, answerDef, v2canonical sql.NullString
 		var v2present sql.NullBool
-		var vQuestionID sql.NullString
+		var vQuestionID, config sql.NullString
 		if err := rows.Scan(&sectionKey, &moduleKey, &moduleOrder, &questionOrder,
-			&examQuestionID, &questionID, &isPretest, &marked, &response, &answerDef, &v2canonical, &v2present, &vQuestionID); err != nil {
+			&examQuestionID, &questionID, &isPretest, &marked, &response, &answerDef, &v2canonical, &v2present, &vQuestionID, &config); err != nil {
 			return out, err
 		}
 		if _, dup := seen[examQuestionID]; dup {
@@ -1120,9 +1121,10 @@ func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQues
 		// Null-verdict rule: pretest, unanswered, or key-less rows never
 		// claim incorrect. Only a answered, keyed, operational row gets a
 		// true/false verdict from the seal-time comparison.
-		answered := response.Valid && strings.TrimSpace(response.String) != "" && response.String != "null"
-		if !isPretest && answered && assessscore.SATHasKey(answerJSON) {
-			verdict := assessscore.SATResponseCorrect(answerJSON, response.Valid, response.String)
+		answered := response.Valid && assessscore.SATResponsePresent(response.String)
+		policy := assessscore.SATSPRPolicy(config.String)
+		if !isPretest && answered && assessscore.SATHasKeyWithPolicy(answerJSON, policy) {
+			verdict := assessscore.SATResponseCorrectWithPolicy(answerJSON, response.Valid, response.String, policy)
 			question.IsCorrect = &verdict
 		}
 		out = append(out, question)
