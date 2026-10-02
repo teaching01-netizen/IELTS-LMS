@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   calculatorLocaleKey,
   calculatorWorkspaceKey,
@@ -6,17 +13,14 @@ import {
   loadCalculatorWorkspace,
   saveCalculatorWorkspace,
 } from "../../infrastructure/satCalculatorWorkspace";
-import type {
-  DesmosCalculatorMode,
-  DesmosLocale,
-} from "../../infrastructure/desmos/desmosTypes";
+import type { DesmosCalculatorMode, DesmosLocale } from "../../infrastructure/desmos/desmosTypes";
 import { DesmosCalculator } from "./DesmosCalculator";
 import { SatFloatingTool } from "./SatFloatingTool";
 import { satToolGeometryKey } from "../../infrastructure/satToolGeometryStore";
 import { useSatMediaQuery } from "../useSatMediaQuery";
-import { resolveSatToolSize } from "../../domain/satToolSizePolicy";
 import { satToolViewKey } from "../../infrastructure/satToolStateStore";
 import { useSatExamZoom } from "../zoom/SatExamZoomContext";
+import { readSatCalculatorSafeArea } from "./satToolPlacementRuntime";
 
 export interface SatCalculatorPanelProps {
   open: boolean;
@@ -28,7 +32,7 @@ export interface SatCalculatorPanelProps {
   onClose: () => void;
 }
 
-const calculatorModes: readonly DesmosCalculatorMode[] = ["scientific", "graphing"];
+const calculatorModes: readonly DesmosCalculatorMode[] = ["graphing", "scientific"];
 
 /** Compact breakpoint mirrors the primitive's sheet switch (SatFloatingTool). */
 const SAT_TOOL_COMPACT_QUERY = "(max-width: 639px), (max-height: 560px)";
@@ -50,7 +54,31 @@ export function SatCalculatorPanel({
     () => calculatorLocaleKey(scheduleId, attemptId, moduleAttemptId),
     [attemptId, moduleAttemptId, scheduleId]
   );
-  const { logicalSize } = useSatExamZoom();
+  const { logicalSize, viewportToLogicalLength, scale } = useSatExamZoom();
+  const [safeArea, setSafeArea] = useState(() =>
+    readSatCalculatorSafeArea(viewportToLogicalLength)
+  );
+  useLayoutEffect(() => {
+    const measure = () => {
+      const next = readSatCalculatorSafeArea(viewportToLogicalLength);
+      setSafeArea((current) =>
+        Object.keys(next).every(
+          (key) => next[key as keyof typeof next] === current[key as keyof typeof next]
+        )
+          ? current
+          : next
+      );
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    const body = document.getElementById("sat-question-content");
+    if (body) observer?.observe(body);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [open, storageKey, viewportToLogicalLength]);
   const [mode, setMode] = useState<DesmosCalculatorMode>(
     () => loadCalculatorWorkspace(storageKey).activeMode
   );
@@ -72,30 +100,17 @@ export function SatCalculatorPanel({
     if (disabled || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     const group = event.currentTarget.parentElement;
-    const nextMode = event.key === "ArrowLeft" || event.key === "Home" ? "scientific" : "graphing";
+    const nextMode = event.key === "ArrowLeft" || event.key === "Home" ? "graphing" : "scientific";
     handleModeChange(nextMode);
     window.requestAnimationFrame(() => {
       group?.querySelector<HTMLButtonElement>(`[data-sat-calculator-mode="${nextMode}"]`)?.focus();
     });
   };
 
-  // Bluebook floating tool (Phase 9): draggable + resizable, geometry
-  // persists per module-attempt. With prewarmWhenClosed the tool shell keeps
-  // one mounted tree while closed (keepAlive): the same ready Desmos iframes
-  // are revealed on open — never remounted. Otherwise closed tools unmount.
-  // Calculator input state persists through Desmos, mode through the
-  // workspace store, locale (frozen exam English) through its own key.
-  // Compact keeps the bottom sheet.
-  if (!open && !prewarmWhenClosed) return null;
-  // Single mode selector (a11y contract pinned by SatCalculatorPanel.test):
-  // radiogroup labelled "Calculator type", two radios with
-  // data-sat-calculator-mode, arrow/Home/End switching, aria-checked.
-  // Desktop renders it in the window header (headerControls); compact has
-  // no header slot by design, so it renders at the top of the body instead.
-  // Exactly one of the two mounts at a time.
+  // Keep Desmos mounted while closed; mode selection is shared across presentations.
   const modeSwitch = (
     <div
-      className="grid w-full min-w-0 max-w-[240px] grid-cols-2 rounded-[8px] bg-[var(--sat-surface-subtle)] p-0.5"
+      className="sat-calculator-modes grid min-w-0 grid-cols-2 gap-0.5"
       role="radiogroup"
       aria-label="Calculator type"
     >
@@ -109,7 +124,7 @@ export function SatCalculatorPanel({
           disabled={disabled}
           role="radio"
           aria-checked={mode === candidate}
-          className={`sat-pressable sat-state-transition min-h-11 min-w-0 rounded-[6px] px-2 sat-type-control-primary font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] ${mode === candidate ? "bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-sm" : "text-[var(--sat-text-secondary)] hover:text-[var(--sat-text)]"} disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)]`}
+          className={`sat-calculator-mode min-w-0 rounded px-2 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] ${mode === candidate ? "bg-white text-black" : "text-white hover:bg-white/10"} disabled:cursor-not-allowed disabled:opacity-50`}
         >
           {candidate === "scientific" ? "Scientific" : "Graphing"}
         </button>
@@ -119,7 +134,7 @@ export function SatCalculatorPanel({
   const body = (
     <div className="flex h-full min-h-0 flex-col bg-[var(--sat-surface)]">
       {compact ? (
-        <div className="flex shrink-0 items-center justify-end border-b border-[var(--sat-divider-soft)] px-3 py-1.5">
+        <div className="flex shrink-0 items-center justify-end bg-[var(--sat-ref-header-bg)] border-b border-[var(--sat-divider-soft)] px-3 py-1.5">
           {modeSwitch}
         </div>
       ) : null}
@@ -134,23 +149,49 @@ export function SatCalculatorPanel({
       </div>
     </div>
   );
-  // First-open size only (Phase-02 policy): resolveSatToolSize for the
-  // active mode. Mode switches preserve the current geometry (the window
-  // never resizes on mode change); saved geometry, when present, wins over
-  // this default inside the primitive.
-  const firstOpenSize = resolveSatToolSize("calculator", mode);
+  // Window dimensions are physical pixels, converted once into the zoom plane.
+  const viewport = logicalSize({ width: window.innerWidth, height: window.innerHeight });
+  const bodyWidth = viewport.width - safeArea.left - safeArea.right;
+  const bodyHeight = Math.max(1, viewport.height - safeArea.top - safeArea.bottom);
+  const firstOpenSize = {
+    w: Math.min(bodyWidth, Math.max(400 / scale, Math.min(440 / scale, bodyWidth * 0.36))),
+    h: bodyHeight,
+  };
+  const defaultGeometry = useMemo(
+    () => ({ x: safeArea.left, y: safeArea.top, w: firstOpenSize.w, h: firstOpenSize.h }),
+    [safeArea, firstOpenSize.w, firstOpenSize.h]
+  );
+  const minimumSize = useMemo(
+    () => ({ w: 400 / scale, h: Math.min(480 / scale, bodyHeight) }),
+    [scale, bodyHeight]
+  );
+  const maximumSize = useMemo(
+    () => ({ w: Math.min(620 / scale, bodyWidth), h: bodyHeight }),
+    [scale, bodyWidth, bodyHeight]
+  );
   return (
     <SatFloatingTool
       title="Calculator"
       open={open}
-      geometryKey={satToolGeometryKey(scheduleId, attemptId, moduleAttemptId, "calculator")}
+      geometryKey={satToolGeometryKey(
+        scheduleId,
+        attemptId,
+        moduleAttemptId,
+        "calculator:portrait-v1"
+      )}
       viewStateKey={satToolViewKey(scheduleId, attemptId, moduleAttemptId)}
-      defaultGeometry={{
-        x: Math.max(32, logicalSize({ width: window.innerWidth, height: window.innerHeight }).width - (firstOpenSize.w + 52)),
-        y: 110,
-        w: firstOpenSize.w,
-        h: firstOpenSize.h,
-      }}
+      defaultGeometry={defaultGeometry}
+      geometryScale={scale}
+      safeArea={safeArea}
+      minSize={minimumSize}
+      maxSize={maximumSize}
+      style={
+        {
+          "--sat-tool-unit": `${1 / scale}px`,
+          "--sat-tool-control-hit": `${44 / scale}px`,
+          "--sat-calculator-type": `${12 / scale}px`,
+        } as CSSProperties
+      }
       resizable
       disabled={disabled}
       keepAlive={prewarmWhenClosed}

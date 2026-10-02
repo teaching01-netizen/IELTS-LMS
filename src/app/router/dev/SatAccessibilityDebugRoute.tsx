@@ -8,7 +8,7 @@ import { useSatReadingPreferences } from "../../../features/student-delivery/hoo
 import { SatExamShell } from "../../../features/student-delivery/ui/SatExamShell";
 import { SatQuestionRenderer } from "../../../features/student-delivery/ui/question/SatQuestionRenderer";
 import { SatBlockingOverlay } from "../../../features/student-delivery/ui/feedback/SatControlFeedback";
-import { SatCalculatorPanel } from "../../../features/student-delivery/ui/tools/SatCalculatorPanel";
+import { SatCalculatorHost } from "../../../features/student-delivery/ui/tools/SatCalculatorHost";
 import { SatReferenceSheetPanel } from "../../../features/student-delivery/ui/tools/SatReferenceSheetPanel";
 import { StudentExamInteractionScopeProvider } from "../../../shared/ui/touch-selection/StudentExamInteractionScope";
 
@@ -345,13 +345,14 @@ export function SatAccessibilityDebugRoute() {
         onAnnotationsChange={(annotations) => setResponse((current) => ({ ...current, annotations }))}
         answered={Boolean(response.answer.trim())}
         educationKey="debug-attempt"
-        floatingToolChildren={math ? (
+        referenceTool={math ? (controls) => (
           <SatReferenceSheetPanel
+            {...controls}
             open={activeTools.referenceSheet}
             disabled={paused}
             onClose={() => setActiveTools((current) => ({ ...current, referenceSheet: false }))}
           />
-        ) : null}
+        ) : undefined}
       >
         <SatQuestionRenderer
           sectionKey={math ? "math" : "reading-writing"}
@@ -382,13 +383,15 @@ export function SatAccessibilityDebugRoute() {
       </SatExamShell>
       {math ? (
         <>
-          <SatCalculatorPanel
+          <SatCalculatorHost
             open={activeTools.calculator}
             scheduleId="debug-schedule"
             attemptId="debug-attempt"
             moduleAttemptId="debug-module"
             disabled={paused}
-            prewarmWhenClosed
+            moduleId="debug-module"
+            examZoom={reading.preferences.examZoom}
+            contrastMode={reading.preferences.contrastMode}
             onClose={() => setActiveTools((current) => ({ ...current, calculator: false }))}
           />
         </>

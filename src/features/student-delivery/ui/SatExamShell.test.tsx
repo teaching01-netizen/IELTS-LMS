@@ -134,12 +134,12 @@ describe("SatExamShell", () => {
     const directionsDialog = screen.getByRole("dialog", { name: "Directions" });
     expect(directionsDialog).toHaveAttribute("id", directionsPanelId);
     expect(directionsDialog.closest("[data-sat-exam-overlay-root]")).toBe(
-      container.querySelector("[data-sat-exam-overlay-root]"),
+      document.querySelector("[data-sat-exam-overlay-root]"),
     );
     // Exactly one element carries the id, and it is the dialog itself — never
     // an inner scroll body.
     expect(document.querySelectorAll(`[id="${directionsPanelId}"]`)).toHaveLength(1);
-    expect(container.querySelector(`[id="${directionsPanelId}"]`)).toBe(directionsDialog);
+    expect(document.querySelector(`[id="${directionsPanelId}"]`)).toBe(directionsDialog);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(directions).not.toHaveAttribute("aria-controls");
 
@@ -147,14 +147,14 @@ describe("SatExamShell", () => {
     fireEvent.click(displayTrigger);
     const displayDialog = screen.getByRole("dialog", { name: "Display" });
     expect(displayDialog.closest("[data-sat-exam-overlay-root]")).toBe(
-      container.querySelector("[data-sat-exam-overlay-root]"),
+      document.querySelector("[data-sat-exam-overlay-root]"),
     );
     fireEvent.keyDown(document, { key: "Escape" });
 
     fireEvent.click(container.querySelector<HTMLElement>('[data-sat-focus="topbar-more"]')!);
     const moreMenu = screen.getByRole("menu");
     expect(moreMenu.closest("[data-sat-exam-overlay-root]")).toBe(
-      container.querySelector("[data-sat-exam-overlay-root]"),
+      document.querySelector("[data-sat-exam-overlay-root]"),
     );
     fireEvent.keyDown(document, { key: "Escape" });
 
@@ -167,7 +167,7 @@ describe("SatExamShell", () => {
     expect(navigatorDialog).toHaveAttribute("id", navigatorPanelId);
     expect(document.querySelectorAll(`[id="${navigatorPanelId}"]`)).toHaveLength(1);
     expect(navigatorDialog.closest("[data-sat-exam-overlay-root]")).toBe(
-      container.querySelector("[data-sat-exam-overlay-root]"),
+      document.querySelector("[data-sat-exam-overlay-root]"),
     );
   });
 
@@ -760,8 +760,8 @@ describe("SatExamShell", () => {
       />,
     );
 
-    const examOverlay = container.querySelector("[data-sat-exam-overlay-root]")!;
-    const viewportOverlay = container.querySelector("[data-sat-viewport-overlay-root]")!;
+    const examOverlay = document.querySelector("[data-sat-exam-overlay-root]")!;
+    const viewportOverlay = document.querySelector("[data-sat-viewport-overlay-root]")!;
     expect(screen.getByRole("dialog", { name: "Help" }).parentElement).toBe(examOverlay);
     expect(screen.getByTestId("sat-break-veil").parentElement).toBe(viewportOverlay);
     expect(screen.getByTestId("zoomed-tool").closest("[data-sat-zoom-plane]")).toBe(

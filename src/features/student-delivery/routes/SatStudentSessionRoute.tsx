@@ -47,7 +47,7 @@ import { ensureDesmosPreconnect } from "../infrastructure/desmos/desmosPreconnec
 import { SatExamShell } from "../ui/SatExamShell";
 import { SatQuestionRenderer } from "../ui/question/SatQuestionRenderer";
 import { SatReviewPage } from "../ui/review/SatReviewPage";
-import { SatCalculatorPanel } from "../ui/tools/SatCalculatorPanel";
+import { SatCalculatorHost } from "../ui/tools/SatCalculatorHost";
 import { SatReferenceSheetPanel } from "../ui/tools/SatReferenceSheetPanel";
 import { SatScheduledBreakScreen } from "../ui/break/SatScheduledBreakScreen";
 import { SatPresenceSurface } from "../ui/motion/SatPresenceSurface";
@@ -252,12 +252,63 @@ export function SatStudentSessionRoute({
    * card beside the frozen exam frame) — position 0 is the stage's own surface in
    * every case, which is what keeps the exam frame mounted across a handoff.
    */
+  const currentCalculatorModule =
+    (state.phase === "module" || state.phase === "review") &&
+    state.toolCapabilities.calculator &&
+    exam.stateModule
+      ? exam.stateModule
+      : null;
+  const pendingCalculatorModule =
+    exam.pendingModule && resolveSatToolCapabilities(exam.pendingModule.toolPolicy).calculator
+      ? exam.pendingModule
+      : null;
+
+  // Warm the live or upcoming Math module, including preparation and breaks.
+  const prewarmEligibleModule =
+    state.phase === "module" || state.phase === "review"
+      ? currentCalculatorModule
+      : (state.phase === "directions" || state.phase === "break")
+        ? pendingCalculatorModule
+        : null;
+
+  const prewarmAttempt = data && prewarmEligibleModule
+    ? findAttemptForModule(data, prewarmEligibleModule.id)
+    : undefined;
+  // A pending module may not have its server attempt yet; retain its iframe host.
+  const calculatorModuleAttemptId =
+    currentCalculatorModule && exam.stateModuleAttempt
+      ? exam.stateModuleAttempt.id
+      : (prewarmAttempt?.id ??
+        ((state.phase === "directions" || state.phase === "break") && prewarmEligibleModule
+          ? `prewarm:${prewarmEligibleModule.id}`
+          : null));
+  const persistenceInteractionBlocked =
+    persistence.failureKind === "superseded" || persistence.failureKind === "terminal" || persistence.failureKind === "expired";
+  const calculatorDisabled = exam.blocked || exam.isSubmitting || persistenceInteractionBlocked;
+  const calculatorHost = calculatorModuleAttemptId ? (
+    <SatCalculatorHost
+      key={identityKey}
+      moduleId={prewarmEligibleModule!.id}
+      examZoom={reading.preferences.examZoom}
+      contrastMode={reading.preferences.contrastMode}
+      open={state.phase === "module" && state.activeTools.calculator}
+      scheduleId={scheduleId}
+      attemptId={attemptId}
+      moduleAttemptId={calculatorModuleAttemptId}
+      disabled={calculatorDisabled}
+      onClose={() => commands.closeTool("calculator")}
+    />
+  ) : null;
+
   const stageHost = (target: SatStudentStage, children: ReactNode) => (
-    <SatTemporalRuntime model={exam.temporalModel ?? null} onBoundary={exam.onTemporalBoundary}>
-      <SatStudentStageHost stage={target} instant={attemptChanged}>
-        {children}
-      </SatStudentStageHost>
-    </SatTemporalRuntime>
+    <>
+      <SatTemporalRuntime model={exam.temporalModel ?? null} onBoundary={exam.onTemporalBoundary}>
+        <SatStudentStageHost stage={target} instant={attemptChanged}>
+          {children}
+        </SatStudentStageHost>
+      </SatTemporalRuntime>
+      {data && (target.kind === "exam" || target.kind === "pre-start" || target.kind === "scheduled-break") ? calculatorHost : null}
+    </>
   );
   useEffect(() => {
     lastValidFrameRef.current = null;
@@ -421,58 +472,6 @@ export function SatStudentSessionRoute({
     );
   }
 
-  const currentCalculatorModule =
-    (state.phase === "module" || state.phase === "review") &&
-    state.toolCapabilities.calculator &&
-    exam.stateModule
-      ? exam.stateModule
-      : null;
-  const pendingCalculatorModule =
-    exam.pendingModule && resolveSatToolCapabilities(exam.pendingModule.toolPolicy).calculator
-      ? exam.pendingModule
-      : null;
-
-  // Phase 03 prewarm gating: the host mounts ONLY where exam chrome can
-  // exist. Module/review warm the live module; directions warms ONLY the
-  // pending module when IT is calculator-capable. Every other phase yields
-  // null (no host). No cross-exam fallback scan: a fallback math module's
-  // warmed iframes would sit under an unrelated module-attempt key with
-  // zero hit rate while spending 2 Desmos embeds on error/loading screens.
-  const prewarmEligibleModule =
-    state.phase === "module" || state.phase === "review"
-      ? currentCalculatorModule
-      : state.phase === "directions"
-        ? pendingCalculatorModule
-        : null;
-
-  const prewarmAttempt = prewarmEligibleModule
-    ? findAttemptForModule(data, prewarmEligibleModule.id)
-    : undefined;
-  // Synthetic prewarm-colon id ONLY for the directions+pending case (the
-  // real attempt does not exist yet). Do NOT extend synthetic ids to any
-  // other phase.
-  const calculatorModuleAttemptId =
-    currentCalculatorModule && exam.stateModuleAttempt
-      ? exam.stateModuleAttempt.id
-      : (prewarmAttempt?.id ??
-        (state.phase === "directions" && prewarmEligibleModule
-          ? `prewarm:${prewarmEligibleModule.id}`
-          : null));
-  const persistenceInteractionBlocked =
-    persistence.failureKind === "superseded" || persistence.failureKind === "terminal" || persistence.failureKind === "expired";
-  const calculatorDisabled = exam.blocked || exam.isSubmitting || persistenceInteractionBlocked;
-  const calculatorHost = calculatorModuleAttemptId ? (
-    <SatCalculatorPanel
-      key="sat-calculator-warm-host"
-      open={state.phase === "module" && state.activeTools.calculator}
-      scheduleId={scheduleId}
-      attemptId={attemptId}
-      moduleAttemptId={calculatorModuleAttemptId}
-      disabled={calculatorDisabled}
-      prewarmWhenClosed
-      onClose={() => commands.closeTool("calculator")}
-    />
-  ) : null;
   // The question shell and review page each own a normal-flow notice row.
   // Other phases place this notice before their content instead of floating it
   // over the exam viewport.
@@ -498,7 +497,6 @@ export function SatStudentSessionRoute({
     <>
       {!inModulePhase && !inReviewPhase ? leaseConflictNotice : null}
       {content}
-      {!inModulePhase ? calculatorHost : null}
     </>
   );
 
@@ -855,21 +853,17 @@ export function SatStudentSessionRoute({
           });
         }}
         isTakingOver={persistence.isTakingOver}
-        floatingToolChildren={
-          <>
-            {calculatorHost}
-            {state.toolCapabilities.referenceSheet ? (
-              <SatReferenceSheetPanel
-                open={state.phase === "module" && state.activeTools.referenceSheet}
-                disabled={interactionBlocked}
-                scheduleId={scheduleId}
-                attemptId={attemptId}
-                moduleAttemptId={exam.stateModuleAttempt?.id ?? "unknown-module"}
-                onClose={() => commands.closeTool("reference_sheet")}
-              />
-            ) : null}
-          </>
-        }
+        referenceTool={state.toolCapabilities.referenceSheet ? (controls) => (
+          <SatReferenceSheetPanel
+            {...controls}
+            open={state.phase === "module" && state.activeTools.referenceSheet}
+            disabled={interactionBlocked}
+            scheduleId={scheduleId}
+            attemptId={attemptId}
+            moduleAttemptId={exam.stateModuleAttempt?.id ?? "unknown-module"}
+            onClose={() => commands.closeTool("reference_sheet")}
+          />
+        ) : undefined}
       >
         <SatQuestionRenderer
           sectionKey={state.sectionKey}

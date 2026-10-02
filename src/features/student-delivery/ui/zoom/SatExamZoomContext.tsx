@@ -1,5 +1,7 @@
 import { createContext, useContext, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useIsPresent } from 'motion/react';
+import { SAT_OVERLAY_Z } from '../primitives/satOverlayZ';
 import { createSatExamZoomGeometry, type SatExamZoomGeometry } from './satExamZoomGeometry';
 
 export interface SatExamVisualSpace extends SatExamZoomGeometry {
@@ -27,6 +29,8 @@ export interface SatExamZoomPlaneProps {
   height?: number | null | undefined;
   contrastMode?: string | undefined;
   children: ReactNode;
+  /** Lift overlays above a persistent tool hosted outside the stage. */
+  portalOverlays?: boolean;
 }
 
 /** Physical viewport with one expanded, transformed logical exam plane. */
@@ -38,7 +42,9 @@ export function SatExamZoomPlane({
   height,
   contrastMode = 'default',
   children,
+  portalOverlays = false,
 }: SatExamZoomPlaneProps) {
+  const isPresent = useIsPresent();
   const geometry = useMemo(() => createSatExamZoomGeometry(scale), [scale]);
   const [examOverlayRoot, setExamOverlayRoot] = useState<HTMLDivElement | null>(null);
   const [viewportOverlayRoot, setViewportOverlayRoot] = useState<HTMLDivElement | null>(null);
@@ -73,6 +79,19 @@ export function SatExamZoomPlane({
       : `${54 / geometry.scale}dvh`,
   } as CSSProperties;
 
+  const examOverlays = <div
+    ref={setExamOverlayRoot} data-sat-exam-overlay-root="true"
+    className="sat-ui sat-exam-overlay-root" data-sat-contrast={contrastMode}
+    inert={!isPresent} aria-hidden={!isPresent || undefined}
+    style={portalOverlays ? { ...zoomPlaneStyle, position: 'fixed', zIndex: SAT_OVERLAY_Z.notesBackdrop, visibility: isPresent ? undefined : 'hidden' } : undefined}
+  />;
+  const viewportOverlays = <div
+    ref={setViewportOverlayRoot} data-sat-viewport-overlay-root="true"
+    className="sat-ui sat-viewport-overlay-root" data-sat-contrast={contrastMode}
+    inert={!isPresent} aria-hidden={!isPresent || undefined}
+    style={portalOverlays ? { zIndex: SAT_OVERLAY_Z.blockingVeil, visibility: isPresent ? undefined : 'hidden' } : undefined}
+  />;
+
   return (
     <SatExamZoomContext.Provider value={visualSpace}>
       <div
@@ -87,18 +106,9 @@ export function SatExamZoomPlane({
           style={zoomPlaneStyle}
         >
           {children}
-          <div
-            ref={setExamOverlayRoot}
-            data-sat-exam-overlay-root="true"
-            className="sat-ui sat-exam-overlay-root"
-            data-sat-contrast={contrastMode}
-          />
+          {portalOverlays ? createPortal(examOverlays, document.body) : examOverlays}
         </div>
-        <div
-          ref={setViewportOverlayRoot}
-          data-sat-viewport-overlay-root="true"
-          className="sat-viewport-overlay-root"
-        />
+        {portalOverlays ? createPortal(viewportOverlays, document.body) : viewportOverlays}
       </div>
     </SatExamZoomContext.Provider>
   );

@@ -99,10 +99,10 @@ describe("SatCalculatorPanel", () => {
 
     const scientific = screen.getByRole("radio", { name: "Scientific" });
     const graphing = screen.getByRole("radio", { name: "Graphing" });
-    fireEvent.keyDown(scientific, { key: "ArrowRight" });
+    fireEvent.keyDown(scientific, { key: "ArrowLeft" });
     expect(graphing).toHaveAttribute("aria-checked", "true");
 
-    fireEvent.keyDown(graphing, { key: "ArrowLeft" });
+    fireEvent.keyDown(graphing, { key: "ArrowRight" });
     expect(scientific).toHaveAttribute("aria-checked", "true");
   });
 

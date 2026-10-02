@@ -1,10 +1,10 @@
-/* eslint-disable jsx-a11y/no-noninteractive-element-interactions -- iframe onLoad is a lifecycle signal, not a user interaction. */
 import { useEffect, useRef, useState } from "react";
 import type {
   DesmosCalculatorMode,
   DesmosLocale,
 } from "../../infrastructure/desmos/desmosTypes";
 import { SAT_EXAM_LOCALE, desmosEmbedUrl } from "../../infrastructure/desmos/desmosTypes";
+import { useSatExamZoom } from "../zoom/SatExamZoomContext";
 
 export interface DesmosCalculatorProps {
   mode: DesmosCalculatorMode;
@@ -32,6 +32,7 @@ export function DesmosCalculator({
   prewarmInactiveModes = false,
   silenceLiveRegions = false,
 }: DesmosCalculatorProps) {
+  const { scale } = useSatExamZoom();
   const [loadedModes, setLoadedModes] = useState<ReadonlySet<DesmosCalculatorMode>>(
     () => new Set()
   );
@@ -87,14 +88,14 @@ export function DesmosCalculator({
             src={desmosEmbedUrl(candidate, locale)}
             title={`Desmos ${candidate} calculator, College Board testing version`}
             className={
-              candidate === "graphing"
-                ? `h-full min-h-[320px] w-full border-0 ${candidate === mode ? "block" : "hidden"}`
-                : `h-full w-full border-0 ${candidate === mode ? "block" : "hidden"}`
+              `absolute inset-0 h-full w-full border-0 ${candidate === mode ? "block" : "invisible"}`
             }
+            aria-hidden={candidate !== mode || silenceLiveRegions || undefined}
+            style={{ width: `${100 * scale}%`, height: `${100 * scale}%`, transform: `scale(${1 / scale})`, transformOrigin: "top left" }}
             loading={candidate === mode || prewarmInactiveModes ? "eager" : "lazy"}
             referrerPolicy="strict-origin-when-cross-origin"
-            tabIndex={disabled ? -1 : 0}
-            inert={disabled}
+            tabIndex={disabled || candidate !== mode || silenceLiveRegions ? -1 : 0}
+            inert={disabled || candidate !== mode || silenceLiveRegions}
             onLoad={() => setLoadedModes((current) => new Set(current).add(candidate))}
             data-desmos-mode={candidate}
           />

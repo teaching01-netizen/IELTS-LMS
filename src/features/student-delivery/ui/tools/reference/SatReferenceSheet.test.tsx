@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -239,45 +239,45 @@ describe('SatReferenceSheetPanel', () => {
     matchMediaMock(false);
   });
 
-  it('renders the resizable floating shell (C11 parity) with the thin stable scroll viewport', () => {
+  it('renders the reference sidebar with a stable scroll viewport', () => {
     render(<SatReferenceSheetPanel open onClose={() => undefined} {...ids} />);
     const dialog = screen.getByRole('dialog', { name: 'Reference Sheet' });
     expect(dialog).toHaveAttribute('data-sat-tool-window', 'Reference Sheet');
-    expect(dialog).toHaveAttribute('data-sat-tool-presentation', 'floating');
-    expect(dialog).toHaveAttribute('data-sat-tool-resizable', 'true');
-    expect(dialog.querySelectorAll('[data-sat-resize-handle]')).toHaveLength(1);
+    expect(dialog).toHaveAttribute('data-sat-tool-presentation', 'sidebar');
+    expect(dialog).not.toHaveAttribute('data-sat-tool-resizable');
+    expect(dialog.querySelectorAll('[data-sat-resize-handle]')).toHaveLength(0);
     expect(dialog.querySelector('[data-sat-tool-scroll]')).not.toBeNull();
   });
 
   it('zooms in steps, labels the percent, and Fit sheet resets to whole-visible', async () => {
     const user = userEvent.setup();
     render(<SatReferenceSheetPanel open onClose={() => undefined} {...ids} />);
-    expect(screen.getByText('Fit', { exact: true })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Zoom out' })).toBeNull();
+    expect(screen.getByText('100%', { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Fit sheet' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     expect(screen.getByText('125%')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Fit sheet' }));
-    expect(screen.getByText('Fit', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('100%', { exact: true })).toBeInTheDocument();
     const scroller = document.querySelector('[data-sat-tool-scroll]') as HTMLElement;
-    expect(scroller.style.overflow).toBe('auto');
+    expect(scroller).toHaveClass('overflow-auto');
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     await user.click(screen.getByRole('button', { name: 'Zoom out' }));
-    expect(screen.getByText('Fit', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('100%', { exact: true })).toBeInTheDocument();
   });
 
   it('keeps overflow reachable at fit and when zoomed', async () => {
     const user = userEvent.setup();
     render(<SatReferenceSheetPanel open onClose={() => undefined} {...ids} />);
     const scroller = document.querySelector('[data-sat-tool-scroll]') as HTMLElement;
-    expect(scroller.style.overflow).toBe('auto');
+    expect(scroller).toHaveClass('overflow-auto');
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     expect(screen.getByText('150%')).toBeInTheDocument();
-    expect(scroller.style.overflow).toBe('auto');
+    expect(scroller).toHaveClass('overflow-auto');
     await user.click(screen.getByRole('button', { name: 'Fit sheet' }));
-    expect(screen.getByText('Fit', { exact: true })).toBeInTheDocument();
-    expect(scroller.style.overflow).toBe('auto');
+    expect(screen.getByText('100%', { exact: true })).toBeInTheDocument();
+    expect(scroller).toHaveClass('overflow-auto');
     expect(scroller.scrollTop).toBe(0);
   });
 
@@ -285,6 +285,7 @@ describe('SatReferenceSheetPanel', () => {
     const user = userEvent.setup();
     const viewKey = satReferenceViewKey(ids.scheduleId, ids.attemptId, ids.moduleAttemptId);
     const first = render(<SatReferenceSheetPanel open onClose={() => undefined} {...ids} />);
+    await act(async () => { await new Promise(requestAnimationFrame); });
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     expect(screen.getByText('125%')).toBeInTheDocument();
     const stored = JSON.parse(window.localStorage.getItem(viewKey) ?? '{}') as {

@@ -30,7 +30,7 @@ describe('DesmosCalculator', () => {
 
     expect(scientific).toBeInTheDocument();
     expect(graphing).toBeInTheDocument();
-    expect(scientific).toHaveClass('hidden');
+    expect(scientific).toHaveClass('invisible');
     expect(graphing).toHaveClass('block');
     expect(screen.queryByText('Loading calculator…')).not.toBeInTheDocument();
     // Both frames share the frozen exam locale so reveal never reloads.
@@ -45,15 +45,17 @@ describe('DesmosCalculator', () => {
     expect(graphing.getAttribute('src')).toContain('?embed');
   });
 
-  it('lets the scientific frame be its natural height while graphing keeps its canvas floor', () => {
-    const { rerender } = render(<DesmosCalculator mode="scientific" />);
+  it('lays out both modes while keeping the inactive frame inert and inaccessible', () => {
+    render(<DesmosCalculator mode="scientific" prewarmInactiveModes />);
     const scientific = screen.getByTitle('Desmos scientific calculator, College Board testing version');
-    // Scientific: no artificial min-h stretch (the R6 void fix).
-    expect(scientific.className).not.toContain('min-h-[320px]');
-    rerender(<DesmosCalculator mode="graphing" prewarmInactiveModes />);
     const graphing = screen.getByTitle('Desmos graphing calculator, College Board testing version');
-    // Graphing: graph canvas legitimately fills the window.
-    expect(graphing.className).toContain('min-h-[320px]');
+    expect(scientific).toHaveClass('absolute', 'block');
+    expect(graphing).toHaveClass('absolute', 'invisible');
+    expect(graphing).toHaveAttribute('inert');
+    expect(graphing).toHaveAttribute('aria-hidden', 'true');
+    expect(graphing).toHaveAttribute('tabindex', '-1');
+    expect(graphing.style.width).toBe('100%');
+    expect(graphing.style.height).toBe('100%');
   });
 
   it('removes the calculator iframe from keyboard interaction when the proctor pauses the exam', async () => {

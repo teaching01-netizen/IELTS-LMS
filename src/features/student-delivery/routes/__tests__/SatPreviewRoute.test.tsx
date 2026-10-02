@@ -223,6 +223,27 @@ describe("SatPreviewRoute", () => {
     expect(screen.getByRole("button", { name: /reference/i })).toBeInTheDocument();
   });
 
+  it("prewarms upcoming Math during the preview break and retains frames through review", async () => {
+    render(<MemoryRouter><SatPreviewRoute examId="exam-1" /></MemoryRouter>);
+    await screen.findByText("Preview question");
+    fireEvent.click(screen.getByRole("button", { name: "Preview break" }));
+    const scientific = await screen.findByTitle("Desmos scientific calculator, College Board testing version");
+    const graphing = screen.getByTitle("Desmos graphing calculator, College Board testing version");
+    expect(scientific).toHaveAttribute("inert");
+    fireEvent.load(scientific); fireEvent.load(graphing);
+    fireEvent.change(screen.getByLabelText("Preview section"), { target: { value: "math" } });
+    await screen.findByText("Math preview question");
+    fireEvent.click(screen.getByRole("button", { name: "Calculator", exact: true }));
+    expect(screen.getByTitle("Desmos scientific calculator, College Board testing version")).toBe(scientific);
+    expect(screen.getByTitle("Desmos graphing calculator, College Board testing version")).toBe(graphing);
+    expect(document.querySelector("[data-desmos-loading]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Review answers/ }));
+    expect(screen.queryByRole("dialog", { name: "Calculator" })).toBeNull();
+    expect(screen.getByTitle("Desmos scientific calculator, College Board testing version")).toBe(scientific);
+    fireEvent.click(screen.getByRole("button", { name: "Back to questions" }));
+    expect(screen.getByTitle("Desmos scientific calculator, College Board testing version")).toBe(scientific);
+  });
+
   it("performs zero delivery writes while answering in SAT staff preview", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")

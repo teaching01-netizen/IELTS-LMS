@@ -2439,15 +2439,19 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 .sat-tool-tip-anchor {
   position: relative;
 }
-.sat-tool-tip-anchor:hover .sat-tool-tip {
-  opacity: 1;
-  transition: opacity var(--sat-tool-edge-reveal) var(--sat-tool-motion-ease);
-  transition-delay: var(--sat-tool-tip-delay);
+@media (hover: hover) and (pointer: fine) {
+  .sat-tool-tip-anchor:hover .sat-tool-tip {
+    opacity: 1;
+    transition: opacity var(--sat-tool-edge-reveal) var(--sat-tool-motion-ease);
+    transition-delay: var(--sat-tool-tip-delay);
+  }
 }
-.sat-tool-tip-anchor:focus-within .sat-tool-tip,
 .sat-tool-tip-anchor:focus-visible .sat-tool-tip {
   opacity: 1;
   transition: none;
+}
+[data-sat-touch-interaction="true"] :is(.sat-tool-tip, .sat-tool-hint) {
+  display: none;
 }
 [data-dragging="true"] .sat-tool-tip,
 [data-sat-resizing="true"] .sat-tool-tip {
@@ -4948,5 +4952,106 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 @layer utilities {
   .student-scroll-breathe {
     padding-bottom: calc(var(--student-bottom-bar-height, 3rem) + 1.5rem);
+  }
+}
+
+/* SAT Math tools use physical control sizes inside the shared zoom geometry. */
+.sat-calculator-header {
+  height: var(--sat-tool-control-hit, 44px);
+  min-height: var(--sat-tool-control-hit, 44px);
+  font-size: var(--sat-calculator-type, 12px);
+}
+.sat-tool-calculator :is(.sat-tool-grip, .sat-tool-header-control, [data-sat-resize-handle]) {
+  width: var(--sat-tool-control-hit, 44px);
+  height: var(--sat-tool-control-hit, 44px);
+}
+.sat-calculator-mode {
+  min-height: var(--sat-tool-control-hit, 44px);
+  min-width: var(--sat-tool-control-hit, 44px);
+  font-size: var(--sat-calculator-type, 12px);
+}
+.sat-calculator-host [data-sat-zoom-plane],
+.sat-calculator-host [data-sat-exam-viewport] { overflow: visible; }
+.sat-reference-header {
+  min-height: calc(44 * var(--sat-ref-unit));
+  padding-inline: calc(12 * var(--sat-ref-unit)) calc(4 * var(--sat-ref-unit));
+  font-size: calc(14 * var(--sat-ref-unit));
+}
+.sat-reference-header svg { width: calc(18 * var(--sat-ref-unit)); height: calc(18 * var(--sat-ref-unit)); }
+.sat-reference-toolbar {
+  min-height: calc(53 * var(--sat-ref-unit));
+  padding-inline: calc(8 * var(--sat-ref-unit));
+  font-size: calc(14 * var(--sat-ref-unit));
+}
+[data-sat-ref-layout="portrait"] svg { min-width: 0; max-width: 160px; width: 100%; height: auto; }
+
+.sat-tool-calculator .sat-tool-header-drag:hover {
+  background-color: var(--sat-ref-header-bg);
+}
+
+/* Display zoom shrinks the logical header even on a wide physical viewport. */
+.sat-exam-topbar {
+  container-type: inline-size;
+}
+@container (width < 800px) {
+  .sat-exam-topbar > div {
+    height: auto;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    gap: 0.5rem;
+    padding-block: 0.25rem;
+  }
+  .sat-exam-topbar > div > div:first-child {
+    display: flex;
+    grid-column: 1;
+    grid-row: 1;
+    padding-block: 0;
+  }
+  .sat-exam-topbar > div > div:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .sat-exam-topbar [aria-label="Test tools"] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-wrap: wrap;
+  }
+}
+.sat-ui.sat-viewport-overlay-root {
+  background: transparent;
+}
+
+.sat-calculator-header {
+  position: relative;
+  gap: calc(4 * var(--sat-tool-unit, 1px));
+  padding-inline: calc(4 * var(--sat-tool-unit, 1px));
+}
+.sat-calculator-header svg {
+  width: calc(20 * var(--sat-tool-unit, 1px));
+  height: calc(20 * var(--sat-tool-unit, 1px));
+}
+.sat-calculator-mode { padding-inline: calc(8 * var(--sat-tool-unit, 1px)); }
+.sat-tool-calculator .sat-tool-grip {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+}
+.sat-tool-calculator [data-sat-resize-handle] > span:first-child {
+  width: calc(24 * var(--sat-tool-unit, 1px));
+  height: calc(24 * var(--sat-tool-unit, 1px));
+  border: 1px solid var(--sat-tool-border);
+  border-radius: 50%;
+  background: var(--sat-surface);
+}
+.sat-tool-calculator .sat-tool-resize-glyph {
+  width: calc(16 * var(--sat-tool-unit, 1px));
+  height: calc(16 * var(--sat-tool-unit, 1px));
+}
+/* Compact chrome leaves a readable tool viewport on short or narrow screens. */
+@media (max-width: 719px), (max-height: 560px) {
+  .sat-exam-topbar,
+  .sat-exam-footer {
+    zoom: min(1, calc(1 / var(--sat-screen-zoom)));
   }
 }

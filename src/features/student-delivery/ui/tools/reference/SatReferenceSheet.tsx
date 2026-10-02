@@ -1,5 +1,6 @@
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import { clampSatReferenceZoom, SAT_REFERENCE_ZOOM_MAX } from "../SatReferenceSheetPanel";
+import { useSatReferenceStageSize } from "../useSatReferenceViewportWidth";
 
 /* ------------------------------------------------------------------ */
 /* Reference canvas dimensions and fit behavior                       */
@@ -123,20 +124,23 @@ function Figure({
   formula,
   x,
   y,
+  flow = false,
 }: {
   label: string;
   art: ReactNode;
   formula: ReactNode;
   x: number;
   y: number;
+  flow?: boolean;
 }) {
   return (
     <figure
       style={{
-        position: "absolute",
-        left: x,
-        top: y,
-        width: 160,
+        position: flow ? "relative" : "absolute",
+        left: flow ? undefined : x,
+        top: flow ? undefined : y,
+        width: flow ? "auto" : 160,
+        minWidth: 0,
         margin: 0,
         textAlign: "center",
       }}
@@ -512,14 +516,20 @@ function SatReferenceSheetInner({
   stageWidth,
   stageHeight,
   examScale = 1,
+  layout = "landscape",
 }: {
   viewportWidth?: number;
   zoom?: number;
   stageWidth?: number | undefined;
   stageHeight?: number | undefined;
   examScale?: number;
+  layout?: "portrait" | "landscape";
 }) {
-  const scale = useFitScale(viewportWidth, zoom, stageHeight, examScale);
+  const portrait = layout === "portrait";
+  const fitScale = useFitScale(viewportWidth, zoom, stageHeight, examScale);
+  const scale = portrait ? Math.min(2, Math.max(1, zoom)) / examScale : fitScale;
+  const [canvasNode, setCanvasNode] = useState<HTMLDivElement | null>(null);
+  const naturalSize = useSatReferenceStageSize(canvasNode, { w: viewportWidth * examScale, h: 1200 });
   const hasStage =
     typeof stageWidth === "number" &&
     Number.isFinite(stageWidth) &&
@@ -536,11 +546,14 @@ function SatReferenceSheetInner({
   // 1000x560 layout box would mis-center under flex when scale < 1, and flex
   // centering would strand the top/left edge outside scroll reach when
   // zoomed. Offsets keep every scaled pixel at non-negative coordinates.
-  const scaledW = SAT_REF_CANVAS_W * scale;
-  const scaledH = SAT_REF_CANVAS_H * scale;
+  const canvasW = portrait ? viewportWidth * examScale : SAT_REF_CANVAS_W;
+  const scaledW = canvasW * scale;
+  const scaledH = (portrait ? naturalSize.h : SAT_REF_CANVAS_H) * scale;
   const wrapperStyle = useMemo(
     () =>
-      hasStage
+      portrait ? {
+        width: Math.max(viewportWidth, scaledW), height: scaledH, position: "relative" as const,
+      } : hasStage
         ? {
             width: Math.max(stageWidth as number, scaledW),
             height: Math.max(stageHeight as number, scaledH),
@@ -552,11 +565,17 @@ function SatReferenceSheetInner({
             height: scaledH,
             margin: "0 auto" as const,
           },
-    [hasStage, scaledW, scaledH, stageWidth, stageHeight],
+    [portrait, viewportWidth, hasStage, scaledW, scaledH, stageWidth, stageHeight],
   );
   const canvasStyle = useMemo(
     () =>
-      hasStage
+      portrait ? {
+        width: canvasW, position: "absolute" as const, top: 0, left: 0,
+        display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "36px 8px", padding: 16,
+        boxSizing: "border-box" as const,
+        transform: `scale(${scale})`, transformOrigin: "top left",
+        background: "var(--sat-surface)", color: "var(--sat-text)",
+      } : hasStage
         ? {
             width: SAT_REF_CANVAS_W,
             height: SAT_REF_CANVAS_H,
@@ -577,7 +596,7 @@ function SatReferenceSheetInner({
             background: "var(--sat-surface)",
             color: "var(--sat-text)",
           },
-    [hasStage, scale, scaledW, scaledH, stageWidth, stageHeight],
+    [portrait, canvasW, hasStage, scale, scaledW, scaledH, stageWidth, stageHeight],
   );
 
   return (
@@ -587,8 +606,9 @@ function SatReferenceSheetInner({
       style={{ background: "var(--sat-surface)" }}
     >
       <div style={wrapperStyle}>
-        <div style={canvasStyle} data-sat-ref-canvas>
+        <div ref={setCanvasNode} style={canvasStyle} data-sat-ref-canvas data-sat-ref-layout={layout}>
           <MemoFigure
+            flow={portrait}
             x={0}
             y={24}
             label="Circle"
@@ -596,6 +616,7 @@ function SatReferenceSheetInner({
             formula={<CircleFormula />}
           />
           <MemoFigure
+            flow={portrait}
             x={160}
             y={24}
             label="Rectangle"
@@ -603,6 +624,7 @@ function SatReferenceSheetInner({
             formula={<RectangleFormula />}
           />
           <MemoFigure
+            flow={portrait}
             x={320}
             y={24}
             label="Triangle"
@@ -610,6 +632,7 @@ function SatReferenceSheetInner({
             formula={<TriangleFormula />}
           />
           <MemoFigure
+            flow={portrait}
             x={480}
             y={24}
             label="Right triangle"
@@ -618,9 +641,9 @@ function SatReferenceSheetInner({
           />
           <section
             aria-labelledby="sat-special-triangles"
-            style={{ position: "absolute", left: 640, top: 24, width: 320 }}
+            style={portrait ? { gridColumn: "1 / -1" } : { position: "absolute", left: 640, top: 24, width: 320 }}
           >
-            <div style={{ display: "flex" }}>
+            <div style={{ display: "flex", justifyContent: "center" }}>
               <ThirtySixtyNinetyArt />
               <FortyFiveArt />
             </div>
@@ -639,6 +662,7 @@ function SatReferenceSheetInner({
           </section>
 
           <MemoFigure
+            flow={portrait}
             x={0}
             y={210}
             label="Rectangular prism"
@@ -646,6 +670,7 @@ function SatReferenceSheetInner({
             formula={<PrismFormula />}
           />
           <MemoFigure
+            flow={portrait}
             x={160}
             y={210}
             label="Cylinder"
@@ -653,6 +678,7 @@ function SatReferenceSheetInner({
             formula={<CylinderFormula />}
           />
           <MemoFigure
+            flow={portrait}
             x={320}
             y={210}
             label="Sphere"
@@ -660,6 +686,7 @@ function SatReferenceSheetInner({
             formula={<SphereFormula />}
           />
           <MemoFigure
+            flow={portrait}
             x={480}
             y={210}
             label="Cone"
@@ -667,6 +694,7 @@ function SatReferenceSheetInner({
             formula={<ConeFormula />}
           />
           <MemoFigure
+            flow={portrait}
             x={640}
             y={210}
             label="Rectangular pyramid"
@@ -676,7 +704,9 @@ function SatReferenceSheetInner({
 
           <section
             aria-label="Angle and circle facts"
-            style={{
+            style={portrait ? {
+              gridColumn: "1 / -1", fontFamily: SAT_REF_MATH_FONT, fontSize: 16, lineHeight: 1.5,
+            } : {
               position: "absolute",
               left: 42,
               top: 440,

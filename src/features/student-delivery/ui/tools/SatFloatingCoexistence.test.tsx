@@ -119,7 +119,7 @@ describe("SatFloatingTool", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("tokenizes tool chrome: #5D6268-grade border, radius 6, 48px header, floating shadow", () => {
+  it("uses square calculator chrome with a dark header and dot grip", () => {
     matchMediaMock(false);
     render(
       <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} onClose={() => undefined}>
@@ -128,7 +128,7 @@ describe("SatFloatingTool", () => {
     );
     const dialog = screen.getByRole("dialog", { name: "Calculator" });
     expect(dialog.className).toContain("var(--sat-tool-border)");
-    expect(dialog.className).toContain("rounded-[6px]");
+    expect(dialog.className).toContain("rounded-none");
     expect(dialog.className).toContain("var(--sat-shadow-floating)");
     expect(dialog.className).not.toContain("shadow-2xl");
     expect(dialog.className).not.toContain("rounded-[12px]");
@@ -136,7 +136,8 @@ describe("SatFloatingTool", () => {
     expect(header).not.toBeNull();
     // C1 contract change (Phase 01): header adopted 48px (h-12) per design
     // spec; 48px is a superset of the 44px a11y floor so no guarantee weakens.
-    expect(header!.className).toContain("h-12");
+    expect(header!.className).toContain("sat-calculator-header");
+    expect(header!.className).toContain("bg-[var(--sat-ref-header-bg)]");
     expect(header!.querySelector("[aria-label^=\"Move\" i]")).not.toBeNull();
     expect(dialog.querySelector("[data-sat-tool-close]")).not.toBeNull();
     // Probe contract survives the chrome swap.
@@ -212,7 +213,7 @@ describe("SatFloatingTool", () => {
     expect(compactDialog.querySelector("[data-sat-tool-hint]")).toBeNull();
   });
 
-  it("ignores sub-threshold drags and tracks live drags 1:1 without scale (C12)", () => {
+  it("ignores sub-threshold drags and tracks live drags 1:1 without scale (C12)", async () => {
     matchMediaMock(false);
     render(
       <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} resizable onClose={() => undefined}>
@@ -230,13 +231,14 @@ describe("SatFloatingTool", () => {
     expect(dialog.style.top).toBe("110px");
     pointer(header, "pointerdown", 700, 120, 2);
     pointer(header, "pointermove", 750, 150, 2);
+    await act(async () => { await new Promise(requestAnimationFrame); });
     expect(dialog.style.left).toBe("650px");
     expect(dialog.style.top).toBe("140px");
     expect(dialog.style.transform).toBe("");
     pointer(header, "pointerup", 750, 150, 2);
   });
 
-  it("cancels an in-progress drag on Escape and restores the pre-drag rect", () => {
+  it("cancels an in-progress drag on Escape and restores the pre-drag rect", async () => {
     matchMediaMock(false);
     render(
       <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} resizable onClose={() => undefined}>
@@ -247,6 +249,7 @@ describe("SatFloatingTool", () => {
     const header = dialog.querySelector("[data-sat-tool-header]") as HTMLElement;
     pointer(header, "pointerdown", 700, 120, 3);
     pointer(header, "pointermove", 760, 180, 3);
+    await act(async () => { await new Promise(requestAnimationFrame); });
     expect(dialog.style.left).toBe("660px");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(dialog.style.left).toBe("600px");
@@ -530,7 +533,7 @@ describe("SatFloatingTool reference variant (R-01 Bluebook chrome, append-only)"
     expect(dialog).toHaveAttribute("data-sat-floating-tool", "Reference Sheet");
   });
 
-  it("Calculator zero-drift (D1 proof): h-12 chrome, 44px close, no variant/collapse/dotgrip", () => {
+  it("keeps calculator controls independent of legacy reference collapse", () => {
     matchMediaMock(false);
     render(
       <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} resizable headerControls={<span data-testid="calc-controls">mode</span>} onClose={() => undefined}>
@@ -547,20 +550,20 @@ describe("SatFloatingTool reference variant (R-01 Bluebook chrome, append-only)"
     // Calculator chrome byte-identical: h-12 header, GripVertical 18px, 44px close.
     const header = dialog.querySelector("[data-sat-tool-header]");
     expect(header).not.toBeNull();
-    expect(header!.className).toContain("h-12");
+    expect(header!.className).toContain("sat-calculator-header");
+    expect(header!.className).toContain("bg-[var(--sat-ref-header-bg)]");
     expect(header!.className).not.toContain("h-8");
     const close = screen.getByRole("button", { name: "Close Calculator" });
-    expect(close.className).toContain("h-11");
-    expect(close.className).toContain("w-11");
+    expect(close.className).toContain("sat-tool-header-control");
     expect(screen.getByTestId("calc-controls")).toBeInTheDocument();
     // Tokenized paper from the pinned contract (C1/C10): tool border +
     // 6px radius + floating shadow, never the card set.
     expect(dialog.className).toContain("var(--sat-tool-border)");
-    expect(dialog.className).toContain("rounded-[6px]");
+    expect(dialog.className).toContain("rounded-none");
     expect(dialog.className).toContain("var(--sat-shadow-floating)");
     expect(dialog.className).not.toContain("shadow-2xl");
     expect(dialog.className).not.toContain("rounded-[12px]");
-    expect(dialog.className).not.toContain("rounded-none");
+    expect(dialog.className).toContain("rounded-none");
   });
 
   it("compact Reference keeps the diff-zero sheet: no header/collapse/edges", () => {
@@ -671,6 +674,7 @@ describe("R-03 reference collapse + motion (append-only; R-01 asserts above unto
     const header = dialog.querySelector("[data-sat-tool-header]") as HTMLElement;
     pointer(header, "pointerdown", 200, 120, 11);
     pointer(header, "pointermove", 260, 180, 11);
+    await act(async () => { await new Promise(requestAnimationFrame); });
     expect(dialog.style.left).toBe("108px");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(dialog.style.left).toBe("48px");

@@ -63,6 +63,23 @@ export function readSatToolViewport(
   }
 }
 
+/** Calculator bounds follow the rendered exam body, including Display zoom. */
+export function readSatCalculatorSafeArea(toLogical: (value: number) => number): SatSafeArea {
+  const body = typeof document === 'undefined' ? null : document.getElementById('sat-question-content');
+  const rect = body?.getBoundingClientRect();
+  if (rect && rect.width > 0 && rect.height > 0) {
+    return {
+      left: toLogical(rect.left + 8), right: toLogical(window.innerWidth - rect.right + 8),
+      top: toLogical(rect.top + 8), bottom: toLogical(window.innerHeight - rect.bottom + 8),
+    };
+  }
+  return {
+    left: toLogical(8), right: toLogical(8),
+    top: toLogical(SAT_TOOL_HEADER_HEIGHT_FALLBACK + 8),
+    bottom: toLogical(SAT_TOOL_FOOTER_HEIGHT_FALLBACK + 8),
+  };
+}
+
 function rectOf(element: Element | null): SatRect | null {
   if (!element || typeof element.getBoundingClientRect !== 'function') return null;
   try {

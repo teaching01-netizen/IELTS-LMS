@@ -67,6 +67,7 @@ export interface SatExamShellProps {
   notices?: ReactNode | undefined;
   /** Route-owned floating tools that share the exam's visual zoom space. */
   floatingToolChildren?: ReactNode | undefined;
+  referenceTool?: ((controls: { expanded: boolean; onToggleExpanded: () => void }) => ReactNode) | undefined;
   /**
    * Highlights & Notes: the shell owns annotation mutation so the contextual
    * toolbar and the note card can both write the same response. The content
@@ -167,6 +168,25 @@ export function SatExamShell(props: SatExamShellProps) {
 }
 
 function SatExamShellContent(props: SatExamShellProps) {
+  const [referenceExpanded, setReferenceExpanded] = useState(false);
+  const referenceBodyRef = useRef<HTMLElement | null>(null);
+  const [narrowReferenceBody, setNarrowReferenceBody] = useState(false);
+  useLayoutEffect(() => {
+    const body = referenceBodyRef.current;
+    if (!body) return;
+    const measure = () => {
+      const width = body.getBoundingClientRect().width;
+      if (width > 0) setNarrowReferenceBody(width < 720);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(body);
+    return () => observer?.disconnect();
+  }, []);
+  const compactReference = useSatMediaQuery('(max-width: 719px), (max-height: 560px)');
+  const referenceVisible = props.referenceOpen && Boolean(props.referenceTool);
+  const referenceOverlaysQuestion = referenceVisible && (referenceExpanded || compactReference || narrowReferenceBody);
+  useEffect(() => { setReferenceExpanded(false); }, [props.referenceOpen, props.moduleIdentity]);
   // Strangler step 1: the interaction machine owns the exclusive surface +
   // the live annotation selection; the runner stays authoritative for exam
   // truth. Context is derived from props every render — never duplicated in
@@ -542,15 +562,16 @@ function SatExamShellContent(props: SatExamShellProps) {
   return (
     <SatContrastContext.Provider value={props.readingPreferences.contrastMode ?? 'default'}>
     <SatExamZoomPlane
+      portalOverlays
       scale={screenZoom}
       height={props.examHeight}
       contrastMode={props.readingPreferences.contrastMode ?? 'default'}
-      viewportClassName="relative h-[var(--student-exam-height,100dvh)] min-h-0 w-full max-h-[var(--student-exam-height,100dvh)] overflow-hidden"
+      viewportClassName="relative h-[var(--student-exam-height,100dvh)] min-h-0 w-full max-h-[var(--student-exam-height,100dvh)] overflow-clip"
       viewportStyle={shellStyle}
       planeClassName="sat-exam-zoom-plane"
     >
     <div
-      className="sat-ui sat-exam-shell grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] overflow-hidden bg-[var(--sat-shell-bg)] text-[var(--sat-text)]"
+      className="sat-ui sat-exam-shell grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] overflow-clip bg-[var(--sat-shell-bg)] text-[var(--sat-text)]"
       data-testid="sat-exam-shell"
       data-sat-contrast={props.readingPreferences.contrastMode ?? 'default'}
       data-sat-keyboard-open={props.keyboardOpen ? "true" : "false"}
@@ -640,11 +661,15 @@ function SatExamShellContent(props: SatExamShellProps) {
           Annotation geometry starts in viewport space and converts back into
           this shared plane for rendering. */}
       <main
-        className="relative row-start-3 min-h-0 min-w-0 overflow-hidden bg-[var(--sat-body-bg)]"
+        ref={referenceBodyRef}
+        className="relative row-start-3 grid min-h-0 min-w-0 overflow-hidden bg-[var(--sat-body-bg)]"
+        style={{ gridTemplateColumns: referenceVisible && !referenceOverlaysQuestion ? `minmax(0, 1fr) clamp(${320 / screenZoom}px, 36%, ${420 / screenZoom}px)` : 'minmax(0, 1fr)' }}
         id="sat-question-content"
         data-sat-question-presentation="instant"
         data-sat-annotation-bounds="true"
       >
+        <div className="relative h-full min-h-0 min-w-0 overflow-hidden" data-sat-question-seat
+          inert={referenceOverlaysQuestion} aria-hidden={referenceOverlaysQuestion || undefined}>
         <SatAnnotationViewContext.Provider value={annotationView}>
           {/* The Notes column rides inside the zoom wrapper on purpose: it is
               exam content now, so screen zoom must treat it like the passage
@@ -778,6 +803,11 @@ function SatExamShellContent(props: SatExamShellProps) {
             onPositionChange={(lineReaderPosition) => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderPosition })}
             onDisable={() => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: false })} />
         ) : null}
+        </div>
+        <div data-sat-reference-seat hidden={!referenceVisible}
+          className={referenceOverlaysQuestion ? 'absolute inset-0 min-h-0 min-w-0' : 'min-h-0 min-w-0'}>
+          {props.referenceTool?.({ expanded: referenceExpanded, onToggleExpanded: () => setReferenceExpanded(value => !value) })}
+        </div>
       </main>
 
       <div className="row-start-5 min-w-0">

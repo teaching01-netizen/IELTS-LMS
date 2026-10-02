@@ -1,4 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cloneElement } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import type { SatRunnerState } from "../../application/satRunnerReducer";
@@ -388,14 +389,42 @@ describe("SatStudentSessionRoute prewarm gating", () => {
     expectBare(document.body);
   });
 
-  it("C4 between-section entry uses the break surface without a hidden calculator tree", () => {
+  it("C4 between-section entry prewarms the upcoming Math module behind the break surface", () => {
     const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: null });
     setup({ phase: "directions", stateModuleId: null, pendingModuleId: "math-m1", data });
     expect(screen.getByTestId("sat-scheduled-break")).toBeInTheDocument();
-    expect(screen.queryByTitle(SCI_TITLE)).toBeNull();
-    expect(screen.queryByTitle(GRAPH_TITLE)).toBeNull();
+    expect(screen.getByTitle(SCI_TITLE)).toHaveAttribute("inert");
+    expect(screen.getByTitle(GRAPH_TITLE)).toHaveAttribute("inert");
     expect(screen.queryByRole("dialog", { name: "Calculator" })).toBeNull();
-    expectBare(document.body);
+    expect(screen.getByTestId("sat-scheduled-break").querySelector("iframe")).toBeNull();
+  });
+
+  it("preserves warmed iframe identity through preparation, module, review and reopening", () => {
+    const pendingData = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: null });
+    const { renderResult, routeElement } = setup({ phase: "directions", stateModuleId: null, pendingModuleId: "math-m1", data: pendingData });
+    const scientific = screen.getByTitle(SCI_TITLE);
+    const graphing = screen.getByTitle(GRAPH_TITLE);
+    fireEvent.load(scientific); fireEvent.load(graphing);
+    const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: "math-m1" });
+    const current = controllerMock.current as Record<string, unknown>;
+    const liveState = { phase: "module", scheduleId: "schedule-1", candidateId: "candidate-1", assessmentId: "exam-1", sectionKey: "math", moduleKey: "math-m1", questionIds: ["q1"], questionIndex: 0, responses: {}, responseRevisions: {}, toolCapabilities: { calculator: true, referenceSheet: false }, activeTools: { calculator: true, referenceSheet: false } };
+    controllerMock.current = { ...current, data, state: liveState, stateModule: moduleById(data, "math-m1"), stateModuleAttempt: data.attempt.moduleAttempts[0], stateSection: data.sections[1], pendingModule: null };
+    renderResult.rerender(cloneElement(routeElement));
+    expect(screen.getByTitle(SCI_TITLE)).toBe(scientific);
+    expect(screen.getByTitle(GRAPH_TITLE)).toBe(graphing);
+    expect(document.querySelector('[data-desmos-loading]')).toBeNull();
+    controllerMock.current = { ...(controllerMock.current as object), state: { ...liveState, phase: "review" } };
+    renderResult.rerender(cloneElement(routeElement));
+    expect(screen.getByTitle(SCI_TITLE)).toBe(scientific);
+    expect(screen.queryByRole("dialog", { name: "Calculator" })).toBeNull();
+    controllerMock.current = { ...(controllerMock.current as object), state: liveState };
+    renderResult.rerender(cloneElement(routeElement));
+    expect(screen.getByTitle(SCI_TITLE)).toBe(scientific);
+    expect(document.querySelector('[data-sat-tool-window="Calculator"]')).toHaveAttribute("role", "dialog");
+    const otherData = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: { ...MATH_CALC, id: "math-m2" }, activeModuleId: "math-m2" });
+    controllerMock.current = { ...(controllerMock.current as object), data: otherData, state: { ...liveState, moduleKey: "math-m2" }, stateModule: moduleById(otherData, "math-m2"), stateModuleAttempt: otherData.attempt.moduleAttempts[0], stateSection: otherData.sections[1] };
+    renderResult.rerender(cloneElement(routeElement));
+    expect(screen.getByTitle(SCI_TITLE)).not.toBe(scientific);
   });
 
   it("C5 module, calculator closed (B12): hidden tree, open reveals dialog", () => {
