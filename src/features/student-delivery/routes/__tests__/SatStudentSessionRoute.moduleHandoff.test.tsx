@@ -206,6 +206,30 @@ function mathModuleOneRouted(): AssessmentDeliveryBootstrap {
   ]);
 }
 
+/**
+ * The waiting room before the proctor's Start, delivered for one Student Access
+ * scope. The server drops out-of-scope sections but keeps release display
+ * order, so a math-only (or Math-restricted full SAT) payload starts at order 1.
+ */
+function waitingRoom(sectionKeys: string[]): AssessmentDeliveryBootstrap {
+  const now = new Date("2026-09-23T09:00:00.000Z").toISOString();
+  const data = examData([]);
+  const sections = data.sections.filter((section) => sectionKeys.includes(section.sectionKey));
+  const moduleAttempts = sections
+    .flatMap((section) => section.modules)
+    .filter((module) => module.adaptiveRole === "base")
+    .map((module) => attemptRow(`ma-${module.id}`, module.id, "not_started", now, 0));
+  return {
+    ...data,
+    timing: { ...data.timing, timingModel: "sat_personal_v1", stageKey: null },
+    sections,
+    attempt: {
+      ...data.attempt,
+      moduleAttempts: moduleAttempts as unknown as AssessmentDeliveryBootstrap["attempt"]["moduleAttempts"],
+    },
+  };
+}
+
 function moduleState(moduleId: string, questionId: string) {
   return {
     phase: "module" as const,
@@ -463,5 +487,37 @@ describe("SatStudentSessionRoute module handoff", () => {
     expect(screen.getAllByTestId("sat-exam-shell")).toHaveLength(1);
     expect(document.querySelectorAll("[data-sat-stage-exiting]")).toHaveLength(0);
     expect(document.querySelectorAll('[data-sat-stage="exam"]')).toHaveLength(1);
+  });
+
+  it.each([
+    ["math-only", ["math"], "math-m1", "Math Module 1 marker"],
+    ["reading/writing-only", ["reading-writing"], "rw-m1", "Reading and Writing Module 1 marker"],
+    ["full SAT", ["reading-writing", "math"], "rw-m1", "Reading and Writing Module 1 marker"],
+  ])("moves a %s student from the ready screen into Module 1 with no break", (_, sectionKeys, moduleId, marker) => {
+    const waiting = waitingRoom(sectionKeys);
+    seed({ phase: "directions" }, waiting, { pendingModuleId: moduleId });
+    const { rerender } = render(routeElement());
+
+    expect(screen.getByRole("heading", { name: "Your exam is ready" })).toBeInTheDocument();
+    expect(screen.queryByTestId("sat-scheduled-break")).toBeNull();
+
+    const opened: AssessmentDeliveryBootstrap = {
+      ...waiting,
+      attempt: {
+        ...waiting.attempt,
+        moduleAttempts: waiting.attempt.moduleAttempts.map((attempt) =>
+          attempt.moduleId === moduleId
+            ? { ...attempt, state: "active", startedAt: waiting.serverNow }
+            : attempt,
+        ),
+      },
+    };
+    seed(moduleState(moduleId, `${moduleId}-q1`), opened);
+    rerender(routeElement());
+
+    return waitFor(() => expect(screen.getByText(marker)).toBeInTheDocument()).then(() => {
+      expect(screen.queryByTestId("sat-scheduled-break")).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Your exam is ready" })).toBeNull();
+    });
   });
 });

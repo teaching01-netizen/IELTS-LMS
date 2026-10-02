@@ -6,6 +6,7 @@ import type {
 import {
   findAttemptForModule,
   matchesFinalModuleState,
+  modulesInExamOrder,
   sectionForModule,
 } from "./satRuntimeSelectors";
 
@@ -62,7 +63,6 @@ export interface SatEntryGateInput {
 export interface SatEntryDecisionInput {
   data: AssessmentDeliveryBootstrap | null;
   module: AssessmentDeliveryModule | null;
-  sectionDisplayOrder: number | null;
   stageReady: boolean;
   breakSeconds: number;
   sectionWaitSeconds: number;
@@ -103,6 +103,36 @@ export function canEnterModule(input: SatEntryGateInput): boolean {
 
 function isUnstartedAttempt(attempt: AssessmentModuleAttemptSnapshot): boolean {
   return !attempt.startedAt && !attempt.completionReason && attempt.state === "not_started";
+}
+
+/**
+ * Whether `module` is the first base module of the delivered exam. Delivered
+ * sections keep their release display order even when Student Access narrows
+ * the scope (a math-only session starts at Math, order 1), so "first" is the
+ * lowest-ordered delivered section, never a literal order of 0.
+ */
+function isFirstBaseModule(
+  data: AssessmentDeliveryBootstrap,
+  module: AssessmentDeliveryModule,
+): boolean {
+  if (module.adaptiveRole !== "base") return false;
+  return modulesInExamOrder(data).find((candidate) => candidate.adaptiveRole === "base")?.id === module.id;
+}
+
+/**
+ * The proctor's Start: `module` is the first base module of the delivered exam,
+ * it has an attempt, and nothing has been started yet. Shared by automatic
+ * entry and the student route's waiting-room classification.
+ */
+export function isSatInitialEntry(
+  data: AssessmentDeliveryBootstrap,
+  module: AssessmentDeliveryModule | null,
+): boolean {
+  if (!module || !isFirstBaseModule(data, module)) return false;
+  return (
+    Boolean(findAttemptForModule(data, module.id)) &&
+    data.attempt.moduleAttempts.every(isUnstartedAttempt)
+  );
 }
 
 /**
@@ -161,9 +191,9 @@ function waiting(reason: SatEntryReason): SatEntryDecision {
 }
 
 /**
- * The one decision the initial entry path reads. Only Section 0's first module
- * (the proctor's Start) is client-started: it opens when the proctor starts
- * the runtime, via one idempotent StartModule. All later progression (M1→M2,
+ * The one decision the initial entry path reads. Only the first delivered
+ * section's first module (the proctor's Start) is client-started: it opens
+ * when the proctor starts the runtime, via one idempotent StartModule. All later progression (M1→M2,
  * break→next-M1) is server-driven — the server activates the next module
  * atomically and the client renders authoritative state — so this never
  * returns shouldStart for branches or later sections.
@@ -171,7 +201,6 @@ function waiting(reason: SatEntryReason): SatEntryDecision {
 export function deriveSatEntryDecision({
   data,
   module,
-  sectionDisplayOrder,
   stageReady,
   breakSeconds,
   sectionWaitSeconds,
@@ -190,16 +219,16 @@ export function deriveSatEntryDecision({
   });
   if (blocked) return waiting(blocked);
   if (!module) return waiting("no-module");
-  if (sectionDisplayOrder === null) return waiting("unknown-section");
+  if (!sectionForModule(data, module.id)) return waiting("unknown-section");
 
   const attempt = data.attempt.moduleAttempts.find(
     (candidate) => candidate.moduleId === module.id,
   );
   const isBranch = module.adaptiveRole !== "base";
 
-  if (sectionDisplayOrder === 0 && !isBranch) {
+  if (isFirstBaseModule(data, module)) {
     if (phase !== "directions") return waiting("initial-entry-not-on-directions");
-    return data.attempt.moduleAttempts.every(isUnstartedAttempt)
+    return isSatInitialEntry(data, module)
       ? { shouldStart: true, reason: "initial-entry", autoStartPending: true }
       : waiting("already-started");
   }

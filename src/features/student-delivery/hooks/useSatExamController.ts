@@ -1046,7 +1046,6 @@ export function useSatExamController({
   const entryDecision = deriveSatEntryDecision({
     data,
     module: pendingModule,
-    sectionDisplayOrder: pendingSection?.displayOrder ?? null,
     stageReady: pendingStageReady,
     breakSeconds: breakGateSeconds,
     sectionWaitSeconds: pendingSectionWaitSeconds,

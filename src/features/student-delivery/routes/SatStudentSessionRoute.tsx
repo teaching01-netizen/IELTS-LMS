@@ -22,6 +22,7 @@ import {
   type SatExamStage,
   type SatStudentStage,
 } from "../application/satStudentSurface";
+import { isSatInitialEntry } from "../application/satEntry";
 import {
   findAttemptForModule,
   moduleStartsNewSection,
@@ -194,11 +195,7 @@ export function SatStudentSessionRoute({
     ? sectionForModule(data, exam.pendingModule.id)
     : null;
   const initialEntry = Boolean(
-    data &&
-      state.phase === "directions" &&
-      exam.pendingModule?.adaptiveRole === "base" &&
-      pendingSection?.displayOrder === 0 &&
-      data.attempt.moduleAttempts.every((moduleAttempt) => moduleAttempt.state === "not_started"),
+    data && state.phase === "directions" && isSatInitialEntry(data, exam.pendingModule),
   );
   const prevIdentityKeyRef = useRef<string | null>(null);
   if (prevIdentityKeyRef.current !== identityKey) {

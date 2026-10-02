@@ -7,6 +7,7 @@ import { resolveSatToolCapabilities, toggleSatActiveTool } from './satTools';
 import type { AssessmentDeliveryBootstrap, AssessmentDeliveryModule, AssessmentModuleAttemptSnapshot, AssessmentTimingSnapshot } from '../contracts/assessmentDelivery';
 import {
   deriveSatEntryDecision,
+  isSatInitialEntry,
   moduleAttemptEndedByOwnClock,
   previousModuleTimedOut,
   type SatEntryDecisionInput,
@@ -198,7 +199,8 @@ describe('SAT delivery domain', () => {
   });
 
   it('auto-enters the first SAT module only after the proctor makes the runtime live', () => {
-    const module = { id: 'rw-m1', adaptiveRole: 'base' } as AssessmentDeliveryModule;
+    const module = { id: 'rw-m1', adaptiveRole: 'base', displayOrder: 0 } as AssessmentDeliveryModule;
+    const mathModule = { id: 'math-m1', adaptiveRole: 'base', displayOrder: 0 } as AssessmentDeliveryModule;
     const pendingAttempt: AssessmentModuleAttemptSnapshot = {
       id: 'attempt-module', moduleId: module.id, state: 'not_started', allocatedSeconds: 600,
       availableAt: null, startedAt: null, pausedAt: null, accumulatedPausedSeconds: 0,
@@ -218,11 +220,15 @@ describe('SAT delivery domain', () => {
         remainingSeconds: 600,
         runtimeRevision: 4,
       },
+      sections: [
+        { id: 'rw', sectionKey: 'reading_writing', displayOrder: 0, modules: [module] },
+        { id: 'math', sectionKey: 'math', displayOrder: 1, modules: [mathModule] },
+      ],
       attempt: { moduleAttempts: [pendingAttempt] },
-    } as AssessmentDeliveryBootstrap;
+    } as unknown as AssessmentDeliveryBootstrap;
     const entry = (overrides: Partial<SatEntryDecisionInput> = {}) =>
       deriveSatEntryDecision({
-        data, module, sectionDisplayOrder: 0, stageReady: true,
+        data, module, stageReady: true,
         breakSeconds: 0, sectionWaitSeconds: 0, phase: 'directions', ...overrides,
       });
 
@@ -276,13 +282,62 @@ describe('SAT delivery domain', () => {
     })).toMatchObject({ shouldStart: false, reason: 'already-started', autoStartPending: true });
     // Later sections are server-driven too (break expiry activates the next
     // Module 1), so the client never starts them either.
-    expect(entry({ sectionDisplayOrder: 1 })).toMatchObject({
+    expect(entry({ module: mathModule })).toMatchObject({
       shouldStart: false, reason: 'already-started',
     });
+    // The first module needs its own unstarted attempt row.
+    expect(entry({
+      data: { ...data, attempt: { ...data.attempt, moduleAttempts: [{ ...pendingAttempt, moduleId: 'other' }] } },
+    })).toMatchObject({ shouldStart: false, reason: 'already-started' });
+  });
+
+  it('auto-enters Math Module 1 when a math-only session keeps the Math section order', () => {
+    const mathModule = { id: 'math-m1', adaptiveRole: 'base', displayOrder: 0 } as AssessmentDeliveryModule;
+    const mathM2 = { id: 'math-m2-high', adaptiveRole: 'higher_branch', displayOrder: 1 } as AssessmentDeliveryModule;
+    const pendingAttempt: AssessmentModuleAttemptSnapshot = {
+      id: 'math-attempt', moduleId: mathModule.id, state: 'not_started', allocatedSeconds: 600,
+      availableAt: null, startedAt: null, pausedAt: null, accumulatedPausedSeconds: 0,
+      extensionSeconds: 0, deadlineAt: null, remainingSeconds: 600, completionReason: null,
+      rawCorrect: null, operationalQuestionCount: null, toolState: {}, revision: 0,
+    };
+    const data = {
+      scheduleRuntimeStatus: 'live',
+      proctorStatus: 'active',
+      timing: { authority: 'cohort_runtime', timingModel: 'sat_personal_v1' },
+      // Student Access narrowed the release to Math; the server keeps order 1.
+      sections: [{ id: 'math', sectionKey: 'math', displayOrder: 1, modules: [mathM2, mathModule] }],
+      attempt: { moduleAttempts: [pendingAttempt] },
+    } as unknown as AssessmentDeliveryBootstrap;
+    const entry = (overrides: Partial<SatEntryDecisionInput> = {}) =>
+      deriveSatEntryDecision({
+        data, module: mathModule, stageReady: true,
+        breakSeconds: 0, sectionWaitSeconds: 0, phase: 'directions', ...overrides,
+      });
+
+    expect(isSatInitialEntry(data, mathModule)).toBe(true);
+    expect(entry()).toMatchObject({ shouldStart: true, reason: 'initial-entry' });
+    expect(entry({ phase: 'break' })).toMatchObject({ reason: 'initial-entry-not-on-directions' });
+    expect(entry({ data: { ...data, scheduleRuntimeStatus: 'paused' } })).toMatchObject({
+      shouldStart: false, reason: 'runtime-not-live',
+    });
+    expect(entry({ data: { ...data, scheduleRuntimeStatus: 'scheduled' } })).toMatchObject({
+      shouldStart: false, reason: 'runtime-not-live',
+    });
+    // Reload mid-module: active Math is never started again.
+    const active = {
+      ...data,
+      attempt: { moduleAttempts: [{ ...pendingAttempt, state: 'active', startedAt: '2026-08-30T03:00:00Z' }] },
+    } as AssessmentDeliveryBootstrap;
+    expect(isSatInitialEntry(active, mathModule)).toBe(false);
+    expect(entry({ data: active })).toMatchObject({ shouldStart: false, reason: 'already-started' });
+    // The branch is server-driven, never the initial entry.
+    expect(isSatInitialEntry(data, mathM2)).toBe(false);
+    expect(entry({ module: mathM2 })).toMatchObject({ shouldStart: false, reason: 'already-started' });
   });
 
   it('auto-enters the next SAT section only after the authoritative break has ended', () => {
-    const module = { id: 'math-m1', adaptiveRole: 'base' } as AssessmentDeliveryModule;
+    const module = { id: 'math-m1', adaptiveRole: 'base', displayOrder: 0 } as AssessmentDeliveryModule;
+    const rwModule = { id: 'rw-m1', adaptiveRole: 'base', displayOrder: 0 } as AssessmentDeliveryModule;
     const pendingAttempt: AssessmentModuleAttemptSnapshot = {
       id: 'math-attempt', moduleId: module.id, state: 'not_started', allocatedSeconds: 600,
       availableAt: null, startedAt: null, pausedAt: null, accumulatedPausedSeconds: 0,
@@ -302,11 +357,15 @@ describe('SAT delivery domain', () => {
         remainingSeconds: 600,
         runtimeRevision: 4,
       },
+      sections: [
+        { id: 'rw', sectionKey: 'reading_writing', displayOrder: 0, modules: [rwModule] },
+        { id: 'math', sectionKey: 'math', displayOrder: 1, modules: [module] },
+      ],
       attempt: { moduleAttempts: [pendingAttempt] },
-    } as AssessmentDeliveryBootstrap;
+    } as unknown as AssessmentDeliveryBootstrap;
     const entry = (overrides: Partial<SatEntryDecisionInput> = {}) =>
       deriveSatEntryDecision({
-        data, module, sectionDisplayOrder: 1, stageReady: true,
+        data, module, stageReady: true,
         breakSeconds: 0, sectionWaitSeconds: 0, phase: 'break', ...overrides,
       });
 
@@ -332,7 +391,7 @@ describe('SAT delivery domain', () => {
     expect(entry({ module: { ...module, adaptiveRole: 'higher_branch' } })).toMatchObject({
       shouldStart: false, reason: 'already-started', autoStartPending: true,
     });
-    expect(entry({ sectionDisplayOrder: null })).toMatchObject({
+    expect(entry({ module: { ...module, id: 'not-delivered' } })).toMatchObject({
       shouldStart: false, reason: 'unknown-section',
     });
     expect(entry({

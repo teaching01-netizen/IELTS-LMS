@@ -372,6 +372,24 @@ function liveFirstModuleBootstrap(runtimeRevision: number): AssessmentDeliveryBo
 }
 
 /**
+ * The same payload with Student Access narrowed to Math (release order kept),
+ * on the personal timing model SAT sessions run, where every module after the
+ * initial one is server-driven.
+ */
+function mathOnly(bootstrap: AssessmentDeliveryBootstrap): AssessmentDeliveryBootstrap {
+  return {
+    ...bootstrap,
+    timing: {
+      ...bootstrap.timing,
+      timingModel: "sat_personal_v1",
+      stageKey: bootstrap.timing.stageKey && "math",
+    },
+    sections: [mathSection()],
+    attempt: { ...bootstrap.attempt, moduleAttempts: [notStarted(MODULE_MATH)] },
+  };
+}
+
+/**
  * The authoritative break has ended: section 1 is complete, the server has
  * advanced, and math is live with its base module still not_started.
  */
@@ -539,6 +557,59 @@ describe("useSatExamController auto-entry", () => {
       moduleId: MODULE_RW,
     });
     await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+  });
+
+  // Student Access narrowed to Math: the server keeps Math's release order (1),
+  // so initial entry is the first delivered base module, not section order 0.
+  it("enters Math Module 1 once the proctor starts a math-only session", async () => {
+    gatewayMocks.bootstrap.mockResolvedValueOnce(mathOnly(notStartedCohortBootstrap()));
+    gatewayMocks.bootstrap.mockResolvedValue(mathOnly(liveFirstModuleBootstrap(2)));
+    gatewayMocks.startModule.mockResolvedValue(
+      openedModule(mathOnly(liveFirstModuleBootstrap(2)), MODULE_MATH, 3),
+    );
+
+    const hook = renderController();
+
+    await waitFor(() =>
+      expect(hook.result.current.data?.scheduleRuntimeStatus).toBe("not_started"),
+    );
+    expect(gatewayMocks.startModule).not.toHaveBeenCalled();
+    expect(hook.result.current.state.phase).toBe("directions");
+
+    hook.rerender({ token: 1 });
+
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1);
+    expect(gatewayMocks.startModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {
+      moduleId: MODULE_MATH,
+    });
+  });
+
+  it("keeps a math-only student waiting while the session is paused", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue({
+      ...mathOnly(liveFirstModuleBootstrap(2)),
+      scheduleRuntimeStatus: "paused",
+    });
+
+    const hook = renderController();
+    await waitFor(() =>
+      expect(hook.result.current.data?.scheduleRuntimeStatus).toBe("paused"),
+    );
+    await act(async () => {
+      await sleep(50);
+    });
+    expect(gatewayMocks.startModule).not.toHaveBeenCalled();
+    expect(hook.result.current.state.phase).toBe("directions");
+  });
+
+  it("resumes an active math-only Math module on reload without starting it again", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(
+      openedModule(mathOnly(liveFirstModuleBootstrap(2)), MODULE_MATH, 3),
+    );
+
+    const hook = renderController();
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(gatewayMocks.startModule).not.toHaveBeenCalled();
   });
 
   // The waiting-room 409 storm: a real pre-start bootstrap used to say

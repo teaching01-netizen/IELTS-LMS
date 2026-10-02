@@ -88,7 +88,7 @@ export function resolveLegacyModuleIdentity(
  * whether the module itself begins a new section (it wrongly made Math Module 2
  * look like a section boundary).
  */
-function modulesInExamOrder(data: AssessmentDeliveryBootstrap): AssessmentDeliveryModule[] {
+export function modulesInExamOrder(data: AssessmentDeliveryBootstrap): AssessmentDeliveryModule[] {
   return [...data.sections]
     .sort((left, right) => left.displayOrder - right.displayOrder)
     .flatMap((section) =>
