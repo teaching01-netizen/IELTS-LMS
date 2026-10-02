@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   emptySatExamToolPolicy,
   resolveSatExamToolPolicy,
+  toSatSectionKey,
   toSatToolCapabilities,
 } from './satToolPolicy';
 
@@ -72,5 +73,15 @@ describe('resolveSatExamToolPolicy', () => {
     expect(
       toSatToolCapabilities(resolveSatExamToolPolicy('math', ['calculator'])),
     ).toEqual({ calculator: true, referenceSheet: false });
+  });
+});
+
+describe('toSatSectionKey', () => {
+  it('keeps math and treats every other value as Reading and Writing', () => {
+    expect(toSatSectionKey('math')).toBe('math');
+    expect(toSatSectionKey('reading-writing')).toBe('reading-writing');
+    expect(toSatSectionKey('listening')).toBe('reading-writing');
+    expect(toSatSectionKey(null)).toBe('reading-writing');
+    expect(toSatSectionKey(undefined)).toBe('reading-writing');
   });
 });

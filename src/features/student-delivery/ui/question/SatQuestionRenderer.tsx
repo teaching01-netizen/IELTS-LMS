@@ -121,6 +121,7 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
                 value={props.response.answer}
                 disabled={props.disabled}
                 onChange={props.onAnswerChange}
+                onBlur={props.onAnswerBlur}
               />
             )}
           </SatQuestionBody>

@@ -92,7 +92,17 @@ func ValidateModule(module Module) []Issue {
 		))
 	}
 	for _, question := range module.Questions {
-		for _, questionIssue := range ValidateQuestion(question) {
+		questionIssues := ValidateQuestion(question)
+		// Student-produced response is Math-only on the Digital SAT; Reading &
+		// Writing is multiple choice throughout.
+		if strings.TrimSpace(module.SectionKey) == SectionReadingWriting && question.QuestionType != "single_choice" {
+			questionIssues = append(questionIssues, issue(
+				"sat.rw.question_type",
+				"questionType",
+				"Reading & Writing questions must be multiple choice.",
+			))
+		}
+		for _, questionIssue := range questionIssues {
 			questionIssue.Path = "examQuestion:" + question.ExamQuestionID + ":" + questionIssue.Path
 			issues = append(issues, questionIssue)
 		}

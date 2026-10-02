@@ -5,7 +5,7 @@ import type {
   DeliveredAssessmentModule,
   DeliveredAssessmentSection,
 } from "../../exam-authoring/api/assessmentContracts";
-import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satToolPolicy";
+import { resolveSatExamToolPolicy, toSatSectionKey, toSatToolCapabilities } from "../domain/satToolPolicy";
 import {
   applySatResponseDraftChange,
   emptySatQuestionResponse,
@@ -130,7 +130,7 @@ export function useSatPreviewController(examId: string) {
   );
   const response = question ? responseForQuestion(responses, question.examQuestionId) : null;
   const navigationItems = buildSatQuestionNavigationItems(questionIds, questionIndex, responses);
-  const toolPolicy = resolveSatExamToolPolicy(section?.sectionKey === "math" ? "math" : "reading-writing", module?.toolPolicy ?? []);
+  const toolPolicy = resolveSatExamToolPolicy(toSatSectionKey(section?.sectionKey), module?.toolPolicy ?? []);
   const tools = toSatToolCapabilities(toolPolicy);
 
   const setResponse = useCallback(

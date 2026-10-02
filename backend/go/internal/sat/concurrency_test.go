@@ -60,7 +60,7 @@ func satNoReceipt(mock sqlmock.Sqlmock) {
 }
 
 func satUnscopedRun(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections FROM assessment_access_links")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a")).
 		WillReturnError(sql.ErrNoRows)
 }
 

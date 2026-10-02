@@ -530,6 +530,14 @@ describe("SatStudentSessionRoute prewarm gating", () => {
     expectBare(document.body);
   });
 
+  it("C13 pending R+W module never prewarms Desmos even if its authored policy advertises one", () => {
+    const rwWithCalc = { id: "rw-m1", toolPolicy: { calculator: true } };
+    const data = bootstrapFixture({ rwModule: rwWithCalc, mathModule: MATH_CALC, activeModuleId: null });
+    setup({ phase: "directions", stateModuleId: null, pendingModuleId: "rw-m1", data });
+    expect(screen.queryByTitle(/Desmos/)).toBeNull();
+    expectBare(document.body);
+  });
+
   it("C12 module R+W no calc (B12): shell present, zero iframes (fallback-removal proof)", () => {
     const rwWithQ = { id: "rw-m1", toolPolicy: {} };
     const data = bootstrapFixture({ rwModule: rwWithQ, mathModule: MATH_CALC, activeModuleId: "rw-m1" });

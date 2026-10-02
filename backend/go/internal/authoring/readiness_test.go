@@ -37,31 +37,22 @@ func TestValidateSATQuestionFlagsIncompleteAndInvalidSeparately(t *testing.T) {
 	}
 }
 
-func TestValidateSATPublishQuestionIgnoresOptionalAuthoringFields(t *testing.T) {
-	issues := validateSATPublishQuestion(questionValidationRow{
-		examQuestionID: "eq-1",
-		sectionKey:     SectionReadingWriting,
-		questionType:   "single_choice",
-		prompt:         validPrompt(),
-		answer:         validChoiceAnswer(),
-		stimulus:       emptyContent(),
-		rationale:      emptyContent(),
-		metadata:       `{}`,
-	})
-	if len(issues) != 0 {
-		t.Fatalf("optional metadata/content must not block SAT publishing: %+v", issues)
+func TestValidateSATQuestionSPRKeysFollowThePublishRule(t *testing.T) {
+	check := func(response string) []ValidationIssue {
+		answer := `{"kind":"student_produced_response","acceptedResponses":["` + response + `"]}`
+		return validateSATQuestion(SectionMath, "student_produced_response", `{}`, validPrompt(), answer, `{}`, validMetadata())
 	}
-}
-
-func TestValidateSATPublishQuestionRequiresNumericSPRResponses(t *testing.T) {
-	issues := validateSATPublishQuestion(questionValidationRow{
-		questionType: "student_produced_response",
-		prompt:       validPrompt(),
-		answer:       `{"kind":"student_produced_response","acceptedResponses":["2/3"]}`,
-		metadata:     `{}`,
-	})
-	if len(issues) != 0 {
-		t.Fatalf("valid numeric SPR publish validation should pass: %+v", issues)
+	// Valid keys longer than the student's 5-character budget still have a
+	// SAT entry form, so the editor must not block what publish accepts.
+	for _, key := range []string{"2/3", "-1.5", "100/333", "0.33333", ".5"} {
+		if containsIssueCode(check(key), "sat.spr.answer.invalid") {
+			t.Fatalf("key %q must be accepted: %+v", key, check(key))
+		}
+	}
+	for _, key := range []string{"12%", "1/0", "1/123456", "--1"} {
+		if !containsIssueCode(check(key), "sat.spr.answer.invalid") {
+			t.Fatalf("key %q must be rejected: %+v", key, check(key))
+		}
 	}
 }
 

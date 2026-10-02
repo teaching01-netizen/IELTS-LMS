@@ -39,6 +39,7 @@ describe('SAT Math student-response rendering', () => {
       answer: { kind: 'student_produced_response', normalizeFraction: true, normalizeDecimal: true, numericTolerance: null },
     };
     const onAnswerChange = vi.fn();
+    const onAnswerBlur = vi.fn();
     const props = {
       sectionKey: 'math' as const,
       questionNumber: 1,
@@ -48,6 +49,7 @@ describe('SAT Math student-response rendering', () => {
       readingPreferences: createSatReadingPreferences(),
       onReadingSplitRatioChange: vi.fn(),
       onAnswerChange,
+      onAnswerBlur,
       onToggleReview: vi.fn(),
       onToggleEliminationMode: vi.fn(),
       onToggleEliminatedOption: vi.fn(),
@@ -61,6 +63,9 @@ describe('SAT Math student-response rendering', () => {
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: '4' } });
     expect(onAnswerChange).toHaveBeenCalledWith('4');
+    // Leaving the field flushes the draft, as it does for multiple choice.
+    fireEvent.blur(input);
+    expect(onAnswerBlur).toHaveBeenCalledTimes(1);
 
     rerender(<SatQuestionRenderer {...props} response={{ ...response, answer: '4' }} />);
     expect(input).toHaveValue('4');

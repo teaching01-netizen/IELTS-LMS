@@ -9,7 +9,6 @@ package attempts
 // has one Go implementation and one vocabulary.
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 const (
@@ -25,8 +25,8 @@ const (
 	SATModuleLocked    = "locked"
 
 	// Section keys owned by the SAT provider.
-	SATSectionReadingWriting = "reading-writing"
-	SATSectionMath           = "math"
+	SATSectionReadingWriting = satpublish.SectionReadingWriting
+	SATSectionMath           = satpublish.SectionMath
 )
 
 // SATModuleTerminal reports whether a stored module state is one the SAT
@@ -154,21 +154,14 @@ func EnsureSATModuleTopologyTx(ctx context.Context, q tx.Tx, attemptID string) e
 	return ensureSATModuleTopologyTx(ctx, q, attemptID)
 }
 
-// satRequiredSectionsTx resolves the section set this run declared, from the
-// Student Access link backing the attempt's schedule: a narrowed link declares
-// its subset, and no link (or an unscoped link) declares the full SAT pair.
-// Read-only and lock-free, so it can run beside the attempt row lock without
-// joining a lock-order cycle.
+// satRequiredSectionsTx resolves the section set this run declared. It is the
+// same release-and-link scope delivery seeds from (exams.AttemptSectionScope),
+// so a Math-only release requires only Math even with no link narrowing; an
+// unscoped run declares the full SAT pair.
 func satRequiredSectionsTx(ctx context.Context, q tx.Tx, attemptID string) ([]string, error) {
-	var raw sql.NullString
-	err := q.QueryRowContext(ctx,
-		"SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a ON a.schedule_id = l.schedule_id WHERE a.id = ?",
-		attemptID).Scan(&raw)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	scope, err := examdomain.AttemptSectionScope(ctx, q, attemptID)
 	if err != nil {
 		return nil, err
 	}
-	return examdomain.SectionScopeKeys(examdomain.ParseStoredSectionScope(raw.String)), nil
+	return examdomain.SectionScopeKeys(scope), nil
 }

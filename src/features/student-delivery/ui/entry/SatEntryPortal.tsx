@@ -50,8 +50,6 @@ export interface SatEntryLayoutProps {
   eyebrow?: string | undefined;
   title: string;
   description?: string | undefined;
-  /** Small facts under the description (audience chip). */
-  meta?: ReactNode;
   /** Closing line of the card. */
   helpText?: string | undefined;
   /** Notices and the form. */
@@ -62,7 +60,6 @@ export function SatEntryLayout({
   eyebrow = "Digital SAT",
   title,
   description,
-  meta,
   helpText = "Need help? Ask your proctor.",
   children,
 }: SatEntryLayoutProps) {
@@ -88,7 +85,6 @@ export function SatEntryLayout({
               {description}
             </p>
           ) : null}
-          {meta ? <div className="mt-5">{meta}</div> : null}
         </div>
 
         <SatPresenceSurface
@@ -145,12 +141,10 @@ export function SatEntryLayout({
 /** Terminal entry states (closed, paused, not yet open): one card, nothing to fill in. */
 export function SatEntryStatus({
   icon,
-  eyebrow,
   title,
   description,
 }: {
   icon: ReactNode;
-  eyebrow?: string | undefined;
   title: string;
   description: string;
 }) {
@@ -166,14 +160,7 @@ export function SatEntryStatus({
           >
             {icon}
           </span>
-          {eyebrow ? (
-            <p className="mt-5 text-[13px] font-semibold text-[var(--sat-text-secondary)]">
-              {eyebrow}
-            </p>
-          ) : null}
-          <h1
-            className={`${eyebrow ? "mt-1.5" : "mt-5"} text-[1.5rem] font-semibold leading-8 tracking-[-0.02em] text-[var(--sat-exam-navy)]`}
-          >
+          <h1 className="mt-5 text-[1.5rem] font-semibold leading-8 tracking-[-0.02em] text-[var(--sat-exam-navy)]">
             {title}
           </h1>
           <p className="mx-auto mt-2 max-w-sm text-[15px] leading-6 text-[var(--sat-text-secondary)]">

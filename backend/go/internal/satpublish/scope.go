@@ -6,10 +6,16 @@ import "fmt"
 // at request boundaries and normalizes to full for backward compatibility.
 type Scope string
 
+// Section keys owned by the SAT provider; other packages alias these.
+const (
+	SectionReadingWriting = "reading-writing"
+	SectionMath           = "math"
+)
+
 const (
 	ScopeFull           Scope = "full"
-	ScopeReadingWriting Scope = "reading-writing"
-	ScopeMath           Scope = "math"
+	ScopeReadingWriting Scope = SectionReadingWriting
+	ScopeMath           Scope = SectionMath
 )
 
 func NormalizeScope(scope Scope) (Scope, error) {
@@ -32,11 +38,11 @@ func (scope Scope) SectionKeys() ([]string, error) {
 	}
 	switch normalized {
 	case ScopeFull:
-		return []string{"reading-writing", "math"}, nil
+		return []string{SectionReadingWriting, SectionMath}, nil
 	case ScopeReadingWriting:
-		return []string{"reading-writing"}, nil
+		return []string{SectionReadingWriting}, nil
 	case ScopeMath:
-		return []string{"math"}, nil
+		return []string{SectionMath}, nil
 	default:
 		return nil, fmt.Errorf("unknown SAT publish scope: %s", scope)
 	}

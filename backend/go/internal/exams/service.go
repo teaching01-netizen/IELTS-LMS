@@ -69,7 +69,7 @@ const (
 // adds science (migration 0050).
 var (
 	IELTSSectionKeys = []string{"listening", "reading", "writing", "speaking"}
-	SATSectionKeys   = []string{"reading-writing", "math"}
+	SATSectionKeys   = []string{satpublish.SectionReadingWriting, satpublish.SectionMath}
 	ACTSectionKeys   = []string{"listening", "reading", "writing", "speaking", "science"}
 )
 

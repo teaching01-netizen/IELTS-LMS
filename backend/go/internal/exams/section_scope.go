@@ -14,6 +14,8 @@ package exams
 // order, and one answer to "what does a NULL/empty/malformed column mean".
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -25,8 +27,8 @@ import (
 // the toggle UI and the validators hardcode the pair, and every other provider
 // leaves enabled_sections NULL (all sections).
 const (
-	LinkSectionReadingWriting = "reading-writing"
-	LinkSectionMath           = "math"
+	LinkSectionReadingWriting = satpublish.SectionReadingWriting
+	LinkSectionMath           = satpublish.SectionMath
 
 	SATPublishScopeFull           = satpublish.ScopeFull
 	SATPublishScopeReadingWriting = satpublish.ScopeReadingWriting
@@ -154,6 +156,35 @@ func ParseSATPublishScope(raw string) map[string]bool {
 	default:
 		return map[string]bool{}
 	}
+}
+
+// RowQueryer is the smallest read boundary AttemptSectionScope needs; both
+// *sql.DB and tx.Tx satisfy it.
+type RowQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// AttemptSectionScope is the single answer to "which sections does this
+// attempt's run include": the immutable release scope intersected with the
+// Student Access link scope. Nil means no narrowing. Read-only and lock-free, so
+// it can run beside an attempt row lock without joining a lock-order cycle.
+// Delivery (what is seeded) and attempts (what completion requires) both call
+// it, so they cannot disagree about a narrowed sitting.
+func AttemptSectionScope(ctx context.Context, q RowQueryer, attemptID string) (map[string]bool, error) {
+	var rawLink, rawRelease sql.NullString
+	err := q.QueryRowContext(ctx,
+		"SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions v ON v.id = a.published_version_id LEFT JOIN assessment_access_links l ON l.schedule_id = a.schedule_id WHERE a.id = ?",
+		attemptID).Scan(&rawLink, &rawRelease)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return IntersectSectionScopes(
+		ParseSATPublishScope(rawRelease.String),
+		ParseStoredSectionScope(rawLink.String),
+	), nil
 }
 
 // IntersectSectionScopes applies release and link scopes. nil means full;

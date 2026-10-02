@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { QuestionRevision, StructuredContent } from "../../../contracts/assessment";
 import { plainContentFromText } from "../../../editor/richContent";
-import { validateSatQuestion } from "../satProvider";
+import { SAT_BLUEPRINT, validateSatQuestion } from "../satProvider";
+import { SAT_DOMAINS, SAT_SKILLS } from "../taxonomy";
 
 function question(overrides: Partial<QuestionRevision> = {}): QuestionRevision {
   return {
@@ -181,5 +184,47 @@ describe("SAT frontend validation parity", () => {
     const codes = validateSatQuestion("math", value).map((issue) => issue.code);
     expect(codes).toContain("sat.spr.characters");
     expect(codes).toContain("sat.spr.denominator_zero");
+  });
+});
+
+// offcut: the Go readiness gate and this editor keep separate copies of the SAT
+// blueprint and taxonomy (different runtimes); these pins fail on drift instead
+// of generating one from the other.
+describe("Go readiness parity", () => {
+  const goSource = readFileSync(
+    resolve(process.cwd(), "backend/go/internal/authoring/readiness.go"),
+    "utf8"
+  );
+  const goFunction = (name: string) => {
+    const start = goSource.indexOf(`func ${name}(`);
+    return goSource.slice(start, goSource.indexOf("\n}\n", start));
+  };
+
+  it.each(SAT_BLUEPRINT)("matches the Go blueprint for $key", (section) => {
+    const goSection = section.key === "math" ? "SectionMath" : "SectionReadingWriting";
+    const match = new RegExp(
+      `case ${goSection}:\\s*spec = satBlueprintModuleSpec\\{durationSeconds: (\\d+) \\* 60, questionCount: (\\d+), pretestCount: (\\d+)(?:, tools: \\[\\]string\\{([^}]*)\\})?\\}\\s*switch moduleKey \\{\\s*case ([^:]+):`
+    ).exec(goFunction("satBlueprintModule"));
+    expect(match).not.toBeNull();
+    const [, minutes, questionCount, pretestCount, tools = "", moduleKeys] = match!;
+    const quoted = (list: string) => [...list.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+
+    expect(section.modules.map((module) => module.key)).toEqual(quoted(moduleKeys!));
+    for (const module of section.modules) {
+      expect(module.durationSeconds).toBe(Number(minutes) * 60);
+      expect(module.questionCount).toBe(Number(questionCount));
+      expect(module.pretestCount).toBe(Number(pretestCount));
+      expect(module.tools).toEqual(quoted(tools));
+    }
+  });
+
+  it("holds the same domains and skills as the Go taxonomy", () => {
+    const goEntries = (name: string) =>
+      [...goFunction(name).matchAll(/"([^"]+)": true/g)].map((m) => m[1]).sort();
+    const domains = Object.values(SAT_DOMAINS).flatMap((list) => list.map((d) => d.key));
+    const skills = Object.values(SAT_SKILLS).flat();
+
+    expect(goEntries("satDomainValid")).toEqual([...domains].sort());
+    expect(goEntries("satSkillValid")).toEqual([...skills].sort());
   });
 });

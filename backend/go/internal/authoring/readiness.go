@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/satpublish"
 )
 
@@ -627,29 +628,6 @@ func validateSATQuestion(section, questionType, stimulus, prompt, answer, ration
 	return issues
 }
 
-// validateSATPublishQuestion is deliberately narrower than validateSATQuestion.
-// Editor diagnostics can require metadata, rich-content shape, accessibility,
-// and provider-specific formatting; the publish contract only owns the four
-// content families represented by satpublish.ValidateQuestion.
-func validateSATPublishQuestion(row questionValidationRow) []ValidationIssue {
-	issues := satpublish.ValidateQuestion(satpublish.Question{
-		ExamQuestionID: row.examQuestionID,
-		QuestionType:   row.questionType,
-		Prompt:         row.prompt,
-		Answer:         row.answer,
-	})
-	out := make([]ValidationIssue, 0, len(issues))
-	for _, issue := range issues {
-		out = append(out, ValidationIssue{
-			Code:     issue.Code,
-			Path:     issue.Path,
-			Message:  issue.Message,
-			Blocking: issue.Blocking,
-		})
-	}
-	return out
-}
-
 func (s *Service) validateSATExam(ctx context.Context, shell Shell, rep ValidationReport, scope satpublish.Scope) (ValidationReport, error) {
 	issues, err := satpublish.ValidateDraftForScope(ctx, s.db, shell.VersionID, scope)
 	if err != nil {
@@ -707,64 +685,6 @@ func validateChoiceAnswer(answer map[string]any, issues *[]ValidationIssue) {
 	}
 }
 
-type sprResponseError struct{ code, message string }
-
-func validateSPRResponse(response string) *sprResponseError {
-	value := strings.TrimSpace(response)
-	negative := strings.HasPrefix(value, "-")
-	maxLength := 5
-	if negative {
-		maxLength = 6
-	}
-	if len(value) > maxLength {
-		return &sprResponseError{"length", fmt.Sprintf("SAT responses allow at most %d characters%s.", maxLength, map[bool]string{true: " including the minus sign", false: ""}[negative])}
-	}
-	for _, character := range value {
-		if (character < '0' || character > '9') && character != '-' && character != '.' && character != '/' {
-			return &sprResponseError{"characters", "Use only digits, a decimal point, a fraction bar, or a leading minus sign."}
-		}
-	}
-	if strings.Count(value, "-") > 1 || (strings.Contains(value, "-") && !negative) {
-		return &sprResponseError{"format", "A minus sign can appear only once, at the beginning."}
-	}
-	unsigned := strings.TrimPrefix(value, "-")
-	if unsigned == "" || (strings.Contains(unsigned, "/") && strings.Contains(unsigned, ".")) {
-		return &sprResponseError{"format", "Enter an integer, decimal, or fraction such as 12, .5, or 3/4."}
-	}
-	if strings.Contains(unsigned, "/") {
-		parts := strings.Split(unsigned, "/")
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" || !allDigits(parts[0]) || !allDigits(parts[1]) {
-			return &sprResponseError{"format", "Enter an integer, decimal, or fraction such as 12, .5, or 3/4."}
-		}
-		if strings.Trim(parts[1], "0") == "" {
-			return &sprResponseError{"denominator_zero", "A fraction denominator cannot be zero."}
-		}
-		return nil
-	}
-	if allDigits(unsigned) {
-		return nil
-	}
-	if strings.Count(unsigned, ".") == 1 {
-		parts := strings.SplitN(unsigned, ".", 2)
-		if parts[1] != "" && (parts[0] == "" || allDigits(parts[0])) && allDigits(parts[1]) {
-			return nil
-		}
-	}
-	return &sprResponseError{"format", "Enter an integer, decimal, or fraction such as 12, .5, or 3/4."}
-}
-
-func allDigits(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, character := range value {
-		if character < '0' || character > '9' {
-			return false
-		}
-	}
-	return true
-}
-
 func validateSPRAnswer(answer map[string]any, issues *[]ValidationIssue) {
 	values, _ := answer["acceptedResponses"].([]any)
 	if values == nil {
@@ -791,8 +711,11 @@ func validateSPRAnswer(answer map[string]any, issues *[]ValidationIssue) {
 		if strings.TrimSpace(response) == "" {
 			continue
 		}
-		if validation := validateSPRResponse(response); validation != nil {
-			appendIssue(issues, "sat.spr."+validation.code, fmt.Sprintf("answer.acceptedResponses[%d]", index), validation.message)
+		// Same rule publish and strict grading enforce, so a key the editor
+		// accepts is exactly a key that can publish (e.g. 100/333 is a valid key
+		// whose student entry is .333).
+		if err := assessscore.ValidateSATSPRKey(response); err != nil {
+			appendIssue(issues, "sat.spr.answer.invalid", fmt.Sprintf("answer.acceptedResponses[%d]", index), err.Error())
 		}
 	}
 }

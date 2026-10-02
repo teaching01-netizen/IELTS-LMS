@@ -268,9 +268,9 @@ func sectionScopeSQL(raw string) (string, []any) {
 	case "", string(satpublish.ScopeFull):
 		return "", nil
 	case string(satpublish.ScopeReadingWriting):
-		return " AND s.section_key = ?", []any{"reading-writing"}
+		return " AND s.section_key = ?", []any{satpublish.SectionReadingWriting}
 	case string(satpublish.ScopeMath):
-		return " AND s.section_key = ?", []any{"math"}
+		return " AND s.section_key = ?", []any{satpublish.SectionMath}
 	default:
 		return " AND 1 = 0", nil
 	}

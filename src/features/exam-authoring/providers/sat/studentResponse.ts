@@ -14,6 +14,9 @@ export function validateSatStudentResponse(input: string): SatStudentResponseVal
   return validateNumericResponse(input, false);
 }
 
+// offcut: checks syntax and the 256-char key cap only. The server
+// (assessscore.ValidateSATSPRKey) also requires a SAT entry form within 5/6
+// characters, so a key like 1/123456 passes here and is rejected at publish.
 export function validateSatAnswerKey(input: string): SatStudentResponseValidation {
   return validateNumericResponse(input, true);
 }

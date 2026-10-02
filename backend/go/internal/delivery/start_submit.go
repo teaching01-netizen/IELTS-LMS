@@ -1244,7 +1244,7 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 	// Math base module the moment Reading & Writing finished, and the exam
 	// would never end. Scope is nil when the schedule has no link or the link
 	// is unscoped, leaving the previous query untouched.
-	scope, err := attemptSectionScopeTx(ctx, t, attemptID)
+	scope, err := examdomain.AttemptSectionScope(ctx, t, attemptID)
 	if err != nil {
 		return nil, err
 	}

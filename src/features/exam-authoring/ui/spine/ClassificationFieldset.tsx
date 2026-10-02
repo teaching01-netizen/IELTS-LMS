@@ -57,12 +57,12 @@ export function ClassificationFieldset({ question, onChange, issues, readOnly = 
           <Label htmlFor={domainId}>Domain</Label>
           <select
             id={domainId}
-            disabled={readOnly || skills.length === 0}
+            disabled={readOnly}
             value={question.metadata.domain ?? ""}
             onChange={(event) => updateDomain(event.target.value || null)}
             aria-invalid={Boolean(domainError)}
             aria-describedby={domainError ? domainErrorId : undefined}
-            className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25"
+            className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <option value="">Choose domain…</option>
             {domains.map((domain) => (
@@ -82,7 +82,7 @@ export function ClassificationFieldset({ question, onChange, issues, readOnly = 
           <Label htmlFor={skillId}>Skill</Label>
           <select
             id={skillId}
-            disabled={readOnly}
+            disabled={readOnly || skills.length === 0}
             value={question.metadata.skill ?? ""}
             onChange={(event) =>
               onChange({

@@ -787,27 +787,6 @@ func filterResponsesForModuleAttempts(responses []ResponseSnapshot, attempts []M
 	return filtered
 }
 
-// attemptSectionScopeTx resolves the published release and Student Access
-// scopes backing the attempt's schedule, inside the caller's transaction
-// (read-only; no lock, so it never joins a lock-order cycle). Nil means "no
-// narrowing".
-func attemptSectionScopeTx(ctx context.Context, t tx.Tx, attemptID string) (map[string]bool, error) {
-	var rawLink, rawRelease sql.NullString
-	err := t.QueryRowContext(ctx,
-		"SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions v ON v.id = a.published_version_id LEFT JOIN assessment_access_links l ON l.schedule_id = a.schedule_id WHERE a.id = ?",
-		attemptID).Scan(&rawLink, &rawRelease)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return examdomain.IntersectSectionScopes(
-		examdomain.ParseSATPublishScope(rawRelease.String),
-		examdomain.ParseStoredSectionScope(rawLink.String),
-	), nil
-}
-
 // sqlPlaceholders renders "?, ?, ?" for n bound arguments.
 func sqlPlaceholders(n int) string {
 	if n <= 0 {

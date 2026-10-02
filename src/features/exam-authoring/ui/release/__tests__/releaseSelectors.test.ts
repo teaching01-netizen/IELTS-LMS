@@ -22,6 +22,7 @@ import {
   getSATPublishBlockers,
   getPublishBlockers,
   isReadinessFresh,
+  isSATPublishReadinessIssue,
   isSATPublishReadinessValid,
   normalizePublishNotes,
   parseIssueLink,
@@ -150,6 +151,19 @@ describe("SAT publish readiness contract", () => {
     expect(isSATPublishReadinessValid({ ...freshReport, valid: false, errors: [legacy] }, true)).toBe(true);
     expect(isSATPublishReadinessValid(report, true)).toBe(false);
     expect(isSATPublishReadinessValid(report, false)).toBe(false);
+  });
+
+  it("gates on every code the Go publish validator can emit", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "backend/go/internal/satpublish/validator.go"),
+      "utf8",
+    );
+    const codes = [...source.matchAll(/issue\(\s*"([a-z_.]+)"/g)].map((match) => match[1]);
+    expect(codes.length).toBeGreaterThan(0);
+    for (const code of codes) {
+      const issue: AssessmentValidationIssue = { code, path: "p", message: "m", blocking: true };
+      expect(isSATPublishReadinessIssue(issue), code).toBe(true);
+    }
   });
 
   it("never reuses a fresh report across publish scopes", () => {

@@ -27,7 +27,7 @@ import {
   sectionForModule,
 } from "./satRuntimeSelectors";
 import { timingForAttempt } from "../domain/satTiming";
-import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satToolPolicy";
+import { resolveSatExamToolPolicy, toSatSectionKey, toSatToolCapabilities } from "../domain/satToolPolicy";
 import { isSatPersonalTimingModel } from "../../../types/domain";
 
 export type SatCommitHint =
@@ -59,7 +59,7 @@ export function startModuleRouteAction(
     Date.parse(payload.serverNow) < Date.parse(attempt.entryStartsAt)
   ) return null;
   const timing = timingForAttempt(payload, attempt);
-  const sectionKey = section.sectionKey === "math" ? "math" : "reading-writing";
+  const sectionKey = toSatSectionKey(section.sectionKey);
   return {
     type: "routeToModule",
     sectionKey,

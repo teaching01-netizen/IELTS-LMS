@@ -39,7 +39,7 @@ func satMath(state string) []driver.Value {
 // declares the full SAT pair, which is the pre-feature behaviour every
 // existing case pins.
 func satScopeUnscoped(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery("SELECT l.enabled_sections FROM assessment_access_links").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a").WillReturnError(sql.ErrNoRows)
 }
 
 // submitPrefixStubs stages the shared prefix every submit walks before the
@@ -235,5 +235,50 @@ func TestSubmitIELTSDoesNotQueryModules(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Completion requires exactly the sections the run was seeded with: the release
+// scope intersected with the link scope (exams.AttemptSectionScope), so a
+// single-section release needs no link narrowing to be submittable.
+func TestEnsureSATModuleTopologyHonorsReleaseAndLinkScope(t *testing.T) {
+	cases := []struct {
+		name        string
+		link        any
+		release     string
+		rows        *sqlmock.Rows
+		wantMissing string
+	}{
+		{"math-only release, no link", nil, "math", satModuleRows(satMath(SATModuleSubmitted)), ""},
+		{"reading-writing-only release, no link", nil, "reading-writing", satModuleRows(satRW(SATModuleSubmitted)), ""},
+		{"full release, link narrowed to math", `["math"]`, "full", satModuleRows(satMath(SATModuleSubmitted)), ""},
+		{"reading-writing release, link allows both", `["reading-writing","math"]`, "reading-writing", satModuleRows(satRW(SATModuleSubmitted)), ""},
+		{"math-only release still needs math", nil, "math", satModuleRows(satRW(SATModuleSubmitted)), SATSectionMath},
+		{"full release, no link needs both", nil, "full", satModuleRows(satRW(SATModuleSubmitted)), SATSectionMath},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectQuery("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a").
+				WithArgs("att-1").
+				WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(tc.link, tc.release))
+			mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").WillReturnRows(tc.rows)
+
+			err = ensureSATModuleTopologyTx(context.Background(), db, "att-1")
+			if tc.wantMissing == "" {
+				if err != nil {
+					t.Fatalf("topology complete for the declared scope must validate, got %v", err)
+				}
+				return
+			}
+			e, ok := apperrors.As(err)
+			if !ok || e.Code != apperrors.CodeConflict || !strings.Contains(e.Message, tc.wantMissing) {
+				t.Fatalf("want CONFLICT naming %s, got %v", tc.wantMissing, err)
+			}
+		})
 	}
 }

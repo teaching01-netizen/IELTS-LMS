@@ -22,6 +22,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // Adaptive roles (migration 0032 CHECK vocabulary).
@@ -34,8 +35,8 @@ const (
 
 // SAT blueprint section keys (see exam_provider/sat.rs).
 const (
-	SectionReadingWriting = "reading-writing"
-	SectionMath           = "math"
+	SectionReadingWriting = satpublish.SectionReadingWriting
+	SectionMath           = satpublish.SectionMath
 )
 
 // Workbook import states (migration 0040).

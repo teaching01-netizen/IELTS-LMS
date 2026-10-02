@@ -50,6 +50,40 @@ describe("ClassificationFieldset", () => {
     expect(screen.getByLabelText("Tags")).toBeInTheDocument();
   });
 
+  it("lets the author pick a domain first; the skill waits for one", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <ClassificationFieldset question={questionWith({})} onChange={onChange} issues={[]} />,
+    );
+    expect(screen.getByLabelText("Domain")).toBeEnabled();
+    expect(screen.getByLabelText("Skill")).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "craft-and-structure" } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ClassificationFieldset
+        question={questionWith({ domain: "craft-and-structure" })}
+        onChange={onChange}
+        issues={[]}
+      />,
+    );
+    expect(screen.getByLabelText("Skill")).toBeEnabled();
+  });
+
+  it("locks both selects when read-only", () => {
+    render(
+      <ClassificationFieldset
+        question={questionWith({ domain: "craft-and-structure" })}
+        onChange={vi.fn()}
+        issues={[]}
+        readOnly
+      />,
+    );
+    expect(screen.getByLabelText("Domain")).toBeDisabled();
+    expect(screen.getByLabelText("Skill")).toBeDisabled();
+  });
+
   it("clears an incompatible skill when the domain changes", () => {
     const onChange = vi.fn();
     render(

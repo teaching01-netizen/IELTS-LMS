@@ -38,8 +38,7 @@ import {
 } from "../infrastructure/satNotesColumnStore";
 import { answeredSatQuestionCount, buildSatQuestionNavigationItems } from "../domain/satSelectors";
 import { formatSatTime } from "../domain/satTiming";
-import { resolveSatToolCapabilities } from "../domain/satTools";
-import { resolveSatExamToolPolicy } from "../domain/satToolPolicy";
+import { resolveSatExamToolPolicy, toSatSectionKey } from "../domain/satToolPolicy";
 import { ensureDesmosPreconnect } from "../infrastructure/desmos/desmosPreconnect";
 import { SatExamShell } from "../ui/SatExamShell";
 import { SatQuestionRenderer } from "../ui/question/SatQuestionRenderer";
@@ -227,8 +226,14 @@ export function SatStudentSessionRoute({
     exam.stateModule
       ? exam.stateModule
       : null;
+  // Same section gate as the live module: Desmos is Math-only, and an
+  // unresolved section reads as Reading and Writing, so it never prewarms one.
+  const pendingSectionKey = toSatSectionKey(
+    data && exam.pendingModule ? sectionForModule(data, exam.pendingModule.id)?.sectionKey : undefined,
+  );
   const pendingCalculatorModule =
-    exam.pendingModule && resolveSatToolCapabilities(exam.pendingModule.toolPolicy).calculator
+    exam.pendingModule &&
+    resolveSatExamToolPolicy(pendingSectionKey, exam.pendingModule.toolPolicy).calculator
       ? exam.pendingModule
       : null;
 
@@ -371,8 +376,7 @@ export function SatStudentSessionRoute({
         ? {
             id: exam.pendingModule.id,
             title: studentModuleTitle(exam.pendingModule),
-            sectionKey:
-              pendingSection.sectionKey === "math" ? "math" : "reading-writing",
+            sectionKey: toSatSectionKey(pendingSection.sectionKey),
             startsNewSection: moduleStartsNewSection(data, exam.pendingModule.id),
             started: Boolean(
               data.attempt.moduleAttempts.find(

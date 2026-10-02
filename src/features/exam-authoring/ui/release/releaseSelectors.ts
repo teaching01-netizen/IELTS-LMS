@@ -38,13 +38,18 @@ export const SAT_PUBLISH_READINESS_FAMILIES = [
   {
     id: "answer-choices",
     label: "Answer choices",
-    codes: ["sat.choice.count", "sat.choice.content.required"],
+    codes: ["sat.choice.count", "sat.choice.content.required", "sat.rw.question_type"],
   },
   { id: "module-question-count", label: "Module question count", codes: ["sat.module.incomplete"] },
   {
     id: "correct-answers",
     label: "Correct answers",
-    codes: ["sat.correct_answer.required", "sat.correct_answer.invalid", "sat.spr.answer.required"],
+    codes: [
+      "sat.correct_answer.required",
+      "sat.correct_answer.invalid",
+      "sat.spr.answer.required",
+      "sat.spr.answer.invalid",
+    ],
   },
 ] as const;
 

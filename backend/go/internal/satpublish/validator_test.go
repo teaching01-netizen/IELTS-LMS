@@ -116,3 +116,31 @@ func TestValidateModuleUsesConfiguredTarget(t *testing.T) {
 		t.Fatalf("expected only module incompleteness, got %+v", issues)
 	}
 }
+
+// Student-produced response is Math-only: Reading & Writing must publish only
+// multiple-choice questions, whatever path the draft was authored through.
+func TestValidateModuleRestrictsStudentProducedResponseToMath(t *testing.T) {
+	spr := Question{
+		ExamQuestionID: "eq-spr",
+		QuestionType:   "student_produced_response",
+		Prompt:         content("Solve for x."),
+		Answer:         `{"kind":"student_produced_response","acceptedResponses":["12"]}`,
+	}
+	mcq := Question{
+		ExamQuestionID: "eq-mcq",
+		QuestionType:   "single_choice",
+		Prompt:         content("Prompt"),
+		Answer:         choiceAnswer("A", "A", "B", "C", "D"),
+	}
+	module := func(section string, questions ...Question) Module {
+		return Module{SectionKey: section, ModuleKey: section + "-m1", TargetQuestionCount: len(questions), Questions: questions}
+	}
+
+	issues := ValidateModule(module(SectionReadingWriting, mcq, spr))
+	if len(issues) != 1 || issues[0].Code != "sat.rw.question_type" || issues[0].Path != "examQuestion:eq-spr:questionType" {
+		t.Fatalf("RW SPR must be the only blocking issue, got %+v", issues)
+	}
+	if issues := ValidateModule(module(SectionMath, mcq, spr)); len(issues) != 0 {
+		t.Fatalf("Math may mix multiple choice and SPR: %+v", issues)
+	}
+}

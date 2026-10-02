@@ -452,7 +452,8 @@ export function StudentAccessLinkEntryRoute() {
       nextErrors.email = "Enter a valid email address.";
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
-      if (link.providerKey === "sat") focusFirstInvalidField(event.currentTarget as HTMLFormElement);
+      if (link.providerKey === "sat")
+        focusFirstInvalidField(event.currentTarget as HTMLFormElement);
       return;
     }
     submittingRef.current = true;
@@ -623,18 +624,9 @@ export function StudentAccessLinkEntryRoute() {
     const locked = submitting || Boolean(queued);
     return (
       <SatEntryLayout
-        eyebrow={`${link.examTitle} · Version ${link.versionNumber}`}
-        title={link.name}
+        title="Exam Check-in"
         description="Check your details, then continue to the exam."
         helpText="Need help? Ask your teacher."
-        meta={
-          link.audienceLabel ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] px-3 py-1.5 text-[13px] font-medium text-[var(--sat-text-secondary)]">
-              <LockKeyhole size={13} aria-hidden="true" />
-              {link.audienceLabel}
-            </span>
-          ) : null
-        }
       >
         {scopeCopy ? (
           <SatEntryNotice tone="info" icon={<Clock3 size={18} />}>
@@ -951,7 +943,10 @@ function UnavailableScreen({
   description: string;
   eyebrow?: string;
 }) {
-  if (sat) return <SatEntryStatus {...state} />;
+  if (sat) {
+    const { eyebrow: _internalLabel, ...student } = state;
+    return <SatEntryStatus {...student} />;
+  }
   return (
     <EntryShell>
       <UnavailableState {...state} />

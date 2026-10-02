@@ -5,7 +5,7 @@ import { hasStructuredContent } from "../../exam-authoring/api/renderingPublic";
 import { useSatPreviewController } from "../hooks/useSatPreviewController";
 import { SatPreviewControls } from "../ui/SatPreviewControls";
 import { formatSatTime } from "../domain/satTiming";
-import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satToolPolicy";
+import { resolveSatExamToolPolicy, toSatSectionKey, toSatToolCapabilities } from "../domain/satToolPolicy";
 import { answeredSatQuestionCount } from "../domain/satSelectors";
 import { createSatReadingPreferences } from "../domain/satReadingPreferences";
 import { SatExamShell } from "../ui/SatExamShell";
@@ -15,10 +15,6 @@ import { SatReviewPage } from "../ui/review/SatReviewPage";
 import { SatCalculatorHost } from "../ui/tools/SatCalculatorHost";
 import { SatReferenceSheetPanel } from "../ui/tools/SatReferenceSheetPanel";
 import { SatBreakScreen } from "../ui/transitions/SatBreakScreen";
-
-function sectionKey(value: string): "math" | "reading-writing" {
-  return value === "math" ? "math" : "reading-writing";
-}
 
 function sectionLabel(displayOrder: number, title: string): string {
   return `Section ${displayOrder + 1}: ${title}`;
@@ -48,7 +44,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
     upcomingModule &&
     nextSection &&
     toSatToolCapabilities(
-      resolveSatExamToolPolicy(sectionKey(nextSection.sectionKey), upcomingModule.toolPolicy)
+      resolveSatExamToolPolicy(toSatSectionKey(nextSection.sectionKey), upcomingModule.toolPolicy)
     ).calculator;
   const calculatorModule = upcomingCalculator
     ? upcomingModule
@@ -119,7 +115,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
         <>
           {controls}
           <SatBreakScreen
-            nextSectionKey={sectionKey(nextSection?.sectionKey ?? preview.section.sectionKey)}
+            nextSectionKey={toSatSectionKey(nextSection?.sectionKey ?? preview.section.sectionKey)}
             remainingSeconds={preview.section.breakAfterSeconds}
             {...(nextSection ? { onContinue: preview.commands.nextSection } : {})}
           />
@@ -176,7 +172,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
         <SatExamShell
           moduleIdentity={preview.module.id}
           sectionLabel={label}
-          sectionKey={sectionKey(preview.section.sectionKey)}
+          sectionKey={toSatSectionKey(preview.section.sectionKey)}
           directions={directions}
           remainingLabel={remainingLabel}
           candidateName="Staff Preview"
@@ -222,7 +218,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
           }
         >
           <SatQuestionRenderer
-            sectionKey={sectionKey(preview.section.sectionKey)}
+            sectionKey={toSatSectionKey(preview.section.sectionKey)}
             questionNumber={preview.questionIndex + 1}
             question={preview.question}
             response={preview.response}

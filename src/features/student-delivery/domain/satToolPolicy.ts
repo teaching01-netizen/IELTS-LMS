@@ -64,6 +64,11 @@ export function emptySatExamToolPolicy(): SatExamToolPolicy {
  * Components must gate on these flags instead of scattering section-key
  * checks through the tree.
  */
+/** Delivery data carries any string; unknown keys are treated as Reading and Writing. */
+export function toSatSectionKey(value: string | null | undefined): SatSectionKey {
+  return value === 'math' ? 'math' : 'reading-writing';
+}
+
 export function resolveSatExamToolPolicy(
   sectionKey: SatSectionKey,
   toolPolicy: Record<string, unknown> | string[],
