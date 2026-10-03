@@ -161,6 +161,11 @@ export function SatCalculatorPanel({
     () => ({ x: safeArea.left, y: safeArea.top, w: firstOpenSize.w, h: firstOpenSize.h }),
     [safeArea, firstOpenSize.w, firstOpenSize.h]
   );
+  // Drag may float over the exam header; first-open placement and size stay in the body.
+  const dragArea = useMemo(
+    () => ({ ...safeArea, top: viewportToLogicalLength(8) }),
+    [safeArea, viewportToLogicalLength]
+  );
   const minimumSize = useMemo(
     () => ({ w: 400 / scale, h: Math.min(480 / scale, bodyHeight) }),
     [scale, bodyHeight]
@@ -182,7 +187,7 @@ export function SatCalculatorPanel({
       viewStateKey={satToolViewKey(scheduleId, attemptId, moduleAttemptId)}
       defaultGeometry={defaultGeometry}
       geometryScale={scale}
-      safeArea={safeArea}
+      safeArea={dragArea}
       minSize={minimumSize}
       maxSize={maximumSize}
       style={
