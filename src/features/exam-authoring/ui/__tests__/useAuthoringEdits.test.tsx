@@ -166,12 +166,12 @@ describe("an explicit save answers the author", () => {
     expect(h.flushNow).not.toHaveBeenCalled();
   });
 
-  it("routes a manual save in the room through the room's own retry", async () => {
+  it.each(["error", "still_saving"] as const)("routes a manual save in the room through its retry when %s", async (status) => {
     const retry = vi.fn();
     const h = renderEdits({
       save: {
         workspaceCollaboration: { retry } as never,
-        coeditDisplayStatus: "error",
+        coeditDisplayStatus: status,
         flushNow: vi.fn(async () => ({ ok: true })),
       },
     });

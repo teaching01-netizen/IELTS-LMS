@@ -8,7 +8,7 @@ import {
   currentStateHash,
   encodeStateAsUpdate,
   fromBase64,
-  hashStateVector,
+  hashDocumentState,
   projectPrompt,
   projectPromptJson,
   projectWorkspace,
@@ -215,13 +215,23 @@ describe("prompt JSON -> Y.Doc -> prompt JSON", () => {
 });
 
 describe("state hashing and binary reload", () => {
-  it("hashes the state vector, not the update", () => {
+  it("hashes the durable binary consistently across reload", () => {
     const first = seedYDocFromPrompt(FULL_VOCABULARY);
     const second = new Y.Doc();
     const state = encodeStateAsUpdate(first);
     applyBinaryState(second, state);
     expect(currentStateHash(second)).toBe(currentStateHash(first));
-    expect(hashStateVector(Y.encodeStateVector(second))).toBe(currentStateHash(second));
+    expect(hashDocumentState(state)).toBe(currentStateHash(second));
+  });
+
+  it("changes the durable hash for a deletion even when the vector is unchanged", () => {
+    const document = seedYDocFromPrompt(FULL_VOCABULARY);
+    const beforeVector = toBase64(Y.encodeStateVector(document));
+    const beforeHash = currentStateHash(document);
+    document.getXmlFragment("prompt").delete(0, 1);
+    expect(toBase64(Y.encodeStateVector(document))).toBe(beforeVector);
+    expect(currentStateHash(document)).not.toBe(beforeHash);
+    document.destroy();
   });
 
   it("survives a base64 encode/decode cycle", () => {

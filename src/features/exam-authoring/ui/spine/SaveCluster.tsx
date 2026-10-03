@@ -47,8 +47,8 @@ function usePrevious<T>(value: T): T | undefined {
 /**
  * Single save truth (plan Phase 7): one vocabulary for QuestionSaveStatus,
  * one component rendered in the header slot AND the footer from the same
- * autosave object. Error is a Retry button; everything else is read-only
- * status text with a polite live region.
+ * autosave object. Failed and stalled saves offer Retry in the same status
+ * surface with a polite live region.
  */
 export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, diverged = false, transientSaved = false, announce = true, displayMode = "legacy" }: SaveClusterProps) {
   const isCoedit = displayMode === "coedit";
@@ -141,16 +141,18 @@ export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, di
       </motion.span>
     );
 
-  if (status === "error") {
+  const stalled = isCoedit && status === "still_saving" && onRetry !== undefined;
+  if (status === "error" || stalled) {
     return (
       <button
         type="button"
         title={title}
         aria-label={`${title}. Retry save`}
         onClick={onRetry}
-        className="flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={`flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 ${stalled ? "hover:bg-muted" : "hover:bg-destructive/10"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
       >
         <span role={statusRole}>{face}</span>
+        {stalled && <span className="text-xs font-semibold text-primary">Retry save</span>}
       </button>
     );
   }

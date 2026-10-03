@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { signServiceRequest, verifyServiceRequest } from "../authToken.js";
@@ -46,7 +47,8 @@ interface GoHarness {
  * production deployment.
  */
 function harness(
-  respond: (path: string, body: Record<string, unknown>) => { status?: number; json: unknown },
+  respond: (path: string, body: Record<string, unknown>) =>
+    { status?: number; json: unknown } | Promise<{ status?: number; json: unknown }>,
 ): GoHarness {
   const calls: RecordedCall[] = [];
   const client = new GoAuthoringClient({
@@ -69,7 +71,7 @@ function harness(
         }),
       ).not.toThrow();
       calls.push({ path: url.pathname, body });
-      const outcome = respond(url.pathname, body);
+      const outcome = await respond(url.pathname, body);
       return new Response(JSON.stringify(outcome.json), {
         status: outcome.status ?? 200,
         headers: { "content-type": "application/json" },
@@ -181,6 +183,24 @@ describe("CoeditPersistence.load", () => {
       toBase64(encodeStateVector(document)),
     );
     expect(document.getXmlFragment("prompt").length).toBeGreaterThan(0);
+  });
+
+  it("uses an existing room's legacy hash as the fence for its first binary-hash save", async () => {
+    const seeded = seedYDocFromPrompt(PROMPT);
+    const legacyHash = createHash("sha256").update(encodeStateVector(seeded)).digest("hex");
+    const go = harness((path, body) => path === LOAD_PATH
+      ? { json: emptyLoad({ lifecycleState: "active", ydocState: toBase64(encodeStateAsUpdate(seeded)), stateHash: legacyHash }) }
+      : { json: storeOk(String(body["stateHash"])) });
+    const persistence = new CoeditPersistence(go.client);
+    const document = new Y.Doc();
+    await persistence.load({ documentName: DOCUMENT_NAME, document, context: {} });
+    await persistence.store({ documentName: DOCUMENT_NAME, document, context: {} });
+
+    expect(go.callsTo(STORE_PATH)[0]?.body["previousStateHash"]).toBe(legacyHash);
+    expect(go.callsTo(STORE_PATH)[0]?.body["stateHash"]).toBe(currentStateHash(document));
+    expect(persistence.lastCommit(DOCUMENT_NAME)?.stateHash).not.toBe(legacyHash);
+    seeded.destroy();
+    document.destroy();
   });
 
   it("refuses a closed document", async () => {
@@ -619,6 +639,77 @@ describe("CoeditPersistence.store", () => {
     await gate;
     await Promise.all([first, second]);
     expect(go.callsTo(STORE_PATH)).toHaveLength(1);
+  });
+
+  it.each(["append", "delete"] as const)("persists a queued %s instead of reusing an older save", async (change) => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let firstRequest = true;
+    const go = harness(async (_path, body) => {
+      if (firstRequest) {
+        firstRequest = false;
+        await gate;
+      }
+      return { json: storeOk(String(body["stateHash"])) };
+    });
+    const persistence = new CoeditPersistence(go.client);
+    const document = seedYDocFromPrompt(PROMPT);
+    const frames: CoeditAckPayload[] = [];
+    persistence.setBroadcaster((_name, payload) => frames.push(JSON.parse(payload)));
+    const input = { documentName: DOCUMENT_NAME, document, context: {} };
+    const beforeVector = toBase64(encodeStateVector(document));
+
+    const first = persistence.store(input);
+    if (change === "append") appendParagraph(document, "arrived while saving");
+    else document.getXmlFragment("prompt").delete(0, 1);
+    if (change === "delete") expect(toBase64(encodeStateVector(document))).toBe(beforeVector);
+    const second = persistence.store(input);
+    const third = persistence.store(input);
+    release();
+    const [earlier, later, coalesced] = await Promise.all([first, second, third]);
+
+    expect(go.callsTo(STORE_PATH)).toHaveLength(2);
+    expect(go.callsTo(STORE_PATH)[1]?.body["previousStateHash"]).toBe(earlier.stateHash);
+    expect(later.stateHash).not.toBe(earlier.stateHash);
+    expect(go.callsTo(STORE_PATH)[1]?.body["ydocState"]).not.toBe(go.callsTo(STORE_PATH)[0]?.body["ydocState"]);
+    expect(coalesced.stateHash).toBe(later.stateHash);
+    expect(persistence.isClean(DOCUMENT_NAME, document)).toBe(true);
+    expect(frames.at(-1)?.stateVector).toBe(toBase64(encodeStateVector(document)));
+    const durable = new Y.Doc();
+    Y.applyUpdate(durable, Buffer.from(String(go.callsTo(STORE_PATH)[1]?.body["ydocState"]), "base64"));
+    expect(durable.getXmlFragment("prompt").toJSON()).toBe(document.getXmlFragment("prompt").toJSON());
+    durable.destroy();
+    document.destroy();
+  });
+
+  it("reports a failed trailing save without acknowledging the newer content", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let firstRequest = true;
+    const go = harness(async (_path, body) => {
+      if (firstRequest) {
+        firstRequest = false;
+        await gate;
+        return { json: storeOk(String(body["stateHash"])) };
+      }
+      return { status: 503, json: { code: "SERVICE_UNAVAILABLE" } };
+    });
+    const persistence = new CoeditPersistence(go.client);
+    const document = seedYDocFromPrompt(PROMPT);
+    const frames: Array<{ type: string }> = [];
+    persistence.setBroadcaster((_name, payload) => frames.push(JSON.parse(payload)));
+    const input = { documentName: DOCUMENT_NAME, document, context: {} };
+    const first = persistence.store(input);
+    appendParagraph(document, "not committed yet");
+    const second = persistence.store(input);
+    const refused = expect(second).rejects.toThrow();
+    release();
+
+    await first;
+    await refused;
+    expect(frames.map((frame) => frame.type)).toEqual(["coedit.ack", "coedit.save_failed"]);
+    expect(persistence.isClean(DOCUMENT_NAME, document)).toBe(false);
+    document.destroy();
   });
 
   it("rejects an oversized materialized prompt before calling Go", async () => {

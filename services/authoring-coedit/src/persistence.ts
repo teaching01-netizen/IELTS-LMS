@@ -8,6 +8,7 @@ import {
   encodeStateAsUpdate,
   encodeStateVector,
   fromBase64,
+  hashDocumentState,
   projectPrompt,
   projectPromptJson,
   projectWorkspace,
@@ -474,9 +475,16 @@ export class CoeditPersistence {
     freezeOperationId: string
   ): Promise<CoeditCommit> {
     const existing = this.inflight.get(inflightKey);
-    if (existing) return existing;
+    if (existing) {
+      const commit = await existing;
+      // Concurrent seeds can advance the room after the pending save captured
+      // it. Reuse that commit only if its binary covers the current document;
+      // deletes can change the binary without advancing the state vector.
+      if (this.isClean(input.documentName, input.document)) return commit;
+      return this.runStoreDeduplicated(input, inflightKey, finalStore, freezeOperationId);
+    }
     const running = this.runStore(input, finalStore, freezeOperationId).finally(() => {
-      this.inflight.delete(inflightKey);
+      if (this.inflight.get(inflightKey) === running) this.inflight.delete(inflightKey);
     });
     this.inflight.set(inflightKey, running);
     return running;
@@ -547,8 +555,8 @@ export class CoeditPersistence {
         outcome: result.duplicate ? "accepted" : "accepted",
       });
       this.observeDuration(Date.now() - started);
-      // Stateless acknowledgement. A client marks Saved only when this hash
-      // equals the hash of its CURRENT state vector.
+      // The hash identifies the committed binary; the browser compares the
+      // acknowledged state vector with its current room state.
       const payload: CoeditAckPayload = {
         type: "coedit.ack",
         documentName,
@@ -680,7 +688,7 @@ export class CoeditPersistence {
     return {
       state,
       vector: encodeStateVector(document),
-      stateHash: currentStateHash(document),
+      stateHash: hashDocumentState(state),
       prompt: promptJson === null ? null : (JSON.parse(promptJson) as unknown),
       workspace: workspaceJson === null ? null : (JSON.parse(workspaceJson) as unknown),
     };

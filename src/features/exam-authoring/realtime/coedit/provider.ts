@@ -983,6 +983,10 @@ export class PromptCoeditProvider {
       }, Math.max(0, timeoutMs));
       timer.unref?.();
       this.flushWaiters.add(finish);
+      // Flushing transport buffers alone cannot restart a store whose last
+      // acknowledgement covered an older state. Ask after registering the
+      // waiter so even an immediate response can settle this flush.
+      this.requestStore();
     });
   }
 

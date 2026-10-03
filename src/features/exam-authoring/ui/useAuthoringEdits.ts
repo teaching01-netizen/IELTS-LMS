@@ -130,7 +130,7 @@ export function useAuthoringEdits({
     // shared Yjs roots; the workspace acknowledgement is the only source of
     // save truth in SAT co-edit mode.
     if (save.workspaceCollaboration) {
-      if (save.coeditDisplayStatus === "error") save.workspaceCollaboration.retry();
+      if (save.coeditDisplayStatus === "error" || save.coeditDisplayStatus === "still_saving") save.workspaceCollaboration.retry();
       return;
     }
     const result = await save.flushNow(draft);

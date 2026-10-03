@@ -34,6 +34,9 @@ interface FakeTransport {
   name: string;
   document: Y.Doc;
   sentTokens: number;
+  sentStateless: string[];
+  connect: () => Promise<void>;
+  flushPendingUpdates: () => void;
   destroyed: boolean;
   /** The room reached initial sync. */
   sync: () => void;
@@ -110,6 +113,7 @@ vi.mock("@hocuspocus/provider", async () => {
     readonly name: string;
     readonly document: Y.Doc;
     sentTokens = 0;
+    sentStateless: string[] = [];
     destroyed = false;
     awareness: InstanceType<typeof Awareness>;
     private readonly options: Record<string, unknown>;
@@ -123,6 +127,9 @@ vi.mock("@hocuspocus/provider", async () => {
     async sendToken(): Promise<void> {
       this.sentTokens += 1;
     }
+    async connect(): Promise<void> {}
+    flushPendingUpdates(): void {}
+    sendStateless(payload: string): void { this.sentStateless.push(payload); }
     destroy(): void {
       this.destroyed = true;
       this.awareness.destroy();
@@ -1225,6 +1232,31 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
    * hand the author to a screen that cannot show their work.
    */
   describe("leaving the workspace", () => {
+    it("clears a stalled-navigation banner after the room confirms the work", async () => {
+      const { transport } = await renderWorkspaceRoomWithRoutes();
+      await act(async () => { editWorkspaceRoom(transport); });
+      transport.sentStateless.length = 0;
+      vi.useFakeTimers();
+      try {
+        fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+        await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });
+        expect(screen.getByText(/This exam's latest changes are still being confirmed/)).toBeInTheDocument();
+        expect(screen.queryByText("Preview landed")).not.toBeInTheDocument();
+        expect(transport.sentStateless.map((payload) => JSON.parse(payload))).toContainEqual({
+          type: "coedit.store", documentName: WORKSPACE_DOCUMENT_NAME,
+        });
+
+        await act(async () => {
+          transport.ack({ stateVector: encodeStateVectorBase64(transport.document), questionRevision: 3 });
+        });
+        expect(screen.queryByText(/This exam's latest changes are still being confirmed/)).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+      await waitFor(() => expect(screen.getByText("Preview landed")).toBeInTheDocument());
+    });
+
     it("navigates once this tab's exact room state is durable", async () => {
       await renderWorkspaceRoomWithRoutes();
       fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));

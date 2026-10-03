@@ -120,4 +120,13 @@ describe("SaveCluster", () => {
     fireEvent.click(retry);
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it("offers an accessible retry while co-edit saving is stalled", () => {
+    const onRetry = vi.fn();
+    render(<SaveCluster status="still_saving" displayMode="coedit" lastSavedAt={null} onRetry={onRetry} />);
+    const retry = screen.getByRole("button", { name: /Still saving.*Retry save/i });
+    expect(retry).toHaveTextContent("Retry save");
+    fireEvent.click(retry);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
 });

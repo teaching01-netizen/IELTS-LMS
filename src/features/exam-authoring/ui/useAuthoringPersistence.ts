@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type Dispatch,
@@ -21,6 +22,7 @@ import { useAuthoringSaveRouting } from "./useAuthoringSaveRouting";
 import {
   COEDIT_MUTATION_FLUSH_TIMEOUT_MS,
   COEDIT_ROUTE_FLUSH_TIMEOUT_MS,
+  COEDIT_ROOM_BLOCK_COPY,
   coeditRoomBlockMessage,
 } from "./collaboration/coeditNavigationGate";
 
@@ -172,6 +174,12 @@ export function useAuthoringPersistence(
    * author two places to look for the same sentence.
    */
   const [navigationError, setNavigationError] = useState<string | null>(null);
+  const roomSaved = workspaceCollaboration?.workspaceSnapshot.saveState.name === "saved";
+  useEffect(() => {
+    if (roomSaved) {
+      setNavigationError((current) => current === COEDIT_ROOM_BLOCK_COPY.pending ? null : current);
+    }
+  }, [roomSaved, navigationError]);
   // A published draft or a remotely deleted question freezes the mutation path
   // WITHOUT touching the author's typed content.
   const mutationFrozenRef = useRef(false);

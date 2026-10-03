@@ -521,8 +521,12 @@ describe("durable acknowledgements and flush", () => {
     await openBarrier();
     provider.setRichField(PROMPT_FIELD, plainContentFromText("Ready to navigate"));
 
+    transport.stateless.length = 0;
     const pending = provider.flushAndWaitForSaved(500);
     expect(transport.flushes).toBe(1);
+    expect(transport.stateless.map((payload) => JSON.parse(payload))).toEqual([
+      { type: "coedit.store", documentName: DOCUMENT_NAME },
+    ]);
     // A vector that is not this tab's cannot satisfy the flush, even though it
     // is a real durable acknowledgement.
     transport.deliver(

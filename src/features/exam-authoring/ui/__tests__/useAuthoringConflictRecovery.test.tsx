@@ -213,6 +213,13 @@ function renderController(overrides: Partial<Harness> = {}) {
 }
 
 describe("conflict and recovery surface", () => {
+  it("retries the collaboration writer while saving is stalled", () => {
+    const h = renderController({ draft: revision(2), coeditDisplayStatus: "still_saving" });
+    act(() => h.result.current.handleRetrySave());
+    expect(h.roomRetry).toHaveBeenCalledTimes(1);
+    expect(h.retrySave).not.toHaveBeenCalled();
+  });
+
   it("reads the remote document only while Review is open", async () => {
     const getQuestion = vi
       .spyOn(assessmentAuthoringApi, "getQuestion")

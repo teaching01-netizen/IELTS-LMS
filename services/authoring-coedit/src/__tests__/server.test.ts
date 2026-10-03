@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { signServiceRequest, verifyServiceRequest } from "../authToken.js";
 import type { CoeditServiceConfig } from "../config.js";
-import { hashStateVector } from "../documentCodec.js";
+import { currentStateHash } from "../documentCodec.js";
 import { createCoeditService, type CoeditService, type LockLike } from "../main.js";
 import type { StructuredContent } from "../../../../src/features/exam-authoring/contracts/assessment.js";
 // The browser's own identity encoder, imported into the real service test on
@@ -148,6 +148,8 @@ interface FakeGo {
    * `Number.POSITIVE_INFINITY` means "until the test says otherwise".
    */
   transientStoreFailures: number;
+  /** Simulates a commit that outlives Hocuspocus's store debounce. */
+  storeDelayMs: number;
   close(): Promise<void>;
 }
 
@@ -166,6 +168,7 @@ async function startFakeGo(
     unauthorized: 0,
     refuseStores: false,
     transientStoreFailures: 0,
+    storeDelayMs: 0,
     close: async () => {},
   };
 
@@ -274,6 +277,9 @@ async function startFakeGo(
             requestId: "req-store-refused",
           });
           return;
+        }
+        if (state.storeDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, state.storeDelayMs));
         }
         const entry = commit(String(body["documentName"]), body);
         respond(res, 200, {
@@ -513,7 +519,7 @@ describe("service integration", () => {
     // what lets a client mark Saved only for its own current state.
     expect(ack.stateHash).toBe(String(running.go.stores.at(-1)?.["stateHash"]));
     expect(ack.questionRevision).toBe(2);
-    expect(hashStateVector(Y.encodeStateVector(provider.document))).toBe(ack.stateHash);
+    expect(currentStateHash(provider.document)).toBe(ack.stateHash);
     // Identity: the browser encodes the same bytes the service acknowledged, so
     // the comparison is byte equality and never depends on a second digest
     // implementation agreeing with node:crypto.
@@ -723,6 +729,48 @@ describe("service integration", () => {
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     expect(received.map((payload) => JSON.parse(payload).commandId)).toEqual([command.commandId]);
+  });
+
+  it("commits all opening workspace seeds while an earlier save is still pending", async () => {
+    const running = await startService();
+    running.go.storeDelayMs = 700;
+    const author = connect(running, {
+      token: mintToken(workspaceClaims()),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    const frames: Array<{ type: string; stateVector?: string; path?: string; outcome?: string }> = [];
+    author.on("stateless", ({ payload }: { payload: string }) => frames.push(JSON.parse(payload)));
+    await waitFor(() => author.isSynced, 5_000, "workspace initial sync");
+    const propose = (path: string) => author.sendStateless(JSON.stringify(createWorkspaceSeedFrame({
+      documentName: WORKSPACE_DOCUMENT_NAME,
+      root: "scalar",
+      path,
+      value: { source: "opening the editor" },
+      sourceQuestionRevision: 1,
+    })));
+
+    propose("question/q1/scalar");
+    await waitFor(() => running.go.stores.length === 1, 5_000, "the first pending save");
+    propose("question/q2/scalar");
+    await waitFor(() => author.document.getMap("workspace").size === 2, 5_000, "both initialized fields");
+    const current = encodeStateVectorBase64(author.document);
+    await waitFor(
+      () => frames.some((frame) => frame.type === "coedit.ack" && frame.stateVector === current),
+      5_000,
+      "durable confirmation of every initialized field without another edit",
+    );
+    await waitFor(
+      () => frames.some((frame) => frame.path === "question/q2/scalar" && frame.outcome === "applied"),
+      5_000,
+      "the newer field's durable seed result",
+    );
+
+    expect(running.go.stores).toHaveLength(2);
+    const durable = new Y.Doc();
+    Y.applyUpdate(durable, running.go.committedState!);
+    expect([...durable.getMap("workspace").keys()].sort()).toEqual(["question/q1/scalar", "question/q2/scalar"]);
+    expect(running.service.persistence.isClean(WORKSPACE_DOCUMENT_NAME, author.document)).toBe(true);
+    durable.destroy();
   });
 
   it("arbitrates concurrent workspace seeds and never relays the seed proposal", async () => {

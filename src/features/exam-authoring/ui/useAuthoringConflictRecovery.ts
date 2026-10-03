@@ -416,11 +416,11 @@ export function useAuthoringConflictRecovery({
   // re-driving, and a retry that silently addressed the other half would look
   // like it did nothing.
   const handleRetrySave = useCallback(() => {
-    if (workspaceCollaboration && coeditDisplayStatus === "error") {
+    if (workspaceCollaboration && (coeditDisplayStatus === "error" || coeditDisplayStatus === "still_saving")) {
       workspaceCollaboration.retry();
       return;
     }
-    if (coeditUiActive && (coeditDisplayStatus === "error" || coedit.error !== null)) {
+    if (coeditUiActive && (coeditDisplayStatus === "error" || coeditDisplayStatus === "still_saving" || coedit.error !== null)) {
       coedit.retry();
       return;
     }

@@ -66,9 +66,8 @@ export function CollaborationHeaderCluster({
         status={status}
         lastSavedAt={null}
         announce={false}
-        onRetry={status === "error" ? collaboration.retry : undefined}
+        onRetry={status === "error" || status === "still_saving" ? collaboration.retry : undefined}
       />
     </span>
   );
 }
-

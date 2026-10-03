@@ -102,13 +102,13 @@ export function encodeStateVector(ydoc: Y.Doc): Uint8Array {
   return Y.encodeStateVector(ydoc);
 }
 
-/** SHA-256 over a state vector: the exact state a client may call Saved. */
-export function hashStateVector(vector: Uint8Array): string {
-  return createHash("sha256").update(vector).digest("hex");
+/** Durable provenance includes deletions, which do not advance state vectors. */
+export function hashDocumentState(state: Uint8Array): string {
+  return createHash("sha256").update(state).digest("hex");
 }
 
 export function currentStateHash(ydoc: Y.Doc): string {
-  return hashStateVector(encodeStateVector(ydoc));
+  return hashDocumentState(encodeStateAsUpdate(ydoc));
 }
 
 /** Canonical structured-content projection of the live fragment. */
