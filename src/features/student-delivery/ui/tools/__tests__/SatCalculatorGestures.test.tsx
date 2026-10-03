@@ -7,7 +7,7 @@ import {
   satToolGeometryKey,
 } from "../../../infrastructure/satToolGeometryStore";
 
-const geometryKey = satToolGeometryKey("gesture", "attempt", "module", "calculator:portrait-v1");
+const geometryKey = satToolGeometryKey("gesture", "attempt", "module", "calculator:portrait-v2");
 const defaultGeometry = { x: 20, y: 60, w: 210, h: 250 };
 const safeArea = { top: 48, right: 16, bottom: 35, left: 16 };
 const minimum = { w: 200, h: 100 };

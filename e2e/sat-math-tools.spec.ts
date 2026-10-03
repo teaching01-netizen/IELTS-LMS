@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { ROUTE, displayZoom } from "./helpers/satReference";
 
 const CALC_KEY =
-  "sat-tool-geometry:v2:debug-schedule:debug-attempt:debug-module:calculator:portrait-v1";
+  "sat-tool-geometry:v2:debug-schedule:debug-attempt:debug-module:calculator:portrait-v2";
 const calculator = (page: import("@playwright/test").Page) =>
   page.getByRole("dialog", { name: "Calculator", exact: true });
 

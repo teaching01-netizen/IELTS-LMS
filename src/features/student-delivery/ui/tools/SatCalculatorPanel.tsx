@@ -152,19 +152,20 @@ export function SatCalculatorPanel({
   // Window dimensions are physical pixels, converted once into the zoom plane.
   const viewport = logicalSize({ width: window.innerWidth, height: window.innerHeight });
   const bodyWidth = viewport.width - safeArea.left - safeArea.right;
-  const bodyHeight = Math.max(1, viewport.height - safeArea.top - safeArea.bottom);
+  // Bluebook layout: the window may cover the exam header, so it opens full height
+  // from the top inset and the expression list stays visible above the keypad.
+  const dragArea = useMemo(
+    () => ({ ...safeArea, top: viewportToLogicalLength(8) }),
+    [safeArea, viewportToLogicalLength]
+  );
+  const bodyHeight = Math.max(1, viewport.height - dragArea.top - safeArea.bottom);
   const firstOpenSize = {
     w: Math.min(bodyWidth, Math.max(400 / scale, Math.min(440 / scale, bodyWidth * 0.36))),
     h: bodyHeight,
   };
   const defaultGeometry = useMemo(
-    () => ({ x: safeArea.left, y: safeArea.top, w: firstOpenSize.w, h: firstOpenSize.h }),
-    [safeArea, firstOpenSize.w, firstOpenSize.h]
-  );
-  // Drag may float over the exam header; first-open placement and size stay in the body.
-  const dragArea = useMemo(
-    () => ({ ...safeArea, top: viewportToLogicalLength(8) }),
-    [safeArea, viewportToLogicalLength]
+    () => ({ x: safeArea.left, y: dragArea.top, w: firstOpenSize.w, h: firstOpenSize.h }),
+    [safeArea.left, dragArea.top, firstOpenSize.w, firstOpenSize.h]
   );
   const minimumSize = useMemo(
     () => ({ w: 400 / scale, h: Math.min(480 / scale, bodyHeight) }),
@@ -182,7 +183,7 @@ export function SatCalculatorPanel({
         scheduleId,
         attemptId,
         moduleAttemptId,
-        "calculator:portrait-v1"
+        "calculator:portrait-v2"
       )}
       viewStateKey={satToolViewKey(scheduleId, attemptId, moduleAttemptId)}
       defaultGeometry={defaultGeometry}
