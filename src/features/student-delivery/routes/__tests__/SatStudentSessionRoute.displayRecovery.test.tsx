@@ -58,9 +58,9 @@ function moduleData(): AssessmentDeliveryBootstrap {
   const now = new Date().toISOString();
   const sections = [
     {
-      id: "sec-math",
-      sectionKey: "math",
-      title: "Math",
+      id: "sec-rw",
+      sectionKey: "reading-writing",
+      title: "Reading and Writing",
       displayOrder: 0,
       durationSeconds: 2100,
       breakAfterSeconds: 0,
@@ -89,7 +89,7 @@ function moduleData(): AssessmentDeliveryBootstrap {
               options: ["a", "b"].map((id) => ({ id, content: para(`Choice ${id}`) })),
             },
             metadata: {
-              sectionKey: "math",
+              sectionKey: "reading-writing",
               domain: null,
               skill: null,
               difficulty: "medium" as const,
@@ -158,7 +158,7 @@ function moduleState(moduleId: string) {
     scheduleId: "schedule-1",
     candidateId: "candidate-1",
     assessmentId: "exam-1",
-    sectionKey: "math",
+    sectionKey: "reading-writing",
     moduleKey: moduleId,
     questionIds: [entry.questionId],
     questionIndex: 0,

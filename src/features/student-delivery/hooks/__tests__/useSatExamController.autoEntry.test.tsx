@@ -501,7 +501,7 @@ describe("useSatExamController auto-entry", () => {
     persistenceMock.submit.mockResolvedValue({} as never);
   });
 
-  it("persists Math annotations through setAnnotations and retains them across question navigation", async () => {
+  it("refuses Math annotations: Bluebook Math has no highlights or notes", async () => {
     const bootstrap = mathBootstrapWithQuestions();
     gatewayMocks.bootstrap.mockResolvedValue(bootstrap);
     gatewayMocks.startModule.mockResolvedValue(openedModule(bootstrap, MODULE_MATH, 10));
@@ -522,15 +522,11 @@ describe("useSatExamController auto-entry", () => {
     };
     act(() => hook.result.current.commands.setAnnotations("math-q1", annotations));
 
-    expect(persistenceMock.save).toHaveBeenCalledWith(
+    expect(persistenceMock.save).not.toHaveBeenCalledWith(
       expect.objectContaining({ questionId: "math-q1", annotations }),
       expect.anything(),
     );
-    expect(hook.result.current.state.phase === "module" ? hook.result.current.state.responses["math-q1"]?.annotations : null).toEqual(annotations);
-
-    act(() => hook.result.current.commands.selectQuestion(1));
-    act(() => hook.result.current.commands.selectQuestion(0));
-    expect(hook.result.current.state.phase === "module" ? hook.result.current.state.responses["math-q1"]?.annotations : null).toEqual(annotations);
+    expect(hook.result.current.state.phase === "module" ? hook.result.current.state.responses["math-q1"]?.annotations : null).toBeUndefined();
   });
 
   it("enters the first module with no student action once the proctor starts the session", async () => {

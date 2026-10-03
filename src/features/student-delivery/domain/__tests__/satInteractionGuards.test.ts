@@ -81,9 +81,9 @@ describe('satInteraction guards (production-hostile)', () => {
     expect(
       satInteractionCan.annotate(createSatInteractionState(), ctx({ toolPolicy: rwTools(), sectionKey: 'reading-writing' })),
     ).toBe(true);
-    expect(satInteractionCan.annotate(createSatInteractionState(), ctx({ toolPolicy: mathTools() }))).toBe(true);
-    const noAnnotation = { ...mathTools(), highlight: false, underline: false, notes: false };
-    expect(satInteractionCan.annotate(createSatInteractionState(), ctx({ toolPolicy: noAnnotation }))).toBe(false);
+    expect(satInteractionCan.annotate(createSatInteractionState(), ctx({ toolPolicy: mathTools() }))).toBe(false);
+    const granted = { ...mathTools(), highlight: true, underline: true, notes: true };
+    expect(satInteractionCan.annotate(createSatInteractionState(), ctx({ toolPolicy: granted }))).toBe(true);
   });
 
   it('forbids answering while the annotation note editor owns the surface', () => {

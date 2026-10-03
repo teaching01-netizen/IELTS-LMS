@@ -8,7 +8,7 @@ import {
 export type { SatToolCapabilities } from './satTools';
 
 export interface SatExamToolPolicy {
-  /** Per-question annotation tools: highlight, underline, anchored notes. */
+  /** Per-question annotation tools: highlight, underline, anchored notes. R&W only. */
   highlight: boolean;
   underline: boolean;
   notes: boolean;
@@ -53,8 +53,8 @@ export function emptySatExamToolPolicy(): SatExamToolPolicy {
 /**
  * Resolve the full student-facing tool policy for a section.
  *
- * Annotation tools (highlight, underline, notes) are available in both
- * sections; line reader and passage expansion stay Reading and Writing only.
+ * Annotation tools (highlight, underline, notes), line reader and passage
+ * expansion are Reading and Writing only; Bluebook Math has none of them.
  * Desmos and reference are Math only and additionally require the module
  * tool policy to advertise them, so authored or legacy modules that omit
  * the policy never gain a calculator. Display and accessibility tools
@@ -76,9 +76,9 @@ export function resolveSatExamToolPolicy(
   const module = resolveSatToolCapabilities(toolPolicy);
   const readingWriting = sectionKey === 'reading-writing';
   return {
-    highlight: true,
-    underline: true,
-    notes: true,
+    highlight: readingWriting,
+    underline: readingWriting,
+    notes: readingWriting,
     lineReader: readingWriting,
     imageZoom: true,
     passageExpand: readingWriting,

@@ -250,16 +250,16 @@ describe('satInteractionReducer transition contracts', () => {
     expect(disarmed.surface.kind).toBe('question-notes');
   });
 
-  it('arms and captures in Math, and refuses a selection without annotation capability', () => {
+  it('refuses to arm or capture in Math, or anywhere without annotation capability', () => {
     const mathCaptured = satInteractionReducer(
       arm(createSatInteractionState(), mathCtx()),
       { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() },
       mathCtx(),
     );
-    expect(mathCaptured.annotation.selectionToolsAnchor).not.toBeNull();
-    expect(mathCaptured.annotation.modeEnabled).toBe(true);
+    expect(mathCaptured.annotation.selectionToolsAnchor).toBeNull();
+    expect(mathCaptured.annotation.modeEnabled).toBe(false);
     // Capability asserted directly: the reducer and the selectors agree.
-    expect(isAnnotationAllowed(mathCtx().toolPolicy)).toBe(true);
+    expect(isAnnotationAllowed(mathCtx().toolPolicy)).toBe(false);
     expect(isAnnotationAllowed(rwCtx().toolPolicy)).toBe(true);
     expect(isAnnotationAllowed(noCapabilityCtx().toolPolicy)).toBe(false);
 
@@ -320,10 +320,10 @@ describe('satInteractionReducer transition contracts', () => {
 });
 
 describe('armed annotation intents', () => {
-  it('resolves a captured selection in R&W and Math, and refuses it without capability', () => {
+  it('resolves a captured selection in R&W, and refuses it in Math or without capability', () => {
     const intent = { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() } as const;
     expect(resolveSatInteractionIntent(createSatInteractionState(), rwCtx(), intent)).toEqual(intent);
-    expect(resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), intent)).toEqual(intent);
+    expect(resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), intent)).toBeNull();
     expect(resolveSatInteractionIntent(createSatInteractionState(), noCapabilityCtx(), intent)).toBeNull();
   });
 
@@ -336,10 +336,8 @@ describe('armed annotation intents', () => {
     expect(resolveSatInteractionIntent(on, rwCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toEqual({
       type: 'ANNOTATION_MODE_DISABLED',
     });
-    // Math arms like R&W now; only a context without capability refuses.
-    expect(resolveSatInteractionIntent(off, mathCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toEqual({
-      type: 'ANNOTATION_MODE_ENABLED',
-    });
+    // Bluebook Math has no annotation tools: the toggle refuses there too.
+    expect(resolveSatInteractionIntent(off, mathCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toBeNull();
     expect(resolveSatInteractionIntent(off, noCapabilityCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toBeNull();
   });
 

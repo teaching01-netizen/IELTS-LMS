@@ -29,27 +29,27 @@ describe('resolveSatExamToolPolicy', () => {
     expect(
       resolveSatExamToolPolicy('math', ['calculator', 'reference_sheet']),
     ).toMatchObject({
-      highlight: true,
-      underline: true,
-      notes: true,
+      highlight: false,
+      underline: false,
+      notes: false,
       lineReader: false,
       passageExpand: false,
       calculator: true,
       referenceSheet: true,
     });
     expect(resolveSatExamToolPolicy('math', [])).toMatchObject({
-      highlight: true,
-      underline: true,
-      notes: true,
+      highlight: false,
+      underline: false,
+      notes: false,
       lineReader: false,
       passageExpand: false,
       calculator: false,
       referenceSheet: false,
     });
     expect(resolveSatExamToolPolicy('math', ['calculator'])).toMatchObject({
-      highlight: true,
-      underline: true,
-      notes: true,
+      highlight: false,
+      underline: false,
+      notes: false,
       calculator: true,
       referenceSheet: false,
     });

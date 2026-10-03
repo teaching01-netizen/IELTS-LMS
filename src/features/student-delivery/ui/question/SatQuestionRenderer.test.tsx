@@ -97,7 +97,7 @@ describe('SAT annotated question rendering', () => {
     expect(container.querySelector('[data-sat-question-scroll]')).toHaveTextContent('A tree grows.');
   });
 
-  it('annotates Math prompt, supporting material, and choice text roots', () => {
+  it('renders no annotation regions in Math: Bluebook Math has no highlights or notes', () => {
     const response = emptySatQuestionResponse('q1');
     response.annotations.annotations = [
       createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:same-id', startOffset: 2, endOffset: 6, exact: 'tree' }),
@@ -110,13 +110,8 @@ describe('SAT annotated question rendering', () => {
           onReadingSplitRatioChange={vi.fn()} onAnswerChange={vi.fn()} onToggleReview={vi.fn()} onToggleEliminationMode={vi.fn()} onToggleEliminatedOption={vi.fn()} />
       </SatAnnotationViewContext.Provider>,
     );
-    const regions = [...container.querySelectorAll('[data-sat-annotation-region]')].map((el) => el.getAttribute('data-sat-annotation-region'));
-    expect(regions).toContain('stimulus');
-    expect(regions).toContain('prompt');
-    expect(container.querySelector('[data-sat-annotation-region="stimulus"] [data-sat-highlight="true"]')).toHaveTextContent('tree');
-    expect(container.querySelector('[data-sat-annotation-region="prompt"] [data-sat-highlight="true"]')).toHaveTextContent('tree');
-    // Choice wording stays annotatable in Math too.
-    expect(container.querySelector('[data-sat-annotation-region="choice.A"] [data-content-text-node]')).not.toBeNull();
+    expect(container.querySelector('[data-sat-annotation-region]')).toBeNull();
+    expect(container.querySelector('[data-sat-highlight="true"]')).toBeNull();
   });
 });
 

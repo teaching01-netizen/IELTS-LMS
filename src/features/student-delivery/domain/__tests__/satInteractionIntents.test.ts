@@ -100,18 +100,18 @@ describe('resolveSatInteractionIntent (intent, not mutation)', () => {
     // in-flight selection must still be discarded by the state machine that
     // owns the mode. Capability is what this layer can answer.
     const anchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' } as const;
+    const granted = {
+      ...mathCtx(),
+      toolPolicy: { ...mathCtx().toolPolicy, highlight: true, underline: true, notes: true },
+    };
     expect(
-      resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), {
+      resolveSatInteractionIntent(createSatInteractionState(), granted, {
         type: 'TEXT_SELECTION_CAPTURED',
         anchor,
       }),
     ).toEqual({ type: 'TEXT_SELECTION_CAPTURED', anchor });
-    const noAnnotation = {
-      ...mathCtx(),
-      toolPolicy: { ...mathCtx().toolPolicy, highlight: false, underline: false, notes: false },
-    };
     expect(
-      resolveSatInteractionIntent(createSatInteractionState(), noAnnotation, {
+      resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), {
         type: 'TEXT_SELECTION_CAPTURED',
         anchor,
       }),
