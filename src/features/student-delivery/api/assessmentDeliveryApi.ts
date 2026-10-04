@@ -143,15 +143,40 @@ async function attemptRequest<T>(
   }
 }
 
-export function loadAssessmentDeliveryMedia(
-  scheduleId: string,
-  attemptId: string,
-  assetId: string,
-): Promise<string> {
+/** A server that has not answered by now is not going to; try again. */
+const MEDIA_HEADERS_TIMEOUT_MS = 15_000;
+/** A body still arriving is progress on a slow room network, so it gets far longer. */
+const MEDIA_BODY_TIMEOUT_MS = 120_000;
+const MEDIA_RETRY_DELAYS_MS = [1_000, 3_000] as const;
+
+/**
+ * Exam figures, downloaded once per attempt and kept as blob URLs in memory.
+ *
+ * The server answers `no-store` (shared test-centre machines must not keep
+ * exam content on disk), so without this every visit to a figure — Next, Back,
+ * Review — waited for the full download again. The cache owns the URLs it
+ * hands out: renderers never revoke them, `releaseAssessmentDeliveryMedia` does.
+ */
+const deliveryMedia = new Map<string, Promise<string>>();
+
+function revokeWhenSettled(entry: Promise<string>): void {
+  void entry.then((url) => URL.revokeObjectURL(url), () => undefined);
+}
+
+function isTransientMediaFailure(error: unknown): boolean {
+  const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error
+    ? (error as { statusCode?: unknown }).statusCode
+    : undefined;
+  // No status: the network dropped or the request timed out.
+  if (typeof statusCode !== 'number') return true;
+  return statusCode === 429 || statusCode >= 500;
+}
+
+function fetchDeliveryMediaOnce(scheduleId: string, attemptId: string, assetId: string): Promise<string> {
   const endpoint = `/api/v1/media/${encodeURIComponent(assetId)}/content`;
   return attemptRequest(scheduleId, attemptId, async (config) => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    let timeoutId = setTimeout(() => controller.abort(), MEDIA_HEADERS_TIMEOUT_MS);
     try {
       const response = await fetch(endpoint, {
         method: 'GET',
@@ -162,11 +187,57 @@ export function loadAssessmentDeliveryMedia(
       if (!response.ok) {
         throw Object.assign(new Error(`Media request failed (${response.status}).`), { statusCode: response.status });
       }
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => controller.abort(), MEDIA_BODY_TIMEOUT_MS);
       return URL.createObjectURL(await response.blob());
     } finally {
       clearTimeout(timeoutId);
     }
   });
+}
+
+async function fetchDeliveryMedia(scheduleId: string, attemptId: string, assetId: string): Promise<string> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await fetchDeliveryMediaOnce(scheduleId, attemptId, assetId);
+    } catch (error) {
+      const delay = MEDIA_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || !isTransientMediaFailure(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+export function loadAssessmentDeliveryMedia(
+  scheduleId: string,
+  attemptId: string,
+  assetId: string,
+  options?: { fresh?: boolean },
+): Promise<string> {
+  const key = `${attemptKey(scheduleId, attemptId)}:${assetId}`;
+  const cached = deliveryMedia.get(key);
+  if (cached && !options?.fresh) return cached;
+  if (cached) {
+    deliveryMedia.delete(key);
+    revokeWhenSettled(cached);
+  }
+  const entry = fetchDeliveryMedia(scheduleId, attemptId, assetId);
+  deliveryMedia.set(key, entry);
+  // A failure is not remembered: the next call tries the network again.
+  entry.catch(() => {
+    if (deliveryMedia.get(key) === entry) deliveryMedia.delete(key);
+  });
+  return entry;
+}
+
+/** Drops (and revokes) every figure held for this attempt. */
+export function releaseAssessmentDeliveryMedia(scheduleId: string, attemptId: string): void {
+  const prefix = `${attemptKey(scheduleId, attemptId)}:`;
+  for (const [key, entry] of deliveryMedia) {
+    if (!key.startsWith(prefix)) continue;
+    deliveryMedia.delete(key);
+    revokeWhenSettled(entry);
+  }
 }
 
 export const assessmentDeliveryApi = {

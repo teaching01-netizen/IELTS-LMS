@@ -143,21 +143,25 @@ export function createStudentRealtimeCoordinator(
       if (runtimeStatus === null && isSelfPacedPastWaiting(context?.attemptPhase)) {
         return { intervalMs: 15_000, maxIntervalMs: 25_000 };
       }
-      // Without a socket, IELTS/ACT completion and pre-start transitions must
-      // be observed quickly so the student does not sit on a stale exam
-      // surface after an authoritative runtime command or timeout. When the
-      // socket is healthy, the branch above deliberately keeps polling lazy.
-      if (runtimeStatus === 'not_started' || runtimeStatus === 'completed') {
+      // Without a socket, IELTS/ACT completion must be observed quickly so the
+      // student does not sit on a stale exam surface after an authoritative
+      // runtime command or timeout.
+      if (runtimeStatus === 'completed') {
         return { intervalMs: 1_500, maxIntervalMs: 3_000 };
       }
-      // No socket: the poll IS the live channel, and that is as true for a
-      // cohort waiting on Start (no runtime row yet, so `null`, or
-      // `not_started`) or on Resume (`paused`) as for one mid-exam. These
-      // bounds used to apply only to `live`, so a waiting student without a
-      // socket sat on a 15-25s cadence and the server's 2s fast lane was
-      // clamped away — the proctor pressed Start and the room learned of it
-      // up to 25s later.
-      return { intervalMs: 1_500, maxIntervalMs: 3_000 };
+      // No socket: the poll IS the live channel for a cohort waiting on Start
+      // (no runtime row yet, so `null`, or `not_started`) or on Resume
+      // (`paused`). The ceiling is held here, not left to the server, because
+      // a missing runtime row reads as steady on the server: Start reaches the
+      // room within 5s whatever the server says.
+      if (runtimeStatus === null || runtimeStatus === 'not_started' || runtimeStatus === 'paused') {
+        return { intervalMs: 1_500, maxIntervalMs: 5_000 };
+      }
+      // Live: the server owns the cadence. It rests at 25s and wakes the room
+      // just past each section deadline or fast-lanes after a proctor command;
+      // a 3s ceiling here clamped that away and cost a room ~25 polls per
+      // student per minute for the whole exam.
+      return { intervalMs: 1_500, maxIntervalMs: 25_000 };
     },
   };
 }

@@ -30,7 +30,7 @@ export interface SatQuestionRendererProps {
   onToggleReview: () => void;
   onToggleEliminationMode: () => void;
   onToggleEliminatedOption: (optionId: string) => void;
-  loadMediaUrl?: ((assetId: string) => Promise<string | null>) | undefined;
+  loadMediaUrl?: ((assetId: string, options?: { fresh?: boolean }) => Promise<string | null>) | undefined;
   onMediaFailure?: ((assetId: string, questionId: string) => void) | undefined;
 }
 

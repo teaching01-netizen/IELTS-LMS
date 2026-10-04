@@ -1373,8 +1373,8 @@ func (s *Service) Activity(ctx context.Context, linkID string) ([]Activity, erro
 // entry (for selected-student links), and the backing schedule window inside
 // one transaction, then gates on lifecycle, roster/identity, and window. Empty
 // studentCode means "not provided". The existence precheck above keeps the
-// NOT_FOUND shape; every gate below re-reads locked rows so lifecycle,
-// roster/identity, and window cannot race. Wire this behind a public
+// NOT_FOUND shape; every gate below re-reads committed rows so lifecycle,
+// roster/identity, and window reflect the latest state. Wire this behind a public
 // POST /public/access-links/{linkID}/resolve-entry handler (see summary);
 // main.go currently routes only publicLinkGet.
 func (s *Service) ResolveEntry(ctx context.Context, linkID, studentCode, studentName, studentEmail string) (ResolvedEntry, error) {
@@ -1384,13 +1384,14 @@ func (s *Service) ResolveEntry(ctx context.Context, linkID, studentCode, student
 	}
 	var gated ResolvedEntry
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		// Locked link + schedule read: the window/lifecycle gate observes the
-		// latest committed state, not the unlocked Get above.
+		// Fresh link + schedule read: the window/lifecycle gate observes the
+		// latest committed state. No FOR UPDATE: nothing here writes, so a lock
+		// would only serialize a room of concurrent check-ins on one link row.
 		var lifecycle, availability string
 		var opensAt, closesAt sql.NullTime
 		var enabledSections, publishScope sql.NullString
 		var scheduleID, providerKey, accessMode, audienceType string
-		if err := q.QueryRowContext(ctx, "SELECT l.schedule_id, e.provider_key, l.access_mode, l.audience_type, l.lifecycle_state, l.availability_type, l.opens_at, l.closes_at, l.enabled_sections, v.sat_publish_scope FROM assessment_access_links l JOIN exam_entities e ON e.id = l.exam_id JOIN exam_versions v ON v.id = l.published_version_id WHERE l.id = ? FOR UPDATE", linkID).Scan(&scheduleID, &providerKey, &accessMode, &audienceType, &lifecycle, &availability, &opensAt, &closesAt, &enabledSections, &publishScope); err != nil {
+		if err := q.QueryRowContext(ctx, "SELECT l.schedule_id, e.provider_key, l.access_mode, l.audience_type, l.lifecycle_state, l.availability_type, l.opens_at, l.closes_at, l.enabled_sections, v.sat_publish_scope FROM assessment_access_links l JOIN exam_entities e ON e.id = l.exam_id JOIN exam_versions v ON v.id = l.published_version_id WHERE l.id = ?", linkID).Scan(&scheduleID, &providerKey, &accessMode, &audienceType, &lifecycle, &availability, &opensAt, &closesAt, &enabledSections, &publishScope); err != nil {
 			if err == sql.ErrNoRows {
 				return notFound("Access link was not found.")
 			}
@@ -1436,7 +1437,7 @@ func (s *Service) ResolveEntry(ctx context.Context, linkID, studentCode, student
 			return unavailable("This Student Link has been revoked.")
 		}
 		var start, end time.Time
-		if err := q.QueryRowContext(ctx, "SELECT start_time, end_time FROM exam_schedules WHERE id = ? FOR UPDATE", scheduleID).Scan(&start, &end); err != nil {
+		if err := q.QueryRowContext(ctx, "SELECT start_time, end_time FROM exam_schedules WHERE id = ?", scheduleID).Scan(&start, &end); err != nil {
 			if err == sql.ErrNoRows {
 				return notFound("Schedule not found.")
 			}

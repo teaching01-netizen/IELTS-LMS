@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { StructuredContent } from "../api/assessmentContracts";
 import { StructuredContentRenderer } from "../StructuredContentRenderer";
@@ -95,15 +95,17 @@ describe("StructuredContentRenderer", () => {
     expect(getAssessmentMediaAsset).not.toHaveBeenCalled();
   });
 
-  it("does not make another request when the loaded image fails", async () => {
+  it("downloads fresh bytes once when the loaded image fails, then gives up", async () => {
     const managed: StructuredContent = {
       version: 2,
       nodes: [],
       document: { type: "doc", content: [{ type: "image", attrs: { assetId: "asset-1", alt: "Graph" } }] },
     };
-    const loadMediaUrl = vi.fn().mockResolvedValue("blob:asset-1");
+    const loadMediaUrl = vi.fn()
+      .mockResolvedValueOnce("blob:asset-1")
+      .mockResolvedValueOnce("blob:asset-1-fresh");
     const onMediaFailure = vi.fn();
-    const { container } = render(
+    render(
       <StructuredContentRenderer
         content={managed}
         questionId="question-1"
@@ -112,13 +114,73 @@ describe("StructuredContentRenderer", () => {
       />,
     );
 
-    await screen.findByRole("img", { name: "Graph" });
-    fireEvent.error(screen.getByRole("img", { name: "Graph" }));
+    fireEvent.error(await screen.findByRole("img", { name: "Graph" }));
+    expect(loadMediaUrl).toHaveBeenLastCalledWith("asset-1", { fresh: true });
+    await waitFor(() => expect(screen.getByRole("img", { name: "Graph" })).toHaveAttribute("src", "blob:asset-1-fresh"));
 
+    fireEvent.error(screen.getByRole("img", { name: "Graph" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Visual could not be loaded");
-    expect(loadMediaUrl).toHaveBeenCalledTimes(1);
+    expect(loadMediaUrl).toHaveBeenCalledTimes(2);
     expect(onMediaFailure).toHaveBeenCalledWith("asset-1", "question-1");
     expect(getAssessmentMediaAsset).not.toHaveBeenCalled();
+  });
+
+  it("shows loading, not failure, while a delivery image is downloading", async () => {
+    const managed: StructuredContent = {
+      version: 2,
+      nodes: [],
+      document: { type: "doc", content: [{ type: "image", attrs: { assetId: "asset-1", alt: "Graph" } }] },
+    };
+    render(<StructuredContentRenderer content={managed} loadMediaUrl={() => new Promise<string>(() => undefined)} />);
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Loading visual…");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("lets the student retry an image that could not be loaded", async () => {
+    const managed: StructuredContent = {
+      version: 2,
+      nodes: [],
+      document: { type: "doc", content: [{ type: "image", attrs: { assetId: "asset-1", alt: "Graph" } }] },
+    };
+    const loadMediaUrl = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce("blob:asset-1");
+    const onMediaFailure = vi.fn();
+    render(
+      <StructuredContentRenderer
+        content={managed}
+        questionId="question-1"
+        loadMediaUrl={loadMediaUrl}
+        onMediaFailure={onMediaFailure}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByRole("img", { name: "Graph" })).toHaveAttribute("src", "blob:asset-1");
+    expect(loadMediaUrl).toHaveBeenLastCalledWith("asset-1", { fresh: true });
+    expect(onMediaFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves loader-owned URLs to the loader on unmount", async () => {
+    const managed: StructuredContent = {
+      version: 2,
+      nodes: [],
+      document: { type: "doc", content: [{ type: "image", attrs: { assetId: "asset-1", alt: "Graph" } }] },
+    };
+    // jsdom has no revokeObjectURL; install one to observe.
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    const { unmount } = render(
+      <StructuredContentRenderer content={managed} loadMediaUrl={vi.fn().mockResolvedValue("blob:asset-1")} />,
+    );
+    await screen.findByRole("img", { name: "Graph" });
+
+    unmount();
+
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    Reflect.deleteProperty(URL, "revokeObjectURL");
   });
 
   it("decorates text with stable block offsets while retaining authored marks", () => {

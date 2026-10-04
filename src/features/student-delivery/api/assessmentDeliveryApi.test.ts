@@ -43,6 +43,7 @@ import {
   assessmentDeliveryApi,
   configureAssessmentDeliveryAttempt,
   loadAssessmentDeliveryMedia,
+  releaseAssessmentDeliveryMedia,
 } from './assessmentDeliveryApi';
 
 const mockedPatch = vi.mocked(backendPatch);
@@ -52,12 +53,29 @@ const mockedExpiring = vi.mocked(isAttemptCredentialExpiringWithin);
 const mockedRefresh = vi.mocked(refreshAttemptCredential);
 const mockedStore = vi.mocked(storeAttemptCredential);
 const nativeCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+const nativeRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   if (nativeCreateObjectURL) Object.defineProperty(URL, 'createObjectURL', nativeCreateObjectURL);
   else Reflect.deleteProperty(URL, 'createObjectURL');
+  if (nativeRevokeObjectURL) Object.defineProperty(URL, 'revokeObjectURL', nativeRevokeObjectURL);
+  else Reflect.deleteProperty(URL, 'revokeObjectURL');
 });
+
+function imageResponse() {
+  return { ok: true, blob: async () => new Blob(['image-bytes'], { type: 'image/png' }) };
+}
+
+function installObjectUrls() {
+  let next = 0;
+  const createObjectURL = vi.fn(() => `blob:media-${++next}`);
+  const revokeObjectURL = vi.fn();
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+  return { createObjectURL, revokeObjectURL };
+}
 
 function responseSnapshot() {
   return {
@@ -92,6 +110,98 @@ describe('assessmentDeliveryApi attempt-auth transport', () => {
       credentials: 'same-origin',
     }));
     expect(createObjectURL).toHaveBeenCalledOnce();
+  });
+
+  it('downloads each figure once per attempt and shares the in-flight request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    installObjectUrls();
+
+    const [first, concurrent] = await Promise.all([
+      loadAssessmentDeliveryMedia('schedule-cache', 'attempt-cache', 'asset-1'),
+      loadAssessmentDeliveryMedia('schedule-cache', 'attempt-cache', 'asset-1'),
+    ]);
+    const revisit = await loadAssessmentDeliveryMedia('schedule-cache', 'attempt-cache', 'asset-1');
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(concurrent).toBe(first);
+    expect(revisit).toBe(first);
+  });
+
+  it('downloads again and revokes the old copy when asked for fresh bytes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const { revokeObjectURL } = installObjectUrls();
+
+    const first = await loadAssessmentDeliveryMedia('schedule-fresh', 'attempt-fresh', 'asset-1');
+    const fresh = await loadAssessmentDeliveryMedia('schedule-fresh', 'attempt-fresh', 'asset-1', { fresh: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fresh).not.toBe(first);
+    expect(revokeObjectURL).toHaveBeenCalledWith(first);
+  });
+
+  it('retries transient failures and does not remember a final failure', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network down'))
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: false, status: 502 })
+      .mockResolvedValueOnce(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    installObjectUrls();
+
+    const failed = loadAssessmentDeliveryMedia('schedule-retry', 'attempt-retry', 'asset-1');
+    const failedAssertion = expect(failed).rejects.toMatchObject({ statusCode: 502 });
+    await vi.runAllTimersAsync();
+    await failedAssertion;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    await expect(loadAssessmentDeliveryMedia('schedule-retry', 'attempt-retry', 'asset-1'))
+      .resolves.toMatch(/^blob:/);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not retry a figure the server says is not there', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+    vi.stubGlobal('fetch', fetchMock);
+    installObjectUrls();
+
+    await expect(loadAssessmentDeliveryMedia('schedule-404', 'attempt-404', 'asset-1'))
+      .rejects.toMatchObject({ statusCode: 404 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('lets a slow body finish after the headers arrive', async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
+      signal = init.signal ?? undefined;
+      return Promise.resolve({
+        ok: true,
+        blob: () => new Promise<Blob>((resolve) => setTimeout(() => resolve(new Blob(['x'])), 60_000)),
+      });
+    }));
+    installObjectUrls();
+
+    const loaded = loadAssessmentDeliveryMedia('schedule-slow', 'attempt-slow', 'asset-1');
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await expect(loaded).resolves.toMatch(/^blob:/);
+    expect(signal?.aborted).toBe(false);
+  });
+
+  it('releases every figure held for the attempt', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(imageResponse()));
+    const { revokeObjectURL } = installObjectUrls();
+
+    const one = await loadAssessmentDeliveryMedia('schedule-release', 'attempt-release', 'asset-1');
+    const two = await loadAssessmentDeliveryMedia('schedule-release', 'attempt-release', 'asset-2');
+    releaseAssessmentDeliveryMedia('schedule-release', 'attempt-release');
+    await Promise.resolve();
+
+    expect(revokeObjectURL).toHaveBeenCalledWith(one);
+    expect(revokeObjectURL).toHaveBeenCalledWith(two);
   });
 
   it('stores a rotated attempt credential returned by heartbeat', async () => {

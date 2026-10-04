@@ -1012,7 +1012,7 @@ export function useStudentSessionRouteData(
 
   // The runtime poll loop is the student RECOVERY channel: pollAfterSecs from
   // the server drives cadence adaptively (2s fast-lane within 60s of a control
-  // command, 25s steady). A revision change triggers exactly one debounced
+  // command, a wake just past each section deadline, 25s steady). A revision change triggers exactly one debounced
   // refresh; 304 = steady, no work. The coordinator's policy depends on
   // whether the socket is connected, so a healthy socket polls lazily and a
   // missing one polls tightly.
@@ -1072,7 +1072,8 @@ export function useStudentSessionRouteData(
         refreshOnRuntimeTransitionRef.current();
       },
       // Phase 6: the loop owns the delay; the coordinator owns how tight the
-      // transport may be (socket connected (20-30s) vs not (1.5-3s)). The
+      // transport may be (socket connected: 20-30s; not: a 5s ceiling while
+      // waiting, the server's cadence once live). The
       // server's pollAfterSecs is clamped between those bounds, so the two
       // policies cannot disagree about who decides when the next poll runs.
       cadence: () => {

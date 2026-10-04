@@ -13,7 +13,7 @@ func clearTierEnv(t *testing.T) {
 		"RATE_LIMIT_AUTH_CRITICAL_PER_MIN", "RATE_LIMIT_ANON_AUTH_PER_MIN",
 		"RATE_LIMIT_AUTHED_READS_PER_MIN", "RATE_LIMIT_POLLING_PER_MIN",
 		"RATE_LIMIT_HEARTBEAT_PER_MIN", "RATE_LIMIT_WRITES_PER_MIN",
-		"RATE_LIMIT_BACKSTOP_PER_MIN",
+		"RATE_LIMIT_BACKSTOP_PER_MIN", "RATE_LIMIT_STUDENT_CHECKIN_PER_MIN",
 	} {
 		_ = os.Unsetenv(k)
 	}
@@ -43,8 +43,11 @@ func TestTierLimitsDeriveFromLegacyDefaults(t *testing.T) {
 	if cfg.RateLimitWritesPerMin != 120 {
 		t.Fatalf("writes default must be 120, got %d", cfg.RateLimitWritesPerMin)
 	}
-	if cfg.RateLimitBackstopPerMin != 3000 {
-		t.Fatalf("backstop default must be 3000, got %d", cfg.RateLimitBackstopPerMin)
+	if cfg.RateLimitStudentCheckinPerMin != 1200 {
+		t.Fatalf("student-checkin default must be 1200, got %d", cfg.RateLimitStudentCheckinPerMin)
+	}
+	if cfg.RateLimitBackstopPerMin != 30000 {
+		t.Fatalf("backstop default must be 30000, got %d", cfg.RateLimitBackstopPerMin)
 	}
 }
 
@@ -109,6 +112,7 @@ func TestRateLimitConfigRejectsInvalidValues(t *testing.T) {
 		{name: "max keys", mutate: func(c *Config) { c.RateLimitMaxKeys = 0 }},
 		{name: "negative burst", mutate: func(c *Config) { c.RateLimitBurst = -1 }},
 		{name: "tier budget", mutate: func(c *Config) { c.RateLimitWritesPerMin = 0 }},
+		{name: "student-checkin budget", mutate: func(c *Config) { c.RateLimitStudentCheckinPerMin = 0 }},
 		{name: "export count", mutate: func(c *Config) { c.RateLimitExportPerUser = 0 }},
 		{name: "export window", mutate: func(c *Config) { c.RateLimitExportPerUserWindowSecs = 0 }},
 	}

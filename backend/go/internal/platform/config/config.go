@@ -467,11 +467,16 @@ type Config struct {
 	// values, so no schema migration is needed to add or retune a tier.
 	RateLimitAuthCriticalPerMin int
 	RateLimitAnonAuthPerMin     int
-	RateLimitAuthedReadsPerMin  int
-	RateLimitPollingPerMin      int
-	RateLimitHeartbeatPerMin    int
-	RateLimitWritesPerMin       int
+	// Student check-in is counted per IP like anon-auth, but sized for a
+	// whole exam room behind one NAT address: about 3 requests per student.
+	RateLimitStudentCheckinPerMin int
+	RateLimitAuthedReadsPerMin    int
+	RateLimitPollingPerMin        int
+	RateLimitHeartbeatPerMin      int
+	RateLimitWritesPerMin         int
 	// Local-only loose backstop per IP across all traffic (abuse floor).
+	// Sized for a whole exam room behind one NAT address (about 75 requests
+	// per student per minute at a module change); floods belong at the edge.
 	// It never touches the distributed counters.
 	RateLimitBackstopPerMin int
 
@@ -910,13 +915,14 @@ func Load() Config {
 		RateLimitExportPerUser:           getenvInt("RATE_LIMIT_EXPORT_PER_USER", 3),
 		RateLimitExportPerUserWindowSecs: getenvInt("RATE_LIMIT_EXPORT_PER_USER_WINDOW_SECS", 300),
 
-		RateLimitAuthCriticalPerMin: deriveTierLimit("RATE_LIMIT_AUTH_CRITICAL_PER_MIN", 120),
-		RateLimitAnonAuthPerMin:     deriveTierLimit("RATE_LIMIT_ANON_AUTH_PER_MIN", 30),
-		RateLimitAuthedReadsPerMin:  deriveTierLimit("RATE_LIMIT_AUTHED_READS_PER_MIN", 300),
-		RateLimitPollingPerMin:      deriveTierLimit("RATE_LIMIT_POLLING_PER_MIN", 240),
-		RateLimitHeartbeatPerMin:    deriveTierLimit("RATE_LIMIT_HEARTBEAT_PER_MIN", 120),
-		RateLimitWritesPerMin:       deriveTierLimit("RATE_LIMIT_WRITES_PER_MIN", 120),
-		RateLimitBackstopPerMin:     deriveTierLimit("RATE_LIMIT_BACKSTOP_PER_MIN", 3000),
+		RateLimitAuthCriticalPerMin:   deriveTierLimit("RATE_LIMIT_AUTH_CRITICAL_PER_MIN", 120),
+		RateLimitAnonAuthPerMin:       deriveTierLimit("RATE_LIMIT_ANON_AUTH_PER_MIN", 30),
+		RateLimitStudentCheckinPerMin: deriveTierLimit("RATE_LIMIT_STUDENT_CHECKIN_PER_MIN", 1200),
+		RateLimitAuthedReadsPerMin:    deriveTierLimit("RATE_LIMIT_AUTHED_READS_PER_MIN", 300),
+		RateLimitPollingPerMin:        deriveTierLimit("RATE_LIMIT_POLLING_PER_MIN", 240),
+		RateLimitHeartbeatPerMin:      deriveTierLimit("RATE_LIMIT_HEARTBEAT_PER_MIN", 120),
+		RateLimitWritesPerMin:         deriveTierLimit("RATE_LIMIT_WRITES_PER_MIN", 120),
+		RateLimitBackstopPerMin:       deriveTierLimit("RATE_LIMIT_BACKSTOP_PER_MIN", 30000),
 
 		RateLimitMode: parseRateLimitMode(os.Getenv("RATE_LIMIT_MODE")),
 
@@ -1043,13 +1049,14 @@ func (c Config) ValidateForRuntime() error {
 		return fmt.Errorf("RATE_LIMIT_BURST must be non-negative")
 	}
 	for name, value := range map[string]int{
-		"RATE_LIMIT_AUTH_CRITICAL_PER_MIN": c.RateLimitAuthCriticalPerMin,
-		"RATE_LIMIT_ANON_AUTH_PER_MIN":     c.RateLimitAnonAuthPerMin,
-		"RATE_LIMIT_AUTHED_READS_PER_MIN":  c.RateLimitAuthedReadsPerMin,
-		"RATE_LIMIT_POLLING_PER_MIN":       c.RateLimitPollingPerMin,
-		"RATE_LIMIT_HEARTBEAT_PER_MIN":     c.RateLimitHeartbeatPerMin,
-		"RATE_LIMIT_WRITES_PER_MIN":        c.RateLimitWritesPerMin,
-		"RATE_LIMIT_BACKSTOP_PER_MIN":      c.RateLimitBackstopPerMin,
+		"RATE_LIMIT_AUTH_CRITICAL_PER_MIN":   c.RateLimitAuthCriticalPerMin,
+		"RATE_LIMIT_ANON_AUTH_PER_MIN":       c.RateLimitAnonAuthPerMin,
+		"RATE_LIMIT_STUDENT_CHECKIN_PER_MIN": c.RateLimitStudentCheckinPerMin,
+		"RATE_LIMIT_AUTHED_READS_PER_MIN":    c.RateLimitAuthedReadsPerMin,
+		"RATE_LIMIT_POLLING_PER_MIN":         c.RateLimitPollingPerMin,
+		"RATE_LIMIT_HEARTBEAT_PER_MIN":       c.RateLimitHeartbeatPerMin,
+		"RATE_LIMIT_WRITES_PER_MIN":          c.RateLimitWritesPerMin,
+		"RATE_LIMIT_BACKSTOP_PER_MIN":        c.RateLimitBackstopPerMin,
 	} {
 		if value <= 0 {
 			return fmt.Errorf("%s must be positive", name)

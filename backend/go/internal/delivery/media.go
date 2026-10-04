@@ -59,11 +59,28 @@ func (s *Service) CanAttemptReadMedia(ctx context.Context, scheduleID, attemptID
 	if err != nil {
 		return false, err
 	}
+	index := s.mediaIndexFor(versionID, revision, sections)
 	for _, section := range deliverySectionsForOpenedModules(sections, opened) {
 		if scope != nil && !examdomain.AllowsSection(scope, section.SectionKey) {
 			continue
 		}
 		for _, module := range section.Modules {
+			if _, ok := index[module.ID][assetID]; ok {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// moduleMediaIndex maps each module to the assets its questions reference.
+// Building it parses every question's rich content, so it is done once per
+// published revision rather than once per image request.
+func moduleMediaIndex(sections []DeliverySection) map[string]map[string]struct{} {
+	index := map[string]map[string]struct{}{}
+	for _, section := range sections {
+		for _, module := range section.Modules {
+			assets := map[string]struct{}{}
 			for _, question := range module.Questions {
 				for _, content := range []struct {
 					raw  []byte
@@ -75,15 +92,44 @@ func (s *Service) CanAttemptReadMedia(ctx context.Context, scheduleID, attemptID
 				} {
 					refs := satpublish.CollectRichContentAssetReferences(string(content.raw), "examQuestion:"+question.ExamQuestionID+":"+content.path, question.ExamQuestionID)
 					for _, ref := range refs {
-						if ref.AssetID == assetID {
-							return true, nil
-						}
+						assets[ref.AssetID] = struct{}{}
 					}
 				}
 			}
+			index[module.ID] = assets
 		}
 	}
-	return false, nil
+	return index
+}
+
+type mediaIndexKey struct {
+	versionID string
+	revision  int64
+}
+
+// mediaIndexFor memoizes moduleMediaIndex beside the version cache: keyed by
+// the same probed revision, so a republish is a new key, never a stale hit.
+// Without the version cache the tree is reloaded per request anyway.
+func (s *Service) mediaIndexFor(versionID string, revision int64, sections []DeliverySection) map[string]map[string]struct{} {
+	if s.versions == nil {
+		return moduleMediaIndex(sections)
+	}
+	key := mediaIndexKey{versionID: versionID, revision: revision}
+	s.mediaIndexMu.Lock()
+	index, ok := s.mediaIndex[key]
+	s.mediaIndexMu.Unlock()
+	if ok {
+		return index
+	}
+	index = moduleMediaIndex(sections)
+	s.mediaIndexMu.Lock()
+	// offcut: wholesale reset at the bound; an exam day runs a handful of versions
+	if s.mediaIndex == nil || len(s.mediaIndex) >= VersionCacheMaxVersions {
+		s.mediaIndex = map[mediaIndexKey]map[string]map[string]struct{}{}
+	}
+	s.mediaIndex[key] = index
+	s.mediaIndexMu.Unlock()
+	return index
 }
 
 // AttemptOpenedModuleIDs exposes the assigned-module set to the other

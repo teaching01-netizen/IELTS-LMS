@@ -55,7 +55,7 @@ func routeNearTier(src []byte, pattern, tier string) bool {
 		window := s[start:i]
 		// Last tier mention before the route should be the expected one.
 		lastTier, lastPos := "", -1
-		for _, cand := range []string{"TierAuthCritical", "TierAnonAuth", "TierAuthedReads", "TierPolling", "TierHeartbeat", "TierWrites"} {
+		for _, cand := range []string{"TierAuthCritical", "TierAnonAuth", "TierStudentCheckin", "TierAuthedReads", "TierPolling", "TierHeartbeat", "TierWrites"} {
 			for j := len(window) - len(cand); j >= 0; j-- {
 				if window[j:j+len(cand)] == cand {
 					if j > lastPos {
@@ -106,7 +106,7 @@ func TestTierCoverageBuildRouterWiring(t *testing.T) {
 	}
 	// Collect limitTier tier names referenced in the file.
 	src := testFileBytes(t, "main.go")
-	for _, tier := range []string{"TierAuthCritical", "TierAnonAuth", "TierAuthedReads", "TierPolling", "TierHeartbeat", "TierWrites"} {
+	for _, tier := range []string{"TierAuthCritical", "TierAnonAuth", "TierStudentCheckin", "TierAuthedReads", "TierPolling", "TierHeartbeat", "TierWrites"} {
 		if !containsBytes(src, tier) {
 			t.Fatalf("BuildRouter must reference %s", tier)
 		}
@@ -122,7 +122,12 @@ func TestTierCoverageBuildRouterWiring(t *testing.T) {
 		`"/{attemptID}/responses:batch"`:  "TierWrites",
 		`"/ws/live"`:                      "TierAuthedReads",
 		`"/login"`:                        "TierAnonAuth",
-		`"/student/entry"`:                "TierAnonAuth",
+		`"/student/entry"`:                "TierStudentCheckin",
+		`"/student/schedules/{id}"`:       "TierStudentCheckin",
+		`"/public/access-links/{linkID}"`: "TierStudentCheckin",
+		`"/activate"`:                     "TierAnonAuth",
+		`"/schedules/{scheduleID}/state"`: "TierAuthedReads",
+		`"/schedules/{scheduleID}/responses/{examQuestionID}"`: "TierWrites",
 	}
 	for pattern, tier := range checks {
 		if !routeNearTier(src, pattern, tier) {

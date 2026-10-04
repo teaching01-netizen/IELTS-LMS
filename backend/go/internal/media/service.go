@@ -60,6 +60,7 @@ type Service struct {
 	runner        *tx.Runner
 	store         objectstore.Store
 	remoteFetcher RemoteImageFetcher
+	renditions    *renditionWorker
 }
 
 // NewService wires the core media dependencies. URL imports remain disabled
@@ -77,7 +78,7 @@ func NewServiceWithRemoteFetcher(
 	store objectstore.Store,
 	fetcher RemoteImageFetcher,
 ) *Service {
-	return &Service{db: db, runner: runner, store: store, remoteFetcher: fetcher}
+	return &Service{db: db, runner: runner, store: store, remoteFetcher: fetcher, renditions: newRenditionWorker()}
 }
 
 // Asset is the media_assets row projection.
@@ -441,21 +442,31 @@ func (s *Service) UploadBytes(ctx context.Context, assetID string, body []byte, 
 // ReadBytes loads finalized bytes (mirrors read_local_object: get_asset
 // then finalized-only guard then read).
 func (s *Service) ReadBytes(ctx context.Context, assetID string) (string, []byte, error) {
-	asset, err := s.GetAsset(ctx, assetID)
+	asset, err := s.finalizedAsset(ctx, assetID)
 	if err != nil {
 		return "", nil, err
-	}
-	if asset.Status != StatusFinalized {
-		return "", nil, notFoundError("Media asset not found.")
-	}
-	if s.store == nil {
-		return "", nil, serviceUnavailable()
 	}
 	body, err := s.store.Get(ctx, asset.ObjectKey)
 	if err != nil {
 		return "", nil, serviceUnavailable()
 	}
 	return asset.ContentType, body, nil
+}
+
+// finalizedAsset is the read guard every byte path shares: pending uploads are
+// never served.
+func (s *Service) finalizedAsset(ctx context.Context, assetID string) (Asset, error) {
+	asset, err := s.GetAsset(ctx, assetID)
+	if err != nil {
+		return Asset{}, err
+	}
+	if asset.Status != StatusFinalized {
+		return Asset{}, notFoundError("Media asset not found.")
+	}
+	if s.store == nil {
+		return Asset{}, serviceUnavailable()
+	}
+	return asset, nil
 }
 
 func (s *Service) checkOwner(ctx context.Context, ownerKind, ownerID string) error {

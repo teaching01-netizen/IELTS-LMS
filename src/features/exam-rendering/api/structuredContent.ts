@@ -1,4 +1,5 @@
 export { StructuredContentRenderer, type StaticStructuredImageEnlargeApi, type StructuredTextRenderer } from '../StructuredContentRenderer';
+export { collectStructuredImageAssetIds } from '../structuredImageAssets';
 export type {
   SatImageEnlargeGeometry,
   SatImageEnlargeProps,

@@ -58,7 +58,7 @@ func TestBuildTierSetLocalModeWithPoolWiresNoDBCheckers(t *testing.T) {
 }
 
 // A1: buildTierSet in dual mode with a pool wires one checker per tier
-// (today's behavior preserved: 6 tiers, backstop excluded).
+// (7 tiers, backstop excluded).
 func TestBuildTierSetDualModeWithPoolWiresDBCheckers(t *testing.T) {
 	pool, _, err := sqlmock.New()
 	if err != nil {
@@ -72,8 +72,8 @@ func TestBuildTierSetDualModeWithPoolWiresDBCheckers(t *testing.T) {
 	if app.Tiers == nil {
 		t.Fatalf("buildTierSet must always set Tiers")
 	}
-	if n := app.Tiers.DBCheckerCount(); n != 6 {
-		t.Fatalf("dual mode with pool must wire 6 DB checkers, got %d", n)
+	if n := app.Tiers.DBCheckerCount(); n != 7 {
+		t.Fatalf("dual mode with pool must wire 7 DB checkers, got %d", n)
 	}
 	if app.Tiers.LocalOnly() {
 		t.Fatalf("dual mode must not set the TierSet localOnly flag")

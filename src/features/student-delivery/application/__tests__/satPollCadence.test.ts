@@ -15,21 +15,19 @@ describe("SAT recovery-poll cadence", () => {
     );
   });
 
-  it("polls faster without the live socket — the poll is the only signal", () => {
+  it("polls a recovery cadence without the live socket", () => {
     expect(satPollDelayMs({ liveSocketConnected: false, failures: 0, random: 0 })).toBe(
       SAT_POLL_OFFLINE_CADENCE_MS / 2,
     );
   });
 
-  it("backs off exponentially, holding the window after three failures", () => {
+  it("backs off on failure, never past the live cadence", () => {
     const delay = (failures: number) =>
       satPollDelayMs({ liveSocketConnected: false, failures, random: 1 });
-    expect(delay(0)).toBe(2_000);
-    expect(delay(1)).toBe(4_000);
-    expect(delay(2)).toBe(8_000);
-    expect(delay(3)).toBe(16_000);
-    expect(delay(4)).toBe(16_000);
-    expect(delay(50)).toBe(16_000);
+    expect(delay(0)).toBe(15_000);
+    expect(delay(1)).toBe(20_000);
+    expect(delay(3)).toBe(20_000);
+    expect(delay(50)).toBe(20_000);
     expect(delay(50)).toBeLessThanOrEqual(SAT_POLL_LIVE_CADENCE_MS);
   });
 

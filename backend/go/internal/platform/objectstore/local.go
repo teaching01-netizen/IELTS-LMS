@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,30 @@ func (s *LocalStore) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 	return os.ReadFile(path)
+}
+
+func (s *LocalStore) Open(ctx context.Context, key string) (io.ReadSeekCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path, err := s.path(key)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, errors.New("object is not a regular file")
+	}
+	return file, nil
 }
 
 func (s *LocalStore) Stat(ctx context.Context, key string) error {

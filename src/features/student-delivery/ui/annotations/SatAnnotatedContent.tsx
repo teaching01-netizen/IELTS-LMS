@@ -51,7 +51,7 @@ export function SatAnnotatedContent({
   enabled: boolean;
   selectionScopeKey?: string | undefined;
   enlarge?: StaticStructuredImageEnlargeApi | undefined;
-  loadMediaUrl?: ((assetId: string) => Promise<string | null>) | undefined;
+  loadMediaUrl?: ((assetId: string, options?: { fresh?: boolean }) => Promise<string | null>) | undefined;
   onMediaFailure?: ((assetId: string, questionId: string) => void) | undefined;
   questionId?: string | undefined;
   /** A confirmed text tap activates the choice through its native radio. */

@@ -61,7 +61,8 @@ import {
 } from "../ui/feedback/SatControlFeedback";
 import { SatIntegrityWarning } from "../ui/feedback/SatIntegrityWarning";
 import { SatTemporalRuntime } from "../timing/SatTemporalRuntime";
-import { loadAssessmentDeliveryMedia } from "../api/assessmentDeliveryApi";
+import { loadAssessmentDeliveryMedia, releaseAssessmentDeliveryMedia } from "../api/assessmentDeliveryApi";
+import { satMediaWarmUp } from "../domain/satMediaWarmUp";
 import { emitStudentObservabilityMetric } from "../../../utils/studentObservability";
 
 export interface SatStudentSessionRouteProps {
@@ -165,13 +166,14 @@ export function SatStudentSessionRoute({
   const [breakVeilOpen, setBreakVeilOpen] = useState(false);
 
   const { state, data, result, error, commands, persistence } = exam;
-  const loadMediaUrl = useCallback(async (assetId: string): Promise<string | null> => {
+  const loadMediaUrl = useCallback(async (assetId: string, options?: { fresh?: boolean }): Promise<string | null> => {
     try {
-      return await loadAssessmentDeliveryMedia(scheduleId, attemptId, assetId);
+      return await loadAssessmentDeliveryMedia(scheduleId, attemptId, assetId, options);
     } catch {
       return null;
     }
   }, [attemptId, scheduleId]);
+  useEffect(() => () => releaseAssessmentDeliveryMedia(scheduleId, attemptId), [attemptId, scheduleId]);
   const reportMediaFailure = useCallback((assetId: string, questionId: string) => {
     emitStudentObservabilityMetric("sat_media_load_failed", {
       assetId,
@@ -351,6 +353,35 @@ export function SatStudentSessionRoute({
           (candidate) => candidate.examQuestionId === liveQuestionId,
         ) ?? null
       : null;
+  // Every figure in the module is downloaded ahead of the student, so reaching
+  // an image question finds it already there instead of waiting for it. The
+  // question on screen requests its own figures; the warm-up waits for those
+  // before its lanes start, so they never share a slow link with the module.
+  // Joined as strings so a re-delivered (but identical) module does not
+  // restart the warm-up.
+  const mediaWarmUp = useMemo(
+    () => satMediaWarmUp(exam.stateModule?.questions ?? [], liveQuestionId),
+    [exam.stateModule, liveQuestionId],
+  );
+  const onScreenAssetIdsKey = mediaWarmUp.onScreen.join("\n");
+  const warmUpAssetIdsKey = mediaWarmUp.rest.join("\n");
+  useEffect(() => {
+    if (!warmUpAssetIdsKey) return;
+    const queue = warmUpAssetIdsKey.split("\n");
+    let cancelled = false;
+    const warm = async () => {
+      for (let assetId = queue.shift(); assetId && !cancelled; assetId = queue.shift()) {
+        await loadMediaUrl(assetId);
+      }
+    };
+    const onScreen = onScreenAssetIdsKey ? onScreenAssetIdsKey.split("\n") : [];
+    void Promise.all(onScreen.map((assetId) => loadMediaUrl(assetId))).then(() => {
+      for (let lane = 0; lane < 3 && !cancelled; lane += 1) void warm();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadMediaUrl, onScreenAssetIdsKey, warmUpAssetIdsKey]);
   const terminated =
     data?.proctorStatus === "terminated" ||
     data?.scheduleRuntimeStatus === "completed" ||

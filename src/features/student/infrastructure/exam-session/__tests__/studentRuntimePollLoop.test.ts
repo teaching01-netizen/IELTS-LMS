@@ -24,6 +24,7 @@ describe('student runtime poll loop', () => {
       poll: (since) => poll(since),
       sinceRevision: 7,
       onRevision,
+      random: () => 0,
     });
     const first = await loop.tick();
     expect(first.notModified).toBe(true);
@@ -65,6 +66,7 @@ describe('student runtime poll loop', () => {
       poll,
       sinceRevision: 7,
       onRevision,
+      random: () => 0,
       cadence: () => {
         const policy = coordinator.getPollingPolicy(runtimeStatus);
         return { floorMs: policy.intervalMs, ceilingMs: policy.maxIntervalMs };
@@ -72,11 +74,11 @@ describe('student runtime poll loop', () => {
     });
 
     // Waiting: the server's steady 25s is clamped down to the socket-less
-    // ceiling, so the next look is seconds away rather than 15-25s.
+    // waiting ceiling, so the next look is seconds away rather than 15-25s.
     await loop.tick();
     expect(poll).toHaveBeenLastCalledWith(7);
     expect(onRevision).not.toHaveBeenCalled();
-    expect(loop.nextDelayMs()).toBeLessThanOrEqual(3_000);
+    expect(loop.nextDelayMs()).toBeLessThanOrEqual(5_000);
 
     // The proctor presses Start.
     started = true;
@@ -119,6 +121,7 @@ describe('student runtime poll loop', () => {
       sinceRevision: 1,
       onRevision: () => {},
       cadence: () => ({ floorMs: 20_000, ceilingMs: 30_000 }),
+      random: () => 0,
     });
     await loop.tick();
     expect(loop.nextDelayMs()).toBe(25_000);
@@ -135,6 +138,7 @@ describe('student runtime poll loop', () => {
       sinceRevision: 3,
       onRevision: () => {},
       cadence: () => ({ floorMs: 2_000, ceilingMs: 25_000 }),
+      random: () => 0,
     });
     await expect(loop.tick()).rejects.toThrow('network down');
     expect(loop.nextDelayMs()).toBe(4_000);
@@ -143,6 +147,27 @@ describe('student runtime poll loop', () => {
     // A successful tick resets the window to the server cadence.
     await loop.tick();
     expect(loop.nextDelayMs()).toBe(25_000);
+  });
+
+  // A room woken for the same section deadline must not land in one instant,
+  // and no student may poll earlier than the server's deadline wake.
+  it('jitters upward only, by at most 20% capped at 3s', async () => {
+    const view = { revision: 1, status: 'live', activeSection: null, pollAfterSecs: 11, notModified: true };
+    const delayWith = async (random: number, pollAfterSecs = 11) => {
+      const loop = createStudentRuntimePollLoop({
+        poll: async () => ({ ...view, pollAfterSecs }),
+        sinceRevision: 1,
+        onRevision: () => {},
+        cadence: () => ({ floorMs: 1_500, ceilingMs: 25_000 }),
+        random: () => random,
+      });
+      await loop.tick();
+      return loop.nextDelayMs();
+    };
+    expect(await delayWith(0)).toBe(11_000);
+    expect(await delayWith(1)).toBe(13_200);
+    // 20% of the 25s steady cadence would be 5s; the spread caps at 3s.
+    expect(await delayWith(1, 25)).toBe(28_000);
   });
 
   it('stops on terminal errors (410) instead of retry-storming', async () => {

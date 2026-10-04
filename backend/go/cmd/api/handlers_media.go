@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -57,22 +58,41 @@ func mediaDownloadHandler(app *App) http.HandlerFunc {
 			return
 		}
 		assetID := strings.TrimSpace(chi.URLParam(r, "assetID"))
-		contentType, body, err := app.Media.ReadBytes(r.Context(), assetID)
+		content, err := app.Media.OpenFinalized(r.Context(), assetID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if strings.TrimSpace(contentType) == "" {
-			contentType = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", contentType)
 		// Step 7: finalized assets are immutable (status flips pending ->
 		// finalized exactly once and never back), so long-lived caching is
 		// safe: browsers/CDNs may reuse bytes for a year. Uploads stay
-		// uncacheable via the pending-only ReadBytes guard above.
+		// uncacheable via the finalized-only guard above.
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body)
+		serveMediaContent(w, r, content)
+	}
+}
+
+// serveMediaContent streams from storage (Content-Length, Range) instead of
+// holding the whole figure in memory per request.
+func serveMediaContent(w http.ResponseWriter, r *http.Request, content media.Content) {
+	defer content.Body.Close()
+	contentType := strings.TrimSpace(content.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	http.ServeContent(w, r, "", time.Time{}, content.Body)
+}
+
+// mediaContentWriteWindow outlasts the client's 120s body timeout, so a large
+// figure on a slow exam-room link is not cut at the server-wide 30s WriteTimeout.
+const mediaContentWriteWindow = 2 * time.Minute
+
+func withWriteWindow(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// ErrNotSupported (e.g. httptest recorders) keeps the server default.
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(mediaContentWriteWindow))
+		h(w, r)
 	}
 }
 
@@ -108,19 +128,15 @@ func mediaDownloadContentHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Media asset not found."))
 			return
 		}
-		contentType, body, err := app.Media.ReadBytes(r.Context(), assetID)
+		// Students get the delivery rendition: same figure, screen-sized bytes.
+		content, err := app.Media.OpenDelivery(r.Context(), assetID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if strings.TrimSpace(contentType) == "" {
-			contentType = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Cache-Control", "private, no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body)
+		serveMediaContent(w, r, content)
 	}
 }
 

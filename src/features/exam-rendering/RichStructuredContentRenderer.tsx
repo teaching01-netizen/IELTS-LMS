@@ -11,6 +11,7 @@ import type {
 import { getAssessmentMediaAsset } from "../exam-authoring/api/assessmentMediaApi";
 import { satImagePresentation } from "../exam-authoring/api/satImagePresentation";
 import { documentFromStructuredContent } from "../exam-authoring/api/renderingPublic";
+import { directSource } from "./structuredImageAssets";
 import {
   SAT_IMAGE_ENLARGE_FIT_VIEW,
   SAT_IMAGE_ENLARGE_NO_GEOMETRY,
@@ -33,12 +34,6 @@ function positiveDimension(node: RichTextNode, name: string): number | undefined
   const value = node.attrs?.[name];
   const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(number) && number > 0 ? Math.round(number) : undefined;
-}
-
-function directSource(value: string): string {
-  if (/^blob:/i.test(value)) return value;
-  if (/^data:image\/(?:png|gif|jpeg|webp)[;,]/i.test(value)) return value;
-  return /^(?:https?:\/\/|\/)/i.test(value) ? value : "";
 }
 
 function initialImageSource(node: RichTextNode): string {
@@ -132,7 +127,12 @@ export interface StaticStructuredImageEnlargeApi {
 }
 
 export interface StructuredContentMediaProps {
-  loadMediaUrl?: ((assetId: string) => Promise<string | null>) | undefined;
+  /**
+   * Resolves a protected asset to a displayable URL. The loader owns the URLs
+   * it returns (it may cache and share them), so the renderer never revokes
+   * them; `fresh` asks it to drop its copy and download the bytes again.
+   */
+  loadMediaUrl?: ((assetId: string, options?: { fresh?: boolean }) => Promise<string | null>) | undefined;
   onMediaFailure?: ((assetId: string, questionId: string) => void) | undefined;
   questionId?: string | undefined;
 }
@@ -158,8 +158,6 @@ function StaticStructuredImage({
   const size = stringAttribute(node, "size");
   const presentation = satImagePresentation(node.attrs ?? {});
   const [source, setSource] = useState(() => initialImageSource(node));
-  const sourceRef = useRef(source);
-  sourceRef.current = source;
   const [failed, setFailed] = useState(() => !assetId && !directSource(fallbackSource));
   const refreshAttempted = useRef(false);
   const failureReported = useRef(false);
@@ -186,30 +184,45 @@ function StaticStructuredImage({
     onMediaFailure?.(assetId, questionId);
   }, [assetId, onMediaFailure, questionId]);
 
-  const refreshOnce = useCallback(async () => {
-    if (!assetId || !loadMediaUrl || refreshAttempted.current) {
+  const loadProtected = useCallback(async (fresh: boolean) => {
+    if (!assetId || !loadMediaUrl) {
       reportFailure();
       return;
     }
-    refreshAttempted.current = true;
     const generation = loadGeneration.current;
     try {
-      const refreshed = await loadMediaUrl(assetId);
-      if (generation !== loadGeneration.current) {
-        if (refreshed?.startsWith("blob:")) URL.revokeObjectURL(refreshed);
-        return;
-      }
-      const nextSource = directSource(refreshed ?? "");
-      if (nextSource && nextSource !== sourceRef.current) {
+      const loaded = await (fresh ? loadMediaUrl(assetId, { fresh: true }) : loadMediaUrl(assetId));
+      if (generation !== loadGeneration.current) return;
+      const nextSource = directSource(loaded ?? "");
+      if (nextSource) {
         setSource(nextSource);
         setFailed(false);
         return;
       }
     } catch {
-      // One bounded refresh attempt; the existing unavailable state is final.
+      // The loader already retried; fall through to the unavailable state.
     }
-    reportFailure();
+    if (generation === loadGeneration.current) reportFailure();
   }, [assetId, loadMediaUrl, reportFailure]);
+
+  // An image that fails to decode gets one fresh download before giving up.
+  const refreshOnce = useCallback(() => {
+    if (refreshAttempted.current) {
+      reportFailure();
+      return;
+    }
+    refreshAttempted.current = true;
+    void loadProtected(true);
+  }, [loadProtected, reportFailure]);
+
+  // The student's way out of the unavailable state: start over with new bytes.
+  const retry = useCallback(() => {
+    refreshAttempted.current = false;
+    failureReported.current = false;
+    setSource("");
+    setFailed(false);
+    void loadProtected(true);
+  }, [loadProtected]);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,11 +234,12 @@ function StaticStructuredImage({
     refreshAttempted.current = false;
     failureReported.current = false;
     setSource(initialSource);
-    setFailed(!initialSource);
+    // A protected figure is loading, not failed, until its loader says otherwise.
+    setFailed(!initialSource && !protectedDelivery);
 
     if (!assetId || directAssetSource || protectedDelivery) {
       if (protectedDelivery) {
-        void refreshOnce();
+        void loadProtected(false);
       }
       return () => {
         cancelled = true;
@@ -250,11 +264,13 @@ function StaticStructuredImage({
       cancelled = true;
       if (loadGeneration.current === generation) loadGeneration.current++;
     };
-  }, [assetId, fallbackSource, loadMediaUrl, refreshOnce]);
+  }, [assetId, fallbackSource, loadMediaUrl, loadProtected]);
 
   useEffect(() => () => {
+    // Loader-delivered URLs belong to the loader, which may be showing them elsewhere.
+    if (loadMediaUrl) return;
     if (source.startsWith("blob:") && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(source);
-  }, [source]);
+  }, [source, loadMediaUrl]);
 
   // A new source is a new figure: no magnification survives it.
   useEffect(() => {
@@ -447,7 +463,7 @@ function StaticStructuredImage({
             decoding="async"
             loading="lazy"
             draggable={false}
-            onError={() => void refreshOnce()}
+            onError={refreshOnce}
             onLoad={measure}
             aria-hidden={viewerOpen ? true : undefined}
             // The visual itself carries the alignment: auto margins move it
@@ -478,12 +494,19 @@ function StaticStructuredImage({
             }
           />
         ) : (
-          <div
-            className="flex min-h-32 w-full items-center justify-center px-4 text-xs text-slate-500"
-            role="status"
-            aria-live="polite"
-          >
-            {failed ? "Visual could not be loaded" : "Loading visual…"}
+          <div className="flex min-h-32 w-full flex-col items-center justify-center gap-2 px-4 text-xs text-slate-500">
+            <span role="status" aria-live="polite">
+              {failed ? "Visual could not be loaded" : "Loading visual…"}
+            </span>
+            {failed && assetId && loadMediaUrl ? (
+              <button
+                type="button"
+                onClick={retry}
+                className="min-h-8 rounded-md border border-slate-300 bg-white px-3 font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700"
+              >
+                Try again
+              </button>
+            ) : null}
           </div>
         )}
       </div>

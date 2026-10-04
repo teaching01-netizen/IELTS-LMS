@@ -528,23 +528,27 @@ func BuildRouter(app *App) http.Handler {
 		// Auth routes split by cost class: session/logout reads get a generous
 		// per-user quota isolated from bulk traffic (unrelated polling can
 		// never starve session bootstrap), while credential-bearing attempts
-		// stay on a strict per-IP quota (abuse surface).
+		// stay on a strict per-IP quota (abuse surface). Student check-in is
+		// per IP too but on its own room-sized budget: a whole exam room can
+		// share one NAT address, and check-in guards no password.
 		r.With(adminLimit).Route("/auth", func(r chi.Router) {
-			r.With(limitTier(app, httpx.TierAuthCritical, userKey())).Group(func(r chi.Router) {
+			r.With(limitTier(app, httpx.TierAuthCritical, sessionCookieKey(app))).Group(func(r chi.Router) {
 				authzRoute(r, "GET", "/session", sessionHandler(app))
 				authzRoute(r, "POST", "/logout", logoutHandler(app))
 				authzRoute(r, "POST", "/logout-all", logoutAllHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
 				authzRoute(r, "POST", "/login", loginHandler(app))
-				authzRoute(r, "POST", "/student/entry", studentEntryHandler(app))
-				authzRoute(r, "GET", "/student/schedules/{id}", studentEntryScheduleHandler(app))
 				authzRoute(r, "POST", "/activate", activateHandler(app))
 				authzRoute(r, "POST", "/password/reset-request", passwordResetRequestHandler(app))
 				authzRoute(r, "POST", "/password/reset-complete", passwordResetCompleteHandler(app))
 			})
+			r.With(limitTier(app, httpx.TierStudentCheckin, ipKey())).Group(func(r chi.Router) {
+				authzRoute(r, "POST", "/student/entry", studentEntryHandler(app))
+				authzRoute(r, "GET", "/student/schedules/{id}", studentEntryScheduleHandler(app))
+			})
 		})
-		r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierStudentCheckin, ipKey())).Group(func(r chi.Router) {
 			authzRoute(r, "POST", "/public/access-links/{linkID}/resolve-entry", publicLinkResolveEntry(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/exams", func(r chi.Router) {
@@ -573,7 +577,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/links/{linkID}/members", linkMembers(app))
 			authzRoute(r, "GET", "/links/{linkID}/activity", linkActivity(app))
 		})
-		r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierStudentCheckin, ipKey())).Group(func(r chi.Router) {
 			authzRoute(r, "GET", "/public/access-links/{linkID}", publicLinkGet(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Get("/assessment-release/exams/{examID}", authorize("GET /api/v1/assessment-release/exams/{examID}", releaseStateHandler(app)))
@@ -604,19 +608,25 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Patch("/exams/{examID}/sections/{sectionID}/delivery-settings", authorize("PATCH /api/v1/assessment-authoring/exams/{examID}/sections/{sectionID}/delivery-settings", authorDeliverySettingsHandler(app)))
 			r.With(adminLimit).Post("/exams/{examID}/validate", authorize("POST /api/v1/assessment-authoring/exams/{examID}/validate", authorValidateHandler(app)))
 		})
-		r.With(limitTier(app, httpx.TierWrites, attemptKey())).With(studentLimit).Route("/assessment-delivery", func(r chi.Router) {
-			authzRoute(r, "POST", "/schedules/{scheduleID}/bootstrap", deliveryBootstrapHandler(app))
-			authzRoute(r, "GET", "/schedules/{scheduleID}/state", deliveryStateHandler(app))
-			authzRoute(r, "PATCH", "/schedules/{scheduleID}/responses/{examQuestionID}", deliverySaveResponseHandler(app))
-			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/start", deliveryStartModuleHandler(app))
-			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/enter", deliveryEnterModuleHandler(app))
-			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/visible", deliveryMarkStageVisibleHandler(app))
-			authzRoute(r, "GET", "/schedules/{scheduleID}/modules/{moduleID}/entry-state", deliveryModuleEntryStateHandler(app))
-			authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/{breakID}/start", deliveryStartBreakHandler(app))
-			authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/enter", deliveryEnterBreakHandler(app))
-			authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/visible", deliveryMarkBreakVisibleHandler(app))
-			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/submit", deliverySubmitModuleHandler(app))
-			authzRoute(r, "POST", "/schedules/{scheduleID}/submit", deliverySubmitAssessmentHandler(app))
+		// SAT delivery reads (the polled state view, module entry probes) must
+		// not spend the writes budget that answer saves and submits draw from.
+		r.With(studentLimit).Route("/assessment-delivery", func(r chi.Router) {
+			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
+				authzRoute(r, "GET", "/schedules/{scheduleID}/state", deliveryStateHandler(app))
+				authzRoute(r, "GET", "/schedules/{scheduleID}/modules/{moduleID}/entry-state", deliveryModuleEntryStateHandler(app))
+			})
+			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Group(func(r chi.Router) {
+				authzRoute(r, "POST", "/schedules/{scheduleID}/bootstrap", deliveryBootstrapHandler(app))
+				authzRoute(r, "PATCH", "/schedules/{scheduleID}/responses/{examQuestionID}", deliverySaveResponseHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/start", deliveryStartModuleHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/enter", deliveryEnterModuleHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/visible", deliveryMarkStageVisibleHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/{breakID}/start", deliveryStartBreakHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/enter", deliveryEnterBreakHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/visible", deliveryMarkBreakVisibleHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/submit", deliverySubmitModuleHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/submit", deliverySubmitAssessmentHandler(app))
+			})
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Group(func(r chi.Router) {
 			authzRoute(r, "GET", "/versions/{versionID}", versionSummaryHandler(app))
@@ -756,13 +766,18 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/{resultID}/events", resultsEventsHandler(app))
 			authzRoute(r, "GET", "/{resultID}", resultsGetHandler(app))
 		})
-		r.With(limitTier(app, httpx.TierWrites, attemptKey())).With(adminLimit).Route("/media", func(r chi.Router) {
-			authzRoute(r, "POST", "/uploads", mediaUploadHandler(app))
-			authzRoute(r, "POST", "/import-url", mediaImportURLHandler(app))
-			authzRoute(r, "PUT", "/uploads/{assetID}", mediaUploadBytesHandler(app))
-			authzRoute(r, "POST", "/uploads/{assetID}/complete", mediaCompleteHandler(app))
+		r.With(adminLimit).Route("/media", func(r chi.Router) {
+			// Only uploads are writes. The reads stay out of this group: a
+			// student's figures share the attempt key with answer saves, so a
+			// writes tier here would let image loading starve them.
+			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Group(func(r chi.Router) {
+				authzRoute(r, "POST", "/uploads", mediaUploadHandler(app))
+				authzRoute(r, "POST", "/import-url", mediaImportURLHandler(app))
+				authzRoute(r, "PUT", "/uploads/{assetID}", mediaUploadBytesHandler(app))
+				authzRoute(r, "POST", "/uploads/{assetID}/complete", mediaCompleteHandler(app))
+			})
 			authzRoute(r, "GET", "/assets/{assetID}", withAuthedReadsTier(app, mediaDownloadHandler(app)))
-			authzRoute(r, "GET", "/{assetID}/content", withAttemptReadsTier(app, mediaDownloadContentHandler(app)))
+			authzRoute(r, "GET", "/{assetID}/content", withAttemptReadsTier(app, withWriteWindow(mediaDownloadContentHandler(app))))
 			authzRoute(r, "GET", "/{assetID}", withAuthedReadsTier(app, mediaGetHandler(app)))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/answer-history", func(r chi.Router) {
@@ -858,6 +873,7 @@ func buildTierSet(app *App) {
 	})
 	perMin[httpx.TierAuthCritical] = cfg.RateLimitAuthCriticalPerMin
 	perMin[httpx.TierAnonAuth] = cfg.RateLimitAnonAuthPerMin
+	perMin[httpx.TierStudentCheckin] = cfg.RateLimitStudentCheckinPerMin
 	perMin[httpx.TierBackstop] = cfg.RateLimitBackstopPerMin
 	budgets := httpx.TierBudgetsFromConfig(perMin, burst)
 	dbs := map[string]httpx.DBChecker{}
@@ -924,12 +940,27 @@ func userKey() httpx.KeyFunc {
 	return httpx.UserOrIPKey(sessionUserLookup)
 }
 
+// sessionCookieKey is userKey, except that a request with no session cookie
+// is not counted: authMiddleware answers it without a DB lookup, and every
+// first page load in a shared exam room would otherwise share one IP bucket.
+// A cookie that resolves to no session did cost a lookup, so it stays per IP.
+func sessionCookieKey(app *App) httpx.KeyFunc {
+	byUser := userKey()
+	cookieName := app.Config.EffectiveSessionCookieName()
+	return func(r *http.Request) string {
+		if cookie, err := r.Cookie(cookieName); err != nil || cookie.Value == "" {
+			return ""
+		}
+		return byUser(r)
+	}
+}
+
 // attemptKey tiers student/attempt-bearer traffic by attempt hash, then user, then IP.
 func attemptKey() httpx.KeyFunc {
 	return httpx.AttemptOrUserOrIPKey(sessionUserLookup)
 }
 
-// ipKey tiers strictly anonymous endpoints (login, entry) by client IP.
+// ipKey tiers anonymous endpoints (login, student check-in) by client IP.
 func ipKey() httpx.KeyFunc {
 	return httpx.ClientIPKey
 }

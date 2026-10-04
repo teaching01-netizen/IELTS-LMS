@@ -176,3 +176,32 @@ func TestPollDeltaNearSectionDeadlineUsesFastLane(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A deadline wake replaces a minute of 2s polls; waiting rooms see Start or
+// Resume within PollWaitingSecs.
+func TestPollAfterSecsCadence(t *testing.T) {
+	now := time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) *time.Time { t := now.Add(d); return &t }
+	cases := []struct {
+		name string
+		snap Snapshot
+		want int
+	}{
+		{"deadline in 10s wakes just past it", Snapshot{Status: StatusLive, SectionDeadlineAt: at(10 * time.Second)}, 11},
+		{"deadline in 500ms", Snapshot{Status: StatusLive, SectionDeadlineAt: at(500 * time.Millisecond)}, PollFastLaneSecs},
+		{"deadline in 40s rests", Snapshot{Status: StatusLive, SectionDeadlineAt: at(40 * time.Second)}, PollSteadySecs},
+		{"deadline passed 5s ago fast-lanes", Snapshot{Status: StatusLive, SectionDeadlineAt: at(-5 * time.Second)}, PollFastLaneSecs},
+		{"deadline long past rests", Snapshot{Status: StatusLive, SectionDeadlineAt: at(-2 * time.Minute)}, PollSteadySecs},
+		{"no deadline rests", Snapshot{Status: StatusLive}, PollSteadySecs},
+		{"not started waits", Snapshot{Status: StatusNotStarted}, PollWaitingSecs},
+		{"paused waits", Snapshot{Status: StatusPaused}, PollWaitingSecs},
+		{"section paused waits", Snapshot{Status: StatusLive, SectionPaused: true}, PollWaitingSecs},
+		{"between sections waits", Snapshot{Status: StatusLive, WaitingForNextSection: true}, PollWaitingSecs},
+		{"paused near deadline keeps the earlier wake", Snapshot{Status: StatusPaused, SectionDeadlineAt: at(2 * time.Second)}, 3},
+	}
+	for _, tc := range cases {
+		if got := pollAfterSecs(tc.snap, now); got != tc.want {
+			t.Errorf("%s: got %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}

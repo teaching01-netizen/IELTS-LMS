@@ -45,6 +45,8 @@ export interface StudentRuntimePollLoopInput {
   readonly onRevision: (revision: number) => void;
   /** Transport bounds; omitted = DEFAULT_STUDENT_POLL_CADENCE. */
   readonly cadence?: () => StudentRuntimePollCadence;
+  /** Jitter source in [0, 1); omitted = Math.random. */
+  readonly random?: () => number;
 }
 
 export interface StudentRuntimePollLoop {
@@ -86,6 +88,9 @@ export function createStudentRuntimePollLoop(input: StudentRuntimePollLoopInput)
       const bounds = cadence();
       const serverDelayMs = Math.max(1_000, view.pollAfterSecs * 1_000);
       delayMs = clampStudentPollDelay(serverDelayMs, bounds);
+      // Upward-only jitter: never earlier than the server asked, but a room
+      // woken for the same deadline spreads over up to 3s instead of one instant.
+      delayMs += Math.round((input.random ?? Math.random)() * Math.min(delayMs * 0.2, 3_000));
       if (!view.notModified && view.revision !== since) {
         since = view.revision;
         input.onRevision(view.revision);

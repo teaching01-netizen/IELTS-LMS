@@ -228,23 +228,26 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
     hook.unmount();
   });
 
-  it("polls faster without the live socket", async () => {
+  // Without the socket the state read is recovery only (room transitions ride
+  // the runtime-poll revision, deadlines the temporal-boundary timers), so it
+  // must not become a 2s full-assembly herd.
+  it("polls on the recovery cadence without the live socket", async () => {
     const polls = recordPollTimes();
     polls.mock(() => deliveryPayload());
     const hook = mount(false);
     await flush();
-    // The failure window is 1–2s; at the top of it, 1.999s must not poll.
-    await advance(1_999);
+    // The window is 7.5–15s; at the top of it, 14.999s must not poll.
+    await advance(14_999);
     expect(polls.offsets()).toEqual([0]);
-    await advance(2_001);
-    expect(polls.offsets()).toEqual([0, 2_000, 4_000]);
+    await advance(15_001);
+    expect(polls.offsets()).toEqual([0, 15_000, 30_000]);
     hook.unmount();
   });
 
   // A failed poll must widen the window. refresh() resolves for a failed fetch,
   // so this only holds while the loop receives an explicit failure signal —
   // otherwise the counter never grows and every poll stays at the fast cadence.
-  it("backs the offline cadence off exponentially and then holds the window", async () => {
+  it("backs the offline cadence off and then holds the window", async () => {
     const polls = recordPollTimes();
     polls.mock((call) => {
       if (call === 1) return deliveryPayload();
@@ -252,11 +255,9 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
     });
     const hook = mount(false);
     await flush();
-    // 2s -> 4s -> 8s -> 16s -> 16s (window held after three failures).
-    await advance(115_000);
-    expect(polls.offsets()).toEqual([
-      0, 2_000, 6_000, 14_000, 30_000, 46_000, 62_000, 78_000, 94_000, 110_000,
-    ]);
+    // 15s -> 20s -> 20s (window held at the live cadence).
+    await advance(100_000);
+    expect(polls.offsets()).toEqual([0, 15_000, 35_000, 55_000, 75_000, 95_000]);
     hook.unmount();
   });
 
@@ -282,7 +283,7 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
 
     // Outage 1: the tick parks on the event instead of polling.
     setBrowserOnline(false);
-    await advance(2_000);
+    await advance(15_000);
     expect(polls.offsets()).toEqual([0]);
     await reconnect();
     const afterFirst = polls.offsets().length;
@@ -290,17 +291,17 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
 
     // Outage 2.
     setBrowserOnline(false);
-    await advance(2_000);
+    await advance(15_000);
     await reconnect();
     const afterSecond = polls.offsets().length;
     expect(afterSecond).toBe(afterFirst + 1);
     // ...and the loop is not doubled: the next window polls once.
-    await advance(2_000);
+    await advance(15_000);
     expect(polls.offsets().length).toBe(afterSecond + 1);
 
     // Outage 3.
     setBrowserOnline(false);
-    await advance(2_000);
+    await advance(15_000);
     await reconnect();
     expect(polls.offsets().length).toBe(afterSecond + 2);
     hook.unmount();
@@ -315,7 +316,7 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
     const hook = mount(false);
     await flush();
     setBrowserOnline(false);
-    await advance(2_000);
+    await advance(15_000);
     const parked = polls.offsets().length;
 
     hook.unmount();
@@ -332,7 +333,7 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
     polls.mock((call) => deliveryPayload({ result: call > 1 }));
     const hook = mount(false);
     await flush();
-    await advance(2_000);
+    await advance(15_000);
     expect(hook.result.current.state.phase).toBe("complete");
     const atComplete = polls.offsets().length;
     await advance(30_000);

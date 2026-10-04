@@ -20,10 +20,14 @@ import (
 const (
 	TierAuthCritical = "auth-critical"
 	TierAnonAuth     = "anon-auth"
-	TierAuthedReads  = "authed-reads"
-	TierPolling      = "polling"
-	TierHeartbeat    = "heartbeat"
-	TierWrites       = "writes"
+	// TierStudentCheckin covers the public check-in routes. It is keyed by IP
+	// (nothing else identifies a student yet) but sized for a room behind one
+	// NAT address, separate from the strict anon-auth budget on staff login.
+	TierStudentCheckin = "student-checkin"
+	TierAuthedReads    = "authed-reads"
+	TierPolling        = "polling"
+	TierHeartbeat      = "heartbeat"
+	TierWrites         = "writes"
 	// TierBackstop is the loose local-only abuse floor applied globally.
 	// It has no distributed counter and never appears as a DB route_key.
 	TierBackstop = "backstop"
@@ -298,13 +302,14 @@ func TierBudgetsFromConfig(perMin map[string]int, burst int) map[string]TierBudg
 		return def
 	}
 	return map[string]TierBudget{
-		TierAuthCritical: {PerMin: b(perMin[TierAuthCritical], 120), Window: time.Minute, Burst: burst},
-		TierAnonAuth:     {PerMin: b(perMin[TierAnonAuth], 30), Window: time.Minute, Burst: burst},
-		TierAuthedReads:  {PerMin: b(perMin[TierAuthedReads], 300), Window: time.Minute, Burst: burst},
-		TierPolling:      {PerMin: b(perMin[TierPolling], 240), Window: time.Minute, Burst: burst},
-		TierHeartbeat:    {PerMin: b(perMin[TierHeartbeat], 120), Window: time.Minute, Burst: burst},
-		TierWrites:       {PerMin: b(perMin[TierWrites], 120), Window: time.Minute, Burst: burst},
-		TierBackstop:     {PerMin: b(perMin[TierBackstop], 3000), Window: time.Minute, Burst: burst},
+		TierAuthCritical:   {PerMin: b(perMin[TierAuthCritical], 120), Window: time.Minute, Burst: burst},
+		TierAnonAuth:       {PerMin: b(perMin[TierAnonAuth], 30), Window: time.Minute, Burst: burst},
+		TierStudentCheckin: {PerMin: b(perMin[TierStudentCheckin], 1200), Window: time.Minute, Burst: burst},
+		TierAuthedReads:    {PerMin: b(perMin[TierAuthedReads], 300), Window: time.Minute, Burst: burst},
+		TierPolling:        {PerMin: b(perMin[TierPolling], 240), Window: time.Minute, Burst: burst},
+		TierHeartbeat:      {PerMin: b(perMin[TierHeartbeat], 120), Window: time.Minute, Burst: burst},
+		TierWrites:         {PerMin: b(perMin[TierWrites], 120), Window: time.Minute, Burst: burst},
+		TierBackstop:       {PerMin: b(perMin[TierBackstop], 30000), Window: time.Minute, Burst: burst},
 	}
 }
 

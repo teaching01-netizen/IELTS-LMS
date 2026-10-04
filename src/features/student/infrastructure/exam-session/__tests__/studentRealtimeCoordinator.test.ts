@@ -98,17 +98,18 @@ describe('student realtime coordinator', () => {
 
     coordinator.handleSocketDisconnected();
 
-    expect(coordinator.getPollingPolicy('live')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
-    expect(coordinator.getPollingPolicy('not_started')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    // Live: the ceiling lets the server's deadline-aligned 25s cadence through.
+    expect(coordinator.getPollingPolicy('live')).toEqual({ intervalMs: 1500, maxIntervalMs: 25_000 });
+    expect(coordinator.getPollingPolicy('not_started')).toEqual({ intervalMs: 1500, maxIntervalMs: 5000 });
     expect(coordinator.getPollingPolicy('completed')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
   });
 
   // A cohort waiting on Start has no runtime row yet (`null`) or a
   // `not_started` one; a paused cohort is waiting on Resume. Without a socket
-  // the poll is their only live channel, so it must be as tight as mid-exam:
-  // the 15-25s cadence here is what made a proctor's Start reach the room up
-  // to 25s late.
-  it('polls a waiting cohort as tightly as a live one when the socket is unavailable', () => {
+  // the poll is their only live channel, so the client holds a 5s ceiling: the
+  // 15-25s cadence here is what made a proctor's Start reach the room up to
+  // 25s late.
+  it('caps a waiting cohort at 5s when the socket is unavailable', () => {
     const coordinator = createStudentRealtimeCoordinator({
       scheduleId: 'schedule-1',
       candidateId: 'candidate-1',
@@ -116,12 +117,12 @@ describe('student realtime coordinator', () => {
     });
 
     for (const status of [null, 'not_started', 'paused'] as const) {
-      expect(coordinator.getPollingPolicy(status)).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+      expect(coordinator.getPollingPolicy(status)).toEqual({ intervalMs: 1500, maxIntervalMs: 5000 });
     }
     // Waiting phases with no runtime row are exactly the cohort-before-Start
     // shape: still tight.
     for (const phase of ['lobby', 'pre-check'] as const) {
-      expect(coordinator.getPollingPolicy(null, { attemptPhase: phase })).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+      expect(coordinator.getPollingPolicy(null, { attemptPhase: phase })).toEqual({ intervalMs: 1500, maxIntervalMs: 5000 });
     }
     // Completion remains fast when polling is the only live channel, so the
     // student reaches the post-exam surface promptly after auto-submit.
@@ -143,9 +144,9 @@ describe('student realtime coordinator', () => {
       expect(coordinator.getPollingPolicy(null, { attemptPhase: phase })).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
     }
     // The phase only disambiguates a MISSING runtime row: a live runtime is
-    // still polled tightly whatever the attempt phase says.
-    expect(coordinator.getPollingPolicy('live', { attemptPhase: 'exam' })).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
-    expect(coordinator.getPollingPolicy('paused', { attemptPhase: 'exam' })).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    // still on the server's cadence whatever the attempt phase says.
+    expect(coordinator.getPollingPolicy('live', { attemptPhase: 'exam' })).toEqual({ intervalMs: 1500, maxIntervalMs: 25_000 });
+    expect(coordinator.getPollingPolicy('paused', { attemptPhase: 'exam' })).toEqual({ intervalMs: 1500, maxIntervalMs: 5000 });
   });
 
   it('rests lazily while the socket carries the transitions', () => {
@@ -162,6 +163,6 @@ describe('student realtime coordinator', () => {
 
     // Losing the socket tightens the waiting cohort immediately.
     coordinator.handleSocketDisconnected();
-    expect(coordinator.getPollingPolicy('not_started')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    expect(coordinator.getPollingPolicy('not_started')).toEqual({ intervalMs: 1500, maxIntervalMs: 5000 });
   });
 });

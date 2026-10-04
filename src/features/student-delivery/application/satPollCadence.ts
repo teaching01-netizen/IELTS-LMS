@@ -12,8 +12,13 @@
 
 /** Steady cadence while the live socket is connected. */
 export const SAT_POLL_LIVE_CADENCE_MS = 20_000;
-/** Faster cadence without the live socket — the poll is the only signal. */
-export const SAT_POLL_OFFLINE_CADENCE_MS = 2_000;
+/**
+ * Cadence without the live socket. The state read is a full attempt assembly,
+ * so it is recovery only: room transitions refresh on the runtime-poll
+ * revision and module deadlines on the temporal-boundary timers. This bounds
+ * per-student proctor actions (server write gates enforce them immediately).
+ */
+export const SAT_POLL_OFFLINE_CADENCE_MS = 15_000;
 
 export function satPollDelayMs(input: {
   liveSocketConnected: boolean;

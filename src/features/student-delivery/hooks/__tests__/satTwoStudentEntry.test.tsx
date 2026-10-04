@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { useSatExamController } from "../useSatExamController";
+import { SAT_POLL_OFFLINE_CADENCE_MS } from "../../application/satPollCadence";
 
 /**
  * Two-student waiting-room convergence (Part A).
@@ -512,6 +513,14 @@ describe("SAT two-student waiting-room convergence", () => {
         studentB.rerender({ token });
         await settle();
       };
+      // Re-render without a refresh: the hook's remainingSeconds is computed at
+      // render time (the per-second display ticks in the temporal context), and
+      // the recovery poll is too slow to re-render on its own.
+      const observe = async () => {
+        studentA.rerender({ token });
+        studentB.rerender({ token });
+        await settle();
+      };
 
       // A enters at ~T+0, B checks in 12 seconds later.
       const studentA = renderStudent("schedule", "attempt-a");
@@ -524,6 +533,7 @@ describe("SAT two-student waiting-room convergence", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(8_000);
       });
+      await observe();
       expect(studentA.result.current.state.phase).toBe("module");
       expect(studentB.result.current.state.phase).toBe("module");
 
@@ -547,6 +557,7 @@ describe("SAT two-student waiting-room convergence", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(15_000);
       });
+      await observe();
       expect(studentA.result.current.remainingSeconds).toBe(25);
       expect(studentB.result.current.remainingSeconds).toBe(25);
 
@@ -562,6 +573,7 @@ describe("SAT two-student waiting-room convergence", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
+      await observe();
       expect(studentA.result.current.remainingSeconds).toBe(frozenA);
       expect(studentB.result.current.remainingSeconds).toBe(frozenB);
       expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
@@ -573,6 +585,7 @@ describe("SAT two-student waiting-room convergence", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
+      await observe();
       expect(studentA.result.current.remainingSeconds).toBe(20);
       expect(studentB.result.current.remainingSeconds).toBe(20);
 
@@ -639,10 +652,11 @@ describe("SAT two-student waiting-room convergence", () => {
       // While the response is in flight, the proctor extends: revision 2.
       cohort.extend(300);
 
-      // The student's next authoritative refresh commits revision 2 — which
-      // already carries the started attempt the server recorded.
+      // The student's next authoritative refresh (within one offline recovery
+      // cadence) commits revision 2 — which already carries the started
+      // attempt the server recorded.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(3_000);
+        await vi.advanceTimersByTimeAsync(SAT_POLL_OFFLINE_CADENCE_MS);
       });
       expect(student.result.current.data?.timing.runtimeRevision).toBe(2);
 

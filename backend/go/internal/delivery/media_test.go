@@ -13,12 +13,38 @@ import (
 // `opened` is the set of module ids the attempt owns
 // (assessment_module_attempts rows).
 func expectAttemptMediaRows(mock sqlmock.Sqlmock, linkScope string, opened ...string) {
+	expectAttemptMediaQueries(mock, true, linkScope, opened...)
+}
+
+// expectAttemptMediaQueries skips the section tree reads when loadTree is
+// false, as on a version-cache hit.
+func expectAttemptMediaQueries(mock sqlmock.Sqlmock, loadTree bool, linkScope string, opened ...string) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT schedule_id, published_version_id FROM student_attempts WHERE id = ?")).
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "published_version_id"}).AddRow("schedule-1", "version-1"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT revision FROM exam_versions WHERE id = ?")).
 		WithArgs("version-1").
 		WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(1))
+	if loadTree {
+		expectAttemptMediaTree(mock)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_publish_scope FROM exam_versions WHERE id = ?")).
+		WithArgs("version-1").
+		WillReturnRows(sqlmock.NewRows([]string{"sat_publish_scope"}).AddRow("full"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ?")).
+		WithArgs("schedule-1").
+		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections"}).AddRow(linkScope))
+	// The assigned-module fence: only modules the attempt owns are readable.
+	rows := sqlmock.NewRows([]string{"module_id"})
+	for _, moduleID := range opened {
+		rows.AddRow(moduleID)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ?")).
+		WithArgs("attempt-1").
+		WillReturnRows(rows)
+}
+
+func expectAttemptMediaTree(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, section_key, title, display_order, duration_seconds, break_after_seconds, instructions FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order")).
 		WithArgs("version-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions"}).
@@ -41,20 +67,41 @@ func expectAttemptMediaRows(mock sqlmock.Sqlmock, linkScope string, opened ...st
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT eq.id AS exam_question_id, eq.question_id, eq.display_order, eq.is_pretest, qr.question_type, qr.stimulus, qr.prompt, qr.answer_definition, qr.metadata, qr.accessibility FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE eq.module_id = ? ORDER BY eq.display_order")).
 		WithArgs("module-lower").
 		WillReturnRows(questionRows("question-branch", branchContent))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_publish_scope FROM exam_versions WHERE id = ?")).
-		WithArgs("version-1").
-		WillReturnRows(sqlmock.NewRows([]string{"sat_publish_scope"}).AddRow("full"))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ?")).
-		WithArgs("schedule-1").
-		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections"}).AddRow(linkScope))
-	// The assigned-module fence: only modules the attempt owns are readable.
-	rows := sqlmock.NewRows([]string{"module_id"})
-	for _, moduleID := range opened {
-		rows.AddRow(moduleID)
+}
+
+// The memoized index must not carry one request's fence or scope into the
+// next: those stay per request, only the asset map is shared.
+func TestCanAttemptReadMediaCachedIndexKeepsPerRequestFence(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ?")).
-		WithArgs("attempt-1").
-		WillReturnRows(rows)
+	defer db.Close()
+	service := NewService(db, nil).SetVersionCache(NewVersionCache(VersionCacheMaxVersions))
+	for i, step := range []struct {
+		linkScope string
+		opened    []string
+		want      bool
+	}{
+		{linkScope: `["reading-writing"]`, opened: []string{"module-1"}, want: false},
+		{linkScope: `["reading-writing"]`, opened: []string{"module-1", "module-lower"}, want: true},
+		{linkScope: `["math"]`, opened: []string{"module-1", "module-lower"}, want: false},
+	} {
+		expectAttemptMediaQueries(mock, i == 0, step.linkScope, step.opened...)
+		allowed, err := service.CanAttemptReadMedia(context.Background(), "schedule-1", "attempt-1", "asset-branch")
+		if err != nil {
+			t.Fatalf("step %d: CanAttemptReadMedia() error = %v", i, err)
+		}
+		if allowed != step.want {
+			t.Fatalf("step %d: CanAttemptReadMedia() = %v, want %v", i, allowed, step.want)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(service.mediaIndex) != 1 {
+		t.Fatalf("media index entries = %d, want 1", len(service.mediaIndex))
+	}
 }
 
 func TestCanAttemptReadMediaUsesPinnedVersionAndSectionScope(t *testing.T) {

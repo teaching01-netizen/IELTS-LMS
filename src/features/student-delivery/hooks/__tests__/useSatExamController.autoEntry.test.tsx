@@ -4,6 +4,7 @@ import { ApiError } from "../../../../shared/api-client/errors";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { createSatTextAnnotation } from "../../domain/satResponses";
 import { useSatExamController } from "../useSatExamController";
+import { SAT_POLL_OFFLINE_CADENCE_MS } from "../../application/satPollCadence";
 import { SatTemporalRuntime } from "../../timing/SatTemporalRuntime";
 
 /**
@@ -627,7 +628,7 @@ describe("useSatExamController auto-entry", () => {
       expect(hook.result.current.data?.scheduleRuntimeStatus).toBe("not_started");
       expect(hook.result.current.state.phase).toBe("directions");
 
-      // 30s without a live socket = many 1-2s recovery polls (plus the 500ms
+      // 30s without a live socket = several recovery polls (plus the 500ms
       // clock tick that drives the entry retry window).
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000);
@@ -643,12 +644,14 @@ describe("useSatExamController auto-entry", () => {
       expect(hook.result.current.error).toBeNull();
 
       // The proctor starts; one live payload is enough for automatic entry.
+      // (In the route the runtime-poll revision refreshes sooner; here the
+      // recovery poll is the only refresh, so allow one full cadence.)
       gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(2));
       gatewayMocks.startModule.mockResolvedValue(
         openedModule(liveFirstModuleBootstrap(2), MODULE_RW, 3),
       );
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(SAT_POLL_OFFLINE_CADENCE_MS);
       });
       expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1);
       expect(gatewayMocks.startModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {

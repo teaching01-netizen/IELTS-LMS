@@ -67,6 +67,10 @@ type Service struct {
 	satTerminalizerInTx func(context.Context, tx.Tx, string, string) (bool, error)
 	timeoutCursorMu     sync.Mutex
 	timeoutCursorID     string
+	// mediaIndex memoizes which assets each module references, per published
+	// revision (see mediaIndexFor).
+	mediaIndexMu sync.Mutex
+	mediaIndex   map[mediaIndexKey]map[string]map[string]struct{}
 }
 
 // NewService wires dependencies explicitly.
