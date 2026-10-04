@@ -134,4 +134,29 @@ describe("student submission commands", () => {
     expect(submit).not.toHaveBeenCalled();
     expect(store.getState().persistence.syncState).toBe("error");
   });
+
+  it("converts a rejected response flush into a retryable durability failure", async () => {
+    const store = createStore();
+    const submit = vi.fn(async () => true);
+    const commands = createStudentSubmissionCommands({
+      store,
+      drafts: {
+        async commitAll() {},
+        async flushDurability() {},
+      },
+      transport: {
+        async flushPending() {
+          throw new Error("network timeout");
+        },
+        submit,
+      },
+    });
+
+    await expect(commands.requestSubmit()).resolves.toEqual({
+      kind: "blocked",
+      reason: "durability_failed",
+    });
+    expect(submit).not.toHaveBeenCalled();
+    expect(store.getState().persistence.syncState).toBe("error");
+  });
 });

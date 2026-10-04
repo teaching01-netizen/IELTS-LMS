@@ -1,10 +1,12 @@
 import type { CSSProperties, ReactNode } from 'react';
+import type { ExamType } from '../../../types';
 import type { StudentLayoutMode } from './studentLayoutMode';
 import { getStudentLayoutModeClassName } from './studentLayoutTokens';
 
 interface StudentExamShellProps {
   readonly children: ReactNode;
   readonly layoutMode: StudentLayoutMode;
+  readonly examType?: ExamType | undefined;
   readonly highContrast?: boolean | undefined;
   readonly touchMode?: boolean | undefined;
   readonly style?: CSSProperties | undefined;
@@ -17,6 +19,7 @@ interface StudentExamShellProps {
 export function StudentExamShell({
   children,
   layoutMode,
+  examType,
   highContrast = false,
   touchMode = false,
   style,
@@ -40,6 +43,7 @@ export function StudentExamShell({
       } ${getStudentLayoutModeClassName(layoutMode)}`}
       data-student-layout-mode={layoutMode}
       data-student-touch-mode={touchMode ? 'true' : 'false'}
+      data-exam-type={examType}
       data-student-keyboard-open={keyboardOpen ? 'true' : 'false'}
       data-testid="student-exam-shell"
       style={shellStyle}

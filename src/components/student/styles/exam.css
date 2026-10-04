@@ -48,6 +48,14 @@
   color-scheme: light;
 }
 
+/* ACT Science passages may arrive pasted from Word with justified paragraph
+   classes. Keep the long-form reading copy left aligned and naturally spaced. */
+.student-exam-shell[data-exam-type='ACT']
+  .student-science-stimulus-pane
+  .student-act-passage-content :is(p, div, li) {
+  text-align: left;
+}
+
 /* IELTS answer fields must stay readable even when the host page or browser
  * applies a muted form-control color.  Keep this scoped to student delivery
  * so authoring/admin controls retain their own theme. */

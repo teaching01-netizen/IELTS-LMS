@@ -17,19 +17,41 @@ function unwrapFontElements(container: HTMLTemplateElement): void {
   });
 }
 
-function stripTypographyStyleOverrides(container: HTMLTemplateElement): void {
+function stripTypographyStyleOverrides(
+  container: HTMLTemplateElement,
+  normalizeJustifiedText: boolean,
+): void {
   container.content.querySelectorAll<HTMLElement>('*[style]').forEach((element) => {
     FONT_STYLE_PROPERTIES.forEach((property) => {
       element.style.removeProperty(property);
     });
 
+    // ACT passage content is sometimes pasted from Word with justified
+    // paragraphs. That spreads spaces across the full iPad pane and makes the
+    // passage hard to scan. Preserve deliberate left/center/right alignment,
+    // but normalize justified text for ACT student delivery.
+    if (normalizeJustifiedText && element.style.textAlign.toLowerCase() === 'justify') {
+      element.style.textAlign = 'left';
+    }
+
     if (element.style.length === 0) {
       element.removeAttribute('style');
     }
   });
+
+  if (normalizeJustifiedText) {
+    container.content.querySelectorAll<HTMLElement>('[align]').forEach((element) => {
+      if (element.getAttribute('align')?.trim().toLowerCase() === 'justify') {
+        element.setAttribute('align', 'left');
+      }
+    });
+  }
 }
 
-export function sanitizeReadingPassageHtml(html: string): string {
+export function sanitizeReadingPassageHtml(
+  html: string,
+  options: { normalizeJustifiedText?: boolean } = {},
+): string {
   const sanitized = sanitizeHtml(html);
   if (typeof document === 'undefined') {
     return sanitized;
@@ -39,7 +61,7 @@ export function sanitizeReadingPassageHtml(html: string): string {
   template.innerHTML = sanitized;
 
   unwrapFontElements(template);
-  stripTypographyStyleOverrides(template);
+  stripTypographyStyleOverrides(template, options.normalizeJustifiedText === true);
 
   return template.innerHTML;
 }

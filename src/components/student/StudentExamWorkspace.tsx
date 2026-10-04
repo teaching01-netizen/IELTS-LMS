@@ -6,7 +6,7 @@ import { WritingTaskNavigator } from "./WritingTaskNavigator";
 import { StudentFooter } from "./StudentFooter";
 import { StudentListening } from "./StudentListening";
 import { StudentReading } from "./StudentReading";
-import { StudentScience } from "./StudentScience";
+import { StudentScience, type ActStudentMediaAuthorization } from "./StudentScience";
 import { StudentSpeaking } from "./StudentSpeaking";
 import { StudentWriting } from "./StudentWriting";
 import type { StudentHighlightColor } from "./highlightPalette";
@@ -19,6 +19,7 @@ export interface StudentExamWorkspaceProps {
   examState: ExamState;
   /** S1-C3: sessionStorage base key (per exam) for split ratio + tab persistence. */
   persistenceKeyBase?: string | undefined;
+  actMediaAuthorization?: ActStudentMediaAuthorization | undefined;
   currentQuestionId: string | null;
   allQuestions: StudentQuestionDescriptor[];
   answers: Record<string, QuestionAnswer>;
@@ -60,6 +61,7 @@ export function StudentExamWorkspace({
   currentModule,
   examState,
   persistenceKeyBase,
+  actMediaAuthorization,
   currentQuestionId,
   allQuestions,
   answers,
@@ -188,6 +190,7 @@ export function StudentExamWorkspace({
             registerLiveAnswer={onRegisterLiveObjectiveAnswer}
             allQuestions={allQuestions}
             persistenceKeyBase={persistenceKeyBase}
+            actMediaAuthorization={actMediaAuthorization}
           />
         ) : null}
       </main>

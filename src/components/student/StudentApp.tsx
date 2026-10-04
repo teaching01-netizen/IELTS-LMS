@@ -391,7 +391,14 @@ export function StudentApp({
     [attemptActions, commitWritingDraft, examSessionStore, reconcileLiveAnswerCacheNow]
   );
 
-  const { finalSubmitStatus, flushAndSubmitCurrentModuleWithRetry, retryFinalSubmit } =
+  const {
+    finalSubmitStatus,
+    flushAndSubmitCurrentModuleWithRetry,
+    retryFinalSubmit,
+    moduleSubmitStatus,
+    moduleSubmitError,
+    retryModuleSubmit,
+  } =
     useStudentSubmissionOrchestration({
       runtimeState: {
         runtimeBacked: runtimeState.runtimeBacked,
@@ -770,7 +777,12 @@ export function StudentApp({
             {blockingCopy.title}
           </h2>
           <p className="text-sm text-gray-700 leading-6">
-            {runtimeState.proctorNote ?? blockingCopy.message}
+            {runtimeState.proctorNote ??
+              (runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus === "submitting"
+                ? "Saving your answers now. Keep this page open; it will continue automatically when they are saved."
+                : runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus === "failed"
+                  ? moduleSubmitError ?? "We could not confirm that your answers were saved. Please retry."
+                  : blockingCopy.message)}
           </p>
           <div className="mt-6 flex items-center justify-center gap-3">
             <div className="px-3 py-1 rounded-sm bg-gray-50 border border-gray-100 text-xs font-bold uppercase tracking-widest text-gray-700">
@@ -780,6 +792,19 @@ export function StudentApp({
               {blockingCopy.badge}
             </div>
           </div>
+          {runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus === "failed" ? (
+            <Button
+              variant="primary"
+              onClick={() =>
+                void retryModuleSubmit(
+                  `${runtimeState.runtimeBacked ? "runtime" : "self"}:${runtimeState.currentModule}`
+                )
+              }
+              className="mt-6 h-11 text-base font-semibold"
+            >
+              Retry saving answers
+            </Button>
+          ) : null}
         </div>
       </div>
     ) : null;
@@ -890,6 +915,7 @@ export function StudentApp({
   return (
     <StudentExamShell
       layoutMode={layoutMode}
+      examType={examState.type}
       highContrast={uiState.accessibilitySettings.highContrast}
       touchMode={tabletMode}
       style={studentShellStyle}
@@ -969,6 +995,14 @@ export function StudentApp({
         <StudentHighlightSelectionManagerProvider>
           <StudentExamWorkspaceSession
             examState={examState}
+            actMediaAuthorization={
+              attemptState.attempt
+                ? {
+                    scheduleId: attemptState.attempt.scheduleId,
+                    attemptId: attemptState.attemptId ?? attemptState.attempt.id,
+                  }
+                : undefined
+            }
             // P2.5: per-attempt sessionStorage namespace for split ratio + tab
             // persistence. A title is a display value, not an identifier; the
             // attempt/version/module identity scopes candidate view state.

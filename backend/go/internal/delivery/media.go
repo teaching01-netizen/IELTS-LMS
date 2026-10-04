@@ -94,12 +94,40 @@ func moduleMediaIndex(sections []DeliverySection) map[string]map[string]struct{}
 					for _, ref := range refs {
 						assets[ref.AssetID] = struct{}{}
 					}
+					// ACT Science passages can still contain legacy HTML <img src>
+					// URLs. The structured-content walker above only sees image nodes
+					// with assetId fields, so index exact managed-media paths from the
+					// pinned Science version too. Other exam sections remain unchanged.
+					if section.SectionKey == "science" {
+						addLegacyManagedMediaReferences(assets, string(content.raw))
+					}
 				}
 			}
 			index[module.ID] = assets
 		}
 	}
 	return index
+}
+
+func addLegacyManagedMediaReferences(assets map[string]struct{}, raw string) {
+	const pathPrefix = "/api/v1/media/"
+	const contentSuffix = "/content"
+	for {
+		prefixIndex := strings.Index(raw, pathPrefix)
+		if prefixIndex < 0 {
+			return
+		}
+		raw = raw[prefixIndex+len(pathPrefix):]
+		suffixIndex := strings.Index(raw, contentSuffix)
+		if suffixIndex < 0 {
+			return
+		}
+		assetID := raw[:suffixIndex]
+		if assetID != "" && !strings.ContainsAny(assetID, "/\\?#\"'<> \t\r\n") {
+			assets[assetID] = struct{}{}
+		}
+		raw = raw[suffixIndex+len(contentSuffix):]
+	}
 }
 
 type mediaIndexKey struct {

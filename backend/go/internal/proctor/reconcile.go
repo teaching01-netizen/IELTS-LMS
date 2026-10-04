@@ -3,6 +3,7 @@ package proctor
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"example.com/ielts-proctoring/internal/attempts"
@@ -13,13 +14,22 @@ import (
 )
 
 // sectionClosingGrace is the existing overrun threshold when auto-advance is
-// disabled. SAT auto-advance separately waits SATSaveGrace before leaving the
-// active section, so its final response writes keep the same runtime epoch.
+// disabled. Auto-advancing sections across IELTS, ACT, and SAT wait the shared
+// short response-save window before leaving the active runtime epoch.
 const sectionClosingGrace = 30 * time.Second
 
 // autoSubmitExpr is the authored auto-submit flag. It is written once and
 // interpolated into the candidate scan so the three predicates cannot drift.
 const autoSubmitExpr = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(v.config_snapshot, '$.progression.autoSubmit')), 'true')"
+
+var responseSaveGraceSeconds = strconv.FormatInt(int64(attempts.ResponseSaveGrace/time.Second), 10)
+
+func responseSaveGraceForProvider(providerKey string) time.Duration {
+	if providerKey == "sat" {
+		return attempts.SATSaveGrace
+	}
+	return attempts.ResponseSaveGrace
+}
 
 // AutoAdvanceOutcome identifies one schedule whose authoritative runtime
 // moved because its active section reached the server-side deadline.
@@ -96,15 +106,15 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 			  AND COALESCE(r.timing_model, '') <> 'sat_personal_v1'
 			  AND r.active_section_key IS NOT NULL
 			  AND (
-					-- The planner applies SATSaveGrace before advancing SAT; this
-					-- candidate scan may revisit it during the short save window.
+					-- Wait for the same final-response drain window used by the
+					-- section planner before attempting an automatic advance.
 					(
 					  rs.status = 'live'
 					  AND rs.actual_start_at IS NOT NULL
 					  AND `+autoSubmitExpr+` = 'true'
 					  AND ? >= DATE_ADD(
 							rs.actual_start_at,
-							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds) SECOND
+							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + `+responseSaveGraceSeconds+`) SECOND
 						  )
 					)
 					-- Between sections: the authored gap has elapsed, start the next.
@@ -301,7 +311,7 @@ func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID strin
 		if err != nil {
 			return err
 		}
-		var saveGrace time.Duration
+		saveGrace := responseSaveGraceForProvider(providerKey)
 		decisionAt := asOf
 		if providerKey == "sat" {
 			saveGrace = attempts.SATSaveGrace

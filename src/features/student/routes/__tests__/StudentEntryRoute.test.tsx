@@ -637,7 +637,7 @@ describe("StudentEntryRoute", () => {
     });
   });
 
-  it("uses the neutral Course label for ACT schedules", async () => {
+  it("uses ACT-specific WCode and course labels without changing the entry payload", async () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440141";
     getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "act" });
     studentEntryMock.mockResolvedValue({
@@ -655,11 +655,13 @@ describe("StudentEntryRoute", () => {
     renderRoute(scheduleId);
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Course")).toBeInTheDocument();
+      expect(screen.getByLabelText("WCode")).toBeInTheDocument();
+      expect(screen.getByLabelText("ACT Course")).toBeInTheDocument();
     });
+    expect(screen.queryByLabelText("Access code")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("IELTS Course")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/code|wcode/i), {
+    fireEvent.change(screen.getByLabelText("WCode"), {
       target: { value: "anything-at-all" },
     });
     fireEvent.change(screen.getByLabelText(/email/i), {
@@ -671,7 +673,7 @@ describe("StudentEntryRoute", () => {
     fireEvent.change(screen.getByLabelText(/nickname/i), {
       target: { value: "act-student" },
     });
-    fireEvent.change(screen.getByLabelText("Course"), {
+    fireEvent.change(screen.getByLabelText("ACT Course"), {
       target: { value: "ACT" },
     });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));

@@ -25,10 +25,15 @@ import (
 // ClosingGrace is the 30s post-deadline acceptance window (plan 26).
 const ClosingGrace = 30 * time.Second
 
-// SATSaveGrace is a save-only window after the visible clock reaches zero.
-// The delivery reconciler waits for the same window before scoring a module.
-// offcut: the server bounds arrival time; it cannot prove when an offline browser edit was typed.
-const SATSaveGrace = 3 * time.Second
+// ResponseSaveGrace is a short save-only window after the visible section clock
+// reaches zero. Runtime-backed exams keep the section writable during this
+// window so the final debounced responses can reach the server before advance.
+// The server bounds arrival time; it cannot prove when an offline browser edit was typed.
+const ResponseSaveGrace = 3 * time.Second
+
+// SATSaveGrace keeps the provider-specific delivery gate vocabulary while
+// sharing the same short response-drain window as IELTS and ACT.
+const SATSaveGrace = ResponseSaveGrace
 
 // Service owns response mutation (plan 4.1).
 type Service struct {

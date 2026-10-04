@@ -131,23 +131,29 @@ export function useStudentSubmissionOrchestration({
             return;
           }
 
-          let flushed: boolean;
-          if (submissionCommands) {
-            const barrierResult = await submissionCommands.flushBarrier();
-            if (cancellationSignal.aborted) {
-              return;
+          let flushed = false;
+          try {
+            if (submissionCommands) {
+              const barrierResult = await submissionCommands.flushBarrier();
+              if (cancellationSignal.aborted) {
+                return;
+              }
+              flushed = barrierResult.kind === "ready";
+            } else {
+              reconcileLiveAnswerCacheNow();
+              commitWritingDraft();
+              if (cancellationSignal.aborted) {
+                return;
+              }
+              flushed = await attemptActions.flushPending();
+              if (cancellationSignal.aborted) {
+                return;
+              }
             }
-            flushed = barrierResult.kind === "ready";
-          } else {
-            reconcileLiveAnswerCacheNow();
-            commitWritingDraft();
-            if (cancellationSignal.aborted) {
-              return;
-            }
-            flushed = await attemptActions.flushPending();
-            if (cancellationSignal.aborted) {
-              return;
-            }
+          } catch {
+            // Retry transport and local-durability exceptions through the
+            // same bounded path as an explicit failed flush.
+            flushed = false;
           }
 
           if (flushed) {
@@ -161,11 +167,16 @@ export function useStudentSubmissionOrchestration({
               runtimeState.runtimeBacked &&
               isFinalModule?.(moduleKey) === true;
             if (shouldFinalizeAttempt) {
-              const submitted = submissionCommands
-                ? (await submissionCommands.submitAfterBarrier()).kind === "submitted"
-                : await (
-                    attemptActions.submitAttemptAfterBarrier?.() ?? attemptActions.submitAttempt()
-                  );
+              let submitted = false;
+              try {
+                submitted = submissionCommands
+                  ? (await submissionCommands.submitAfterBarrier()).kind === "submitted"
+                  : await (
+                      attemptActions.submitAttemptAfterBarrier?.() ?? attemptActions.submitAttempt()
+                    );
+              } catch {
+                submitted = false;
+              }
               if (submitted) {
                 setModuleSubmitStatus("idle");
                 return;

@@ -61,7 +61,7 @@ export function createResponseDurabilityV2Transport(
         backendPost<ResponseBatchResponseV2>(
           `${attemptPath(attemptId)}/responses:batch`,
           request,
-          requestConfig(attemptId),
+          requestConfig(attemptId, { timeout: 15_000 }),
         ),
         clientSessionId,
       ),

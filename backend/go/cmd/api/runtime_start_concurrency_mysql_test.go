@@ -133,7 +133,7 @@ func newStartRaceHarness(t *testing.T) *startRaceHarness {
 	if _, err := db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 2 WHERE id = ?", reopenedModule); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := authors.CreateQuestion(ctx, reopenedModule, actor, validSATPublishSPR()); err != nil {
+	if _, err := authors.CreateQuestion(ctx, reopenedModule, actor, validSATPublishQuestion()); err != nil {
 		t.Fatal(err)
 	}
 	latest, err := authors.Shell(ctx, exam.ID)
@@ -304,7 +304,7 @@ func TestStartAndCheckInDoNotDeadlock(t *testing.T) {
 	defer tx.SetRetryHook(func(error) { absorbed.Add(1) })()
 
 	const rounds = 6
-	const students = 4
+	const students = 6
 	for round := 0; round < rounds; round++ {
 		sch := h.newSchedule(t, h.v1)
 		regs := make([]schedules.Registration, 0, students)
@@ -363,5 +363,66 @@ func TestStartAndCheckInDoNotDeadlock(t *testing.T) {
 	}
 	if n := absorbed.Load(); n != 0 {
 		t.Fatalf("no transient (deadlock / lock wait) may be absorbed by a retry, %d were", n)
+	}
+}
+
+// A student's browser can retry check-in after a delayed response. Concurrent
+// retries for the same registration must all resolve to the one committed
+// attempt, never mint duplicate attempts or report a spurious conflict.
+func TestConcurrentCheckInRetryMintsOneAttemptMySQL(t *testing.T) {
+	h := newStartRaceHarness(t)
+	ctx := context.Background()
+	sch := h.newSchedule(t, h.v1)
+	reg := h.register(t, sch.ID)
+
+	const retries = 6
+	release := make(chan struct{})
+	refs := make(chan schedules.AttemptRef, retries)
+	errs := make(chan error, retries)
+	var wg sync.WaitGroup
+	for i := 0; i < retries; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-release
+			ref, err := h.schedules.CreateScheduleAttempt(
+				ctx, sch.ID, reg.ID, reg.StudentKey, reg.Wcode,
+				"Race Student", "race@example.com", "session-"+reg.ID,
+			)
+			if err != nil {
+				errs <- err
+				return
+			}
+			refs <- ref
+		}()
+	}
+	close(release)
+	wg.Wait()
+	close(errs)
+	close(refs)
+	for err := range errs {
+		t.Fatalf("same-registration retry must succeed idempotently: %v", err)
+	}
+
+	var attemptID string
+	for ref := range refs {
+		if attemptID == "" {
+			attemptID = ref.AttemptID
+			continue
+		}
+		if ref.AttemptID != attemptID {
+			t.Fatalf("concurrent check-in retries returned different attempts: %s and %s", attemptID, ref.AttemptID)
+		}
+	}
+	if attemptID == "" {
+		t.Fatal("concurrent retries returned no attempt")
+	}
+
+	var count int
+	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM student_attempts WHERE registration_id = ?", reg.ID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("idempotent check-in retries must mint exactly one attempt, got %d", count)
 	}
 }

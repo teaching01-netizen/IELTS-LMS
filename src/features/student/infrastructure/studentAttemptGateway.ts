@@ -15,6 +15,7 @@ export {
   studentAttemptRepository,
   backendConflictReason,
   clearAttemptMutationWatermark,
+  tryBuildAttemptAuthorizationHeader,
 } from "@services/studentAttemptRepository";
 export {
   buildQueuedMutationUpdate,

@@ -186,6 +186,54 @@ describe("useStudentSubmissionOrchestration", () => {
     expect(submitAttempt).not.toHaveBeenCalled();
   });
 
+  it("retries the section flush when the durability barrier rejects", async () => {
+    const flushBarrier = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("network timeout"))
+      .mockResolvedValue({ kind: "ready" as const });
+    const submitModule = vi.fn();
+
+    const { result } = renderHook(() =>
+      useStudentSubmissionOrchestration({
+        runtimeState: {
+          runtimeBacked: true,
+          runtimeStatus: "live",
+          currentModule: "reading",
+        },
+        runtimeStateRef: {
+          current: { phase: "exam", currentModule: "reading" },
+        },
+        attemptId: "attempt-retry-flush",
+        runtimeCompletionVerified: false,
+        shouldRenderPostExam: false,
+        isFinalModule: () => false,
+        reconcileLiveAnswerCacheNow: vi.fn(),
+        commitWritingDraft: vi.fn(),
+        attemptActions: {
+          flushPending: vi.fn(),
+          submitAttempt: vi.fn(),
+        },
+        submissionCommands: {
+          flushBarrier,
+          requestSubmit: vi.fn(),
+          submitAfterBarrier: vi.fn(),
+        },
+        runtimeActions: {
+          transitionBlocking: vi.fn(),
+          submitModule,
+        },
+      })
+    );
+
+    await act(async () => {
+      await result.current.flushAndSubmitCurrentModuleWithRetry("runtime:reading");
+    });
+
+    expect(flushBarrier).toHaveBeenCalledTimes(2);
+    expect(submitModule).toHaveBeenCalledTimes(1);
+    expect(result.current.moduleSubmitStatus).toBe("idle");
+  });
+
   it("triggers runtime final-submit pipeline when runtime is completed", async () => {
     const submitAttempt = vi.fn().mockResolvedValue(true);
 

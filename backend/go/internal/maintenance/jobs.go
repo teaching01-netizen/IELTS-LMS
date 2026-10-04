@@ -23,7 +23,7 @@
 // Grading projection: gated by GradingProjectionEnabled; idempotent sync of
 // schedule/submission/section/writing rows with a durable checkpoint in
 // shared_cache_entries under key grading_projection_state_v1 via revision
-// compare-and-swap; bootstrap looks back 24h when no watermark exists;
+// compare-and-swap; each missing source cursor bootstraps with a 24h lookback;
 // batch 500.
 package maintenance
 
@@ -383,14 +383,24 @@ func AuditInvariants(ctx context.Context, db *sql.DB) ([]InvariantIssue, error) 
 // ProjectionState is the durable grading-projection checkpoint stored as JSON
 // in shared_cache_entries under ProjectionCheckpointKey.
 type ProjectionState struct {
-	Watermark         *time.Time `json:"watermark,omitempty"`
-	ScheduleCursor    *Cursor    `json:"scheduleCursor,omitempty"`
-	AttemptCursor     *Cursor    `json:"attemptCursor,omitempty"`
-	SchedulesSynced   int64      `json:"scheduleRowsSynced"`
-	SubmissionsSynced int64      `json:"submissionRowsSynced"`
-	SectionsSynced    int64      `json:"sectionRowsSynced"`
-	WritingSynced     int64      `json:"writingTaskRowsSynced"`
-	Failures          int64      `json:"failuresTotal"`
+	Watermark          *time.Time `json:"watermark,omitempty"`
+	ScheduleCursor     *Cursor    `json:"scheduleCursor,omitempty"`
+	AttemptCursor      *Cursor    `json:"attemptCursor,omitempty"`
+	AttemptCursorBasis string     `json:"attemptCursorBasis,omitempty"`
+	SchedulesSynced    int64      `json:"scheduleRowsSynced"`
+	SubmissionsSynced  int64      `json:"submissionRowsSynced"`
+	SectionsSynced     int64      `json:"sectionRowsSynced"`
+	WritingSynced      int64      `json:"writingTaskRowsSynced"`
+	Failures           int64      `json:"failuresTotal"`
+}
+
+const projectionAttemptCursorBasisSubmittedAt = "submitted_at"
+
+func attemptCursorForCurrentBasis(state ProjectionState) *Cursor {
+	if state.AttemptCursorBasis != projectionAttemptCursorBasisSubmittedAt {
+		return nil
+	}
+	return state.AttemptCursor
 }
 
 // Cursor is a keyset pagination position.
@@ -423,9 +433,13 @@ func RunGradingProjection(ctx context.Context, db *sql.DB, enabled bool) (Projec
 	}
 	now := time.Now().UTC()
 	bootstrapAfter := now.Add(-ProjectionBootstrapHours * time.Hour)
-	if state.Watermark != nil {
-		bootstrapAfter = *state.Watermark
-	}
+	// Keep an independent cursor per source stream. A newer schedule update
+	// must not advance the attempts scan past a submitted attempt whose
+	// updated_at column has coarser timestamp precision.
+	// A missing stream cursor starts from the bootstrap lookback; the shared
+	// watermark is telemetry and can be fractionally ahead of a just-committed
+	// row whose legacy updated_at value is only precise to seconds.
+	state.AttemptCursor = attemptCursorForCurrentBasis(state)
 	rep, nextSchedule, nextAttempt, watermark, err := syncProjectionBatch(ctx, db, state.ScheduleCursor, state.AttemptCursor, bootstrapAfter)
 	if err != nil {
 		return ProjectionReport{}, err
@@ -437,6 +451,7 @@ func RunGradingProjection(ctx context.Context, db *sql.DB, enabled bool) (Projec
 	if nextAttempt != nil {
 		state.AttemptCursor = nextAttempt
 	}
+	state.AttemptCursorBasis = projectionAttemptCursorBasisSubmittedAt
 	if watermark != nil {
 		state.Watermark = watermark
 	}
@@ -592,15 +607,16 @@ func syncProjectionBatch(ctx context.Context, db *sql.DB, scheduleCursor, attemp
 		SELECT a.id, a.schedule_id, a.exam_id, a.published_version_id,
 			a.candidate_id, a.candidate_name, COALESCE(a.candidate_email, ''),
 			s.cohort_name, a.submitted_at, CAST(a.final_submission AS CHAR),
-			CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), a.updated_at
+			CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR)
 		FROM student_attempts a
 		JOIN exam_schedules s ON s.id = a.schedule_id
 		JOIN exam_entities e ON e.id = a.exam_id
 		JOIN exam_versions v ON v.id = a.published_version_id
 		WHERE a.submitted_at IS NOT NULL
 		  AND e.provider_key = 'ielts'
-		  AND (a.updated_at > ? OR (a.updated_at = ? AND a.id > ?))
-		ORDER BY a.updated_at ASC, a.id ASC
+		  -- submitted_at preserves fractional precision; updated_at is second-granularity.
+		  AND (a.submitted_at > ? OR (a.submitted_at = ? AND a.id > ?))
+		ORDER BY a.submitted_at ASC, a.id ASC
 		LIMIT ?`,
 		attemptSince, attemptSince, attemptID, ProjectionBatch)
 	if err != nil {
@@ -613,11 +629,10 @@ func syncProjectionBatch(ctx context.Context, db *sql.DB, scheduleCursor, attemp
 		var attempt grading.ProjectionAttempt
 		var submittedAt sql.NullTime
 		var finalSubmission, contentSnapshot, configSnapshot sql.NullString
-		var updated time.Time
 		if err := attRows.Scan(
 			&attempt.ID, &attempt.ScheduleID, &attempt.ExamID, &attempt.PublishedVersionID,
 			&attempt.StudentID, &attempt.StudentName, &attempt.StudentEmail, &attempt.CohortName,
-			&submittedAt, &finalSubmission, &contentSnapshot, &configSnapshot, &updated,
+			&submittedAt, &finalSubmission, &contentSnapshot, &configSnapshot,
 		); err != nil {
 			attRows.Close()
 			return rep, nil, nil, nil, err
@@ -643,8 +658,8 @@ func syncProjectionBatch(ctx context.Context, db *sql.DB, scheduleCursor, attemp
 		rep.SectionsSynced += projected.SectionsSynced
 		rep.WritingSynced += projected.WritingSynced
 		affectedScheduleIDs[attempt.ScheduleID] = true
-		lastAttempt = &Cursor{UpdatedAt: updated, ID: attempt.ID}
-		w := updated
+		lastAttempt = &Cursor{UpdatedAt: submittedAt.Time, ID: attempt.ID}
+		w := submittedAt.Time
 		watermark = &w
 	}
 	attRows.Close()

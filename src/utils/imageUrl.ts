@@ -36,6 +36,33 @@ export const getImageUrlCandidates = (value: string): string[] => {
   ];
 };
 
+/**
+ * Advance a rendered image to the next safe source candidate after a load
+ * failure. Callers may preserve the original URL in data-image-original-src
+ * when the initial src has already been normalized for display.
+ */
+export function advanceImageSourceCandidate(image: HTMLImageElement): boolean {
+  const currentSource = image.getAttribute('src')?.trim() ?? '';
+  const originalSource =
+    image.dataset['imageOriginalSrc']?.trim() || currentSource;
+  if (!originalSource || !currentSource) return false;
+
+  const candidates = getImageUrlCandidates(originalSource);
+  if (candidates.length < 2) return false;
+
+  const recordedIndex = Number.parseInt(image.dataset['imageCandidateIndex'] ?? '', 10);
+  const currentIndex = Number.isInteger(recordedIndex)
+    ? recordedIndex
+    : candidates.indexOf(currentSource);
+  const nextIndex = currentIndex + 1;
+  if (nextIndex < 0 || nextIndex >= candidates.length) return false;
+
+  image.dataset['imageOriginalSrc'] = originalSource;
+  image.dataset['imageCandidateIndex'] = String(nextIndex);
+  image.src = candidates[nextIndex]!;
+  return true;
+}
+
 export const normalizeImageUrl = (value: string): string => {
   // Drops javascript:/vbscript:/data:text/html to '' so downstream <img src>
   // and sanitizeHtml post-processing never emit an executable source.

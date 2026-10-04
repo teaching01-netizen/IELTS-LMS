@@ -57,4 +57,17 @@ describe('response durability transport writer identity', () => {
       expect(request).toHaveBeenCalledTimes(2);
     },
   );
+
+  it('bounds response-batch requests so a stalled save can enter the retry path', async () => {
+    mocks.backendPost.mockResolvedValue({ ok: true });
+    const transport = createResponseDurabilityV2Transport('schedule-1', attempt);
+
+    await transport.sendBatch('attempt-1', { commands: [] } as never);
+
+    expect(mocks.backendPost).toHaveBeenCalledWith(
+      '/v2/student/attempts/attempt-1/responses:batch',
+      { commands: [] },
+      expect.objectContaining({ timeout: 15_000, retries: 0 }),
+    );
+  });
 });

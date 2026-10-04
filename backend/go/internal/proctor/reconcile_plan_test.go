@@ -235,6 +235,31 @@ func TestSATSaveGraceFreezesSectionBeforeStartingTheNext(t *testing.T) {
 	}
 }
 
+func TestIELTSAndACTWaitForFinalResponseSaveGrace(t *testing.T) {
+	deadline := planBase.Add(64 * time.Minute)
+	sections := []runtimeSection{
+		liveSection("reading", 1, 64, 0, planBase),
+		lockedSection("writing", 2, 60, 0),
+	}
+	runtime := reconcileRuntime{activeSectionKey: ptr("reading")}
+
+	for _, provider := range []string{"ielts", "act"} {
+		t.Run(provider, func(t *testing.T) {
+			grace := responseSaveGraceForProvider(provider)
+			if got := planSectionAdvance(runtime, sections, true, deadline.Add(grace-time.Millisecond), grace); len(got.steps) != 0 {
+				t.Fatalf("%s section advanced before queued responses had time to save: %+v", provider, got.steps)
+			}
+			got := planSectionAdvance(runtime, sections, true, deadline.Add(grace), grace)
+			if len(got.steps) != 2 || got.steps[0].kind != stepCompleteSection || got.steps[1].kind != stepStartSection {
+				t.Fatalf("%s section should advance after the save window: %+v", provider, got.steps)
+			}
+			if want := deadline.Add(grace); !got.steps[1].startAt.Equal(want) {
+				t.Fatalf("%s next section starts at %v, want %v", provider, got.steps[1].startAt, want)
+			}
+		})
+	}
+}
+
 // A sweep that returns after an outage catches up through every expired section
 // and preserves the authored timeline: each section starts at its
 // predecessor's end plus the gap, never at "now".

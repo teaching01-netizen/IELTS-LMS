@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// Each projection stream resumes at its own cursor. The shared watermark is
-// telemetry, and must not skip a schedule backlog when attempts advance first.
+// Each projection stream resumes at its own cursor. When a stream has no
+// cursor, it bootstraps from the bounded lookback; the shared watermark is
+// telemetry and must not hide rows committed just behind it.
 func projectionPosition(cursor *Cursor, since time.Time) (time.Time, string) {
 	if cursor != nil {
 		return cursor.UpdatedAt, cursor.ID
@@ -23,11 +24,8 @@ func HasPendingGradingProjection(ctx context.Context, db *sql.DB) (bool, error) 
 		return false, err
 	}
 	since := time.Now().UTC().Add(-ProjectionBootstrapHours * time.Hour)
-	if state.Watermark != nil {
-		since = *state.Watermark
-	}
 	scheduleAt, scheduleID := projectionPosition(state.ScheduleCursor, since)
-	attemptAt, attemptID := projectionPosition(state.AttemptCursor, since)
+	attemptAt, attemptID := projectionPosition(attemptCursorForCurrentBasis(state), since)
 	var pending bool
 	err = db.QueryRowContext(ctx, `SELECT
 		EXISTS(SELECT 1 FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id
@@ -37,7 +35,7 @@ func HasPendingGradingProjection(ctx context.Context, db *sql.DB) (bool, error) 
 			JOIN exam_entities e ON e.id = a.exam_id
 			JOIN exam_versions v ON v.id = a.published_version_id
 			WHERE a.submitted_at IS NOT NULL AND e.provider_key = 'ielts'
-			AND (a.updated_at > ? OR (a.updated_at = ? AND a.id > ?)))`,
+			AND (a.submitted_at > ? OR (a.submitted_at = ? AND a.id > ?)))`,
 		scheduleAt, scheduleAt, scheduleID, attemptAt, attemptAt, attemptID).Scan(&pending)
 	return pending, err
 }

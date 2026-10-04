@@ -282,10 +282,11 @@ export function StudentEntryRoute() {
     providerOverride === "sat" ||
     isSatSchedule ||
     (scheduleAvailability.state === "unknown" && locatorSuggestsSat);
+  const isActSchedule =
+    scheduleAvailability.state === "ready" && scheduleAvailability.providerKey === "act";
+  const accessCodeLabel = isActSchedule ? "WCode" : "Access code";
   const courseLabel =
-    scheduleAvailability.state === "ready" && scheduleAvailability.providerKey === "act"
-      ? "Course"
-      : "IELTS Course";
+    isActSchedule ? "ACT Course" : "IELTS Course";
   const availabilityGate =
     scheduleAvailability.state === "unavailable" ? scheduleAvailability : null;
 
@@ -934,14 +935,14 @@ export function StudentEntryRoute() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label htmlFor="wcode" className="block text-sm font-medium text-gray-700 mb-2">
-              Access code
+              {accessCodeLabel}
               <input
                 id="wcode"
                 type="text"
                 value={formData.wcode}
                 onChange={(e) => handleInputChange("wcode", e.target.value)}
-                placeholder="Enter your access code"
-                aria-label="Access code"
+                placeholder={`Enter your ${accessCodeLabel}`}
+                aria-label={accessCodeLabel}
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
                   errors.wcode ? "border-red-300" : "border-gray-300"
@@ -949,7 +950,9 @@ export function StudentEntryRoute() {
               />
             </label>
             {errors.wcode && <p className="mt-1 text-sm text-red-600">{errors.wcode}</p>}
-            <p className="mt-1 text-xs text-gray-500">Enter the access code provided to you.</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Enter the {isActSchedule ? "WCode" : "access code"} provided to you.
+            </p>
           </div>
 
           <div>

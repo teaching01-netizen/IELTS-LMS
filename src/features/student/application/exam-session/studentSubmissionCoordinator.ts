@@ -32,7 +32,14 @@ export async function runStudentSubmissionBarrier(
     return { kind: 'blocked', reason: 'draft_commit_failed' };
   }
 
-  const flushed = await dependencies.transport.flushPending();
+  let flushed: boolean;
+  try {
+    flushed = await dependencies.transport.flushPending();
+  } catch {
+    // A transport failure is a failed durability barrier, not an exception
+    // that should leave the student's timeout UI stuck in "saving" forever.
+    flushed = false;
+  }
   if (!flushed) {
     dependencies.store.getState().actions.setPersistence({ syncState: 'error' });
     return { kind: 'blocked', reason: 'durability_failed' };

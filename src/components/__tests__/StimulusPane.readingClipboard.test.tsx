@@ -10,6 +10,9 @@ import {
 import type { ExamState, StimulusImageAsset } from "../../types";
 
 vi.mock("../../services/actScienceChoiceImageService", () => ({
+  ACT_SCIENCE_CHOICE_IMAGE_TYPES: ["image/jpeg", "image/png", "image/webp"],
+  uploadActScienceChoiceImage: vi.fn(),
+  uploadActScienceQuestionImage: vi.fn(),
   uploadActScienceStimulusImage: vi.fn(),
   uploadAssessmentPassageImage: vi.fn(),
   rotateImageFile: vi.fn(),

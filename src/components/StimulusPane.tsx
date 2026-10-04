@@ -17,13 +17,13 @@ import {
 import { ActScienceStimulus, Passage, ExamState, StimulusImageAsset } from '../types';
 import { StimulusImageEditor } from './StimulusImageEditor';
 import { getPassageMetrics } from '../utils/builderEnhancements';
-import { normalizeImageUrl } from '../utils/imageUrl';
+import { advanceImageSourceCandidate, normalizeImageUrl } from '../utils/imageUrl';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 import {
-  rotateImageFile,
-  uploadActScienceStimulusImage,
-  uploadAssessmentPassageImage,
-} from '../services/actScienceChoiceImageService';
+  rotateImageFileGateway as rotateImageFile,
+  uploadActScienceStimulusImageGateway as uploadActScienceStimulusImage,
+  uploadAssessmentPassageImageGateway as uploadAssessmentPassageImage,
+} from '../features/exam-authoring/api/actScienceChoiceImageGateway';
 
 const metricTone = {
   green: 'text-emerald-700 bg-emerald-50 border-emerald-100',
@@ -740,6 +740,11 @@ export const StimulusPane = React.memo(function StimulusPane({
         <div
           ref={editorScrollRef}
           onScroll={updateInlineImageGeometry}
+          onErrorCapture={(event) => {
+            if (section === 'science' && event.target instanceof HTMLImageElement) {
+              advanceImageSourceCandidate(event.target);
+            }
+          }}
           className="relative flex-1 overflow-y-auto p-8 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_34%)]"
         >
             {imageUploadStatus ? (
@@ -893,8 +898,14 @@ export const StimulusPane = React.memo(function StimulusPane({
                     >
                       <img
                         src={normalizeImageUrl(image.src)}
+                        data-image-original-src={image.src}
                         alt={image.alt}
                         title={image.alt}
+                        onError={(event) => {
+                          if (section === 'science') {
+                            advanceImageSourceCandidate(event.currentTarget);
+                          }
+                        }}
                         className="h-full w-full object-contain"
                       />
                       {image.annotations.map((annotation) => (

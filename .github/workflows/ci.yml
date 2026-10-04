@@ -4,6 +4,13 @@ on:
   push:
     branches: [main, develop]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_full_e2e:
+        description: Run the full 16-shard, seven-browser E2E suite
+        type: boolean
+        required: true
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -44,6 +51,7 @@ jobs:
       COOKIE_SECURE: "false"
       SESSION_COOKIE_NAME: session
       CSRF_COOKIE_NAME: csrf
+      GRADING_PROJECTION_ENABLED: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -106,6 +114,13 @@ jobs:
 
       - name: Migration validation
         run: go run ./cmd/migrate --validate-only
+
+      - name: Capacity race and idempotency regressions (real MySQL)
+        env:
+          TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
+        run: >-
+          go test ./cmd/api -count=1
+          -run '^(TestStartAndCheckInDoNotDeadlock|TestConcurrentCheckInRetryMintsOneAttemptMySQL|TestAuthoringFinalSlotRaceMySQL|TestAuthoringIdempotentReplayMySQL)$'
 
       - name: Integration tests (real MySQL)
         env:
@@ -297,6 +312,7 @@ jobs:
 
   e2e-test-shards:
     name: e2e-tests (${{ matrix.label }})
+    if: github.event_name == 'workflow_dispatch' && inputs.run_full_e2e
     strategy:
       fail-fast: false
       matrix:
@@ -366,6 +382,7 @@ jobs:
       COOKIE_SECURE: "false"
       SESSION_COOKIE_NAME: session
       CSRF_COOKIE_NAME: csrf
+      GRADING_PROJECTION_ENABLED: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -440,7 +457,7 @@ jobs:
           retention-days: 30
 
   e2e-tests:
-    if: always()
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.run_full_e2e
     needs: e2e-test-shards
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -452,6 +469,91 @@ jobs:
             exit 1
           fi
           echo "All E2E shards passed."
+
+  # Short, isolated IELTS + ACT browser journeys are required before every
+  # Railway deploy. The database and all seeded records are job-local CI data.
+  release-smoke:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ielts
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      DATABASE_URL: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
+      DATABASE_DIRECT_URL: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
+      DATABASE_MIGRATOR_URL: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
+      DATABASE_WORKER_URL: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
+      TEST_DATABASE_URL: "mysql://root:root@127.0.0.1:3306/ielts"
+      AUTH_SECRET: ci-only-secret-with-at-least-32-characters
+      METRICS_TOKEN: "ci-only-e2e-metrics-token"
+      API_HOST: 127.0.0.1
+      PORT: 4000
+      API_PORT: 4000
+      APP_ENV: test
+      ENVIRONMENT: test
+      MIGRATIONS_DIR: migrations
+      COOKIE_SECURE: "false"
+      SESSION_COOKIE_NAME: session
+      CSRF_COOKIE_NAME: csrf
+      GRADING_PROJECTION_ENABLED: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go/go.mod
+          cache-dependency-path: backend/go/go.sum
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Apply migrations for smoke tests
+        working-directory: backend/go
+        run: go run ./cmd/migrate
+
+      - name: Run IELTS and ACT browser smoke journeys
+        run: >-
+          bunx playwright test
+          e2e/full-lifecycle.spec.ts
+          e2e/act-science-workflow.spec.ts
+          --project=chromium
+          --grep 'completes full exam lifecycle from registration to grading|renders, saves, terminalizes, scores, and reports an ACT Science attempt'
+
+      - name: Upload smoke test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-release-smoke
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
 
   # The authoring lifecycle gate (plan Phase 16).
   #
@@ -543,8 +645,8 @@ jobs:
 
   railway-deploy:
     runs-on: ubuntu-latest
-    needs: [quality-gates, go-backend]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    needs: [quality-gates, go-backend, release-smoke]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -570,15 +672,13 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
-      - name: Run Unit Tests Against Production
+      - name: Verify Railway readiness (read-only)
         run: |
-          # Wait for deployment to be healthy
-          echo "Waiting for Railway deployment to be healthy..."
-          sleep 30
-
-          # Get the deployment URL
-          DEPLOYMENT_URL=$(railway domain --service)
-          echo "Testing against: $DEPLOYMENT_URL"
-
-          # Run unit tests with production environment
-          VITE_API_BASE_URL=https://$DEPLOYMENT_URL bun run test:run
+          host="$(railway domain --service)"
+          url="https://${host#https://}"
+          url="${url%/}/readyz"
+          echo "Waiting for Railway readiness at ${url}..."
+          curl --fail --silent --show-error \
+            --connect-timeout 10 --max-time 20 \
+            --retry 10 --retry-all-errors --retry-delay 6 --retry-max-time 180 \
+            "$url"

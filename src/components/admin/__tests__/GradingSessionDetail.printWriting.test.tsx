@@ -163,6 +163,9 @@ describe('GradingSessionDetail print writing', () => {
     await waitFor(() => expect(printSpy).toHaveBeenCalledTimes(1));
     expect(downloadCsvFile).not.toHaveBeenCalled();
     expect(gradingRepository.getWritingSubmissionsBySubmissionId).toHaveBeenCalledTimes(2);
+    expect(printedSnapshot).toContain('Describe the chart.');
+    expect(printedSnapshot).toContain('Ada response text');
+    expect(printedSnapshot).toContain('Ben response text');
   });
 
   test('prints writing when a task has missing prompt or response text', async () => {

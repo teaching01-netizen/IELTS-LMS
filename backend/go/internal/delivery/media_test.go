@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"testing"
 
@@ -135,5 +136,33 @@ func TestCanAttemptReadMediaUsesPinnedVersionAndSectionScope(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestModuleMediaIndexIncludesLegacyManagedImagesOnlyForScience(t *testing.T) {
+	legacyImage := json.RawMessage(`<img src="/api/v1/media/asset-legacy/content">`)
+	sections := []DeliverySection{
+		{
+			SectionKey: "science",
+			Modules: []DeliveryModule{{
+				ID:        "science-module",
+				Questions: []DeliveredQuestion{{ExamQuestionID: "science-question", Stimulus: legacyImage}},
+			}},
+		},
+		{
+			SectionKey: "reading-writing",
+			Modules: []DeliveryModule{{
+				ID:        "reading-module",
+				Questions: []DeliveredQuestion{{ExamQuestionID: "reading-question", Stimulus: legacyImage}},
+			}},
+		},
+	}
+
+	index := moduleMediaIndex(sections)
+	if _, ok := index["science-module"]["asset-legacy"]; !ok {
+		t.Fatal("managed legacy image referenced by pinned Science content must be indexed")
+	}
+	if _, ok := index["reading-module"]["asset-legacy"]; ok {
+		t.Fatal("legacy HTML image URL must not expand the non-Science media allowlist")
 	}
 }

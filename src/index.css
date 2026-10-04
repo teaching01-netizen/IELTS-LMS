@@ -577,6 +577,25 @@
     min-width: var(--student-touch-target-preferred) !important;
   }
 
+  /* ACT iPad density: retain a comfortable 40px touch target without making
+     every control as large as the generic 48px touch profile. Radio/checkbox
+     glyphs keep their desktop-sized visual footprint; their surrounding
+     answer row remains the larger hit area. */
+  .student-exam-shell[data-exam-type='ACT'][data-student-touch-mode='true']
+    :is(button, [role="button"], input, select, textarea, a[href]) {
+    min-block-size: 2.5rem !important;
+    min-inline-size: 2.5rem !important;
+    min-width: 2.5rem !important;
+  }
+
+  .student-exam-shell[data-exam-type='ACT'][data-student-touch-mode='true']
+    :is(input[type='radio'], input[type='checkbox']) {
+    min-block-size: 1rem !important;
+    min-inline-size: 1rem !important;
+    min-width: 1rem !important;
+    min-height: 1rem !important;
+  }
+
   .student-touch-target {
     min-block-size: var(--student-touch-target-preferred);
     min-inline-size: var(--student-touch-target-preferred);

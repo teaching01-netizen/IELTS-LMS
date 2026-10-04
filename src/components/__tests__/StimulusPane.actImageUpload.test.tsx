@@ -7,7 +7,11 @@ import { uploadActScienceStimulusImage } from "../../services/actScienceChoiceIm
 import type { ActScienceStimulus, ExamState } from "../../types";
 
 vi.mock("../../services/actScienceChoiceImageService", () => ({
+  ACT_SCIENCE_CHOICE_IMAGE_TYPES: ["image/jpeg", "image/png", "image/webp"],
   rotateImageFile: vi.fn(),
+  uploadActScienceChoiceImage: vi.fn(),
+  uploadActScienceQuestionImage: vi.fn(),
+  uploadAssessmentPassageImage: vi.fn(),
   uploadActScienceStimulusImage: vi.fn(),
 }));
 

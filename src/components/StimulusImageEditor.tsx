@@ -7,7 +7,7 @@ import type {
   StimulusImageAsset,
 } from '../types';
 import { createId } from '../utils/idUtils';
-import { rotateImageFile } from '../services/actScienceChoiceImageService';
+import { rotateImageFileGateway as rotateImageFile } from '../features/exam-authoring/api/actScienceChoiceImageGateway';
 
 interface StimulusImageEditorProps {
   initialImage?: StimulusImageAsset;

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActScienceStimulus, ExamState, QuestionAnswer, StimulusAnnotation } from '../../types';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import {
@@ -16,7 +16,13 @@ import { StudentModuleEmptyState } from './StudentModuleEmptyState';
 import { useSplitPaneResize } from './useSplitPaneResize';
 import { hasHtmlMarkup, normalizeReadingPlainTextForDisplay } from './normalizeReadingPassageText';
 import { sanitizeReadingPassageHtml } from './sanitizeReadingPassageHtml';
-import { getImageUrlCandidates } from '../../utils/imageUrl';
+import { advanceImageSourceCandidate, getImageUrlCandidates } from '../../utils/imageUrl';
+import { tryBuildAttemptAuthorizationHeader } from '@student/api/studentAttemptGateway';
+
+export interface ActStudentMediaAuthorization {
+  scheduleId: string;
+  attemptId: string;
+}
 
 export interface StudentScienceProps {
   state: ExamState;
@@ -41,16 +47,106 @@ export interface StudentScienceProps {
   allQuestions?: StudentQuestionDescriptor[] | undefined;
   /** S1-C3: sessionStorage base key (per exam). Module suffix is appended. */
   persistenceKeyBase?: string | undefined;
+  actMediaAuthorization?: ActStudentMediaAuthorization | undefined;
 }
 
 interface ScienceStimulusPaneProps {
   stimulus: ActScienceStimulus;
+  mediaAuthorization?: ActStudentMediaAuthorization | undefined;
   materialCompact: boolean;
   isTabletMode: boolean;
   contentZoomStyle: React.CSSProperties | undefined;
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor | undefined;
   highlightClassName: string | undefined;
+}
+
+function isManagedMediaContentUrl(source: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const url = new URL(source, window.location.href);
+    return url.origin === window.location.origin && /^\/api\/v1\/media\/[^/]+\/content$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function useActAttemptMediaSources(
+  stimulus: ActScienceStimulus,
+  mediaAuthorization?: ActStudentMediaAuthorization,
+): ReadonlyMap<string, string> {
+  const scheduleId = mediaAuthorization?.scheduleId;
+  const attemptId = mediaAuthorization?.attemptId;
+  const managedSources = useMemo(() => {
+    const sources = new Set<string>();
+    if (typeof DOMParser !== 'undefined') {
+      const document = new DOMParser().parseFromString(stimulus.content, 'text/html');
+      document.querySelectorAll('img[src]').forEach((image) => {
+        const source = image.getAttribute('src')?.trim();
+        if (source && isManagedMediaContentUrl(source)) sources.add(source);
+      });
+    }
+    (stimulus.images ?? []).forEach((image) => {
+      if (isManagedMediaContentUrl(image.src)) sources.add(image.src);
+    });
+    return [...sources];
+  }, [stimulus.content, stimulus.images]);
+  const managedSourcesKey = managedSources.join('\u0000');
+  const requestKey = `${scheduleId ?? ''}\u0000${attemptId ?? ''}\u0000${managedSourcesKey}`;
+  const emptySourceMap = useMemo(() => new Map<string, string>(), []);
+  const [resolvedSources, setResolvedSources] = useState<{
+    key: string;
+    sources: ReadonlyMap<string, string>;
+  } | null>(null);
+  const visibleSources = resolvedSources?.key === requestKey ? resolvedSources.sources : emptySourceMap;
+
+  useEffect(() => {
+    let cancelled = false;
+    const objectUrls: string[] = [];
+    const authorization = scheduleId && attemptId
+      ? tryBuildAttemptAuthorizationHeader(scheduleId, attemptId)
+      : null;
+
+    setResolvedSources({ key: requestKey, sources: emptySourceMap });
+    if (!authorization || managedSources.length === 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadSource = async (source: string): Promise<[string, string] | null> => {
+      try {
+        const response = await fetch(source, {
+          credentials: 'same-origin',
+          headers: authorization,
+          cache: 'no-store',
+        });
+        if (!response.ok || cancelled) return null;
+        const imageBlob = await response.blob();
+        if (cancelled || !imageBlob.type.toLowerCase().startsWith('image/')) return null;
+        const objectUrl = URL.createObjectURL(imageBlob);
+        objectUrls.push(objectUrl);
+        return [source, objectUrl];
+      } catch {
+        return null;
+      }
+    };
+
+    void Promise.all(managedSources.map(loadSource)).then((loaded) => {
+      if (cancelled) return;
+      setResolvedSources({
+        key: requestKey,
+        sources: new Map(loaded.filter((entry): entry is [string, string] => entry !== null)),
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      objectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
+    };
+  }, [attemptId, emptySourceMap, managedSources, requestKey, scheduleId]);
+
+  return visibleSources;
 }
 
 function renderScienceImageAnnotations(
@@ -123,6 +219,7 @@ function renderScienceImageAnnotations(
 
 const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
   stimulus,
+  mediaAuthorization,
   materialCompact,
   isTabletMode,
   contentZoomStyle,
@@ -132,9 +229,10 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
 }: ScienceStimulusPaneProps) {
   const [inlineImageToZoom, setInlineImageToZoom] = useState<{ src: string; alt: string } | null>(null);
   const contentHasHtml = hasHtmlMarkup(stimulus.content);
-  const renderedContent = contentHasHtml
-    ? sanitizeReadingPassageHtml(stimulus.content)
+  const sanitizedContent = contentHasHtml
+    ? sanitizeReadingPassageHtml(stimulus.content, { normalizeJustifiedText: true })
     : normalizeReadingPlainTextForDisplay(stimulus.content);
+  const authenticatedImageSources = useActAttemptMediaSources(stimulus, mediaAuthorization);
   const handleInlineImageClick = (event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -166,16 +264,24 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
       >
         {stimulus.title}
       </h2>
-      <div className="student-passage-measure break-normal text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-[0.5em] [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:p-2 [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-50 [&_th]:p-2 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7]">
-        <div onClick={handleInlineImageClick}>
+      <div className="student-act-passage-content student-passage-measure break-normal text-left text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-[0.5em] [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:p-2 [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-50 [&_th]:p-2 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7]">
+        <div
+          onClick={handleInlineImageClick}
+          onErrorCapture={(event) => {
+            if (event.target instanceof HTMLImageElement) {
+              advanceImageSourceCandidate(event.target);
+            }
+          }}
+        >
           <RichTextHighlighter
-            content={renderedContent}
+            content={sanitizedContent}
             contentType="html"
             enabled={highlightEnabled}
             className="whitespace-pre-wrap break-normal [&_img]:cursor-zoom-in"
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
             highlightSurfaceId={`science:stimulus:${stimulus.id}`}
+            imageSourceOverrides={authenticatedImageSources}
           />
         </div>
         {inlineImageToZoom ? (
@@ -197,7 +303,7 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
             style={{ width: `${image.displayWidthPercent ?? 100}%` }}
           >
             <StudentZoomableMedia
-              sources={getImageUrlCandidates(image.src ?? '')}
+              sources={getImageUrlCandidates(authenticatedImageSources.get(image.src) ?? image.src ?? '')}
               alt={image.alt}
               label={image.alt || 'Stimulus image'}
               hint="Tap to zoom the stimulus image"
@@ -228,6 +334,7 @@ export function StudentScience({
   contentZoom = 1,
   registerLiveAnswer,
   persistenceKeyBase,
+  actMediaAuthorization,
 }: StudentScienceProps) {
   const isTabletMode = Boolean(tabletMode);
   const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
@@ -290,6 +397,10 @@ export function StudentScience({
     isTabletMode,
     materialPaneWidthProperty: '--science-pane-width',
     dividerMode: isTabletMode ? 'overlay' : 'consumes-space',
+    // Keep ACT Science's passage and question panes close to the balanced
+    // two-column layout in ACT test booklets, even if an old saved split was
+    // dragged to the widest setting. IELTS keeps its existing resize range.
+    maxMaterialRatio: isTabletMode ? undefined : 0.58,
     persistenceKey: persistenceKeyBase ? `${persistenceKeyBase}:science:split` : undefined,
   });
   const allQuestions = useMemo(
@@ -362,6 +473,7 @@ export function StudentScience({
         <ScienceStimulusPane
           key={activeStimulus.id}
           stimulus={activeStimulus}
+          mediaAuthorization={actMediaAuthorization}
           materialCompact={materialCompact}
           isTabletMode={isTabletMode}
           contentZoomStyle={contentZoomStyle}

@@ -506,7 +506,11 @@ func gradingWritingTasksHandler(app *App) http.HandlerFunc {
 			}
 		}
 		rows, err := app.DB.QueryContext(r.Context(),
-			`SELECT w.id, w.task_id, w.task_label, w.grading_status, w.word_count FROM writing_task_submissions w WHERE w.submission_id = ?`,
+			`SELECT w.id, w.submission_id, w.task_id, w.task_label, w.prompt, w.student_text,
+				w.word_count, w.grading_status, w.submitted_at
+			FROM writing_task_submissions w
+			WHERE w.submission_id = ?
+			ORDER BY w.task_id ASC`,
 			submissionID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -515,15 +519,18 @@ func gradingWritingTasksHandler(app *App) http.HandlerFunc {
 		defer rows.Close()
 		out := []map[string]any{}
 		for rows.Next() {
-			var id, taskID, label, status string
+			var id, rowSubmissionID, taskID, label, prompt, studentText, status string
 			var words sql.NullInt64
-			if err := rows.Scan(&id, &taskID, &label, &status, &words); err != nil {
+			var submittedAt time.Time
+			if err := rows.Scan(&id, &rowSubmissionID, &taskID, &label, &prompt, &studentText, &words, &status, &submittedAt); err != nil {
 				httpx.WriteError(w, r, err)
 				return
 			}
 			row := map[string]any{
-				"id": id, "taskId": taskID, "taskLabel": label,
-				"gradingStatus": status,
+				"id": id, "submissionId": rowSubmissionID,
+				"taskId": taskID, "taskLabel": label,
+				"prompt": prompt, "studentText": studentText,
+				"gradingStatus": status, "submittedAt": submittedAt,
 			}
 			if words.Valid {
 				row["wordCount"] = words.Int64

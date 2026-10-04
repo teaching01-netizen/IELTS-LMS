@@ -91,13 +91,17 @@ export function computeSplitBounds(
   railWidth: number,
   minMaterialWidth: number,
   minAnswerWidth: number,
+  maxMaterialRatio = PREFERRED_TRAVEL_MAX,
 ): SplitRatioBounds {
   const usableWidth = containerWidth - railWidth;
   if (!Number.isFinite(containerWidth) || usableWidth <= 0) {
     return { lower: null, upper: null, usableWidth: Math.max(0, usableWidth) };
   }
   const lower = Math.max(PREFERRED_TRAVEL_MIN, minMaterialWidth / usableWidth);
-  const upper = Math.min(PREFERRED_TRAVEL_MAX, 1 - minAnswerWidth / usableWidth);
+  const safeMaxMaterialRatio = Number.isFinite(maxMaterialRatio)
+    ? Math.min(PREFERRED_TRAVEL_MAX, Math.max(0, maxMaterialRatio))
+    : PREFERRED_TRAVEL_MAX;
+  const upper = Math.min(safeMaxMaterialRatio, 1 - minAnswerWidth / usableWidth);
   if (lower > upper) {
     return { lower: null, upper: null, usableWidth };
   }
@@ -154,6 +158,8 @@ interface UseSplitPaneResizeOptions {
    */
   crampedDefaultLeftWidth?: number | undefined;
   dividerMode?: 'overlay' | 'consumes-space';
+  /** Optional cap for the material pane, used by ACT Science's reading layout. */
+  maxMaterialRatio?: number | undefined;
   /** P2.5: sessionStorage key scoped to attempt/version/module. Omit to disable. */
   persistenceKey?: string | undefined;
   /** Font scale (1 = normal) used to enlarge readable pane minimums. */
@@ -172,6 +178,7 @@ export function useSplitPaneResize({
   defaultLeftWidth = DEFAULT_PREFERRED_RATIO * 100,
   crampedDefaultLeftWidth,
   dividerMode = 'consumes-space',
+  maxMaterialRatio = PREFERRED_TRAVEL_MAX,
   persistenceKey,
   fontScale = 1,
 }: UseSplitPaneResizeOptions) {
@@ -259,6 +266,7 @@ export function useSplitPaneResize({
         dividerConsumesSpace ? dividerWidth : 0,
         minMaterialWidth,
         minAnswerWidth,
+        maxMaterialRatio,
       ),
     // preferredRatio re-runs the read after drags/keyboard moves, and
     // containerResizeTick after rotations/window changes, so ARIA and the
@@ -271,6 +279,7 @@ export function useSplitPaneResize({
       dividerWidth,
       minMaterialWidth,
       minAnswerWidth,
+      maxMaterialRatio,
       readContainerWidth,
     ],
   );
@@ -458,8 +467,8 @@ export function useSplitPaneResize({
         dividerConsumesSpace ? dividerWidth : 0,
         minMaterialWidth,
         minAnswerWidth,
+        maxMaterialRatio,
       );
-      void boundsNow;
       const rendered = renderSplitRatio(drag.startRatio, boundsNow);
       if (rendered === null) {
         return;
@@ -541,9 +550,7 @@ export function useSplitPaneResize({
   const adjustSplitByStep = useCallback(
     (direction: -1 | 1, large: boolean) => {
       const step = large ? 0.05 : 0.02;
-      commitPreferredRatio(
-        Math.min(1, Math.max(0, (renderedRatio ?? DEFAULT_PREFERRED_RATIO) + direction * step)),
-      );
+      commitPreferredRatio(Math.min(1, Math.max(0, (renderedRatio ?? DEFAULT_PREFERRED_RATIO) + direction * step)));
     },
     [commitPreferredRatio, renderedRatio],
   );
