@@ -5,7 +5,12 @@ async function computeSha256(file: File): Promise<string> {
   if (!globalThis.crypto?.subtle) {
     throw new Error("Secure browser cryptography is required for image uploads.");
   }
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", await readFileBytes(file));
+  // Copy into a local Uint8Array so WebCrypto implementations with strict
+  // BufferSource checks (including Node 20 in the jsdom test environment) do
+  // not receive an ArrayBuffer created by another realm.
+  const fileBytes = new Uint8Array(await readFileBytes(file));
+  const digestBytes = new Uint8Array(fileBytes);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", digestBytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

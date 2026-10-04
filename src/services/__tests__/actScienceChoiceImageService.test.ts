@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { runInNewContext } from "node:vm";
 import { backendPost } from "../backendBridge";
 import {
   ACT_SCIENCE_CHOICE_IMAGE_MAX_BYTES,
@@ -46,6 +47,43 @@ describe("uploadActScienceChoiceImage", () => {
       })
     );
     expect(backendPost).toHaveBeenNthCalledWith(2, "/v1/media/uploads/asset-1/complete", expect.objectContaining({ sizeBytes: file.size, checksumSha256: expect.any(String) }));
+  });
+
+  it("normalizes bytes from another realm before computing the checksum", async () => {
+    const uploadResponse = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", uploadResponse);
+    vi.mocked(backendPost)
+      .mockResolvedValueOnce({
+        asset: { id: "asset-cross-realm" },
+        uploadUrl: "https://media.example/uploads/asset-cross-realm",
+        headers: { "content-type": "image/png" },
+      })
+      .mockResolvedValueOnce({
+        downloadUrl: "https://media.example/assets/asset-cross-realm",
+      });
+
+    const file = new File(["foreign-realm-image"], "foreign.png", { type: "image/png" });
+    const foreignBytes = runInNewContext("new ArrayBuffer(8)") as ArrayBuffer;
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(foreignBytes),
+    });
+    const digest = vi.spyOn(globalThis.crypto.subtle, "digest");
+
+    try {
+      await expect(uploadActScienceChoiceImage(file, "cross-realm-owner")).resolves.toBe(
+        "https://media.example/assets/asset-cross-realm"
+      );
+
+      expect(digest).toHaveBeenCalledWith("SHA-256", expect.any(Uint8Array));
+      expect(backendPost).toHaveBeenNthCalledWith(
+        1,
+        "/v1/media/uploads",
+        expect.objectContaining({ checksumSha256: expect.any(String) })
+      );
+    } finally {
+      digest.mockRestore();
+    }
   });
 
   it("rejects unsupported image types before creating a media asset", async () => {

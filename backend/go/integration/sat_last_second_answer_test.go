@@ -83,18 +83,36 @@ func (f *adaptiveExam) openWriterSession(t *testing.T, attemptID string) {
 	t.Helper()
 	ctx := context.Background()
 	clientSessionID, tokenID := writerSessionFor(attemptID)
+	userID := uuid.NewString()
+	if _, err := f.db.ExecContext(ctx,
+		`INSERT INTO users (id, email, display_name, role, state) VALUES (?, ?, 'SAT Candidate', 'student', 'active')`,
+		userID, "sat-writer-"+attemptID+"@example.test"); err != nil {
+		t.Fatalf("seed attempt session user: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := f.db.ExecContext(ctx, `DELETE FROM attempt_sessions WHERE attempt_id = ?`, attemptID); err != nil {
+			t.Errorf("cleanup attempt session: %v", err)
+		}
+		if _, err := f.db.ExecContext(ctx,
+			`UPDATE student_attempts SET user_id = NULL, active_client_session_id = NULL WHERE id = ?`, attemptID); err != nil {
+			t.Errorf("unbind attempt session user: %v", err)
+		}
+		if _, err := f.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
+			t.Errorf("cleanup attempt session user: %v", err)
+		}
+	})
+	if _, err := f.db.ExecContext(ctx,
+		`UPDATE student_attempts SET user_id = ?, active_client_session_id = ? WHERE id = ?`,
+		userID, clientSessionID, attemptID); err != nil {
+		t.Fatalf("bind active client session: %v", err)
+	}
 	if _, err := f.db.ExecContext(ctx,
 		`INSERT INTO attempt_sessions (
 			id, user_id, schedule_id, attempt_id, client_session_id, token_id,
 			device_fingerprint_hash, issued_at, last_seen_at, expires_at
-		) VALUES (?, '', ?, ?, ?, ?, NULL, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 1 HOUR)`,
-		uuid.NewString(), f.scheduleID, attemptID, clientSessionID, tokenID); err != nil {
+		) VALUES (?, ?, ?, ?, ?, ?, NULL, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 1 HOUR)`,
+		uuid.NewString(), userID, f.scheduleID, attemptID, clientSessionID, tokenID); err != nil {
 		t.Fatalf("seed attempt session: %v", err)
-	}
-	if _, err := f.db.ExecContext(ctx,
-		`UPDATE student_attempts SET active_client_session_id = ? WHERE id = ?`,
-		clientSessionID, attemptID); err != nil {
-		t.Fatalf("bind active client session: %v", err)
 	}
 }
 
