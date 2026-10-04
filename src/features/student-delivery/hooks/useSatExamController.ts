@@ -1157,24 +1157,14 @@ export function useSatExamController({
     (generation: number, assessmentId: string): Promise<AssessmentResult | null> =>
       finalizationGateRef.current.begin(async () => {
         emitStudentObservabilityMetric('sat_finalize_attempt', { scheduleId, attemptId });
-        // SAT-001: a committed V2 provisional claim (bootstrap reports
-        // provisionalSubmitted) makes response resubmission impossible by
-        // design — the durability engine treats the attempt as terminal and
-        // refuses — while the scoring result is still missing. Skip the
-        // resubmission phase and go straight to the idempotent completion
-        // call instead of failing finalization forever.
-        const provisional = dataRef.current?.attempt.provisionalSubmitted === true;
-        if (!provisional) {
-          await persistenceRef.current.flush();
-          if (identityGenerationRef.current !== generation) return null;
-          await persistenceRef.current.submit();
-          if (identityGenerationRef.current !== generation) return null;
-        }
-        if (identityGenerationRef.current === generation) setAnswersRecorded(true);
+        // Module timeout/close owns answer draining and server sealing. Once
+        // every module is terminal, response submission may only be rejected
+        // as closed; the idempotent completion endpoint returns the result.
         const finalResult = await satDeliveryGateway.submitAssessment(scheduleId, attemptId, {
           submissionId: attemptId,
         });
         if (identityGenerationRef.current !== generation) return null;
+        setAnswersRecorded(true);
         setResult(finalResult);
         dispatch({
           type: "recover",
@@ -1726,9 +1716,8 @@ export function useSatExamController({
     data && (data.proctorStatus === "paused" || data.scheduleRuntimeStatus === "paused")
   );
   const warning = data?.proctorStatus === "warned" ? data.proctorNote : null;
-  // Exam-day P1: distinguishes "answers recorded, generating result" from
-  // "submission failed, answers safe locally — retry". Set once flush +
-  // V2 submit ack inside finalizeAssessment; cleared on identity change.
+  // Set only after confirmed completion; failed completion cannot claim that
+  // answers were recorded. Cleared on identity change.
   const [answersRecorded, setAnswersRecorded] = useState(false);
 
   return {

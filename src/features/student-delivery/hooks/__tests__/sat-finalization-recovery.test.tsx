@@ -9,6 +9,7 @@ const gatewayMocks = vi.hoisted(() => ({
   startModule: vi.fn(),
   submitModule: vi.fn(),
   submitAssessment: vi.fn(),
+  closeModule: null as ReturnType<typeof vi.fn> | null,
 }));
 const persistenceMock = vi.hoisted(() => ({
   pendingCount: 0,
@@ -34,6 +35,7 @@ vi.mock("../../infrastructure/satDeliveryGateway", () => ({
     startModule: gatewayMocks.startModule,
     submitModule: gatewayMocks.submitModule,
     submitAssessment: gatewayMocks.submitAssessment,
+    get closeModule() { return gatewayMocks.closeModule ?? undefined; },
   },
 }));
 vi.mock("../useSatResponsePersistence", () => ({
@@ -104,7 +106,7 @@ function expiredPayload(source: AssessmentDeliveryBootstrap): AssessmentDelivery
   payload.serverNow = serverNow;
   payload.timing.serverNow = serverNow;
   payload.timing.runtimeRevision += 1;
-  const attempt = payload.attempt.moduleAttempts[0];
+  const attempt = payload.attempt.moduleAttempts.find((item) => item.state === "active");
   if (!attempt) throw new Error("Expected the SAT fixture to have one module attempt.");
   attempt.state = "locked";
   attempt.completionReason = "time_expired";
@@ -126,9 +128,69 @@ describe("SAT finalization recovery", () => {
     gatewayMocks.bootstrap.mockReset();
     gatewayMocks.submitModule.mockReset();
     gatewayMocks.submitAssessment.mockReset();
+    gatewayMocks.closeModule = null;
+    persistenceMock.flush.mockReset();
+    persistenceMock.submit.mockReset();
     persistenceMock.flush.mockResolvedValue(undefined);
     persistenceMock.submit.mockResolvedValue({} as never);
   });
+
+  it.each(["close acknowledgement", "timeout reconciliation"])(
+    "completes a server-closed Module 2 through %s without resubmitting responses",
+    async (source) => {
+      const p = activePayload();
+      if (source === "close acknowledgement") p.timing.timingModel = "sat_personal_v1";
+      const module = p.sections[0]!.modules[0]!;
+      module.title = "Module 2";
+      module.displayOrder = 1;
+      module.adaptiveRole = "higher_branch";
+      p.sections[0]!.modules.unshift({ ...module, id: "module-1", title: "Module 1", displayOrder: 0, adaptiveRole: "base" });
+      p.attempt.moduleAttempts.unshift({
+        ...p.attempt.moduleAttempts[0]!, id: "ma-1", moduleId: "module-1",
+        state: "locked", remainingSeconds: 0, completionReason: "time_expired", revision: 2,
+      });
+      gatewayMocks.bootstrap.mockResolvedValue(p);
+      persistenceMock.submit.mockRejectedValue(new Error("Attempt is closed."));
+      gatewayMocks.submitAssessment.mockResolvedValue({
+        id: "result-1", submissionId: "attempt-a", providerKey: "sat",
+        totalScore: null, scorePayload: {}, scoreKind: "practice", sections: [],
+      });
+      const hook = renderHook(() => useSatExamController(opts));
+      await settle();
+      expect(hook.result.current.state.phase).toBe("module");
+      expect(gatewayMocks.submitAssessment).not.toHaveBeenCalled();
+      const done = expiredPayload(p);
+      if (source === "close acknowledgement") {
+        gatewayMocks.bootstrap.mockRejectedValue(new Error("State read unavailable"));
+        gatewayMocks.closeModule = vi.fn().mockResolvedValue({
+          closed: true, controlEpoch: 1, scheduleId: "schedule", attemptId: "attempt-a",
+          moduleId: module.id, moduleAttemptId: "ma", alreadyClosed: false,
+          moduleAttempts: done.attempt.moduleAttempts, nextModuleId: null,
+          serverNow: done.serverNow, routeBasis: "client_confirmed",
+        });
+        await act(async () => { await vi.advanceTimersByTimeAsync(61_000); });
+        expect(gatewayMocks.closeModule).toHaveBeenCalledTimes(1);
+        expect(persistenceMock.flush).toHaveBeenCalledTimes(1);
+      } else {
+        const seam = hook.result.current as unknown as {
+          commitForTest: (payload: AssessmentDeliveryBootstrap) => boolean;
+        };
+        act(() => { expect(seam.commitForTest(done)).toBe(true); });
+      }
+      await settle();
+      expect(hook.result.current.state.phase).toBe("complete");
+      expect(hook.result.current.error).toBeNull();
+      expect(hook.result.current.answersRecorded).toBe(true);
+      expect(gatewayMocks.submitAssessment).toHaveBeenCalledTimes(1);
+      expect(gatewayMocks.submitAssessment).toHaveBeenCalledWith("schedule", "attempt-a", {
+        submissionId: "attempt-a",
+      });
+      expect(persistenceMock.submit).not.toHaveBeenCalled();
+      if (source === "timeout reconciliation") expect(persistenceMock.flush).not.toHaveBeenCalled();
+      hook.unmount();
+      vi.useRealTimers();
+    },
+  );
 
   it("recovers to complete via bootstrap polling after authoritative timeout finalization", async () => {
     const p = activePayload();
@@ -143,6 +205,7 @@ describe("SAT finalization recovery", () => {
     act(() => { expect(seam.commitForTest(done)).toBe(true); });
     await settle();
     expect(hook.result.current.error).toBe("Network unavailable");
+    expect(hook.result.current.answersRecorded).toBe(false);
     const calls = gatewayMocks.bootstrap.mock.calls.length;
     gatewayMocks.bootstrap.mockResolvedValue({
       ...done,
@@ -195,11 +258,13 @@ describe("SAT finalization recovery", () => {
     await settle();
     expect(hook.result.current.state.phase).toBe("submitting");
     expect(hook.result.current.error).toBe("completion backend down");
+    expect(hook.result.current.answersRecorded).toBe(false);
 
     await act(async () => {
       await hook.result.current.commands.retryFinalization();
     });
     expect(hook.result.current.state.phase).toBe("complete");
+    expect(hook.result.current.answersRecorded).toBe(true);
     const ids = gatewayMocks.submitAssessment.mock.calls.map(
       (call) => (call[2] as { submissionId?: string }).submissionId,
     );

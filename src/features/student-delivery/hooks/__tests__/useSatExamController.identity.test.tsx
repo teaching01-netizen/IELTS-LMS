@@ -406,8 +406,8 @@ describe("useSatExamController attempt identity", () => {
     );
 
     await waitFor(() => expect(hook.result.current.result?.id).toBe("result-1"));
-    expect(persistenceMock.flush).toHaveBeenCalled();
-    expect(persistenceMock.submit).toHaveBeenCalled();
+    expect(persistenceMock.flush).not.toHaveBeenCalled();
+    expect(persistenceMock.submit).not.toHaveBeenCalled();
     expect(gatewayMocks.submitAssessment).toHaveBeenCalledWith("schedule", "attempt-a", {
       submissionId: "attempt-a",
     });
