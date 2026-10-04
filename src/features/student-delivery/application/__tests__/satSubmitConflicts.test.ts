@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../../../shared/api-client/errors";
 import {
+  classifySatCloseRejection,
   isControlEpochStaleRejection,
   isDurabilityReconcileRejection,
   isSectionClosingRejection,
@@ -175,5 +176,44 @@ describe("SAT conflict policy covers every backend code", () => {
       expect(isWriterSupersededRejection(error)).toBe(false);
       expect(isStaleConflictRejection(error)).toBe(false);
     }
+  });
+});
+
+describe("SAT module-close refusal policy", () => {
+  it("waits out clock skew until the server's deadline, bounded", () => {
+    const skew = new ApiError({
+      code: "ASSESSMENT_CONFLICT",
+      message: "not yet",
+      status: 409,
+      details: { reason: "MODULE_NOT_EXPIRED", deadlineAt: "2026-10-04T10:00:01.500Z", serverNow: "2026-10-04T10:00:00.000Z" },
+    });
+    expect(classifySatCloseRejection(skew)).toEqual({ kind: "wait", delayMs: 1_600 });
+    const farSkew = new ApiError({
+      code: "ASSESSMENT_CONFLICT",
+      message: "not yet",
+      status: 409,
+      details: { reason: "MODULE_NOT_EXPIRED", deadlineAt: "2026-10-04T10:05:00.000Z", serverNow: "2026-10-04T10:00:00.000Z" },
+    });
+    expect(classifySatCloseRejection(farSkew)).toEqual({ kind: "wait", delayMs: 5_000 });
+  });
+
+  it("re-sends answers when the server is still missing one", () => {
+    expect(classifySatCloseRejection(apiError("ASSESSMENT_CONFLICT", "CLOSE_WRITES_PENDING"))).toEqual({ kind: "flush" });
+  });
+
+  it.each(["CLOSE_UNSUPPORTED", "MODULE_NOT_ACTIVE", "ATTEMPT_TERMINAL", "ATTEMPT_PROCTOR_BLOCKED"])(
+    "stops on %s and leaves routing to the server's close window",
+    (reason) => {
+      expect(classifySatCloseRejection(apiError("ASSESSMENT_CONFLICT", reason))).toEqual({ kind: "stop" });
+    },
+  );
+
+  it("stops when the endpoint does not exist on this server", () => {
+    expect(classifySatCloseRejection(apiError("NOT_FOUND", undefined, 404))).toEqual({ kind: "stop" });
+  });
+
+  it("backs off on overload and transport failures", () => {
+    expect(classifySatCloseRejection(apiError("SERVICE_UNAVAILABLE", undefined, 503))).toEqual({ kind: "backoff" });
+    expect(classifySatCloseRejection(new TypeError("Failed to fetch"))).toEqual({ kind: "backoff" });
   });
 });

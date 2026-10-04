@@ -138,3 +138,64 @@ export function isDurabilityReconcileRejection(error: unknown): boolean {
 export function isStaleConflictRejection(error: unknown): boolean {
   return isControlEpochStaleRejection(error) || isDurabilityReconcileRejection(error);
 }
+
+/**
+ * What a module-close refusal asks the browser to do next
+ * (POST …/modules/close, docs/sat-m1-m2-handoff-plan.md Phase 3):
+ *   - wait      MODULE_NOT_EXPIRED: the server's clock has not reached the
+ *               deadline yet (skew); retry at the server's deadline.
+ *   - flush     CLOSE_WRITES_PENDING: a listed answer has not landed; send the
+ *               queued answers again, then retry.
+ *   - stop      the server will not close this way (cohort clock, module
+ *               already terminal elsewhere, attempt closed, bad request); the
+ *               server's own close window routes the module.
+ *   - backoff   transport, overload or unknown: retry with jitter.
+ */
+export type SatCloseRetry =
+  | { kind: "wait"; delayMs: number }
+  | { kind: "flush" }
+  | { kind: "stop" }
+  | { kind: "backoff" };
+
+const CLOSE_STOP_REASONS: Record<string, true> = {
+  CLOSE_UNSUPPORTED: true,
+  MODULE_NOT_ACTIVE: true,
+  MODULE_ATTEMPT_MISMATCH: true,
+  ATTEMPT_TERMINAL: true,
+  ATTEMPT_PROCTOR_BLOCKED: true,
+};
+
+/** Bound on one skew wait: never park the transition longer than this. */
+const MAX_CLOSE_SKEW_WAIT_MS = 5_000;
+
+export function classifySatCloseRejection(error: unknown): SatCloseRetry {
+  const reason = backendErrorReason(error);
+  if (reason === "MODULE_NOT_EXPIRED") {
+    let deadline = Number.NaN;
+    let serverNow = Number.NaN;
+    if (typeof error === "object" && error !== null && "details" in error) {
+      const details = error.details;
+      if (typeof details === "object" && details !== null) {
+        if ("deadlineAt" in details && typeof details.deadlineAt === "string") deadline = Date.parse(details.deadlineAt);
+        if ("serverNow" in details && typeof details.serverNow === "string") serverNow = Date.parse(details.serverNow);
+      }
+    }
+    const remaining = Number.isFinite(deadline) && Number.isFinite(serverNow) ? deadline - serverNow : 1_000;
+    return { kind: "wait", delayMs: Math.min(MAX_CLOSE_SKEW_WAIT_MS, Math.max(100, remaining + 100)) };
+  }
+  if (reason === "CLOSE_WRITES_PENDING") return { kind: "flush" };
+  if (reason !== null && CLOSE_STOP_REASONS[reason]) return { kind: "stop" };
+  const code = backendErrorCode(error);
+  const status = typeof error === "object" && error !== null && "status" in error ? error.status : undefined;
+  if (
+    code === "ATTEMPT_TOKEN_INVALID" ||
+    code === "FORBIDDEN" ||
+    code === "NOT_FOUND" ||
+    code === "VALIDATION_ERROR" ||
+    status === 404 ||
+    status === 400
+  ) {
+    return { kind: "stop" };
+  }
+  return { kind: "backoff" };
+}

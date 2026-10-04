@@ -112,6 +112,7 @@ type BulkQuestionResolver interface {
 // itself. ensureWritable consumes every liveness field below, so none of them
 // can silently go unenforced.
 type RuntimeGate struct {
+	HandoffMode           string
 	Status                string
 	TimingModel           string
 	WaitingForNextSection bool
@@ -672,37 +673,57 @@ func ensureQuestionAdmitted(owner QuestionOwner, gate RuntimeGate, questionID st
 
 func ensureQuestionAdmittedForProvider(owner QuestionOwner, gate RuntimeGate, questionID, provider string) error {
 	if owner.ModuleState == "unassigned" {
-		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Question is not in an assigned module for this attempt.", HTTPStatus: 422, Details: map[string]any{"questionId": questionID}}
+		return moduleRejection(apperrors.CodeAttemptNotWritable, "Question is not in an assigned module for this attempt.", ReasonModuleUnassigned, questionID, owner.ModuleID)
+	}
+	if owner.ModuleState == "not_started" {
+		return moduleRejection(apperrors.CodeAttemptNotWritable, "Question module has not started.", ReasonModuleNotStarted, questionID, owner.ModuleID)
 	}
 	if owner.ModuleState != "active" && owner.ModuleState != "review" {
-		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Question module is not active.", HTTPStatus: 422}
+		return moduleRejection(apperrors.CodeAttemptNotWritable, "Question module is not active.", ReasonModuleClosed, questionID, owner.ModuleID)
 	}
 	if provider == string(ProviderSAT) && owner.ModuleDeadlineAt == nil {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT module deadline is unavailable.", HTTPStatus: 422}
 	}
-	personalSAT := isPersonalTimingModel(owner.TimingModel)
+	// The close window needs the runtime's model. The bulk resolver does not
+	// stamp it on the owner; the runtime gate read on this transaction does.
+	windowModel := owner.TimingModel
+	if windowModel == "" {
+		windowModel = gate.TimingModel
+	}
+	personalSAT := isPersonalTimingModel(windowModel)
 	// The single-operation offer flow (StartModuleOfferAck) sets the module to
 	// active with started_at = DB NOW and no longer performs an enter/visible
 	// confirmation handshake. Module state is already gated active/review above,
 	// so an existing started_at plus a non-expired deadline is the authority for
 	// writability; entry_confirmed_at is not required.
 	if personalSAT && (owner.ModuleStartedAt == nil || gate.Now.Before(*owner.ModuleStartedAt)) {
-		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT module has not started.", HTTPStatus: 422}
+		return moduleRejection(apperrors.CodeAttemptNotWritable, "SAT module has not started.", ReasonModuleNotStarted, questionID, owner.ModuleID)
 	}
 	// The attempt deadline covers the shared SAT section clock. Module 1 can
 	// have a shorter personal clock, so enforce the effective module boundary
 	// here too; otherwise a fresh V2 write could slip in before the timeout
-	// worker terminalizes the module.
+	// worker terminalizes the module. The window is the one the reconciler
+	// waits for before routing (ModuleCloseWindow), so the two never disagree.
 	satClosing := provider == string(ProviderSAT) && owner.ModuleDeadlineAt != nil &&
-		!gate.Now.Before(*owner.ModuleDeadlineAt) && gate.Now.Before(owner.ModuleDeadlineAt.Add(SATSaveGrace))
+		!gate.Now.Before(*owner.ModuleDeadlineAt) && gate.Now.Before(owner.ModuleDeadlineAt.Add(ModuleCloseWindow(windowModel, gate.HandoffMode)))
 	if owner.ModuleDeadlineAt != nil && !gate.Now.Before(*owner.ModuleDeadlineAt) && !satClosing {
 		telemetry.IncCounter(telemetry.MSATResponseWriteAfterTerminal)
-		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
+		return moduleRejection(apperrors.CodeDeadlineExpired, "Response deadline has passed.", ReasonModuleDeadlineExpired, questionID, owner.ModuleID)
 	}
 	if !personalSAT && gate.ActiveSectionKey != "*" && gate.ActiveSectionKey != "" && owner.SectionKey != gate.ActiveSectionKey && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Question is not in the active section.", HTTPStatus: 400}
 	}
 	return nil
+}
+
+// moduleRejection is a refusal that belongs to ONE module, not the attempt.
+// The code stays the historical one (old clients key on it); the reason lets a
+// current client confine the refusal to that module's drafts.
+func moduleRejection(code apperrors.Code, message, reason, questionID, moduleID string) *apperrors.Error {
+	telemetry.IncCounter(telemetry.MSATModuleScopedRejectionTotal, "reason", reason)
+	return &apperrors.Error{Code: code, Message: message, HTTPStatus: 422, Details: map[string]any{
+		"reason": reason, "questionId": questionID, "moduleId": moduleID,
+	}}
 }
 
 func leaseFenced() *apperrors.Error {

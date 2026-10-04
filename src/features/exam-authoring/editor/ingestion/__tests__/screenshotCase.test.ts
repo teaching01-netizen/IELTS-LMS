@@ -23,8 +23,9 @@ describe("screenshot expressions validate", () => {
       "\\[\\sum_{n\\in \\mathbb Z} f(x+n)\\]\n\nconverges absolutely.";
     const out = parseMathText(pasted);
     const kinds = out.document.nodes.flatMap((n) => (n.kind === "paragraph" ? n.children.map((c) => c.kind) : []));
-    expect(kinds).toContain("inlineMath");
-    expect(kinds).toContain("blockMath");
+    // One paragraph here, so the display sits beside text and stays inline;
+    // the real paste path splits it into its own paragraph (smartPastePlugin test).
+    expect(kinds.filter((kind) => kind === "inlineMath")).toHaveLength(3);
     expect(JSON.stringify(out.document)).not.toContain("\\(");
     expect(out.warnings.length).toBe(0);
   });

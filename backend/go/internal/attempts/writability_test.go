@@ -78,7 +78,7 @@ func TestEnsureQuestionAdmittedMatrix(t *testing.T) {
 		{"unassigned", QuestionOwner{ModuleState: "unassigned", SectionKey: "rw"}, apperrors.CodeAttemptNotWritable, "Question is not in an assigned module for this attempt."},
 		{"submitted", QuestionOwner{ModuleState: "submitted", SectionKey: "rw"}, apperrors.CodeAttemptNotWritable, "Question module is not active."},
 		{"locked", QuestionOwner{ModuleState: "locked", SectionKey: "rw"}, apperrors.CodeAttemptNotWritable, "Question module is not active."},
-		{"not_started", QuestionOwner{ModuleState: "not_started", SectionKey: "rw"}, apperrors.CodeAttemptNotWritable, "Question module is not active."},
+		{"not_started", QuestionOwner{ModuleState: "not_started", SectionKey: "rw"}, apperrors.CodeAttemptNotWritable, "Question module has not started."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -286,6 +286,68 @@ func TestEnsureQuestionAdmittedSATSaveOnlyGrace(t *testing.T) {
 	gate.Now = now
 	if err := ensureQuestionAdmittedForProvider(owner, gate, "q-1", string(ProviderACT)); err == nil {
 		t.Fatal("ACT must not inherit the SAT closing window")
+	}
+}
+
+// Module-scoped refusals carry a reason the client uses to confine the
+// refusal to that module's drafts (docs/sat-m1-m2-handoff-plan.md, Phase 1).
+// The historical code stays the same so older clients keep their behaviour.
+func TestEnsureQuestionAdmittedNamesTheModuleItRefuses(t *testing.T) {
+	now := time.Now().UTC()
+	started := now.Add(-time.Hour)
+	expired := now.Add(-time.Minute)
+	gate := liveGate(now)
+	gate.TimingModel = personalTimingModel
+	cases := []struct {
+		name   string
+		owner  QuestionOwner
+		code   apperrors.Code
+		reason string
+	}{
+		{"unassigned", QuestionOwner{ModuleID: "m2", ModuleState: "unassigned"}, apperrors.CodeAttemptNotWritable, ReasonModuleUnassigned},
+		{"closed", QuestionOwner{ModuleID: "m1", ModuleState: "locked"}, apperrors.CodeAttemptNotWritable, ReasonModuleClosed},
+		{"not started", QuestionOwner{ModuleID: "m2", ModuleState: "active", TimingModel: personalTimingModel, ModuleDeadlineAt: &expired}, apperrors.CodeAttemptNotWritable, ReasonModuleNotStarted},
+		{"deadline passed", QuestionOwner{ModuleID: "m1", ModuleState: "active", TimingModel: personalTimingModel, ModuleStartedAt: &started, ModuleDeadlineAt: &expired}, apperrors.CodeDeadlineExpired, ReasonModuleDeadlineExpired},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			appErr, ok := apperrors.As(ensureQuestionAdmittedForProvider(tc.owner, gate, "q-1", string(ProviderSAT)))
+			if !ok || appErr.Code != tc.code {
+				t.Fatalf("code = %v, want %s", appErr, tc.code)
+			}
+			if appErr.Details["reason"] != tc.reason || appErr.Details["moduleId"] != tc.owner.ModuleID {
+				t.Fatalf("details = %v, want reason %s for module %s", appErr.Details, tc.reason, tc.owner.ModuleID)
+			}
+		})
+	}
+}
+
+// Under client_start the personal module stays writable for the configured
+// close window (a confirmed close routes before it ends); the bulk resolver
+// leaves the owner's timing model empty, so the runtime gate supplies it.
+// Cohort modules keep SATSaveGrace whatever the mode.
+func TestEnsureQuestionAdmittedPersonalCloseWindow(t *testing.T) {
+	previous := SATHandoff()
+	ConfigureSATHandoff(SATHandoffConfig{Mode: HandoffModeClientStart, CloseWindow: 15 * time.Second, AutoStart: time.Minute})
+	t.Cleanup(func() { ConfigureSATHandoff(previous) })
+
+	deadline := time.Date(2026, 10, 4, 10, 0, 0, 0, time.UTC)
+	started := deadline.Add(-32 * time.Minute)
+	owner := QuestionOwner{ModuleID: "m1", ModuleState: "active", ModuleStartedAt: &started, ModuleDeadlineAt: &deadline}
+	personal := liveGate(deadline.Add(10 * time.Second))
+	personal.TimingModel = personalTimingModel
+	personal.HandoffMode = HandoffModeClientStart
+	if err := ensureQuestionAdmittedForProvider(owner, personal, "q-1", string(ProviderSAT)); err != nil {
+		t.Fatalf("a personal answer 10s after zero is inside the 15s close window: %v", err)
+	}
+	personal.Now = deadline.Add(15*time.Second + time.Millisecond)
+	if err := ensureQuestionAdmittedForProvider(owner, personal, "q-1", string(ProviderSAT)); err == nil {
+		t.Fatal("a personal answer past the close window must be refused")
+	}
+	cohort := liveGate(deadline.Add(10 * time.Second))
+	cohort.TimingModel = "cohort_section_v3"
+	if err := ensureQuestionAdmittedForProvider(owner, cohort, "q-1", string(ProviderSAT)); err == nil {
+		t.Fatal("a cohort module must keep SATSaveGrace under client_start")
 	}
 }
 

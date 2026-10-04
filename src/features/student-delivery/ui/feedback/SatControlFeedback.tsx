@@ -60,7 +60,7 @@ export function SatTimeoutOverlay({
   saveFailure,
   onRetrySave,
 }: {
-  saveFailureKind: "offline" | "retryable" | "terminal" | "expired" | "superseded" | null;
+  saveFailureKind: "offline" | "retryable" | "terminal" | "expired" | "superseded" | "module_closed" | null;
   saveFailure: string | null;
   onRetrySave: () => void;
 }) {

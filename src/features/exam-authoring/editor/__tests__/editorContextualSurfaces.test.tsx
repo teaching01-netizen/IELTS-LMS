@@ -103,7 +103,7 @@ describe("surfaces that follow the author's action", () => {
     });
     const selectionBubble = host.querySelector('[data-bubble="selection"]');
     expect(selectionBubble).not.toBeNull();
-    for (const name of ["Bold (⌘B)", "Italic (⌘I)", "Underline (⌘U)", "Superscript", "Subscript", "Bulleted list"]) {
+    for (const name of ["Bold (⌘B)", "Italic (⌘I)", "Underline (⌘U)", "Strikethrough (⇧⌘S)", "Superscript", "Subscript", "Bulleted list"]) {
       expect(within(selectionBubble as HTMLElement).getByRole("button", { name })).toBeInTheDocument();
     }
 

@@ -302,6 +302,7 @@ describe('SAT delivery domain', () => {
     };
     const data = {
       scheduleRuntimeStatus: 'live',
+      serverNow: '2026-10-04T10:00:00Z',
       proctorStatus: 'active',
       timing: { authority: 'cohort_runtime', timingModel: 'sat_personal_v1' },
       // Student Access narrowed the release to Math; the server keeps order 1.
@@ -448,6 +449,43 @@ describe('SAT delivery domain', () => {
     // The tolerance covers the ceil-based countdown and the submit round trip.
     expect(moduleAttemptEndedByOwnClock(attempt(baseModule.id, 'submitted', deadlineAt), '2026-09-19T09:31:59.500Z')).toBe(true);
     expect(moduleAttemptEndedByOwnClock(attempt(baseModule.id, 'submitted', deadlineAt), '2026-09-19T09:31:58.000Z')).toBe(false);
+  });
+
+  // client_start handoff: the routed Module 2 waits not_started with an
+  // auto-start backstop. The browser starts it (its clock starts in that same
+  // request); a branch without the backstop stays server-driven.
+  it('starts a routed Module 2 the server left waiting for this browser', () => {
+    const base = { id: 'rw-m1', adaptiveRole: 'base', displayOrder: 0 } as AssessmentDeliveryModule;
+    const branch = { id: 'rw-m2-high', adaptiveRole: 'higher_branch', displayOrder: 1 } as AssessmentDeliveryModule;
+    const row = (moduleId: string, state: string, extra: Partial<AssessmentModuleAttemptSnapshot> = {}): AssessmentModuleAttemptSnapshot => ({
+      id: `ma-${moduleId}`, moduleId, state, allocatedSeconds: 1_920,
+      availableAt: '2026-10-04T10:00:00Z', startedAt: null, pausedAt: null, accumulatedPausedSeconds: 0,
+      extensionSeconds: 0, deadlineAt: null, remainingSeconds: 1_920, completionReason: null,
+      rawCorrect: null, operationalQuestionCount: null, toolState: {}, revision: 0, ...extra,
+    });
+    const payload = (branchRow: AssessmentModuleAttemptSnapshot) => ({
+      scheduleRuntimeStatus: 'live',
+      serverNow: '2026-10-04T10:00:00Z',
+      proctorStatus: 'active',
+      timing: { authority: 'cohort_runtime', timingModel: 'sat_personal_v1' },
+      sections: [{ id: 'rw', sectionKey: 'reading-writing', displayOrder: 0, modules: [base, branch] }],
+      attempt: { moduleAttempts: [row(base.id, 'locked', { startedAt: '2026-10-04T09:28:00Z', completionReason: 'time_expired' }), branchRow] },
+    } as unknown as AssessmentDeliveryBootstrap);
+    const entry = (data: AssessmentDeliveryBootstrap, overrides: Partial<SatEntryDecisionInput> = {}) =>
+      deriveSatEntryDecision({ data, module: branch, stageReady: true, breakSeconds: 0, sectionWaitSeconds: 0, phase: 'directions', ...overrides });
+
+    const awaiting = payload(row(branch.id, 'not_started', { autoStartAt: '2026-10-04T10:01:00Z' }));
+    expect(entry(awaiting)).toMatchObject({ shouldStart: true, reason: 'handoff-entry' });
+    expect(entry({ ...awaiting, serverNow: '2026-10-04T09:59:59Z' })).toMatchObject({ shouldStart: false });
+    expect(entry({ ...awaiting, attempt: { ...awaiting.attempt, moduleAttempts: awaiting.attempt.moduleAttempts.map((a) => a.moduleId === base.id ? { ...a, state: 'active' } : a) } })).toMatchObject({ shouldStart: false });
+    // A paused candidate or room never starts it.
+    expect(entry({ ...awaiting, proctorStatus: 'paused' })).toMatchObject({ shouldStart: false, reason: 'proctor-blocked' });
+    expect(entry({ ...awaiting, scheduleRuntimeStatus: 'paused' })).toMatchObject({ shouldStart: false, reason: 'runtime-not-live' });
+    // server_start rows (no backstop) and rows the backstop already started stay server-driven.
+    expect(entry(payload(row(branch.id, 'not_started')))).toMatchObject({ shouldStart: false, reason: 'already-started' });
+    expect(entry(payload(row(branch.id, 'active', { startedAt: '2026-10-04T10:01:00Z', autoStartAt: '2026-10-04T10:01:00Z' })))).toMatchObject({
+      shouldStart: false, reason: 'already-started',
+    });
   });
 
 });

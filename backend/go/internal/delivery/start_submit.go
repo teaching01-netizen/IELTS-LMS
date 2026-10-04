@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/assessscore"
+	"example.com/ielts-proctoring/internal/attempts"
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -79,13 +80,25 @@ func (s *Service) StartModuleOffer(ctx context.Context, bearerScheduleID, bearer
 // StartModuleOfferAck keeps the mutation contract while leaving the full
 // attempt projection to cold load and recovery.
 func (s *Service) StartModuleOfferAck(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, generation, controlEpoch *int, needContent bool, writerBinding ...string) (*SatModuleEntryAck, error) {
-	_, ack, err := s.startModuleWithResponse(ctx, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID, generation, controlEpoch, true, writerBinding...)
-	if err == nil && needContent {
-		_, _, _, versionID, bindingErr := s.startScheduleBinding(ctx, bearerScheduleID)
-		if bindingErr != nil {
-			return nil, bindingErr
+	var content *DeliverySection
+	if needContent {
+		if urlScheduleID != bearerScheduleID {
+			return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
 		}
-		ack.SelectedSection, err = s.selectedModuleSection(ctx, bearerAttemptID, bearerScheduleID, versionID, moduleID)
+		_, _, _, versionID, err := s.startScheduleBinding(ctx, bearerScheduleID)
+		if err != nil {
+			return nil, err
+		}
+		// Warm the immutable content before starting the clock. It is only returned
+		// after the owned module has passed the start transaction's writer gates.
+		content, err = s.selectedModuleSection(ctx, bearerAttemptID, bearerScheduleID, versionID, moduleID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	_, ack, err := s.startModuleWithResponse(ctx, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID, generation, controlEpoch, true, writerBinding...)
+	if err == nil {
+		ack.SelectedSection = content
 	}
 	return ack, err
 }
@@ -126,9 +139,11 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 			return nil, nil, err
 		}
 	}
+	var m2StartLag *float64
 	var hubEvents []liveupdates.Event
 	// B1: module CAS + writer fence are point writes (RC-safe).
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
+		m2StartLag = nil
 		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
 			return err
 		}
@@ -178,6 +193,16 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 			}
 			if module.state != "not_started" {
 				return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module cannot be started in its current state.")
+			}
+			if gated.handoffMode == attempts.HandoffModeClientStart {
+				var autoStart sql.NullTime
+				if err := t.QueryRowContext(ctx, "SELECT auto_start_at FROM assessment_module_attempts WHERE id = ?", module.id).Scan(&autoStart); err != nil {
+					return err
+				}
+				if autoStart.Valid && module.availableAt != nil {
+					lag := gateNow.Sub(*module.availableAt).Seconds()
+					m2StartLag = &lag
+				}
 			}
 			res, err := t.ExecContext(ctx,
 				"UPDATE assessment_module_attempts SET state = 'active', allocated_seconds = ?, available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'",
@@ -256,6 +281,10 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 	}); err != nil {
 		return nil, nil, err
 	}
+	if m2StartLag != nil {
+		telemetry.ObserveSeconds(telemetry.MSATM2StartLagSeconds, *m2StartLag, "starter", "client")
+	}
+
 	if compact {
 		ack, err := s.entryStateBound(ctx, scheduleID, bearerAttemptID, moduleID)
 		if err != nil {
@@ -626,7 +655,7 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 			return err
 		}
 		if gated.gate.usesPersonalDeadline() {
-			if err := ensureSaveModuleAdmitted(active, gated.now); err != nil {
+			if err := ensureSaveModuleAdmitted(active, gated.now, gated.closeWindow()); err != nil {
 				return err
 			}
 		}
@@ -844,6 +873,7 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 		if err := s.loadPersonalEntryOffers(ctx, attemptID, moduleAttempts); err != nil {
 			return nil, err
 		}
+		sections = withholdAwaitingModuleContent(sections, moduleAttempts)
 	}
 	var personalBreaks []PersonalBreak
 	if examruntime.IsSatPersonal(timing.TimingModel) {
@@ -891,12 +921,33 @@ type nextModuleRow struct {
 	toolPolicy      sql.NullString
 }
 
+// Route basis values recorded on assessment_route_decisions.route_basis: what
+// closed the base module whose score chose the branch.
+const (
+	routeBasisClientConfirmed = "client_confirmed"
+	routeBasisWindowClosed    = "window_closed"
+	routeBasisRoomCompleted   = "room_completed"
+)
+
+// routeAudit carries the audit facts written with a route decision: the basis
+// and the module deadline used to count answers that arrived after it.
+type routeAudit struct {
+	basis    string
+	deadline *time.Time
+}
+
 // finalizeModuleTx mirrors finalize_module_tx (Rust
 // assessment_delivery.rs:2131-2217): score the module responses, flip the row
 // to locked with a not_started/active/review CAS, then route + insert the
 // follow-up module attempt. Historical student_submit rows stay readable, but
 // new finalizations accept only timeout or authorized proctor reasons.
 func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID string, active saveActiveModule, completionReason string) (*nextModuleRow, error) {
+	return s.finalizeModuleWithBasisTx(ctx, t, attemptID, active, completionReason, routeBasisWindowClosed)
+}
+
+// finalizeModuleWithBasisTx is finalizeModuleTx with the route basis the
+// caller observed (a confirmed close, the close window, a completed room).
+func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemptID string, active saveActiveModule, completionReason, basis string) (*nextModuleRow, error) {
 	switch completionReason {
 	case "time_expired", "proctor_end", "proctor_terminate":
 	case "student_submit":
@@ -932,7 +983,12 @@ func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID strin
 		active.moduleID).Scan(&currentSectionID, &breakAfterSeconds); err != nil {
 		return nil, err
 	}
-	next, err := s.nextModuleTx(ctx, t, attemptID, active.id, active.moduleID, rawCorrect, operationalCount)
+	if completionReason == "proctor_end" || completionReason == "proctor_terminate" {
+		basis = completionReason
+	}
+	telemetry.IncCounter(telemetry.MSATModuleRouteBasisTotal, "basis", basis)
+	audit := routeAudit{basis: basis, deadline: moduleDeadline(active.availableAt, active.startedAt, active.allocatedSeconds, active.accumulatedPausedSeconds, active.extensionSeconds)}
+	next, err := s.nextModuleTx(ctx, t, attemptID, active.id, active.moduleID, rawCorrect, operationalCount, audit)
 	if err != nil {
 		return nil, err
 	}
@@ -943,6 +999,10 @@ func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID strin
 	if err != nil {
 		return nil, err
 	}
+	if audit.deadline != nil && (next.adaptiveRole == "lower_branch" || next.adaptiveRole == "higher_branch") {
+		telemetry.ObserveSeconds(telemetry.MSATRouteLagSeconds, now.Sub(*audit.deadline).Seconds(), "basis", basis)
+	}
+
 	var cohortTimed, personalTimed int
 	if err := t.QueryRowContext(ctx,
 		"SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model IN ("+examruntime.CohortTimingModelsSQL+")), EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model = '"+examruntime.TimingModelPersonal+"')",
@@ -953,16 +1013,27 @@ func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID strin
 	if cohortTimed != 0 {
 		availableAt = now
 	}
+	var handoffMode string
+	if personalTimed != 0 {
+		if err := t.QueryRowContext(ctx, "SELECT COALESCE(r.sat_handoff_mode, 'server_start') FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ?", attemptID).Scan(&handoffMode); err != nil {
+			return nil, err
+		}
+	}
 	if personalTimed != 0 {
 		// Server-driven progression (product contract 2026-09-24):
 		// - Same-section adaptive (M1→M2): route selection + selected M2
-		//   activation happen atomically here. The client swaps M1 UI → M2 UI
-		//   with zero mutations.
+		//   creation happen atomically here.
 		// - Cross-section (RW M2 → break → Math M1): the server starts the
 		//   scheduled break immediately (active with DB-time deadline) and the
 		//   next M1 waits as not_started until break expiry activates it
 		//   (see ReconcileAttemptTimeout). The client renders authoritative
 		//   state only.
+		//
+		// Without a break, the follow-up module's clock is the student's own
+		// time. Under server_start it runs from this commit, so routing,
+		// notification and content download are charged to it. Under
+		// client_start it waits not_started: the browser starts it when it has
+		// the module in hand (StartModule), and auto_start_at is the backstop.
 		if currentSectionID != next.sectionID && breakAfterSeconds > 0 {
 			if err := createActivePersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, now); err != nil {
 				return nil, err
@@ -970,6 +1041,10 @@ func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID strin
 			breakDeadline := now.Add(time.Duration(breakAfterSeconds) * time.Second)
 			availableAt = breakDeadline
 			if err := insertModuleAttemptTx(ctx, t, attemptID, next, availableAt); err != nil {
+				return nil, err
+			}
+		} else if currentSectionID == next.sectionID && handoffMode == attempts.HandoffModeClientStart {
+			if err := insertAwaitingModuleAttemptTx(ctx, t, attemptID, next, now, now.Add(attempts.SATHandoff().AutoStart)); err != nil {
 				return nil, err
 			}
 		} else {
@@ -1029,12 +1104,34 @@ func insertActiveModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string,
 	return err
 }
 
+// insertAwaitingModuleAttemptTx inserts the routed follow-up module
+// not_started under client_start: available now (the browser may start it at
+// once), with auto_start_at as the server backstop. Its clock starts in
+// StartModule — when the browser receives the module — or at auto_start_at.
+// The unique (attempt_id, module_id) constraint keeps it idempotent.
+func insertAwaitingModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string, module *nextModuleRow, now, autoStartAt time.Time) error {
+	_, err := t.ExecContext(ctx,
+		"INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, available_at, auto_start_at, tool_state) VALUES (?, ?, ?, 'not_started', ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
+		uuid.NewString(), attemptID, module.id, module.durationSeconds, now, autoStartAt, module.toolPolicy.String)
+	return err
+}
+
 // scoringRow is one response joined to its answer definition for scoring.
 type scoringRow struct {
+	examQuestionID   string
 	isPretest        bool
 	answerDefinition sql.NullString
 	response         sql.NullString
 	scoringPolicy    string
+}
+
+// scoringSourceStats is one scoring pass's source attribution, emitted as
+// telemetry by the scoring path only (an evidence rescore stays silent).
+type scoringSourceStats struct {
+	operationalV2      bool
+	operationalLegacy  bool
+	legacyFallbackRows int
+	operationalRows    int
 }
 
 // loadScoringRowsTx loads the scoring join for finalizeModuleTx.
@@ -1064,11 +1161,22 @@ func loadScoringRowsTx(ctx context.Context, t tx.Tx, moduleAttemptID, moduleID s
 // scoring module (v.module_id = eq.module_id) and prefers the eq.id match;
 // Go-side dedup keeps exactly one row per eq.id.
 func loadScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, moduleID string) ([]scoringRow, error) {
+	out, stats, err := queryScoringRowsV2FirstTx(ctx, t, moduleAttemptID, moduleID)
+	if err != nil {
+		return nil, err
+	}
+	stats.emit()
+	return out, nil
+}
+
+// queryScoringRowsV2FirstTx is the V2-first scoring join without telemetry.
+func queryScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, moduleID string) ([]scoringRow, scoringSourceStats, error) {
+	var stats scoringSourceStats
 	rows, err := t.QueryContext(ctx,
 		"SELECT eq.id, eq.is_pretest, qr.answer_definition, ar.response, CAST(v.response AS CHAR), CAST(v.question_id AS CHAR), CAST(ev.config_snapshot AS CHAR) FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections sec ON sec.id = m.section_id JOIN exam_versions ev ON ev.id = sec.exam_version_id LEFT JOIN assessment_question_responses ar ON ar.module_attempt_id = ? AND ar.exam_question_id = eq.id LEFT JOIN attempt_responses_v2 v ON v.question_id IN (eq.id, eq.question_id) AND v.module_id = eq.module_id AND v.attempt_id = (SELECT attempt_id FROM assessment_module_attempts WHERE id = ?) WHERE eq.module_id = ? ORDER BY eq.display_order, CASE WHEN (CAST(v.question_id AS CHAR) COLLATE utf8mb4_unicode_ci) = eq.id THEN 0 ELSE 1 END",
 		moduleAttemptID, moduleAttemptID, moduleID)
 	if err != nil {
-		return nil, err
+		return nil, stats, err
 	}
 	defer rows.Close()
 	var out []scoringRow
@@ -1077,10 +1185,6 @@ func loadScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, mod
 	// so paging counters must too — a pretest-only legacy answer (or a
 	// pretest-only unanswered pass) is not a scoring gap and must not page
 	// on EITHER the pass-level source series or the per-row fallback series.
-	operationalV2 := false
-	operationalLegacy := false
-	legacyFallbackRows := 0
-	operationalRows := 0
 	for rows.Next() {
 		var eqID string
 		var r scoringRow
@@ -1088,11 +1192,12 @@ func loadScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, mod
 		var vQuestionID sql.NullString
 		var config sql.NullString
 		if err := rows.Scan(&eqID, &r.isPretest, &r.answerDefinition, &r.response, &canonical, &vQuestionID, &config); err != nil {
-			return nil, err
+			return nil, stats, err
 		}
+		r.examQuestionID = eqID
 		r.scoringPolicy = assessscore.SATSPRPolicy(config.String)
 		if r.scoringPolicy == "invalid" {
-			return nil, apperrors.New(apperrors.CodeValidation, "Published SAT student-response scoring policy is invalid.")
+			return nil, stats, apperrors.New(apperrors.CodeValidation, "Published SAT student-response scoring policy is invalid.")
 		}
 		if _, dup := seen[eqID]; dup {
 			// Second V2 match for the same question (eq.id + eq.question_id
@@ -1102,11 +1207,11 @@ func loadScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, mod
 		}
 		seen[eqID] = struct{}{}
 		if !r.isPretest {
-			operationalRows++
+			stats.operationalRows++
 		}
 		if canonical.Valid && canonical.String != "" {
 			if !r.isPretest {
-				operationalV2 = true
+				stats.operationalV2 = true
 			}
 			if input, ok := assessscore.V2ResponseToScorerInput(canonical.String); ok {
 				r.response = sql.NullString{String: input, Valid: true}
@@ -1118,47 +1223,51 @@ func loadScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, mod
 			}
 		} else if r.response.Valid && r.response.String != "" {
 			if !r.isPretest {
-				operationalLegacy = true
+				stats.operationalLegacy = true
 				// Gap attribution is decided after the full pass: this
 				// legacy row is a pageable gap only when V2 owns
 				// sibling OPERATIONAL questions (pretest rows never
 				// count — the scorer skips them).
-				legacyFallbackRows++
+				stats.legacyFallbackRows++
 			}
 		}
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, stats, err
 	}
+	return out, stats, nil
+}
+
+// emit records one scoring pass's source attribution.
+func (stats scoringSourceStats) emit() {
 	// Pass-level source: operational rows only. A pretest-only V2 (or
 	// legacy) pass emits nothing — there is no scored content to attribute.
-	if operationalV2 {
+	if stats.operationalV2 {
 		telemetry.IncCounter(telemetry.MSATScoreSource, "source", telemetry.SATScoreV2)
 	}
-	if operationalLegacy {
+	if stats.operationalLegacy {
 		telemetry.IncCounter(telemetry.MSATScoreSource, "source", telemetry.SATScoreLegacy)
 	}
-	if operationalV2 && legacyFallbackRows > 0 {
+	if stats.operationalV2 && stats.legacyFallbackRows > 0 {
 		// Mixed pass: some OPERATIONAL questions scored from legacy gaps
 		// while V2 owned the rest. Emit one increment per gap row (not
 		// one per pass) so the page fires on ANY gap and the magnitude
 		// tracks its size.
-		for range legacyFallbackRows {
+		for range stats.legacyFallbackRows {
 			telemetry.IncCounter(telemetry.MSATScoreFallbackRows, "source", telemetry.SATScoreLegacy)
 		}
-	} else if !operationalV2 && !operationalLegacy && operationalRows > 0 {
+	} else if !stats.operationalV2 && !stats.operationalLegacy && stats.operationalRows > 0 {
 		// Zero-answer pass: operational questions existed but no response
 		// row answered any of them (mass lease-fencing / transport
 		// loss). Scoring silence would otherwise release an
 		// all-incorrect module with no page — emit one increment per
 		// unanswered OPERATIONAL question. Pretest-only passes stay
 		// silent (the scorer skips pretest, so there is no gap).
-		for range operationalRows {
+		for range stats.operationalRows {
 			telemetry.IncCounter(telemetry.MSATScoreFallbackRows, "source", telemetry.SATScoreZero)
 		}
 	}
-	return out, nil
 }
 
 // scoreScoringRows mirrors score_scoring_rows (Rust
@@ -1188,7 +1297,7 @@ func answerString(v sql.NullString) string {
 // modules route through the adaptive routing policy; other modules advance to
 // the next section's base module. A nil row means the assessment has no
 // follow-up module.
-func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModuleAttemptID, moduleID string, rawCorrect, operationalCount int) (*nextModuleRow, error) {
+func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModuleAttemptID, moduleID string, rawCorrect, operationalCount int, audit routeAudit) (*nextModuleRow, error) {
 	var sectionID, sectionKey string
 	var sectionOrder int
 	var adaptiveRole, versionID string
@@ -1224,9 +1333,17 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 			selectedModuleID = higherModuleID
 			routeName = "higher"
 		}
+		// late_answer_count is computed in the same statement: base-module
+		// answers whose last accepted write landed after the module deadline
+		// (inside the close window). Audit only; it never changes the route.
+		var basis any
+		if audit.basis != "" {
+			basis = audit.basis
+		}
 		if _, err := t.ExecContext(ctx,
-			"INSERT INTO assessment_route_decisions (id, attempt_id, section_id, base_module_attempt_id, base_module_id, selected_module_id, selected_route, raw_correct, operational_question_count, policy_key, policy_revision, policy_config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			uuid.NewString(), attemptID, policySectionID, baseModuleAttemptID, baseModuleID, selectedModuleID, routeName, rawCorrect, operationalCount, policyKey, policyRevision, policyConfig); err != nil {
+			"INSERT INTO assessment_route_decisions (id, attempt_id, section_id, base_module_attempt_id, base_module_id, selected_module_id, selected_route, raw_correct, operational_question_count, policy_key, policy_revision, policy_config, route_basis, late_answer_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COUNT(*) FROM attempt_responses_v2 WHERE attempt_id = ? AND module_id = ? AND updated_at > ?))",
+			uuid.NewString(), attemptID, policySectionID, baseModuleAttemptID, baseModuleID, selectedModuleID, routeName, rawCorrect, operationalCount, policyKey, policyRevision, policyConfig,
+			basis, attemptID, baseModuleID, audit.deadline); err != nil {
 			return nil, err
 		}
 		next, err := scanNextModuleRowTx(ctx, t, selectedModuleID)

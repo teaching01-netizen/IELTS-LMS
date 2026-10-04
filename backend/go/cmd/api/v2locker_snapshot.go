@@ -66,5 +66,11 @@ func (snapshotLocker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (att
 	if err != nil {
 		return attempts.RuntimeGate{}, err
 	}
-	return snapshotRuntimeGate(snap, now), nil
+	gate := snapshotRuntimeGate(snap, now)
+	if runtime.IsSatPersonal(snap.TimingModel) {
+		if err := q.QueryRowContext(ctx, "SELECT COALESCE(sat_handoff_mode, 'server_start') FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&gate.HandoffMode); err != nil {
+			return attempts.RuntimeGate{}, err
+		}
+	}
+	return gate, nil
 }

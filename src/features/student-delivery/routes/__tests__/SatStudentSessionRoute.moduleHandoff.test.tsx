@@ -399,6 +399,19 @@ describe("SatStudentSessionRoute module handoff", () => {
     matchMediaMock();
   });
 
+  it("keeps Module 2 answer controls usable when a Module 1 draft is preserved", () => {
+    seed(moduleState("math-m2-higher", "math-m2-higher-q1"), mathModuleTwoRouted());
+    const controller = controllerMock.current as { persistence: Record<string, unknown> };
+    Object.assign(controller.persistence, {
+      failureKind: "module_closed", failure: "MODULE_CLOSED:ma-m1",
+      closedModuleAttemptIds: ["ma-m1"],
+    });
+    render(routeElement());
+    expect(screen.getByText("Math Module 2 marker")).toBeInTheDocument();
+    expect(screen.getByTestId("sat-exam-shell").closest("[inert]")).toBeNull();
+    expect(screen.getAllByRole("radio")[0]).toBeEnabled();
+  });
+
   it("swaps Module 1 to Module 2 directly with no handoff surface", () => {
     const { rerender } = renderLiveModule();
     expect(screen.getByText("Math Module 1 marker")).toBeInTheDocument();

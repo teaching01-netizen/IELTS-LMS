@@ -18,6 +18,7 @@ export interface FastQuestionComposerProps {
   capabilities?: Readonly<RichComposerCapabilities>;
   smartPaste?: boolean;
   onSmartPaste?: ((info: SmartPasteStatus) => void) | undefined;
+  onOpenShortcutHelp?: (() => void) | undefined;
   /** Prompt co-editing binding; absent means the legacy editor. */
   collaboration?: RichComposerCollaboration | undefined;
 }
@@ -34,6 +35,7 @@ export function FastQuestionComposer({
   capabilities,
   smartPaste,
   onSmartPaste,
+  onOpenShortcutHelp,
   collaboration,
 }: FastQuestionComposerProps) {
   return (
@@ -49,6 +51,7 @@ export function FastQuestionComposer({
       {...(capabilities ? { capabilities } : {})}
       {...(smartPaste !== undefined ? { smartPaste } : {})}
       {...(onSmartPaste ? { onSmartPaste } : {})}
+      onOpenShortcutHelp={onOpenShortcutHelp}
       {...(collaboration ? { collaboration } : {})}
     />
   );

@@ -19,7 +19,7 @@
     "input": "block $$\\frac{a}{b}$$ done",
     "kinds": [
       "text",
-      "blockMath",
+      "inlineMath",
       "text"
     ],
     "warnings": []
@@ -28,7 +28,7 @@
     "input": "display \\[y+1\\] end",
     "kinds": [
       "text",
-      "blockMath",
+      "inlineMath",
       "text"
     ],
     "warnings": []

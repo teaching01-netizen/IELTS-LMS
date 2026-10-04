@@ -32,6 +32,7 @@ func personalReconcileHarness(mock sqlmock.Sqlmock, runtimeStatus string, breakR
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", runtimeStatus, "sat_personal_v1", nil))
+	mock.ExpectQuery("SELECT COALESCE\\(sat_handoff_mode").WillReturnRows(sqlmock.NewRows([]string{"mode"}).AddRow("server_start"))
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	// Personal + live: the break sweep runs first (own deadline, no grace).

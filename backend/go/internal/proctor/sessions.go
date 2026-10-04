@@ -1090,6 +1090,7 @@ type studentSessionRow struct {
 	satEntryModuleAttemptID, satEntryModuleID, satEntryTitle   sql.NullString
 	satEntryGeneration                                         sql.NullInt64
 	satEntryStartsAt, satEntryProctorRearmAt                   sql.NullTime
+	satEntryAutoStartAt                                        sql.NullTime
 }
 
 // studentSessionColumns mirrors Rust load_student_sessions (explicit list).
@@ -1106,7 +1107,7 @@ const studentSessionColumns = "sa.id, sa.candidate_id, sa.candidate_name, sa.can
 	"sat_break.id, sat_break.state, sat_break.duration_seconds, sat_break.accumulated_paused_seconds, " +
 	"sat_break.starts_at, sat_break.paused_at, sat_break.entry_starts_at, sat_break.deadline_at, " +
 	"sat_entry.id, sat_entry.module_id, sat_entry_module.title, sat_entry.entry_generation, " +
-	"sat_entry.entry_starts_at, sat_entry.entry_proctor_rearm_at"
+	"sat_entry.entry_starts_at, sat_entry.entry_proctor_rearm_at, sat_entry.auto_start_at"
 
 const studentSessionFrom = "FROM student_attempts sa " +
 	"JOIN exam_entities e ON e.id = sa.exam_id " +
@@ -1152,7 +1153,7 @@ func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSes
 		&r.satBreakID, &r.satBreakState, &r.satBreakDuration, &r.satBreakAccum,
 		&r.satBreakStartsAt, &r.satBreakPausedAt, &r.satBreakEntryStartsAt, &r.satBreakDeadlineAt,
 		&r.satEntryModuleAttemptID, &r.satEntryModuleID, &r.satEntryTitle, &r.satEntryGeneration,
-		&r.satEntryStartsAt, &r.satEntryProctorRearmAt,
+		&r.satEntryStartsAt, &r.satEntryProctorRearmAt, &r.satEntryAutoStartAt,
 	); err != nil {
 		return studentSessionRow{}, err
 	}
@@ -1391,6 +1392,9 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 			generation = int(row.satEntryGeneration.Int64)
 		}
 		switch {
+		case row.satEntryAutoStartAt.Valid:
+			v := "starting"
+			entryState = &v
 		case row.satEntryProctorRearmAt.Valid:
 			v := "granted"
 			entryState = &v
@@ -1464,6 +1468,8 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 			currentSection = row.satModuleTitle.String
 		} else if row.satModuleKey.Valid && strings.TrimSpace(row.satModuleKey.String) != "" {
 			currentSection = row.satModuleKey.String
+		} else if row.satEntryAutoStartAt.Valid {
+			currentSection = "Starting Module 2"
 		}
 	}
 	runtimeCurrentSection := runtime.CurrentSectionKey
@@ -1569,6 +1575,8 @@ func defaultAlertMessage(actionType string) string {
 		return "Candidate session paused by proctor."
 	case "STUDENT_TERMINATE":
 		return "Candidate session terminated by proctor."
+	case "SAT_LATE_ANSWER_ROUTE_RISK":
+		return "Late Module 1 answers would have changed the selected Module 2 route. Review the evidence; the scored route remains unchanged."
 	case "VIOLATION_DETECTED":
 		return "Candidate violation detected."
 	default:
@@ -1589,7 +1597,7 @@ func buildSessionAlerts(logs []SessionAuditLog, sessions []StudentSessionSummary
 		} else {
 			switch log.ActionType {
 			case "HEARTBEAT_LOST", "DEVICE_CONTINUITY_FAILED", "NETWORK_DISCONNECTED",
-				"AUTO_ACTION", "STUDENT_WARN", "STUDENT_PAUSE", "STUDENT_TERMINATE":
+				"AUTO_ACTION", "STUDENT_WARN", "STUDENT_PAUSE", "STUDENT_TERMINATE", "SAT_LATE_ANSWER_ROUTE_RISK":
 			default:
 				continue
 			}
@@ -1683,7 +1691,7 @@ func loadAuditLogs(ctx context.Context, q sessionQuerier, scheduleID string, lim
 // alertLogFilter is the Rust load_alert_logs predicate verbatim.
 const alertLogFilter = "acknowledged_at IS NULL AND action_type IN (" +
 	"'HEARTBEAT_LOST', 'DEVICE_CONTINUITY_FAILED', 'NETWORK_DISCONNECTED', " +
-	"'AUTO_ACTION', 'STUDENT_WARN', 'STUDENT_PAUSE', 'STUDENT_TERMINATE')"
+	"'AUTO_ACTION', 'STUDENT_WARN', 'STUDENT_PAUSE', 'STUDENT_TERMINATE', 'SAT_LATE_ANSWER_ROUTE_RISK')"
 
 // loadAlertLogs ports Rust load_alert_logs (unacked monitor actions only).
 func loadAlertLogs(ctx context.Context, q sessionQuerier, scheduleID string, limit int) ([]SessionAuditLog, error) {

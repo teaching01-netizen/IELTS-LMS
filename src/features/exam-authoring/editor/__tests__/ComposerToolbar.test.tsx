@@ -1,4 +1,3 @@
-import {readFileSync} from 'node:fs';
 import {act,fireEvent,render,screen} from '@testing-library/react';
 import { Editor } from '@tiptap/react';
 import {afterEach,describe,it,expect,vi} from 'vitest';
@@ -18,7 +17,7 @@ describe('stable composer toolbar',()=>{
  it('keeps one row, in one order, and never moves Bold when the context changes',()=>{
   const paragraph=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]}]});
   renderToolbar(paragraph);
-  expect(mainRowGroups()).toEqual(['style','format','math','insert','more','history']);
+  expect(mainRowGroups()).toEqual(['history','style','format','script','lists','align','math','insert','more']);
   expect(screen.getByRole('button',{name:'Text style'})).toHaveTextContent('Paragraph');
   expect(screen.queryByRole('button',{name:'Replace image'})).toBeNull();
  });
@@ -31,11 +30,11 @@ describe('stable composer toolbar',()=>{
    const editor=make(item.content);
    editor.commands.setNodeSelection(item.pos);
    const view=render(<ComposerToolbar editor={editor} capabilities={capabilities} onOpenDialog={vi.fn()} onTableMutation={vi.fn()} onFeedback={vi.fn()}/>);
-   expect(mainRowGroups()).toEqual(['style','format','math','insert','more','history']);
+   expect(mainRowGroups()).toEqual(['history','style','format','script','lists','align','math','insert','more']);
    expect(document.querySelector('.sat-rich-editor__toolbar')).toHaveAttribute('data-composer-context',item.context);
    expect(document.querySelector('.sat-rich-editor__toolbar')).toHaveAttribute('data-selection-kind','node');
    expect(screen.queryByRole('button',{name:'Replace image'})).toBeNull();
-   expect(screen.queryByRole('button',{name:'Edit equation'})).toBeNull();
+   expect(screen.queryByRole('button',{name:'Edit LaTeX'})).toBeNull();
    // Marks cannot apply to a node selection, so they dim rather than move.
    expect(screen.getByRole('button',{name:'Bold (⌘B)'})).toBeDisabled();
    view.unmount();
@@ -50,7 +49,7 @@ describe('stable composer toolbar',()=>{
   expect(screen.getByRole('group',{name:'Table tools'})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Add row'})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Add column'})).toBeInTheDocument();
-  expect(mainRowGroups()).toEqual(['style','format','math','insert','more','history']);
+  expect(mainRowGroups()).toEqual(['history','style','format','script','lists','align','math','insert','more']);
   fireEvent.click(screen.getByRole('button',{name:'Table actions'}));
   fireEvent.click(screen.getByRole('menuitem',{name:'Delete table'}));
   expect(screen.queryByRole('group',{name:'Table tools'})).toBeNull();
@@ -150,24 +149,88 @@ describe('stable composer toolbar',()=>{
   expect(JSON.stringify(editor.getJSON())).toContain('"level":2');
   expect(screen.getByRole('button',{name:'Text style'})).toHaveTextContent('Heading');
  });
- it('groups advanced formatting by concept and keeps destructive-free clear last',()=>{
+ it('keeps only clear formatting and the shortcut sheet behind ···, since every format is on the row',()=>{
   const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]}]});
-  const onFeedback=renderToolbar(editor);
+  const onFeedback=vi.fn();
+  const onOpenShortcutHelp=vi.fn();
+  render(<ComposerToolbar editor={editor} capabilities={capabilities} onOpenDialog={vi.fn()} onTableMutation={vi.fn()} onFeedback={onFeedback} onOpenShortcutHelp={onOpenShortcutHelp}/>);
   fireEvent.click(screen.getByRole('button',{name:'More formatting'}));
-  for(const name of ['Underline (⌘U)','Superscript','Subscript','Bulleted list','Numbered list','Clear formatting']) expect(screen.getByRole('menuitem',{name})).toBeInTheDocument();
-  expect(screen.getAllByRole('separator')).toHaveLength(3);
+  expect(screen.getAllByRole('menuitem').map((item)=>item.textContent)).toEqual(['Clear formatting','Keyboard shortcuts (⌘/)']);
+  fireEvent.click(screen.getByRole('menuitem',{name:'Keyboard shortcuts (⌘/)'}));
+  expect(onOpenShortcutHelp).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button',{name:'More formatting'}));
   fireEvent.click(screen.getByRole('menuitem',{name:'Clear formatting'}));
   expect(onFeedback).toHaveBeenCalledWith({message:'Formatting cleared',undoable:true});
+ });
+ it('states every text format on the row and toggles it in place',()=>{
+  const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]}]});
+  editor.commands.selectAll();
+  renderToolbar(editor);
+  for(const [name,mark] of [['Underline (⌘U)','underline'],['Strikethrough (⇧⌘S)','strike'],['Superscript (⌘.)','superscript'],['Subscript (⌘,)','subscript']] as const){
+   const button=screen.getByRole('button',{name});
+   expect(button).toHaveAttribute('aria-pressed','false');
+   fireEvent.click(button);
+   expect(editor.isActive(mark)).toBe(true);
+   expect(button).toHaveAttribute('aria-pressed','true');
+  }
+ });
+ it('indents only inside a list, and nests the item when it can',()=>{
+  const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Plain'}]}]});
+  renderToolbar(editor);
+  expect(screen.getByRole('button',{name:'Increase indent (Tab)'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Decrease indent (⇧Tab)'})).toBeDisabled();
+  act(()=>{editor.commands.setContent({type:'doc',content:[{type:'bulletList',content:[
+   {type:'listItem',content:[{type:'paragraph',content:[{type:'text',text:'One'}]}]},
+   {type:'listItem',content:[{type:'paragraph',content:[{type:'text',text:'Two'}]}]},
+  ]}]});editor.commands.setTextSelection(10);});
+  expect(screen.getByRole('button',{name:'Bulleted list (⇧⌘8)'})).toHaveAttribute('aria-pressed','true');
+  fireEvent.click(screen.getByRole('button',{name:'Increase indent (Tab)'}));
+  expect(editor.view.dom.querySelectorAll('ul ul')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button',{name:'Decrease indent (⇧Tab)'}));
+  expect(editor.view.dom.querySelectorAll('ul ul')).toHaveLength(0);
+ });
+ it('aligns the paragraph from the Align menu and shows the current alignment',()=>{
+  const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]}]});
+  renderToolbar(editor);
+  fireEvent.click(screen.getByRole('button',{name:'Text alignment'}));
+  expect(screen.getByRole('menuitem',{name:/Align left/})).toHaveAttribute('aria-current','true');
+  fireEvent.click(screen.getByRole('menuitem',{name:/Align center/}));
+  expect(editor.getJSON().content?.[0]?.attrs?.['textAlign']).toBe('center');
+  expect(editor.view.dom.querySelector('p')).toHaveStyle({textAlign:'center'});
+  fireEvent.click(screen.getByRole('button',{name:'Text alignment'}));
+  expect(screen.getByRole('menuitem',{name:/Align center/})).toHaveAttribute('aria-current','true');
+  // Left is the default, so it is stored as nothing at all.
+  fireEvent.click(screen.getByRole('menuitem',{name:/Align left/}));
+  expect(editor.getJSON().content?.[0]?.attrs?.['textAlign']).toBeNull();
+ });
+ it('keeps alignment through a save and reopen, and never trusts a stored value it does not know',()=>{
+  const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]},{type:'heading',attrs:{level:2},content:[{type:'text',text:'Title'}]}]});
+  editor.chain().selectAll().setTextAlign('right').run();
+  for(const saved of [editor.getJSON(),editor.getHTML()]){
+   const reopened=make(saved);
+   expect(reopened.getJSON().content?.slice(0,2).map((node)=>node.attrs?.['textAlign'])).toEqual(['right','right']);
+  }
+  const hostile=make('<p style="text-align: evil">One</p><p style="text-align: center">Two</p>');
+  expect(hostile.getJSON().content?.map((node)=>node.attrs?.['textAlign'])).toEqual([null,'center']);
+  expect(make({type:'doc',content:[{type:'paragraph',attrs:{textAlign:'evil'},content:[{type:'text',text:'x'}]}]}).getHTML()).not.toContain('evil');
+ });
+ it('inserts symbols and the SAT blank at the cursor from the Insert menu',()=>{
+  const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'x'}]}]});
+  editor.commands.setTextSelection(2);
+  renderToolbar(editor);
+  fireEvent.click(screen.getByRole('button',{name:'Insert content'}));
+  fireEvent.click(screen.getByRole('menuitem',{name:/Less than or equal to/}));
+  fireEvent.click(screen.getByRole('button',{name:'Insert content'}));
+  fireEvent.click(screen.getByRole('menuitem',{name:/Blank/}));
+  expect(editor.state.doc.textContent).toBe('x≤______');
  });
  it('drops list and block-style commands from a choice composer without reshuffling the row',()=>{
   const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Choice A'}]}]});
   renderToolbar(editor,choiceCapabilities);
-  expect(mainRowGroups()).toEqual(['format','math','insert','more','history']);
-  fireEvent.click(screen.getByRole('button',{name:'More formatting'}));
-  expect(screen.getByRole('menuitem',{name:'Underline (⌘U)'})).toBeInTheDocument();
-  expect(screen.queryByRole('menuitem',{name:'Bulleted list'})).toBeNull();
-  expect(screen.getAllByRole('separator')).toHaveLength(2);
-  fireEvent.keyDown(screen.getByRole('menu'),{key:'Escape'});
+  expect(mainRowGroups()).toEqual(['history','format','script','math','insert','more']);
+  expect(screen.getByRole('button',{name:'Underline (⌘U)'})).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Bulleted list (⇧⌘8)'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'Text alignment'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'Insert content'}));
   for(const name of ['Insert image or graph','Insert equation','Insert table','Code block']) expect(screen.getByRole('menuitem',{name})).toBeInTheDocument();
   // Divider is a block-style insert, so a choice composer never offers it.
@@ -202,17 +265,11 @@ describe('stable composer toolbar',()=>{
   expect(undo).toBeDisabled();
   expect(undo.querySelector('svg')).not.toBeNull();
  });
- it('places the recovery group with the selector its CSS actually targets',()=>{
-  // The row's geometry is decided in CSS, so the selector and the markup have to
-  // name the same thing: a class the toolbar no longer renders silently drops
-  // undo/redo back into the middle of the row.
+ it('opens the row with undo and redo, as a word processor does',()=>{
   const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]}]});
   renderToolbar(editor);
-  const selector='.sat-rich-editor__toolbar-group[data-toolbar-group="history"]';
-  expect(document.querySelectorAll(selector)).toHaveLength(1);
-  expect(readFileSync('src/index.css','utf8')).toContain(selector+' {');
-  const history=document.querySelector(selector) as HTMLElement;
-  expect(mainRowGroups().at(-1)).toBe('history');
+  const history=document.querySelector('[data-toolbar-group="history"]') as HTMLElement;
+  expect(mainRowGroups().at(0)).toBe('history');
   expect(history.querySelectorAll('button')).toHaveLength(2);
  });
  it('renders every toolbar control through the shared control contract',()=>{
@@ -220,11 +277,13 @@ describe('stable composer toolbar',()=>{
   renderToolbar(editor);
   const row=document.querySelector('.sat-rich-editor__toolbar-row') as HTMLElement;
   const commands=Array.from(row.querySelectorAll<HTMLButtonElement>('.sat-rich-editor__toolbar-button'));
-  // The commands of the default row: Bold, Italic, Math, Undo, Redo. Every one
-  // of them is the shared control, and the menus are the only other kind of
-  // button in the row — a third recipe is how surfaces drift apart.
+  // The commands of the default row. Every one of them is the shared control,
+  // and the menus are the only other kind of button in the row — a third
+  // recipe is how surfaces drift apart.
   expect(commands.map((button)=>button.getAttribute('aria-label'))).toEqual([
-   'Bold (⌘B)','Italic (⌘I)','Insert equation','Undo (⌘Z)','Redo (⇧⌘Z)',
+   'Undo (⌘Z)','Redo (⇧⌘Z)','Bold (⌘B)','Italic (⌘I)','Underline (⌘U)','Strikethrough (⇧⌘S)',
+   'Superscript (⌘.)','Subscript (⌘,)','Bulleted list (⇧⌘8)','Numbered list (⇧⌘7)',
+   'Decrease indent (⇧Tab)','Increase indent (Tab)','Insert equation',
   ]);
   for(const button of commands){
    expect(button.tagName).toBe('BUTTON');

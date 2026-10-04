@@ -7,6 +7,7 @@ import { EditorFeedback } from "./EditorFeedback";
 import {
   bubbleAppendTarget,
   hasLiveEditorView,
+  OBJECT_BUBBLE_KEY,
   objectAnchorFor,
   supportsHoverAnchoredBubbles,
 } from "./anchoredSurfaces";
@@ -85,7 +86,7 @@ export function EditorContextualSurfaces({
       </BubbleMenu>
       <BubbleMenu
         editor={editor}
-        pluginKey="satObjectBubble"
+        pluginKey={OBJECT_BUBBLE_KEY}
         updateDelay={0}
         shouldShow={({ state }) => hasLiveEditorView(editor) && resolveObjectBubble(state) !== null}
         getReferencedVirtualElement={() => objectAnchorFor(editor)}

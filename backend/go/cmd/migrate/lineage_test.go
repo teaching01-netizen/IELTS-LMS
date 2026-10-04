@@ -66,10 +66,11 @@ func migDir(t *testing.T) string {
 // submission_id nullable, matching the attempt-owned contract 0044 and the
 // terminalization service already implement) — count/max bumped 71->72.
 // SAT co-edit room replacement landed 0073 (workspace generations) — count/max
-// bumped 72->73. Any other count/max/gap change fails loudly.
+// bumped 72->73. SAT module handoff and late-answer evidence landed 0074/0075
+// — count/max bumped 73->75. Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 73
-	pinnedMigrationMax   = 73
+	pinnedMigrationFiles = 75
+	pinnedMigrationMax   = 75
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

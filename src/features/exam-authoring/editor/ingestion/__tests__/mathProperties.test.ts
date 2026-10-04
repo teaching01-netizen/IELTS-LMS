@@ -14,7 +14,9 @@ describe("math properties", () => {
     const json = JSON.stringify(out.document);
     expect(json).not.toMatch(/javascript:/i);
     expect(json).toContain("inlineMath");
-    expect(json).toContain("blockMath");
+    // Display math next to text stays inline; alone in its paragraph it is a block.
+    expect(json).not.toContain("blockMath");
+    expect(JSON.stringify(parseMathText(" $$y$$ ", "rich").document)).toContain("blockMath");
   });
   it("bounded output with capped error fields", () => {
     const big = "start " + "\\(x\\) ".repeat(200) + "end";
@@ -31,15 +33,12 @@ describe("math properties", () => {
       const out = parseMathText(text);
       const rebuilt = out.document.nodes
         .flatMap((n) => (n.kind === "paragraph" ? n.children : []))
-        .map((c) => {
-          if (c.kind === "text") return c.text;
-          const open = c.kind === "blockMath" ? "$$" : "\\(";
-          const close = c.kind === "blockMath" ? "$$" : "\\)";
-          return open + c.latex + close;
-        })
+        .map((c) => (c.kind === "text" ? c.text : c.latex))
         .join("");
-      for (const ch of text.replace(/\s+/g, "")) {
-        expect((rebuilt + JSON.stringify(out.warnings)).replace(/\s+/g, "")).toContain(ch === "$" ? "$" : ch);
+      // Delimiters are consumed into the math node; every other char survives.
+      const content = text.replace(/\$\$|\\[()[\]]/g, "").replace(/\s+/g, "");
+      for (const ch of content) {
+        expect((rebuilt + JSON.stringify(out.warnings)).replace(/\s+/g, "")).toContain(ch);
       }
     }
   });

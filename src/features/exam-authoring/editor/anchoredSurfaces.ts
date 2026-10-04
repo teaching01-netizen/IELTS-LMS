@@ -41,6 +41,17 @@ export function bubbleAppendTarget(editor: Editor): HTMLElement | null {
   return editor.view.dom.parentElement;
 }
 
+/** Plugin key of the object bubble, shared so an object can ask it to follow. */
+export const OBJECT_BUBBLE_KEY = "satObjectBubble";
+
+/**
+ * The bubble repositions only on document or selection changes. An object whose
+ * box changes on its own (an equation opening into its editor) asks it to follow.
+ */
+export function repositionObjectBubble(editor: Editor): void {
+  if (hasLiveEditorView(editor)) editor.view.dispatch(editor.state.tr.setMeta(OBJECT_BUBBLE_KEY, "updatePosition"));
+}
+
 /** The shape floating-ui positions against; kept structural so no extra import is needed. */
 export interface AnchoredSurfaceRect {
   getBoundingClientRect: () => DOMRect;

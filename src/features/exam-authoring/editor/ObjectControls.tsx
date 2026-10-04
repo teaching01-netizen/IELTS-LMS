@@ -247,9 +247,9 @@ function EquationControls({
       >
         Block
       </EditorControl>
-      <EditorControl label="Edit equation" className="sat-rich-editor__bubble-label" onSelect={() => { onInteract(); onEdit(context); }}>
+      <EditorControl label="Edit LaTeX" className="sat-rich-editor__bubble-label" onSelect={() => { onInteract(); onEdit(context); }}>
         <Pencil size={13} aria-hidden="true" />
-        Edit
+        LaTeX
       </EditorControl>
       <div className="sat-spine__menu">
         <SatMenu

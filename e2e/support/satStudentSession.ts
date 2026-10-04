@@ -97,7 +97,7 @@ export async function createRunningSatSession(
   const studentPage = await studentContext.newPage();
   await studentPage.goto(joinHref);
   try {
-    await expect(studentPage.getByRole("heading", { name: linkName })).toBeVisible({
+    await expect(studentPage.getByRole("heading", { name: "Exam Check-in", exact: true })).toBeVisible({
       timeout: 30_000,
     });
   } catch (error) {

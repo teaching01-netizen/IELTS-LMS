@@ -56,6 +56,7 @@ func personalReconcileDrained(mock sqlmock.Sqlmock) {
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", "live", examruntime.TimingModelPersonal, nil))
+	mock.ExpectQuery("SELECT COALESCE\\(sat_handoff_mode").WillReturnRows(sqlmock.NewRows([]string{"mode"}).AddRow("server_start"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_attempt_breaks")).
@@ -86,6 +87,7 @@ func personalTimingGate(mock sqlmock.Sqlmock, now time.Time) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT status FROM exam_session_runtimes WHERE schedule_id = ?")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
+	mock.ExpectQuery("SELECT COALESCE\\(sat_handoff_mode").WillReturnRows(sqlmock.NewRows([]string{"mode"}).AddRow("server_start"))
 }
 
 // personalModuleRow stages the locked module attempt with the authored allotment.

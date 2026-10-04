@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DurableResponseEngine } from '@shared/durability/DurableResponseEngine';
+import { DurableResponseEngine, type ScopeManifestEntry } from '@shared/durability/DurableResponseEngine';
 import {
   blockedSubmitGateMessage,
   mapEngineStatus,
@@ -11,6 +11,7 @@ import {
 } from '@student/api/responseDurabilityTransport';
 import {
   getVisibleResponse,
+  type QuarantinedWrite,
   type ResponsePayload,
   type SubmitAttemptV2Response,
 } from '@shared/durability/types';
@@ -44,7 +45,7 @@ export interface SatResponsePersistenceOptions {
   credentialAttempt?: StudentAttempt | null | undefined;
 }
 
-export type SatResponseFailureKind = 'offline' | 'retryable' | 'terminal' | 'expired' | 'superseded';
+export type SatResponseFailureKind = 'offline' | 'retryable' | 'terminal' | 'expired' | 'superseded' | 'module_closed';
 
 export interface SatResponseSaveContext {
   moduleAttemptId: string;
@@ -85,6 +86,14 @@ export interface SatResponsePersistence {
    * and terminal submit share it; never infer safety from queue length.
    */
   assertBoundarySettled?: () => Promise<void>;
+  /**
+   * Module attempts the server closed while this device still held answers
+   * for them. Those answers are kept here as evidence (uploaded once for
+   * review) and never block the next module. Additive; defaults to [].
+   */
+  closedModuleAttemptIds?: ReadonlyArray<string>;
+  /** The close manifest for one module attempt (see DurableResponseEngine.getScopeManifest). */
+  closeManifest?: (moduleAttemptId: string) => ScopeManifestEntry[];
   failure: string | null;
   failureKind: SatResponseFailureKind | null;
   tombstoneCount: number;
@@ -139,6 +148,7 @@ export function durablePayloadToSatDraft(
 export function useSatResponsePersistence({
   scheduleId,
   attemptId,
+  gateway,
   onSavedRevision,
   leaseEpoch = 1,
   controlEpoch = 1,
@@ -153,6 +163,13 @@ export function useSatResponsePersistence({
   const v2ReadyRef = useRef<Promise<void> | null>(null);
   const v2PendingAcceptancesRef = useRef(new Set<Promise<void>>());
   const v2RevisionRef = useRef(new Map<string, number>());
+  // Write scope per question — the module attempt it belongs to — learned
+  // from every committed payload. The engine sends one module per batch and
+  // confines a closed-module refusal to that module's drafts.
+  const questionScopeRef = useRef(new Map<string, string>());
+  const moduleIdByAttemptRef = useRef(new Map<string, string>());
+  const evidenceSentRef = useRef(new Set<string>());
+  const [closedModuleAttemptIds, setClosedModuleAttemptIds] = useState<string[]>([]);
   const [v2ModePendingDrafts, setV2ModePendingDrafts] = useState<
     Record<string, SatQuestionResponseDraft>
   >({});
@@ -178,8 +195,11 @@ export function useSatResponsePersistence({
       // blockedDrafts field names them for banners/badges. visibleDrafts path
       // itself is unchanged.
       const blocked: string[] = [];
+      // A closed module's drafts are evidence, not "needs attention" work.
+      const closedScopes = v2EngineRef.current?.getClosedScopes();
       for (const [questionId, state] of states) {
-        if (state.pending?.blocked) blocked.push(questionId);
+        const scope = questionScopeRef.current.get(questionId);
+        if (state.pending?.blocked && !(scope !== undefined && closedScopes?.has(scope))) blocked.push(questionId);
         const visible = getVisibleResponse(state);
         if (visible) visibleDrafts[questionId] = durablePayloadToSatDraft(questionId, visible);
         if (state.pending && visible) {
@@ -211,6 +231,10 @@ export function useSatResponsePersistence({
     setFailure(null);
     setFailureKind(null);
     setTombstoneCount(0);
+    questionScopeRef.current.clear();
+    moduleIdByAttemptRef.current.clear();
+    evidenceSentRef.current.clear();
+    setClosedModuleAttemptIds([]);
 
     return () => {
       mountedRef.current = false;
@@ -240,6 +264,7 @@ export function useSatResponsePersistence({
       leaseEpoch: initialLeaseEpoch,
       controlEpoch: initialControlEpoch,
       transport,
+      scopeOf: (questionId) => questionScopeRef.current.get(questionId) ?? null,
       // WP7 reason-coded counters (telemetry only; never answer content).
       onDurabilityEvent: (name, fields) =>
         emitStudentObservabilityMetric(
@@ -262,15 +287,27 @@ export function useSatResponsePersistence({
         // blocked_attention => retryable failure with exam-stress-safe copy,
         // explicitly NOT terminal/superseded: the draft is kept on this
         // device, visible, and recoverable via reconcile.
+        const closedScopes = engine.getClosedScopes();
+        setClosedModuleAttemptIds((previous) =>
+          previous.length === closedScopes.size && previous.every((id) => closedScopes.has(id))
+            ? previous
+            : [...closedScopes.keys()]
+        );
         let blockedIds: string[] = [];
         try {
-          blockedIds = engine.getBlockedQuestionIds();
+          blockedIds = engine.getBlockedQuestionIds().filter((questionId) => {
+            const scope = questionScopeRef.current.get(questionId);
+            return !(scope !== undefined && closedScopes.has(scope));
+          });
         } catch {
           blockedIds = [];
         }
         setBlockedDrafts(blockedIds);
         const display = mapEngineStatus(status, blockedIds.length);
-        if (error?.includes('DEADLINE_EXPIRED') || error?.includes('TIMEOUT_RECOVERY_CLOSED')) {
+        if (error?.startsWith('MODULE_CLOSED:')) {
+          setFailure('An answer from an ended module remains on this device for proctor review.');
+          setFailureKind('module_closed');
+        } else if (error?.includes('DEADLINE_EXPIRED') || error?.includes('TIMEOUT_RECOVERY_CLOSED')) {
           setFailure('A final answer was not confirmed before the save window ended. It remains on this device. Please contact your proctor.');
           setFailureKind('expired');
         } else if (status === 'durability_fault') {
@@ -358,9 +395,74 @@ export function useSatResponsePersistence({
     // No-op: V2 engine state is authoritative.
   }, []);
 
-  const hydrateBootstrap = useCallback((_payload: AssessmentDeliveryBootstrap) => {
-    // No-op: V2 engine state is authoritative.
+  // V2 engine state stays authoritative for answers; the payload only teaches
+  // the engine which module attempt each question belongs to (write scope).
+  const hydrateBootstrap = useCallback((payload: AssessmentDeliveryBootstrap) => {
+    const attemptByModule = new Map(
+      payload.attempt.moduleAttempts.map((moduleAttempt) => [moduleAttempt.moduleId, moduleAttempt.id])
+    );
+    for (const section of payload.sections) {
+      for (const module of section.modules) {
+        const moduleAttemptId = attemptByModule.get(module.id);
+        if (!moduleAttemptId) continue;
+        moduleIdByAttemptRef.current.set(moduleAttemptId, module.id);
+        for (const question of module.questions) {
+          questionScopeRef.current.set(question.examQuestionId, moduleAttemptId);
+        }
+      }
+    }
+    const engine = v2EngineRef.current;
+    for (const module of payload.attempt.moduleAttempts) {
+      if (module.state === 'locked' || module.state === 'submitted') engine?.sealScope(module.id);
+    }
+    engine?.refreshScopes();
   }, []);
+
+  // Late-answer evidence (review only, never scored): once per closed module,
+  // upload the latest answer this device still held for each of its
+  // questions. Failed uploads retry while this attempt remains mounted.
+  useEffect(() => {
+    const engine = v2EngineRef.current;
+    if (!engine || !gateway.recordLateEvidence) return;
+    let cancelled = false;
+    const retryTimers: number[] = [];
+    for (const moduleAttemptId of closedModuleAttemptIds) {
+      if (evidenceSentRef.current.has(moduleAttemptId)) continue;
+      const moduleId = moduleIdByAttemptRef.current.get(moduleAttemptId);
+      const reason = engine.getClosedScopes().get(moduleAttemptId);
+      if (!moduleId || !reason) continue;
+      const latest = new Map<string, QuarantinedWrite>();
+      for (const entry of engine.getQuarantined()) {
+        if (entry.reason !== reason || questionScopeRef.current.get(entry.questionId) !== moduleAttemptId) continue;
+        const previous = latest.get(entry.questionId);
+        if (!previous || entry.clientVersion >= previous.clientVersion) latest.set(entry.questionId, entry);
+      }
+      if (latest.size === 0) continue;
+      const answers = [...latest.values()].map((entry) => ({
+        questionId: entry.questionId,
+        writeId: entry.writeId,
+        response: entry.payload,
+        clientReceivedAt: entry.quarantinedAt,
+      }));
+      const upload = async (retry: number): Promise<void> => {
+        if (cancelled || evidenceSentRef.current.has(moduleAttemptId)) return;
+        try {
+          await gateway.recordLateEvidence!(scheduleId, attemptId, { moduleId, answers });
+          if (!cancelled) evidenceSentRef.current.add(moduleAttemptId);
+        } catch {
+          if (!cancelled) retryTimers.push(window.setTimeout(() => void upload(retry + 1), Math.min(30_000, 1_000 * 2 ** Math.min(retry, 5))));
+        }
+      };
+      void upload(0);
+    }
+    return () => { cancelled = true; retryTimers.forEach(window.clearTimeout); };
+  }, [attemptId, closedModuleAttemptIds, gateway, scheduleId]);
+
+  const closeManifest = useCallback(
+    (moduleAttemptId: string): ScopeManifestEntry[] =>
+      v2EngineRef.current?.getScopeManifest(moduleAttemptId) ?? [],
+    []
+  );
 
   const waitForV2Acceptances = useCallback(async () => {
     let firstError: unknown;
@@ -683,6 +785,8 @@ export function useSatResponsePersistence({
     reconcileBlocked,
     adoptControlEpoch,
     assertBoundarySettled,
+    closedModuleAttemptIds,
+    closeManifest,
     failure,
     failureKind,
     tombstoneCount,

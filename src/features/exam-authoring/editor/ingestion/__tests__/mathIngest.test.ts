@@ -109,7 +109,7 @@ describe("upgradeMathInDocument", () => {
 describe("footnote-adjacent math", () => {
   it("keeps trailing footnote refs as text", () => {
     const { inlines } = upgradeInlineList([textInline("$$x^2$$[1] follows")], "rich", "text");
-    expect(inlines[0]?.kind).toBe("blockMath");
+    expect(inlines[0]?.kind).toBe("inlineMath");
     expect(JSON.stringify(inlines)).toContain("[1]");
   });
 });

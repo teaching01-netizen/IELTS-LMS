@@ -41,7 +41,8 @@ export type SatEntryReason =
   | "section-wait"
   | "initial-entry"
   | "next-section-entry"
-  | "next-module-entry";
+  | "next-module-entry"
+  | "handoff-entry";
 
 export interface SatEntryDecision {
   shouldStart: boolean;
@@ -103,6 +104,15 @@ export function canEnterModule(input: SatEntryGateInput): boolean {
 
 function isUnstartedAttempt(attempt: AssessmentModuleAttemptSnapshot): boolean {
   return !attempt.startedAt && !attempt.completionReason && attempt.state === "not_started";
+}
+
+/**
+ * A routed module waiting for this browser to start it (client_start
+ * handoff): unstarted, with the server's auto-start backstop set. Its clock
+ * starts in the StartModule request that also delivers its content.
+ */
+export function isAwaitingClientStart(attempt: AssessmentModuleAttemptSnapshot | undefined): boolean {
+  return Boolean(attempt && isUnstartedAttempt(attempt) && attempt.autoStartAt);
 }
 
 /**
@@ -191,12 +201,13 @@ function waiting(reason: SatEntryReason): SatEntryDecision {
 }
 
 /**
- * The one decision the initial entry path reads. Only the first delivered
- * section's first module (the proctor's Start) is client-started: it opens
- * when the proctor starts the runtime, via one idempotent StartModule. All later progression (M1→M2,
- * break→next-M1) is server-driven — the server activates the next module
- * atomically and the client renders authoritative state — so this never
- * returns shouldStart for branches or later sections.
+ * The one decision the entry path reads. The first delivered section's first
+ * module (the proctor's Start) is client-started: it opens when the proctor
+ * starts the runtime, via one idempotent StartModule. Under the personal model
+ * later progression is server-driven, EXCEPT a routed module the server left
+ * waiting for this browser (client_start handoff): its clock starts in the
+ * StartModule that delivers its content, so routing and delivery latency are
+ * never charged to it.
  */
 export function deriveSatEntryDecision({
   data,
@@ -238,10 +249,20 @@ export function deriveSatEntryDecision({
 
   // Personal (sat_personal_v1) is server-driven beyond the initial module:
   // M1→M2 and break→next-M1 activate atomically server-side, so the client
-  // waits for authoritative state instead of negotiating entry. Cohort/legacy
-  // models still enter branches and later sections via client StartModule.
+  // waits for authoritative state instead of negotiating entry — unless the
+  // server routed the module and left its start to this browser.
+  // Cohort/legacy models still enter branches and later sections via client
+  // StartModule.
   const personal = (data.timing as { timingModel?: string } | null)?.timingModel === "sat_personal_v1";
   if (personal) {
+    const section = sectionForModule(data, module.id);
+    const previousFinal = section?.modules.some((previous) =>
+      previous.adaptiveRole === "base" && previous.id !== module.id &&
+      matchesFinalModuleState(findAttemptForModule(data, previous.id)?.state ?? ""));
+    const available = attempt?.availableAt ? Date.parse(attempt.availableAt) <= Date.parse(data.serverNow) : false;
+    if (phase === "directions" && isBranch && previousFinal && available && isAwaitingClientStart(attempt)) {
+      return { shouldStart: true, reason: "handoff-entry", autoStartPending: true };
+    }
     return waiting("already-started");
   }
 

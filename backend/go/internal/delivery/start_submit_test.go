@@ -184,10 +184,10 @@ func deliveryBootstrapLoadsForModel(mock sqlmock.Sqlmock, at time.Time, model an
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"sat_timing_model"}).AddRow(model))
 	if choice, ok := model.(string); ok && choice == examruntime.TimingModelPersonal {
-		mock.ExpectQuery(regexp.QuoteMeta("SELECT id, entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at FROM assessment_module_attempts WHERE attempt_id = ?")).
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT id, entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at, auto_start_at FROM assessment_module_attempts WHERE attempt_id = ?")).
 			WithArgs("att-1").
-			WillReturnRows(sqlmock.NewRows([]string{"id", "entry_generation", "entry_starts_at", "entry_confirmed_at", "entry_entered_at"}).
-				AddRow("ma-1", 1, at, nil, nil))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "entry_generation", "entry_starts_at", "entry_confirmed_at", "entry_entered_at", "auto_start_at"}).
+				AddRow("ma-1", 1, at, nil, nil, nil))
 		mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_attempt_breaks")).
 			WithArgs("att-1").
 			WillReturnRows(sqlmock.NewRows([]string{"id", "after_section_id", "duration_seconds", "state", "starts_at", "deadline_at", "entered_at", "paused_at", "accumulated_paused_seconds", "entry_generation", "entry_starts_at", "entry_confirmed_at", "entry_entered_at", "revision"}))

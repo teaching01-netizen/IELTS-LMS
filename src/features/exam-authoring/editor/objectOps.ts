@@ -1,4 +1,4 @@
-import { Selection } from "@tiptap/pm/state";
+import { NodeSelection, Selection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 
 /**
@@ -39,5 +39,22 @@ export function convertEquationAt(editor: Editor, pos: number, display: boolean)
       { type: display ? "blockMath" : "inlineMath", attrs: { latex: String(node.attrs["latex"] ?? "") } }
     )
     .run();
+  return true;
+}
+
+/**
+ * Inserts an empty inline equation at the caret and selects it, which opens the
+ * visual editor in place (see EditableMathNode). Leaving it empty removes it.
+ */
+export function insertEquationInPlace(editor: Editor): boolean {
+  const type = editor.schema.nodes["inlineMath"];
+  const { selection } = editor.state;
+  if (!type || selection.$from.parent.type.spec.code) return false;
+  const transaction = editor.state.tr.replaceSelectionWith(type.create({ latex: "" }), false);
+  const pos = transaction.selection.from - 1;
+  if (transaction.doc.nodeAt(pos)?.type !== type) return false;
+  transaction.setSelection(NodeSelection.create(transaction.doc, pos)).scrollIntoView();
+  editor.view.dispatch(transaction);
+  editor.view.focus();
   return true;
 }

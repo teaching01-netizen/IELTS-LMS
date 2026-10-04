@@ -2,6 +2,9 @@ import type {
   AssessmentDeliveryBootstrap,
   AssessmentDeliveryState,
   AssessmentBreakEntryRequest,
+  AssessmentLateEvidenceRequest,
+  AssessmentModuleCloseAck,
+  AssessmentModuleCloseRequest,
   AssessmentModuleEntryRequest,
   AssessmentModuleEntryStateAck,
   AssessmentModuleStartRequest,
@@ -85,6 +88,22 @@ export interface SatDeliveryGateway {
     attemptId: string,
     request: AssessmentModuleSubmitRequest,
   ): Promise<AssessmentDeliveryBootstrap>;
+  /**
+   * Confirms a timed-out module's final answers so the server routes it now
+   * instead of waiting out the close window. Optional: a gateway without it
+   * leaves routing to the server's close window.
+   */
+  closeModule?(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentModuleCloseRequest,
+  ): Promise<AssessmentModuleCloseAck>;
+  /** Uploads answers kept on the device after their module closed (evidence only). */
+  recordLateEvidence?(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentLateEvidenceRequest,
+  ): Promise<{ recorded: number }>;
   submitAssessment(
     scheduleId: string,
     attemptId: string,

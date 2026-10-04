@@ -339,6 +339,53 @@ func deliveryMarkBreakVisibleHandler(app *App) http.HandlerFunc {
 	}
 }
 
+// deliveryCloseModuleHandler confirms a timed-out personal SAT module's final
+// answers (POST /schedules/{scheduleID}/modules/close) so the server can route
+// it immediately instead of waiting out the close window.
+func deliveryCloseModuleHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+		if !ok {
+			return
+		}
+		var req delivery.ModuleCloseRequest
+		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Delivery.CloseModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+// deliveryLateEvidenceHandler stores answers that reached the server only
+// after their module closed (POST /schedules/{scheduleID}/modules/late-evidence).
+// Evidence never changes a score; it is flagged when it would have changed
+// the adaptive route.
+func deliveryLateEvidenceHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+		if !ok {
+			return
+		}
+		var req delivery.LateEvidenceRequest
+		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Delivery.RecordLateEvidence(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
 // verifiedDeliveryWriterClaims shares the session-bound bearer and writer
 // identity gates used by delivery mutations.
 func verifiedDeliveryWriterClaims(app *App, w http.ResponseWriter, r *http.Request) (crypto.AttemptClaims, bool) {

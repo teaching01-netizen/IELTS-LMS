@@ -217,6 +217,23 @@ describe("SpineOverlays (Phase 9.1+9.4 parity)", () => {
     expect(await screen.findByRole("dialog", { name: /keyboard shortcuts/i })).toBeInTheDocument();
   });
 
+  it("opens shortcut help with Ctrl+/ from inside a field, but leaves ? to the text", async () => {
+    renderSpine();
+    await screen.findByRole("heading", { name: "SAT Practice 1" });
+    const field = document.createElement("textarea");
+    document.body.append(field);
+    try {
+      // A typed "?" is text, never a command.
+      fireEvent.keyDown(field, { key: "?" });
+      expect(screen.queryByRole("dialog", { name: /keyboard shortcuts/i })).toBeNull();
+      // The sheet documents editor formatting, so it must open from the editor.
+      fireEvent.keyDown(field, { key: "/", ctrlKey: true });
+      expect(await screen.findByRole("dialog", { name: /keyboard shortcuts/i })).toBeInTheDocument();
+    } finally {
+      field.remove();
+    }
+  });
+
   it("reviews module issues from the spine queue", async () => {
     renderSpine();
     await screen.findByRole("heading", { name: "SAT Practice 1" });

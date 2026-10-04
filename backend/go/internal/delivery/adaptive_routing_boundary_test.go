@@ -75,7 +75,7 @@ func boundaryRoutePolicy(mock sqlmock.Sqlmock) {
 
 func boundaryBranchExpectations(mock sqlmock.Sqlmock, moduleID, route, moduleKey, role string, rawCorrect int) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_route_decisions")).
-		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", moduleID, route, rawCorrect, 25, "threshold", 1, sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", moduleID, route, rawCorrect, 25, "threshold", 1, sqlmock.AnyArg(), "window_closed", "att-1", "mod-base", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs(moduleID).

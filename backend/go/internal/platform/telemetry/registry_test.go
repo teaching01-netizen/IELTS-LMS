@@ -1,10 +1,29 @@
 package telemetry
 
 import (
+	"math"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestDurationHistogramExposition(t *testing.T) {
+	r := NewRegistry()
+	r.ObserveSeconds(MSATRouteLagSeconds, 1, "basis", "client_confirmed")
+	r.ObserveSeconds(MSATRouteLagSeconds, 3, "basis", "client_confirmed")
+	r.ObserveSeconds(MSATRouteLagSeconds, math.NaN(), "basis", "client_confirmed")
+	for _, expected := range []string{
+		"# TYPE sat_route_lag_seconds histogram",
+		"sat_route_lag_seconds_bucket{basis=\"client_confirmed\",le=\"2\"} 1",
+		"sat_route_lag_seconds_bucket{basis=\"client_confirmed\",le=\"+Inf\"} 2",
+		"sat_route_lag_seconds_sum{basis=\"client_confirmed\"} 4",
+		"sat_route_lag_seconds_count{basis=\"client_confirmed\"} 2",
+	} {
+		if !strings.Contains(r.Snapshot(), expected) {
+			t.Fatalf("missing %s in %s", expected, r.Snapshot())
+		}
+	}
+}
 
 func TestCounterAccumulates(t *testing.T) {
 	r := NewRegistry()

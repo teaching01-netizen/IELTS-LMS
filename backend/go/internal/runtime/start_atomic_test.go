@@ -71,7 +71,11 @@ func staticPlanner(plan []PlanEntry, timingModel string) StartPlanner {
 // startStubs stages the exact statement sequence of a one-section Start up to
 // (but not including) the wakeup INSERT and COMMIT, so each test can decide how
 // the event leg behaves.
-func startStubs(mock sqlmock.Sqlmock) {
+func startStubs(mock sqlmock.Sqlmock, handoffMode ...string) {
+	mode := "server_start"
+	if len(handoffMode) > 0 {
+		mode = handoffMode[0]
+	}
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	// Lock order: the schedule row, then its attempts, then the runtime row.
@@ -87,6 +91,7 @@ func startStubs(mock sqlmock.Sqlmock) {
 		WithArgs("exam-1").
 		WillReturnRows(sqlmock.NewRows([]string{"provider_key"}).AddRow("sat"))
 	mock.ExpectExec("INSERT INTO exam_session_runtimes").
+		WithArgs(sqlmock.AnyArg(), "sched-1", "exam-1", "sat", sqlmock.AnyArg(), sqlmock.AnyArg(), mode, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO exam_session_runtime_sections").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -103,6 +108,33 @@ func startStubs(mock sqlmock.Sqlmock) {
 
 func startPlan() []PlanEntry {
 	return []PlanEntry{{SectionKey: "reading-writing", Label: "Reading and Writing", Order: 0, DurationMinutes: 32}}
+}
+
+func TestStartCapturesHandoffModeOnlyForPersonalRuntime(t *testing.T) {
+	for _, model := range []string{TimingModelPersonal, TimingModelCohortSection} {
+		t.Run(model, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			svc, _ := runtimeServiceWithOutbox(db)
+			svc.SetSATHandoffMode("client_start")
+			mode := "server_start"
+			if model == TimingModelPersonal {
+				mode = "client_start"
+			}
+			startStubs(mock, mode)
+			mock.ExpectExec("INSERT INTO outbox_events").WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectCommit()
+			if _, err := svc.Start(context.Background(), "sched-1", "admin-1", staticPlanner(startPlan(), model)); err != nil {
+				t.Fatal(err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func runtimeServiceWithOutbox(db *sql.DB) (*Service, *recordingOutbox) {

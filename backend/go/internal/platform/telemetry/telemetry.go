@@ -2,6 +2,14 @@
 // High-cardinality IDs stay in logs/traces, never in Prometheus labels.
 package telemetry
 
+const (
+	MSATRouteLagSeconds            = "sat_route_lag_seconds"
+	MSATM2StartLagSeconds          = "sat_m2_start_lag_seconds"
+	MSATM2AutoStartTotal           = "sat_m2_auto_start_total"
+	MSATModuleScopedRejectionTotal = "sat_module_scoped_rejection_total"
+	MSATCloseWritesPendingTotal    = "sat_close_writes_pending_total"
+)
+
 var metricHelpText = map[string]string{
 	MHTTPRequestsTotal:              "Total HTTP requests by method, route, and status class.",
 	MHTTPRequestDur:                 "HTTP request duration in seconds.",
@@ -26,6 +34,9 @@ var metricHelpText = map[string]string{
 	MSATAdaptiveIntegrityViolation:  "Total SAT adaptive-routing integrity violations where the recorded route decision and the administered module disagreed.",
 	MSATAdaptiveRouteTotal:          "Total SAT adaptive-routing decisions by section and selected route (higher vs lower).",
 	MSATAdaptiveModuleOpenTotal:     "Total SAT adaptive follow-up modules opened by adaptive role (higher_branch vs lower_branch).",
+	MSATModuleRouteBasisTotal:       "Total SAT module finalizations by what closed the module (client_confirmed, window_closed, room_completed, proctor_end, proctor_terminate).",
+	MSATModuleCloseRequestTotal:     "Total SAT module close requests by outcome (closed, already_closed, not_expired, writes_pending).",
+	MSATLateAnswerEvidenceTotal:     "Total SAT late-answer evidence uploads by whether the evidence would have selected the other adaptive branch.",
 	MSATPersonalOfferTotal:          "Total attempt-owned SAT entry offers by event (armed, rearmed, exhausted) and stage (module, break).",
 	MSATPersonalEntryTotal:          "Total attempt-owned SAT entry confirmations by stage and result (confirmed, missed).",
 	MSATPersonalFrameLateTotal:      "Total first active SAT frames acknowledged after their authored start, by stage. Non-zero means the candidate's visible clock began below the authored duration.",
@@ -140,6 +151,16 @@ const (
 	// MSATAdaptiveModuleOpenTotal counts every adaptive follow-up module the
 	// router opens. Label is the authored adaptive role only (role).
 	MSATAdaptiveModuleOpenTotal = "sat_adaptive_module_open_total"
+	// MSATModuleRouteBasisTotal counts module finalizations by route basis.
+	// A falling client_confirmed share at a synchronized boundary means
+	// browsers are not reaching the close endpoint and routing is waiting out
+	// the close window instead.
+	MSATModuleRouteBasisTotal = "sat_module_route_basis_total"
+	// MSATModuleCloseRequestTotal counts browser close requests by outcome.
+	MSATModuleCloseRequestTotal = "sat_module_close_total"
+	// MSATLateAnswerEvidenceTotal counts late-answer evidence uploads; any
+	// would_change_route="true" is a proctor review case.
+	MSATLateAnswerEvidenceTotal = "sat_late_answer_evidence_total"
 	// SAT full-entry-time (plan 2026-09-24, 7.2): the attempt-owned offer and
 	// first-active-frame funnel. Labels are the closed stage vocabulary
 	// (module|break) and event/result; never a candidate, attempt, or schedule
@@ -375,6 +396,10 @@ func Names() []string {
 		MSATAdaptiveIntegrityViolation,
 		MSATAdaptiveRouteTotal,
 		MSATAdaptiveModuleOpenTotal,
+		MSATModuleRouteBasisTotal,
+		MSATModuleCloseRequestTotal,
+		MSATRouteLagSeconds, MSATM2StartLagSeconds, MSATM2AutoStartTotal, MSATModuleScopedRejectionTotal, MSATCloseWritesPendingTotal,
+		MSATLateAnswerEvidenceTotal,
 		MSATPersonalOfferTotal,
 		MSATPersonalEntryTotal,
 		MSATPersonalFrameLateTotal,

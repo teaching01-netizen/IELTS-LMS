@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"example.com/ielts-proctoring/internal/attempts"
@@ -82,11 +83,13 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 	changed := false
 	finalizedModules := 0
 	var hubEvents []liveupdates.Event
+	var autoStartLag *float64
 	// B1: reconcile locks attempt + runtime rows explicitly; it never depends
 	// on a repeatable snapshot, so RC only shrinks its gap-lock footprint.
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		shouldComplete, completedInTx, satCreated, changed, finalizedModules = false, false, false, false, 0
 		hubEvents = nil
+		autoStartLag = nil
 		var attemptRow, providerKey string
 		if err := t.QueryRowContext(ctx,
 			"SELECT id, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), '') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
@@ -97,6 +100,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			return err
 		}
 		var runtimeID, runtimeStatus, timingModel string
+		var handoffMode string
 		var currentStageKey sql.NullString
 		if err := t.QueryRowContext(ctx,
 			"SELECT id, status, timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE",
@@ -105,6 +109,11 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				return nil
 			}
 			return err
+		}
+		if examruntime.IsSatPersonal(timingModel) {
+			if err := t.QueryRowContext(ctx, "SELECT COALESCE(sat_handoff_mode, 'server_start') FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&handoffMode); err != nil {
+				return err
+			}
 		}
 		cohortTimed := examruntime.IsCohortTimed(timingModel)
 		var currentStageOrder *int
@@ -131,14 +140,18 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		didWork := false
 		drainedAtEntry := false
 		// SAT keeps the module open for a short save-only window after the
-		// student clock freezes. ACT retains its existing timeout boundary.
+		// student clock freezes (attempts.ModuleCloseWindow: SATSaveGrace, or
+		// the wider personal close window under client_start). A confirmed
+		// close routes before this window ends (CloseModule); this is the
+		// backstop for browsers that never confirm. ACT retains its existing
+		// timeout boundary.
 		closingAsOf := asOf
 		if providerKey == "sat" {
 			var dbNow time.Time
 			if err := t.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&dbNow); err != nil {
 				return err
 			}
-			closingAsOf = dbNow.UTC().Add(-attempts.SATSaveGrace)
+			closingAsOf = dbNow.UTC().Add(-attempts.ModuleCloseWindow(timingModel, handoffMode))
 		}
 		if examruntime.IsSatPersonal(timingModel) && runtimeStatus == "live" {
 			// Personal breaks own their deadline. They are completed at that
@@ -163,6 +176,14 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			// authoritative state only (BREAK → EXAM swap, zero mutations).
 			// The initial Module 1 is seeded without available_at, so this
 			// never steals the one client StartModule.
+			//
+			// A routed Module 2 inserted under client_start carries
+			// auto_start_at: the browser starts it (StartModule) when it has the
+			// module in hand, and this is only the backstop that starts its
+			// clock at auto_start_at when the browser never does. The predicate
+			// is row-based, so a later config change never strands such a row.
+			// A proctor-paused candidate is not auto-started: a pause freezes
+			// only active clocks, so starting one here would run it unseen.
 			var pendingBreak bool
 			if err := t.QueryRowContext(ctx,
 				"SELECT EXISTS(SELECT 1 FROM assessment_attempt_breaks WHERE attempt_id = ? AND state <> 'completed')",
@@ -176,7 +197,12 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 					    available_at = COALESCE(available_at, UTC_TIMESTAMP(6)),
 					    paused_at = NULL, revision = revision + 1
 					WHERE attempt_id = ? AND state = 'not_started'
-					  AND available_at IS NOT NULL AND available_at <= UTC_TIMESTAMP(6)
+					  AND available_at IS NOT NULL
+					  AND COALESCE(auto_start_at, available_at) <= UTC_TIMESTAMP(6)
+					  AND (auto_start_at IS NULL OR paused_at IS NULL)
+					  AND (auto_start_at IS NULL OR NOT EXISTS (
+					    SELECT 1 FROM student_attempts sa
+					    WHERE sa.id = assessment_module_attempts.attempt_id AND sa.proctor_status = 'paused'))
 					ORDER BY created_at, id LIMIT 1`, attemptID)
 				if err != nil {
 					return err
@@ -184,6 +210,16 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				if an, err := ares.RowsAffected(); err != nil {
 					return err
 				} else if an > 0 {
+					if handoffMode == attempts.HandoffModeClientStart {
+						var lag float64
+						err := t.QueryRowContext(ctx, "SELECT TIMESTAMPDIFF(MICROSECOND, available_at, started_at) / 1000000 FROM assessment_module_attempts WHERE attempt_id = ? AND state = 'active' AND auto_start_at IS NOT NULL ORDER BY started_at DESC LIMIT 1", attemptID).Scan(&lag)
+						if err != nil && err != sql.ErrNoRows {
+							return err
+						}
+						if err == nil {
+							autoStartLag = &lag
+						}
+					}
 					changed = true
 				}
 			}
@@ -217,13 +253,17 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			if !expired {
 				break
 			}
-			next, err := s.finalizeModuleTx(ctx, t, attemptID, saveActiveModule{
+			basis := routeBasisWindowClosed
+			if runtimeStatus == "completed" || runtimeStatus == "cancelled" {
+				basis = routeBasisRoomCompleted
+			}
+			next, err := s.finalizeModuleWithBasisTx(ctx, t, attemptID, saveActiveModule{
 				id: mod.id, moduleID: mod.moduleID, state: mod.state,
 				allocatedSeconds: mod.allocatedSeconds, availableAt: mod.availableAt,
 				startedAt: mod.startedAt, pausedAt: mod.pausedAt,
 				accumulatedPausedSeconds: mod.accumulatedPausedSeconds,
 				extensionSeconds:         mod.extensionSeconds, completionReason: mod.completionReason,
-			}, "time_expired")
+			}, "time_expired", basis)
 			if err != nil {
 				return err
 			}
@@ -285,6 +325,10 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		return nil
 	}); err != nil {
 		return false, err
+	}
+	if autoStartLag != nil {
+		telemetry.IncCounter(telemetry.MSATM2AutoStartTotal)
+		telemetry.ObserveSeconds(telemetry.MSATM2StartLagSeconds, *autoStartLag, "starter", "auto")
 	}
 	s.publishHubEvents(hubEvents)
 	for i := 0; i < finalizedModules; i++ {
@@ -360,7 +404,7 @@ func (s *Service) ReconcileTimeouts(ctx context.Context, asOf time.Time, batchSi
 	if err != nil {
 		return personalChanged, errors.Join(personalErr, err)
 	}
-	generalChanged, generalErr := reconcileTimeoutCandidateBatch(ctx, candidates, asOf, s.ReconcileAttemptTimeout)
+	generalChanged, generalErr := reconcileTimeoutCandidateBatch(ctx, candidates, asOf, 1, s.ReconcileAttemptTimeout)
 	return personalChanged + generalChanged, errors.Join(personalErr, generalErr)
 }
 
@@ -421,19 +465,33 @@ type timeoutCandidate struct {
 	moduleID, attemptID, scheduleID string
 }
 
+// reconcileTimeoutCandidateBatch reconciles every candidate, at most
+// `concurrency` at a time (<= 1 is sequential, in order). Each candidate runs
+// its own lock-ordered transaction (attempt → runtime FOR SHARE → module rows),
+// the same interleaving concurrent request-path reconciles already produce, so
+// parallelism adds no new lock order. A failing candidate never stops the
+// batch; the first error is reported after every candidate was visited.
 func reconcileTimeoutCandidateBatch(
 	ctx context.Context,
 	candidates []timeoutCandidate,
 	asOf time.Time,
+	concurrency int,
 	reconcile func(context.Context, string, string, time.Time) (bool, error),
 ) (int64, error) {
-	var changed int64
-	var firstErr error
-	for _, c := range candidates {
-		if err := ctx.Err(); err != nil {
-			return changed, err
-		}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	var (
+		mu      sync.Mutex
+		changed int64
+		wg      sync.WaitGroup
+	)
+	slots := make(chan struct{}, concurrency)
+	failures := make([]error, len(candidates))
+	run := func(index int, c timeoutCandidate) {
 		ok, err := reconcile(ctx, c.scheduleID, c.attemptID, asOf.UTC())
+		mu.Lock()
+		defer mu.Unlock()
 		if err != nil {
 			attrs := []any{
 				slog.String("attempt_id", c.attemptID),
@@ -444,16 +502,41 @@ func reconcileTimeoutCandidateBatch(
 				attrs = append(attrs, slog.String("module_id", c.moduleID))
 			}
 			slog.ErrorContext(ctx, "attempt timeout reconciliation failed; continuing batch", attrs...)
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
+			failures[index] = err
+			return
 		}
 		if ok {
 			changed++
 		}
 	}
-	return changed, firstErr
+	for index, c := range candidates {
+		if err := ctx.Err(); err != nil {
+			wg.Wait()
+			return changed, err
+		}
+		if concurrency == 1 {
+			run(index, c)
+			continue
+		}
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return changed, ctx.Err()
+		}
+		wg.Add(1)
+		go func(index int, c timeoutCandidate) {
+			defer func() { <-slots; wg.Done() }()
+			run(index, c)
+		}(index, c)
+	}
+	wg.Wait()
+	for _, err := range failures {
+		if err != nil {
+			return changed, err
+		}
+	}
+	return changed, nil
 }
 
 // ReconcilePersonalTimeouts is the short-cadence worker lane for synchronized
@@ -481,9 +564,10 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 	}
 	var candidates []timeoutCandidate
 	cursor := ""
-	// A SAT module remains writable for the three-second save grace. Scanning
-	// before that boundary only locks thousands of attempts that cannot yet
-	// finalize and delays the next useful sweep.
+	// A SAT module remains writable for its close window after the deadline
+	// (attempts.ModuleCloseWindow). Scanning before that boundary only locks
+	// thousands of attempts that cannot yet finalize and delays the next useful
+	// sweep; a browser that confirms its close routes earlier on its own path.
 	closingAsOf := asOf.UTC().Add(-attempts.SATSaveGrace)
 	for len(candidates) < personalTimeoutSweepLimit {
 		limit := pageSize
@@ -498,12 +582,13 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			WHERE m.state IN ('active', 'review') AND m.paused_at IS NULL
 			  AND m.started_at IS NOT NULL AND m.started_at <= ?
 			  AND (m.entry_confirmed_at IS NULL OR m.entry_entered_at IS NOT NULL)
-			  AND DATE_ADD(m.started_at, INTERVAL (m.allocated_seconds + m.extension_seconds + m.accumulated_paused_seconds) SECOND) <= ?
+			  AND DATE_ADD(m.started_at, INTERVAL (m.allocated_seconds + m.extension_seconds + m.accumulated_paused_seconds + IF(r.sat_handoff_mode = 'client_start', ?, 3)) SECOND) <= ?
 			  AND r.timing_model = 'sat_personal_v1'
 			  AND a.submitted_at IS NULL
+			  AND COALESCE(a.proctor_status, 'active') <> 'paused'
 			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
 			  AND m.id > ?
-			ORDER BY m.id LIMIT ?`, closingAsOf, closingAsOf, cursor, limit)
+			ORDER BY m.id LIMIT ?`, closingAsOf, int64(attempts.SATHandoff().CloseWindow/time.Second), asOf.UTC(), cursor, limit)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -545,6 +630,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			  AND b.deadline_at IS NOT NULL AND b.deadline_at <= ?
 			  AND r.timing_model = 'sat_personal_v1'
 			  AND a.submitted_at IS NULL
+			  AND COALESCE(a.proctor_status, 'active') <> 'paused'
 			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
 			ORDER BY b.id LIMIT 250`, asOf.UTC())
 		if berr != nil {
@@ -571,10 +657,56 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 		}
 		brows.Close()
 	}
+	// client_start backstop: a routed Module 2 the browser never started has
+	// no expired ACTIVE module and no break, so neither scan above finds it.
+	// Pick up rows whose auto_start_at has passed so the clock starts on time
+	// without any request. The predicate in ReconcileAttemptTimeout is
+	// row-based; this scan only makes it prompt (the general sweep also
+	// revisits every open attempt).
+	if len(candidates) < personalTimeoutSweepLimit {
+		seen := make(map[string]struct{}, len(candidates))
+		for _, c := range candidates {
+			seen[c.attemptID] = struct{}{}
+		}
+		arows, aerr := s.db.QueryContext(ctx, `
+			SELECT m.id, a.id, a.schedule_id
+			FROM assessment_module_attempts m
+			JOIN student_attempts a ON a.id = m.attempt_id
+			JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
+			WHERE m.state = 'not_started' AND m.auto_start_at IS NOT NULL AND m.auto_start_at <= ? AND m.paused_at IS NULL
+			  AND r.timing_model = 'sat_personal_v1' AND r.status = 'live'
+			  AND a.submitted_at IS NULL
+			  AND COALESCE(a.proctor_status, 'active') <> 'paused'
+			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			ORDER BY m.state, m.auto_start_at, m.id LIMIT 250`, asOf.UTC())
+		if aerr != nil {
+			return 0, 0, aerr
+		}
+		for arows.Next() {
+			var c timeoutCandidate
+			if err := arows.Scan(&c.moduleID, &c.attemptID, &c.scheduleID); err != nil {
+				arows.Close()
+				return 0, 0, err
+			}
+			if _, dup := seen[c.attemptID]; dup {
+				continue
+			}
+			seen[c.attemptID] = struct{}{}
+			candidates = append(candidates, c)
+			if len(candidates) >= personalTimeoutSweepLimit {
+				break
+			}
+		}
+		if err := arows.Err(); err != nil {
+			arows.Close()
+			return 0, 0, err
+		}
+		arows.Close()
+	}
 	if len(candidates) == 0 {
 		return 0, 0, nil
 	}
-	changed, firstErr := reconcileTimeoutCandidateBatch(ctx, candidates, asOf, s.ReconcileAttemptTimeout)
+	changed, firstErr := reconcileTimeoutCandidateBatch(ctx, candidates, asOf, s.reconcileConcurrency, s.ReconcileAttemptTimeout)
 	return int64(len(candidates)), changed, firstErr
 }
 
@@ -638,7 +770,7 @@ func reconcilePersonalOrLegacyExpiredTx(runtimeStatus, timingModel string, mod *
 	if examruntime.IsSatPersonal(timingModel) && mod.entryConfirmedAt != nil && mod.entryEnteredAt == nil {
 		return false
 	}
-	if closing && runtimeStatus == "completed" && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf.Add(attempts.SATSaveGrace)) > 0 {
+	if closing && runtimeStatus == "completed" && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf.Add(attempts.ModuleCloseWindow(timingModel))) > 0 {
 		return true // A proctor closed the room before this module's clock ended.
 	}
 	return (mod.state == "active" || (closing && runtimeStatus == "completed" && mod.state == "review")) && mod.pausedAt == nil && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf) <= 0

@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -17,15 +18,51 @@ import (
 // schedule, user or session ids as label values; those belong in
 // logs/traces, never in metric labels.
 type Registry struct {
-	mu       sync.Mutex
-	counters map[string]float64
-	gauges   map[string]float64
-	names    map[string]string
+	mu         sync.Mutex
+	counters   map[string]float64
+	gauges     map[string]float64
+	names      map[string]string
+	histograms map[string]map[string]float64
 }
 
 // NewRegistry builds an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, names: map[string]string{}}
+	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, names: map[string]string{}, histograms: map[string]map[string]float64{}}
+}
+
+// ObserveSeconds records a duration using bounded buckets suitable for SAT
+// handoff p99 alerts. Labels obey the same cardinality rules as counters.
+func ObserveSeconds(name string, value float64, labels ...string) {
+	DefaultRegistry.ObserveSeconds(name, value, labels...)
+}
+
+func (r *Registry) ObserveSeconds(name string, value float64, labels ...string) {
+	if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return
+	}
+	name = sanitizeMetricName(name)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	samples := r.histograms[name]
+	if samples == nil {
+		samples = map[string]float64{}
+		r.histograms[name] = samples
+	}
+	for _, bound := range []float64{0.1, 0.5, 1, 2, 3, 5, 10, 15, 20, 30, 60, 120} {
+		key, _ := seriesKey(name+"_bucket", append(append([]string{}, labels...), "le", fmt.Sprint(bound)))
+		if value <= bound {
+			samples[key]++
+		} else if _, exists := samples[key]; !exists {
+			samples[key] = 0
+		}
+	}
+	inf, _ := seriesKey(name+"_bucket", append(append([]string{}, labels...), "le", "+Inf"))
+	count, _ := seriesKey(name+"_count", labels)
+	sum, _ := seriesKey(name+"_sum", labels)
+	samples[inf]++
+	samples[count]++
+	samples[sum] += value
+	r.names[name] = "histogram"
 }
 
 // DefaultRegistry is the process-wide registry served by /metrics.
@@ -112,6 +149,7 @@ func ResetForTest(r *Registry) {
 	defer r.mu.Unlock()
 	r.counters = map[string]float64{}
 	r.gauges = map[string]float64{}
+	r.histograms = map[string]map[string]float64{}
 }
 
 // SetGauge sets a gauge on the process registry.
@@ -188,6 +226,11 @@ func (r *Registry) Snapshot() string {
 		value float64
 	}
 	var all []series
+	for name, samples := range r.histograms {
+		for key, value := range samples {
+			all = append(all, series{name: name, key: key, kind: "histogram", value: value})
+		}
+	}
 	for k, v := range r.counters {
 		all = append(all, series{name: metricOf(k), key: k, kind: "counter", value: v})
 	}

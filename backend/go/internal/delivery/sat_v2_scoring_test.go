@@ -67,7 +67,7 @@ func TestFinalizeModuleScoresV2AnswersWithoutLegacyRows(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
 			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "threshold", `{"minimumCorrectForHigher":1}`, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_route_decisions")).
-		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-higher", "higher", 1, 1, "threshold", 1, sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-higher", "higher", 1, 1, "threshold", 1, sqlmock.AnyArg(), "window_closed", "att-1", "mod-base", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-higher").
@@ -134,7 +134,7 @@ func TestFinalizeModuleLegacyFallbackWithoutV2Rows(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
 			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "threshold", `{"minimumCorrectForHigher":1}`, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_route_decisions")).
-		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-higher", "higher", 1, 1, "threshold", 1, sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-higher", "higher", 1, 1, "threshold", 1, sqlmock.AnyArg(), "window_closed", "att-1", "mod-base", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-higher").
@@ -206,7 +206,7 @@ func TestFinalizeModuleDedupsDualV2IdentityRows(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
 			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "threshold", `{"minimumCorrectForHigher":1}`, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_route_decisions")).
-		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-higher", "higher", 1, 1, "threshold", 1, sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-higher", "higher", 1, 1, "threshold", 1, sqlmock.AnyArg(), "window_closed", "att-1", "mod-base", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-higher").
@@ -276,7 +276,7 @@ func TestFinalizeModuleZeroAnswerPassRoutesLower(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
 			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "threshold", `{"minimumCorrectForHigher":1}`, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_route_decisions")).
-		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-lower", "lower", 0, 2, "threshold", 1, sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-lower", "lower", 0, 2, "threshold", 1, sqlmock.AnyArg(), "window_closed", "att-1", "mod-base", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
 		WithArgs("mod-lower").

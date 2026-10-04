@@ -992,38 +992,25 @@
     0 10px 34px rgba(25, 65, 120, 0.055);
 }
 
-/* Editor chrome stays present (never animated in and out), but it recedes by
- * contrast: at rest the toolbars are the quietest layer on the page, and they
- * step up only for the field being worked on. */
 /* The toolbar is its own optical layer: a cool-white band that steps down from
- * the document, always present, never announced. */
+ * the document, always present, never announced. It is fully opaque and never
+ * faded: the band is sticky, so text scrolls beneath it, and a faded control
+ * falls below the 3:1 contrast a control needs. The chrome recedes by icon
+ * tone instead, and steps up for the field being worked on. */
 .sat-spine .sat-rich-editor__toolbar {
-  opacity: 0.65;
-  color: #7b828c;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 253, 0.94));
+  color: #6b7079;
+  background: linear-gradient(180deg, #ffffff, #f8fafd);
   border-bottom-color: rgba(25, 35, 48, 0.055);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  transition: opacity var(--spine-motion-fast) ease-out;
-}
-
-/* Three steps, never hidden: the shell is present at rest, comes forward when
- * the field is under the pointer, and reaches full strength only while the
- * document has focus. */
-.sat-spine .sat-rich-editor:hover .sat-rich-editor__toolbar {
-  opacity: 0.82;
-}
-
-.sat-spine .sat-rich-editor:focus-within .sat-rich-editor__toolbar {
-  opacity: 1;
 }
 
 .sat-spine .sat-rich-editor__toolbar-button {
-  color: #7b828c;
+  color: #6b7079;
 }
 
 .sat-spine .sat-rich-editor:hover .sat-rich-editor__toolbar-button,
 .sat-spine .sat-rich-editor:focus-within .sat-rich-editor__toolbar-button {
-  color: #626269;
+  color: #3f3f46;
 }
 
 /* One action, one obvious feedback signal.
@@ -1060,6 +1047,15 @@
   border-color: rgba(0, 0, 0, 0.1);
   color: #18181b;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+/* "On" is a filled key, not a tint of the icon, and it outranks the hover and
+ * engaged tones above so bold-is-on still reads under the pointer. */
+.sat-spine .sat-rich-editor .sat-rich-editor__toolbar-button[aria-pressed="true"] {
+  border-color: rgba(0, 113, 227, 0.22);
+  background: rgba(0, 113, 227, 0.12);
+  color: #0058b9;
+  box-shadow: none;
 }
 
 .sat-spine .sat-rich-editor__menu-trigger {

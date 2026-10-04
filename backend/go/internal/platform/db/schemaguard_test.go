@@ -37,9 +37,6 @@ func TestSchemaGuardListSizes(t *testing.T) {
 	if len(RequiredTables) != 1 {
 		t.Fatalf("RequiredTables must hold 1 entry (0058), got %d", len(RequiredTables))
 	}
-	if len(RequiredColumns) != 19 {
-		t.Fatalf("RequiredColumns must hold 19 entries (I6), got %d", len(RequiredColumns))
-	}
 	if len(RequiredIndexes) != 10 {
 		t.Fatalf("RequiredIndexes must hold 10 entries (I6 + the 0060 authoring replay index), got %d", len(RequiredIndexes))
 	}

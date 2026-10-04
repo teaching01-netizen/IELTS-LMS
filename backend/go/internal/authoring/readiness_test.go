@@ -56,6 +56,25 @@ func TestValidateSATQuestionSPRKeysFollowThePublishRule(t *testing.T) {
 	}
 }
 
+func TestValidateSATQuestionAcceptsEditorFormattingButNotLinks(t *testing.T) {
+	prompt := func(blocks string) string {
+		return `{"version":2,"nodes":[{"type":"paragraph","id":"p1","text":"Read the passage."}],"document":{"type":"doc","content":[` + blocks + `]}}`
+	}
+	check := func(blocks string) []ValidationIssue {
+		return validateSATQuestion(SectionReadingWriting, "single_choice", `{}`, prompt(blocks), validChoiceAnswer(), `{}`, validMetadata())
+	}
+	// Everything the SAT editor toolbar can produce must be publishable.
+	formatted := `{"type":"paragraph","attrs":{"textAlign":"center"},"content":[{"type":"text","text":"old","marks":[{"type":"strike"}]}]},{"type":"horizontalRule"}`
+	if issues := check(formatted); len(issues) != 0 {
+		t.Fatalf("editor formatting must publish, got %+v", issues)
+	}
+	// A link would let a student leave the exam.
+	linked := `{"type":"paragraph","content":[{"type":"text","text":"site","marks":[{"type":"link","attrs":{"href":"https://example.com"}}]}]}`
+	if !containsIssueCode(check(linked), "sat.content.mark.unsupported") {
+		t.Fatalf("link mark must be rejected, got %+v", check(linked))
+	}
+}
+
 func containsIssueCode(issues []ValidationIssue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {

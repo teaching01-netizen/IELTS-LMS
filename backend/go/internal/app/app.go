@@ -10,6 +10,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"example.com/ielts-proctoring/internal/accesslinks"
 	"example.com/ielts-proctoring/internal/act"
@@ -122,8 +123,20 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	s.ACT = act.NewService(pool, s.Tx)
 	s.Terminal.SetAttemptScorer(s.ACT)
 	s.Release = release.NewService(pool)
-	s.Runtime = runtime.NewService(s.Tx, nil).SetOutboxExecOnly(cfg.OutboxExecOnly).SetSnapshotCache(deps.RuntimeSnapshots)
-	deliverySvc := delivery.NewService(pool, s.Tx)
+	s.Runtime = runtime.NewService(s.Tx, nil).SetOutboxExecOnly(cfg.OutboxExecOnly).SetSnapshotCache(deps.RuntimeSnapshots).SetSATHandoffMode(cfg.SATHandoffMode)
+	s.Schedules.SetRuntime(s.Runtime)
+	// One owner for the SAT handoff policy: the V2 write gate, the legacy save
+	// gate, the reconciler and the close endpoint all read it from attempts.
+	attempts.ConfigureSATHandoff(attempts.SATHandoffConfig{
+		Mode:        cfg.SATHandoffMode,
+		CloseWindow: time.Duration(cfg.SATPersonalCloseWindowSecs) * time.Second,
+		AutoStart:   time.Duration(cfg.SATM2AutoStartSecs) * time.Second,
+	})
+	concurrency := cfg.SATReconcileConcurrency
+	if concurrency > cfg.DBPoolMaxWorker-2 {
+		concurrency = cfg.DBPoolMaxWorker - 2
+	}
+	deliverySvc := delivery.NewService(pool, s.Tx).SetReconcileConcurrency(concurrency)
 	liveOrigin := ""
 	if deps.LiveBus != nil {
 		liveOrigin = deps.LiveBus.Origin()

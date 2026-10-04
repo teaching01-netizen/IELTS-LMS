@@ -24,13 +24,13 @@ export interface UseSatModuleEntryOptions {
 }
 
 /**
- * One owner for initial Module 1 entry (the proctor's Start).
- *
- * Later progression (M1→M2, break→next-M1) is server-driven: the server
- * activates the next module atomically and the client renders authoritative
- * state, so this hook never runs for those. A lost StartModule response is
- * safe to retry because StartModule itself is idempotent (already-active
- * returns the authoritative state).
+ * One owner for client-started module entry: the initial Module 1 (the
+ * proctor's Start), cohort/legacy later modules, and — under the personal
+ * model — a routed module the server left waiting for this browser
+ * (client_start handoff), whose clock starts in the StartModule that delivers
+ * its content. Every other personal progression is server-driven. A lost
+ * StartModule response is safe to retry because StartModule itself is
+ * idempotent (already-active returns the authoritative state).
  */
 export function useSatModuleEntry({
   identity,

@@ -15,8 +15,14 @@ const ROWS: Array<{ keys: string; action: string; scope: string }> = [
   {keys:'Alt ↑ / ↓',action:'Previous / next question',scope:'Outside controls; ↑ / ↓ or j / k also work'},
   {keys:'Space',action:'Toggle student preview',scope:'Outside controls'},
   {keys:'Esc',action:'Close overlay / leave editor',scope:'Inside editors too'},
-  {keys:'Ctrl/⌘ / or ?',action:'Keyboard shortcuts',scope:'Outside text inputs and overlays'},
+  {keys:'Ctrl/⌘ /',action:'Keyboard shortcuts',scope:'Anywhere except overlays; ? also works outside text inputs'},
   {keys:'Ctrl/⌘ Z · Shift Z',action:'Undo · Redo',scope:'Inside rich-text editors'},
+  {keys:'Ctrl/⌘ B · I · U',action:'Bold · Italic · Underline',scope:'Inside rich-text editors'},
+  {keys:'Ctrl/⌘ Shift S',action:'Strikethrough',scope:'Inside rich-text editors'},
+  {keys:'Ctrl/⌘ . · ,',action:'Superscript · Subscript',scope:'Inside rich-text editors'},
+  {keys:'Ctrl/⌘ Shift 8 · 7',action:'Bulleted · Numbered list',scope:'Question, passage, and explanation editors'},
+  {keys:'Tab · Shift Tab',action:'Indent · Outdent list item',scope:'Inside a list'},
+  {keys:'Ctrl/⌘ Shift L · E · R · J',action:'Align left · center · right · justify',scope:'Question, passage, and explanation editors'},
 ];
 /**
  * Shortcut cheat sheet (plan Phase 8): discoverability for the existing

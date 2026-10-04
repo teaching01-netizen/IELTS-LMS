@@ -1218,6 +1218,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                     [selectedSection?.title, selectedModule?.title].filter(Boolean).join(" · ") || null
                   }
                   readOnly={collaborationReadOnly}
+                  onOpenShortcutHelp={() => setShortcutHelpOpen(true)}
                   headerPresenceSlot={coeditHeaderPresenceSlot}
                   headerSaveSlot={coeditHeaderSaveSlot}
                   hideFooterSaveStatus={coeditUiActive}

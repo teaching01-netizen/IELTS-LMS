@@ -50,7 +50,31 @@ export interface DurableResponseEngineOptions {
    * answer/payload content. Best-effort; never throws.
    */
   onDurabilityEvent?: (name: string, fields?: Record<string, string | number | boolean | null | undefined>) => void;
+  /**
+   * Optional write scope per question (SAT: the module attempt it belongs
+   * to). When provided, every batch carries one scope only, and a server
+   * refusal that names a closed module (details.reason MODULE_CLOSED /
+   * MODULE_DEADLINE_EXPIRED / MODULE_UNASSIGNED) quarantines that scope's
+   * drafts as evidence instead of fencing the whole attempt. Without it the
+   * engine keeps its attempt-wide behaviour.
+   */
+  scopeOf?: (questionId: string) => string | null;
 }
+
+/** One close-manifest entry: the latest write the engine holds for a question. */
+export interface ScopeManifestEntry {
+  questionId: string;
+  writeId: string;
+  clientVersion: number;
+}
+
+/** Server refusals that belong to one module, not to the attempt. */
+const MODULE_SCOPED_CLOSE_REASONS: Record<string, true> = {
+  MODULE_CLOSED: true,
+  MODULE_DEADLINE_EXPIRED: true,
+  MODULE_UNASSIGNED: true,
+  MODULE_NOT_STARTED: true,
+};
 
 export interface AcceptResponseOptions {
   /** Bypass the normal typing debounce after the local durable checkpoint. */
@@ -389,6 +413,9 @@ export class DurableResponseEngine {
   private readonly issuedCommands = new Map<string, ResponseCommandV2>();
   private readonly commandEpochs = new Map<string, CommandEpoch>();
   private readonly quarantined: QuarantinedWrite[] = [];
+  private readonly scopeOf: ((questionId: string) => string | null) | undefined;
+  /** Scopes the server closed (scope -> reason). Their drafts never fly. */
+  private readonly closedScopes = new Map<string, string>();
   /** Incremented in destroy(); async archive/tombstone work aborts when it moves. */
   private engineGeneration = 0;
   /** Per-question reconcile mutex: one reconcileBlocked per question at a time. */
@@ -429,6 +456,7 @@ export class DurableResponseEngine {
     this.onStatusChange = options.onStatusChange;
     this.onStateChange = options.onStateChange;
     this.onDurabilityEvent = options.onDurabilityEvent;
+    this.scopeOf = options.scopeOf;
 
     this.setupLifecycleListeners();
   }
@@ -461,6 +489,59 @@ export class DurableResponseEngine {
     return this.quarantined;
   }
 
+  /** Scopes the server closed; their drafts are kept as evidence and never sent. */
+  public getClosedScopes(): ReadonlyMap<string, string> {
+    this.restoreClosedScopes();
+    return this.closedScopes;
+  }
+
+  /** Reconnect persisted evidence to question ownership learned from bootstrap. */
+  public refreshScopes(): void {
+    this.restoreClosedScopes();
+    if (this.syncStatus === "blocked_attention" && this.getBlockedCount() === 0) {
+      this.syncStatus = "saved_locally";
+      this.lastError = null;
+    }
+    this.notifyStatusChange();
+  }
+
+  private restoreClosedScopes(): void {
+    if (!this.scopeOf) return;
+    for (const entry of this.quarantined) {
+      const scope = this.scopeOf(entry.questionId);
+      if (scope != null && MODULE_SCOPED_CLOSE_REASONS[entry.reason]) this.closedScopes.set(scope, entry.reason);
+    }
+    for (const [questionId, state] of this.states) {
+      const scope = this.scopeOf(questionId);
+      const reason = state.pending?.blocked?.reason;
+      if (scope != null && reason && MODULE_SCOPED_CLOSE_REASONS[reason]) this.closedScopes.set(scope, reason);
+    }
+  }
+
+  /**
+   * The close manifest for one scope: per question, the latest write this
+   * engine holds — an issued pending write, else the confirmed version.
+   * Blocked and provisional (unissued) drafts are excluded: they are not on
+   * their way to the server, so the server must not wait for them.
+   */
+  public getScopeManifest(scope: string): ScopeManifestEntry[] {
+    if (!this.scopeOf) return [];
+    const manifest: ScopeManifestEntry[] = [];
+    for (const [questionId, state] of this.states) {
+      if (this.scopeOf(questionId) !== scope) continue;
+      const pending = state.pending;
+      if (pending && !pending.blocked && pending.clientVersion > 0) {
+        manifest.push({ questionId, writeId: pending.writeId, clientVersion: pending.clientVersion });
+        continue;
+      }
+      const confirmedVersion = this.confirmedVersions.get(questionId) ?? 0;
+      if (state.confirmed && confirmedVersion > 0) {
+        manifest.push({ questionId, writeId: "", clientVersion: confirmedVersion });
+      }
+    }
+    return manifest;
+  }
+
   public getPendingCount(): number {
     return this.outbox.size + this.inFlight.size;
   }
@@ -482,7 +563,7 @@ export class DurableResponseEngine {
   public getBlockedQuestionIds(): string[] {
     const blocked: string[] = [];
     for (const [questionId, state] of this.states) {
-      if (state.pending?.blocked) blocked.push(questionId);
+      if (state.pending?.blocked && !this.isClosedScope(questionId)) blocked.push(questionId);
     }
     return blocked;
   }
@@ -503,7 +584,7 @@ export class DurableResponseEngine {
     if (this.getBlockedCount() > 0) {
       throw new Error("Blocked drafts need attention before submit. Reconcile or discard them first.");
     }
-    if (this.quarantined.length > 0) {
+    if (this.quarantined.some((entry) => !this.isClosedScope(entry.questionId))) {
       throw new Error("Some saved answers were quarantined and need attention before submit.");
     }
     if (this.hasOutstandingWork()) {
@@ -535,8 +616,8 @@ export class DurableResponseEngine {
    * maps, so queue size alone cannot answer "is anything still outstanding?".
    */
   private hasUnacknowledgedIntent(): boolean {
-    for (const state of this.states.values()) {
-      if (state.pending) return true;
+    for (const [questionId, state] of this.states) {
+      if (state.pending && !this.isClosedScope(questionId)) return true;
     }
     return false;
   }
@@ -871,6 +952,15 @@ export class DurableResponseEngine {
         command,
         this.syncStatus === "conflict_fenced" ? "LEASE_FENCED" : "TERMINAL_CONFLICT"
       );
+      return;
+    }
+
+    // The server closed this draft's scope (its module): the answer is kept
+    // on the device as evidence and never sent.
+    const commandScope = this.scopeOf?.(command.questionId) ?? null;
+    const closedReason = commandScope !== null ? this.closedScopes.get(commandScope) : undefined;
+    if (closedReason !== undefined) {
+      this.quarantineEntry(command, closedReason);
       return;
     }
 
@@ -1707,10 +1797,18 @@ export class DurableResponseEngine {
         // so claiming the whole outbox would strand every otherwise-valid
         // answer behind one oversized batch. The outer loop keeps sending
         // bounded chunks until nothing sendable is left.
+        // A batch carries one write scope only (SAT: one module attempt), so
+        // a refusal that closes one module can never take another module's
+        // answers with it. Without a scope function every command shares the
+        // null scope and nothing changes.
         const sendable: ResponseCommandV2[] = [];
+        let chunkScope: string | null | undefined;
         for (const [questionId, command] of this.outbox) {
           // Blocked drafts stay queued in the outbox map but never fly.
           if (this.isBlockedPending(questionId, command.writeId)) continue;
+          const scope = this.scopeOf?.(questionId) ?? null;
+          if (chunkScope === undefined) chunkScope = scope;
+          if (scope !== chunkScope) continue;
           sendable.push(command);
         }
         const nextChunk = chunkResponseCommands(sendable)[0] ?? [];
@@ -1800,6 +1898,20 @@ export class DurableResponseEngine {
           // bounded retry below — quarantining it would strand answers that
           // the next cohort-start bootstrap would accept.
           if (this.isTerminalConflict(errorCode) && !this.isRetryableConflictReason(error)) {
+            // A refusal that names a closed module belongs to that module's
+            // scope, not to the attempt: quarantine that scope's drafts as
+            // evidence and keep delivering every other scope (the next module).
+            const closeReason = this.extractConflictReason(error);
+            if (
+              this.scopeOf &&
+              closeReason !== null &&
+              MODULE_SCOPED_CLOSE_REASONS[closeReason] &&
+              chunkScope !== undefined &&
+              chunkScope !== null
+            ) {
+              this.closeScope(chunkScope, closeReason);
+              continue;
+            }
             // RISK-23: CONTROL_EPOCH_STALE is the control-only fence — it
             // follows the blocked/reconcilable path (mirrors
             // blockPendingOnControlBump), never the quarantine path. Only
@@ -2714,10 +2826,56 @@ export class DurableResponseEngine {
     );
   }
 
-  /** SECTION_CLOCK_MISSING is the one retryable ASSESSMENT_CONFLICT reason. */
+  /**
+   * SECTION_CLOCK_MISSING remains retryable while a cohort start becomes visible.
+   */
   private isRetryableConflictReason(error: unknown): boolean {
     const reason = this.extractConflictReason(error);
     return reason === "SECTION_CLOCK_MISSING";
+  }
+
+  /**
+   * The server closed `scope` (one module). Every draft of that scope — in
+   * flight, queued, or accepted later — is quarantined as evidence, and the
+   * attempt stays writable for every other scope. The attempt status is not
+   * downgraded: a closed module is not a failure of the next one.
+   */
+  private isClosedScope(questionId: string): boolean {
+    this.restoreClosedScopes();
+    const scope = this.scopeOf?.(questionId);
+    return scope != null && this.closedScopes.has(scope);
+  }
+
+  /** Preserve unsent intent when an authoritative projection closes its module. */
+  sealScope(scope: string): void {
+    this.restoreClosedScopes();
+    if (this.closedScopes.has(scope)) return;
+    if ([...this.states].some(([questionId, state]) => this.scopeOf?.(questionId) === scope && state.pending?.leaseEpoch === this.leaseEpoch)) {
+      this.closeScope(scope, "MODULE_CLOSED");
+    }
+  }
+
+  private closeScope(scope: string, reason: string): void {
+    this.closedScopes.set(scope, reason);
+    const commands = new Map<string, ResponseCommandV2>();
+    for (const [questionId, state] of this.states) {
+      const pending = state.pending;
+      if (this.scopeOf?.(questionId) === scope && pending?.leaseEpoch === this.leaseEpoch) {
+        commands.set(pending.writeId, { questionId, writeId: pending.writeId, clientVersion: pending.clientVersion, response: clonePayload(pending.payload) });
+      }
+    }
+    for (const command of [...this.inFlight.values(), ...this.outbox.values()]) {
+      if (this.scopeOf?.(command.questionId) === scope) commands.set(command.writeId, command);
+    }
+    for (const command of commands.values()) {
+      this.inFlight.delete(command.questionId);
+      this.removeCommand(command);
+      this.quarantineEntry(command, reason);
+    }
+    this.syncStatus = "saved_locally";
+    this.lastError = `MODULE_CLOSED:${scope}`;
+    this.emitDurabilityEvent("module_scope_closed", { scope, reason, count: commands.size });
+    this.notifyStatusChange();
   }
 
   /** Read details.reason (ApiClient surfaces backend details there). */

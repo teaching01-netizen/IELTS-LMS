@@ -288,5 +288,32 @@ describe("StructuredContentRenderer", () => {
     expect(tables[0]?.querySelector("td")).toHaveAttribute("colspan", "2");
     expect(tables[0]?.querySelector('[role="math"]')).toHaveAttribute("aria-label", "Equation: \\frac{7}{2}");
     expect(container.querySelector("[contenteditable]")).not.toBeInTheDocument();
+    // A wide table scrolls inside a keyboard-reachable region on narrow screens.
+    const region = screen.getAllByRole("region", { name: "Table" })[0];
+    expect(region).toHaveClass("sat-table-scroll");
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toContainElement(tables[0] ?? null);
+  });
+
+  it("renders the author's alignment and blank lines, dropping unknown alignments and edge blanks", () => {
+    const text = (value: string) => [{ type: "text", text: value }];
+    const value: StructuredContent = {
+      version: 2, nodes: [], document: { type: "doc", content: [
+        { type: "paragraph" },
+        { type: "heading", attrs: { level: 2, textAlign: "center" }, content: text("Centered heading") },
+        { type: "paragraph", attrs: { textAlign: "right" }, content: text("Right line") },
+        { type: "paragraph" },
+        { type: "paragraph", attrs: { textAlign: "evil" }, content: text("Left line") },
+        { type: "paragraph" },
+      ] },
+    };
+    const { container } = render(<StructuredContentRenderer content={value} />);
+
+    expect(screen.getByRole("heading", { name: "Centered heading" })).toHaveStyle({ textAlign: "center" });
+    expect(screen.getByText("Right line")).toHaveStyle({ textAlign: "right" });
+    expect(screen.getByText("Left line")).not.toHaveAttribute("style");
+    const paragraphs = container.querySelectorAll("p");
+    expect(paragraphs).toHaveLength(3);
+    expect(paragraphs[1]?.querySelector("br")).toBeInTheDocument();
   });
 });

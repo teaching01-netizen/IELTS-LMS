@@ -3,6 +3,7 @@ import { Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { EditableBlockMath, EditableInlineMath } from "../../EditableMathExtension";
 import { satMathInputRules } from "../mathInputRules";
+import { LatexPasteRule } from "../../plugins/latexPasteRule";
 
 function makeEditor(): Editor {
   return new Editor({
@@ -51,5 +52,57 @@ describe("satMathInputRules", () => {
       small.destroy();
       big.destroy();
     }
+  });
+  describe("typed display delimiters", () => {
+    function typedEditor(text: string): Editor {
+      return new Editor({
+        extensions: [StarterKit, EditableInlineMath, EditableBlockMath, LatexPasteRule.configure({ enabled: true })],
+        content: { type: "doc", content: [{ type: "paragraph", content: text ? [{ type: "text", text }] : [] }] },
+      });
+    }
+    function type(editor: Editor, text: string): void {
+      for (const ch of text) {
+        const { from, to } = editor.state.selection;
+        const handled = editor.view.someProp("handleTextInput", (handle) =>
+          handle(editor.view, from, to, ch, () => editor.state.tr.insertText(ch, from, to))
+        );
+        if (!handled) editor.view.dispatch(editor.state.tr.insertText(ch, from, to));
+      }
+    }
+    const kinds = (editor: Editor) =>
+      (editor.getJSON().content ?? []).flatMap((node) => [node.type, ...(node.content ?? []).map((child) => child.type)]);
+
+    it("keeps $$..$$ inline when typed after text on the same line", () => {
+      const editor = typedEditor("Solve ");
+      try {
+        editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+        type(editor, "$$x^2=4$$");
+        expect(kinds(editor)).toEqual(["paragraph", "text", "inlineMath"]);
+      } finally {
+        editor.destroy();
+      }
+    });
+
+    it("converts typed \\(..\\) into inline math", () => {
+      const editor = typedEditor("See ");
+      try {
+        editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+        type(editor, "\\(x^2\\)");
+        expect(kinds(editor)).toEqual(["paragraph", "text", "inlineMath"]);
+      } finally {
+        editor.destroy();
+      }
+    });
+
+    it("makes $$..$$ a block when typed on an empty line", () => {
+      const editor = typedEditor("");
+      try {
+        type(editor, "$$x^2=4$$");
+        expect(kinds(editor)).toContain("blockMath");
+        expect(kinds(editor)).not.toContain("inlineMath");
+      } finally {
+        editor.destroy();
+      }
+    });
   });
 });

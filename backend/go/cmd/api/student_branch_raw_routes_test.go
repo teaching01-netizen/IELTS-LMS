@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/auth"
@@ -22,8 +25,10 @@ import (
 // HTTP surfaces. Exercise their raw bodies with the same routed candidate, so
 // stimulus, prompt or option content cannot leak through a second projection.
 func TestStudentRawContentRoutesFenceUnassignedBranch(t *testing.T) {
-	for _, route := range []string{"higher", "lower"} {
-		t.Run(route, func(t *testing.T) {
+	for _, scenario := range []string{"higher", "lower", "higher_client_start", "lower_client_start"} {
+		route := strings.Split(scenario, "_")[0]
+		clientStart := strings.HasSuffix(scenario, "client_start")
+		t.Run(scenario, func(t *testing.T) {
 			db := staleETagTestDB(t)
 			cfg := config.Load()
 			cfg.AuthSecret = "test-secret-with-at-least-32-characters!!"
@@ -31,6 +36,14 @@ func TestStudentRawContentRoutesFenceUnassignedBranch(t *testing.T) {
 			scheduleID, attemptID, _, lowID, highID := seedStaleETagExam(t, db)
 			userID := uuid.NewString()
 			ctx := context.Background()
+			if clientStart {
+				if _, err := db.ExecContext(ctx, "UPDATE exam_session_runtimes SET timing_model = 'sat_personal_v1', sat_handoff_mode = 'client_start' WHERE schedule_id = ?", scheduleID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.ExecContext(ctx, "UPDATE exam_schedules SET sat_timing_model = 'sat_personal_v1' WHERE id = ?", scheduleID); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			canaries := map[string][]string{}
 			for label, moduleID := range map[string]string{"lower": lowID, "higher": highID} {
@@ -89,6 +102,8 @@ func TestStudentRawContentRoutesFenceUnassignedBranch(t *testing.T) {
 			}
 
 			router := chi.NewRouter()
+			router.Use(chimw.Compress(5, "application/json"))
+			router.Post("/api/v1/assessment-delivery/schedules/{scheduleID}/modules/start", deliveryStartModuleHandler(app))
 			router.Get("/api/v1/student/sessions/{scheduleID}", v1SessionHandler(app))
 			router.Get("/api/v1/student/sessions/{scheduleID}/static", v1StaticHandler(app))
 			router.Get("/api/v1/student/sessions/{scheduleID}/live", v1LiveHandler(app))
@@ -141,12 +156,20 @@ func TestStudentRawContentRoutesFenceUnassignedBranch(t *testing.T) {
 					t.Fatalf("%s %s = %d: %s", endpoint.method, endpoint.path, rec.Code, rec.Body.String())
 				}
 				body := rec.Body.String()
+				if clientStart {
+					for _, canary := range canaries[assigned][1:] {
+						if strings.Contains(body, canary) {
+							t.Fatalf("unstarted branch leaked on %s: %s", endpoint.path, canary)
+						}
+					}
+				}
+
 				for _, canary := range canaries[unassigned] {
 					if strings.Contains(body, canary) {
 						t.Fatalf("%s %s exposed unassigned %s canary %q", endpoint.method, endpoint.path, unassigned, canary)
 					}
 				}
-				if endpoint.path == "/api/v1/student/sessions/"+scheduleID+"/static" || endpoint.path == "/api/v1/student/sessions/"+scheduleID || strings.HasSuffix(endpoint.path, "/bootstrap") {
+				if !clientStart && (endpoint.path == "/api/v1/student/sessions/"+scheduleID+"/static" || endpoint.path == "/api/v1/student/sessions/"+scheduleID || strings.HasSuffix(endpoint.path, "/bootstrap")) {
 					for _, canary := range canaries[assigned] {
 						if !strings.Contains(body, canary) {
 							t.Fatalf("%s %s lost assigned %s canary %q", endpoint.method, endpoint.path, assigned, canary)
@@ -154,6 +177,42 @@ func TestStudentRawContentRoutesFenceUnassignedBranch(t *testing.T) {
 					}
 				}
 			}
+			if clientStart {
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/assessment-delivery/schedules/"+scheduleID+"/modules/start", strings.NewReader(fmt.Sprintf(`{"moduleId":%q,"needContent":true}`, assignedID)))
+				req.Header.Set("Authorization", "Bearer "+token)
+				req.Header.Set("Accept-Encoding", "gzip")
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+				if rec.Code != http.StatusOK || rec.Header().Get("Content-Encoding") != "gzip" {
+					t.Fatalf("start gzip = %d %s", rec.Code, rec.Body.String())
+				}
+				compressedSize := rec.Body.Len()
+				reader, err := gzip.NewReader(rec.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw, err := io.ReadAll(reader)
+				reader.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, canary := range canaries[assigned] {
+					if !strings.Contains(string(raw), canary) {
+						t.Fatalf("start lost content %s", canary)
+					}
+				}
+				for _, canary := range canaries[unassigned] {
+					if strings.Contains(string(raw), canary) {
+						t.Fatalf("start leaked content %s", canary)
+					}
+				}
+				if compressedSize >= len(raw) {
+					t.Fatalf("gzip did not reduce content: %d >= %d", compressedSize, len(raw))
+				}
+				t.Logf("StartModule content: %d bytes gzip / %d bytes JSON", compressedSize, len(raw))
+			}
+
 		})
 	}
 }

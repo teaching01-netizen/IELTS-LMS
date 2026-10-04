@@ -460,12 +460,12 @@ var satAllowedNodes = map[string]bool{
 	"hardBreak": true, "bulletList": true, "orderedList": true,
 	"listItem": true, "inlineMath": true, "blockMath": true,
 	"image": true, "table": true, "tableRow": true, "tableHeader": true,
-	"tableCell": true, "codeBlock": true,
+	"tableCell": true, "codeBlock": true, "horizontalRule": true,
 }
 
 var satAllowedMarks = map[string]bool{
 	"bold": true, "italic": true, "underline": true,
-	"superscript": true, "subscript": true, "code": true,
+	"superscript": true, "subscript": true, "code": true, "strike": true,
 }
 
 func appendIssue(issues *[]ValidationIssue, code, path, message string) {

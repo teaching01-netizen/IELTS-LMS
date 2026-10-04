@@ -497,6 +497,11 @@ export function SatStudentSessionRoute({
       onTakeOver={takeOverDurabilityLease}
     />
   ) : null;
+  // A closed earlier module's late answer: informational only. It must never
+  // block the module the student is in now.
+  const closedModuleNotice = (persistence.closedModuleAttemptIds?.length ?? 0) > 0 ? (
+    <SatControlBanner tone="warning">{SAT_COPY.timeout.previousModuleUnconfirmed}</SatControlBanner>
+  ) : null;
   const withCalculatorHost = (content: ReactNode) => (
     <>
       {!inModulePhase && !inReviewPhase ? leaseConflictNotice : null}
@@ -576,6 +581,9 @@ export function SatStudentSessionRoute({
           runtimeStatus={data.scheduleRuntimeStatus}
           proctorStatus={data.proctorStatus}
           stageReady={exam.pendingStageReady}
+          startingModuleTwo={Boolean(exam.pendingModule && data.attempt.moduleAttempts.some(
+            (attempt) => attempt.moduleId === exam.pendingModule?.id && attempt.state === "not_started" && attempt.autoStartAt,
+          ))}
         />,
       ),
     );
@@ -698,6 +706,7 @@ export function SatStudentSessionRoute({
               {exam.warning ? <SatControlBanner tone="warning">Proctor message: {exam.warning}</SatControlBanner> : null}
               {error ? <SatControlBanner tone="error">{error}</SatControlBanner> : null}
               {leaseConflictNotice}
+              {closedModuleNotice}
             </>
           }
           onSelectQuestion={commands.returnToQuestion}
@@ -804,6 +813,7 @@ export function SatStudentSessionRoute({
           <>
             {exam.warning ? <SatControlBanner tone="warning">Proctor message: {exam.warning}</SatControlBanner> : null}
             {error ? <SatControlBanner tone="error">{error}</SatControlBanner> : null}
+            {closedModuleNotice}
           </>
         }
         questionNote={response.annotations.legacyQuestionNote}

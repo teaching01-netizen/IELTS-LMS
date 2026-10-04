@@ -272,6 +272,12 @@ export interface DeliveredAssessmentModule {
   instructions: StructuredContent;
   toolPolicy: Record<string, unknown> | string[];
   questions: DeliveredQuestion[];
+  /**
+   * Delivered as metadata only: the module is routed but its clock has not
+   * started (client_start handoff). Its questions arrive with
+   * StartModule(needContent), the request that starts its clock.
+   */
+  contentWithheld?: boolean;
 }
 
 export interface DeliveredAssessmentSection {

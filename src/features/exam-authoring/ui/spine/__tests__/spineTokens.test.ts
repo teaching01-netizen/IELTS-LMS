@@ -84,7 +84,7 @@ describe('authoring-local foundation', () => {
   it('gives every rich editor the same gradient tool strip, answers included', () => {
     // The shared contract owns the band, the hairline, and the strip height.
     const shared = css.match(/\.sat-spine \.sat-rich-editor__toolbar \{([^}]*)\}/)?.[1] ?? '';
-    expect(shared).toContain('background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 253, 0.94));');
+    expect(shared).toContain('background: linear-gradient(180deg, #ffffff, #f8fafd);');
     expect(shared).toContain('border-bottom-color: rgba(25, 35, 48, 0.055);');
     const strip = css.match(/\.sat-spine \.answer-choice \.sat-rich-editor__toolbar \{([^}]*)\}/)?.[1] ?? '';
     expect(strip).toContain('opacity: 1;');
@@ -110,14 +110,13 @@ describe('authoring-local foundation', () => {
     expect(css).toContain('linear-gradient(90deg, #1590ff, #0071e3)');
     expect(css).toContain('linear-gradient(180deg, #1684ed 0%, #0877e4 46%, #006bd8 100%)');
   });
-  it('never fades a toolbar out entirely', () => {
-    // Toolbars stay present at all times; they recede by contrast only, in
-    // three steps: rest, under the pointer, and focused.
+  it('never fades a toolbar', () => {
+    // The sticky band is opaque so text cannot show through it, and controls
+    // recede by icon tone, never by opacity, which would drop them under 3:1.
     const toolbar = css.match(/\.sat-spine \.sat-rich-editor__toolbar \{([^}]*)\}/)?.[1] ?? '';
-    expect(toolbar).toContain('opacity: 0.65');
-    expect(toolbar).not.toContain('opacity: 0;');
-    expect(css).toContain('.sat-spine .sat-rich-editor:hover .sat-rich-editor__toolbar {\n  opacity: 0.82;\n}');
-    expect(css).toContain('.sat-spine .sat-rich-editor:focus-within .sat-rich-editor__toolbar {\n  opacity: 1;\n}');
+    expect(toolbar).not.toContain('opacity');
+    expect(css).not.toMatch(/\.sat-rich-editor__toolbar \{\n\s*opacity: 0\./);
+    expect(css).toContain('.sat-spine .sat-rich-editor .sat-rich-editor__toolbar-button[aria-pressed="true"] {');
   });
   it('hands the accent to whichever surface has focus, so only one cue shows', () => {
     // The field's own focus treatment is pinned above; these rules only step it

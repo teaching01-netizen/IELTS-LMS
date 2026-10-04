@@ -183,7 +183,7 @@ describe("equation controls", () => {
 
   it("edits the equation through the dialog and deletes it behind the menu", () => {
     const { editor, onEditEquation, onFeedback } = renderEquation();
-    fireEvent.click(screen.getByRole("button", { name: "Edit equation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit LaTeX" }));
     expect(onEditEquation).toHaveBeenCalledWith(expect.objectContaining({ kind: "equation", latex: "x^2=16" }));
     fireEvent.click(screen.getByRole("button", { name: "Equation options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete equation" }));

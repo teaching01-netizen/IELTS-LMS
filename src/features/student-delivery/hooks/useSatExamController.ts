@@ -49,7 +49,7 @@ import {
   type SatCommitHint,
 } from "../application/satCommitRouting";
 import { createSatFinalizationGate } from "../application/satFinalizationGate";
-import { applyEntryAck, isEntryAck } from "../application/satEntryAck";
+import { applyCloseAck, applyEntryAck, isEntryAck } from "../application/satEntryAck";
 import { adoptEntryControlEpochFromAck } from "../application/satEntryControlEpoch";
 // Clock + cadence policy (pure): display allotment vs expiry authority, stage
 // readiness, break/wait countdowns, and the recovery-poll cadence.
@@ -66,6 +66,7 @@ import {
 } from "../application/satTimingPolicy";
 import { satPollDelayMs } from "../application/satPollCadence";
 import {
+  classifySatCloseRejection,
   isSectionClosingRejection,
   isControlEpochStaleRejection,
   isStaleConflictRejection,
@@ -106,6 +107,15 @@ import { deriveSatTemporalSnapshot, type SatTemporalModel } from "../timing/satT
  * replaced directly by the next active module when state arrives.
  */
 const SAT_BREAK_END_PULL_WINDOW_MS = 2_000;
+
+/**
+ * Module close at expiry (docs/sat-m1-m2-handoff-plan.md, Phase 3): how long
+ * the browser keeps confirming its final answers before it leaves routing to
+ * the server's close window, and how many short reads then look for the
+ * routed module before the steady recovery poll takes over.
+ */
+const SAT_CLOSE_BUDGET_MS = 20_000;
+const SAT_CLOSE_FALLBACK_READS = 8;
 
 /**
  * The control-epoch fence is optional on the wire: with
@@ -444,8 +454,15 @@ export function useSatExamController({
         let payload: AssessmentDeliveryBootstrap;
         if (current && satDeliveryGateway.state) {
           const state = await satDeliveryGateway.state(scheduleId, attemptId);
-          const known = new Set(current.sections.flatMap((section) => section.modules.map((module) => module.id)));
-          const needsSections = state.attempt.moduleAttempts.some((item) => !known.has(item.moduleId));
+          const known = new Map(current.sections.flatMap((section) => section.modules.map((module) => [module.id, module] as const)));
+          // Full bootstrap only when the retained tree cannot render the
+          // attempt: a routed module new to this browser, or a module retained
+          // as a content-withheld stub whose clock has since started (the
+          // server's auto-start backstop fired before this browser started it).
+          const needsSections = state.attempt.moduleAttempts.some((item) => {
+            const module = known.get(item.moduleId);
+            return !module || (module.contentWithheld === true && item.state !== "not_started");
+          });
           payload = needsSections
             ? await satDeliveryGateway.bootstrap(scheduleId, attemptId)
             : {
@@ -470,6 +487,72 @@ export function useSatExamController({
       }
     },
     [acceptPayloadAndRoute, attemptId, renderIdentityGeneration, scheduleId]
+  );
+
+  /**
+   * Module close at expiry (docs/sat-m1-m2-handoff-plan.md, Phase 3). Send the
+   * module's remaining answers, then confirm the final set so the server
+   * scores and routes now instead of waiting out its close window; the close
+   * answer carries the routed follow-up module, so no state/bootstrap read is
+   * needed. Every refusal has a bounded answer (classifySatCloseRejection).
+   * When closing cannot succeed, the server's close window routes the module
+   * and the short, jittered reads below discover it before the steady poll.
+   */
+  const closeTimedOutModule = useCallback(
+    async (generation: number, moduleId: string, moduleAttemptId: string): Promise<void> => {
+      const live = () => identityGenerationRef.current === generation;
+      const pause = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+      const closeModule = satDeliveryGateway.closeModule;
+      const closeId = globalThis.crypto?.randomUUID?.() ?? `close-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const giveUpAt = Date.now() + SAT_CLOSE_BUDGET_MS;
+      let retries = 0;
+      await persistenceRef.current.flush().catch(() => undefined);
+      while (closeModule && live() && Date.now() < giveUpAt) {
+        try {
+          const ack = await closeModule(scheduleId, attemptId, {
+            moduleId,
+            moduleAttemptId,
+            closeId,
+            answers: persistenceRef.current.closeManifest?.(moduleAttemptId) ?? [],
+          });
+          if (!live()) return;
+          const base = dataRef.current;
+          const merged = base ? applyCloseAck(base, ack) : null;
+          if (!merged) break;
+          acceptPayloadAndRoute(merged, { kind: "poll" });
+          emitStudentObservabilityMetric("sat_module_close", {
+            scheduleId,
+            attemptId,
+            moduleId,
+            routeBasis: ack.routeBasis ?? null,
+            alreadyClosed: ack.alreadyClosed,
+            retries,
+          });
+          return;
+        } catch (closeError) {
+          if (!live()) return;
+          const next = classifySatCloseRejection(closeError);
+          if (next.kind === "stop") break;
+          retries += 1;
+          await pause(
+            next.kind === "wait"
+              ? next.delayMs
+              : next.kind === "flush"
+                ? 300
+                : 500 + Math.floor(Math.random() * 500),
+          );
+          if (!live()) return;
+          await persistenceRef.current.flush().catch(() => undefined);
+        }
+      }
+      for (let read = 0; read < SAT_CLOSE_FALLBACK_READS && live(); read += 1) {
+        await refresh(read === 0);
+        const moduleAttempt = dataRef.current?.attempt.moduleAttempts.find((item) => item.id === moduleAttemptId);
+        if (!moduleAttempt || matchesFinalModuleState(moduleAttempt.state)) return;
+        await pause(Math.min(3_000, 1_000 * (read + 1)) + Math.floor(Math.random() * 500));
+      }
+    },
+    [acceptPayloadAndRoute, attemptId, refresh, scheduleId],
   );
 
   // Phase 02 bootstrap effect (singleflight per identity+version): the only
@@ -664,6 +747,9 @@ export function useSatExamController({
     const activeAttempt = findActiveAttempt(data);
     const activeModule = moduleForAttempt(data, activeAttempt);
     if (!activeAttempt?.startedAt || !activeModule) return;
+    // A withheld stub has no questions yet; the refresh that observed the
+    // start fetches the content first.
+    if (activeModule.contentWithheld) return;
     const key = `${data.versionId}:${data.timing.runtimeRevision}:${state.phase}:${activeModule.id}`;
     if (safetyReconcileKeyRef.current === key) return;
     safetyReconcileKeyRef.current = key;
@@ -942,8 +1028,9 @@ export function useSatExamController({
    * Single-operation StartModule: one idempotent mutation that activates
    * immediately at DB time. The browser renders the exam on this response.
    * A lost response is safe to retry: already-active returns the same
-   * authoritative state. Later progression (M1→M2, break→next-M1) is
-   * server-driven, so this runs only for the initial Module 1.
+   * authoritative state. Under the personal model it runs for the initial
+   * Module 1 and for a routed module the server left waiting for this
+   * browser (client_start handoff); other progression is server-driven.
    */
   const startPendingModule = useCallback(async (): Promise<SatEntryOutcome> => {
     if (!data || !pendingModule || isStarting) return "noop";
@@ -958,7 +1045,10 @@ export function useSatExamController({
       // into the bootstrap: the ack's control epoch is dropped by the merge.
       const startResponse = await withEntryControlEpoch((epoch) => satDeliveryGateway.startModule(scheduleId, attemptId, {
         moduleId: pendingModule.id,
-        ...(data.sections.some((section) => section.modules.some((module) => module.id === pendingModule.id)) ? {} : { needContent: true as const }),
+        // Content travels with the start when this browser does not hold it:
+        // the module is absent, or retained only as a withheld stub (its clock
+        // starts in this same request).
+        ...(data.sections.some((section) => section.modules.some((module) => module.id === pendingModule.id && !module.contentWithheld)) ? {} : { needContent: true as const }),
         ...controlEpochField(epoch),
       }));
       if (identityGenerationRef.current !== generation) return "noop";
@@ -1052,10 +1142,10 @@ export function useSatExamController({
     phase: state.phase,
   });
 
-  // Initial Module 1 entry only (the proctor's Start). Later progression
-  // (M1→M2, break→next-M1) is server-driven; the client renders authoritative
-  // state. Transient failures keep the waiting room mounted and retry with
-  // jitter behind it.
+  // Client-started entry: the proctor's Start, cohort/legacy later modules,
+  // and a personal routed module waiting for this browser (deriveSatEntryDecision
+  // owns the rule). Transient failures keep the waiting room mounted and retry
+  // with jitter behind it.
   useSatModuleEntry({
     identity: identityKey,
     enabled: entryDecision.shouldStart,
@@ -1386,6 +1476,9 @@ export function useSatExamController({
           emitStudentObservabilityMetric("sat_first_answerable_frame_at", {
             scheduleId, attemptId, moduleId: stateModule.id,
             at, authorizedAt: authorized.at, latencyMs: at - authorized.at,
+            ...(stateModule.adaptiveRole !== "base" && stateModuleAttempt.startedAt ? {
+              m2AllotmentDeltaSeconds: Math.max(0, (at + serverClockOffsetMs - Date.parse(stateModuleAttempt.startedAt)) / 1000 - stateModuleAttempt.accumulatedPausedSeconds),
+            } : {}),
           });
         });
       });
@@ -1397,7 +1490,7 @@ export function useSatExamController({
       document.removeEventListener("visibilitychange", report);
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [answerInteractionBlocked, attemptId, data?.proctorStatus, data?.scheduleRuntimeStatus, scheduleId, state.phase, stateModule, stateModuleAttempt]);
+  }, [answerInteractionBlocked, attemptId, data?.proctorStatus, data?.scheduleRuntimeStatus, scheduleId, serverClockOffsetMs, state.phase, stateModule, stateModuleAttempt]);
 
   const saveContext = useCallback(
     (interactionType: "typing" | "discrete") => {
@@ -1493,12 +1586,17 @@ export function useSatExamController({
     setTimeoutTransitionKey(key);
     setTimeoutTransitionStarted(true);
     const generation = identityGenerationRef.current;
+    if (isSatPersonalTimingModel(data.timing.timingModel)) {
+      void closeTimedOutModule(generation, stateModule.id, stateModuleAttempt.id);
+      return;
+    }
+    // Cohort/legacy clocks close on the shared section boundary: flush, then
+    // one recovery read. Server reconciliation finalizes the module.
     void persistenceRef.current.flush().catch(() => undefined).then(() => {
       if (identityGenerationRef.current !== generation) return;
-      // This read is a recovery nudge only. Server reconciliation finalizes the module.
       void refresh(true);
     });
-  }, [data, refresh, state.phase, stateModule, stateModuleAttempt]);
+  }, [closeTimedOutModule, data, refresh, state.phase, stateModule, stateModuleAttempt]);
 
   // The controller also owns the local expiry safety net. The route's
   // SatTemporalRuntime reports the same boundary for UI clocks, but hooks and

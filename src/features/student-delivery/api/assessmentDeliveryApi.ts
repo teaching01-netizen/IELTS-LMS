@@ -16,6 +16,9 @@ import type {
   AssessmentDeliveryBootstrap,
   AssessmentDeliveryState,
   AssessmentBreakEntryRequest,
+  AssessmentLateEvidenceRequest,
+  AssessmentModuleCloseAck,
+  AssessmentModuleCloseRequest,
   AssessmentModuleEntryRequest,
   AssessmentModuleEntryStateAck,
   AssessmentModuleStartRequest,
@@ -421,6 +424,34 @@ export const assessmentDeliveryApi = {
   ): Promise<AssessmentDeliveryBootstrap> {
     return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
       `/v1/assessment-delivery/schedules/${scheduleId}/modules/submit`,
+      request,
+      config,
+    ));
+  },
+
+  // A synchronized room reaches zero together; a short timeout plus the
+  // controller's own retry loop keeps one slow close from pinning the student
+  // on the transition screen. Routing never depends on this request alone:
+  // the server routes at the close window regardless.
+  closeModule(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentModuleCloseRequest,
+  ): Promise<AssessmentModuleCloseAck> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentModuleCloseAck>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/modules/close`,
+      request,
+      { ...config, timeout: 6_000, retries: 0 },
+    ));
+  },
+
+  recordLateEvidence(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentLateEvidenceRequest,
+  ): Promise<{ recorded: number }> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<{ recorded: number }>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/modules/late-evidence`,
       request,
       config,
     ));

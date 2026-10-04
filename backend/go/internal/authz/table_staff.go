@@ -79,6 +79,8 @@ func init() {
 		"POST /schedules/{scheduleID}/breaks/enter":                  {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/breaks/visible":                {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/submit":                {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /schedules/{scheduleID}/modules/close":                 {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /schedules/{scheduleID}/modules/late-evidence":         {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/submit":                        {Bearer: true, Scope: ScopeAttemptOwner},
 		// student sessions: session-or-bearer STUDENT paths (handler:
 		// requireV1StudentIdentity / requireStudentDeps + resolve check).

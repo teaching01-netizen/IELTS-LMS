@@ -139,6 +139,21 @@ export async function insertIngestResult(
     }
     if (nodes.length === 0) return { handled: false, rejectedImages };
 
+    // A lone display equation pasted into a line that has other text joins
+    // that line; the author can still switch it to Block from its controls.
+    const { $from, $to } = view.state.selection;
+    const inlineMath = view.state.schema.nodes["inlineMath"];
+    const lone = nodes.length === 1 ? nodes[0] : undefined;
+    if (
+      lone?.type.name === "blockMath" &&
+      inlineMath &&
+      $from.parent.isTextblock &&
+      $from.sameParent($to) &&
+      ($from.parentOffset > 0 || $to.parentOffset < $to.parent.content.size)
+    ) {
+      nodes[0] = inlineMath.create({ latex: lone.attrs["latex"] });
+    }
+
     // Insert a slice of content, not a nested doc or separate image/text
     // transactions that can overwrite each other's NodeSelection.
     const slice = Slice.maxOpen(Fragment.fromArray(nodes));

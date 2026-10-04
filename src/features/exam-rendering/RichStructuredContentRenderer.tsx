@@ -1,5 +1,5 @@
 /* eslint-disable jsx-a11y/no-noninteractive-element-interactions -- img onError is a resource lifecycle signal; the figure frame is a pannable surface rather than a control. */
-/* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-tabindex -- the frame becomes tabbable and labelled only while zoomed, so a magnified figure keeps a keyboard path (arrow keys) to the parts the window no longer shows. */
+/* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-tabindex -- the frame becomes tabbable and labelled only while zoomed, so a magnified figure keeps a keyboard path (arrow keys) to the parts the window no longer shows; a table's scroll region is tabbable for the same reason. */
 import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -11,6 +11,7 @@ import type {
 import { getAssessmentMediaAsset } from "../exam-authoring/api/assessmentMediaApi";
 import { satImagePresentation } from "../exam-authoring/api/satImagePresentation";
 import { documentFromStructuredContent } from "../exam-authoring/api/renderingPublic";
+import { storedTextAlignment } from "../exam-authoring/api/textAlignment";
 import { directSource } from "./structuredImageAssets";
 import {
   SAT_IMAGE_ENLARGE_FIT_VIEW,
@@ -23,11 +24,28 @@ import {
 } from "./api/structuredContentEnlarge";
 
 const CONTENT_CLASS_NAME =
-  "structured-content-renderer outline-none text-[inherit] leading-7 [&_p]:my-2 [&_h1]:my-3 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-3 [&_h3]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:my-4 [&_blockquote]:border-l-4 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:p-2.5 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:p-2.5 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-slate-50 [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-[0.92em] [&_pre]:leading-6 [&_pre]:text-slate-900 [&_a]:underline [&_a]:underline-offset-2";
+  "structured-content-renderer outline-none text-[inherit] leading-7 [&_p]:my-2 [&_h1]:my-3 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-3 [&_h3]:font-semibold [&_ul]:my-3 [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:my-4 [&_blockquote]:border-l-4 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:p-2.5 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:p-2.5 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-slate-50 [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-[0.92em] [&_pre]:leading-6 [&_pre]:text-slate-900 [&_a]:underline [&_a]:underline-offset-2";
 
 function stringAttribute(node: RichTextNode, name: string): string {
   const value = node.attrs?.[name];
   return typeof value === "string" ? value : "";
+}
+
+/** Stored paragraph/heading alignment, re-checked so content can only ever set the allowlisted values. */
+function alignmentStyle(node: RichTextNode): CSSProperties | undefined {
+  const textAlign = storedTextAlignment(node.attrs?.["textAlign"]);
+  return textAlign ? { textAlign } : undefined;
+}
+
+const isEmptyParagraph = (node: RichTextNode) => node.type === "paragraph" && !node.content?.length;
+
+/** Blank lines the author left between blocks stay; the editor's leading and trailing placeholders do not. */
+function trimEmptyEdges(nodes: readonly RichTextNode[] = []): readonly RichTextNode[] {
+  let start = 0;
+  let end = nodes.length;
+  while (start < end && isEmptyParagraph(nodes[start]!)) start += 1;
+  while (end > start && isEmptyParagraph(nodes[end - 1]!)) end -= 1;
+  return nodes.slice(start, end);
 }
 
 function positiveDimension(node: RichTextNode, name: string): number | undefined {
@@ -580,13 +598,17 @@ function RichNode({ node, renderText, enlarge, ...mediaProps }: { node: RichText
     case "doc":
       return children("doc");
     case "paragraph":
-      return <p {...textAttributes}>{textChildren()}</p>;
+      // An empty paragraph is a blank line in the editor; without the break it
+      // collapses to nothing for the student.
+      if (isEmptyParagraph(node)) return <p style={alignmentStyle(node)}><br /></p>;
+      return <p {...textAttributes} style={alignmentStyle(node)}>{textChildren()}</p>;
     case "heading": {
       const level = Number(node.attrs?.["level"] ?? 2);
       const content = textChildren();
-      if (level <= 1) return <h1 {...textAttributes}>{content}</h1>;
-      if (level === 2) return <h2 {...textAttributes}>{content}</h2>;
-      return <h3 {...textAttributes}>{content}</h3>;
+      const style = alignmentStyle(node);
+      if (level <= 1) return <h1 {...textAttributes} style={style}>{content}</h1>;
+      if (level === 2) return <h2 {...textAttributes} style={style}>{content}</h2>;
+      return <h3 {...textAttributes} style={style}>{content}</h3>;
     }
     case "blockquote":
       return <blockquote>{children("blockquote")}</blockquote>;
@@ -615,7 +637,13 @@ function RichNode({ node, renderText, enlarge, ...mediaProps }: { node: RichText
     case "image":
       return <StaticStructuredImage node={node} enlarge={enlarge} {...mediaProps} />;
     case "table":
-      return <table data-cell-alignment={node.attrs?.["cellAlignment"] === "center" ? "center" : undefined}><tbody>{children("table")}</tbody></table>;
+      // A wide table scrolls inside its own region instead of widening the
+      // pane; the region is focusable so the keyboard can scroll it too.
+      return (
+        <div className="sat-table-scroll" role="region" aria-label="Table" tabIndex={0}>
+          <table data-cell-alignment={node.attrs?.["cellAlignment"] === "center" ? "center" : undefined}><tbody>{children("table")}</tbody></table>
+        </div>
+      );
     case "tableRow":
       return <tr>{children("table-row")}</tr>;
     case "tableHeader":
@@ -654,5 +682,5 @@ export const RichStructuredContentRenderer = memo(function RichStructuredContent
 } & StructuredContentMediaProps) {
   const mediaProps: StructuredContentMediaProps = { loadMediaUrl, onMediaFailure, questionId };
   const document = documentFromStructuredContent(content) as RichTextDocument;
-  return <div className={CONTENT_CLASS_NAME}>{renderNodes(document.content, "content", renderText, enlarge, mediaProps)}</div>;
+  return <div className={CONTENT_CLASS_NAME}>{renderNodes(trimEmptyEdges(document.content), "content", renderText, enlarge, mediaProps)}</div>;
 });

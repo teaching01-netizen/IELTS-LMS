@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { SatPreStartScreen } from "./SatPreStartScreen";
 
 describe("SAT entry surfaces", () => {
+  it("announces routed Module 2 without showing a running clock", () => {
+    render(<SatPreStartScreen reason="waiting" runtimeStatus="live" proctorStatus="active" stageReady startingModuleTwo />);
+    expect(screen.getByRole("heading", { name: "Module 2 is ready — starting" })).toBeInTheDocument();
+    expect(screen.queryByRole("timer")).toBeNull();
+  });
   it("announces the waiting room without offering a manual start action", () => {
     render(
       <SatPreStartScreen

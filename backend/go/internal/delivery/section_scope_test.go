@@ -114,7 +114,7 @@ func TestNextModuleTxSkipsSectionDroppedByLinkScope(t *testing.T) {
 		WithArgs("pv-1", 0, "reading-writing").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27)
+	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27, routeAudit{})
 	if err != nil {
 		t.Fatalf("nextModuleTx must succeed: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestNextModuleTxWithoutLinkScopeKeepsOriginalQuery(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_id", "section_key", "module_key", "duration_seconds", "adaptive_role", "tool_policy"}).
 			AddRow("mod-math", "sec-math", "math", "math-m1", 4200, "base", nil))
 
-	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27)
+	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27, routeAudit{})
 	if err != nil {
 		t.Fatalf("nextModuleTx must succeed: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestNextModuleTxHonorsPublishedScopeWithoutLink(t *testing.T) {
 		WithArgs("pv-1", 0, "reading-writing").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27)
+	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27, routeAudit{})
 	if err != nil {
 		t.Fatalf("nextModuleTx must succeed: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestNextModuleTxStopsForEmptyScopeIntersection(t *testing.T) {
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(`["math"]`, "reading-writing"))
 
-	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27)
+	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-rw", "mod-rw", 20, 27, routeAudit{})
 	if err != nil {
 		t.Fatalf("nextModuleTx must succeed: %v", err)
 	}

@@ -105,6 +105,12 @@ func NewService(db *sql.DB, runner *tx.Runner) *Service {
 	return &Service{db: db, runner: runner, runtime: examruntime.NewService(runner, nil)}
 }
 
+// SetRuntime shares the configured runtime owner used by proctor commands.
+func (s *Service) SetRuntime(runtime *examruntime.Service) *Service {
+	s.runtime = runtime
+	return s
+}
+
 // Schedule is the exam_schedules row projection.
 type Schedule struct {
 	ID                     string     `json:"id"`

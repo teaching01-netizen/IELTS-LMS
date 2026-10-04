@@ -271,6 +271,14 @@ function isImportImage(part: MixedPart): part is ImportImageNode {
 }
 
 function markerParts(el: Element, marks: TextMark[], state: WalkState): MixedPart[] | null {
+  const latex = el.getAttribute("data-latex");
+  const mathType = el.getAttribute("data-type");
+  if (latex !== null && (mathType === "inline-math" || mathType === "block-math")) {
+    // An equation copied out of the editor carries its LaTeX only as an
+    // attribute; re-emit it delimited so phase 03 validates it like any paste.
+    const delimited = mathType === "block-math" ? "\\[" + latex + "\\]" : "\\(" + latex + "\\)";
+    return [textNode(delimited, [...marks], "html")];
+  }
   const refId = el.getAttribute("data-sat-image-ref");
   if (refId === null) return null;
   const ref = state.imageRefs.get(refId);

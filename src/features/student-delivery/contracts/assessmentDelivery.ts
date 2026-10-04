@@ -41,6 +41,12 @@ export interface AssessmentModuleAttemptSnapshot {
   entryStartsAt?: string | null;
   entryConfirmedAt?: string | null;
   entryEnteredAt?: string | null;
+  /**
+   * Set on a routed module waiting for the browser to start it (client_start
+   * handoff): the browser starts it with StartModule as soon as it can render
+   * it; the server starts its clock at this instant if the browser never does.
+   */
+  autoStartAt?: string | null;
   completionReason: string | null;
   rawCorrect: number | null;
   operationalQuestionCount: number | null;
@@ -239,6 +245,53 @@ export interface AssessmentBreakEntryRequest {
 
 export interface AssessmentModuleSubmitRequest {
   moduleId: string;
+}
+
+/** One close-manifest entry: the latest write the browser holds for a question. */
+export interface AssessmentModuleCloseAnswer {
+  questionId: string;
+  writeId: string;
+  clientVersion: number;
+}
+
+/**
+ * The browser's confirmation that every answer it holds for a timed-out
+ * module reached the server, so the server can route immediately.
+ */
+export interface AssessmentModuleCloseRequest {
+  moduleId: string;
+  moduleAttemptId: string;
+  closeId: string;
+  answers: AssessmentModuleCloseAnswer[];
+}
+
+/**
+ * The compact close answer: every module row of the attempt after the close,
+ * and the follow-up module's section (metadata only while it waits for the
+ * browser to start it).
+ */
+export interface AssessmentModuleCloseAck {
+  scheduleId: string;
+  attemptId: string;
+  moduleId: string;
+  moduleAttemptId: string;
+  routeBasis?: string;
+  alreadyClosed: boolean;
+  moduleAttempts: AssessmentModuleAttemptSnapshot[];
+  nextModuleId: string | null;
+  selectedSection?: AssessmentDeliverySection;
+  serverNow: string;
+}
+
+/** Answers kept on the device after their module closed (review evidence only). */
+export interface AssessmentLateEvidenceRequest {
+  moduleId: string;
+  answers: Array<{
+    questionId: string;
+    writeId: string;
+    response: unknown;
+    clientReceivedAt?: string;
+  }>;
 }
 
 export interface AssessmentSubmitRequest {

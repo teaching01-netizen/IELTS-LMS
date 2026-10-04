@@ -407,3 +407,45 @@ groups:
           summary: "SAT entry offers are being repeatedly rearmed"
           description: "sat_personal_offer_total{event=\"rearmed\"} is sustained above 0.5/s: clients repeatedly miss the offer lead and request a new one. Check sat_personal_entry_total{result=\"missed\"} and the network/CPU conditions of the affected cohort before enabling the model for more schedules."
           runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+  - name: sat-module-handoff
+    rules:
+      - alert: SATModuleRouteLag
+        expr: histogram_quantile(0.99, sum by (le, basis) (rate(sat_route_lag_seconds_bucket[10m]))) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SAT Module 1 routing exceeds the default 15-second window plus 5 seconds"
+          runbook_url: "docs/runbooks/sat-module-handoff.md"
+      - alert: SATModuleClientStartLag
+        expr: histogram_quantile(0.99, sum by (le) (rate(sat_m2_start_lag_seconds_bucket{starter="client"}[10m]))) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SAT Module 2 client starts are delayed"
+          runbook_url: "docs/runbooks/sat-module-handoff.md"
+      - alert: SATModuleAutoStartRate
+        expr: rate(sat_m2_auto_start_total[10m]) / clamp_min(sum(rate(sat_adaptive_route_total[10m])), 0.001) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than one percent of SAT Module 2 starts use the backstop"
+          runbook_url: "docs/runbooks/sat-module-handoff.md"
+      - alert: SATModuleScopedRejectionRate
+        expr: sum(rate(sat_module_scoped_rejection_total[10m])) / clamp_min(sum(rate(sat_module_close_total{outcome="closed"}[10m])), 0.001) > 0.005
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SAT module-scoped save rejections exceed 0.5 percent of closes"
+          runbook_url: "docs/runbooks/sat-module-handoff.md"
+      - alert: SATLateAnswerRouteRisk
+        expr: increase(sat_late_answer_evidence_total{would_change_route="true"}[10m]) > 0
+        labels:
+          severity: page
+        annotations:
+          summary: "Late SAT Module 1 evidence would change the selected branch"
+          runbook_url: "docs/runbooks/sat-module-handoff.md"

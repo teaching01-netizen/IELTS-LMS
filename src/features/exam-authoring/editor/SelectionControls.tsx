@@ -1,5 +1,5 @@
 import { useEditorState, type Editor } from "@tiptap/react";
-import { Bold, Italic, List, Subscript, Superscript, Underline } from "lucide-react";
+import { Bold, Italic, List, Strikethrough, Subscript, Superscript, Underline } from "lucide-react";
 import { EditorControl } from "./EditorControl";
 import type { RichComposerCapabilities } from "./RichQuestionComposer";
 
@@ -24,6 +24,7 @@ export function SelectionControls({
       bold: e.isActive("bold"),
       italic: e.isActive("italic"),
       underline: e.isActive("underline"),
+      strike: e.isActive("strike"),
       superscript: e.isActive("superscript"),
       subscript: e.isActive("subscript"),
       bullet: e.isActive("bulletList"),
@@ -47,6 +48,9 @@ export function SelectionControls({
           <Underline size={15} />
         </EditorControl>
       ) : null}
+      <EditorControl label="Strikethrough (⇧⌘S)" shortcut="⇧⌘S" active={state.strike} onSelect={() => { editor.chain().focus().toggleStrike().run(); }}>
+        <Strikethrough size={15} />
+      </EditorControl>
       <EditorControl label="Superscript" active={state.superscript} onSelect={() => { editor.chain().focus().toggleSuperscript().run(); }}>
         <Superscript size={15} />
       </EditorControl>

@@ -425,6 +425,21 @@ type Config struct {
 	OutboxMaxAttempts             int
 	GradingProjectionIntervalSecs int
 
+	// SAT Module 1 -> Module 2 handoff (docs/sat-m1-m2-handoff-plan.md).
+	// SATHandoffMode: server_start (default, deployed behavior) or
+	// client_start (routed Module 2 waits for the browser; its clock starts
+	// when the browser receives it, with an auto-start backstop).
+	SATHandoffMode string
+	// SATPersonalCloseWindowSecs is the MAXIMUM a personal module stays
+	// writable after its deadline under client_start when the browser never
+	// confirms its final answers. A confirmed close routes immediately.
+	SATPersonalCloseWindowSecs int
+	// SATM2AutoStartSecs is how long a routed Module 2 waits for the browser
+	// before the server starts its clock anyway (client_start only).
+	SATM2AutoStartSecs int
+	// SATReconcileConcurrency bounds parallel attempts per timeout sweep.
+	SATReconcileConcurrency int
+
 	// StudentWS selects the plan-C3 student-socket posture (default allow).
 	StudentWS StudentWSMode
 
@@ -874,6 +889,10 @@ func Load() Config {
 		WorkerMaintenanceIntervalSecs:    getenvInt("WORKER_MAINTENANCE_INTERVAL_SECS", 300),
 		LiveUpdatePollIntervalMs:         getenvInt("LIVE_UPDATE_POLL_INTERVAL_MS", resourceDefault(profile, 250, 500)),
 		OutboxBatchSize:                  getenvInt("OUTBOX_BATCH_SIZE", 100),
+		SATHandoffMode:                   strings.ToLower(strings.TrimSpace(os.Getenv("SAT_HANDOFF_MODE"))),
+		SATPersonalCloseWindowSecs:       getenvInt("SAT_PERSONAL_CLOSE_WINDOW_SECS", 15),
+		SATM2AutoStartSecs:               getenvInt("SAT_M2_AUTO_START_SECS", 60),
+		SATReconcileConcurrency:          getenvInt("SAT_RECONCILE_CONCURRENCY", 4),
 		LiveBus:                          parseLiveBusMode(os.Getenv("LIVE_BUS")),
 		StudentWS:                        parseStudentWSMode(os.Getenv("STUDENT_WS")),
 		ShedMode:                         parseShedMode(os.Getenv("SHED_MODE")),

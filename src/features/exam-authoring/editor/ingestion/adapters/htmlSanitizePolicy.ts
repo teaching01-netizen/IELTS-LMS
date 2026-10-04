@@ -81,6 +81,8 @@ export function sanitizeForIngestion(dirtyHtml: string): SanitizeOutcome {
         "data-sat-latex",
         "data-sat-display",
         "data-sat-image-ref",
+        "data-type",
+        "data-latex",
       ],
       FORBID_TAGS: [
         "script",

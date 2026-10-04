@@ -174,7 +174,7 @@ func (s *Service) AttemptOpenedModuleIDs(ctx context.Context, attemptID string) 
 // read content for.
 func (s *Service) attemptModuleIDs(ctx context.Context, attemptID string) (map[string]bool, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ?", attemptID)
+		"SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ? AND (state <> 'not_started' OR auto_start_at IS NULL)", attemptID)
 	if err != nil {
 		return nil, err
 	}

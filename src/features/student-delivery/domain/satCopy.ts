@@ -135,6 +135,11 @@ export const SAT_COPY = {
     recordingAnswers: "Your saved answers are being recorded.",
     offline: "We could not confirm your latest save. Keep this screen open while you reconnect.",
     failed: "We could not confirm your latest save. Keep this screen open and retry the save.",
+    // A previous module closed before one of its answers reached the server.
+    // The answer is kept on this device for the proctor; it never blocks the
+    // current module.
+    previousModuleUnconfirmed:
+      "An answer from the previous module reached the exam after that module closed. It is kept on this device for your proctor to review.",
   },
   transitions: {
     waitingForBreak: "Waiting for the break to start",

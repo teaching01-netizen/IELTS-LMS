@@ -170,6 +170,9 @@ export function upgradeInlineList(
   const warnings: ImportWarning[] = [];
   const out: InlineNode[] = [];
   let mathCount = 0;
+  // Display math keeps its own line only when nothing else shares the
+  // paragraph; next to text it stays inline so a paste never splits the line.
+  const contentful = inlines.filter((n) => n.kind !== "text" || n.text.trim().length > 0);
   for (const inline of inlines) {
     if (inline.kind !== "text") {
       out.push(inline);
@@ -243,7 +246,13 @@ export function upgradeInlineList(
       } else {
         const validation = validateLatex(latex);
         if (validation.ok) {
-          const display = match.display && target === "rich";
+          const display =
+            match.display &&
+            target === "rich" &&
+            contentful.length === 1 &&
+            matches.length === 1 &&
+            !inline.text.slice(0, match.start).trim() &&
+            !inline.text.slice(match.end).trim();
           out.push({ kind: display ? "blockMath" : "inlineMath", latex, meta: meta(source) });
           mathCount += 1;
         } else {

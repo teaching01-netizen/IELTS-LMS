@@ -155,6 +155,67 @@ describe("SmartPastePlugin", () => {
     expect(json).toContain("blockMath");
     expect(json).not.toContain("\\(");
   });
+  it.each([
+    ["display math beside text", "$$x^2=4$$ now"],
+    ["a lone display equation", "\\[x^2=4\\]"],
+  ])("keeps %s on the current line", async (_label, pasted) => {
+    const editor = makeEditor();
+    try {
+      editor.commands.setContent({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Solve  for x" }] }],
+      });
+      editor.commands.setTextSelection(7);
+      const view = editor.view;
+      smartPlugin(view).props.handlePaste?.(
+        view as never,
+        pasteEvent([], null, pasted) as never,
+        null as never
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      const content = editor.getJSON().content ?? [];
+      expect(content).toHaveLength(1);
+      expect(content[0]?.type).toBe("paragraph");
+      expect(JSON.stringify(content)).toContain('"type":"inlineMath"');
+      expect(JSON.stringify(content)).not.toContain("blockMath");
+      expect(editor.getText()).toContain("for x");
+    } finally {
+      editor.destroy();
+    }
+  });
+  it("keeps equations copied from the editor when pasted back", async () => {
+    const editor = makeEditor();
+    try {
+      editor.commands.setContent({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "a " },
+              { type: "inlineMath", attrs: { latex: "x^2" } },
+              { type: "text", text: " b" },
+            ],
+          },
+          { type: "blockMath", attrs: { latex: "\\frac{a}{b}" } },
+        ],
+      });
+      const view = editor.view;
+      const { dom, text } = view.serializeForClipboard(view.state.doc.slice(0));
+      editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+      smartPlugin(view).props.handlePaste?.(
+        view as never,
+        pasteEvent([], dom.innerHTML, text) as never,
+        null as never
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      const json = JSON.stringify(editor.getJSON());
+      expect(json).toContain('"type":"inlineMath","attrs":{"latex":"x^2"}');
+      expect(json).toContain('"type":"blockMath","attrs":{"latex":"\\\\frac{a}{b}"}');
+    } finally {
+      editor.destroy();
+    }
+  });
   it("paste over selection replaces exactly the range", async () => {
     const editor = makeEditor();
     try {

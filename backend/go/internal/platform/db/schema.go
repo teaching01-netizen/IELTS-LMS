@@ -50,6 +50,13 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "users", Column: "organization_id"},
 	{Table: "student_heartbeat_events", Column: "mutation_id"},
 	{Table: "assessment_question_responses", Column: "client_write_id"},
+	// SAT Module 2 handoff (0074): the reconciler's activation predicate reads
+	// auto_start_at on every pass and finalization writes route_basis.
+	{Table: "assessment_module_attempts", Column: "auto_start_at"},
+	{Table: "exam_session_runtimes", Column: "sat_handoff_mode"},
+	{Table: "assessment_route_decisions", Column: "route_basis"},
+	{Table: "assessment_route_decisions", Column: "late_answer_count"},
+	{Table: "assessment_late_answer_evidence", Column: "response"},
 }
 
 // RequiredIndex is one (table, index) pair the runtime depends on.

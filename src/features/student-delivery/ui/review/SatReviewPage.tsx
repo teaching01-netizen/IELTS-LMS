@@ -21,7 +21,7 @@ export interface SatReviewPageProps {
   answeredCount: number;
   pendingSaveCount: number;
   saveFailure: string | null;
-  saveFailureKind: "offline" | "retryable" | "terminal" | "expired" | "superseded" | null;
+  saveFailureKind: "offline" | "retryable" | "terminal" | "expired" | "superseded" | "module_closed" | null;
   /** Current question index (0-based) for the "Back to question N" exit. */
   currentQuestionIndex?: number | undefined;
   timerVisible?: boolean | undefined;

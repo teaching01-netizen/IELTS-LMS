@@ -5,11 +5,13 @@ export function SatPreStartScreen({
   runtimeStatus,
   proctorStatus,
   stageReady,
+  startingModuleTwo = false,
 }: {
   reason: "waiting" | "loading";
   runtimeStatus: string;
   proctorStatus: string;
   stageReady: boolean;
+  startingModuleTwo?: boolean;
 }) {
   const isPaused = proctorStatus === "paused" || runtimeStatus === "paused";
   const title =
@@ -17,6 +19,8 @@ export function SatPreStartScreen({
       ? "Loading your SAT session"
       : isPaused
       ? "Your exam is paused"
+      : startingModuleTwo
+        ? "Module 2 is ready — starting"
       : runtimeStatus !== "live"
         ? "Waiting for your proctor…"
         : !stageReady
@@ -27,6 +31,8 @@ export function SatPreStartScreen({
       ? "Your session is loading. You do not need to do anything."
       : isPaused
       ? "Your answers are saved. Your exam will continue when the proctor resumes it."
+      : startingModuleTwo
+        ? "Stay on this screen. Module 2 opens automatically."
       : runtimeStatus !== "live"
         ? "Stay on this screen. Your first module opens automatically when the proctor starts the session."
         : !stageReady

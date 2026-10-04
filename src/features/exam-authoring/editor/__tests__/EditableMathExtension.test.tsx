@@ -4,6 +4,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { EditableInlineMath } from "../EditableMathExtension";
+import { insertEquationInPlace } from "../objectOps";
 
 vi.mock("mathlive", () => {
   class FakeMathfieldElement extends HTMLElement {
@@ -163,6 +164,36 @@ describe("EditableInlineMath keyboard exit behavior", () => {
     await waitFor(() => expect(document.querySelector("math-field")).toBeNull());
     await waitFor(() => expect(findInlineMathLatex(getEditor())).toBe("y^3"));
     await waitFor(() => expect(getEditor().state.selection.$from.nodeBefore?.type.name).toBe("inlineMath"));
+  });
+
+  it("removes an equation that is cleared and committed", async () => {
+    const { getEditor } = renderEditor();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Edit inline equation/ })).toBeVisible());
+    const field = await openMathEditor();
+    field.value = "  ";
+
+    fireEvent.keyDown(field, { key: "Enter" });
+
+    await waitFor(() => expect(findInlineMathLatex(getEditor())).toBeNull());
+    expect(getEditor().getText()).toBe("Before  after");
+  });
+
+  it("inserts an empty equation in place, opens it, and drops it on Escape", async () => {
+    const { getEditor } = renderEditor();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Edit inline equation/ })).toBeVisible());
+    act(() => {
+      getEditor().commands.setTextSelection(4);
+      insertEquationInPlace(getEditor());
+    });
+
+    await waitFor(() => expect(document.querySelector("math-field")).not.toBeNull());
+    const paragraph = getEditor().getJSON().content?.[0]?.content ?? [];
+    expect(paragraph.filter((node) => node.type === "inlineMath")).toHaveLength(2);
+
+    fireEvent.keyDown(document.querySelector("math-field") as TestMathfield, { key: "Escape" });
+
+    await waitFor(() => expect(document.querySelector("math-field")).toBeNull());
+    expect(getEditor().getJSON().content?.[0]?.content?.filter((node) => node.type === "inlineMath")).toHaveLength(1);
   });
 
   it("does not exit on vertical move-out events", async () => {

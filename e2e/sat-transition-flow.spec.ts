@@ -343,6 +343,92 @@ test.describe("SAT student transitions", () => {
       await studentContext.close();
     }
   });
+  for (const scenario of ["delayed final batch", "offline at zero", "reload during handoff"] as const) {
+    test(`client-start handoff survives ${scenario}`, async ({ browser, page }) => {
+      test.skip(process.env["SAT_HANDOFF_MODE"] !== "client_start", "Requires an opt-in client-start runtime.");
+      const session = await createRunningSatSession(browser, page, { label: scenario });
+      const student = session.studentPage;
+      const release = deferredSignal();
+      let sawRequest = false;
+      const runtimes = await queryDb<{ sat_handoff_mode: string }>("SELECT sat_handoff_mode FROM exam_session_runtimes WHERE schedule_id = ?", [session.scheduleId]);
+      expect(runtimes[0]!.sat_handoff_mode).toBe("client_start");
+      const bases = await queryDb<{ id: string; attempt_id: string; module_id: string }>(
+        `SELECT ma.id, ma.attempt_id, ma.module_id FROM assessment_module_attempts ma
+         JOIN student_attempts a ON a.id = ma.attempt_id WHERE a.schedule_id = ? AND ma.state = 'active'`,
+        [session.scheduleId],
+      );
+      expect(bases).toHaveLength(1);
+      const base = bases[0]!;
+      let finalQuestion: string | undefined;
+      try {
+        if (scenario === "delayed final batch") {
+          await student.route("**/responses:batch", async (route) => {
+            const command = route.request().postDataJSON().commands[0];
+            finalQuestion = command.questionId;
+            sawRequest = true;
+            await release.promise;
+            await route.continue();
+          });
+          await student.getByRole("radio").first().press("Space");
+          await expect.poll(() => sawRequest, { timeout: 30_000 }).toBe(true);
+          // Hold the final packet across the old three-second boundary.
+          await executeUpdate("UPDATE assessment_module_attempts SET started_at = TIMESTAMPADD(SECOND, -allocated_seconds - 4, NOW(6)) WHERE id = ?", [base.id]);
+          release.resolve();
+          await expect.poll(async () => (await queryDb<{ n: number }>(
+            "SELECT COUNT(*) AS n FROM attempt_responses_v2 WHERE attempt_id = ? AND question_id = ?", [base.attempt_id, finalQuestion!],
+          ))[0]!.n).toBe(1);
+          await student.unroute("**/responses:batch");
+        } else if (scenario === "offline at zero") {
+          await executeUpdate("UPDATE assessment_module_attempts SET allocated_seconds = 10, started_at = NOW(6) WHERE id = ?", [base.id]);
+          await student.reload({ waitUntil: "domcontentloaded" });
+          await expect(student.getByTestId("sat-exam-shell")).toBeVisible();
+          await session.studentContext.setOffline(true);
+          await student.getByRole("radio").first().press("Space");
+          await expect.poll(async () => (await queryDb<{ state: string }>(
+            "SELECT state FROM assessment_module_attempts WHERE id = ?", [base.id],
+          ))[0]!.state, { timeout: 40_000 }).toBe("locked");
+          await session.studentContext.setOffline(false);
+          await expect.poll(async () => (await queryDb<{ n: number }>(
+            "SELECT COUNT(*) AS n FROM assessment_late_answer_evidence WHERE attempt_id = ?", [base.attempt_id],
+          ))[0]!.n, { timeout: 30_000 }).toBe(1);
+        } else {
+          await student.route("**/modules/start", async (route) => {
+            sawRequest = true;
+            await release.promise;
+            await route.continue().catch(() => undefined); // Reload aborts the old request.
+          });
+          await executeUpdate("UPDATE assessment_module_attempts SET started_at = TIMESTAMPADD(SECOND, -allocated_seconds - 20, NOW(6)) WHERE id = ?", [base.id]);
+          await expect.poll(() => sawRequest, { timeout: 30_000 }).toBe(true);
+          const waiting = await queryDb<{ state: string; started_at: string | null }>(
+            "SELECT state, started_at FROM assessment_module_attempts WHERE attempt_id = ? AND module_id <> ?", [base.attempt_id, base.module_id],
+          );
+          expect(waiting).toHaveLength(1);
+          expect(waiting[0]).toMatchObject({ state: "not_started", started_at: null });
+          await student.reload({ waitUntil: "domcontentloaded" });
+          release.resolve();
+        }
+        await expect.poll(async () => (await queryDb<{ n: number }>(
+          "SELECT COUNT(*) AS n FROM assessment_module_attempts WHERE attempt_id = ? AND module_id <> ? AND state = 'active'", [base.attempt_id, base.module_id],
+        ))[0]!.n, { timeout: 45_000 }).toBe(1);
+        await expect(student.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 30_000 });
+        const branch = await queryDb<{ n: number }>("SELECT COUNT(*) AS n FROM assessment_route_decisions WHERE attempt_id = ?", [base.attempt_id]);
+        expect(branch[0]!.n).toBe(1);
+        const questions = await queryDb<{ id: string }>(
+          `SELECT eq.id FROM assessment_exam_questions eq JOIN assessment_module_attempts ma ON ma.module_id = eq.module_id
+           WHERE ma.attempt_id = ? AND ma.state = 'active' ORDER BY eq.display_order LIMIT 1`, [base.attempt_id],
+        );
+        const option = student.locator(`input[name="sat-answer-${questions[0]!.id}"]`).first();
+        await expect(option).toBeVisible({ timeout: 30_000 });
+        const saved = student.waitForResponse((response) => response.url().endsWith("/responses:batch") && response.status() === 200);
+        await option.press("Space");
+        await saved;
+      } finally {
+        release.resolve();
+        await session.studentContext.setOffline(false);
+        await session.studentContext.close();
+      }
+    });
+  }
 });
 
 async function reviewAndExpireCurrentModule(

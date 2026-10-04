@@ -52,6 +52,7 @@ import (
 	"example.com/ielts-proctoring/internal/student"
 	"example.com/ielts-proctoring/internal/terminalization"
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 )
 
@@ -610,7 +611,11 @@ func BuildRouter(app *App) http.Handler {
 		})
 		// SAT delivery reads (the polled state view, module entry probes) must
 		// not spend the writes budget that answer saves and submits draw from.
-		r.With(studentLimit).Route("/assessment-delivery", func(r chi.Router) {
+		// JSON is gzip-compressed: a whole room shares one uplink, and after the
+		// client_start handoff the StartModule content transfer is the only
+		// thing charged to the next module's clock. No route in this group
+		// streams or upgrades.
+		r.With(studentLimit, chimw.Compress(5, "application/json")).Route("/assessment-delivery", func(r chi.Router) {
 			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
 				authzRoute(r, "GET", "/schedules/{scheduleID}/state", deliveryStateHandler(app))
 				authzRoute(r, "GET", "/schedules/{scheduleID}/modules/{moduleID}/entry-state", deliveryModuleEntryStateHandler(app))
@@ -625,6 +630,8 @@ func BuildRouter(app *App) http.Handler {
 				authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/enter", deliveryEnterBreakHandler(app))
 				authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/visible", deliveryMarkBreakVisibleHandler(app))
 				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/submit", deliverySubmitModuleHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/close", deliveryCloseModuleHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/late-evidence", deliveryLateEvidenceHandler(app))
 				authzRoute(r, "POST", "/schedules/{scheduleID}/submit", deliverySubmitAssessmentHandler(app))
 			})
 		})

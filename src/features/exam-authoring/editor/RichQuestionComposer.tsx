@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import type { Extensions, JSONContent } from "@tiptap/core";
-import { EditorContent, useEditor, type Editor } from "@tiptap/react";
+import { Extension, type Extensions, type JSONContent } from "@tiptap/core";
+import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TableView } from "@tiptap/extension-table";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
@@ -21,6 +21,7 @@ import { AuthoringDialog } from "../ui/authoringPrimitives";
 import { authoringMotion } from "@/src/shared/motion";
 import { RichContentIdentity } from "./RichContentIdentityExtension";
 import { richTextSchemaExtensions } from "./schema/richTextSchema";
+import type { TextAlignment } from "../api/textAlignment";
 import { ComposerToolbar } from "./ComposerToolbar";
 import { type ComposerContext, type ImageDialogMode } from "./composerContext";
 import { EditorContextualSurfaces } from "./EditorContextualSurfaces";
@@ -94,6 +95,37 @@ const collaborativeBaseExtensions = [
   SatImage,
 ];
 
+// Word-processor alignment keys. Registered on every editor (the extension list
+// is built once), but only editors that offer block styles act on them.
+const TextAlignShortcuts = Extension.create<{ enabled: () => boolean }>({
+  name: "textAlignShortcuts",
+  addOptions() {
+    return { enabled: () => true };
+  },
+  addKeyboardShortcuts() {
+    const align = (alignment: TextAlignment) => () =>
+      this.options.enabled() && this.editor.commands.setTextAlign(alignment);
+    return {
+      "Mod-Shift-l": align("left"),
+      "Mod-Shift-e": align("center"),
+      "Mod-Shift-r": align("right"),
+      "Mod-Shift-j": align("justify"),
+    };
+  },
+});
+
+/** Live word count under a document editor, like a word processor's status bar. */
+function EditorWordCount({ editor }: { editor: Editor }) {
+  const words = useEditorState({
+    editor,
+    selector: ({ editor: e }) => {
+      const { doc } = e.state;
+      return doc.textBetween(0, doc.content.size, " ", " ").split(/\s+/).filter(Boolean).length;
+    },
+  });
+  return <div className="sat-rich-editor__footer">{words === 1 ? "1 word" : `${words} words`}</div>;
+}
+
 /**
  * The base extension list for a mode. Exported so a test can assert the
  * collaborative set really has no independent undo history, instead of trusting
@@ -104,9 +136,7 @@ export function composerBaseExtensions(collaborative: boolean): Extensions {
 }
 
 type Dialog = "math" | "image" | null;
-type MathDialogTarget =
-  | { mode: "insert"; display: boolean; latex: string }
-  | { mode: "edit"; display: boolean; latex: string; pos: number };
+type MathDialogTarget = { display: boolean; latex: string; pos: number };
 
 export interface RichComposerCapabilities {
   blockStyles: boolean;
@@ -173,6 +203,8 @@ export interface RichQuestionComposerProps {
    * default is a lazily created localStorage-backed store.
    */
   hintStore?: OneTimeHintStore | undefined;
+  /** Opens the workspace keyboard-shortcut sheet from the toolbar's `···` menu. */
+  onOpenShortcutHelp?: (() => void) | undefined;
   /**
    * Prompt co-editing binding, supplied by the co-edit package (the only
    * package that knows about Yjs and Hocuspocus). When present the composer:
@@ -237,6 +269,7 @@ export function RichQuestionComposer({
   smartPaste = true,
   onSmartPaste,
   hintStore,
+  onOpenShortcutHelp,
   collaboration,
 }: RichQuestionComposerProps) {
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -400,6 +433,7 @@ export function RichQuestionComposer({
         enabled: capabilities.equation,
         onConvert: () => publishFeedbackRef.current({ message: "Converted to equation", undoable: true }),
       }),
+      TextAlignShortcuts.configure({ enabled: () => capabilitiesRef.current.blockStyles }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable plugin identity; runtime opts flow via refs
     [collaborative, placeholder, collaborationExtensions]
@@ -558,8 +592,10 @@ export function RichQuestionComposer({
         }}
         onTableMutation={flashTableFeedback}
         onFeedback={publishFeedback}
+        onOpenShortcutHelp={onOpenShortcutHelp}
       />
       <EditorContent editor={editor} className="sat-rich-editor__content" />
+      {compact ? null : <EditorWordCount editor={editor} />}
       {/*
        * The contextual surfaces of the interaction model: text formatting next
        * to the text, object controls attached to the object. Neither joins the
@@ -582,19 +618,14 @@ export function RichQuestionComposer({
         resolveAsset={getAssessmentMediaAsset}
       />
       <AnimatePresence>
-        {dialog === "math" ? (
+        {dialog === "math" && dialogContext.kind === "equation" ? (
           <MathDialog
             editor={editor}
-            target={
-              dialogContext.kind === "equation"
-                ? {
-                    mode: "edit",
-                    display: dialogContext.display,
-                    latex: dialogContext.latex,
-                    pos: dialogContext.pos,
-                  }
-                : { mode: "insert", display: false, latex: "" }
-            }
+            target={{
+              display: dialogContext.display,
+              latex: dialogContext.latex,
+              pos: dialogContext.pos,
+            }}
             onClose={() => setDialog(null)}
           />
         ) : null}
@@ -640,7 +671,7 @@ function MathDialog({
 }) {
   const reduceMotion = useReducedMotion();
   const [latex, setLatex] = useState(target.latex);
-  const [display, setDisplay] = useState(target.display);
+  const { display } = target;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const equation = useMemo(() => {
     const expression = latex.trim();
@@ -663,7 +694,6 @@ function MathDialog({
     }
   }, [display, latex]);
   const canCommit = Boolean(equation.html && latex.trim());
-  const isEditing = target.mode === "edit";
 
   const insertSnippet = (snippet: string, selectToken?: string) => {
     const input = inputRef.current;
@@ -689,60 +719,19 @@ function MathDialog({
     if (!canCommit) return;
     const expression = latex.trim();
     const chain = editor.chain().focus();
-    if (target.mode === "edit") {
-      if (target.display) chain.updateBlockMath({ latex: expression, pos: target.pos }).run();
-      else chain.updateInlineMath({ latex: expression, pos: target.pos }).run();
-    } else if (display) {
-      chain.insertBlockMath({ latex: expression }).run();
-    } else {
-      chain.insertInlineMath({ latex: expression }).run();
-    }
+    if (display) chain.updateBlockMath({ latex: expression, pos: target.pos }).run();
+    else chain.updateInlineMath({ latex: expression, pos: target.pos }).run();
     onClose();
   };
 
-  const placementDescription = display
-    ? "Places the equation on its own line for larger or important expressions."
-    : "Keeps the equation in the flow of a sentence.";
-
   return (
     <DialogFrame
-      title={isEditing ? "Edit equation" : "Insert equation"}
+      title="Edit LaTeX"
       onClose={onClose}
       dismissOnBackdrop={false}
       widthClassName="max-w-xl"
     >
       <div className="space-y-5">
-        <div>
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <span className="text-[12px] font-semibold text-slate-700">Placement</span>
-            {isEditing ? (
-              <span className="text-[11px] text-slate-400">
-                Placement stays fixed while editing
-              </span>
-            ) : null}
-          </div>
-          <div
-            className="authoring-segmented inline-flex rounded-full p-1"
-            aria-label="Equation placement"
-          >
-            <EquationPlacementButton
-              active={!display}
-              disabled={isEditing && target.display}
-              onClick={() => setDisplay(false)}
-            >
-              Inline
-            </EquationPlacementButton>
-            <EquationPlacementButton
-              active={display}
-              disabled={isEditing && !target.display}
-              onClick={() => setDisplay(true)}
-            >
-              Display
-            </EquationPlacementButton>
-          </div>
-          <p className="mt-2 text-[11px] leading-5 text-slate-500">{placementDescription}</p>
-        </div>
-
         <div>
           <div className="mb-2 flex items-center justify-between gap-3">
             <span className="text-[12px] font-semibold text-slate-700">Quick build</span>
@@ -811,8 +800,7 @@ function MathDialog({
               </p>
             ) : (
               <p id="sat-equation-help" className="text-[11px] leading-5 text-slate-400">
-                Use the quick controls or type LaTeX directly. Press ⌘Return to{" "}
-                {isEditing ? "update" : "insert"}.
+                Use the quick controls or type LaTeX directly. Press ⌘Return to update.
               </p>
             )}
           </div>
@@ -851,7 +839,7 @@ function MathDialog({
 
         <div className="flex items-center justify-between border-t border-au-separator pt-4">
           <span className="hidden text-[11px] text-slate-400 sm:inline">
-            Esc to cancel · ⌘Return to {isEditing ? "update" : "insert"}
+            Esc to cancel · ⌘Return to update
           </span>
           <div className="ml-auto flex items-center gap-2">
             <button
@@ -869,38 +857,12 @@ function MathDialog({
               onClick={commitEquation}
               className="authoring-interactive h-10 rounded-full bg-au-accent px-4 text-[12px] font-semibold text-white shadow-sm hover:bg-au-accent-hover disabled:cursor-default disabled:opacity-35"
             >
-              {isEditing ? "Update equation" : "Insert equation"}
+              Update equation
             </motion.button>
           </div>
         </div>
       </div>
     </DialogFrame>
-  );
-}
-
-function EquationPlacementButton({
-  active,
-  disabled,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={`min-h-8 rounded-full px-3.5 text-[12px] font-semibold transition disabled:cursor-default disabled:opacity-30 ${
-        active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-900"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 

@@ -303,6 +303,31 @@ describe("useSatExamController adaptive handoff", () => {
     gatewayMocks.state.mockImplementation(() => new Promise(() => undefined));
   });
 
+  it("starts only the routed withheld branch with content after a handoff reload", async () => {
+    const active = handoffBootstrap();
+    const pending = handoffBootstrap();
+    pending.attempt.moduleAttempts = [expiredAttempt(M1_ID), {
+      ...pendingAttempt(HIGH_ID), autoStartAt: new Date(Date.parse(SERVER_NOW) + 60_000).toISOString(),
+    }];
+    pending.sections[0]!.modules = pending.sections[0]!.modules.map((module) => module.id === HIGH_ID
+      ? { ...module, questions: [], contentWithheld: true } : module);
+    gatewayMocks.bootstrap.mockResolvedValue(pending);
+    gatewayMocks.startModule.mockResolvedValue({
+      scheduleId: "schedule", attemptId: ATTEMPT_ID, moduleId: HIGH_ID,
+      moduleAttemptId: `ma-${HIGH_ID}`, moduleRevision: 2, state: "active",
+      timingModel: "sat_personal_v1", entryState: "none", entryGeneration: 0,
+      serverNow: SERVER_NOW, startedAt: SERVER_NOW, deadlineAt: activeAttempt(HIGH_ID).deadlineAt,
+      remainingSeconds: 1800, selectedSection: active.sections[0], controlEpoch: 1,
+      runtimeRevision: active.timing.runtimeRevision,
+    });
+    const hook = renderController([]);
+    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalled());
+    expect(gatewayMocks.startModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, expect.objectContaining({ moduleId: HIGH_ID, needContent: true }));
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(hook.result.current.stateModule?.questions.map((q) => q.examQuestionId)).toEqual(["high-q-1", "high-q-2"]);
+    hook.unmount();
+  });
+
   it("resumes into HIGH (never LOW) after a reload at the Module 1 boundary", async () => {
     const handoff = handoffBootstrap();
     gatewayMocks.bootstrap.mockResolvedValue(handoff);

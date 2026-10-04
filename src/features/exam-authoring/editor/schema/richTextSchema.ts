@@ -16,6 +16,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { TableKit, type TableOptions } from "@tiptap/extension-table";
 import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
+import { storedTextAlignment, type TextAlignment } from "../../api/textAlignment";
 import { RICH_TEXT_BLOCK_TYPES } from "../richContentIdentity";
 import { BlockMathNode, InlineMathNode } from "./mathNodes";
 import { SatImageNode } from "./imageNode";
@@ -62,6 +63,43 @@ const TableCellAlignment = Extension.create({
   },
 });
 
+declare module "@tiptap/core" {
+  interface Commands<ReturnType> {
+    textAlignment: {
+      /** Aligns every paragraph and heading the selection touches. */
+      setTextAlign: (alignment: TextAlignment) => ReturnType;
+    };
+  }
+}
+
+// offcut: smart paste drops block alignment (ingestion AST has none); pasted text lands left-aligned.
+const TextAlignment = Extension.create({
+  name: "textAlignment",
+  addGlobalAttributes() {
+    return [{
+      types: ["paragraph", "heading"],
+      attributes: {
+        textAlign: {
+          default: null,
+          parseHTML: (element) => storedTextAlignment(element.style.textAlign),
+          renderHTML: (attributes) => {
+            const alignment = storedTextAlignment(attributes["textAlign"]);
+            return alignment ? { style: `text-align: ${alignment}` } : {};
+          },
+        },
+      },
+    }];
+  },
+  addCommands() {
+    return {
+      setTextAlign: (alignment) => ({ commands }) => {
+        const textAlign = storedTextAlignment(alignment);
+        return ["paragraph", "heading"].map((type) => commands.updateAttributes(type, { textAlign })).some(Boolean);
+      },
+    };
+  },
+});
+
 export interface RichTextSchemaOptions {
   /**
    * Include StarterKit's undo/redo history. The collaborative editor MUST
@@ -95,11 +133,15 @@ export function richTextSchemaExtensions(options: RichTextSchemaOptions = {}): E
     StarterKit.configure({
       blockquote: false,
       heading: { levels: [2, 3] },
+      // SAT delivery never shows links (a student must not leave the exam), so
+      // the editor must not create them behind the author's back.
+      link: { autolink: false, linkOnPaste: false, openOnClick: false },
       ...(options.history === false ? { undoRedo: false } : {}),
     })
   );
   if (options.math !== false) extensions.push(InlineMathNode, BlockMathNode);
   extensions.push(
+    TextAlignment,
     TableCellAlignment,
     TableKit.configure({ table: {
       resizable: true,

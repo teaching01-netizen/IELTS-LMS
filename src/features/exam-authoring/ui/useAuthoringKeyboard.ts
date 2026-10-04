@@ -117,7 +117,9 @@ export function useAuthoringKeyboard(input: AuthoringKeyboardInput): void {
         onSaveNow();
         return;
       }
-      if (!editing && command && event.key === "/") {
+      // The cheat sheet documents editor formatting too, so it opens from
+      // inside a field as well; no editor binds Ctrl/⌘ /.
+      if (command && event.key === "/") {
         event.preventDefault();
         onOpenShortcutHelp();
         return;

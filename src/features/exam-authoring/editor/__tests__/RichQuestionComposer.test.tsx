@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Extensions } from "@tiptap/core";
 import { Editor } from "@tiptap/core";
@@ -44,13 +44,33 @@ describe("collaborative composer history", () => {
 
 describe("SAT rich question composer capabilities", () => {
   it("shows the standard control set with visible undo and redo", async () => {
-    // Count includes the style command, which reads as a control rather than a
-    // form field: 8 buttons, and no combobox anywhere in the chrome.
+    // The word-processor row: undo, redo, style, B I U S, x² x₂, two lists, two
+    // indents, align, equation, insert, and ···. The style command reads as a
+    // control rather than a form field: no combobox anywhere in the chrome.
     render(<RichQuestionComposer value={plainContentFromText("Hello")} onChange={vi.fn()} label="Question" />);
     const toolbar=await screen.findByRole("toolbar", {name:"Formatting tools"});
-    expect(within(toolbar).getAllByRole("button")).toHaveLength(8);
+    expect(within(toolbar).getAllByRole("button")).toHaveLength(17);
     expect(within(toolbar).getByRole("button", {name:"Text style"})).toBeInTheDocument();
     expect(within(toolbar).queryByRole("combobox")).toBeNull();
+  });
+  it("counts words under the document and keeps the count current", async () => {
+    render(<RichQuestionComposer value={plainContentFromText("Read the passage")} onChange={vi.fn()} label="Question" />);
+    const textbox = await screen.findByRole("textbox", { name: "Question" });
+    expect(await screen.findByText("3 words")).toBeInTheDocument();
+    const editor = (textbox as HTMLElement & { editor: Editor }).editor;
+    act(() => { editor.commands.insertContentAt(editor.state.doc.content.size - 1, " carefully"); });
+    expect(screen.getByText("4 words")).toBeInTheDocument();
+  });
+  it("aligns with the word-processor shortcut and never turns a typed URL into a link", async () => {
+    render(<RichQuestionComposer value={plainContentFromText("Stem")} onChange={vi.fn()} label="Question" />);
+    const textbox = await screen.findByRole("textbox", { name: "Question" });
+    const editor = (textbox as HTMLElement & { editor: Editor }).editor;
+    // jsdom is not a Mac, so Mod is Ctrl here.
+    fireEvent.keyDown(textbox, { key: "e", ctrlKey: true, shiftKey: true });
+    expect(editor.getJSON().content?.[0]?.attrs?.["textAlign"]).toBe("center");
+    // SAT delivery rejects links, so typing one must not create one.
+    act(() => { editor.chain().focus("end").insertContent(" see https://example.com").insertContent(" ").run(); });
+    expect(JSON.stringify(editor.getJSON())).not.toContain('"link"');
   });
   it("retains a persisted text-block identity when the editor loads", async () => {
     render(<RichQuestionComposer value={{ version: 2, nodes: [], document: {
@@ -75,10 +95,10 @@ describe("SAT rich question composer capabilities", () => {
     );
     expect(screen.getByRole("toolbar", { name: "Formatting tools" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Insert equation" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", {name:"More formatting"}));
-    expect(screen.getByRole("menuitem", {name:"Underline (⌘U)"})).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", {name:"Bulleted list"})).not.toBeInTheDocument();
-    fireEvent.keyDown(screen.getByRole("menu"), {key:"Escape"});
+    expect(screen.getByRole("button", {name:"Underline (⌘U)"})).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name:"Bulleted list (⇧⌘8)"})).not.toBeInTheDocument();
+    // A one-line answer has no use for a word count.
+    expect(document.querySelector(".sat-rich-editor__footer")).toBeNull();
     fireEvent.click(screen.getByRole("button", {name:"Insert content"}));
     for(const name of ["Insert image or graph", "Code block", "Insert table"]) expect(screen.getByRole("menuitem",{name})).toBeInTheDocument();
   });
@@ -280,8 +300,8 @@ describe("SAT rich question composer capabilities", () => {
     );
   });
 
-  it("applies the inline placement layout to the equation preview", async () => {
-    render(
+  it("inserts an equation in place instead of opening a LaTeX dialog", async () => {
+    const { container } = render(
       <RichQuestionComposer
         value={plainContentFromText("Question prompt")}
         onChange={vi.fn()}
@@ -294,9 +314,10 @@ describe("SAT rich question composer capabilities", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Insert equation" }));
 
-    const previewLabel = screen.getByText("Preview");
-    const preview = previewLabel.parentElement?.children[1];
-    expect(preview).toHaveClass("items-center", "justify-start");
+    await waitFor(() =>
+      expect(container.querySelector(".sat-editable-inline-math")).not.toBeNull()
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("waits for initial collaboration sync before mounting an editable prompt", async () => {

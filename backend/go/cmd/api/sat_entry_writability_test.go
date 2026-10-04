@@ -53,6 +53,7 @@ func satPersonalRuntime(mock sqlmock.Sqlmock, now time.Time) {
 			AddRow("rt-1", "live", "sat_personal_v1", nil, false))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(now))
+	mock.ExpectQuery("SELECT COALESCE\\(sat_handoff_mode").WithArgs("sched-1").WillReturnRows(sqlmock.NewRows([]string{"mode"}).AddRow("server_start"))
 }
 
 // satPersonalOwnerRow stages v2Resolver.Resolve for an active SAT module: the

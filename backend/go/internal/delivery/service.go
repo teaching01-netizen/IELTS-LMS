@@ -71,11 +71,23 @@ type Service struct {
 	// revision (see mediaIndexFor).
 	mediaIndexMu sync.Mutex
 	mediaIndex   map[mediaIndexKey]map[string]map[string]struct{}
+	// reconcileConcurrency bounds how many attempts one timeout sweep
+	// reconciles at once (<= 1 is sequential). Each attempt reconciles in its
+	// own lock-ordered transaction, exactly as concurrent request paths do.
+	reconcileConcurrency int
 }
 
 // NewService wires dependencies explicitly.
 func NewService(db *sql.DB, runner *tx.Runner) *Service {
 	return &Service{db: db, runner: runner}
+}
+
+// SetReconcileConcurrency bounds parallel attempts per timeout sweep. A
+// synchronized cohort otherwise finalizes one attempt at a time behind a
+// single worker connection. Values below 1 are sequential.
+func (s *Service) SetReconcileConcurrency(n int) *Service {
+	s.reconcileConcurrency = n
+	return s
 }
 
 // SetLive wires the live-update bus origin + hub explicitly. Callers (BuildApp)
@@ -168,6 +180,11 @@ type DeliveryModule struct {
 	Instructions        json.RawMessage     `json:"instructions"`
 	ToolPolicy          json.RawMessage     `json:"toolPolicy"`
 	Questions           []DeliveredQuestion `json:"questions"`
+	// ContentWithheld marks a module delivered as metadata only: its attempt
+	// is routed but its clock has not started (client_start handoff). The
+	// browser fetches the questions with StartModule(needContent), which
+	// starts the clock in the same request.
+	ContentWithheld bool `json:"contentWithheld,omitempty"`
 }
 
 // DeliverySection is one section with its modules.
@@ -208,10 +225,14 @@ type ModuleAttempt struct {
 	// Personal-model future-start offer. Generation fences stale start/enter
 	// requests; the offer is accepted only before startsAt, and enteredAt is
 	// acknowledged after the first active frame paints.
-	EntryGeneration          *int            `json:"entryGeneration,omitempty"`
-	EntryStartsAt            *time.Time      `json:"entryStartsAt,omitempty"`
-	EntryConfirmedAt         *time.Time      `json:"entryConfirmedAt,omitempty"`
-	EntryEnteredAt           *time.Time      `json:"entryEnteredAt,omitempty"`
+	EntryGeneration  *int       `json:"entryGeneration,omitempty"`
+	EntryStartsAt    *time.Time `json:"entryStartsAt,omitempty"`
+	EntryConfirmedAt *time.Time `json:"entryConfirmedAt,omitempty"`
+	EntryEnteredAt   *time.Time `json:"entryEnteredAt,omitempty"`
+	// AutoStartAt is set on a routed module waiting for the browser to start
+	// it (client_start handoff): the server starts its clock then if the
+	// browser never does.
+	AutoStartAt              *time.Time      `json:"autoStartAt,omitempty"`
 	CompletionReason         *string         `json:"completionReason"`
 	RawCorrect               *int64          `json:"rawCorrect"`
 	OperationalQuestionCount *int64          `json:"operationalQuestionCount"`
@@ -407,6 +428,7 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 		if err := s.loadPersonalEntryOffers(ctx, attemptID, moduleAttempts); err != nil {
 			return nil, err
 		}
+		sections = withholdAwaitingModuleContent(sections, moduleAttempts)
 	}
 	var personalBreaks []PersonalBreak
 	if examruntime.IsSatPersonal(timing.TimingModel) {
@@ -761,6 +783,49 @@ func deliverySectionsForAttempt(sections []DeliverySection, attempts []ModuleAtt
 	return deliverySectionsForOpenedModules(sections, opened)
 }
 
+// awaitingStart reports a routed module whose clock waits for the browser
+// (client_start): not started, with an auto-start backstop.
+func awaitingStart(attempt ModuleAttempt) bool {
+	return attempt.State == "not_started" && attempt.StartedAt == nil && attempt.AutoStartAt != nil
+}
+
+// withholdAwaitingModuleContent delivers awaiting modules as metadata only and
+// clears the pre-start deadline their row would otherwise project. A module's
+// questions reach the browser only through StartModule(needContent), the same
+// request that starts its clock, so no content is readable on time the module
+// has not been charged for. Returns a fresh tree (the version cache's shared
+// tree is never mutated); attempts are updated in place.
+func withholdAwaitingModuleContent(sections []DeliverySection, attempts []ModuleAttempt) []DeliverySection {
+	awaiting := make(map[string]bool)
+	for i := range attempts {
+		if !awaitingStart(attempts[i]) {
+			continue
+		}
+		awaiting[attempts[i].ModuleID] = true
+		attempts[i].DeadlineAt = nil
+		full := int64(attempts[i].AllocatedSeconds + attempts[i].ExtensionSeconds)
+		attempts[i].RemainingSeconds = &full
+	}
+	if len(awaiting) == 0 {
+		return sections
+	}
+	out := make([]DeliverySection, 0, len(sections))
+	for _, section := range sections {
+		modules := make([]DeliveryModule, 0, len(section.Modules))
+		for _, module := range section.Modules {
+			if awaiting[module.ID] {
+				module.Questions = []DeliveredQuestion{}
+				module.Instructions = nil
+				module.ContentWithheld = true
+			}
+			modules = append(modules, module)
+		}
+		section.Modules = modules
+		out = append(out, section)
+	}
+	return out
+}
+
 func filterModuleAttemptsForSections(attempts []ModuleAttempt, sections []DeliverySection) []ModuleAttempt {
 	allowed := make(map[string]bool)
 	for _, section := range sections {
@@ -865,9 +930,11 @@ func (s *Service) loadModuleAttempts(ctx context.Context, attemptID string, now 
 
 // loadPersonalEntryOffers projects future-start metadata only for the new SAT
 // personal model. Older cohort bootstraps retain their existing query shape.
+// It also carries auto_start_at: a routed module waiting for the browser to
+// start it under the client_start handoff.
 func (s *Service) loadPersonalEntryOffers(ctx context.Context, attemptID string, attempts []ModuleAttempt) error {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at FROM assessment_module_attempts WHERE attempt_id = ?",
+		"SELECT id, entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at, auto_start_at FROM assessment_module_attempts WHERE attempt_id = ?",
 		attemptID)
 	if err != nil {
 		return err
@@ -880,8 +947,8 @@ func (s *Service) loadPersonalEntryOffers(ctx context.Context, attemptID string,
 	for rows.Next() {
 		var id string
 		var generation int
-		var startsAt, confirmedAt, enteredAt sql.NullTime
-		if err := rows.Scan(&id, &generation, &startsAt, &confirmedAt, &enteredAt); err != nil {
+		var startsAt, confirmedAt, enteredAt, autoStartAt sql.NullTime
+		if err := rows.Scan(&id, &generation, &startsAt, &confirmedAt, &enteredAt, &autoStartAt); err != nil {
 			return err
 		}
 		index, ok := byID[id]
@@ -892,6 +959,7 @@ func (s *Service) loadPersonalEntryOffers(ctx context.Context, attemptID string,
 		attempts[index].EntryStartsAt = nullTime(startsAt)
 		attempts[index].EntryConfirmedAt = nullTime(confirmedAt)
 		attempts[index].EntryEnteredAt = nullTime(enteredAt)
+		attempts[index].AutoStartAt = nullTime(autoStartAt)
 	}
 	return rows.Err()
 }
@@ -1384,7 +1452,7 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 				return err
 			}
 			if gated.gate == timingGateLegacy || gated.gate == timingGatePersonal {
-				if err := ensureSaveModuleAdmitted(active, gated.now); err != nil {
+				if err := ensureSaveModuleAdmitted(active, gated.now, gated.closeWindow(), examQuestionID); err != nil {
 					return err
 				}
 			}
@@ -1754,6 +1822,16 @@ const (
 	timingGatePersonal
 )
 
+// closeWindow is the save-only window after a module deadline on this gate.
+// The personal model takes the configured handoff window; every other gate
+// keeps SATSaveGrace (attempts.ModuleCloseWindow is the single owner).
+func (g moduleTimingGateResult) closeWindow() time.Duration {
+	if g.gate == timingGatePersonal {
+		return attempts.ModuleCloseWindow(examruntime.TimingModelPersonal, g.handoffMode)
+	}
+	return attempts.SATSaveGrace
+}
+
 // moduleTimingGateResult is what moduleTimingGateTx hands back: the model-narrowed
 // gate, the authoritative in-tx instant, and — for a section-keyed cohort
 // runtime — the ROOM's window for the module being started.
@@ -1766,8 +1844,9 @@ const (
 // from started_at + allocated_seconds, so one rule owns the window and a late
 // joiner reads the clock the proctor and the run sheet are already on.
 type moduleTimingGateResult struct {
-	gate timingGate
-	now  time.Time
+	handoffMode string
+	gate        timingGate
+	now         time.Time
 	// roomWindowEnd is meaningful only alongside roomWindowKnown: a zero
 	// instant is a legitimate boundary (a window that has already elapsed).
 	roomWindowEnd   time.Time
@@ -1816,7 +1895,11 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		if runtimeStatus != "live" {
 			return moduleTimingGateResult{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT runtime is not live.")
 		}
-		return moduleTimingGateResult{gate: timingGatePersonal, now: now}, nil
+		var mode string
+		if err := t.QueryRowContext(ctx, "SELECT COALESCE(sat_handoff_mode, 'server_start') FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&mode); err != nil {
+			return moduleTimingGateResult{}, err
+		}
+		return moduleTimingGateResult{gate: timingGatePersonal, now: now, handoffMode: mode}, nil
 	case examruntime.TimingModelCohortStage:
 	case examruntime.TimingModelCohortSection:
 	default:
@@ -2041,17 +2124,26 @@ func pausedInt(v sql.NullInt64) int64 {
 
 // ensureSaveModuleAdmitted mirrors ensure_module_response_admitted: the
 // legacy personal module clock admits only active/review, started, unpaused
-// rows before their deadline, plus the same SATSaveGrace window the reconciler
-// and the V2 batch write gate use. A module is closed by the worker only after
-// deadline + grace, so a save admitted inside that window is never racing a
-// close that has already happened; both write paths must agree on the boundary
-// or one of them accepts what the other rejects for the same instant.
-func ensureSaveModuleAdmitted(m saveActiveModule, now time.Time) error {
+// rows before their deadline, plus the same close window the reconciler and
+// the V2 batch write gate use (attempts.ModuleCloseWindow). A module is closed
+// by the worker only after deadline + window, so a save admitted inside that
+// window is never racing a close that has already happened; both write paths
+// must agree on the boundary or one of them accepts what the other rejects for
+// the same instant.
+func ensureSaveModuleAdmitted(m saveActiveModule, now time.Time, closeWindow time.Duration, questionID ...string) error {
+	reject := func(reason, message string) error {
+		err := assessmentConflict(reason, message)
+		err.Details["moduleId"] = m.moduleID
+		if len(questionID) > 0 {
+			err.Details["questionId"] = questionID[0]
+		}
+		return err
+	}
 	if m.state != "active" && m.state != "review" {
-		return assessmentConflict("MODULE_NOT_ACTIVE", "The SAT module is not active.")
+		return reject("MODULE_CLOSED", "The SAT module is not active.")
 	}
 	if m.startedAt == nil {
-		return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT module has not been started.")
+		return reject("MODULE_NOT_STARTED", "The SAT module has not been started.")
 	}
 	if m.pausedAt != nil {
 		return assessmentConflict("RUNTIME_PAUSED", "The SAT module is paused by the proctor.")
@@ -2060,8 +2152,8 @@ func ensureSaveModuleAdmitted(m saveActiveModule, now time.Time) error {
 	if deadline == nil {
 		return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT module deadline is unavailable.")
 	}
-	if now.After(deadline.Add(attempts.SATSaveGrace)) {
-		return assessmentConflict("DEADLINE_EXPIRED", "The SAT module timer has expired.")
+	if now.After(deadline.Add(closeWindow)) {
+		return reject("MODULE_DEADLINE_EXPIRED", "The SAT module timer has expired.")
 	}
 	return nil
 }

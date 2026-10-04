@@ -1270,10 +1270,10 @@ math-field.sat-block-mathfield {
   text-align: center;
 }
 
+/* The keyboard toggle stays: it is the in-place way to build fractions, roots
+ * and symbols without knowing LaTeX. */
 math-field.sat-inline-mathfield::part(menu-toggle),
-math-field.sat-inline-mathfield::part(virtual-keyboard-toggle),
-math-field.sat-block-mathfield::part(menu-toggle),
-math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
+math-field.sat-block-mathfield::part(menu-toggle) {
   display: none;
 }
 
@@ -4201,12 +4201,16 @@ button:not(:disabled):active > .sat-annotation-press {
   box-shadow: 0 0 0 3px var(--color-au-accent-tint);
 }
 
+/* Like a word processor, the formatting row stays pinned while a long passage
+ * scrolls under it, for as long as its own editor is in view. It needs an
+ * opaque surface, or the text shows through it. */
 .sat-rich-editor__toolbar {
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 2;
   border-bottom: 1px solid var(--color-au-separator);
   border-radius: calc(var(--radius-au-lg) - 1px) calc(var(--radius-au-lg) - 1px) 0 0;
-  background: transparent;
+  background: var(--color-au-surface);
 }
 
 /* The table strip draws its own boundary, so the shared row must not draw a
@@ -4236,18 +4240,11 @@ button:not(:disabled):active > .sat-annotation-press {
   gap: 2px;
 }
 
-/* The contextual label ("Table", "Equation", "Image") names the set like a
- * toolbar section header: quiet, never competing with the content line. */
-/* Groups are separated by space, not by lines: style / format / math / insert /
- * more must read as distinct sets rather than one long string of controls. */
+/* Groups are split by a hairline, as in a word processor: history / style /
+ * marks / scripts / lists / alignment / insert must read as distinct sets
+ * rather than one long string of icons. */
 .sat-rich-editor__toolbar-group + .sat-rich-editor__toolbar-group {
-  margin-left: var(--spacing-2);
-}
-
-/* Recovery is parked at the far end of the row, past a hairline: always in the
- * same place, never in the way of the actions that change the content. */
-.sat-rich-editor__toolbar-group[data-toolbar-group="history"] {
-  margin-left: auto;
+  margin-left: var(--spacing-1);
   padding-left: var(--spacing-1);
   border-left: 1px solid var(--color-au-separator);
 }
@@ -4347,7 +4344,6 @@ button:not(:disabled):active > .sat-annotation-press {
   font-weight: 600;
 }
 
-.sat-rich-editor__toolbar-action,
 .sat-rich-editor__insert-trigger {
   display: inline-flex;
   align-items: center;
@@ -4465,6 +4461,29 @@ button:not(:disabled):active > .sat-annotation-press {
   padding: 18px 18px 20px;
 }
 
+/* A word count, as in a word processor: present, never louder than the text. */
+.sat-rich-editor__footer {
+  padding: 0 18px 10px;
+  color: var(--color-gray-500);
+  font-size: var(--text-au-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Insert menu symbols: the glyph sits in a fixed column so the names align. */
+.sat-rich-editor__symbol-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.sat-rich-editor__symbol-glyph {
+  inline-size: 3.25rem;
+  color: var(--color-gray-900);
+  font-size: 1rem;
+  text-align: center;
+}
+
 .sat-rich-editor[data-compact="true"] .sat-rich-editor__content {
   padding: var(--spacing-2) var(--spacing-3);
 }
@@ -4558,6 +4577,43 @@ button:not(:disabled):active > .sat-annotation-press {
 .sat-rich-editor__input li {
   margin-block: var(--spacing-1);
   padding-left: var(--spacing-1);
+}
+
+/* Lists, rules, and blank lines read the same while authoring and in the
+ * student exam. Tailwind's preflight strips list markers, so both surfaces
+ * restore them here, with a different marker at each nesting level. */
+:is(.sat-rich-editor__input, .structured-content-renderer) ul { list-style-type: disc; }
+:is(.sat-rich-editor__input, .structured-content-renderer) ul ul { list-style-type: circle; }
+:is(.sat-rich-editor__input, .structured-content-renderer) ul ul ul { list-style-type: square; }
+:is(.sat-rich-editor__input, .structured-content-renderer) ol { list-style-type: decimal; }
+:is(.sat-rich-editor__input, .structured-content-renderer) ol ol { list-style-type: lower-alpha; }
+:is(.sat-rich-editor__input, .structured-content-renderer) ol ol ol { list-style-type: lower-roman; }
+
+:is(.sat-rich-editor__input, .structured-content-renderer) li > p {
+  margin-block: 0;
+}
+
+:is(.sat-rich-editor__input, .structured-content-renderer) hr {
+  margin-block: var(--spacing-5);
+  border: 0;
+  /* currentColor keeps the rule visible in every student contrast theme. */
+  border-top: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.sat-rich-editor__input hr.ProseMirror-selectednode {
+  outline: 2px solid var(--color-au-accent);
+  outline-offset: 4px;
+}
+
+/* A wide table scrolls inside its region rather than widening the pane. */
+.sat-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.sat-table-scroll:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 .sat-rich-editor__input table {
@@ -4834,7 +4890,8 @@ button:not(:disabled):active > .sat-annotation-press {
 }
 
 @media (max-width: 640px) {
-  .sat-rich-editor__toolbar-group[data-toolbar-group="history"] {
+  /* A wrapped row would start its lines with a stray hairline. */
+  .sat-rich-editor__toolbar-group + .sat-rich-editor__toolbar-group {
     margin-left: 0;
     border-left: 0;
     padding-left: 0;
@@ -4845,8 +4902,7 @@ button:not(:disabled):active > .sat-annotation-press {
   }
 
   /* Meaning survives the collapse: the trigger keeps its accessible name and
-   * its tooltip, and only the visible word goes. Labels that carry meaning a
-   * "+" cannot (Math) are never collapsed. */
+   * its tooltip, and only the visible word ("Insert") goes. */
   .sat-rich-editor__toolbar-label {
     display: none;
   }

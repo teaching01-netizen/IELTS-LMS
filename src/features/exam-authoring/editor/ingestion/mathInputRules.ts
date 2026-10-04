@@ -2,8 +2,9 @@
  * Phase 03 — typing-time LaTeX input rules (explicit delimiters only).
  *
  * Paren \\(..\\) -> inlineMath, bracket \\[..\\] + double-dollar $$..$$ ->
- * blockMath. Each find regex is anchored to the last ~300 chars before the
- * cursor by the InputRule engine (find runs on the current textblock tail):
+ * blockMath when alone on the line, otherwise inlineMath. Each find regex is
+ * anchored to the last ~300 chars before the cursor by the InputRule engine
+ * (find runs on the current textblock tail):
  * O(candidate window), never O(document). A rule inserts only when
  * validateLatex passes at keystroke time; otherwise it leaves typed text.
  * No single-dollar rule (currency guard).
@@ -40,15 +41,23 @@ function inlineRule(
 ): InputRule {
   return new InputRule({
     find,
-    handler: ({ range, match, chain }) => {
+    handler: ({ state, range, match, chain }) => {
       const latex = (match[1] ?? "").trim();
       if (!tryLatex(latex)) return null;
+      // Display delimiters make a block only on an otherwise empty line;
+      // mid-sentence they stay inline so typing never splits the line.
+      const $from = state.doc.resolve(range.from);
+      const type =
+        nodeName === "blockMath" && (range.from !== $from.start() || range.to !== $from.end())
+          ? "inlineMath"
+          : nodeName;
       chain()
         .deleteRange(range)
-        .insertContentAt(range.from, { type: nodeName, attrs: { latex } })
+        .insertContentAt(range.from, { type, attrs: { latex } })
         .run();
-      options.onConvert?.(latex, nodeName);
-      return null;
+      options.onConvert?.(latex, type);
+      // Not null: Tiptap discards the transaction when a handler returns null.
+      return undefined;
     },
   });
 }

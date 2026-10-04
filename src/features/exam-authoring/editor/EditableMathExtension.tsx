@@ -5,6 +5,8 @@ import katex from "katex";
 import type { MathfieldElement } from "mathlive";
 import "mathlive/fonts.css";
 import { logger } from "../../../utils/logger";
+import { repositionObjectBubble } from "./anchoredSurfaces";
+import { deleteObjectAt } from "./objectOps";
 import { BlockMathNode, InlineMathNode, mathOptions } from "./schema/mathNodes";
 
 let mathLiveModule: Promise<typeof import("mathlive")> | null = null;
@@ -30,7 +32,15 @@ function EditableMathNode({ editor, getPos, node, updateAttributes, selected }: 
   const [editing, setEditing] = useState(false);
   const hostRef = useRef<HTMLSpanElement | HTMLDivElement>(null);
   const cancelledRef = useRef(false);
-  const rendered = useMemo(() => renderEquation(latex, isBlock), [isBlock, latex]);
+  // React 19 rewrites innerHTML whenever this object changes identity, which
+  // swaps the KaTeX DOM mid-click (on selection) and swallows the click.
+  const rendered = useMemo(() => ({ __html: renderEquation(latex, isBlock) }), [isBlock, latex]);
+
+  // A freshly inserted (empty) equation opens straight into the visual editor.
+  // Only the inserting client holds the node selection, so collaborators don't.
+  useEffect(() => {
+    if (selected && latex === "") setEditing(true);
+  }, [selected, latex]);
 
   useEffect(() => {
     if (!editing || !hostRef.current) return;
@@ -49,22 +59,26 @@ function EditableMathNode({ editor, getPos, node, updateAttributes, selected }: 
       if (finished) return;
       finished = true;
 
-      if (commit && field) {
-        const nextLatex = field.value.trim();
-        if (nextLatex.length > 0 && nextLatex !== latex) {
-          updateAttributes({ latex: nextLatex });
-        }
+      const nextLatex = commit && field ? field.value.trim() : latex;
+      const position = getPos();
+      if (!nextLatex && typeof position === "number") {
+        // An equation left empty (cleared, or inserted then abandoned) is
+        // removed instead of lingering invisibly or keeping a stale value.
+        setEditing(false);
+        if (exitDirection) deleteObjectAt(editor, position);
+        else editor.view.dispatch(editor.state.tr.delete(position, position + node.nodeSize));
+        return;
       }
+      if (nextLatex !== latex) updateAttributes({ latex: nextLatex });
 
       setEditing(false);
 
       if (!exitDirection) return;
-      const nodePosition = getPos();
       const requestedPosition =
-        typeof nodePosition === "number"
+        typeof position === "number"
           ? exitDirection === "backward"
-            ? nodePosition
-            : nodePosition + node.nodeSize
+            ? position
+            : position + node.nodeSize
           : null;
       const bias = exitDirection === "backward" ? -1 : 1;
 
@@ -118,7 +132,13 @@ function EditableMathNode({ editor, getPos, node, updateAttributes, selected }: 
           finish(true, event.detail.direction);
         };
         const stop = (event: Event) => event.stopPropagation();
-        const commit = () => finish(!cancelledRef.current);
+        // MathLive's own chrome (the virtual keyboard toggle) blurs and refocuses
+        // the field, so only focus that is still elsewhere a tick later commits.
+        const commit = () => {
+          window.setTimeout(() => {
+            if (!disposed && document.activeElement !== field) finish(!cancelledRef.current);
+          }, 0);
+        };
 
         field.addEventListener("keydown", onKeyDown);
         field.addEventListener("move-out", onMoveOut);
@@ -133,6 +153,7 @@ function EditableMathNode({ editor, getPos, node, updateAttributes, selected }: 
           if (!field) return;
           field.focus();
           field.position = field.lastOffset;
+          repositionObjectBubble(editor);
         });
 
         const currentField = field;
@@ -195,7 +216,7 @@ function EditableMathNode({ editor, getPos, node, updateAttributes, selected }: 
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") beginEditing(event);
             }}
-            dangerouslySetInnerHTML={{ __html: rendered }}
+            dangerouslySetInnerHTML={rendered}
           />
         )}
       </NodeViewWrapper>
@@ -220,7 +241,7 @@ function EditableMathNode({ editor, getPos, node, updateAttributes, selected }: 
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") beginEditing(event);
           }}
-          dangerouslySetInnerHTML={{ __html: rendered }}
+          dangerouslySetInnerHTML={rendered}
         />
       )}
     </NodeViewWrapper>
@@ -231,13 +252,21 @@ function EditableMathNode({ editor, getPos, node, updateAttributes, selected }: 
 // with a node view. Node name, attributes, and schema rules stay identical to
 // what the Hocuspocus co-editing service converts, which is what makes a
 // round trip lossless.
+// Typed delimiters are owned by satMathInputRules (validated, capability-gated),
+// so the inherited Tiptap input rules are switched off.
 export const EditableInlineMath = InlineMathNode.extend({
+  addInputRules() {
+    return [];
+  },
   addNodeView() {
     return ReactNodeViewRenderer(EditableMathNode, { as: "span" });
   },
 });
 
 export const EditableBlockMath = BlockMathNode.extend({
+  addInputRules() {
+    return [];
+  },
   addNodeView() {
     return ReactNodeViewRenderer(EditableMathNode, { as: "div" });
   },

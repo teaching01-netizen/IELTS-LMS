@@ -3,11 +3,13 @@ package delivery
 import (
 	"context"
 	"errors"
+	"fmt"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
-
-	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -21,7 +23,7 @@ func TestReconcileTimeoutCandidateBatchContinuesAfterFailure(t *testing.T) {
 	}
 
 	changed, err := reconcileTimeoutCandidateBatch(
-		context.Background(), candidates, time.Now(),
+		context.Background(), candidates, time.Now(), 1,
 		func(_ context.Context, scheduleID, attemptID string, _ time.Time) (bool, error) {
 			visited = append(visited, scheduleID+":"+attemptID)
 			if attemptID == "att-bad" {
@@ -39,6 +41,51 @@ func TestReconcileTimeoutCandidateBatchContinuesAfterFailure(t *testing.T) {
 	want := []string{"sched-1:att-bad", "sched-2:att-good"}
 	if !reflect.DeepEqual(visited, want) {
 		t.Fatalf("visited candidates = %v, want %v", visited, want)
+	}
+}
+
+// A synchronized cohort must not finalize one attempt at a time: with
+// concurrency N the sweep overlaps up to N attempts, never more, still visits
+// every candidate, and still reports the first failure without stopping.
+func TestReconcileTimeoutCandidateBatchBoundsParallelism(t *testing.T) {
+	const concurrency = 4
+	candidates := make([]timeoutCandidate, 40)
+	for i := range candidates {
+		candidates[i] = timeoutCandidate{attemptID: fmt.Sprintf("att-%02d", i), scheduleID: "sched-1"}
+	}
+	failure := errors.New("one attempt failed")
+	var inFlight, peak atomic.Int32
+	var visited sync.Map
+	changed, err := reconcileTimeoutCandidateBatch(context.Background(), candidates, time.Now(), concurrency,
+		func(_ context.Context, _, attemptID string, _ time.Time) (bool, error) {
+			now := inFlight.Add(1)
+			for {
+				seen := peak.Load()
+				if now <= seen || peak.CompareAndSwap(seen, now) {
+					break
+				}
+			}
+			time.Sleep(5 * time.Millisecond)
+			inFlight.Add(-1)
+			visited.Store(attemptID, true)
+			if attemptID == "att-07" {
+				return false, failure
+			}
+			return true, nil
+		})
+	if !errors.Is(err, failure) {
+		t.Fatalf("batch error = %v, want the failing attempt's error", err)
+	}
+	if changed != int64(len(candidates)-1) {
+		t.Fatalf("changed = %d, want %d", changed, len(candidates)-1)
+	}
+	if got := peak.Load(); got < 2 || got > concurrency {
+		t.Fatalf("peak in-flight reconciles = %d, want overlap bounded by %d", got, concurrency)
+	}
+	for _, c := range candidates {
+		if _, ok := visited.Load(c.attemptID); !ok {
+			t.Fatalf("candidate %s was never reconciled", c.attemptID)
+		}
 	}
 }
 
@@ -76,7 +123,7 @@ func TestTimeoutSweepAdvancesPastFailedOldestAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	failed := errors.New("permanent attempt failure")
-	_, err = reconcileTimeoutCandidateBatch(context.Background(), first, time.Now(),
+	_, err = reconcileTimeoutCandidateBatch(context.Background(), first, time.Now(), 1,
 		func(context.Context, string, string, time.Time) (bool, error) { return false, failed })
 	if !errors.Is(err, failed) {
 		t.Fatalf("first batch error = %v", err)
@@ -88,7 +135,7 @@ func TestTimeoutSweepAdvancesPastFailedOldestAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	var visited string
-	changed, err := reconcileTimeoutCandidateBatch(context.Background(), second, time.Now(),
+	changed, err := reconcileTimeoutCandidateBatch(context.Background(), second, time.Now(), 1,
 		func(_ context.Context, _, attemptID string, _ time.Time) (bool, error) {
 			visited = attemptID
 			return true, nil

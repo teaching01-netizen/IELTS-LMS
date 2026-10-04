@@ -447,6 +447,11 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 	if err != nil {
 		return attempts.RuntimeGate{}, err
 	}
+	if timingModel.String == runtime.TimingModelPersonal {
+		if err := q.QueryRowContext(ctx, "SELECT COALESCE(sat_handoff_mode, 'server_start') FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&gate.HandoffMode); err != nil {
+			return attempts.RuntimeGate{}, err
+		}
+	}
 	gate.Now = now
 	if timingModel.Valid {
 		gate.TimingModel = timingModel.String
