@@ -66,20 +66,27 @@ export function SatSessionContextBar({
         {runtime.isOverrun ? <span className="sat-room__context-overrun">Overrun · review extensions before ending</span> : null}
       </div>
       <div className="sat-room__context-counts" aria-label="Student counts">
-        <span>{joinedCount} joined</span>
-        <span>{activeCount} active</span>
+        <ContextStat value={joinedCount} label="Joined" />
+        <ContextStat value={activeCount} label="Active" />
         {attentionCount > 0 ? (
-          <button type="button" aria-label={`Needs attention ${attentionCount}`} onClick={onNeedsAttention}>
-            {attentionCount} need{attentionCount === 1 ? 's' : ''} attention
+          <button type="button" className="sat-room__context-stat is-warning" aria-label={`Needs attention ${attentionCount}`} onClick={onNeedsAttention}>
+            <strong>{attentionCount}</strong> Needs attention
           </button>
-        ) : <span>0 need attention</span>}
-        <span>{openAlerts} open alert{openAlerts === 1 ? '' : 's'}</span>
+        ) : <ContextStat value={0} label="Needs attention" />}
+        <ContextStat value={openAlerts} label={openAlerts === 1 ? 'Open alert' : 'Open alerts'} warning={openAlerts > 0} />
       </div>
       <div className="sat-room__context-health" aria-label="Session health">
-        <span className={isStale ? 'is-stale' : ''}>{isStale ? 'Reconnecting' : 'Online'}</span>
-        <span>Server clock</span>
+        <span className={isStale ? 'is-stale' : ''}>{isStale ? 'Reconnecting' : 'Live data'}</span>
         <span>Updated {lastUpdatedLabel}</span>
       </div>
     </section>
+  );
+}
+
+function ContextStat({ value, label, warning = false }: { value: number; label: string; warning?: boolean }) {
+  return (
+    <span className={`sat-room__context-stat${warning ? ' is-warning' : value === 0 ? ' is-zero' : ''}`}>
+      <strong>{value}</strong> {label}
+    </span>
   );
 }

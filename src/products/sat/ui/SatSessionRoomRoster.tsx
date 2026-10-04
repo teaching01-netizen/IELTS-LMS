@@ -18,6 +18,7 @@ export function SatSessionRoomRoster({
   onAttentionFilterChange,
   attentionCount,
   onSelect,
+  onShareLink,
 }: {
   students: StudentSession[];
   visibleStudents: StudentSession[];
@@ -30,6 +31,7 @@ export function SatSessionRoomRoster({
   onAttentionFilterChange: (filter: AttentionFilter) => void;
   attentionCount: number;
   onSelect: (studentId: string, trigger: HTMLElement) => void;
+  onShareLink?: (() => void) | undefined;
 }) {
   const activeStudent = visibleStudents.find((student) => student.id === selectedStudent?.id) ?? null;
 
@@ -115,6 +117,15 @@ export function SatSessionRoomRoster({
             <p className="mt-1.5 text-[12px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
               {students.length ? 'Change the search or the filter.' : 'Students appear here the moment they open their exam link.'}
             </p>
+            {!students.length && onShareLink ? (
+              <button
+                type="button"
+                onClick={onShareLink}
+                className="mt-4 min-h-10 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3.5 text-[12px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+              >
+                Share student link
+              </button>
+            ) : null}
           </div>
         )}
       </div>

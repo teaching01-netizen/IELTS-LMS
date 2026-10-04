@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, UserRound } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, QrCode, UserRound } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { SatPageError, SatPageLoading } from '../ui/SatPage';
 import { logError, logInfo } from '../../../shared/observability/errorLogger';
@@ -15,6 +15,7 @@ import { SatSessionRoomInspector } from '../ui/SatSessionRoomInspector';
 import { SatSessionRoomRoster } from '../ui/SatSessionRoomRoster';
 import { SatSessionRoomTimeline } from '../ui/SatSessionRoomTimeline';
 import { StudentDetail } from '../ui/SatSessionRoomStudents';
+import { SatStudentLinkCard, SatStudentLinkDialog, SatStudentLinkPresent } from '../ui/SatStudentLink';
 import { buildSatRunSheet, formatRunSheetRemaining, satRunSheetCurrentRows } from '../ui/sessionRunSheet';
 import { isSatStageLive } from '../ui/satStage';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
@@ -33,6 +34,8 @@ export function SatSessionRoomRoute() {
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [confirm, setConfirm] = useState<SatSessionRoomConfirmation | null>(null);
   const [attentionFilter, setAttentionFilter] = useState<'all' | 'needs'>('all');
+  const [shareOpen, setShareOpen] = useState(false);
+  const [presentOpen, setPresentOpen] = useState(false);
   const messageRef = useRef(message);
   const inspectorTriggerRef = useRef<HTMLElement | null>(null);
   messageRef.current = message;
@@ -240,6 +243,7 @@ export function SatSessionRoomRoute() {
                     : 'This session was cancelled. The run sheet above shows the timeline recorded so far.'}
             </p>
             {runtimeStatus === 'not_started' ? <p className="sat-room__empty-hint">{students.length ? `${students.length} student${students.length === 1 ? '' : 's'} already connected.` : 'No students have joined yet.'}</p> : null}
+            {runtimeStatus === 'not_started' ? <button type="button" onClick={() => setShareOpen(true)} className="mt-4 min-h-10 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3.5 text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">Share student link</button> : null}
           </div>
         </div>
       );
@@ -257,6 +261,7 @@ export function SatSessionRoomRoute() {
           <div className="h-5 w-px bg-[var(--sat-staff-border-input,rgba(0,0,0,0.075))]" aria-hidden="true" />
           <div className="sat-room__title"><div className="flex items-center gap-2"><h1>{schedule.examTitle}</h1><SatStatusPill tone={roomStatusTone(runtime.status)} pulse={runtime.status === 'live'}>{runtimeLabel(runtime.status)}</SatStatusPill></div><p className="sat-room__cohort">{schedule.cohortName} · {satPublishScopeCopy(schedule.publishScope ?? 'full')}</p></div>
           {controller.error ? <span className="inline-flex items-center gap-1 text-[11px] font-semibold tabular-nums text-[var(--sat-staff-warning-text,#92400e)]"><AlertTriangle size={11} aria-hidden="true" />Reconnecting</span> : null}
+          {roomMode !== 'review' ? <button type="button" onClick={() => setShareOpen(true)} className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><QrCode size={14} aria-hidden="true" />Student link</button> : null}
           <SatSessionControls runtimeStatus={runtime.status} pendingActions={pendingActions} blocked={isStale} onStart={() => void run('start', () => controller.handleStartScheduledSession(scheduleId), 'Session started.')} onPause={() => void run('pause', () => controller.handlePauseCohort(scheduleId), 'Session paused.')} onResume={() => void run('resume', () => controller.handleResumeCohort(scheduleId), 'Session resumed.')} onExtend={(minutes) => { if (isStale) return; setConfirm({ kind: 'extend-session', minutes, stage: currentStage, remainingLabel: formatRunSheetRemaining(cohortStageRemainingSeconds) }); }} onComplete={() => setConfirm({ kind: 'complete' })} />
         </div>
       </header>
@@ -289,6 +294,7 @@ export function SatSessionRoomRoute() {
           onAttentionFilterChange={setAttentionFilter}
           attentionCount={attentionCount}
           onSelect={selectStudent}
+          onShareLink={roomMode === 'review' ? undefined : () => setShareOpen(true)}
         />
 
         <SatSessionRoomTimeline
@@ -300,6 +306,9 @@ export function SatSessionRoomRoute() {
           sessionLive={sessionLive}
           currentStage={currentStage}
           remainingSeconds={cohortStageRemainingSeconds}
+          studentEntry={roomMode === 'prestart' ? (
+            <SatStudentLinkCard scheduleId={scheduleId} cohortName={schedule.cohortName} joinedCount={students.length} onOpenShare={() => setShareOpen(true)} onPresent={() => setPresentOpen(true)} />
+          ) : undefined}
         />
 
         <SatSessionRoomInspector
@@ -315,6 +324,23 @@ export function SatSessionRoomRoute() {
         confirm={confirm}
         onCancel={() => setConfirm(null)}
         onConfirm={confirmCurrentAction}
+      />
+
+      <SatStudentLinkDialog
+        open={shareOpen}
+        scheduleId={scheduleId}
+        cohortName={schedule.cohortName}
+        onClose={() => setShareOpen(false)}
+        onPresent={() => { setShareOpen(false); setPresentOpen(true); }}
+      />
+      <SatStudentLinkPresent
+        open={presentOpen}
+        scheduleId={scheduleId}
+        examTitle={schedule.examTitle}
+        cohortName={schedule.cohortName}
+        joinedCount={students.length}
+        activeCount={activeStudentCount}
+        onClose={() => setPresentOpen(false)}
       />
     </div>
   );

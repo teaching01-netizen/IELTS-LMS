@@ -10,6 +10,7 @@ vi.mock('../../../../features/proctor/hooks/useProctorRouteController', () => ({
 vi.mock('../../../../features/auth/authSession', () => ({
   useAuthSession: () => ({ session: { user: { displayName: 'SAT Proctor', email: 'p@example.com' } } }),
 }));
+vi.mock('qrcode', () => ({ toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,QR') }));
 vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => ({
   examDeliveryService: {
     extendStudentAttempt: vi.fn(), warnStudent: vi.fn(), pauseStudentAttempt: vi.fn(), resumeStudentAttempt: vi.fn(), terminateStudentAttempt: vi.fn(),
@@ -145,6 +146,49 @@ describe('SatSessionRoomRoute', () => {
     expect(screen.getByText('Section 2 · Math')).toBeInTheDocument();
   });
 
+  it('gives staff the student link and QR before the session starts', async () => {
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [{ ...runtime, status: 'not_started', actualStartAt: null, currentSectionKey: null, sections: [] }], sessions: [], alerts: [], error: null, isLoading: false,
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+
+    const url = window.location.origin + '/student/sched-1';
+    const card = document.querySelector<HTMLElement>('[data-sat-room-student-link]');
+    expect(card).toHaveTextContent(url);
+    expect(card).toHaveTextContent('No students have joined yet.');
+    expect(await within(card as HTMLElement).findByAltText('QR code for Morning')).toHaveAttribute('src', 'data:image/png;base64,QR');
+    // Empty roster and empty inspector both lead to the link instead of a dead end.
+    expect(screen.getAllByRole('button', { name: 'Share student link' })).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Student link' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Morning' });
+    expect(dialog).toHaveTextContent(url);
+    expect(await within(dialog).findByRole('link', { name: 'Download QR' })).toHaveAttribute('download', 'sat-morning-qr.png');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Present' }));
+    const presenter = await screen.findByRole('dialog', { name: 'Morning' });
+    expect(presenter).toHaveTextContent('Scan to join');
+    expect(presenter).toHaveTextContent('0Joined');
+  });
+
+  it('keeps the student link in the header while live and drops it in review', () => {
+    const view = render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.getByRole('button', { name: 'Student link' })).toBeInTheDocument();
+    expect(document.querySelector('[data-sat-room-student-link]')).toBeNull();
+    view.unmount();
+
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [{ ...runtime, status: 'completed', actualEndAt: '2026-08-30T04:30:00Z' }], sessions: [], alerts: [], error: null, isLoading: false,
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: 'Student link' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Share student link' })).not.toBeInTheDocument();
+  });
+
   it('starts a prestart session through the existing controller action', async () => {
     const startSession = vi.fn().mockResolvedValue(undefined);
     const prestartRuntime = { ...runtime, status: 'not_started', actualStartAt: null, currentSectionKey: null, sections: [] };
@@ -209,8 +253,8 @@ describe('SatSessionRoomRoute', () => {
     expect(detailValue('Section clock')).toBe('25:00');
 
     // Session-level facts now have one home in the compact context bar.
-    expect(document.querySelector('[data-sat-room-context]')).toHaveTextContent('Online');
-    expect(document.querySelector('[data-sat-room-context]')).toHaveTextContent('Server clock');
+    expect(document.querySelector('[data-sat-room-context]')).toHaveTextContent('Live data');
+    expect(document.querySelector('[data-sat-room-context]')).not.toHaveTextContent('Server clock');
   });
 
   // The projection's module clock is absent until a module is started, and the
@@ -297,8 +341,9 @@ describe('SatSessionRoomRoute', () => {
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    expect(screen.getByText('0 need attention')).toBeInTheDocument();
-    expect(document.querySelector('[data-sat-room-context]')).toHaveTextContent('1 open alert');
+    const counts = within(screen.getByLabelText('Student counts'));
+    expect(counts.getByText(/Needs attention/)).toHaveTextContent('0 Needs attention');
+    expect(counts.getByText(/Open alert/)).toHaveTextContent('1 Open alert');
   });
 
   it('previews a warning with exact copy before sending', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import { SatEyebrow } from './SatPage';
 import { SatRunSheet } from './SatRunSheet';
@@ -18,6 +18,7 @@ export function SatSessionRoomTimeline({
   sessionLive,
   currentStage,
   remainingSeconds,
+  studentEntry,
 }: {
   runtime: ExamSessionRuntime;
   scheduledStartAt: string | null;
@@ -26,6 +27,8 @@ export function SatSessionRoomTimeline({
   sessionLive: boolean;
   currentStage: string;
   remainingSeconds: number;
+  /** Pre-start only: how students get into the room (link + QR). */
+  studentEntry?: ReactNode;
 }) {
   const workspaceRef = useRef<HTMLElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -83,7 +86,10 @@ export function SatSessionRoomTimeline({
             <div className="min-w-0">
               <h2>{roomMode === 'review' ? (sessionFinished ? 'Session finished' : 'Session cancelled') : roomMode === 'prestart' ? upcomingSection?.label.replace(/^Section \d+ · /, '') ?? 'Session schedule' : currentStage}</h2>
               {roomMode === 'review' ? null : roomMode === 'prestart' ? (
-                <p className="sat-room__stage-note">Starts when the proctor starts the session.</p>
+                <>
+                  <p className="sat-room__stage-note">Starts when the proctor starts the session.</p>
+                  {studentEntry}
+                </>
               ) : (
                 <>
                   {stageSlot ? <p className="sat-room__stage-slot" data-sat-room-stage-slot>{stageSlot}</p> : null}

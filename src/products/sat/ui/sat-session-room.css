@@ -86,14 +86,15 @@
   font-variant-numeric: tabular-nums;
 }
 
-.sat-room__context-counts,
 .sat-room__context-health {
-  color: var(--sat-staff-text-secondary, #515154);
+  color: var(--sat-staff-text-tertiary, #6e6e73);
   font-weight: 550;
 }
 
-.sat-room__context-counts > span + span::before,
-.sat-room__context-counts > button::before,
+.sat-room__context-counts {
+  gap: 6px;
+}
+
 .sat-room__context-health > span + span::before {
   display: inline-block;
   width: 3px;
@@ -105,25 +106,51 @@
   content: "";
 }
 
-.sat-room__context-counts button {
+/* Exam-day stat chips: the number is what staff scan for, the label explains it. */
+.sat-room__context-stat {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: baseline;
+  gap: 6px;
   border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--sat-staff-warning-text, #92400e);
+  border-radius: 999px;
+  padding: 6px 11px;
+  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
+  color: var(--sat-staff-text-secondary, #515154);
   font: inherit;
-  text-align: left;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-underline-offset: 3px;
+  font-weight: 550;
+}
+
+.sat-room__context-stat strong {
+  color: var(--sat-staff-text-primary, #1d1d1f);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-room__context-stat.is-zero strong {
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+
+.sat-room__context-stat.is-warning,
+.sat-room__context-stat.is-warning strong {
+  color: var(--sat-staff-warning-text, #92400e);
+}
+
+.sat-room__context-stat.is-warning {
+  background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
+}
+
+button.sat-room__context-stat {
   cursor: pointer;
+  transition: box-shadow 120ms ease-out;
 }
 
-.sat-room__context-counts button:hover,
-.sat-room__context-counts button:focus-visible {
-  text-decoration-color: currentColor;
+button.sat-room__context-stat:hover {
+  box-shadow: inset 0 0 0 1px var(--sat-staff-warning-dot, #d97706);
 }
 
-.sat-room__context-counts button:focus-visible,
+button.sat-room__context-stat:focus-visible,
 .sat-room__inspector-close:focus-visible {
   outline: 2px solid var(--sat-staff-accent-ring, rgba(0, 113, 227, 0.4));
   outline-offset: 2px;
@@ -825,13 +852,10 @@ button.sat-room__attention-filter:hover {
     width: 100%;
   }
 
-  .sat-room__context-counts,
   .sat-room__context-health {
     gap: 6px 10px;
   }
 
-  .sat-room__context-counts > span + span::before,
-  .sat-room__context-counts > button::before,
   .sat-room__context-health > span + span::before {
     margin-right: 10px;
   }
