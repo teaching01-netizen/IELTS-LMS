@@ -270,8 +270,8 @@ func TestSATSavePastDeadlineAndGraceIsRefusedWhileTheWorkerIsBehind(t *testing.T
 	if !ok || appErr.Details == nil {
 		t.Fatalf("expected a typed deadline conflict, got %T (%v)", err, err)
 	}
-	if reason, _ := appErr.Details["reason"].(string); reason != "DEADLINE_EXPIRED" {
-		t.Fatalf("reason = %q, want DEADLINE_EXPIRED (%v)", reason, err)
+	if reason, _ := appErr.Details["reason"].(string); reason != "MODULE_DEADLINE_EXPIRED" {
+		t.Fatalf("reason = %q, want MODULE_DEADLINE_EXPIRED (%v)", reason, err)
 	}
 	if state, _ := f.moduleAttemptState(t, attemptID, f.rw.baseID); state != "active" {
 		t.Fatalf("the save gate, not the timeout worker, must refuse this write; state = %q", state)
