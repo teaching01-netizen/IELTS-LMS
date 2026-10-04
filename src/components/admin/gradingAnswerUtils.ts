@@ -51,13 +51,6 @@ export function formatAnswerValue(value: unknown): string {
   return stringifyFallback(value);
 }
 
-function lookupOptionText(
-  options: Array<{ id: string; text: string }> | undefined,
-  id: string,
-): string {
-  return options?.find((opt) => opt.id === id)?.text ?? id;
-}
-
 function formatChoiceLetter(index: number): string {
   let value = index + 1;
   let label = '';
@@ -70,14 +63,15 @@ function formatChoiceLetter(index: number): string {
 }
 
 function lookupOptionDisplay(
-  options: Array<{ id: string; text: string }> | undefined,
+  options: Array<{ id: string; text: string; label?: string | undefined }> | undefined,
   id: string,
   includeChoiceLabels: boolean,
 ): string {
-  const optionIndex = options?.findIndex((option) => option.id === id) ?? -1;
-  const text = lookupOptionText(options, id);
+  const option = options?.find((candidate) => candidate.id === id);
+  const optionIndex = option ? (options?.indexOf(option) ?? -1) : -1;
+  const text = option?.text ?? id;
   return includeChoiceLabels && optionIndex >= 0
-    ? `${formatChoiceLetter(optionIndex)}. ${text}`
+    ? `${option?.label?.trim() || formatChoiceLetter(optionIndex)}. ${text}`
     : text;
 }
 

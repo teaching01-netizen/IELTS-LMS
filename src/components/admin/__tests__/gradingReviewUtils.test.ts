@@ -209,6 +209,71 @@ test('exports ACT Science answers with category totals and correct counts', () =
   expect(exportData.rows[0]?.['answer:science-iod']).toBe('B. Answer B');
 });
 
+test('exports ACT Science custom choice labels for student and correct answers', () => {
+  const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
+  examState.science.stimuli = [
+    {
+      id: 'stimulus-custom-labels',
+      title: 'Custom choice labels',
+      content: 'Read the experiment results.',
+      blocks: [
+        {
+          id: 'science-block-custom-labels',
+          type: 'SINGLE_MCQ',
+          instruction: 'Choose the best answer.',
+          stem: 'What does the evidence show?',
+          questions: [
+            {
+              id: 'science-custom-labels',
+              stem: 'What does the evidence show?',
+              skillCategory: 'interpretation_of_data',
+              options: [
+                { id: 'choice-f', label: 'F', text: 'First choice', isCorrect: false },
+                { id: 'choice-g', label: 'G', text: 'Correct choice', isCorrect: true },
+                { id: 'choice-h', label: 'H', text: 'Third choice', isCorrect: false },
+                { id: 'choice-j', label: 'J', text: 'Fourth choice', isCorrect: false },
+              ],
+            },
+          ],
+        },
+      ],
+      images: [],
+    },
+  ] as any;
+
+  const submission = createStudentSubmission(
+    'sub-act-custom-labels',
+    'stu-act-custom-labels',
+    'ACT Student',
+  );
+  const sectionSubmission = createSectionSubmission(
+    submission.id,
+    'science',
+    { 'science-custom-labels': 'choice-j' },
+    [
+      {
+        ...createQuestionResult('science-custom-labels', false, 0),
+        studentAnswer: 'choice-j',
+        correctAnswer: 'choice-g',
+      },
+    ],
+  );
+
+  const exportData = buildWideObjectiveExport({
+    session: { sessionId: 'session-act-custom-labels', examTitle: 'ACT Science Practice' },
+    submissions: [submission],
+    sectionSubmissions: [{ submissionId: submission.id, sectionSubmission }],
+    examState,
+    moduleType: 'science',
+  });
+
+  expect(exportData.rows[0]?.['answer:science-custom-labels']).toBe('J. Fourth choice');
+  expect(exportData.rows[0]?.['rightAnswer:science-custom-labels']).toBe('G. Correct choice');
+  const csvContent = buildCsvContent(exportData.columns, exportData.rows);
+  expect(csvContent).toContain('J. Fourth choice');
+  expect(csvContent).toContain('G. Correct choice');
+});
+
 test('restores ACT answers from persisted question results when the answer map is missing', () => {
   const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
   examState.science.stimuli = [
