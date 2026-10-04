@@ -3,6 +3,7 @@
   "sources": [
     "services/authoring-coedit/src",
     "services/authoring-coedit/tsconfig.json",
+    "src/features/exam-authoring/api/textAlignment.ts",
     "src/features/exam-authoring/contracts",
     "src/features/exam-authoring/editor/ingestion/domain",
     "src/features/exam-authoring/editor/richContent.ts",
