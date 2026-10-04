@@ -55,7 +55,7 @@ func parseSATSPR(value string, student bool) (*big.Rat, bool) {
 func ValidateSATSPRKey(value string) error {
 	key, ok := parseSATSPR(value, false)
 	if !ok {
-		return fmt.Errorf("Use a numeric integer, decimal, or fraction with a nonzero denominator (up to %d characters).", SATSPRMaxKeyCharacters)
+		return fmt.Errorf("use a numeric integer, decimal, or fraction with a nonzero denominator (up to %d characters)", SATSPRMaxKeyCharacters)
 	}
 	if _, ok := parseSATSPR(key.RatString(), true); ok {
 		return nil
@@ -63,7 +63,7 @@ func ValidateSATSPRKey(value string) error {
 	if exactSATDecimalFits(key) || len(satSPRDecimalForms(key)) > 0 {
 		return nil
 	}
-	return fmt.Errorf("The answer has no SAT representation within 5 characters (6 with a leading minus).")
+	return fmt.Errorf("the answer has no SAT representation within 5 characters (6 with a leading minus)")
 }
 
 // ValidateSATSPRDefinition is shared by publishing and strict grading so an
@@ -71,7 +71,7 @@ func ValidateSATSPRKey(value string) error {
 func ValidateSATSPRDefinition(answerJSON string) error {
 	var def map[string]json.RawMessage
 	if json.Unmarshal([]byte(answerJSON), &def) != nil {
-		return fmt.Errorf("The answer definition must be a JSON object.")
+		return fmt.Errorf("the answer definition must be a JSON object")
 	}
 	return validateStrictSPRDefinition(def)
 }
@@ -79,12 +79,12 @@ func ValidateSATSPRDefinition(answerJSON string) error {
 func validateStrictSPRDefinition(def map[string]json.RawMessage) error {
 	var kind string
 	if json.Unmarshal(def["kind"], &kind) != nil || kind != "student_produced_response" {
-		return fmt.Errorf("Use a student-produced response answer definition.")
+		return fmt.Errorf("use a student-produced response answer definition")
 	}
 	var accepted []string
 	raw, ok := answerField(def, "acceptedResponses", "accepted_responses")
 	if !ok || json.Unmarshal(raw, &accepted) != nil || len(accepted) == 0 {
-		return fmt.Errorf("At least one numeric accepted response is required.")
+		return fmt.Errorf("at least one numeric accepted response is required")
 	}
 	for _, value := range accepted {
 		if err := ValidateSATSPRKey(value); err != nil {
@@ -95,12 +95,12 @@ func validateStrictSPRDefinition(def map[string]json.RawMessage) error {
 		if raw, exists := answerField(def, names[0], names[1]); exists {
 			var enabled bool
 			if json.Unmarshal(raw, &enabled) != nil || !enabled {
-				return fmt.Errorf("Enable %s for strict SAT grading.", names[0])
+				return fmt.Errorf("enable %s for strict SAT grading", names[0])
 			}
 		}
 	}
 	if raw, exists := answerField(def, "numericTolerance", "numeric_tolerance"); exists && strings.TrimSpace(string(raw)) != "null" {
-		return fmt.Errorf("Remove numericTolerance; strict SAT grading uses exact equivalence and SAT decimal forms.")
+		return fmt.Errorf("remove numericTolerance; strict SAT grading uses exact equivalence and SAT decimal forms")
 	}
 	return nil
 }

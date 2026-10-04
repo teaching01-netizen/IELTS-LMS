@@ -365,18 +365,6 @@ func bootstrapModuleIDs(out *delivery.Bootstrap) map[string]string {
 	return ids
 }
 
-// bootstrapSectionModuleIDs lists every module the payload actually DELIVERS
-// (the sections tree), which is where question content lives.
-func bootstrapSectionModuleIDs(out *delivery.Bootstrap) []string {
-	var ids []string
-	for _, section := range out.Sections {
-		for _, module := range section.Modules {
-			ids = append(ids, module.ID)
-		}
-	}
-	return ids
-}
-
 // examQuestionIDs lists one module's delivered exam-question ids.
 func (f *adaptiveExam) examQuestionIDs(t *testing.T, moduleID string) []string {
 	t.Helper()
