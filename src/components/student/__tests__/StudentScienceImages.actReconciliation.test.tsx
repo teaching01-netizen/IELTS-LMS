@@ -39,6 +39,48 @@ function singleMcqBlock(): SingleMCQBlock {
 }
 
 describe("Phase 04 ACT science runtime images", () => {
+  it("uses natural wrapping for ACT passage HTML pasted with forced word breaks", () => {
+    const state = {
+      type: "ACT",
+      activeModule: "science",
+      activeScienceStimulusId: "stim-1",
+      config: { sections: { science: { enabled: true } } },
+      science: {
+        stimuli: [
+          {
+            id: "stim-1",
+            title: "Growth experiment",
+            content:
+              '<p style="word-break: break-all; white-space: pre-wrap">A carefully collected result should read as ordinary passage text.</p>',
+            blocks: [singleMcqBlock()],
+            images: [],
+          },
+        ],
+      },
+    } as unknown as ExamState;
+    const { container } = render(
+      <StudentScience
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="sci-q1"
+        onNavigate={() => {}}
+        tabletMode
+      />,
+    );
+    const passage = container.querySelector(
+      ".student-act-passage-content [data-student-highlightable='true']",
+    );
+
+    expect(passage).toHaveClass("whitespace-normal");
+    expect(passage).not.toHaveClass("whitespace-pre-wrap");
+    expect(passage?.querySelector("p")?.style.wordBreak).toBe("");
+    expect(passage?.querySelector("p")?.style.whiteSpace).toBe("");
+    expect(passage).toHaveTextContent(
+      "A carefully collected result should read as ordinary passage text.",
+    );
+  });
+
   it("renders question-level imageUrl through Drive-tolerant candidates", () => {
     const block = singleMcqBlock();
     render(

@@ -230,7 +230,10 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
   const [inlineImageToZoom, setInlineImageToZoom] = useState<{ src: string; alt: string } | null>(null);
   const contentHasHtml = hasHtmlMarkup(stimulus.content);
   const sanitizedContent = contentHasHtml
-    ? sanitizeReadingPassageHtml(stimulus.content, { normalizeJustifiedText: true })
+    ? sanitizeReadingPassageHtml(stimulus.content, {
+        normalizeJustifiedText: true,
+        normalizeLineWrapping: true,
+      })
     : normalizeReadingPlainTextForDisplay(stimulus.content);
   const authenticatedImageSources = useActAttemptMediaSources(stimulus, mediaAuthorization);
   const handleInlineImageClick = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -277,7 +280,7 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
             content={sanitizedContent}
             contentType="html"
             enabled={highlightEnabled}
-            className="whitespace-pre-wrap break-normal [&_img]:cursor-zoom-in"
+            className="whitespace-normal break-normal [&_img]:cursor-zoom-in"
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
             highlightSurfaceId={`science:stimulus:${stimulus.id}`}
