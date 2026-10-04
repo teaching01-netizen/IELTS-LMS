@@ -80,6 +80,16 @@ export function readSatCalculatorSafeArea(toLogical: (value: number) => number):
   };
 }
 
+/** Calculator drag bounds: the whole screen (over header and footer) minus an 8px inset and device safe areas. */
+export function readSatCalculatorDragArea(toLogical: (value: number) => number): SatSafeArea {
+  return {
+    top: toLogical(8 + readCssPixel('--student-safe-top', 0)),
+    right: toLogical(8 + readCssPixel('--student-safe-right', 0)),
+    bottom: toLogical(8 + readCssPixel('--student-safe-bottom', 0)),
+    left: toLogical(8 + readCssPixel('--student-safe-left', 0)),
+  };
+}
+
 function rectOf(element: Element | null): SatRect | null {
   if (!element || typeof element.getBoundingClientRect !== 'function') return null;
   try {

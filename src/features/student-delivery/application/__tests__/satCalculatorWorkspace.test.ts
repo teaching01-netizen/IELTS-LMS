@@ -25,8 +25,8 @@ describe('satCalculatorWorkspace', () => {
 
   it('round-trips the selected embedded calculator mode', () => {
     const key = calculatorWorkspaceKey('schedule-1', 'attempt-1', 'module-1');
-    expect(saveCalculatorWorkspace(key, { activeMode: 'graphing' })).toBe(true);
-    expect(loadCalculatorWorkspace(key)).toEqual({ activeMode: 'graphing' });
+    expect(saveCalculatorWorkspace(key, { activeMode: 'scientific' })).toBe(true);
+    expect(loadCalculatorWorkspace(key)).toEqual({ activeMode: 'scientific' });
   });
 
   it('returns a safe default for corrupt state and clears persisted state', () => {

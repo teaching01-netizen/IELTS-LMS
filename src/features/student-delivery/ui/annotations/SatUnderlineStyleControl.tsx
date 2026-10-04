@@ -143,7 +143,7 @@ export function SatUnderlineStyleControl({
       // Sits just under the toolbar, centred on it: the menu belongs to the
       // whole control row, and centring keeps it clear of the swatches it would
       // otherwise cover when the toolbar is narrow.
-      className="sat-ui absolute left-1/2 top-full z-[90] mt-1 grid -translate-x-1/2 gap-1 rounded-[10px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] p-1 shadow-[var(--sat-shadow-floating)]"
+      className="sat-ui sat-annotation-menu-enter absolute left-1/2 top-full z-[90] mt-1 grid -translate-x-1/2 gap-1 rounded-[10px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] p-1 shadow-[var(--sat-shadow-floating)]"
       // A press inside the popover is still a press on the toolbar: it must not
       // read as the student leaving the selection.
       onPointerDown={(event) => event.stopPropagation()}
@@ -225,7 +225,7 @@ export function SatUnderlineStyleControl({
         >
           <SatActionWash>
             <ChevronDown
-              className={'sat-state-transition h-4 w-4 shrink-0 ' + (open ? 'rotate-180' : '')}
+              className={'sat-annotation-chevron h-4 w-4 shrink-0 ' + (open ? 'rotate-180' : '')}
               aria-hidden="true"
             />
           </SatActionWash>

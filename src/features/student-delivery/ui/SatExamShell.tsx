@@ -366,6 +366,13 @@ function SatExamShellContent(props: SatExamShellProps) {
     questionNotes,
   } = surface;
   const annotationsWritable = surface.writable;
+  // Whether the selection tools were on screen at the last commit. A mark's edit
+  // controls that mount right after them are the same bar changing state (a
+  // highlight just landed), so they take over in place instead of growing in.
+  const selectionToolsShownRef = useRef(false);
+  useEffect(() => {
+    selectionToolsShownRef.current = !editingMark && selectionToolsAnchor !== null;
+  });
   const questionHasAnnotations = props.questionNote.trim().length > 0 || surface.hasAnnotations;
   /**
    * The Notes column's open state, read from the one Notes UI value.
@@ -746,6 +753,9 @@ function SatExamShellContent(props: SatExamShellProps) {
             coarse pointer widens touch comfort. Browser-owned selection UI
             reserves a lane only when the interaction scope leaves selection to
             the platform. */}
+        {/* offcut: no exit motion; dismissal unmounts at once. A fade-out needs
+            AnimatePresence plus an inert, click-through exiting bar so it can
+            never catch the next selection. */}
         {editingMark ? (
           <SatAnnotationEditControls
             annotation={editingMark}
@@ -758,6 +768,7 @@ function SatExamShellContent(props: SatExamShellProps) {
             onNote={() => openNoteOnMark(editingMark)}
             onRemove={() => removeMark(editingMark)}
             onClose={surface.closeMarkEditor}
+            entrance={!selectionToolsShownRef.current}
           />
         ) : selectionToolsAnchor ? (
           <SatSelectionActionsPanel

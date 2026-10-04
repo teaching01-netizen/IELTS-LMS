@@ -17,7 +17,7 @@ export function calculatorWorkspaceKey(
 }
 
 export function createCalculatorWorkspace(): SatCalculatorWorkspace {
-  return { activeMode: 'scientific' };
+  return { activeMode: 'graphing' };
 }
 
 function canUseSessionStorage() {
@@ -30,7 +30,7 @@ export function loadCalculatorWorkspace(key: string): SatCalculatorWorkspace {
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return createCalculatorWorkspace();
     const parsed = JSON.parse(raw) as Partial<SatCalculatorWorkspace>;
-    return { activeMode: parsed.activeMode === 'graphing' ? 'graphing' : 'scientific' };
+    return { activeMode: parsed.activeMode === 'scientific' ? 'scientific' : 'graphing' };
   } catch {
     return createCalculatorWorkspace();
   }

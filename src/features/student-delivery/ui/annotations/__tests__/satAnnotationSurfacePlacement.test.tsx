@@ -4,6 +4,7 @@ import type { SatTextAnchor } from '../../../domain/satResponses';
 import { SatSelectionActionsPanel } from '../SatSelectionActionsPanel';
 import { useSatAnnotationPlacement } from '../useSatAnnotationPlacement';
 import { satAnnotationSurfaceChrome } from '../SatAnnotationSurfaceFrame';
+import { measureSatAnnotation } from '../satAnnotationPlacementRuntime';
 import { SAT_EXAM_ZOOM_MAX, SAT_EXAM_ZOOM_MIN, SAT_EXAM_ZOOM_STEP } from '../../../domain/satReadingPreferences';
 import type { SelectionMenuEnvironment } from '@shared/ui/selection-v2/engine/selectionPlacement';
 
@@ -185,6 +186,39 @@ describe('useSatAnnotationPlacement', () => {
     expect(chrome.style.width).toBeCloseTo(placement.width / scale, 8);
     expect(chrome.style.maxHeight).toBeCloseTo(placement.maxHeight / scale, 8);
     expect(chrome.bodyMaxHeight).toBeCloseTo(placement.maxHeight / scale, 8);
+  });
+
+  it('grows in only once visible, from the edge facing its line, and never on a hand-off', () => {
+    const above = {
+      mode: 'floating' as const, left: 120, top: 80, width: 288, maxHeight: 400,
+      side: 'above' as const, arrowX: 32, animated: false, clamped: false,
+    };
+    const floating = satAnnotationSurfaceChrome(above, 0.5);
+    expect(floating.className).toContain('sat-annotation-surface-floating');
+    expect(floating.style.transformOrigin).toBe('64px 100%');
+    expect(satAnnotationSurfaceChrome({ ...above, side: 'below' }).style.transformOrigin).toBe('32px 0');
+
+    // Mounted while placement measures: an entrance spent hidden is never seen.
+    expect(satAnnotationSurfaceChrome(null).className).not.toContain('sat-annotation-surface-floating');
+    expect(satAnnotationSurfaceChrome({ ...above, mode: 'hidden' }).className).not.toContain('sat-annotation-surface-floating');
+    // Taking over from the selection tools in place.
+    expect(satAnnotationSurfaceChrome(above, 1, false).className).not.toContain('sat-annotation-surface-floating');
+  });
+
+  it('measures the surface without its own entrance scale', () => {
+    mountPassage();
+    const surface = document.createElement('div');
+    surface.dataset['testid'] = 'surface';
+    stubSurfaceSize(SURFACE.width * 0.9, SURFACE.height * 0.9);
+    const computed = window.getComputedStyle;
+    override(window, 'getComputedStyle', (element: Element) =>
+      element === surface
+        ? ({ transform: 'matrix(0.9, 0, 0, 0.9, 0, 0)' } as CSSStyleDeclaration)
+        : computed.call(window, element));
+
+    const size = measureSatAnnotation(surface, anchor).size;
+    expect(size?.width).toBeCloseTo(SURFACE.width, 8);
+    expect(size?.height).toBeCloseTo(SURFACE.height, 8);
   });
 
   it('waits for the selection to settle before it surfaces', () => {

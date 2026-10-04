@@ -33,6 +33,8 @@ export function useSatAnnotationSurface(
      * of these is one.
      */
     onDismiss: () => void;
+    /** See `satAnnotationSurfaceChrome`: false when taking over a surface already shown. */
+    entrance?: boolean | undefined;
   },
 ): {
   placement: SelectionMenuPlacement | null;
@@ -47,5 +49,5 @@ export function useSatAnnotationSurface(
   });
   useSatAnnotationAutofocus(placement, options.autoFocusKey, containerRef);
   useSatAnnotationDismiss(containerRef, options.onDismiss);
-  return { placement, chrome: satAnnotationSurfaceChrome(placement, visualScale), containerRef };
+  return { placement, chrome: satAnnotationSurfaceChrome(placement, visualScale, options.entrance ?? true), containerRef };
 }

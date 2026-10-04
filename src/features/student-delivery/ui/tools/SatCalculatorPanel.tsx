@@ -20,7 +20,7 @@ import { satToolGeometryKey } from "../../infrastructure/satToolGeometryStore";
 import { useSatMediaQuery } from "../useSatMediaQuery";
 import { satToolViewKey } from "../../infrastructure/satToolStateStore";
 import { useSatExamZoom } from "../zoom/SatExamZoomContext";
-import { readSatCalculatorSafeArea } from "./satToolPlacementRuntime";
+import { readSatCalculatorDragArea, readSatCalculatorSafeArea } from "./satToolPlacementRuntime";
 
 export interface SatCalculatorPanelProps {
   open: boolean;
@@ -152,13 +152,18 @@ export function SatCalculatorPanel({
   // Window dimensions are physical pixels, converted once into the zoom plane.
   const viewport = logicalSize({ width: window.innerWidth, height: window.innerHeight });
   const bodyWidth = viewport.width - safeArea.left - safeArea.right;
-  // Bluebook layout: the window may cover the exam header, so it opens full height
-  // from the top inset and the expression list stays visible above the keypad.
+  // Bluebook layout: the window may cover the exam header and footer. First open
+  // stays full height from the top inset down to the body so the expression list
+  // stays visible above the keypad; afterwards it moves and resizes screen-wide.
   const dragArea = useMemo(
-    () => ({ ...safeArea, top: viewportToLogicalLength(8) }),
+    () => readSatCalculatorDragArea(viewportToLogicalLength),
+    // safeArea re-measures on viewport resize; device insets change with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [safeArea, viewportToLogicalLength]
   );
   const bodyHeight = Math.max(1, viewport.height - dragArea.top - safeArea.bottom);
+  const dragWidth = Math.max(1, viewport.width - dragArea.left - dragArea.right);
+  const dragHeight = Math.max(1, viewport.height - dragArea.top - dragArea.bottom);
   const firstOpenSize = {
     w: Math.min(bodyWidth, Math.max(400 / scale, Math.min(440 / scale, bodyWidth * 0.36))),
     h: bodyHeight,
@@ -168,13 +173,10 @@ export function SatCalculatorPanel({
     [safeArea.left, dragArea.top, firstOpenSize.w, firstOpenSize.h]
   );
   const minimumSize = useMemo(
-    () => ({ w: 400 / scale, h: Math.min(480 / scale, bodyHeight) }),
-    [scale, bodyHeight]
+    () => ({ w: Math.min(400 / scale, dragWidth), h: Math.min(400 / scale, dragHeight) }),
+    [scale, dragWidth, dragHeight]
   );
-  const maximumSize = useMemo(
-    () => ({ w: Math.min(620 / scale, bodyWidth), h: bodyHeight }),
-    [scale, bodyWidth, bodyHeight]
-  );
+  const maximumSize = useMemo(() => ({ w: dragWidth, h: dragHeight }), [dragWidth, dragHeight]);
   return (
     <SatFloatingTool
       title="Calculator"

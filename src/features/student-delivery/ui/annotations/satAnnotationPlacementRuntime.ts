@@ -74,6 +74,18 @@ function measurementKey(
   return parts.map(keyPart).join(':');
 }
 
+/**
+ * The surface's OWN transform scale. The entrance grows the surface from 0.9, and
+ * a bounding rect read mid-entrance would hand the engine a size 10% short — which
+ * it would then impose as the surface's width. Ancestor zoom stays in the rect.
+ */
+function ownTransformScale(element: HTMLElement): { x: number; y: number } {
+  const match = /^matrix\(([^)]+)\)$/.exec(getComputedStyle(element).transform);
+  if (!match) return { x: 1, y: 1 };
+  const [a = 1, b = 0, c = 0, d = 1] = match[1]!.split(',').map(Number);
+  return { x: Math.hypot(a, b) || 1, y: Math.hypot(c, d) || 1 };
+}
+
 export function measureSatAnnotation(
   container: HTMLElement | null,
   anchor: SatTextAnchor | null,
@@ -82,8 +94,9 @@ export function measureSatAnnotation(
   const bounds = satAnnotationBoundsRect(container);
   const viewport = satAnnotationViewportRect();
   const rect = container?.getBoundingClientRect();
+  const scale = container && rect ? ownTransformScale(container) : { x: 1, y: 1 };
   const size = rect && rect.width > 0 && rect.height > 0
-    ? { width: rect.width, height: rect.height }
+    ? { width: rect.width / scale.x, height: rect.height / scale.y }
     : null;
   const geometry = anchor ? satAnnotationAnchorGeometryFor(anchor) : null;
   return {

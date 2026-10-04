@@ -59,7 +59,7 @@ const SURFACE_BASE = "sat-ui absolute z-[80] ";
 // makes a row of quiet glyphs read as one object hanging off the words rather
 // than as a panel placed near them.
 const SURFACE_FLOATING =
-  "sat-annotation-surface-floating rounded-full" +
+  "rounded-full" +
   " border border-[var(--sat-answer-border)] bg-[var(--sat-surface)]" +
   " px-[var(--sat-annotation-surface-padding-x)] py-[var(--sat-annotation-surface-padding-y)]" +
   " shadow-[var(--sat-shadow-floating)]";
@@ -81,7 +81,14 @@ export interface SatAnnotationSurfaceChrome {
 }
 export function satAnnotationSurfaceChrome(
   placement: SelectionMenuPlacement | null,
-  visualScale = 1
+  visualScale = 1,
+  /**
+   * Grow in from the selection when the surface becomes visible. Off when the
+   * surface takes over from one already standing in the same place (the
+   * selection tools handing a fresh mark to its edit controls): that is one
+   * object changing state, and it must not appear twice.
+   */
+  entrance = true
 ): SatAnnotationSurfaceChrome {
   const geometry = createSatExamZoomGeometry(visualScale);
   const mode = placement?.mode ?? null;
@@ -98,6 +105,9 @@ export function satAnnotationSurfaceChrome(
     className:
       SURFACE_BASE +
       SURFACE_FLOATING +
+      // The entrance starts on the first VISIBLE frame: the surface mounts hidden
+      // while placement measures, and an animation spent there is never seen.
+      (floating && entrance ? " sat-annotation-surface-floating" : "") +
       // Only a move big enough to notice settles; a nudge is applied directly, so
       // the surface never chases a selection handle.
       (floating && placement?.animated ? " sat-annotation-settle" : ""),
@@ -132,6 +142,14 @@ export function satAnnotationSurfaceChrome(
           ? geometry.viewportToLogicalLength(placement.maxHeight)
           : undefined,
       visibility: hidden ? "hidden" : "visible",
+      // The entrance grows from the words it acts on, as the iOS edit menu does:
+      // the edge facing the line, at the point the caret would have sat.
+      transformOrigin:
+        placement?.side === "below"
+          ? `${geometry.viewportToLogicalLength(placement.arrowX)}px 0`
+          : placement?.side === "above"
+            ? `${geometry.viewportToLogicalLength(placement.arrowX)}px 100%`
+            : undefined,
     },
   };
 }

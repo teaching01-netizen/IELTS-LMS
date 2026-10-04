@@ -86,6 +86,8 @@ describe('desktop selection panel', () => {
     // circle read as "the one in use" rather than as a different control.
     for (const swatch of [blue, yellow]) {
       expect(swatch.className).toContain('border-[var(--sat-annotation-swatch-ring)]');
+      // The press dips the drawing, never the 44px target.
+      expect(swatch.closest('[data-sat-annotation-wash="true"]')!.className).toContain('sat-annotation-press');
     }
   });
 

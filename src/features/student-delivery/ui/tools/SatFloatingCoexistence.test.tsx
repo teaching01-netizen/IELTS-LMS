@@ -5,13 +5,13 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { SatFloatingTool } from "./SatFloatingTool";
 
-const matchMediaMock = (matches: boolean) => {
+const matchMediaMock = (matches: boolean | ((query: string) => boolean)) => {
   vi.stubGlobal(
     "matchMedia",
     vi.fn(
       (query: string) =>
         ({
-          matches,
+          matches: typeof matches === "function" ? matches(query) : matches,
           media: query,
           onchange: null,
           addListener: vi.fn(),
@@ -313,7 +313,8 @@ describe("SatFloatingTool", () => {
     const dialog = screen.getByRole("dialog", { name: "Calculator" });
     const hint = dialog.querySelector("[data-sat-tool-hint]");
     expect(hint).not.toBeNull();
-    expect(hint!.textContent).toContain("Drag the top to move");
+    expect(hint!.textContent).toContain("Drag the bar to move");
+    expect(dialog.getAttribute("data-sat-tool-teaching")).toBe("true");
     expect(hint!.getAttribute("aria-hidden")).toBe("true");
     expect(hint!.className).toContain("sat-tool-hint");
     const header = dialog.querySelector("[data-sat-tool-header]") as HTMLElement;
@@ -329,6 +330,18 @@ describe("SatFloatingTool", () => {
       </SatFloatingTool>
     );
     expect(screen.getByRole("dialog", { name: "Calculator" }).querySelector("[data-sat-tool-hint]")).toBeNull();
+  });
+
+  it("teaches move and resize on touch screens too", () => {
+    matchMediaMock((query) => query === "(pointer: coarse)");
+    render(
+      <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} resizable onClose={() => undefined}>
+        <div>calc body</div>
+      </SatFloatingTool>
+    );
+    const dialog = screen.getByRole("dialog", { name: "Calculator" });
+    expect(dialog.querySelector("[data-sat-tool-hint]")?.textContent).toContain("Drag a corner or edge to resize");
+    expect(dialog.querySelectorAll("[data-sat-resize-edge]")).toHaveLength(7);
   });
 
   it("labels Move and Resize tooltips without importing the shared tooltip primitive (C16)", () => {

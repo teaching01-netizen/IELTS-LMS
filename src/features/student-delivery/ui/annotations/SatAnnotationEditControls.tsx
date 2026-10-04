@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { SatHighlightColor, SatTextAnnotation } from '../../domain/satResponses';
 import { satAnnotationUnderlineStyle } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
@@ -49,6 +50,7 @@ export function SatAnnotationEditControls({
   onNote,
   onRemove,
   onClose,
+  entrance,
 }: {
   annotation: SatTextAnnotation;
   /** Coarse-pointer comfort and browser-owned UI are separate placement facts. */
@@ -62,8 +64,14 @@ export function SatAnnotationEditControls({
   onRemove: () => void;
   /** Dismiss the controls; the mark and its note stay. */
   onClose: () => void;
+  /** False when these controls replace the selection tools in place (a highlight just landed). */
+  entrance?: boolean | undefined;
 }) {
   const visualScale = useSatExamZoom().scale;
+  // Decided once, at mount: the caller's "was the toolbar just here" is only true
+  // for the render that swaps the toolbar out, and a later re-render must not
+  // turn a surface that took over in place into one that grows in late.
+  const [entersVisibly] = useState(entrance ?? true);
   // Opening a mark's editor moves the caret into it: a tap and Enter/Space on
   // the mark must both leave the student able to change the mark without
   // hunting for the controls.
@@ -72,6 +80,7 @@ export function SatAnnotationEditControls({
     environment,
     visualScale,
     onDismiss: onClose,
+    entrance: entersVisibly,
   });
   const isHighlight = annotation.kind === 'highlight';
   const hasNote = typeof annotation.note === 'string' && annotation.note.length > 0;

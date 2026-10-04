@@ -61,7 +61,9 @@ export function SatActionWash({
     <span
       aria-hidden="true"
       data-sat-annotation-wash="true"
-      className={'grid h-8 w-8 shrink-0 place-items-center rounded-full ' + hoverClassName}
+      // `sat-annotation-press`: the drawing dips under the finger and springs
+      // back on release, while the 44px target around it never moves.
+      className={'sat-annotation-press grid h-8 w-8 shrink-0 place-items-center rounded-full ' + hoverClassName}
     >
       {children}
     </span>
@@ -152,7 +154,7 @@ export function SatHighlightSwatchButtons({
                 data-sat-swatch={ink.color}
                 data-sat-swatch-state={pressed ? 'current' : 'idle'}
                 className={
-                  'grid shrink-0 place-items-center rounded-full border border-[var(--sat-annotation-swatch-ring)] '
+                  'sat-annotation-swatch grid shrink-0 place-items-center rounded-full border border-[var(--sat-annotation-swatch-ring)] '
                   + (pressed ? 'h-7 w-7' : 'h-6 w-6')
                 }
                 style={{ backgroundColor: ink.swatch }}
@@ -160,7 +162,7 @@ export function SatHighlightSwatchButtons({
                 {pressed ? (
                   <Droplet
                     data-sat-swatch-ink="true"
-                    className="h-4 w-4"
+                    className="sat-annotation-ink-in h-4 w-4"
                     style={{ color: ink.inkGlyph }}
                     aria-hidden="true"
                   />

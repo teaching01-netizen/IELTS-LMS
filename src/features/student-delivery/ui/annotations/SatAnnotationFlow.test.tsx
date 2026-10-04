@@ -814,7 +814,7 @@ describe('SAT annotation Bluebook surfaces (Phase 7)', () => {
     expect(css).toContain('--sat-swatch-yellow');
     // Selection preview + entrance motion stay tokenized too.
     expect(css).toContain('--sat-selection-color');
-    expect(css).toContain('--sat-motion-annotation');
+    expect(css).toContain('--sat-ios-menu-in');
     expect(css).toContain('sat-annotation-enter');
   });
 });

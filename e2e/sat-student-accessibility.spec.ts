@@ -908,12 +908,12 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(calculator).toBeVisible();
     await expect(desmos).toBeVisible();
     await expect(desmos).toHaveAttribute("data-desmos-ready", "true");
-    await expect(scientific).toHaveAttribute("data-prewarm-node", "scientific");
+    await expect(graphing).toHaveAttribute("data-prewarm-node", "graphing");
     await expect(calculator.locator("[data-desmos-loading]")).toHaveCount(0);
 
-    await page.getByRole("radio", { name: "Graphing" }).click();
+    await page.getByRole("radio", { name: "Scientific" }).click();
     await expect(desmos).toHaveAttribute("data-desmos-ready", "true");
-    await expect(graphing).toHaveAttribute("data-prewarm-node", "graphing");
+    await expect(scientific).toHaveAttribute("data-prewarm-node", "scientific");
     await expect(calculator.locator("[data-desmos-loading]")).toHaveCount(0);
   });
 
@@ -968,9 +968,9 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(calculator.locator("[data-sat-compact-resize-handle]")).toHaveCount(0);
     const before = await calculator.boundingBox();
     expect(before).not.toBeNull();
-    await page.getByRole("radio", { name: "Graphing" }).click();
+    await page.getByRole("radio", { name: "Scientific" }).click();
     await expect(
-      page.getByTitle("Desmos graphing calculator, College Board testing version")
+      page.getByTitle("Desmos scientific calculator, College Board testing version")
     ).toBeVisible();
     expect(await calculator.boundingBox()).toEqual(before);
     await page.getByRole("button", { name: "Close Calculator" }).click();
@@ -1062,7 +1062,7 @@ test.describe("SAT student accessibility and layout", () => {
     const paused = page.getByRole("alertdialog", { name: "Your timer is paused" });
     await expect(paused).toBeVisible();
     await expect(paused).toBeFocused();
-    const frame = page.getByTitle("Desmos scientific calculator, College Board testing version");
+    const frame = page.getByTitle("Desmos graphing calculator, College Board testing version");
     await expect(frame).toHaveAttribute("tabindex", "-1");
     await expect(frame).toHaveAttribute("inert", "");
     const tool = page.locator("[data-sat-tool-window]");

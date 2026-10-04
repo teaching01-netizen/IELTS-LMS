@@ -78,17 +78,25 @@ describe("SatCalculatorPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens on the graphing calculator by default", () => {
+    render(<SatCalculatorPanel {...baseProps} open />);
+    expect(screen.getByRole("radio", { name: "Graphing" })).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.getByTitle("Desmos graphing calculator, College Board testing version")
+    ).toHaveClass("block");
+  });
+
   it("persists only the selected embedded calculator mode", () => {
     render(<SatCalculatorPanel {...baseProps} open />);
-    fireEvent.click(screen.getByRole("radio", { name: "Graphing" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Scientific" }));
 
     const persisted = [...Array(window.sessionStorage.length)].map((_, index) => {
       const key = window.sessionStorage.key(index);
       return key ? window.sessionStorage.getItem(key) : null;
     });
-    expect(persisted).toContain(JSON.stringify({ activeMode: "graphing" }));
+    expect(persisted).toContain(JSON.stringify({ activeMode: "scientific" }));
     expect(
-      screen.getByTitle("Desmos graphing calculator, College Board testing version")
+      screen.getByTitle("Desmos scientific calculator, College Board testing version")
     ).toHaveClass("block");
   });
 
@@ -124,12 +132,41 @@ describe("SatCalculatorPanel", () => {
     render(<SatCalculatorPanel {...baseProps} open />);
     const dialog = screen.getByRole("dialog", { name: "Calculator" });
     const before = { left: dialog.style.left, top: dialog.style.top, width: dialog.style.width, height: dialog.style.height };
-    fireEvent.click(screen.getByRole("radio", { name: "Graphing" }));
-    expect(screen.getByTitle("Desmos graphing calculator, College Board testing version")).toHaveClass("block");
+    fireEvent.click(screen.getByRole("radio", { name: "Scientific" }));
+    expect(screen.getByTitle("Desmos scientific calculator, College Board testing version")).toHaveClass("block");
     expect(dialog.style.left).toBe(before.left);
     expect(dialog.style.top).toBe(before.top);
     expect(dialog.style.width).toBe(before.width);
     expect(dialog.style.height).toBe(before.height);
+  });
+
+  it("moves over the exam footer while staying fully on screen", () => {
+    render(<SatCalculatorPanel {...baseProps} open />);
+    const dialog = screen.getByRole("dialog", { name: "Calculator" });
+    const grip = screen.getByRole("button", { name: /^Move Calculator/ });
+    // First open: full height from the top inset down to the exam body (1024x768 jsdom).
+    expect(dialog.style.height).toBe("682px");
+    for (let step = 0; step < 5; step += 1) fireEvent.keyDown(grip, { key: "ArrowDown", shiftKey: true });
+    // Bottom edge stops 8px above the screen edge, past the 78px footer band.
+    expect(dialog.style.top).toBe("78px");
+  });
+
+  it("resizes from 400x400 up to the whole screen", () => {
+    render(<SatCalculatorPanel {...baseProps} open />);
+    const dialog = screen.getByRole("dialog", { name: "Calculator" });
+    const handle = screen.getByRole("separator", { name: /^Resize Calculator/ });
+    for (let step = 0; step < 30; step += 1) {
+      fireEvent.keyDown(handle, { key: "ArrowRight", shiftKey: true });
+      fireEvent.keyDown(handle, { key: "ArrowDown", shiftKey: true });
+    }
+    expect(dialog.style.width).toBe("1008px");
+    expect(dialog.style.height).toBe("752px");
+    for (let step = 0; step < 40; step += 1) {
+      fireEvent.keyDown(handle, { key: "ArrowLeft", shiftKey: true });
+      fireEvent.keyDown(handle, { key: "ArrowUp", shiftKey: true });
+    }
+    expect(dialog.style.width).toBe("400px");
+    expect(dialog.style.height).toBe("400px");
   });
 
   it("embeds carry the explicit exam locale", () => {

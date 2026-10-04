@@ -1689,8 +1689,16 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
    * action's outline. Deliberately paler than the yellow highlight, so the icon
    * never reads as "these words are already highlighted". */
   --sat-annotation-note-fill: #FFF7D1;
-  /* Annotation chrome motion (C4: exam TSX carries no duration literals). */
-  --sat-motion-annotation: 140ms;
+  /* Annotation toolbar motion (C4: exam TSX carries no duration literals),
+   * tuned to the iOS edit menu: one critically damped curve (no overshoot),
+   * opacity done before the scale settles, a fast press and an eased release.
+   * Subtle on purpose — these repeat all exam. */
+  --sat-ios-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --sat-ios-menu-in: 240ms;
+  --sat-ios-fade-in: 120ms;
+  --sat-ios-press: 90ms;
+  --sat-ios-release: 260ms;
+  --sat-ios-ink: 220ms;
   /* Annotation surface placement (Highlights & Notes). BUDGETS, not guesses:
    * `native-ui-zone` is the height reserved only when the browser owns a native
    * selection surface. When present, that budget decides which lane it takes
@@ -1871,21 +1879,99 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   text-rendering: optimizeLegibility;
 }
 
-/* Annotation toolbar entrance (Highlights & Notes): a system control
- * becoming available, not a panel sliding in. 140ms, 4px rise, opacity. */
+/* Annotation toolbar entrance (Highlights & Notes): the iOS edit menu — the bar
+ * grows out of the words it acts on (transform-origin is set by the chrome to
+ * the edge facing the line), and is fully opaque well before the scale settles,
+ * so it is readable from the first frames. */
 @keyframes sat-annotation-enter {
   from {
+    transform: scale(0.9);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes sat-annotation-fade {
+  from {
     opacity: 0;
-    transform: translateY(4px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
 .sat-annotation-surface-floating {
-  animation: sat-annotation-enter var(--sat-motion-annotation) ease-out;
+  animation:
+    sat-annotation-enter var(--sat-ios-menu-in) var(--sat-ios-ease) both,
+    sat-annotation-fade var(--sat-ios-fade-in) linear both;
+}
+
+/* The underline style menu drops from the control row it belongs to. */
+.sat-annotation-menu-enter {
+  transform-origin: top center;
+  animation:
+    sat-annotation-enter var(--sat-ios-menu-in) var(--sat-ios-ease) both,
+    sat-annotation-fade var(--sat-ios-fade-in) linear both;
+}
+
+/* Press: the glyph dips under the finger fast and eases back on release. Only
+ * the drawing scales; the 44px target around it never moves. */
+.sat-annotation-press {
+  transition:
+    transform var(--sat-ios-release) var(--sat-ios-ease),
+    background-color var(--sat-motion-state) var(--sat-ios-ease);
+}
+
+button:not(:disabled):active > .sat-annotation-press {
+  transform: scale(0.88);
+  transition-duration: var(--sat-ios-press);
+}
+
+/* The ink in use is the larger chip: it grows into that size rather than
+ * snapping, inside a fixed 32px wash so its neighbours never move. */
+.sat-annotation-swatch {
+  transition:
+    width var(--sat-ios-ink) var(--sat-ios-ease),
+    height var(--sat-ios-ink) var(--sat-ios-ease);
+}
+
+/* The drop arrives with the ink it marks. */
+.sat-annotation-ink-in {
+  animation: sat-annotation-ink-in var(--sat-ios-ink) var(--sat-ios-ease) both;
+}
+
+@keyframes sat-annotation-ink-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Tailwind v4's rotate-* sets the standalone `rotate` property. */
+.sat-annotation-chevron {
+  transition:
+    rotate var(--sat-ios-menu-in) var(--sat-ios-ease),
+    color var(--sat-motion-state) var(--sat-ios-ease);
+}
+
+/* A mark that just landed washes in with its ink; a recolour cross-fades. Only
+ * the ACTIVE mark — the one whose controls are open — so marks painted when a
+ * question loads never flash, and tapping an existing mark (an attribute
+ * change, which @starting-style ignores) does not replay it. `!important`
+ * because the ink itself is an inline style. */
+.sat-ui [data-sat-highlight="true"][data-sat-annotation-active="true"] {
+  transition: background-color var(--sat-ios-ink) var(--sat-ios-ease);
+}
+
+@starting-style {
+  .sat-ui [data-sat-highlight="true"][data-sat-annotation-active="true"] {
+    background-color: transparent !important;
+  }
 }
 
 /* A larger reposition (scroll, resize, a handle nudge that moved the anchor
@@ -2450,8 +2536,39 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   opacity: 1;
   transition: none;
 }
-[data-sat-touch-interaction="true"] :is(.sat-tool-tip, .sat-tool-hint) {
+[data-sat-touch-interaction="true"] .sat-tool-tip {
   display: none;
+}
+/* Fingertips need more reach than a cursor; edges and corners grow on touch. */
+@media (pointer: coarse) {
+  .sat-ui {
+    --sat-tool-edge-zone: 16px;
+    --sat-tool-edge-outside: 8px;
+    --sat-tool-corner-zone: 44px;
+  }
+}
+.sat-tool-hint-grabber {
+  display: inline-block;
+  width: 16px;
+  height: 4px;
+  border-radius: 9999px;
+  background: currentColor;
+}
+.sat-tool-hint-corner {
+  width: 12px;
+  height: 12px;
+}
+/* First open: the grabber and resize corner pulse in sync with the hint so
+ * students see exactly where to touch. Reduce Motion keeps the static hint. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-sat-tool-teaching="true"] .sat-tool-grabber,
+  [data-sat-tool-teaching="true"] [data-sat-resize-handle] .sat-tool-resize-glyph {
+    animation: sat-tool-teach-pulse 900ms var(--sat-tool-motion-ease) 300ms 2;
+  }
+}
+@keyframes sat-tool-teach-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.35); }
 }
 [data-dragging="true"] .sat-tool-tip,
 [data-sat-resizing="true"] .sat-tool-tip {
@@ -2597,7 +2714,9 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   /* Tool windows appear instantly: the enter/exit animation lives on the
    * .sat-ui root itself, which the descendant selector above does not match. */
   .sat-ui.sat-tool-enter,
-  .sat-ui.sat-tool-exit {
+  .sat-ui.sat-tool-exit,
+  .sat-ui.sat-annotation-surface-floating,
+  .sat-ui.sat-annotation-menu-enter {
     animation: none !important;
   }
   /* R-03 collapse instant path (D9): short fade only, clip cut is instant.
@@ -4965,6 +5084,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   width: var(--sat-tool-control-hit, 44px);
   height: var(--sat-tool-control-hit, 44px);
 }
+/* Header buttons win taps over the (larger on touch) top resize corners. */
+.sat-tool-calculator :is(.sat-tool-header-control, .sat-calculator-mode) {
+  position: relative;
+  z-index: 6;
+}
 .sat-calculator-mode {
   min-height: var(--sat-tool-control-hit, 44px);
   min-width: var(--sat-tool-control-hit, 44px);
@@ -5032,18 +5156,75 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   left: 50%;
   top: 0;
   transform: translateX(-50%);
+  opacity: .7;
+  transition: opacity var(--sat-tool-edge-reveal) var(--sat-tool-motion-ease);
+}
+/* iPadOS-style grabber: the whole bar drags; the capsule says where. */
+.sat-tool-grabber {
+  display: block;
+  width: calc(36 * var(--sat-tool-unit, 1px));
+  height: calc(5 * var(--sat-tool-unit, 1px));
+  border-radius: 9999px;
+  background: currentColor;
+}
+.sat-tool-calculator .sat-tool-header-drag:hover .sat-tool-grip,
+.sat-tool-calculator .sat-tool-grip:focus-visible,
+.sat-tool-calculator[data-dragging="true"] .sat-tool-grip {
+  opacity: 1;
+}
+/* Resize corner: an L bracket hugging the window edge, always visible. */
+.sat-tool-calculator [data-sat-resize-handle] {
+  /* .sat-tool-tip-anchor (unlayered) would otherwise beat Tailwind's absolute. */
+  position: absolute;
+  z-index: 6;
+  place-items: end;
+  padding: calc(4 * var(--sat-tool-unit, 1px));
 }
 .sat-tool-calculator [data-sat-resize-handle] > span:first-child {
-  width: calc(24 * var(--sat-tool-unit, 1px));
-  height: calc(24 * var(--sat-tool-unit, 1px));
-  border: 1px solid var(--sat-tool-border);
-  border-radius: 50%;
-  background: var(--sat-surface);
+  width: auto;
+  height: auto;
+  color: var(--sat-text-secondary);
+  transition: color var(--sat-tool-edge-reveal) var(--sat-tool-motion-ease);
 }
-.sat-tool-calculator .sat-tool-resize-glyph {
-  width: calc(16 * var(--sat-tool-unit, 1px));
-  height: calc(16 * var(--sat-tool-unit, 1px));
+.sat-tool-calculator .sat-tool-resize-glyph,
+.sat-tool-calculator .sat-tool-resize-edge:hover .sat-tool-resize-glyph,
+.sat-tool-calculator [data-sat-resize-handle]:hover .sat-tool-resize-glyph {
+  width: calc(20 * var(--sat-tool-unit, 1px));
+  height: calc(20 * var(--sat-tool-unit, 1px));
+  opacity: 1;
+  transform-origin: bottom right;
+  transition: transform var(--sat-tool-edge-reveal) var(--sat-tool-motion-ease);
 }
+.sat-tool-calculator [data-sat-resize-handle]:is(:hover, :focus-visible) > span:first-child,
+.sat-tool-calculator[data-sat-resizing="true"] [data-sat-resize-handle] > span:first-child {
+  color: var(--sat-focus);
+}
+.sat-tool-calculator [data-sat-resize-handle]:hover .sat-tool-resize-glyph,
+.sat-tool-calculator[data-sat-resizing="true"] .sat-tool-resize-glyph {
+  transform: scale(1.15);
+}
+/* Edge feedback: a focus-colored line marks the exact edge being resized. */
+.sat-tool-calculator .sat-tool-resize-edge:is(:hover, :active) {
+  background: transparent;
+  opacity: 1;
+}
+.sat-tool-calculator .sat-tool-resize-edge::after {
+  content: "";
+  position: absolute;
+  opacity: 0;
+  border: 0 solid var(--sat-focus);
+  transition: opacity var(--sat-tool-edge-reveal) var(--sat-tool-motion-ease);
+}
+.sat-tool-calculator .sat-tool-resize-edge:is(:hover, :active)::after {
+  opacity: 1;
+}
+.sat-tool-calculator .sat-tool-resize-edge-n::after { inset: var(--sat-tool-edge-outside) 0 auto; border-top-width: 2px; }
+.sat-tool-calculator .sat-tool-resize-edge-s::after { inset: auto 0 var(--sat-tool-edge-outside); border-bottom-width: 2px; }
+.sat-tool-calculator .sat-tool-resize-edge-e::after { inset: 0 var(--sat-tool-edge-outside) 0 auto; border-right-width: 2px; }
+.sat-tool-calculator .sat-tool-resize-edge-w::after { inset: 0 auto 0 var(--sat-tool-edge-outside); border-left-width: 2px; }
+.sat-tool-calculator .sat-tool-resize-edge-ne::after { inset: var(--sat-tool-edge-outside) var(--sat-tool-edge-outside) auto auto; width: 16px; height: 16px; border-top-width: 2px; border-right-width: 2px; }
+.sat-tool-calculator .sat-tool-resize-edge-nw::after { inset: var(--sat-tool-edge-outside) auto auto var(--sat-tool-edge-outside); width: 16px; height: 16px; border-top-width: 2px; border-left-width: 2px; }
+.sat-tool-calculator .sat-tool-resize-edge-sw::after { inset: auto auto var(--sat-tool-edge-outside) var(--sat-tool-edge-outside); width: 16px; height: 16px; border-bottom-width: 2px; border-left-width: 2px; }
 /* Compact chrome leaves a readable tool viewport on short or narrow screens. */
 @media (max-width: 719px), (max-height: 560px) {
   .sat-exam-topbar,

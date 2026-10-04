@@ -46,6 +46,9 @@ test("warmed Desmos opens within 100ms, retains real expressions and both iframe
   );
   expect(latency).toBeLessThan(100);
   await expect(calculator(page).locator("[data-desmos-loading]")).toHaveCount(0);
+  await expect(page.getByRole("radio", { name: "Graphing", exact: true })).toBeChecked();
+  await page.getByRole("radio", { name: "Scientific", exact: true }).click();
+  await expect(scientific.getByRole("application")).toBeVisible();
   await scientific.getByRole("button", { name: "1", exact: true }).click();
   await scientific.getByRole("button", { name: "Plus", exact: true }).click();
   await scientific.getByRole("button", { name: "2", exact: true }).click();

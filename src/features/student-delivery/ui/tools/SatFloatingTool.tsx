@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type TransitionEvent as ReactTransitionEvent } from "react";
-import { ChevronDown, ChevronUp, GripVertical, Grip, X } from "lucide-react";
+import { ChevronDown, ChevronUp, GripVertical, X } from "lucide-react";
 import { satOverlayZClass } from "../primitives/satOverlayZ";
 import { useSatMediaQuery } from "../useSatMediaQuery";
 import {
@@ -960,7 +960,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   // prewarmed iframe identity survives closed -> open. `hidden` removes it
   // from layout; inert + no dialog role keeps it out of the tab order/AT.
   const showActive = props.active === true && !props.disabled;
-  const showHint = !compact && !coarsePointer && props.open && interactive && !hintSeen;
+  const showHint = !compact && props.open && interactive && !hintSeen;
   // R-03 collapsed render: desktop Reference only; compact masks (never
   // clears) so desktop restore still sees `collapsed: true`. Calculator
   // paths are byte-identical — every branch below is isReference-gated.
@@ -1000,6 +1000,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       data-sat-resizing={resizing ? "true" : undefined}
       data-sat-touch-interaction={touchInteraction ? "true" : undefined}
       data-collapsed={collapsedEffective ? "true" : undefined}
+      data-sat-tool-teaching={showHint ? "true" : undefined}
       onPointerDown={handleWindowPointerDown}
       onPointerDownCapture={event => setTouchInteraction(event.pointerType === "touch")}
       onKeyDownCapture={() => setTouchInteraction(false)}
@@ -1075,7 +1076,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
             className="sat-tool-grip sat-tool-tip-anchor grid shrink-0 place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
             onKeyDown={handleGripKeyDown}
           >
-            <Grip className="h-5 w-5" aria-hidden="true" />
+            <span aria-hidden="true" className="sat-tool-grabber" />
             <span className="sat-tool-tip" aria-hidden="true">Move {props.title}</span>
           </span> : null}
           <span className="flex-1" />
@@ -1110,7 +1111,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
         >
           <span aria-hidden="true" className="grid h-8 w-8 place-items-center text-[var(--sat-text-secondary)]">
             <svg className="sat-tool-resize-glyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-              <path d={isCalculator ? "M3 9 L9 3 M3 6 V9 H6 M6 3 H9 V6" : "M2 10 L10 2 M5.5 10 L10 4.5"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+              <path d={isCalculator ? "M11 1.5 V11 H1.5" : "M2 10 L10 2 M5.5 10 L10 4.5"} stroke="currentColor" strokeWidth={isCalculator ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
             </svg>
           </span>
           <span className="sat-tool-tip" aria-hidden="true">Resize {props.title}</span>
