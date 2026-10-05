@@ -1212,7 +1212,7 @@ func studentEntryScheduleHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Schedule service is unavailable."))
 			return
 		}
-		out, err := app.Schedules.Get(r.Context(), chi.URLParam(r, "id"))
+		out, err := app.Schedules.GetStudentEntry(r.Context(), chi.URLParam(r, "id"))
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

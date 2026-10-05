@@ -38,6 +38,9 @@ func TestCreateScheduleAttemptReplayEmitsCounter(t *testing.T) {
 	mock.ExpectQuery("FROM schedule_registrations WHERE id").
 		WithArgs("reg-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "wcode", "user_id"}).AddRow("reg-1", "W1", "u-1"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT exam_type FROM exam_entities WHERE id = ?")).
+		WithArgs("exam-1").
+		WillReturnRows(sqlmock.NewRows([]string{"exam_type"}).AddRow("Academic"))
 	mock.ExpectQuery("FROM student_attempts WHERE registration_id").
 		WithArgs("reg-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "protocol_version"}).AddRow("att-9", 2))

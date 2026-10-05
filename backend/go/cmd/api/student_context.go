@@ -15,7 +15,7 @@ import (
 )
 
 type studentScheduleContextRow struct {
-	id, examID, providerKey, examTitle              string
+	id, examID, providerKey, examType, examTitle    string
 	proctorDisplayName, gradingDisplayName          string
 	publishedVersionID, cohortName                  string
 	institution, recurrenceEndDate                  sql.NullString
@@ -35,7 +35,7 @@ type studentScheduleContextRow struct {
 func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID string, openedModules map[string]bool) (map[string]any, map[string]any, string, error) {
 	var row studentScheduleContextRow
 	err := db.QueryRowContext(ctx, `
-		SELECT s.id, s.exam_id, s.provider_key, s.exam_title,
+		SELECT s.id, s.exam_id, s.provider_key, e.exam_type, s.exam_title,
 		       COALESCE(s.proctor_display_name, s.exam_title),
 		       COALESCE(s.grading_display_name, s.exam_title),
 		       s.published_version_id, s.cohort_name, s.institution,
@@ -45,8 +45,9 @@ func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID stri
 		       s.auto_start, s.auto_stop, s.status, s.created_at, s.created_by,
 		       s.updated_at, s.revision
 		FROM exam_schedules s
+		JOIN exam_entities e ON e.id = s.exam_id
 		WHERE s.id = ?`, scheduleID).Scan(
-		&row.id, &row.examID, &row.providerKey, &row.examTitle,
+		&row.id, &row.examID, &row.providerKey, &row.examType, &row.examTitle,
 		&row.proctorDisplayName, &row.gradingDisplayName,
 		&row.publishedVersionID, &row.cohortName, &row.institution,
 		&row.startTime, &row.endTime, &row.plannedDuration,
@@ -61,8 +62,9 @@ func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID stri
 		return nil, nil, "", err
 	}
 
+	providerKey := effectiveStudentContextProvider(row.providerKey, row.examType)
 	schedule := map[string]any{
-		"id": row.id, "examId": row.examID, "providerKey": row.providerKey,
+		"id": row.id, "examId": row.examID, "providerKey": providerKey,
 		"examTitle": row.examTitle, "proctorDisplayName": row.proctorDisplayName,
 		"gradingDisplayName": row.gradingDisplayName, "publishedVersionId": row.publishedVersionID,
 		"cohortName": row.cohortName, "startTime": row.startTime.UTC(), "endTime": row.endTime.UTC(),
@@ -121,7 +123,9 @@ func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID stri
 	// the same narrowing; answer-key redaction alone leaves the unassigned
 	// branch's stimulus, prompt and options readable.
 	fenceStudentSnapshotBranches(content, openedModules)
-	if _, exists := content["providerKey"]; !exists {
+	if strings.EqualFold(strings.TrimSpace(row.examType), "ACT") {
+		content["providerKey"] = "act"
+	} else if _, exists := content["providerKey"]; !exists {
 		content["providerKey"] = row.providerKey
 	}
 	config, err := redactStudentSnapshot(configRaw.String)
@@ -136,7 +140,14 @@ func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID stri
 	if parentVersionID.Valid {
 		version["parentVersionId"] = parentVersionID.String
 	}
-	return schedule, version, row.providerKey, nil
+	return schedule, version, providerKey, nil
+}
+
+func effectiveStudentContextProvider(providerKey, examType string) string {
+	if strings.EqualFold(strings.TrimSpace(examType), "ACT") {
+		return "act"
+	}
+	return providerKey
 }
 
 // fenceStudentSnapshotBranches walks a decoded V1 content snapshot in place and

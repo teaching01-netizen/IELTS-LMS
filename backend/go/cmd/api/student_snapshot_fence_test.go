@@ -171,6 +171,25 @@ func TestFenceStudentSnapshotHandlesSnakeCaseAndMissingIds(t *testing.T) {
 	}
 }
 
+func TestEffectiveStudentContextProviderHealsACTOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider string
+		examType string
+		want     string
+	}{
+		{name: "legacy ACT identity", provider: "ielts", examType: "ACT", want: "act"},
+		{name: "IELTS identity remains stored value", provider: "ielts", examType: "Academic", want: "ielts"},
+		{name: "other provider remains unchanged", provider: "sat", examType: "Digital SAT", want: "sat"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveStudentContextProvider(tc.provider, tc.examType); got != tc.want {
+				t.Fatalf("effective student provider = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // A new caller that forgets to resolve the opener set would silently ship every
 // branch again, so the projection itself must own the fence.
 func TestStudentVersionProjectionAppliesTheBranchFence(t *testing.T) {

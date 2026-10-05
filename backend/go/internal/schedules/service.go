@@ -418,6 +418,42 @@ func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
 	return sch, nil
 }
 
+// GetStudentEntry returns the schedule metadata used before a student signs in.
+// Legacy ACT schedules can retain provider_key='ielts' even though their exam
+// is ACT; the exam identity is authoritative for the student-facing check-in.
+func (s *Service) GetStudentEntry(ctx context.Context, id string) (Schedule, error) {
+	sch, err := s.Get(ctx, id)
+	if err != nil {
+		return Schedule{}, err
+	}
+	providerKey, err := effectiveScheduleProvider(ctx, s.db, sch)
+	if err != nil {
+		return Schedule{}, err
+	}
+	sch.ProviderKey = providerKey
+	return sch, nil
+}
+
+func effectiveScheduleProvider(ctx context.Context, q planQuerier, sch Schedule) (string, error) {
+	stored := strings.TrimSpace(sch.ProviderKey)
+	if !strings.EqualFold(stored, "ielts") && stored != "" {
+		// Keep every already-classified provider, including SAT, byte-for-byte
+		// unchanged. Only legacy IELTS/blank rows need the ACT identity probe.
+		return sch.ProviderKey, nil
+	}
+	var examType string
+	if err := q.QueryRowContext(ctx, "SELECT exam_type FROM exam_entities WHERE id = ?", sch.ExamID).Scan(&examType); err != nil {
+		if err == sql.ErrNoRows {
+			return "", notFoundError("Exam not found.")
+		}
+		return "", err
+	}
+	if strings.EqualFold(strings.TrimSpace(examType), examdomain.ExamTypeACT) {
+		return examdomain.ProviderACT, nil
+	}
+	return sch.ProviderKey, nil
+}
+
 // ValidateUpdateWindow checks an explicit start/end pair WITHOUT touching
 // the DB (round 62: fail-fast series). Both-nil means "keep existing"
 // and always passes here; the merged-window check inside the tx stays
@@ -1124,13 +1160,11 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 			}
 			return err
 		}
-		currentModule := "listening"
-		switch sch.ProviderKey {
-		case "sat":
-			currentModule = "reading"
-		case "act":
-			currentModule = "science"
+		providerKey, err := effectiveScheduleProvider(ctx, q, sch)
+		if err != nil {
+			return err
 		}
+		currentModule := initialModuleForProvider(providerKey)
 		// Check-in is retried by browsers when navigation or the first session
 		// response is delayed. The registration lock makes this replay-safe and
 		// avoids a unique-key conflict turning a successful attempt into a 409.
@@ -1194,6 +1228,17 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 		return AttemptRef{}, err
 	}
 	return AttemptRef{AttemptID: attemptID, ScheduleID: scheduleID, ProtocolVersion: protocolVersion}, nil
+}
+
+func initialModuleForProvider(providerKey string) string {
+	switch providerKey {
+	case "sat":
+		return "reading"
+	case "act":
+		return "science"
+	default:
+		return "listening"
+	}
 }
 
 // NormalizeAccessCode uppercases W+6-digit codes, else trims (mirrors
