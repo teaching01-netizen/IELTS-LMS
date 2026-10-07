@@ -61,6 +61,14 @@ interface StudentSessionRouteData {
   answerInvariantRollout: StudentAnswerInvariantRollout;
   attemptSnapshot: StudentAttempt | null;
   error: string | null;
+  /**
+   * The server refused this browser because another browser/device owns the
+   * SAT attempt (SESSION_ALREADY_ACTIVE). The route renders the device
+   * transfer surface instead of a generic load error.
+   */
+  ownershipBlocked: boolean;
+  /** Normalized candidate id the session reads use (the SAT writer-key input). */
+  candidateId: string | null;
   isLoading: boolean;
   providerKey: 'ielts' | 'sat' | 'act' | 'unknown';
   runtimeSnapshot: ExamSessionRuntime | null;
@@ -126,6 +134,7 @@ export function useStudentSessionRouteData(
   const [satAttemptUpdateToken, setSatAttemptUpdateToken] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ownershipBlocked, setOwnershipBlocked] = useState(false);
   const loadTransitionRollout = useMemo(buildDefaultAnswerInvariantRollout, []);
   // Phase 3 rollout: the socket is the primary student channel only when the
   // deployment says so (VITE_STUDENT_REALTIME=websocket). The default is the
@@ -830,6 +839,7 @@ export function useStudentSessionRouteData(
     }
 
       applyLoadTransition(source, { type: 'requested' });
+      setOwnershipBlocked(false);
 
       try {
         if (!candidateId) {
@@ -973,6 +983,11 @@ export function useStudentSessionRouteData(
       });
       applyLoadTransition(source, { type: 'succeeded' });
     } catch (loadError) {
+      // Another browser/device owns this SAT attempt: not a load failure but
+      // an ownership state the route answers with the device-transfer surface.
+      if ((loadError as { code?: unknown } | null)?.code === 'SESSION_ALREADY_ACTIVE') {
+        setOwnershipBlocked(true);
+      }
       applyLoadTransition(source, {
         type: 'failed',
         error: loadError instanceof Error ? loadError.message : 'Failed to load exam data',
@@ -1212,6 +1227,8 @@ export function useStudentSessionRouteData(
     answerInvariantRollout,
     attemptSnapshot,
     error,
+    ownershipBlocked,
+    candidateId,
     isLoading,
     providerKey,
     runtimeSnapshot,

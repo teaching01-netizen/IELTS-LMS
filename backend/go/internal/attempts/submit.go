@@ -164,6 +164,9 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 	if cmd.LeaseEpoch != attempt.LeaseEpoch {
 		return SubmitResult{}, leaseFenced()
 	}
+	if claims.LeaseEpoch != nil && *claims.LeaseEpoch != attempt.LeaseEpoch {
+		return SubmitResult{}, leaseFenced()
+	}
 	if err := ensureActiveSession(ctx, q, attempt, claims); err != nil {
 		return SubmitResult{}, err
 	}
@@ -372,6 +375,16 @@ func (s *Service) takeoverInTx(ctx context.Context, q tx.Tx, claims crypto.Attem
 	if claims.AttemptID != attemptID || claims.ScheduleID != attempt.ScheduleID || claims.UserID != attempt.UserID {
 		return TakeoverResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Attempt credential mismatch.", HTTPStatus: 401}
 	}
+	var active, policy sql.NullString
+	if err := q.QueryRowContext(ctx, `SELECT active_client_session_id, writer_policy FROM student_attempts WHERE id=?`, attemptID).Scan(&active, &policy); err != nil {
+		return TakeoverResult{}, err
+	}
+	// Single-writer attempts change owner only through an approved device
+	// transfer: the legacy self-service takeover must not bypass approval.
+	// The current owner may still use it to rotate its own credential.
+	if policy.Valid && policy.String == WriterPolicySATSingleWriter && (!active.Valid || active.String != clientSessionID || claims.ClientSessionID != clientSessionID) {
+		return TakeoverResult{}, transferError(apperrors.CodeTransferApprovalRequired, "Changing devices requires an approved device transfer.", "transfer_required")
+	}
 	if err := s.validateTokenSession(ctx, q, claims); err != nil {
 		return TakeoverResult{}, err
 	}
@@ -394,8 +407,6 @@ func (s *Service) takeoverInTx(ctx context.Context, q tx.Tx, claims crypto.Attem
 		return TakeoverResult{}, &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
 	newLease := attempt.LeaseEpoch
-	var active sql.NullString
-	_ = q.QueryRowContext(ctx, `SELECT active_client_session_id FROM student_attempts WHERE id=?`, attemptID).Scan(&active)
 	if !active.Valid || active.String != clientSessionID {
 		newLease++
 		if newLease == 0 {

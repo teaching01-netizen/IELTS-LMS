@@ -313,15 +313,18 @@ export function useSatResponsePersistence({
         } else if (status === 'durability_fault') {
           setFailure(error ?? 'Answer storage is unavailable.');
           setFailureKind('terminal');
+        } else if (status === 'conflict_fenced') {
+          // Ownership moved (device transfer / lease fence). Drafts the fence
+          // blocked are evidence kept on this device, not something to retry
+          // here: the student must see that the exam continues elsewhere.
+          setFailure(error ?? 'This attempt is active in a newer student session.');
+          setFailureKind('superseded');
         } else if (display === 'blocked_attention') {
           setFailure(
             error ??
               'Your latest answer is kept on this device. Re-checking with the exam\u2026'
           );
           setFailureKind('retryable');
-        } else if (status === 'conflict_fenced') {
-          setFailure(error ?? 'This attempt is active in a newer student session.');
-          setFailureKind('superseded');
         } else if (status === 'conflict_terminal') {
           setFailure(error ?? 'This response can no longer be changed.');
           setFailureKind('terminal');

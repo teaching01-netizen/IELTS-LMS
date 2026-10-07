@@ -240,7 +240,7 @@ func (s *Service) MarkBreakVisible(ctx context.Context, scheduleID, attemptID, u
 
 func personalRuntimeNowTx(ctx context.Context, t tx.Tx, scheduleID string) (time.Time, error) {
 	var model, status string
-	if err := t.QueryRowContext(ctx, "SELECT timing_model, status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE", scheduleID).Scan(&model, &status); err != nil {
+	if err := t.QueryRowContext(ctx, "SELECT timing_model, status FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE", scheduleID).Scan(&model, &status); err != nil {
 		if err == sql.ErrNoRows {
 			return time.Time{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT runtime is not live.")
 		}

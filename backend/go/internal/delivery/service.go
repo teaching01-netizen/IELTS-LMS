@@ -1933,7 +1933,7 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 	var actualStart, pausedAt sql.NullTime
 	var plannedMinutes, extensionMinutes, pausedSeconds sql.NullInt64
 	if err := t.QueryRowContext(ctx,
-		"SELECT rs.status, rs.actual_start_at, rs.paused_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR UPDATE",
+		"SELECT rs.status, rs.actual_start_at, rs.paused_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR SHARE",
 		scheduleID, expected).Scan(&status, &actualStart, &pausedAt, &plannedMinutes, &extensionMinutes, &pausedSeconds); err != nil {
 		if err == sql.ErrNoRows {
 			return moduleTimingGateResult{}, assessmentConflict("SECTION_CLOCK_MISSING", "The authoritative SAT section clock is missing.")
@@ -2244,7 +2244,7 @@ func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, 
 	}
 	var timingModel sql.NullString
 	if err := t.QueryRowContext(ctx,
-		"SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+		"SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE",
 		scheduleID).Scan(&timingModel); err != nil && err != sql.ErrNoRows {
 		return err
 	}
@@ -2276,7 +2276,7 @@ func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, 
 		var startedAt sql.NullTime
 		var plannedMinutes, extensionMinutes, pausedSeconds sql.NullInt64
 		if err := t.QueryRowContext(ctx,
-			"SELECT rs.actual_start_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR UPDATE",
+			"SELECT rs.actual_start_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR SHARE",
 			scheduleID, expected).Scan(&startedAt, &plannedMinutes, &extensionMinutes, &pausedSeconds); err != nil {
 			if err == sql.ErrNoRows {
 				return assessmentConflict("SECTION_CLOCK_MISSING", "The authoritative SAT cohort clock is unavailable for recovery.")

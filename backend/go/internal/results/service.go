@@ -105,6 +105,15 @@ type SATAccessGroup struct {
 	PendingCount     int        `json:"pendingCount"`
 	InvalidatedCount int        `json:"invalidatedCount"`
 	LatestSubmitted  *time.Time `json:"latestSubmittedAt"`
+	// Test start is the earliest assessment_module_attempts.started_at of each
+	// attempt (first genuine module start); null when no module ever started.
+	LatestTestStarted   *time.Time `json:"latestTestStartedAt"`
+	EarliestTestStarted *time.Time `json:"earliestTestStartedAt"`
+	// Disjoint delivery buckets; they sum to AttemptCount.
+	CompletedCount int `json:"completedCount"`
+	RunningCount   int `json:"runningCount"`
+	EndedCount     int `json:"endedCount"`
+	OtherCount     int `json:"otherCount"`
 }
 
 // SATAttemptRow includes attempts before an assessment result has been made.
@@ -124,6 +133,16 @@ type SATAttemptRow struct {
 	StudentEmail  *string    `json:"studentEmail"`
 	CohortName    string     `json:"cohortName"`
 	SubmittedAt   *time.Time `json:"submittedAt"`
+	TestStartedAt *time.Time `json:"testStartedAt"`
+}
+
+// SATAttemptOptions narrows ListSATAttempts. Status is one of "", "all",
+// "completed", "running", "ended", "other". From/To are a half-open UTC
+// interval over the actual test start.
+type SATAttemptOptions struct {
+	Status string
+	From   *time.Time
+	To     *time.Time
 }
 
 type SATAttemptPage struct {
@@ -208,6 +227,8 @@ type SATDetail struct {
 	Payload   any           `json:"scorePayload"`
 	Sections  []SATSection  `json:"sections"`
 	Questions []SATQuestion `json:"questions"`
+	// TestStartedAt is the first genuine module start; null when unknown.
+	TestStartedAt *time.Time `json:"testStartedAt"`
 }
 
 // ACTScienceRow is one ACT science outcome row.
@@ -618,6 +639,19 @@ func (s *Service) ListSATResults(ctx context.Context, actor auth.ActorContext) (
 	return out, rows.Err()
 }
 
+// satTestStartSQL is the first genuine module start for the attempt aliased
+// as "a"; NULL when the candidate never started a module.
+const satTestStartSQL = `(SELECT MIN(ma.started_at) FROM assessment_module_attempts ma WHERE ma.attempt_id = a.id)`
+
+// satOutcomeBucketSQL maps delivery state to disjoint staff-facing buckets
+// for the attempt aliased as "a". Terminated wins over submitted because the
+// terminal seal also stamps submitted_at.
+const satOutcomeBucketSQL = `(CASE
+		WHEN a.delivery_status = 'terminated' THEN 'ended'
+		WHEN a.submitted_at IS NOT NULL OR a.delivery_status = 'submitted' THEN 'completed'
+		WHEN COALESCE(a.delivery_status, 'running') IN ('running', 'paused') THEN 'running'
+		ELSE 'other' END)`
+
 // ListSATAccessGroups returns one row per SAT schedule, including schedules
 // whose Student Access link was deleted. Schedule version and attempt version
 // are read from their immutable published-version references.
@@ -631,17 +665,22 @@ func (s *Service) ListSATAccessGroups(ctx context.Context, actor auth.ActorConte
 			COALESCE(SUM(CASE WHEN ar.outcome_status = 'scored' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN ar.outcome_status = 'pending' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN ar.outcome_status IN ('invalidated_proctor', 'invalidated_timeout') THEN 1 ELSE 0 END), 0),
-			MAX(a.submitted_at)
+			MAX(a.submitted_at), MAX(st.started_at), MIN(st.started_at),
+			COALESCE(SUM(CASE WHEN ` + satOutcomeBucketSQL + ` = 'completed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ` + satOutcomeBucketSQL + ` = 'running' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ` + satOutcomeBucketSQL + ` = 'ended' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ` + satOutcomeBucketSQL + ` = 'other' THEN 1 ELSE 0 END), 0)
 		FROM exam_schedules sch
 		JOIN exam_entities exam ON exam.id = sch.exam_id AND exam.provider_key = 'sat'
 		JOIN exam_versions version ON version.id = sch.published_version_id
 		LEFT JOIN assessment_access_links access ON access.schedule_id = sch.id
 		LEFT JOIN student_attempts a ON a.schedule_id = sch.id
+		LEFT JOIN (SELECT attempt_id, MIN(started_at) AS started_at FROM assessment_module_attempts GROUP BY attempt_id) st ON st.attempt_id = a.id
 		LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat'
 		WHERE 1 = 1` + scope + `
 		GROUP BY sch.id, access.id, access.name, access.lifecycle_state,
 			sch.exam_id, sch.exam_title, version.version_number, sch.cohort_name
-		ORDER BY MAX(a.submitted_at) DESC, sch.exam_title ASC, sch.id ASC`
+		ORDER BY MAX(st.started_at) DESC, MAX(a.submitted_at) DESC, sch.exam_title ASC, sch.id ASC`
 	rows, err := s.db.QueryContext(ctx, query, scopeArgs...)
 	if err != nil {
 		return nil, err
@@ -651,11 +690,12 @@ func (s *Service) ListSATAccessGroups(ctx context.Context, actor auth.ActorConte
 	for rows.Next() {
 		var group SATAccessGroup
 		var linkID, linkName, linkState, cohort sql.NullString
-		var latest sql.NullTime
+		var latest, latestStart, earliestStart sql.NullTime
 		if err := rows.Scan(&group.ScheduleID, &linkID, &linkName, &linkState,
 			&group.ExamID, &group.ExamTitle, &group.VersionNumber, &cohort,
 			&group.AttemptCount, &group.SubmittedCount, &group.ScoredCount,
-			&group.PendingCount, &group.InvalidatedCount, &latest); err != nil {
+			&group.PendingCount, &group.InvalidatedCount, &latest, &latestStart, &earliestStart,
+			&group.CompletedCount, &group.RunningCount, &group.EndedCount, &group.OtherCount); err != nil {
 			return nil, err
 		}
 		group.AccessLinkID = nullableStringPtr(linkID)
@@ -669,6 +709,8 @@ func (s *Service) ListSATAccessGroups(ctx context.Context, actor auth.ActorConte
 			group.AccessLinkName = "Previous Student Access"
 		}
 		group.LatestSubmitted = nullableTimePtr(latest)
+		group.LatestTestStarted = nullableTimePtr(latestStart)
+		group.EarliestTestStarted = nullableTimePtr(earliestStart)
 		out = append(out, group)
 	}
 	return out, rows.Err()
@@ -677,7 +719,7 @@ func (s *Service) ListSATAccessGroups(ctx context.Context, actor auth.ActorConte
 // ListSATAttempts returns a page of attempts for one exam and schedule. It
 // starts from student_attempts so attempts without an assessment_results row
 // are retained and labeled unscored.
-func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, examID, scheduleID string, limit, offset int, needle, scoreFilter string) (*SATAttemptPage, error) {
+func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, examID, scheduleID string, limit, offset int, needle, scoreFilter string, opts SATAttemptOptions) (*SATAttemptPage, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
@@ -703,6 +745,18 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 	case "unavailable":
 		where += ` AND (ar.id IS NULL OR ar.outcome_status <> 'scored' OR ar.total_score IS NULL)`
 	}
+	if opts.Status != "" && opts.Status != "all" {
+		where += ` AND ` + satOutcomeBucketSQL + ` = ?`
+		args = append(args, opts.Status)
+	}
+	if opts.From != nil {
+		where += ` AND ` + satTestStartSQL + ` >= ?`
+		args = append(args, *opts.From)
+	}
+	if opts.To != nil {
+		where += ` AND ` + satTestStartSQL + ` < ?`
+		args = append(args, *opts.To)
+	}
 	var total int
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*)"+from+where, args...).Scan(&total); err != nil {
 		return nil, err
@@ -710,9 +764,9 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 	query := `SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored'),
 		COALESCE(ar.release_status, ''), ar.total_score, a.schedule_id, a.exam_id,
 		sch.exam_title, version.version_number, a.candidate_id, a.candidate_name,
-		a.candidate_email, sch.cohort_name, a.submitted_at, a.created_at` + from + `
+		a.candidate_email, sch.cohort_name, a.submitted_at, a.created_at, ` + satTestStartSQL + `` + from + `
 		JOIN exam_versions version ON version.id = a.published_version_id` + where + `
-		ORDER BY COALESCE(a.submitted_at, a.created_at) DESC, a.id DESC LIMIT ? OFFSET ?`
+		ORDER BY ` + satTestStartSQL + ` DESC, COALESCE(a.submitted_at, a.created_at) DESC, a.id DESC LIMIT ? OFFSET ?`
 	pageArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := s.db.QueryContext(ctx, query, pageArgs...)
 	if err != nil {
@@ -724,17 +778,18 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 		var item SATAttemptRow
 		var resultID, email sql.NullString
 		var score sql.NullInt64
-		var submitted sql.NullTime
+		var submitted, started sql.NullTime
 		var created time.Time
 		if err := rows.Scan(&resultID, &item.AttemptID, &item.AttemptStatus, &item.Outcome, &item.ReleaseState,
 			&score, &item.ScheduleID, &item.ExamID, &item.ExamTitle, &item.VersionNumber,
-			&item.StudentID, &item.StudentName, &email, &item.CohortName, &submitted, &created); err != nil {
+			&item.StudentID, &item.StudentName, &email, &item.CohortName, &submitted, &created, &started); err != nil {
 			return nil, err
 		}
 		item.ResultID = nullableStringPtr(resultID)
 		item.TotalScore = nullableIntPtr(score)
 		item.StudentEmail = nullableStringPtr(email)
 		item.SubmittedAt = nullableTimePtr(submitted)
+		item.TestStartedAt = nullableTimePtr(started)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -755,7 +810,7 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 		studentID, studentName                    string
 		total                                     sql.NullInt64
 		payload                                   sql.NullString
-		submittedAt                               sql.NullTime
+		submittedAt, testStartedAt                sql.NullTime
 		scheduleID, examID, examTitle, cohortName string
 		versionNumber                             int
 	)
@@ -764,7 +819,8 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 		SELECT ar.id, ar.attempt_id, ar.submission_id, ar.provider_key, ar.outcome_status,
 			ar.total_score, ar.score_payload, ar.release_status,
 			a.schedule_id, a.exam_id, sch.exam_title, version.version_number,
-			a.candidate_id, a.candidate_name, a.candidate_email, sch.cohort_name, a.submitted_at
+			a.candidate_id, a.candidate_name, a.candidate_email, sch.cohort_name, a.submitted_at,
+			(SELECT MIN(ma.started_at) FROM assessment_module_attempts ma WHERE ma.attempt_id = a.id)
 		FROM assessment_results ar
 		JOIN student_attempts a ON a.id = ar.attempt_id
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
@@ -774,7 +830,7 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 	err := s.db.QueryRowContext(ctx, query, args...).
 		Scan(&id, &attemptID, &sub, &provider, &outcome, &total, &payload, &release,
 			&scheduleID, &examID, &examTitle, &versionNumber,
-			&studentID, &studentName, &email, &cohortName, &submittedAt)
+			&studentID, &studentName, &email, &cohortName, &submittedAt, &testStartedAt)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.New(apperrors.CodeNotFound, "SAT result not found.")
 	}
@@ -810,9 +866,9 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 			telemetry.IncCounter(telemetry.MSATResultQuestionDetailFailure)
 			return nil, fmt.Errorf("load SAT question responses: %w", err)
 		}
-		return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: questions}, nil
+		return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: questions, TestStartedAt: nullableTimePtr(testStartedAt)}, nil
 	}
-	return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: []SATQuestion{}}, nil
+	return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: []SATQuestion{}, TestStartedAt: nullableTimePtr(testStartedAt)}, nil
 }
 
 // ListACTScience serves GET /api/v1/results/act-science from the sealed

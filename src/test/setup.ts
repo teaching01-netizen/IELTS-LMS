@@ -179,3 +179,31 @@ if (typeof document !== "undefined") {
   document.head.appendChild(style);
   document.documentElement.classList.add("testing-no-motion");
 }
+
+// jsdom has no Web Locks. The SAT one-writer-tab gate requires them (and
+// fails closed without them), so give jsdom a minimal in-memory exclusive
+// lock manager with `ifAvailable` semantics. Real browsers use the native API.
+if (typeof navigator !== "undefined" && !("locks" in navigator)) {
+  const held = new Set<string>();
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: {
+      async request(
+        name: string,
+        options: { ifAvailable?: boolean },
+        callback: (lock: { name: string } | null) => Promise<unknown> | unknown,
+      ) {
+        if (held.has(name)) {
+          if (options.ifAvailable) return callback(null);
+          throw new Error("jsdom Web Locks stub supports ifAvailable requests only.");
+        }
+        held.add(name);
+        try {
+          return await callback({ name });
+        } finally {
+          held.delete(name);
+        }
+      },
+    },
+  });
+}

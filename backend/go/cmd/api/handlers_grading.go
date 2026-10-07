@@ -1090,7 +1090,27 @@ func resultsSATAttemptsHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "scoreFilter must be all, available, or unavailable."))
 			return
 		}
-		out, err := app.Results.ListSATAttempts(r.Context(), actorOf(r.Context()), examID, scheduleID, limit, offset, needle, scoreFilter)
+		opts := resultsdomain.SATAttemptOptions{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
+		switch opts.Status {
+		case "", "all", "completed", "running", "ended", "other":
+		default:
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "status must be all, completed, running, ended, or other."))
+			return
+		}
+		for name, dst := range map[string]**time.Time{"from": &opts.From, "to": &opts.To} {
+			value := strings.TrimSpace(r.URL.Query().Get(name))
+			if value == "" {
+				continue
+			}
+			parsed, perr := time.Parse(time.RFC3339, value)
+			if perr != nil {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, name+" must be an RFC 3339 timestamp."))
+				return
+			}
+			utc := parsed.UTC()
+			*dst = &utc
+		}
+		out, err := app.Results.ListSATAttempts(r.Context(), actorOf(r.Context()), examID, scheduleID, limit, offset, needle, scoreFilter, opts)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

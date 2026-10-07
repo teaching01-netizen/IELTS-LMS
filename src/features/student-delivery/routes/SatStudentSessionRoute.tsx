@@ -50,6 +50,7 @@ import { SatPresenceSurface } from "../ui/motion/SatPresenceSurface";
 import { SatStudentStageHost } from "../ui/stage/SatStudentStageHost";
 import { SatCompleteScreen, SatTerminatedScreen } from "../ui/transitions/SatCompleteScreen";
 import { SatPreStartScreen } from "../ui/transitions/SatPreStartScreen";
+import { SatWriterTransferControl } from "../ui/entry/SatWriterTransferControl";
 import { useStudentExamPageLock } from "@components/student/layout/useStudentExamPageLock";
 import { useStudentExamViewport } from "@components/student/layout/useStudentExamViewport";
 import { useStudentFocusedControlVisibility } from "@components/student/layout/useStudentFocusedControlVisibility";
@@ -483,10 +484,16 @@ export function SatStudentSessionRoute({
   const inReviewPhase = state.phase === "review";
   const takeOverDurabilityLease = () => {
     void exam.commands.takeOverDurabilityLease().catch((takeoverError: unknown) => {
+      // Single-writer attempts move only through an approved device change.
+      // Reloading re-enters as a blocked browser, which offers the request.
+      if ((takeoverError as { code?: unknown } | null)?.code === "TRANSFER_APPROVAL_REQUIRED") {
+        window.location.reload();
+        return;
+      }
       exam.setError(
         takeoverError instanceof Error
           ? takeoverError.message
-          : "Unable to take over this attempt."
+          : "Unable to continue on this device."
       );
     });
   };
@@ -584,6 +591,13 @@ export function SatStudentSessionRoute({
           startingModuleTwo={Boolean(exam.pendingModule && data.attempt.moduleAttempts.some(
             (attempt) => attempt.moduleId === exam.pendingModule?.id && attempt.state === "not_started" && attempt.autoStartAt,
           ))}
+          footer={
+            // Self-service device change exists only before any timed module
+            // starts; afterwards a proctor approves it (server-enforced).
+            stage.reason === "waiting" && data.attempt.moduleAttempts.every((attempt) => !attempt.startedAt) ? (
+              <SatWriterTransferControl scheduleId={scheduleId} attemptId={attemptId} />
+            ) : null
+          }
         />,
       ),
     );
@@ -851,15 +865,7 @@ export function SatStudentSessionRoute({
         onRetrySave={() => {
           void persistence.retryFailed();
         }}
-        onTakeOver={() => {
-          void exam.commands.takeOverDurabilityLease().catch((takeoverError: unknown) => {
-            exam.setError(
-              takeoverError instanceof Error
-                ? takeoverError.message
-                : "Unable to take over this attempt."
-            );
-          });
-        }}
+        onTakeOver={takeOverDurabilityLease}
         isTakingOver={persistence.isTakingOver}
         referenceTool={state.toolCapabilities.referenceSheet ? (controls) => (
           <SatReferenceSheetPanel

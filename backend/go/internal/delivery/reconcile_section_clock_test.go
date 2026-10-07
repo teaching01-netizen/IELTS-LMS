@@ -22,7 +22,7 @@ import (
 
 const (
 	moduleSectionLookup = "SELECT s.section_key FROM assessment_modules m JOIN assessment_sections s"
-	sectionClockLock    = "FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR UPDATE"
+	sectionClockLock    = "FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR SHARE"
 )
 
 // cohortSectionModuleExpired runs the cohort_section_v3 expiry branch against a

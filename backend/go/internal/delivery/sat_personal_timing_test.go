@@ -566,7 +566,7 @@ func TestMarkStageVisibleIsIdempotentAfterTheFirstPaint(t *testing.T) {
 // personalBreakRuntimeNow stages personalRuntimeNowTx: the runtime lock plus the
 // authoritative in-tx instant the break arm/entry decision is made against.
 func personalBreakRuntimeNow(mock sqlmock.Sqlmock, now time.Time) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, status FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "status"}).
 			AddRow(examruntime.TimingModelPersonal, "live"))

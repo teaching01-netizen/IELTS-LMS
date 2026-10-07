@@ -439,6 +439,19 @@ type Config struct {
 	SATM2AutoStartSecs int
 	// SATReconcileConcurrency bounds parallel attempts per timeout sweep.
 	SATReconcileConcurrency int
+	// SAT session ownership (docs/superpowers/plans/2026-10-06-sat-session-
+	// ownership-and-device-transfer.md). SATSingleWriter enables admission
+	// claims + blocked competing entry for SAT attempts; an attempt that was
+	// claimed under the policy keeps it even if the flag is later turned off
+	// (rollback stops NEW claims and transfer requests only).
+	SATSingleWriter bool
+	// Empty selects all SAT schedules; otherwise only these schedule IDs
+	// can acquire a new policy snapshot. Existing snapshots remain enforced.
+	SATSingleWriterScheduleIDs string
+	// SATTransferRequestTTLSecs bounds an unapproved transfer request;
+	// SATTransferApprovalTTLSecs bounds the redeem window after approval.
+	SATTransferRequestTTLSecs  int
+	SATTransferApprovalTTLSecs int
 
 	// StudentWS selects the plan-C3 student-socket posture (default allow).
 	StudentWS StudentWSMode
@@ -635,8 +648,8 @@ type Config struct {
 	OutboxClaimMode OutboxClaimMode
 
 	// RuntimeSnapshotEnabled gates the plan-B2 lock-free runtime pre-gate.
-	// Off (default) = today's behavior: every V2 write locks
-	// exam_session_runtimes + section rows FOR UPDATE in-tx. On = the
+	// Off (default) = today's behavior: every V2 write share-locks
+	// exam_session_runtimes + section rows (FOR SHARE) in-tx. On = the
 	// v2Locker pre-checks writability against a ~1s-TTL committed-read
 	// snapshot before the write tx and only takes the locks on mismatch
 	// (one synchronous refresh + retry, then today's 422/409 codes).
@@ -893,6 +906,10 @@ func Load() Config {
 		SATPersonalCloseWindowSecs:       getenvInt("SAT_PERSONAL_CLOSE_WINDOW_SECS", 15),
 		SATM2AutoStartSecs:               getenvInt("SAT_M2_AUTO_START_SECS", 60),
 		SATReconcileConcurrency:          getenvInt("SAT_RECONCILE_CONCURRENCY", 4),
+		SATSingleWriter:                  getenvBool("SAT_SINGLE_WRITER", true),
+		SATSingleWriterScheduleIDs:       strings.TrimSpace(os.Getenv("SAT_SINGLE_WRITER_SCHEDULE_IDS")),
+		SATTransferRequestTTLSecs:        getenvInt("SAT_TRANSFER_REQUEST_TTL_SECS", 600),
+		SATTransferApprovalTTLSecs:       getenvInt("SAT_TRANSFER_APPROVAL_TTL_SECS", 120),
 		LiveBus:                          parseLiveBusMode(os.Getenv("LIVE_BUS")),
 		StudentWS:                        parseStudentWSMode(os.Getenv("STUDENT_WS")),
 		ShedMode:                         parseShedMode(os.Getenv("SHED_MODE")),

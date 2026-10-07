@@ -67,10 +67,12 @@ func migDir(t *testing.T) string {
 // terminalization service already implement) — count/max bumped 71->72.
 // SAT co-edit room replacement landed 0073 (workspace generations) — count/max
 // bumped 72->73. SAT module handoff and late-answer evidence landed 0074/0075
-// — count/max bumped 73->75. Any other count/max/gap change fails loudly.
+// — count/max bumped 73->75. SAT session ownership + device transfer landed
+// 0076 (student_attempts.writer_policy, attempt_device_transfers) — count/max
+// bumped 75->76. Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 75
-	pinnedMigrationMax   = 75
+	pinnedMigrationFiles = 76
+	pinnedMigrationMax   = 76
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

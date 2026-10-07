@@ -119,7 +119,7 @@ describe("SatReviewPage", () => {
     for (const notice of [screen.getByRole("status"), screen.getByRole("alert")]) {
       expect(notice.className).not.toMatch(/fixed|absolute/);
     }
-    fireEvent.click(screen.getByRole("button", { name: "Take over" }));
+    fireEvent.click(screen.getByRole("button", { name: SAT_COPY.saveStatus.takeOver }));
     expect(onTakeOver).toHaveBeenCalledOnce();
   });
 });

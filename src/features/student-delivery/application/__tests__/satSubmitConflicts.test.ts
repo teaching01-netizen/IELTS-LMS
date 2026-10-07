@@ -149,15 +149,21 @@ const BACKEND_CODE_BUCKETS: ReadonlyArray<
   ["STUDENT_WS_RETIRED", "none"],
   ["EXAM_NOT_FOUND", "none"],
   ["DRAFT_INTEGRITY_VIOLATION", "none"],
+  // Device transfer: a blocked browser is told another device owns the
+  // attempt; transfer workflow refusals are their own UI, never transitions.
+  ["SESSION_ALREADY_ACTIVE", "writer-superseded"],
+  ["TRANSFER_APPROVAL_REQUIRED", "none"],
+  ["TRANSFER_EXPIRED", "none"],
+  ["TRANSFER_CONFLICT", "none"],
 ];
 
 describe("SAT conflict policy covers every backend code", () => {
   it("has a unique, complete table", () => {
     const codes = BACKEND_CODE_BUCKETS.map(([code]) => code);
     expect(new Set(codes).size).toBe(codes.length);
-    // 38 codes in platform/apperrors/errors.go. If this count changes, the
+    // 42 codes in platform/apperrors/errors.go. If this count changes, the
     // backend added a code: classify it rather than inheriting a default.
-    expect(codes.length).toBe(38);
+    expect(codes.length).toBe(42);
   });
 
   it.each(BACKEND_CODE_BUCKETS)("classifies %s as %s", (code, bucket) => {

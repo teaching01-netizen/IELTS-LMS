@@ -423,7 +423,11 @@ func snapshotContainsQuestion(value any, questionID string) bool {
 	return false
 }
 
-// v2Locker locks the exam runtime + active section after the attempt.
+// v2Locker share-locks the exam runtime + active section after the attempt.
+// FOR SHARE (not FOR UPDATE): this path only reads both rows, and only
+// runtime/proctor commands write them. A share lock still holds those writers
+// off until commit, but no longer serializes every student of the schedule
+// behind one slow save or seal.
 // A missing runtime row is an open gate (schedules without a runtime yet).
 type v2Locker struct{}
 
@@ -436,7 +440,7 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 	var timingModel sql.NullString
 	var active sql.NullString
 	var waiting sql.NullBool
-	err := q.QueryRowContext(ctx, `SELECT id, status, timing_model, active_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE`, scheduleID).Scan(&id, &status, &timingModel, &active, &waiting)
+	err := q.QueryRowContext(ctx, `SELECT id, status, timing_model, active_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE`, scheduleID).Scan(&id, &status, &timingModel, &active, &waiting)
 	now, terr := dbNow(ctx, q)
 	if terr != nil {
 		return attempts.RuntimeGate{}, terr
@@ -468,7 +472,7 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 	}
 	if active.Valid && active.String != "" {
 		var secStatus sql.NullString
-		serr := q.QueryRowContext(ctx, `SELECT status FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR UPDATE`, id, active.String).Scan(&secStatus)
+		serr := q.QueryRowContext(ctx, `SELECT status FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR SHARE`, id, active.String).Scan(&secStatus)
 		if serr != nil && serr != sql.ErrNoRows {
 			return attempts.RuntimeGate{}, serr
 		}
@@ -1174,12 +1178,16 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			att = &minted
 		}
 		now := time.Now().UTC()
-		lease := uint64(1)
-		token, attemptExpiresAt, err := auth.IssueAttemptToken(r.Context(), app.DB, app.Config, userID, scheduleID, att.AttemptID, clientSessionID, nil, &lease, now)
+		// One admission boundary: authoritative lease (never a hardcoded
+		// epoch) and, under the SAT single-writer policy, no writer
+		// credential for a browser competing with the current owner.
+		admission, err := admitStudentSession(r.Context(), app, userID, scheduleID, att.AttemptID, clientSessionID)
 		if err != nil {
-			httpx.WriteError(w, r, err)
+			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
+		// The blocked browser still gets its student session: it is the
+		// scoped capability for requesting a device transfer.
 		_, sessionToken, csrfToken, err := auth.CreateSession(r.Context(), app.DB, app.Config, userID, auth.RoleStudent, nil, nil, now)
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -1187,18 +1195,24 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 		}
 		sessionExpiresAt, idleTimeoutAt := auth.SessionExpiry(app.Config, auth.RoleStudent, now)
 		setCreatedSessionCookies(w, app, auth.RoleStudent, sessionToken, csrfToken, sessionExpiresAt, idleTimeoutAt, now)
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		out := map[string]any{
 			"user":             map[string]any{"id": userID, "email": email, "displayName": displayName, "role": auth.RoleStudent, "state": "active"},
 			"csrfToken":        csrfToken,
 			"expiresAt":        sessionExpiresAt,
 			"idleTimeoutAt":    idleTimeoutAt,
 			"scheduleId":       scheduleID,
 			"studentCode":      wcode,
-			"attemptToken":     token,
+			"attemptToken":     nil,
 			"attemptId":        att.AttemptID,
-			"attemptExpiresAt": attemptExpiresAt.UTC(),
+			"attemptExpiresAt": nil,
 			"clientSessionId":  clientSessionID,
-		})
+			"admission":        admissionPayload(admission),
+		}
+		if admission.Token != "" {
+			out["attemptToken"] = admission.Token
+			out["attemptExpiresAt"] = admission.ExpiresAt.UTC()
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
 	}
 }
 

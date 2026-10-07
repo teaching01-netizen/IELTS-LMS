@@ -43,13 +43,13 @@ func TestTakeoverUsesLiveSessionColumns(t *testing.T) {
 			"delivery_status", "phase", "lease_epoch", "control_epoch", "response_revision",
 			"deadline_at", "closing_grace_until", "submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
 		}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 1, 2, 0, nil, nil, nil, nil, "active", "", ""))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT active_client_session_id, writer_policy FROM student_attempts WHERE id=?")).
+		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id", "writer_policy"}).AddRow("cs-old", nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id=? AND revoked_at IS NULL FOR UPDATE")).
 		WillReturnRows(sqlmock.NewRows([]string{"attempt_id", "client_session_id", "revoked_at", "expires_at"}).
 			AddRow("att-1", "cs-new", nil, time.Date(2026, 9, 8, 13, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id=?")).
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("cs-old"))
 	// Live-column INSERT: names id + revocation_reason, never `reason`.
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO attempt_sessions (id, token_id, attempt_id")).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE attempt_sessions SET revoked_at=?, revocation_reason=")).WillReturnResult(sqlmock.NewResult(0, 1))

@@ -19,12 +19,20 @@ export interface SatAccessGroupSummary {
   pendingCount: number;
   invalidatedCount: number;
   latestSubmittedAt: string | null;
+  /** Optional while older servers omit them. Test start = first module start. */
+  latestTestStartedAt?: string | null;
+  earliestTestStartedAt?: string | null;
+  completedCount?: number;
+  runningCount?: number;
+  endedCount?: number;
+  otherCount?: number;
 }
 
 export interface SatAttemptRow extends Omit<SatResultSummary, 'id' | 'submissionId' | 'scoreKind'> {
   resultId: string | null;
   attemptId: string;
   attemptStatus?: string;
+  testStartedAt?: string | null;
 }
 
 export interface SatAttemptPage {
@@ -93,6 +101,7 @@ export interface SatResultDetail {
   scorePayload: Record<string, unknown>;
   sections: SatSectionResult[];
   questions: SatQuestionResult[];
+  testStartedAt?: string | null;
 }
 
 export interface SatAttemptAnswer {
@@ -116,13 +125,15 @@ export interface SatAttemptAnswers {
   responseRevision: number | null;
   savedAnswerCount: number;
   lastSavedAt: string | null;
+  testStartedAt?: string | null;
+  submittedAt?: string | null;
   questions: SatAttemptAnswer[];
 }
 
 export const satResultKeys = {
   all: ['sat-results'] as const,
   list: () => [...satResultKeys.all, 'list'] as const,
-  attempts: (examId: string, scheduleId: string, offset: number, needle: string, scoreFilter: string) => [...satResultKeys.all, 'attempts', examId, scheduleId, offset, needle, scoreFilter] as const,
+  attempts: (examId: string, scheduleId: string, offset: number, needle: string, scoreFilter: string, filters: SatAttemptFilters) => [...satResultKeys.all, 'attempts', examId, scheduleId, offset, needle, scoreFilter, filters] as const,
   detail: (resultId: string) => [...satResultKeys.all, 'detail', resultId] as const,
   attemptAnswers: (attemptId: string) => [...satResultKeys.all, 'attempt-answers', attemptId] as const,
 };
@@ -136,10 +147,23 @@ export function useSatResultsQuery() {
   });
 }
 
-export function useSatAttemptsQuery(examId?: string, scheduleId?: string, offset = 0, needle = '', scoreFilter = 'all') {
+export interface SatAttemptFilters {
+  status?: 'all' | 'completed' | 'running' | 'ended' | 'other';
+  /** RFC 3339 instants; half-open interval over the actual test start. */
+  from?: string;
+  to?: string;
+}
+
+export function useSatAttemptsQuery(examId?: string, scheduleId?: string, offset = 0, needle = '', scoreFilter = 'all', filters: SatAttemptFilters = {}) {
   return useQuery({
-    queryKey: satResultKeys.attempts(examId ?? '', scheduleId ?? '', offset, needle, scoreFilter),
-    queryFn: () => resultsGateway.get<SatAttemptPage>(`/v1/results/sat/attempts?examId=${encodeURIComponent(examId ?? '')}&scheduleId=${encodeURIComponent(scheduleId ?? '')}&limit=50&offset=${offset}&q=${encodeURIComponent(needle)}&scoreFilter=${encodeURIComponent(scoreFilter)}`),
+    queryKey: satResultKeys.attempts(examId ?? '', scheduleId ?? '', offset, needle, scoreFilter, filters),
+    queryFn: () => {
+      const params = new URLSearchParams({ examId: examId ?? '', scheduleId: scheduleId ?? '', limit: '50', offset: String(offset), q: needle, scoreFilter });
+      if (filters.status && filters.status !== 'all') params.set('status', filters.status);
+      if (filters.from) params.set('from', filters.from);
+      if (filters.to) params.set('to', filters.to);
+      return resultsGateway.get<SatAttemptPage>(`/v1/results/sat/attempts?${params.toString()}`);
+    },
     enabled: Boolean(examId && scheduleId),
     staleTime: 30_000,
     gcTime: 5 * 60_000,

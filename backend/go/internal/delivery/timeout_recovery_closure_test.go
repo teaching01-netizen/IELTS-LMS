@@ -55,7 +55,7 @@ func timeoutRecoveryFixture(t *testing.T, routeDecided int) error {
 	if routeDecided == 0 {
 		// A decided route short-circuits before the cohort-clock read, so this
 		// expectation exists only for the control case.
-		mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 			WithArgs("sched-1").
 			WillReturnRows(sqlmock.NewRows([]string{"timing_model"}).AddRow("legacy_section_v1"))
 	}

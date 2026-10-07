@@ -5,8 +5,10 @@ function appendQuery(endpoint: string, query: URLSearchParams): string {
   return queryString.length > 0 ? `${endpoint}?${queryString}` : endpoint;
 }
 
-function withCandidateId(endpoint: string, candidateId: string): string {
-  return appendQuery(endpoint, new URLSearchParams({ candidateId }));
+function withCandidateAndSession(endpoint: string, candidateId: string, clientSessionId?: string | null): string {
+  const query = new URLSearchParams({ candidateId });
+  if (clientSessionId) query.set('clientSessionId', clientSessionId);
+  return appendQuery(endpoint, query);
 }
 
 function resolveCandidateIdFromStudentKey(scheduleId: string, studentKey: string): string | null {
@@ -30,7 +32,11 @@ function resolveCandidateIdFromStudentKey(scheduleId: string, studentKey: string
 export interface StudentSessionTransport {
   readonly paths: {
     session: (scheduleId: string, candidateId: string, clientSessionId?: string) => string;
-    staticSession: (scheduleId: string, candidateId: string) => string;
+    /**
+     * clientSessionId presents this browser's writer identity: a SAT
+     * single-writer attempt serves protected content only to its owner.
+     */
+    staticSession: (scheduleId: string, candidateId: string, clientSessionId?: string | null) => string;
     liveSession: (scheduleId: string, candidateId: string) => string;
     credentialRefresh: (
       scheduleId: string,
@@ -56,10 +62,10 @@ export const studentSessionTransport: StudentSessionTransport = {
       if (clientSessionId) query.set('clientSessionId', clientSessionId);
       return appendQuery(`/v1/student/sessions/${scheduleId}`, query);
     },
-    staticSession: (scheduleId, candidateId) =>
-      withCandidateId(`/v1/student/sessions/${scheduleId}/static`, candidateId),
+    staticSession: (scheduleId, candidateId, clientSessionId) =>
+      withCandidateAndSession(`/v1/student/sessions/${scheduleId}/static`, candidateId, clientSessionId),
     liveSession: (scheduleId, candidateId) =>
-      withCandidateId(`/v1/student/sessions/${scheduleId}/live`, candidateId),
+      withCandidateAndSession(`/v1/student/sessions/${scheduleId}/live`, candidateId),
     credentialRefresh: (scheduleId, candidateId, clientSessionId) =>
       appendQuery(
         `/v1/student/sessions/${scheduleId}`,

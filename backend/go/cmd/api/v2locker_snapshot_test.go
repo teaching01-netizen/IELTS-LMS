@@ -145,7 +145,7 @@ func TestSnapshotLockerOpenGateWithoutRuntimeRow(t *testing.T) {
 // The two gate modes must reach the SAME verdict for the same committed section
 // state — one shared mapping (runtime.SectionLiveness), so "no mode silently
 // skips the check" is a testable property rather than a comment. Each mode is
-// driven through its own SQL shape (FOR UPDATE vs lock-free) against the same
+// driven through its own SQL shape (FOR SHARE vs lock-free) against the same
 // staged rows.
 func TestLockerModesAgreeOnEverySectionStatus(t *testing.T) {
 	for _, status := range []string{"live", "paused", "locked", "completed", ""} {
@@ -162,7 +162,7 @@ func TestLockerModesAgreeOnEverySectionStatus(t *testing.T) {
 	}
 }
 
-// lockWithV2Locker runs the FOR UPDATE gate against staged rows; a nil status
+// lockWithV2Locker runs the FOR SHARE gate against staged rows; a nil status
 // stages a runtime whose active section has no row (fail closed).
 func lockWithV2Locker(t *testing.T, sectionStatus *string) attempts.RuntimeGate {
 	t.Helper()

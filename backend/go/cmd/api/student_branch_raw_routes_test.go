@@ -147,15 +147,28 @@ func TestStudentRawContentRoutesFenceUnassignedBranch(t *testing.T) {
 				{http.MethodPost, "/api/v1/assessment-delivery/schedules/" + scheduleID + "/bootstrap", true},
 				{http.MethodGet, "/api/v1/assessment-delivery/schedules/" + scheduleID + "/state", true},
 				{http.MethodGet, "/api/v1/assessment-delivery/schedules/" + scheduleID + "/modules/" + assignedID + "/entry-state", true},
-				{http.MethodGet, "/api/v1/student/sessions/" + scheduleID, false},
-				{http.MethodGet, "/api/v1/student/sessions/" + scheduleID + "/static", false},
-				{http.MethodGet, "/api/v1/student/sessions/" + scheduleID + "/live", false},
+				// Cookie reads present the owning browser's writer session:
+				// under the SAT single-writer policy a non-owner browser is
+				// refused protected content (SESSION_ALREADY_ACTIVE).
+				{http.MethodGet, "/api/v1/student/sessions/" + scheduleID + "?clientSessionId=sess-canary", false},
+				{http.MethodGet, "/api/v1/student/sessions/" + scheduleID + "/static?clientSessionId=sess-canary", false},
+				{http.MethodGet, "/api/v1/student/sessions/" + scheduleID + "/live?clientSessionId=sess-canary", false},
 			} {
 				rec := call(endpoint.method, endpoint.path, endpoint.bearer)
 				if rec.Code != http.StatusOK {
 					t.Fatalf("%s %s = %d: %s", endpoint.method, endpoint.path, rec.Code, rec.Body.String())
 				}
 				body := rec.Body.String()
+				// The owner's credential refresh rotates its token (same as
+				// the browser); keep using the freshly issued bearer.
+				var refreshed struct {
+					AttemptCredential *struct {
+						AttemptToken string `json:"attemptToken"`
+					} `json:"attemptCredential"`
+				}
+				if json.Unmarshal(rec.Body.Bytes(), &refreshed) == nil && refreshed.AttemptCredential != nil && refreshed.AttemptCredential.AttemptToken != "" {
+					token = refreshed.AttemptCredential.AttemptToken
+				}
 				if clientStart {
 					for _, canary := range canaries[assigned][1:] {
 						if strings.Contains(body, canary) {
@@ -169,7 +182,7 @@ func TestStudentRawContentRoutesFenceUnassignedBranch(t *testing.T) {
 						t.Fatalf("%s %s exposed unassigned %s canary %q", endpoint.method, endpoint.path, unassigned, canary)
 					}
 				}
-				if !clientStart && (endpoint.path == "/api/v1/student/sessions/"+scheduleID+"/static" || endpoint.path == "/api/v1/student/sessions/"+scheduleID || strings.HasSuffix(endpoint.path, "/bootstrap")) {
+				if !clientStart && (strings.Contains(endpoint.path, "/static?") || strings.HasSuffix(endpoint.path, scheduleID+"?clientSessionId=sess-canary") || strings.HasSuffix(endpoint.path, "/bootstrap")) {
 					for _, canary := range canaries[assigned] {
 						if !strings.Contains(body, canary) {
 							t.Fatalf("%s %s lost assigned %s canary %q", endpoint.method, endpoint.path, assigned, canary)

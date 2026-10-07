@@ -6,19 +6,13 @@ import { QuestionRawTable } from '../../../components/results/QuestionRawTable';
 import type { SatQuestionResult, SatSectionResult } from '../../../features/results/api/satResultsQueries';
 import { useSatResultQuery } from '../../../features/results/api/satResultsQueries';
 import { SatSectionCard, SatStatusPill } from '../ui/SatPage';
+import { formatTestTimeLine, viewerTimeZoneLabel } from './satTestTime';
 
 function sectionTitle(key: string): string {
   const normalized = key.toLocaleLowerCase().replace(/[-_]/g, ' ');
   if (normalized.includes('reading') || normalized.includes('writing')) return 'Reading & Writing';
   if (normalized.includes('math')) return 'Math';
   return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return '—';
-  const time = new Date(value).getTime();
-  if (Number.isNaN(time)) return '—';
-  return new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(time));
 }
 
 function moduleRoleLabel(role: string): string {
@@ -98,7 +92,7 @@ export function SatResultDetailRoute() {
       <div className="mt-5 border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pb-7">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{summary.examTitle} · Version {summary.versionNumber}</p>
         <div className="mt-2 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div><h1 className="text-balance text-[30px] font-semibold tracking-[-0.045em]">{summary.studentName}</h1><p className="mt-1 text-[11px] text-slate-400">{summary.studentId} · {summary.cohortName} · {formatDate(summary.submittedAt)}</p></div>
+          <div><h1 className="text-balance text-[30px] font-semibold tracking-[-0.045em]">{summary.studentName}</h1><p className="mt-1 text-[12px] text-slate-500">{summary.studentId} · {summary.cohortName}</p><p className="mt-3 text-[15px] font-semibold tabular-nums text-slate-900">Test started: {formatTestTimeLine(query.data.testStartedAt)}</p><p className="mt-1 text-[12px] tabular-nums text-slate-500">Submitted: {summary.submittedAt ? formatTestTimeLine(summary.submittedAt) : 'Not submitted'} · Times shown in {viewerTimeZoneLabel()}</p></div>
           <div className="sm:text-right">
             <p className="text-[22px] font-semibold tracking-[-0.035em] text-slate-950">{isInvalidated ? 'Ended' : 'Completed · view answers'}</p>
             <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-400">{isInvalidated ? `${outcomeLabel(summary.outcomeStatus)} · ${summary.releaseStatus}` : 'Saved response review'}</p>

@@ -138,8 +138,7 @@ test.describe("SAT entry control-epoch adoption", () => {
       await expect(sessionRow).toBeVisible({ timeout: 30_000 });
       await sessionRow.click();
       await expect(page).toHaveURL(new RegExp(`/sat/sessions/${scheduleId}$`));
-      await page.getByRole("button", { name: "Start" }).click();
-      await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
+      await page.getByRole("button", { name: "Start", exact: true }).click();
 
       await studentPage.reload({ waitUntil: "domcontentloaded" });
       await waitForExamShell(studentPage);

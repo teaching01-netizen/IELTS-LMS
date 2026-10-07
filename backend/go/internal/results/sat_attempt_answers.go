@@ -25,6 +25,8 @@ type SATAttemptAnswers struct {
 	ResponseRevision *uint64            `json:"responseRevision"`
 	SavedAnswerCount int                `json:"savedAnswerCount"`
 	LastSavedAt      *time.Time         `json:"lastSavedAt"`
+	TestStartedAt    *time.Time         `json:"testStartedAt"`
+	SubmittedAt      *time.Time         `json:"submittedAt"`
 	Questions        []SATAttemptAnswer `json:"questions"`
 }
 
@@ -50,7 +52,9 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 	query := `SELECT a.id, sch.exam_title, version.version_number, a.candidate_id,
 		a.candidate_name, sch.cohort_name, a.delivery_status, a.protocol_version,
 		a.response_revision, (SELECT ar.outcome_status FROM assessment_results ar
-			WHERE ar.attempt_id = a.id AND ar.provider_key = 'sat' LIMIT 1)
+			WHERE ar.attempt_id = a.id AND ar.provider_key = 'sat' LIMIT 1),
+		(SELECT MIN(ma.started_at) FROM assessment_module_attempts ma WHERE ma.attempt_id = a.id),
+		a.submitted_at
 		FROM student_attempts a
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		JOIN exam_entities exam ON exam.id = a.exam_id AND exam.provider_key = 'sat'
@@ -59,10 +63,11 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 	args := append([]any{attemptID}, scopeArgs...)
 	out := &SATAttemptAnswers{Questions: []SATAttemptAnswer{}}
 	var cohort, delivery, outcome sql.NullString
+	var testStarted, submitted sql.NullTime
 	var revision uint64
 	err = tx.QueryRowContext(ctx, query, args...).Scan(&out.AttemptID, &out.ExamTitle,
 		&out.VersionNumber, &out.StudentID, &out.StudentName, &cohort, &delivery,
-		&out.ProtocolVersion, &revision, &outcome)
+		&out.ProtocolVersion, &revision, &outcome, &testStarted, &submitted)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.New(apperrors.CodeNotFound, "SAT attempt not found.")
 	}
@@ -70,6 +75,8 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 		return nil, err
 	}
 	out.CohortName = cohort.String
+	out.TestStartedAt = nullableTimePtr(testStarted)
+	out.SubmittedAt = nullableTimePtr(submitted)
 	out.Status = delivery.String
 	if outcome.Valid {
 		out.Status = outcome.String

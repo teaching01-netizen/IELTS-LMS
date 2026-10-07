@@ -49,7 +49,7 @@ test.describe('SAT exam-screen integrity (visibility excursion)', () => {
     const { studentContext, studentPage } = await createRunningSatSession(browser, page, { label: 'integrity' });
     try {
       const firstOption = studentPage.locator('input[type="radio"]').first();
-      await firstOption.check();
+      await studentPage.locator("label").filter({ has: firstOption }).first().click();
       await expect(firstOption).toBeChecked();
 
       // AC-SAT-02: watch for the delivery audit the excursion must produce.

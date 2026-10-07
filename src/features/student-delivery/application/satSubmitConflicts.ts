@@ -100,13 +100,14 @@ export function isSectionClosingRejection(error: unknown): boolean {
 
 /**
  * Another window/device holds the live writer slot (or the durability lease).
- * This needs takeover/recovery instructions — never the "exam is finalizing
- * this module / keep this screen open" copy.
+ * This needs device-change/recovery instructions — never the "exam is
+ * finalizing this module / keep this screen open" copy.
  */
 export function isWriterSupersededRejection(error: unknown): boolean {
   const code = backendErrorCode(error);
-  if (code === "ACTIVE_SESSION_SUPERSEDED" || code === "LEASE_FENCED") return true;
-  return backendErrorReason(error) === "ACTIVE_SESSION_SUPERSEDED";
+  if (code === "ACTIVE_SESSION_SUPERSEDED" || code === "LEASE_FENCED" || code === "SESSION_ALREADY_ACTIVE") return true;
+  const reason = backendErrorReason(error);
+  return reason === "ACTIVE_SESSION_SUPERSEDED" || reason === "SESSION_ALREADY_ACTIVE";
 }
 
 /**

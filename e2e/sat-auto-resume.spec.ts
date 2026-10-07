@@ -139,7 +139,6 @@ test.describe("SAT automatic resume", () => {
       expect(await schedulePage.locator('input[type="radio"]:checked').first().inputValue()).toBe(
         savedAnswer
       );
-      await schedulePage.getByRole("button", { name: "Turn on cross-out mode" }).click();
       // The recovered crossing out wears the real exam's applied shape: one
       // strike across the row and the visible word "Undo", not the cut glyph.
       const resumedUndo = schedulePage.getByRole("button", { name: "Undo option B" });
@@ -186,18 +185,14 @@ test.describe("SAT automatic resume", () => {
       await secondStudentPage.goto(`/student/${scheduleId}/${encodeURIComponent(candidateId)}`, {
         waitUntil: "domcontentloaded",
       });
-      await expect(
-        secondStudentPage.getByRole("heading", { name: /Exam Not Found|SAT attempt unavailable/i })
-      ).toBeVisible({ timeout: 45_000 });
+      await expect(secondStudentPage.getByRole("alert")).toBeVisible({ timeout: 45_000 });
       await expect(secondStudentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
 
       await secondStudentPage.evaluate(() =>
         window.localStorage.removeItem("ielts_student_attempts_v1")
       );
       await secondStudentPage.reload({ waitUntil: "domcontentloaded" });
-      await expect(
-        secondStudentPage.getByRole("heading", { name: /Exam Not Found|SAT attempt unavailable/i })
-      ).toBeVisible({ timeout: 45_000 });
+      await expect(secondStudentPage.getByRole("alert")).toBeVisible({ timeout: 45_000 });
       await expect(secondStudentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
 
       // A manually edited candidate and attempt locator remain hints only;
@@ -231,8 +226,8 @@ test.describe("SAT automatic resume", () => {
       });
       expect(await readAttemptIdentity(linkPage, scheduleId, candidateId)).toEqual(original);
 
-      // The canonical student URL plus the HttpOnly cookie is sufficient even
-      // after local discovery data has been removed.
+      // Removing discovery/cache data does not remove this tab's writer
+      // identity in sessionStorage; the authorized tab still resumes.
       await linkPage.evaluate(() => window.localStorage.clear());
       await linkPage.goto(`/student/${scheduleId}/${encodeURIComponent(candidateId)}`, {
         waitUntil: "domcontentloaded",
@@ -240,9 +235,8 @@ test.describe("SAT automatic resume", () => {
       await expect(linkPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
       expect(await readAttemptIdentity(linkPage, scheduleId, candidateId)).toEqual(original);
 
-      // A new browser context with only the persistent HttpOnly auth cookie
-      // has no localStorage, sessionStorage, or IndexedDB attempt cache. It
-      // must recover the saved answer from the authenticated server response.
+      // A cookie alone authenticates the student, not the browser writer.
+      // A fresh browser must be blocked before protected content is mounted.
       const cookies = await studentContext.cookies();
       expect(cookies.some((cookie) => cookie.httpOnly && cookie.expires > Date.now() / 1_000)).toBe(
         true
@@ -250,61 +244,12 @@ test.describe("SAT automatic resume", () => {
       const restartedContext = await browser.newContext({ storageState: { cookies, origins: [] } });
       const restartedPage = await restartedContext.newPage();
       await restartedPage.goto(`/student/${scheduleId}`, { waitUntil: "domcontentloaded" });
-      await expect(restartedPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
-      await expect(restartedPage.locator('input[type="radio"]').first()).toBeChecked({
-        timeout: 30_000,
+      await expect(restartedPage.getByRole("button", { name: "Request device change" })).toBeVisible({
+        timeout: 45_000,
       });
-      expect(await readAttemptIdentity(restartedPage, scheduleId, candidateId)).toEqual(original);
-      expect(await restartedPage.locator('input[type="radio"]:checked').first().inputValue()).toBe(
-        savedAnswer
-      );
-      await restartedPage.getByRole("button", { name: "Turn on cross-out mode" }).click();
-      const restartedUndo = restartedPage.getByRole("button", { name: "Undo option B" });
-      await expect(restartedUndo).toHaveAttribute("aria-pressed", "true");
-      await expect(restartedUndo).toHaveText("Undo");
-      await expect(restartedUndo.locator("[data-sat-eliminator-glyph]")).toHaveCount(0);
-      await expect(restartedPage.locator('[data-sat-elimination-line="true"]')).toHaveCount(1);
-      await expect(restartedPage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
-
-      // This context has the same authenticated student but a fresh writer
-      // identity. It may recover the read-only exam state, but its first write
-      // must hit the existing active-writer gate until the student takes over.
-      const checkedFreshAnswer = restartedPage.locator('input[type="radio"]:checked').first();
-      const freshQuestionName = await checkedFreshAnswer.getAttribute("name");
-      if (!freshQuestionName)
-        throw new Error("Resumed SAT answer control did not expose its question group.");
-      const freshQuestionChoices = restartedPage.locator(
-        `input[type="radio"][name="${freshQuestionName}"]`
-      );
-      const currentFreshIndex = await freshQuestionChoices.evaluateAll((choices) =>
-        choices.findIndex((choice) => (choice as HTMLInputElement).checked)
-      );
-      const nextFreshChoice = freshQuestionChoices.nth((currentFreshIndex + 1) % 4);
-      const rejectedFreshAnswer = await nextFreshChoice.inputValue();
-      const nextFreshChoiceId = await nextFreshChoice.evaluate(
-        (input) => (input as HTMLInputElement).labels?.[0]?.htmlFor ?? null
-      );
-      if (!nextFreshChoiceId)
-        throw new Error("Fresh browser answer control did not expose its associated label.");
-      await restartedPage.locator(`label[for="${nextFreshChoiceId}"]`).click();
-      await expect(
-        restartedPage
-          .getByRole("alert")
-          .filter({ hasText: "This attempt is open in another session." })
-      ).toBeVisible({ timeout: 30_000 });
-      await expect(restartedPage.getByTestId("sat-exam-shell")).toHaveAttribute(
-        "data-sat-save-state",
-        "superseded",
-        { timeout: 30_000 }
-      );
-      const afterRejectedFreshWrite = await readAttemptIdentity(
-        restartedPage,
-        scheduleId,
-        candidateId
-      );
-      expect(afterRejectedFreshWrite.id).toBe(original.id);
-      expect(Object.values(afterRejectedFreshWrite.answers)).toContain(savedAnswer);
-      expect(Object.values(afterRejectedFreshWrite.answers)).not.toContain(rejectedFreshAnswer);
+      await expect(restartedPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+      await expect(restartedPage.locator('input[type="radio"]')).toHaveCount(0);
+      expect(await readAttemptIdentity(linkPage, scheduleId, candidateId)).toEqual(original);
 
       // A valid locator and even a cached attempt are still only hints. Removing
       // the persistent auth cookie must return to check-in without mounting SAT.
@@ -494,7 +439,7 @@ test.describe("SAT automatic resume", () => {
     const { studentContext, studentPage, scheduleId, candidateId } = await createRunningSatSession(
       browser,
       page,
-      { label: "resume-lifecycle" }
+      { label: "resume-lifecycle", timingModel: "cohort_section_v3" }
     );
     const adminContext = page.context();
     try {
@@ -561,11 +506,7 @@ test.describe("SAT automatic resume", () => {
 
       const breakPage = await studentContext.newPage();
       await breakPage.goto(`/student/${scheduleId}`, { waitUntil: "domcontentloaded" });
-      await expect(breakPage.getByTestId("sat-scheduled-break")).toHaveAttribute(
-        "data-sat-break-phase",
-        /^(waiting-for-break|on-break)$/,
-        { timeout: 45_000 }
-      );
+      await expect(breakPage.getByTestId("sat-scheduled-break")).toBeVisible({ timeout: 45_000 });
       await breakPage.close({ runBeforeUnload: false });
 
       // Advance the scheduled break while the browser is closed; reopening

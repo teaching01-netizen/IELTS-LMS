@@ -97,6 +97,15 @@ func init() {
 		"POST /{scheduleID}/mutations:batch": {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /{scheduleID}/audit":           {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /{scheduleID}/submit":          {Bearer: true, Scope: ScopeAttemptOwner},
+		// SAT device transfer. Blocked browser: student cookie session,
+		// enforced in-handler (requireStudentDeps + requester binding in
+		// the attempts transaction). Current writer: attempt bearer.
+		"POST /{scheduleID}/device-transfers":                            {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/device-transfers/{requestID}":                 {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/device-transfers/{requestID}/cancel":         {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/device-transfers/{requestID}/commit":         {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/writer/device-transfer":                       {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/writer/device-transfers/{requestID}/confirm": {Bearer: true, Scope: ScopeAttemptOwner},
 		// proctor sessions/notes/rules/controls. NOTE: "GET /sessions"
 		// is shared by proctor-sessions (admin/observer/proctor) and
 		// grading-sessions (admin/observer/grader): this single entry
@@ -139,8 +148,12 @@ func init() {
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/extend":    {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/rearm":     {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/terminate": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
-		"POST /alerts/{alertID}/ack":                                 {MinRoles: proctorRW},
-		"GET /live-mode":                                             {MinRoles: proctorRead},
+		// Device-transfer review: assigned proctors only (handler second
+		// layer: requireProctorAttemptScope, 404-collapse).
+		"GET /sessions/{scheduleID}/device-transfers":                       {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/device-transfers/{requestID}/decision": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /alerts/{alertID}/ack":                                        {MinRoles: proctorRW},
+		"GET /live-mode":                                                    {MinRoles: proctorRead},
 		// library passages/questions.
 		"GET /passages":                         {MinRoles: readStaff},
 		"POST /passages":                        {MinRoles: writeStaff},

@@ -1,6 +1,7 @@
 export { backendGet, backendPatch, backendPost, hasBackendStatusCode } from '@services/backendBridge';
 export {
   ensureClientSessionIdForStudentKey,
+  restoreClientSessionIdForStudentKey,
   satWriterStudentKey,
   tryBuildAttemptAuthorizationHeader,
 } from '@services/studentAttemptRepository';

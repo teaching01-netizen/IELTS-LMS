@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/proctor"
@@ -456,20 +457,6 @@ func openedModuleIDsForAttempt(ctx context.Context, app *App, attemptID string) 
 	return app.Delivery.AttemptOpenedModuleIDs(ctx, attemptID)
 }
 
-// openedModuleIDsForUser resolves the signed-in user's attempt on the schedule
-// (optionally narrowed by candidateId) and returns its assigned module set.
-// Anything unresolvable narrows to base modules.
-func openedModuleIDsForUser(ctx context.Context, app *App, sess *auth.Session, scheduleID, candidateID string) (map[string]bool, error) {
-	attemptID, err := resolveStudentAttemptIDForUser(ctx, app.DB, scheduleID, candidateID, sess.UserID)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return openedModuleIDsForAttempt(ctx, app, attemptID)
-}
-
 // requireScheduleRegistration reports ErrNoRows when no registration row
 // binds (scheduleID, userID). Both user_id and actor_id count: entry binds
 // either column depending on the flow (see CreateRegistration).
@@ -526,22 +513,38 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 		return nil, err
 	}
 	context["attempt"] = attempt
-	if includeCredential {
-		clientSessionID = strings.TrimSpace(clientSessionID)
-		if clientSessionID == "" {
-			clientSessionID = uuid.NewString()
-		}
-		context["clientSessionId"] = clientSessionID
-		leaseEpoch, ok := attempt["leaseEpoch"].(int64)
-		if !ok || leaseEpoch < 1 {
-			return nil, apperrors.New(apperrors.CodeInternal, "Attempt lease epoch is unavailable.")
-		}
-		lease := uint64(leaseEpoch)
-		token, expiresAt, err := auth.IssueAttemptToken(ctx, app.DB, app.Config, sess.UserID, scheduleID, attemptID, clientSessionID, nil, &lease, time.Now().UTC())
+	clientSessionID = strings.TrimSpace(clientSessionID)
+	if !includeCredential {
+		enforced, _, err := attempts.WriterPolicyOf(ctx, app.DB, attemptID)
 		if err != nil {
 			return nil, err
 		}
-		context["attemptCredential"] = map[string]any{"attemptToken": token, "expiresAt": expiresAt.UTC()}
+		if enforced {
+			redactWriterIdentity(attempt, clientSessionID)
+		}
+		return context, nil
+	}
+	if clientSessionID == "" {
+		clientSessionID = uuid.NewString()
+	}
+	context["clientSessionId"] = clientSessionID
+	// Credential issue/refresh goes through the same admission boundary as
+	// entry: authoritative lease, and no writer credential (nor protected
+	// content) for a session competing with the current owner.
+	admission, err := admitStudentSession(ctx, app, sess.UserID, scheduleID, attemptID, clientSessionID)
+	if err != nil {
+		return nil, err
+	}
+	context["admission"] = admissionPayload(admission)
+	if admission.SingleWriter {
+		redactWriterIdentity(attempt, clientSessionID)
+	}
+	if admission.Outcome == attempts.AdmissionBlocked {
+		context["version"] = nil
+		return context, nil
+	}
+	if admission.Token != "" {
+		context["attemptCredential"] = map[string]any{"attemptToken": admission.Token, "expiresAt": admission.ExpiresAt.UTC()}
 	}
 	return context, nil
 }

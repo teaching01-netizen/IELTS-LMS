@@ -12,6 +12,7 @@ import { SatSessionControls } from '../ui/SatSessionControls';
 import { SatSessionContextBar, getSatRoomMode, roomStatusTone, runtimeLabel } from '../ui/SatSessionContextBar';
 import { SAT_SESSION_WARN_MESSAGE, SatSessionRoomConfirmDialog, type SatSessionRoomConfirmation } from '../ui/SatSessionRoomConfirmDialog';
 import { SatSessionRoomInspector } from '../ui/SatSessionRoomInspector';
+import { SatDeviceTransferRequests } from '../ui/SatDeviceTransferRequests';
 import { SatSessionRoomRoster } from '../ui/SatSessionRoomRoster';
 import { SatSessionRoomTimeline } from '../ui/SatSessionRoomTimeline';
 import { StudentDetail } from '../ui/SatSessionRoomStudents';
@@ -280,6 +281,7 @@ export function SatSessionRoomRoute() {
 
       {isStale ? <div role="alert" className="sat-banner-enter mx-auto flex w-full max-w-[1500px] items-center justify-between gap-3 px-4 pt-3"><div className="rounded-2xl border border-amber-700/15 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3.5 py-2.5 text-[11px] font-medium text-amber-800"><span className="font-semibold">Data may be out of date.</span> Risky session actions are paused until reconnection.</div><button type="button" onClick={() => void controller.reload()} className="min-h-9 shrink-0 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-surface,#fff)] px-3 text-[11px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] shadow-sm ring-1 ring-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">Retry</button></div> : null}
       {message ? <div role={message.kind === 'error' ? 'alert' : 'status'} className="sat-banner-enter mx-auto max-w-[1500px] px-4 pt-3"><div className={message.kind === 'error' ? 'rounded-2xl border border-red-700/20 bg-[var(--sat-staff-danger-tint,rgba(217,45,32,0.08))] px-3.5 py-2.5 text-[11px] font-medium text-[var(--sat-staff-danger,#b42318)]' : 'rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3.5 py-2.5 text-[11px] font-medium text-[var(--sat-staff-text-secondary,#515154)]'}>{message.text}</div></div> : null}
+      {roomMode !== 'review' ? <SatDeviceTransferRequests scheduleId={scheduleId} blocked={isStale} /> : null}
 
       <main className="sat-room__body">
         <SatSessionRoomRoster

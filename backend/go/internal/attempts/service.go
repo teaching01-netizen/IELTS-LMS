@@ -252,6 +252,12 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 	if cmd.LeaseEpoch != attempt.LeaseEpoch {
 		return SaveResult{}, leaseFenced()
 	}
+	// The credential's own lease must be current too: a bearer minted before
+	// an ownership change cannot write by echoing the new lease in the body.
+	// (Legacy lease-less bearers keep the body check only.)
+	if claims.LeaseEpoch != nil && *claims.LeaseEpoch != attempt.LeaseEpoch {
+		return SaveResult{}, leaseFenced()
+	}
 	if cmd.ControlEpoch != attempt.ControlEpoch {
 		return SaveResult{}, controlStale(cmd.ControlEpoch, attempt.ControlEpoch)
 	}
@@ -506,6 +512,14 @@ func (s *Service) validateTokenSession(ctx context.Context, q tx.Tx, claims cryp
 	var attemptID, sessionID string
 	err := q.QueryRowContext(ctx, `SELECT attempt_id, client_session_id, revoked_at, expires_at FROM attempt_sessions WHERE token_id=? AND revoked_at IS NULL FOR UPDATE`, claims.TokenID).Scan(&attemptID, &sessionID, &revoked, &expires)
 	if err == sql.ErrNoRows {
+		// A writer superseded by a device transfer or takeover is told so
+		// (LEASE_FENCED: stop and preserve drafts) rather than handed a
+		// generic 401 that only invites a credential refresh it cannot get.
+		var reason sql.NullString
+		if probeErr := q.QueryRowContext(ctx, `SELECT revocation_reason FROM attempt_sessions WHERE token_id=? AND revoked_at IS NOT NULL`, claims.TokenID).Scan(&reason); probeErr == nil &&
+			(reason.String == "device_transfer" || reason.String == "response_durability_lease_takeover") {
+			return leaseFenced()
+		}
 		log.Printf("attempts: session fence rejected unknown-or-revoked token (attempt %s)", claims.AttemptID)
 		return &apperrors.Error{Code: apperrors.CodeUnauthorized, Message: "Attempt credential session is not recognized.", HTTPStatus: 401}
 	}

@@ -7,6 +7,8 @@ import {
 } from '@services/backendBridge';
 import {
   mapBackendStudentAttempt,
+  peekClientSessionIdForStudentKey,
+  satWriterStudentKey,
   studentAttemptRepository,
 } from '@services/studentAttemptRepository';
 import { studentSessionTransport } from '@services/studentSessionTransport';
@@ -21,10 +23,15 @@ import type {
 export { studentSessionTransport };
 
 export function createStudentSessionGateway(): StudentSessionFacade {
+  // Static reads present this browser's EXISTING SAT writer identity (never
+  // minting one): a single-writer attempt serves protected content only to
+  // the owning browser. Live reads carry no identity; the server withholds
+  // writer ids from them for single-writer attempts.
   return {
     async loadStaticSession(scheduleId, candidateId) {
+      const writerSession = peekClientSessionIdForStudentKey(scheduleId, satWriterStudentKey(scheduleId, candidateId));
       return backendGet<StudentSessionStaticPayload>(
-        studentSessionTransport.paths.staticSession(scheduleId, candidateId),
+        studentSessionTransport.paths.staticSession(scheduleId, candidateId, writerSession),
       );
     },
 

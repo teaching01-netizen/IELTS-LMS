@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
@@ -196,7 +197,25 @@ func v1StaticInner(app *App, w http.ResponseWriter, r *http.Request) {
 		}
 		// This projection changes when routing assigns a branch, even if the
 		// published version does not. Resolve assignment before considering 304.
-		openedModules, err := openedModuleIDsForUser(r.Context(), app, sess, chi.URLParam(r, "scheduleID"), r.URL.Query().Get("candidateId"))
+		attemptID, err := resolveStudentAttemptIDForUser(r.Context(), app.DB, chi.URLParam(r, "scheduleID"), r.URL.Query().Get("candidateId"), sess.UserID)
+		if err != nil && err != sql.ErrNoRows {
+			httpx.WriteError(w, r, MapDBError(err))
+			return
+		}
+		if attemptID != "" {
+			// Single-writer attempts serve protected content only to the
+			// owning browser session; a blocked browser requests a transfer.
+			enforced, owner, perr := attempts.WriterPolicyOf(r.Context(), app.DB, attemptID)
+			if perr != nil {
+				httpx.WriteError(w, r, MapDBError(perr))
+				return
+			}
+			if enforced && owner != "" && owner != strings.TrimSpace(r.URL.Query().Get("clientSessionId")) {
+				httpx.WriteError(w, r, transferBlockedError())
+				return
+			}
+		}
+		openedModules, err := openedModuleIDsForAttempt(r.Context(), app, attemptID)
 		if err != nil {
 			httpx.WriteError(w, r, MapDBError(err))
 			return
@@ -248,7 +267,7 @@ func v1LiveInner(app *App, w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, err := studentSessionContext(
 		r.Context(), app, sess, chi.URLParam(r, "scheduleID"),
-		r.URL.Query().Get("candidateId"), "", false,
+		r.URL.Query().Get("candidateId"), r.URL.Query().Get("clientSessionId"), false,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {

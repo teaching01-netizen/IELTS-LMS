@@ -1094,7 +1094,7 @@ export function useSatExamController({
         // needs the ownership instruction, not a silent retry forever.
         if (isWriterSupersededRejection(startError)) {
           setError(
-            "This attempt is now active in another window. Your saved answers are safe — continue there, or use Take over to resume here."
+            "This attempt is now active on another device. Your saved answers are safe — continue there, or choose \u201cContinue on this device\u201d to request a device change."
           );
         } else if (!isSectionClosingRejection(startError) && !isStaleConflictRejection(startError)) {
           setError(

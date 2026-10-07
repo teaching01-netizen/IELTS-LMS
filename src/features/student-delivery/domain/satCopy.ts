@@ -176,10 +176,54 @@ export const SAT_COPY = {
   // What remains is what asks the student to do something.
   saveStatus: {
     failed: "Save failed.",
-    superseded: "Opened in another session \u2014 answers here are paused.",
-    takeOver: "Take over",
+    superseded: "Opened on another device \u2014 answers here are paused.",
+    // Legacy attempts take over directly; single-writer attempts route this
+    // action to the device-change request (server approval required).
+    takeOver: "Continue on this device",
     retryNow: "Retry now",
     retry: "Retry",
+  },
+  // SAT session ownership: one device answers at a time. A second browser is
+  // blocked before any exam content, and moving requires an approval (the
+  // other device before the exam starts, a proctor after).
+  deviceTransfer: {
+    blockedTitle: "This exam is open on another device",
+    blockedBodyPreStart:
+      "To continue here, request a device change, then allow it on the other device or ask your proctor.",
+    blockedBodyPostStart:
+      "Your exam has started on another device. To continue here, request a device change and ask your proctor to approve it.",
+    clockNotice: "The exam clock keeps running during a device change.",
+    request: "Request device change",
+    requesting: "Requesting" + "\u2026",
+    pendingTitle: "Waiting for approval",
+    pendingBodyPreStart:
+      "On the other device, choose \u201cAllow on another device\u201d, or ask your proctor to approve.",
+    pendingBodyPostStart: "Your proctor needs to approve this request. Keep this screen open.",
+    approvedTitle: "Approved \u2014 opening your exam here" + "\u2026",
+    cancel: "Cancel request",
+    deniedTitle: "Request denied",
+    expiredTitle: "Request expired",
+    conflictedTitle: "Request could not be completed",
+    endedBody: "Your exam stays on the other device. You can request again.",
+    requestAgain: "Request again",
+    unconfirmedWarning:
+      "Answers the other device had not yet saved to the server will not move to this device.",
+    retry: "Try again",
+    checkFailed: "Could not check this device. Check your connection and try again.",
+    duplicateTabTitle: "This exam is already open in another tab",
+    duplicateTabBody: "Close the other tab, then choose Try again. Only one tab can answer at a time.",
+    unsupportedTitle: "This browser cannot run the exam safely",
+    unsupportedBody: "Open the exam in a current version of Chrome, Edge, Safari, or Firefox.",
+    writerCheck: "Move this exam to another device",
+    writerChecking: "Checking" + "\u2026",
+    writerPendingTitle: "Another device asked to continue this exam",
+    writerPendingBody:
+      "Allow it only if you are moving to that device. This screen will stop accepting answers.",
+    writerAllow: "Allow on another device",
+    writerAllowed: "Allowed. Continue on the other device.",
+    writerNoRequest: "No request yet. Check in on the other device first, then choose this again.",
+    writerProctorRequired: "Your exam has started. Your proctor must approve a device change.",
+    backToCheckIn: "Back to check-in",
   },
   // Highlights & Notes (self-teaching pass). Every control carries a written
   // label: the feature is meant to be understood by using it, with no tutorial

@@ -602,7 +602,8 @@ func ensureV1ClientSession(ctx context.Context, q tx.Tx, row v1AttemptRow, reque
 		return "", validationError("clientSessionId must be at most 36 characters.")
 	}
 	if row.ActiveClientSessionID.Valid && row.ActiveClientSessionID.String != "" && row.ActiveClientSessionID.String != clientSessionID {
-		return "", &apperrors.Error{Code: apperrors.CodeActiveSessionSuperseded, Message: "Attempt write credential has been superseded by a newer student session.", HTTPStatus: 409, Details: map[string]any{"activeSessionId": row.ActiveClientSessionID.String}}
+		// Never echo the owner's session id: it is the writer capability.
+		return "", &apperrors.Error{Code: apperrors.CodeActiveSessionSuperseded, Message: "Attempt write credential has been superseded by a newer student session.", HTTPStatus: 409, Details: map[string]any{"reason": "ACTIVE_SESSION_SUPERSEDED"}}
 	}
 	if !row.ActiveClientSessionID.Valid || row.ActiveClientSessionID.String == "" {
 		if _, err := q.ExecContext(ctx, "UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND active_client_session_id IS NULL", clientSessionID, row.ID); err != nil {

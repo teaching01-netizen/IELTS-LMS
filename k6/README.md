@@ -10,6 +10,31 @@ Important limits:
 
 ## Scenarios
 
+### SAT device transfer burst
+
+`k6/sat-device-transfer.js` drives one ownership change per student: device A
+enters (authorized), device B enters with the same identity (must be blocked),
+B requests a transfer, staff approves with the unconfirmed-answer
+acknowledgement, B commits, then retries the commit (must recover at the same
+lease). Correctness counters (`sat_transfer_competing_entry_authorized`,
+`sat_transfer_stale_owner_accepted`, `sat_transfer_duplicate_ownership_change`)
+must stay at zero. Run it concurrently with `k6/sat-exam-day.js` on a disjoint
+student slice (`K6_STUDENT_OFFSET`) to measure transfers while saves continue.
+Requires `K6_CONFIRM_SAT=true`, an isolated staging SAT schedule, and staff
+credentials that can approve for that schedule. Operator steps:
+`docs/runbooks/sat-device-transfer.md`.
+
+```bash
+k6 run \
+  -e K6_CONFIRM_SAT=true \
+  -e K6_BASE_URL=https://staging.example.com \
+  -e K6_SCHEDULE_ID=<schedule-id> \
+  -e K6_TARGET_PATH=/absolute/path/to/target.json \
+  -e K6_CREDS_PATH=/absolute/path/to/creds.json \
+  -e K6_STUDENTS=100 -e K6_STUDENT_OFFSET=5000 \
+  k6/sat-device-transfer.js
+```
+
 ### SAT personal module entry, 2,000 candidates
 
 `k6/sat-module-entry-2000.js` exercises one synchronized module entry per

@@ -1063,6 +1063,28 @@ export function ensureClientSessionIdForStudentKey(
   return ensureClientSessionId(scheduleId, studentKey, preferredClientSessionId);
 }
 
+/**
+ * Read this browser's writer identity for (scheduleId, studentKey) without
+ * creating one. Reads that only need to PRESENT an existing identity (static
+ * content, live polls) use this, so a cold read never mints a writer id.
+ */
+export function peekClientSessionIdForStudentKey(
+  scheduleId: string,
+  studentKey: string,
+): string | null {
+  const storageKey = getClientSessionStorageKey(scheduleId, studentKey);
+  try {
+    const stored =
+      getBrowserStorage("sessionStorage")?.getItem(storageKey) ??
+      getBrowserStorage("localStorage")?.getItem(storageKey) ??
+      null;
+    if (stored && stored.trim()) return stored;
+  } catch {
+    // Denied storage falls through to the in-memory identity.
+  }
+  return inMemoryClientSessionIds.get(storageKey) ?? null;
+}
+
 /** Persist an identity supplied by student admission for the canonical writer key. */
 export function restoreClientSessionIdForStudentKey(
   scheduleId: string,

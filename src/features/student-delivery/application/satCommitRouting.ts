@@ -106,6 +106,11 @@ export function decideSatCommitRoute(
           },
         } as const;
       }
+      // Recovery can finish before the initial bootstrap, or after it failed.
+      // The first committed payload must release the runner's loading phase.
+      if (preState.phase === "loading") {
+        return { type: "bootstrapLoaded", assessmentId: payload.versionId };
+      }
       if (
         (preState.phase === "module" || preState.phase === "review") &&
         "moduleId" in preState

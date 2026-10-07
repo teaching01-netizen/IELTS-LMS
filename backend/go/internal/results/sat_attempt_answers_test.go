@@ -22,8 +22,8 @@ func TestSATAttemptAnswersReturnsLastAcknowledgedV2Save(t *testing.T) {
 	stamp := time.Date(2026, 9, 24, 11, 5, 0, 0, time.UTC)
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts a")).WithArgs("attempt-1").WillReturnRows(
-		sqlmock.NewRows([]string{"id", "exam_title", "version_number", "candidate_id", "candidate_name", "cohort_name", "delivery_status", "protocol_version", "response_revision", "outcome_status"}).
-			AddRow("attempt-1", "SAT", 14, "S1", "Student", "Morning", "running", 2, 8, nil))
+		sqlmock.NewRows([]string{"id", "exam_title", "version_number", "candidate_id", "candidate_name", "cohort_name", "delivery_status", "protocol_version", "response_revision", "outcome_status", "test_started_at", "submitted_at"}).
+			AddRow("attempt-1", "SAT", 14, "S1", "Student", "Morning", "running", 2, 8, nil, stamp, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WithArgs("attempt-1").WillReturnRows(
 		sqlmock.NewRows(satAnswerColumns).
 			AddRow("reading-writing", "module-1", 1, "eq-1", "q-1", `"old"`, false, stamp.Add(-time.Minute), `{"answer":"B","markedForReview":true}`, stamp).
@@ -67,8 +67,8 @@ func TestSATAttemptAnswersEmptyAndInvalidatedLegacy(t *testing.T) {
 			stamp := time.Date(2026, 9, 24, 11, 5, 0, 0, time.UTC)
 			mock.ExpectBegin()
 			mock.ExpectQuery("FROM student_attempts a").WithArgs("attempt-1").WillReturnRows(
-				sqlmock.NewRows([]string{"id", "exam_title", "version_number", "candidate_id", "candidate_name", "cohort_name", "delivery_status", "protocol_version", "response_revision", "outcome_status"}).
-					AddRow("attempt-1", "SAT", 14, "S1", "Student", "Morning", tc.status, tc.protocol, 0, tc.outcome))
+				sqlmock.NewRows([]string{"id", "exam_title", "version_number", "candidate_id", "candidate_name", "cohort_name", "delivery_status", "protocol_version", "response_revision", "outcome_status", "test_started_at", "submitted_at"}).
+					AddRow("attempt-1", "SAT", 14, "S1", "Student", "Morning", tc.status, tc.protocol, 0, tc.outcome, nil, nil))
 			mock.ExpectQuery("FROM assessment_module_attempts ma").WithArgs("attempt-1").WillReturnRows(
 				sqlmock.NewRows(satAnswerColumns).AddRow("math", "module-1", 1, "eq-1", "q-1", tc.legacy, false, stamp, tc.canonical, stamp))
 			mock.ExpectCommit()
@@ -103,7 +103,7 @@ func TestSATAttemptAnswersRejectsUnassignedStaffBeforeResponseRead(t *testing.T)
 	defer db.Close()
 	mock.ExpectBegin()
 	mock.ExpectQuery("(?s)FROM student_attempts a.*schedule_staff_assignments").WithArgs("attempt-1", "org-1", "grader-1", auth.RoleGrader).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_title", "version_number", "candidate_id", "candidate_name", "cohort_name", "delivery_status", "protocol_version", "response_revision", "outcome_status"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_title", "version_number", "candidate_id", "candidate_name", "cohort_name", "delivery_status", "protocol_version", "response_revision", "outcome_status", "test_started_at", "submitted_at"}))
 	mock.ExpectRollback()
 	_, err = NewService(db).GetSATAttemptAnswers(context.Background(), auth.NewActorContext("grader-1", auth.RoleGrader).WithOrgID("org-1"), "attempt-1")
 	if appErr, ok := apperrors.As(err); !ok || appErr.Code != apperrors.CodeNotFound {

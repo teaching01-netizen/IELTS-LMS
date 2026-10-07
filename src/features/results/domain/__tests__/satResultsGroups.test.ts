@@ -448,3 +448,18 @@ describe('filterSatGroups', () => {
     expect(byId.get('exam-B')?.visibleAttempts).toHaveLength(1);
   });
 });
+
+describe('groupSatAccessGroups test-start ordering', () => {
+  const base = { accessLinkId: null, accessLinkState: null, examTitle: 'SAT', versionNumber: 1, cohortName: '', attemptCount: 1, submittedCount: 1, scoredCount: 0, pendingCount: 0, invalidatedCount: 0 };
+
+  it('orders by actual test start, not submission, and sums disjoint outcome counts', () => {
+    const groups = groupSatAccessGroups([
+      { ...base, scheduleId: 's-old-start', accessLinkName: 'A', examId: 'e1', latestSubmittedAt: '2026-09-09T00:00:00Z', latestTestStartedAt: '2026-09-01T02:00:00Z', completedCount: 1, runningCount: 0, endedCount: 0, otherCount: 0 },
+      { ...base, scheduleId: 's-new-start', accessLinkName: 'B', examId: 'e1', latestSubmittedAt: '2026-09-02T00:00:00Z', latestTestStartedAt: '2026-09-05T02:00:00Z', completedCount: 0, runningCount: 1, endedCount: 0, otherCount: 0 },
+      { ...base, scheduleId: 's-none', accessLinkName: 'C', examId: 'e1', latestSubmittedAt: null, latestTestStartedAt: null, completedCount: 0, runningCount: 0, endedCount: 1, otherCount: 0 },
+    ]);
+    expect(groups[0]?.accessGroups?.map((group) => group.scheduleId)).toEqual(['s-new-start', 's-old-start', 's-none']);
+    expect(groups[0]?.latestTestStartedAt).toBe('2026-09-05T02:00:00Z');
+    expect(groups[0]?.outcomeCounts).toEqual({ completed: 1, running: 1, ended: 1, other: 0 });
+  });
+});

@@ -1,34 +1,102 @@
+import type { ReactNode } from 'react';
 import { ArrowRight } from 'lucide-react';
 import type { SatAccessGroupSummary, SatAttemptRow } from '../../../features/results/api/satResultsQueries';
-import type { SatExamGroup } from '../../../features/results/domain/satResultsGroups';
-import { SatListRow, SatStatusPill, satOutcomeTone } from '../ui/SatPage';
+import type { SatExamGroup, SatOutcomeCounts } from '../../../features/results/domain/satResultsGroups';
+import { SatListRow, SatStatusPill, satOutcomeTone, type SatStatusTone } from '../ui/SatPage';
+import { formatTestTime, testDayKey } from './satTestTime';
 
 export function formatDate(value: string | null | undefined): string {
-  if (!value) return '—';
-  const time = new Date(value).getTime();
-  if (Number.isNaN(time)) return '—';
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(time));
+  const parts = formatTestTime(value);
+  return parts ? parts.day : '—';
 }
 
-export function outcomeLabel(outcomeStatus: string): string {
-  switch (outcomeStatus) {
-    case 'scored': return 'Completed · view answers';
-    case 'invalidated_proctor': return 'Exam terminated by proctor';
-    case 'invalidated_timeout': return 'Exam ended';
-    case 'pending':
-    case 'unscored': return 'Completed · view answers';
-    default: return 'Completed · view answers';
+// Column templates are shared by header and rows so values align across records.
+// Below sm each record stacks; every cell stays self-describing.
+const EXAM_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_88px_76px_minmax(0,1.3fr)_16px]';
+const ACCESS_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_64px_76px_minmax(0,1.3fr)_16px]';
+const ATTEMPT_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_minmax(0,1fr)_88px_minmax(0,1fr)_16px]';
+
+const CELL_PRIMARY = 'block text-[14px] font-semibold leading-[1.45] tracking-[-0.012em] text-slate-900';
+const CELL_SECONDARY = 'block text-[12px] leading-[1.45] tabular-nums text-slate-500';
+
+function ColumnHeader({ columns, labels }: { columns: string; labels: string[] }) {
+  return (
+    <div aria-hidden="true" className={`mt-4 hidden gap-4 px-4 text-[12px] font-semibold text-slate-500 sm:grid ${columns}`}>
+      {labels.map((label, index) => <span key={label + index} className={label === 'Attempts' ? 'text-right' : undefined}>{label}</span>)}
+    </div>
+  );
+}
+
+export function ExamColumnHeader() {
+  return <ColumnHeader columns={EXAM_COLUMNS} labels={['Latest test', 'Exam', 'Access groups', 'Attempts', 'Outcomes', '']} />;
+}
+
+export function AccessColumnHeader() {
+  return <ColumnHeader columns={ACCESS_COLUMNS} labels={['Latest test', 'Student Access', 'Version', 'Attempts', 'Outcomes', '']} />;
+}
+
+export function AttemptColumnHeader() {
+  return <ColumnHeader columns={ATTEMPT_COLUMNS} labels={['Test started', 'Student', 'Cohort', 'Submitted', 'Outcome', '']} />;
+}
+
+/** Date over time; never substitutes another timestamp when the start is unknown. */
+function TestStartCell({ value, note }: { value: string | null | undefined; note?: string | null }) {
+  const parts = formatTestTime(value);
+  if (!parts) return <span className="min-w-0"><span className={CELL_SECONDARY}>Test time unavailable</span></span>;
+  return (
+    <span className="min-w-0">
+      <span className={`${CELL_PRIMARY} tabular-nums`}>{parts.day}</span>
+      <span className={CELL_SECONDARY}>{parts.time}{note ? ` · ${note}` : ''}</span>
+    </span>
+  );
+}
+
+function Chevron() {
+  return <ArrowRight size={15} className="sat-row-chevron hidden shrink-0 text-slate-400 group-hover:text-slate-500 sm:block" aria-hidden="true" />;
+}
+
+function RowGrid({ columns, children }: { columns: string; children: ReactNode }) {
+  return <span className={`grid w-full items-center gap-x-4 gap-y-1 py-3 ${columns}`}>{children}</span>;
+}
+
+export function outcomeCountsLine(counts: SatOutcomeCounts): string {
+  const parts = [`${counts.completed} completed`];
+  if (counts.running) parts.push(`${counts.running} running`);
+  if (counts.ended) parts.push(`${counts.ended} ended`);
+  if (counts.other) parts.push(`${counts.other} other`);
+  return parts.join(' · ');
+}
+
+export function accessOutcomeCounts(group: SatAccessGroupSummary): SatOutcomeCounts {
+  return {
+    completed: group.completedCount ?? group.scoredCount + group.pendingCount,
+    running: group.runningCount ?? 0,
+    ended: group.endedCount ?? 0,
+    other: group.otherCount ?? 0,
+  };
+}
+
+export function hasMultipleTestDates(group: SatAccessGroupSummary): boolean {
+  const first = testDayKey(group.earliestTestStartedAt);
+  const last = testDayKey(group.latestTestStartedAt);
+  return first != null && last != null && first !== last;
+}
+
+function attemptOutcome(attempt: SatAttemptRow): { label: string; tone: SatStatusTone } {
+  switch (attempt.outcomeStatus) {
+    case 'invalidated_proctor': return { label: 'Ended by proctor', tone: satOutcomeTone('invalidated_proctor') };
+    case 'invalidated_timeout': return { label: 'Time expired', tone: satOutcomeTone('invalidated_timeout') };
+    case 'scored': return { label: 'Completed', tone: satOutcomeTone('scored') };
+    case 'pending': return { label: 'Completed', tone: satOutcomeTone('pending') };
+    default: break;
   }
-}
-
-function attemptLabel(attempt: SatAttemptRow): string {
-  if (attempt.outcomeStatus !== 'unscored') return outcomeLabel(attempt.outcomeStatus);
   switch (attempt.attemptStatus) {
-    case 'running': return 'In progress · view answers';
-    case 'submitted': return 'Completed · view answers';
-    case 'terminated': return 'Ended by proctor';
-    case 'locked': return 'Ended';
-    default: return 'Completed · view answers';
+    case 'running':
+    case 'paused': return { label: 'In progress', tone: satOutcomeTone('unscored') };
+    case 'submitted': return { label: 'Completed', tone: satOutcomeTone('pending') };
+    case 'terminated': return { label: 'Ended by proctor', tone: satOutcomeTone('invalidated_proctor') };
+    case 'locked': return { label: 'Ended', tone: satOutcomeTone('invalidated_timeout') };
+    default: return { label: 'Status unavailable', tone: 'neutral' };
   }
 }
 
@@ -41,39 +109,8 @@ export function versionLineFor(versions: number[]): string | null {
   return 'v' + first + '–v' + last;
 }
 
-export function cohortCountFor(group: SatExamGroup): number {
-  const names = new Set<string>();
-  for (const attempt of group.attempts) {
-    names.add(attempt.cohortName ?? '');
-  }
-  return names.size;
-}
-
-export type ExamRollup = 'ready' | 'invalidated';
-
-export function rollupFor(group: SatExamGroup): ExamRollup {
-  if (group.pending + group.scored > 0) return 'ready';
-  return 'invalidated';
-}
-
-export function rollupToneFor(rollup: ExamRollup, group: SatExamGroup) {
-  if (rollup === 'ready') return satOutcomeTone('scored');
-  if (group.invalidated < group.total) return satOutcomeTone('unscored');
-  return satOutcomeTone('invalidated_proctor');
-}
-
-export function rollupLabelFor(rollup: ExamRollup, group: SatExamGroup): string {
-  if (rollup === 'ready') return 'Completed';
-  return group.invalidated === group.total && group.total > 0 ? 'Ended' : 'In progress';
-}
-
 export function aggregateLineFor(group: SatExamGroup): string {
-	return group.total + ' attempts · ' + (group.scored + group.pending) + ' completed';
-}
-
-export function recencyLineFor(group: SatExamGroup): string {
-  const cohortCount = cohortCountFor(group);
-  return formatDate(group.latestSubmittedAt) + ' · ' + cohortCount + ' cohorts';
+  return `${group.total} attempts · ${group.accessGroups?.length ?? 0} Student Access groups`;
 }
 
 /**
@@ -90,18 +127,20 @@ export function SatExamGroupRow({
   onOpen: (examId: string) => void;
 }) {
   const versionLine = versionLineFor(group.versions);
-  const rollup = rollupFor(group);
+  const counts = group.outcomeCounts ?? { completed: group.scored + group.pending, running: 0, ended: group.invalidated, other: 0 };
   return (
     <SatListRow index={Math.min(groupIndex, 5)} onOpen={() => onOpen(group.examId)}>
-      <span className="flex w-full items-center gap-4 py-3">
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-semibold tracking-[-0.012em] text-slate-900">{group.examTitle}</span>
-          <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{versionLine ? versionLine + ' · ' : ''}{aggregateLineFor(group)}</span>
-          <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{recencyLineFor(group)}</span>
+      <RowGrid columns={EXAM_COLUMNS}>
+        <TestStartCell value={group.latestTestStartedAt} />
+        <span className="min-w-0">
+          <span className={CELL_PRIMARY}>{group.examTitle}</span>
+          {versionLine ? <span className={CELL_SECONDARY}>{versionLine}</span> : null}
         </span>
-        <span className="shrink-0"><SatStatusPill tone={group.total === 0 ? 'neutral' : rollupToneFor(rollup, group)}>{group.total === 0 ? 'No attempts' : rollupLabelFor(rollup, group)}</SatStatusPill></span>
-        <ArrowRight size={15} className="sat-row-chevron shrink-0 text-slate-400 group-hover:text-slate-500" aria-hidden="true" />
-      </span>
+        <span className={`${CELL_SECONDARY} text-slate-700`}>{group.accessGroups?.length ?? 0} groups</span>
+        <span className={`${CELL_SECONDARY} text-slate-700 sm:text-right`}>{group.total} attempts</span>
+        <span className={`${CELL_SECONDARY} text-slate-700`}>{group.total === 0 ? 'No attempts' : outcomeCountsLine(counts)}</span>
+        <Chevron />
+      </RowGrid>
     </SatListRow>
   );
 }
@@ -115,25 +154,25 @@ export function SatAccessGroupRow({
   groupIndex: number;
   onOpen: (scheduleId: string) => void;
 }) {
-  const state = group.accessLinkState && group.accessLinkState !== 'active' ? ` · ${group.accessLinkState}` : '';
+  const closed = group.accessLinkState && group.accessLinkState !== 'active' ? group.accessLinkState : null;
   return (
-    <SatListRow index={Math.min(groupIndex, 5)} onOpen={() => onOpen(group.scheduleId)} ariaLabel={`${group.accessLinkName}, ${group.attemptCount} students`}>
-      <span className="flex w-full items-center gap-4 py-3">
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-semibold tracking-[-0.012em] text-slate-900">{group.accessLinkName}</span>
-          <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">Version {group.versionNumber} · {group.scoredCount + group.pendingCount} completed{state}</span>
+    <SatListRow index={Math.min(groupIndex, 5)} onOpen={() => onOpen(group.scheduleId)} ariaLabel={`${group.accessLinkName}, ${group.attemptCount} attempts`}>
+      <RowGrid columns={ACCESS_COLUMNS}>
+        <TestStartCell value={group.latestTestStartedAt} note={hasMultipleTestDates(group) ? 'Multiple test dates' : null} />
+        <span className="min-w-0">
+          <span className={CELL_PRIMARY}>{group.accessLinkName}</span>
+          <span className={CELL_SECONDARY}>{[group.cohortName, closed ? `Access ${closed}` : null].filter(Boolean).join(' · ') || 'No cohort'}</span>
         </span>
-        <span className="shrink-0 text-right text-[11px] tabular-nums text-slate-500">{group.attemptCount} students</span>
-        <ArrowRight size={15} className="sat-row-chevron shrink-0 text-slate-400 group-hover:text-slate-500" aria-hidden="true" />
-      </span>
+        <span className={`${CELL_SECONDARY} text-slate-700`}>v{group.versionNumber}</span>
+        <span className={`${CELL_SECONDARY} text-slate-700 sm:text-right`}>{group.attemptCount} attempts</span>
+        <span className={`${CELL_SECONDARY} text-slate-700`}>{group.attemptCount === 0 ? 'No attempts' : outcomeCountsLine(accessOutcomeCounts(group))}</span>
+        <Chevron />
+      </RowGrid>
     </SatListRow>
   );
 }
 
-/**
- * Presentational student attempt row for the inside view. Verbatim today's
- * attempt-row JSX — the route owns navigation via onOpen.
- */
+/** One row per attempt; the route owns navigation via onOpen. */
 export function SatExamAttemptRow({
   attempt,
   attemptIndex,
@@ -143,20 +182,27 @@ export function SatExamAttemptRow({
   attemptIndex: number;
   onOpen: (attempt: SatAttemptRow) => void;
 }) {
+  const outcome = attemptOutcome(attempt);
+  const submitted = formatTestTime(attempt.submittedAt);
+  const started = formatTestTime(attempt.testStartedAt);
+  // Show the submission date too when it falls on a different day than the start.
+  const submittedLabel = !submitted ? 'Not submitted' : started && started.day === submitted.day ? submitted.time : `${submitted.day} · ${submitted.time}`;
   return (
     <SatListRow index={Math.min(attemptIndex, 5)} onOpen={() => onOpen(attempt)}>
-      <span className="flex w-full items-center gap-4 py-3">
-        <span className="min-w-0 flex-1">
-          {/* Density ladder: Results names sit at 13px; Library titles sit at 14px. */}
-          <span className="block truncate text-[13px] font-semibold tracking-[-0.012em] text-slate-900">{attempt.studentName}</span>
-          <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{attempt.studentId} · {attempt.cohortName}</span>
-          <span className="mt-1 block truncate text-[10px] tabular-nums text-slate-400">{attempt.examTitle} · Version {attempt.versionNumber} · {formatDate(attempt.submittedAt)}</span>
+      <RowGrid columns={ATTEMPT_COLUMNS}>
+        <TestStartCell value={attempt.testStartedAt} />
+        <span className="min-w-0">
+          <span className={`${CELL_PRIMARY} break-words`}>{attempt.studentName}</span>
+          <span className={CELL_SECONDARY}>{attempt.studentId}</span>
         </span>
-        <span className="shrink-0 text-right">
-          <span className="flex justify-end"><SatStatusPill tone={satOutcomeTone(attempt.outcomeStatus === 'unscored' && attempt.attemptStatus === 'submitted' ? 'pending' : attempt.outcomeStatus)}>{attemptLabel(attempt)}</SatStatusPill></span>
+        <span className={`${CELL_SECONDARY} text-slate-700 break-words`}>{attempt.cohortName || '—'}</span>
+        <span className={`${CELL_SECONDARY} text-slate-700`}>{submittedLabel}</span>
+        <span className="flex min-w-0 flex-col items-start gap-0.5">
+          <SatStatusPill tone={outcome.tone}>{outcome.label}</SatStatusPill>
+          <span className={CELL_SECONDARY}>{attempt.outcomeStatus === 'scored' ? 'View answers' : 'View saved answers'}</span>
         </span>
-        <ArrowRight size={15} className="sat-row-chevron hidden shrink-0 text-slate-400 group-hover:text-slate-500 sm:block" aria-hidden="true" />
-      </span>
+        <Chevron />
+      </RowGrid>
     </SatListRow>
   );
 }

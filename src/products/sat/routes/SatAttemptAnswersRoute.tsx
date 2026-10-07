@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useSatAttemptAnswersQuery } from '../../../features/results/api/satResultsQueries';
 import { QuestionRawTable } from '../../../components/results/QuestionRawTable';
 import { SatPageError, SatPageLoading, SatSectionCard } from '../ui/SatPage';
+import { formatTestTimeLine, viewerTimeZoneLabel } from './satTestTime';
 
 function formatSavedAt(value: string | null): string {
   if (!value) return 'No server save yet';
@@ -55,6 +56,8 @@ export function SatAttemptAnswersRoute() {
         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{detail.examTitle} · Version {detail.versionNumber}</p>
         <h1 className="mt-2 text-[30px] font-semibold tracking-tight text-slate-950">{detail.studentName}</h1>
         <p className="mt-1 text-[13px] text-slate-600">{detail.studentId} · {detail.cohortName} · {statusLabel(detail.status)}</p>
+        <p className="mt-3 text-[15px] font-semibold tabular-nums text-slate-900">Test started: {formatTestTimeLine(detail.testStartedAt)}</p>
+        <p className="mt-1 text-[12px] tabular-nums text-slate-600">Submitted: {detail.submittedAt ? formatTestTimeLine(detail.submittedAt) : 'Not submitted'} · Times shown in {viewerTimeZoneLabel()}</p>
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
           <div>
             <p className="text-[13px] font-semibold text-slate-900">{detail.savedAnswerCount} server-saved answers</p>

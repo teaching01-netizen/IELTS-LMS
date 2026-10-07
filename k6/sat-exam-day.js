@@ -423,11 +423,15 @@ export function studentFlow() {
   const faultDrop = faultRoll >= 5 && faultRoll < 7;
   void faultDrop;
 
-  // 1. Entry with bounded 429 shed handling.
+  // 1. Entry with bounded 429 shed handling. One browser-owned writer
+  // identity for entry AND bootstrap: under the SAT single-writer policy a
+  // second identity is a second device and is blocked.
+  const clientSessionId = uuidV4();
+  const entryBody = JSON.stringify({ scheduleId, wcode: student.wcode, email: student.email, studentName: student.fullName, clientSessionId });
   const tEntry0 = Date.now();
   let entryResp = http.post(
     `${baseUrl}/api/v1/auth/student/entry`,
-    JSON.stringify({ scheduleId, wcode: student.wcode, email: student.email, studentName: student.fullName }),
+    entryBody,
     { jar, headers: jsonHeaders(), responseCallback: http.expectedStatuses({ min: 200, max: 200 }, 429) },
   );
   const queueBudget = clampInt(__ENV.K6_ENTRY_QUEUE_MAX_SECONDS || '600', 0, 3600);
@@ -438,7 +442,7 @@ export function studentFlow() {
     sleep(retryAfter);
     entryResp = http.post(
       `${baseUrl}/api/v1/auth/student/entry`,
-      JSON.stringify({ scheduleId, wcode: student.wcode, email: student.email, studentName: student.fullName }),
+      entryBody,
       { jar, headers: jsonHeaders(), responseCallback: http.expectedStatuses({ min: 200, max: 200 }, 429) },
     );
   }
@@ -447,7 +451,6 @@ export function studentFlow() {
     || fail(`SAT entry failed (${student.wcode}): status=${entryResp.status} body=${String(entryResp.body).slice(0, 200)}`);
 
   // 2. V1 bootstrap to mint the attempt credential (attemptId + bearer).
-  const clientSessionId = uuidV4();
   const bootResp = http.post(
     `${baseUrl}/api/v1/student/sessions/${scheduleId}/bootstrap`,
     JSON.stringify({

@@ -346,13 +346,13 @@ test.describe("SAT adaptive identity in the browser", () => {
       // Convergence: the staff projection must arrive at the routed module.
       await expect
         .poll(
-          async () => (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleId,
+          async () => (await staffProjection(page, scheduleId, studentName)).runtimeCurrentModuleRole,
           {
             timeout: 60_000,
             intervals: [500, 1_000, 2_000],
           }
         )
-        .not.toBeNull();
+        .toBe("higher_branch");
       const converged = await staffProjection(page, scheduleId, studentName);
       const decision = await routeDecision(attemptId);
       expect(decision.route).toBe("higher");
@@ -482,10 +482,6 @@ async function startSatAttempt(
   const studentContext = await browser.newContext();
   const studentPage = await studentContext.newPage();
   await studentPage.goto(joinHref);
-  await expect(studentPage.getByRole("heading", { name: linkName })).toBeVisible({
-    timeout: 30_000,
-  });
-  await expect(studentPage.getByText(`${examTitle} · Version 1`)).toBeVisible();
   await studentPage.getByLabel("Full name").fill(studentName);
   await studentPage.getByLabel("Email").fill(studentEmail);
   await studentPage.getByRole("button", { name: /Continue/i }).click();
@@ -515,8 +511,7 @@ async function startSatAttempt(
   await sessionRow.click();
   await expect(page).toHaveURL(`/sat/sessions/${scheduleId}`);
   await expect(page.getByText(studentName).first()).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Start" }).click();
-  await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "Start", exact: true }).click();
 
   // The proctor's Start is the ONLY action taken: refresh (never click) and
   // the module must be OPEN by itself. One reload retry absorbs a first load

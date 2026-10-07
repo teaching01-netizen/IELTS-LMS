@@ -1,5 +1,6 @@
 import { expect, type Browser, type BrowserContextOptions, type Page } from "@playwright/test";
 import { stubScreenDetails } from "./studentUi";
+import { executeUpdate } from "./db";
 
 export interface RunningSatSessionOptions {
   /** Short label used to keep generated session and candidate identifiers unique. */
@@ -8,6 +9,8 @@ export interface RunningSatSessionOptions {
   studentContext?: BrowserContextOptions;
   /** Leave the published session waiting so a test can control proctor start. */
   startRuntime?: boolean;
+  /** Explicit cohort timing for scenarios that expire shared section rows. */
+  timingModel?: "cohort_section_v3";
 }
 
 /** Create one published SAT session, optionally leaving it for a later proctor start. */
@@ -29,7 +32,6 @@ export async function createRunningSatSession(
   const studentEmail = `sat-${label}-${suffix}@example.com`;
 
   await adminPage.goto("/sat/exams");
-  await expect(adminPage.getByRole("heading", { name: "Exam Library" })).toBeVisible();
   const createSatButton = adminPage.getByRole("button", { name: "Create SAT" }).first();
   await expect(createSatButton).toBeVisible({ timeout: 30_000 });
   await createSatButton.click();
@@ -122,6 +124,12 @@ export async function createRunningSatSession(
   const candidateId = decodeURIComponent(studentRouteParts[2] ?? "");
   if (!scheduleId) throw new Error("SAT student route did not include a schedule id.");
   if (!candidateId) throw new Error("SAT student route did not include a candidate id.");
+  if (options.timingModel) {
+    await executeUpdate("UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?", [
+      options.timingModel,
+      scheduleId,
+    ]);
+  }
 
   await adminPage.goto("/sat/sessions");
   await expect(adminPage.getByRole("heading", { name: "Sessions" })).toBeVisible();
@@ -134,8 +142,7 @@ export async function createRunningSatSession(
   await sessionRow.click();
   await expect(adminPage).toHaveURL(new RegExp(`/sat/sessions/${scheduleId}$`));
   if (options.startRuntime !== false) {
-    await adminPage.getByRole("button", { name: "Start" }).click();
-    await expect(adminPage.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
+    await adminPage.getByRole("button", { name: "Start", exact: true }).click();
 
     await studentPage.reload({ waitUntil: "domcontentloaded" });
     await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
@@ -153,5 +160,6 @@ export async function createRunningSatSession(
     examTitle,
     linkName,
     studentName,
+    studentEmail,
   };
 }

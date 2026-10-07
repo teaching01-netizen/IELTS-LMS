@@ -21,7 +21,7 @@ vi.mock('../../../../features/results/api/satResultsQueries', () => ({
 }));
 
 const accessGroups = [
-  { scheduleId: 'schedule-1', accessLinkId: 'link-1', accessLinkName: 'Saturday 9 AM', accessLinkState: 'active', examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 12, cohortName: 'Morning', attemptCount: 2, submittedCount: 2, scoredCount: 1, pendingCount: 1, invalidatedCount: 0, latestSubmittedAt: '2026-09-01T08:00:00Z' },
+  { scheduleId: 'schedule-1', accessLinkId: 'link-1', accessLinkName: 'Saturday 9 AM', accessLinkState: 'active', examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 12, cohortName: 'Morning', attemptCount: 2, submittedCount: 2, scoredCount: 1, pendingCount: 1, invalidatedCount: 0, latestSubmittedAt: '2026-09-01T08:00:00Z', latestTestStartedAt: '2026-09-01T02:03:00Z', earliestTestStartedAt: '2026-08-30T02:03:00Z', completedCount: 1, runningCount: 1, endedCount: 0, otherCount: 0 },
   { scheduleId: 'schedule-2', accessLinkId: null, accessLinkName: 'Previous Student Access', accessLinkState: null, examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 20, cohortName: '', attemptCount: 1, submittedCount: 1, scoredCount: 1, pendingCount: 0, invalidatedCount: 0, latestSubmittedAt: '2026-09-02T08:00:00Z' },
   { scheduleId: 'schedule-3', accessLinkId: 'link-3', accessLinkName: 'Monday Makeup', accessLinkState: 'paused', examId: 'sat-2', examTitle: 'Practice Test 07', versionNumber: 4, cohortName: 'Monday', attemptCount: 1, submittedCount: 1, scoredCount: 0, pendingCount: 0, invalidatedCount: 1, latestSubmittedAt: '2026-08-29T08:00:00Z' },
 ];
@@ -78,17 +78,17 @@ describe('SAT Results hierarchy', () => {
 
   it('exports the RAWDATA workbook for the selected Student Access group', async () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
-    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA XLSX/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Export all group answers/ }));
     await waitFor(() => expect(downloadSatRawdataXlsxMock).toHaveBeenCalledWith('sat-1', 'schedule-1', 'Saturday 9 AM'));
   });
 
   it('surfaces a failed RAWDATA export and offers the button again', async () => {
     downloadSatRawdataXlsxMock.mockRejectedValue(new Error('Export failed: 500'));
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
-    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA XLSX/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Export all group answers/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Export failed: 500');
-    await waitFor(() => expect(screen.getByRole('button', { name: /Export RAWDATA XLSX/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export all group answers/ })).toBeEnabled());
   });
 
   it('blocks a second RAWDATA export while the first is still running', async () => {
@@ -98,7 +98,7 @@ describe('SAT Results hierarchy', () => {
     );
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
 
-    fireEvent.click(screen.getByRole('button', { name: /Export RAWDATA XLSX/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Export all group answers/ }));
 
     const pendingButton = await screen.findByRole('button', { name: /Exporting/ });
     expect(pendingButton).toBeDisabled();
@@ -106,12 +106,12 @@ describe('SAT Results hierarchy', () => {
     expect(downloadSatRawdataXlsxMock).toHaveBeenCalledTimes(1);
 
     finishExport();
-    await waitFor(() => expect(screen.getByRole('button', { name: /Export RAWDATA XLSX/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export all group answers/ })).toBeEnabled());
   });
 
   it('only offers the RAWDATA export inside a Student Access group', () => {
     renderResultsRoute('/sat/results?exam=sat-1');
-    expect(screen.queryByRole('button', { name: /Export RAWDATA XLSX/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Export all group answers/ })).not.toBeInTheDocument();
   });
 
   it('keeps attempts inside their schedule and opens the existing detail by result id', () => {
@@ -200,13 +200,26 @@ describe('SAT Results hierarchy', () => {
   it('paginates through older attempts rather than truncating the schedule', () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
     fireEvent.click(screen.getByRole('button', { name: /Next/ }));
-    expect(useSatAttemptsQueryMock).toHaveBeenLastCalledWith('sat-1', 'schedule-1', 50, '', 'all');
+    expect(useSatAttemptsQueryMock).toHaveBeenLastCalledWith('sat-1', 'schedule-1', 50, '', 'all', { status: 'all' });
     expect(screen.getByText('Older Student')).toBeInTheDocument();
   });
 
   it('keeps deleted-link fallback and versions on schedule groups', () => {
     renderResultsRoute('/sat/results?exam=sat-1');
-    expect(screen.getByText('Version 20 · 1 completed')).toBeInTheDocument();
+    expect(screen.getByText('1 completed')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Previous Student Access/ })).toBeInTheDocument();
+  });
+
+  it('flags an access group used on several days and shows its test start', () => {
+    renderResultsRoute('/sat/results?exam=sat-1');
+    expect(screen.getByText(/Multiple test dates/)).toBeInTheDocument();
+    expect(screen.getAllByText('Test time unavailable').length).toBeGreaterThan(0);
+  });
+
+  it('restores status, date range and page from the URL and resets the page on a filter change', () => {
+    renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1&status=running&from=2026-09-01&offset=50');
+    expect(useSatAttemptsQueryMock).toHaveBeenLastCalledWith('sat-1', 'schedule-1', 50, '', 'all', expect.objectContaining({ status: 'running', from: expect.any(String) }));
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'ended' } });
+    expect(useSatAttemptsQueryMock).toHaveBeenLastCalledWith('sat-1', 'schedule-1', 0, '', 'all', expect.objectContaining({ status: 'ended' }));
   });
 });

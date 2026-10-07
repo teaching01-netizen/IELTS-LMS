@@ -296,6 +296,36 @@ describe("useSatExamController convergence (Phase 04)", () => {
     expect(seen).not.toContainEqual({ dataNull: false, phase: "loading" });
   });
 
+  it("opens the active module when recovery wins the initial bootstrap race", async () => {
+    const initial = deferred<AssessmentDeliveryBootstrap>();
+    gatewayMocks.bootstrap.mockImplementation(() => initial.promise);
+    const recovered = modulePayload({
+      currentModuleId: "m-1",
+      currentModuleKey: "rw-m1",
+      currentState: "active",
+    });
+    const hook = renderHook(() => useSatExamController({
+      scheduleId: "schedule",
+      attemptId: "attempt-a",
+      candidateId: "candidate",
+    }));
+    try {
+      await act(async () => {
+        hook.result.current.commitForTest(recovered);
+      });
+      expect(hook.result.current.state.phase).toBe("module");
+      expect(hook.result.current.stateModule?.id).toBe("m-1");
+      await act(async () => {
+        initial.resolve(recovered);
+        await initial.promise;
+      });
+      expect(hook.result.current.state.phase).toBe("module");
+      expect(hook.result.current.stateModule?.id).toBe("m-1");
+    } finally {
+      hook.unmount();
+    }
+  });
+
   it("T2b: poll carrying a finalized current module + different pending dispatches showDirections synchronously", async () => {
     const first = modulePayload({
       currentModuleId: "m-1",

@@ -231,8 +231,10 @@ func (s *Service) authorizeWrite(ctx context.Context, q tx.Tx, actor Actor, sche
 	return nil
 }
 
-// lockAttemptScope locks the attempt row FOR UPDATE, then the schedule
-// runtime row + active section row FOR UPDATE (attempt -> runtime -> section).
+// lockAttemptScope locks the attempt row FOR UPDATE, then share-locks the
+// schedule runtime row + active section row (attempt -> runtime -> section).
+// Per-attempt commands only read the shared rows, so FOR SHARE holds runtime
+// writers off without blocking every other candidate of the schedule.
 func lockAttemptScope(ctx context.Context, q tx.Tx, scheduleID, attemptID string) error {
 	const lockAttempt = "SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
 	var id string
@@ -242,16 +244,20 @@ func lockAttemptScope(ctx context.Context, q tx.Tx, scheduleID, attemptID string
 		}
 		return err
 	}
-	const lockRuntime = "SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
+	const lockRuntime = "SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE"
 	var runtimeID sql.NullString
 	var active sql.NullString
 	if err := q.QueryRowContext(ctx, lockRuntime, scheduleID).Scan(&runtimeID, &active); err != nil && err != sql.ErrNoRows {
 		return err
 	}
 	if runtimeID.Valid && active.Valid && active.String != "" {
-		const lockSection = "SELECT id FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR UPDATE"
+		const lockSection = "SELECT id FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR SHARE"
 		var sectionID string
-		_ = q.QueryRowContext(ctx, lockSection, runtimeID.String, active.String).Scan(&sectionID)
+		// A lock-wait timeout rolls back only the statement, so a swallowed
+		// error here would continue the command without the section lock.
+		if err := q.QueryRowContext(ctx, lockSection, runtimeID.String, active.String).Scan(&sectionID); err != nil && err != sql.ErrNoRows {
+			return err
+		}
 	}
 	return nil
 }

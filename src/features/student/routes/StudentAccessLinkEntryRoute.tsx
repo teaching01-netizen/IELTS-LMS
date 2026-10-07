@@ -29,7 +29,6 @@ import {
   type SatResumeLocatorV1,
 } from "../../student-delivery/api/satResume";
 import {
-  createStudentClientSessionId,
   ensureClientSessionIdForStudentKey,
   restoreClientSessionIdForStudentKey,
   satWriterStudentKey,
@@ -203,7 +202,6 @@ export function StudentAccessLinkEntryRoute() {
     key: string;
     promise: ReturnType<typeof resumeSatStudentSession>;
   } | null>(null);
-  const linkClientSessionIdRef = useRef<string | null>(null);
   const initial = useMemo(() => readProfile(accessLinkId ?? ""), [accessLinkId]);
   const [restoredQueue] = useState<PersistedAccessLinkQueue | null>(() =>
     loadPersistedAccessLinkQueue(accessLinkId ?? "")
@@ -227,7 +225,6 @@ export function StudentAccessLinkEntryRoute() {
 
   useEffect(() => {
     setResumeLocator(loadSatResumeLocator());
-    linkClientSessionIdRef.current = null;
   }, [accessLinkId]);
 
   const clearFieldError = (field: keyof AccessForm) => {
@@ -420,8 +417,14 @@ export function StudentAccessLinkEntryRoute() {
             satWriterStudentKey(activeLink.scheduleId, normalizedCode)
           );
         } else {
-          linkClientSessionIdRef.current ??= createStudentClientSessionId();
-          clientSessionId = linkClientSessionIdRef.current;
+          // Open links learn the student code only from the server, so key
+          // the browser-owned writer identity by link + email: re-entering
+          // from the same browser presents the same identity and resumes
+          // instead of being blocked as a second device.
+          clientSessionId = ensureClientSessionIdForStudentKey(
+            activeLink.scheduleId,
+            `open-link-${activeLink.id}-${normalizedEmail}`
+          );
         }
       }
       return studentEntry({

@@ -12,6 +12,11 @@ const SatStudentDeliveryBranch = React.lazy(() =>
 const IeltsStudentDeliveryBranch = React.lazy(() =>
   import('./IeltsStudentDeliveryBranch').then((module) => ({ default: module.IeltsStudentDeliveryBranch })),
 );
+const SatDeviceTransferPanel = React.lazy(() =>
+  import('../../student-delivery/api/satDeviceTransferSurfaces').then((module) => ({
+    default: module.SatDeviceTransferPanel,
+  })),
+);
 
 /**
  * Student Session Route
@@ -38,8 +43,10 @@ export function StudentSessionRoute() {
   const {
     answerInvariantRollout,
     attemptSnapshot,
+    candidateId,
     error,
     isLoading,
+    ownershipBlocked,
     providerKey,
     retry,
     runtimeSnapshot,
@@ -106,6 +113,21 @@ export function StudentSessionRoute() {
 
   if (isLoading) {
     return <LoadingSurface label="Loading Exam…" />;
+  }
+
+  // Another browser/device owns this SAT attempt: no exam content here, only
+  // the device-change request flow. A committed transfer reloads the route.
+  if (ownershipBlocked && scheduleId && candidateId) {
+    return (
+      <React.Suspense fallback={<SatLoadingSurface kind="initial" label="Loading Digital SAT…" />}>
+        <SatDeviceTransferPanel
+          scheduleId={scheduleId}
+          candidateId={candidateId}
+          onAuthorized={() => void retry()}
+          onExit={navigateToStudentCheckIn}
+        />
+      </React.Suspense>
+    );
   }
 
   if (error) {

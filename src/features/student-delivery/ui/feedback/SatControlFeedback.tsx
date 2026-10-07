@@ -37,10 +37,10 @@ export function SatLeaseConflictNotice({
     >
       <div>
         <p className="text-[14px] font-semibold text-[var(--sat-text)]">
-          This attempt is open in another session.
+          {SAT_COPY.deviceTransfer.blockedTitle}.
         </p>
         <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">
-          {error ?? "Pause here or take over explicitly to continue saving responses."}
+          {error ?? SAT_COPY.saveStatus.superseded}
         </p>
       </div>
       <button
@@ -49,7 +49,7 @@ export function SatLeaseConflictNotice({
         onClick={onTakeOver}
         disabled={isTakingOver}
       >
-        {isTakingOver ? "Taking over…" : "Take over"}
+        {isTakingOver ? SAT_COPY.deviceTransfer.writerChecking : SAT_COPY.saveStatus.takeOver}
       </button>
     </div>
   );

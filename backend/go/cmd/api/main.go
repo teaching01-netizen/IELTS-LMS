@@ -675,6 +675,17 @@ func BuildRouter(app *App) http.Handler {
 				authzRoute(r, "POST", "/{scheduleID}/mutations:batch", v1MutationHandler(app))
 				authzRoute(r, "POST", "/{scheduleID}/audit", v1AuditHandler(app))
 				authzRoute(r, "POST", "/{scheduleID}/submit", v1SubmitHandler(app))
+				// SAT device transfer: the blocked browser (student cookie
+				// session) requests/cancels/commits; the current writer
+				// (attempt bearer) reads + confirms pre-start.
+				authzRoute(r, "POST", "/{scheduleID}/device-transfers", studentTransferRequestHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/device-transfers/{requestID}/cancel", studentTransferCancelHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/device-transfers/{requestID}/commit", studentTransferCommitHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/writer/device-transfers/{requestID}/confirm", writerConfirmTransferHandler(app))
+			})
+			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
+				authzRoute(r, "GET", "/{scheduleID}/device-transfers/{requestID}", studentTransferStatusHandler(app))
+				authzRoute(r, "GET", "/{scheduleID}/writer/device-transfer", writerPendingTransferHandler(app))
 			})
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/proctor", func(r chi.Router) {
@@ -706,6 +717,8 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/extend", proctorExtendAttemptHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/rearm", proctorReArmStageHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/terminate", proctorTerminateHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}/device-transfers", proctorDeviceTransfersHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/device-transfers/{requestID}/decision", proctorDeviceTransferDecisionHandler(app))
 			authzRoute(r, "POST", "/alerts/{alertID}/ack", proctorAckAlertHandler(app))
 			authzRoute(r, "GET", "/live-mode", proctorLiveModeHandler(app))
 		})

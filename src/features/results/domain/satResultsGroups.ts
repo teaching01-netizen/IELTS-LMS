@@ -17,8 +17,19 @@ export interface SatExamGroup {
   avgScore: number | null;
   /** Original string of the max valid submittedAt; null when no valid dates. */
   latestSubmittedAt: string | null;
+  /** Latest actual test start across access groups; null when none known. Set by groupSatAccessGroups. */
+  latestTestStartedAt?: string | null;
+  /** Disjoint delivery buckets summed across access groups. Set by groupSatAccessGroups. */
+  outcomeCounts?: SatOutcomeCounts;
   /** Populated by groupSatAccessGroups for the workspace drill-down. */
   accessGroups?: SatAccessGroupSummary[];
+}
+
+export interface SatOutcomeCounts {
+  completed: number;
+  running: number;
+  ended: number;
+  other: number;
 }
 
 export interface FilteredSatAccessGroup {
@@ -206,7 +217,8 @@ export function groupSatAccessGroups(rows: SatAccessGroupSummary[]): SatExamGrou
   const groups: SatExamGroup[] = [];
   for (const [examId, accessGroups] of buckets) {
     const sortedAccess = [...accessGroups].sort((a, b) => {
-      const timeOrder = (timeOrNull(b.latestSubmittedAt) ?? 0) - (timeOrNull(a.latestSubmittedAt) ?? 0);
+      const startOrder = (timeOrNull(b.latestTestStartedAt) ?? 0) - (timeOrNull(a.latestTestStartedAt) ?? 0);
+      const timeOrder = startOrder || (timeOrNull(b.latestSubmittedAt) ?? 0) - (timeOrNull(a.latestSubmittedAt) ?? 0);
       return timeOrder || a.accessLinkName.localeCompare(b.accessLinkName) || compareStringsAsc(a.scheduleId, b.scheduleId);
     });
     const first = sortedAccess[0];
@@ -220,6 +232,16 @@ export function groupSatAccessGroups(rows: SatAccessGroupSummary[]): SatExamGrou
       const current = timeOrNull(group.latestSubmittedAt);
       return current != null && (latest == null || current > (timeOrNull(latest) ?? -Infinity)) ? group.latestSubmittedAt : latest;
     }, null);
+    const latestTestStartedAt = sortedAccess.reduce<string | null>((latest, group) => {
+      const current = timeOrNull(group.latestTestStartedAt);
+      return current != null && (latest == null || current > (timeOrNull(latest) ?? -Infinity)) ? (group.latestTestStartedAt ?? null) : latest;
+    }, null);
+    const outcomeCounts = sortedAccess.reduce<SatOutcomeCounts>((sum, group) => ({
+      completed: sum.completed + (group.completedCount ?? 0),
+      running: sum.running + (group.runningCount ?? 0),
+      ended: sum.ended + (group.endedCount ?? 0),
+      other: sum.other + (group.otherCount ?? 0),
+    }), { completed: 0, running: 0, ended: 0, other: 0 });
     groups.push({
       examId,
       examTitle: first.examTitle.trim() || UNTITLED_EXAM,
@@ -231,11 +253,14 @@ export function groupSatAccessGroups(rows: SatAccessGroupSummary[]): SatExamGrou
       invalidated,
       avgScore: null,
       latestSubmittedAt,
+      latestTestStartedAt,
+      outcomeCounts,
       accessGroups: sortedAccess,
     });
   }
   return groups.sort((a, b) => {
-    const timeOrder = (timeOrNull(b.latestSubmittedAt) ?? 0) - (timeOrNull(a.latestSubmittedAt) ?? 0);
+    const startOrder = (timeOrNull(b.latestTestStartedAt) ?? 0) - (timeOrNull(a.latestTestStartedAt) ?? 0);
+    const timeOrder = startOrder || (timeOrNull(b.latestSubmittedAt) ?? 0) - (timeOrNull(a.latestSubmittedAt) ?? 0);
     return timeOrder || a.examTitle.localeCompare(b.examTitle) || compareStringsAsc(a.examId, b.examId);
   });
 }

@@ -8,6 +8,8 @@ const (
 	MSATM2AutoStartTotal           = "sat_m2_auto_start_total"
 	MSATModuleScopedRejectionTotal = "sat_module_scoped_rejection_total"
 	MSATCloseWritesPendingTotal    = "sat_close_writes_pending_total"
+	MSATAdmissionTotal             = "sat_admission_total"
+	MSATTransferTotal              = "sat_device_transfer_total"
 )
 
 var metricHelpText = map[string]string{
@@ -31,6 +33,8 @@ var metricHelpText = map[string]string{
 	MSATResultQuestionDetailFailure: "Total SAT result question-detail reads that failed instead of returning an empty list.",
 	MSATTimeoutFinalize:             "Total SAT modules finalized by authoritative timeout reconciliation.",
 	MSATResponseReplayAfterTerminal: "Total exact SAT response replays served at or after the authoritative deadline.",
+	MSATAdmissionTotal:              "Total SAT writer admission decisions by outcome (authorized, blocked, closed).",
+	MSATTransferTotal:               "Total SAT device-transfer workflow transitions by action and outcome.",
 	MSATAdaptiveIntegrityViolation:  "Total SAT adaptive-routing integrity violations where the recorded route decision and the administered module disagreed.",
 	MSATAdaptiveRouteTotal:          "Total SAT adaptive-routing decisions by section and selected route (higher vs lower).",
 	MSATAdaptiveModuleOpenTotal:     "Total SAT adaptive follow-up modules opened by adaptive role (higher_branch vs lower_branch).",
@@ -399,6 +403,7 @@ func Names() []string {
 		MSATModuleRouteBasisTotal,
 		MSATModuleCloseRequestTotal,
 		MSATRouteLagSeconds, MSATM2StartLagSeconds, MSATM2AutoStartTotal, MSATModuleScopedRejectionTotal, MSATCloseWritesPendingTotal,
+		MSATAdmissionTotal, MSATTransferTotal,
 		MSATLateAnswerEvidenceTotal,
 		MSATPersonalOfferTotal,
 		MSATPersonalEntryTotal,

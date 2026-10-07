@@ -50,6 +50,16 @@ const (
 	// CodeStudentWSRetired marks the plan-C3 student-socket retirement:
 	// student WS attempts render 410 + {use: runtime-poll}.
 	CodeStudentWSRetired Code = "STUDENT_WS_RETIRED"
+	// SAT session ownership / device transfer. SESSION_ALREADY_ACTIVE: another
+	// session owns the attempt (entry is blocked, not superseded).
+	// TRANSFER_APPROVAL_REQUIRED: the requested ownership change needs an
+	// approval that has not been granted. TRANSFER_EXPIRED: the request or its
+	// approval lapsed. TRANSFER_CONFLICT: a different request, operation
+	// payload, lease, or stage invalidated the transfer.
+	CodeSessionAlreadyActive     Code = "SESSION_ALREADY_ACTIVE"
+	CodeTransferApprovalRequired Code = "TRANSFER_APPROVAL_REQUIRED"
+	CodeTransferExpired          Code = "TRANSFER_EXPIRED"
+	CodeTransferConflict         Code = "TRANSFER_CONFLICT"
 )
 
 // Authoring lifecycle codes. These are separate from the block above because
@@ -102,8 +112,11 @@ func statusFor(c Code) int {
 		return http.StatusMethodNotAllowed
 	case CodeConflict, CodeControlEpochStale, CodeVersionCollision, CodeWriteIDConflict,
 		CodeTerminalConflict, CodeSubmissionReplayMisuse, CodeResponseRevisionMismatch,
-		CodeRuntimeRevisionStale, CodeAssessmentConflict, CodeActiveSessionSuperseded:
+		CodeRuntimeRevisionStale, CodeAssessmentConflict, CodeActiveSessionSuperseded,
+		CodeSessionAlreadyActive, CodeTransferApprovalRequired, CodeTransferConflict:
 		return http.StatusConflict
+	case CodeTransferExpired:
+		return http.StatusGone
 	case CodeDeadlineExpired, CodeAttemptNotWritable:
 		return http.StatusUnprocessableEntity
 	case CodeRateLimited, CodeRateLimitExceeded, CodeLeaseAcquireFailed:

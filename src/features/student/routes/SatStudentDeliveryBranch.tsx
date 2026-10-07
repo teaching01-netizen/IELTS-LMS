@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { SatStudentSessionRoute } from '../../student-delivery/routes/SatStudentSessionRoute';
 import { clearSatResumeLocator, loadSatResumeLocator, saveSatResumeLocator } from '../../student-delivery/api/satResumeLocator';
+import { SatWriterLockGate } from '../../student-delivery/api/satDeviceTransferSurfaces';
 import { getVerifiedTerminalState } from '../domain/exam-session/terminalState';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 import type { ExamSessionRuntime } from '../../../types/domain';
@@ -43,20 +44,24 @@ export function SatStudentDeliveryBranch({
     });
   }, [attemptSnapshot, runtimeSnapshot, scheduleId]);
 
+  // One writer tab per browser (Web Locks): another tab of this browser never
+  // mounts the exam, its durability engine, or its credential refresh.
   return (
-    <SatStudentSessionRoute
-      scheduleId={scheduleId}
-      attemptId={attemptSnapshot.id}
-      candidateId={attemptSnapshot.candidateId}
-      attemptSnapshot={attemptSnapshot}
-      runtimeSnapshot={runtimeSnapshot}
-      liveSocketConnected={liveSocketConnected}
-      attemptUpdateToken={satAttemptUpdateToken}
-      leaseEpoch={attemptSnapshot.leaseEpoch}
-      controlEpoch={attemptSnapshot.controlEpoch}
-      bootstrapSeed={satBootstrapSeed}
-      initialIsLoading={false}
-      onExit={onExit}
-    />
+    <SatWriterLockGate scheduleId={scheduleId} attemptId={attemptSnapshot.id}>
+      <SatStudentSessionRoute
+        scheduleId={scheduleId}
+        attemptId={attemptSnapshot.id}
+        candidateId={attemptSnapshot.candidateId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={runtimeSnapshot}
+        liveSocketConnected={liveSocketConnected}
+        attemptUpdateToken={satAttemptUpdateToken}
+        leaseEpoch={attemptSnapshot.leaseEpoch}
+        controlEpoch={attemptSnapshot.controlEpoch}
+        bootstrapSeed={satBootstrapSeed}
+        initialIsLoading={false}
+        onExit={onExit}
+      />
+    </SatWriterLockGate>
   );
 }

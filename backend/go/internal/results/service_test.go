@@ -133,9 +133,9 @@ func TestListSATAccessGroupsRetainsDeletedLinkScheduleAndPinnedVersion(t *testin
 	}
 	defer db.Close()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules sch")).WillReturnRows(sqlmock.NewRows([]string{
-		"schedule_id", "link_id", "link_name", "link_state", "exam_id", "exam_title", "version_number", "cohort_name", "attempt_count", "submitted_count", "scored_count", "pending_count", "invalidated_count", "latest_submitted_at",
-	}).AddRow("schedule-live", "link-1", "Saturday 9 AM", "active", "exam-1", "SAT", 20, "Morning", 2, 2, 1, 1, 0, nil).
-		AddRow("schedule-deleted", nil, nil, nil, "exam-1", "SAT", 12, "Cohort A", 1, 1, 1, 0, 0, nil))
+		"schedule_id", "link_id", "link_name", "link_state", "exam_id", "exam_title", "version_number", "cohort_name", "attempt_count", "submitted_count", "scored_count", "pending_count", "invalidated_count", "latest_submitted_at", "latest_test_started_at", "earliest_test_started_at", "completed_count", "running_count", "ended_count", "other_count",
+	}).AddRow("schedule-live", "link-1", "Saturday 9 AM", "active", "exam-1", "SAT", 20, "Morning", 2, 2, 1, 1, 0, nil, time.Date(2026, 10, 7, 2, 0, 0, 0, time.UTC), time.Date(2026, 10, 5, 2, 0, 0, 0, time.UTC), 1, 1, 0, 0).
+		AddRow("schedule-deleted", nil, nil, nil, "exam-1", "SAT", 12, "Cohort A", 1, 1, 1, 0, 0, nil, nil, nil, 1, 0, 0, 0))
 	groups, err := NewService(db).ListSATAccessGroups(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver))
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestListSATAccessGroupsRetainsDeletedLinkScheduleAndPinnedVersion(t *testin
 	if len(groups) != 2 {
 		t.Fatalf("expected 2 schedule groups, got %d", len(groups))
 	}
-	if groups[0].VersionNumber != 20 || groups[0].AccessLinkName != "Saturday 9 AM" || groups[0].ScoredCount != 1 {
+	if groups[0].VersionNumber != 20 || groups[0].AccessLinkName != "Saturday 9 AM" || groups[0].ScoredCount != 1 || groups[0].LatestTestStarted == nil || groups[0].EarliestTestStarted == nil || groups[0].CompletedCount != 1 || groups[0].RunningCount != 1 || groups[1].LatestTestStarted != nil {
 		t.Fatalf("unexpected live access group: %#v", groups[0])
 	}
 	if groups[1].ScheduleID != "schedule-deleted" || groups[1].VersionNumber != 12 || groups[1].AccessLinkName != "Cohort A" || groups[1].AccessLinkID != nil {
@@ -160,18 +160,18 @@ func TestListSATAttemptsPagesAndIncludesAttemptWithoutResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM student_attempts a")).WithArgs("exam-1", "schedule-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(51))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored')")).WithArgs("exam-1", "schedule-1", 50, 50).WillReturnRows(sqlmock.NewRows([]string{
-		"result_id", "attempt_id", "attempt_status", "outcome_status", "release_status", "total_score", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at",
-	}).AddRow(nil, "attempt-51", "running", "unscored", "", nil, "schedule-1", "exam-1", "SAT", 20, "student-51", "Student 51", nil, "Cohort", nil, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)))
-	page, err := NewService(db).ListSATAttempts(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1", 50, 50, "", "all")
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM student_attempts a")).WithArgs("exam-1", "schedule-1", "running").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(51))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored')")).WithArgs("exam-1", "schedule-1", "running", 50, 50).WillReturnRows(sqlmock.NewRows([]string{
+		"result_id", "attempt_id", "attempt_status", "outcome_status", "release_status", "total_score", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at", "test_started_at",
+	}).AddRow(nil, "attempt-51", "running", "unscored", "", nil, "schedule-1", "exam-1", "SAT", 20, "student-51", "Student 51", nil, "Cohort", nil, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 7, 2, 3, 0, 0, time.UTC)))
+	page, err := NewService(db).ListSATAttempts(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1", 50, 50, "", "all", SATAttemptOptions{Status: "running"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.Total != 51 || page.Offset != 50 || page.HasMore {
 		t.Fatalf("unexpected page metadata: %#v", page)
 	}
-	if len(page.Items) != 1 || page.Items[0].ResultID != nil || page.Items[0].Outcome != "unscored" || page.Items[0].AttemptStatus != "running" || page.Items[0].VersionNumber != 20 {
+	if len(page.Items) != 1 || page.Items[0].ResultID != nil || page.Items[0].Outcome != "unscored" || page.Items[0].AttemptStatus != "running" || page.Items[0].VersionNumber != 20 || page.Items[0].TestStartedAt == nil || page.Items[0].SubmittedAt != nil {
 		t.Fatalf("unscored administered attempt should remain visible with its attempt version: %#v", page.Items)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -205,8 +205,8 @@ func expectScoredSATResultBase(mock sqlmock.Sqlmock) {
 		WithArgs("result-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "attempt_id", "submission_id", "provider_key", "outcome_status", "total_score", "score_payload", "release_status",
-			"schedule_id", "exam_id", "exam_title", "version_number", "candidate_id", "candidate_name", "candidate_email", "cohort_name", "submitted_at",
-		}).AddRow("result-1", "attempt-1", nil, "sat", OutcomeScored, int64(1200), `{}`, ReleaseReady, "schedule-1", "exam-1", "Practice SAT", 1, "candidate-1", "Student", nil, "Cohort", nil))
+			"schedule_id", "exam_id", "exam_title", "version_number", "candidate_id", "candidate_name", "candidate_email", "cohort_name", "submitted_at", "test_started_at",
+		}).AddRow("result-1", "attempt-1", nil, "sat", OutcomeScored, int64(1200), `{}`, ReleaseReady, "schedule-1", "exam-1", "Practice SAT", 1, "candidate-1", "Student", nil, "Cohort", nil, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_section_results WHERE assessment_result_id = ?")).
 		WithArgs("result-1").
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "route", "raw_correct", "operational_question_count", "scaled_score", "details"}))

@@ -774,6 +774,68 @@ issued:
 	return signed, expiresAt, nil
 }
 
+// AttemptSessionExecer is the statement surface IssueAttemptTokenTx needs; a
+// *sql.Tx and the platform tx.Tx both satisfy it.
+type AttemptSessionExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// IssueAttemptTokenTx is IssueAttemptToken for callers that decide writer
+// ownership in the same transaction (SAT admission and device transfer): the
+// attempt_sessions upsert commits or rolls back together with the ownership
+// decision, so a credential can never outlive a refused or rolled-back claim.
+// No statement-level retry here — a deadlock aborts the whole transaction and
+// the caller's tx runner re-drives the ownership decision with it.
+func IssueAttemptTokenTx(ctx context.Context, q AttemptSessionExecer, cfg config.Config, userID, scheduleID, attemptID, clientSessionID string, organizationID *string, leaseEpoch *uint64, now time.Time) (token string, expiresAt time.Time, err error) {
+	now = now.UTC()
+	expiresAt = now.Add(AttemptTokenTTL(cfg))
+	tokenID, err := RandomToken(24)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("auth: attempt token id: %w", err)
+	}
+	var org, lease any
+	if organizationID != nil {
+		org = *organizationID
+	}
+	if leaseEpoch != nil {
+		lease = *leaseEpoch
+	}
+	_, err = q.ExecContext(ctx,
+		`INSERT INTO attempt_sessions (id, user_id, schedule_id, attempt_id, client_session_id, token_id, device_fingerprint_hash, issued_at, last_seen_at, expires_at, organization_id, lease_epoch)
+		 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), token_id = VALUES(token_id), issued_at = VALUES(issued_at), last_seen_at = VALUES(last_seen_at), expires_at = VALUES(expires_at), organization_id = VALUES(organization_id), lease_epoch = VALUES(lease_epoch), revoked_at = NULL, revocation_reason = NULL`,
+		uuid.NewString(), userID, scheduleID, attemptID, clientSessionID, tokenID, now, now, expiresAt, org, lease)
+	if err != nil && isMissingColumn(err) {
+		_, err = q.ExecContext(ctx,
+			`INSERT INTO attempt_sessions (id, user_id, schedule_id, attempt_id, client_session_id, token_id, device_fingerprint_hash, issued_at, last_seen_at, expires_at)
+			 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+			 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), token_id = VALUES(token_id), issued_at = VALUES(issued_at), last_seen_at = VALUES(last_seen_at), expires_at = VALUES(expires_at), revoked_at = NULL, revocation_reason = NULL`,
+			uuid.NewString(), userID, scheduleID, attemptID, clientSessionID, tokenID, now, now, expiresAt)
+	}
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	var canonicalTokenID string
+	if err := q.QueryRowContext(ctx,
+		`SELECT token_id FROM attempt_sessions WHERE attempt_id = ? AND client_session_id = ?`,
+		attemptID, clientSessionID).Scan(&canonicalTokenID); err != nil {
+		return "", time.Time{}, err
+	}
+	claims := crypto.AttemptClaims{
+		TokenID: canonicalTokenID, UserID: userID, ScheduleID: scheduleID, AttemptID: attemptID,
+		ClientSessionID: clientSessionID, LeaseEpoch: leaseEpoch, Exp: expiresAt.Unix(),
+	}
+	if organizationID != nil {
+		claims.OrganizationID = *organizationID
+	}
+	signed, err := crypto.SignAttemptToken([]byte(cfg.AuthSecret), claims)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("auth: sign attempt token: %w", err)
+	}
+	return signed, expiresAt, nil
+}
+
 // isClientGone reports a dead client context (canceled/timeout): the
 // caller went away mid-statement (round 151: 5k entry-wave queue-aged
 // admissions timing out client-side inside IssueAttemptToken's re-read).

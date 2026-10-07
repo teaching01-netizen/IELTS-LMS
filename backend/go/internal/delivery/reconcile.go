@@ -47,7 +47,7 @@ type reconcileRow struct {
 	entryEnteredAt   *time.Time
 }
 
-// reconcileStage is one authoritative runtime-section row locked FOR UPDATE.
+// reconcileStage is one authoritative runtime-section row read FOR SHARE.
 type reconcileStage struct {
 	order            int
 	status           string
@@ -908,14 +908,16 @@ func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, ru
 	return false, nil
 }
 
-// lockReconcileStageTx locks one authoritative runtime-section row; nil means
+// lockReconcileStageTx share-locks one authoritative runtime-section row: it
+// blocks runtime writers (pause/extend/advance) until commit without making
+// concurrent candidates of the same section wait on each other. nil means
 // the stage row is missing (Rust fetch_optional -> Conflict at the call site).
 func lockReconcileStageTx(ctx context.Context, t tx.Tx, runtimeID, sectionKey string) (*reconcileStage, error) {
 	var st reconcileStage
 	var startedAt, pausedAt sql.NullTime
 	var plannedMinutes, extensionMinutes, pausedSeconds sql.NullInt64
 	if err := t.QueryRowContext(ctx,
-		"SELECT section_order, status, actual_start_at, paused_at, planned_duration_minutes, extension_minutes, accumulated_paused_seconds FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR UPDATE",
+		"SELECT section_order, status, actual_start_at, paused_at, planned_duration_minutes, extension_minutes, accumulated_paused_seconds FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR SHARE",
 		runtimeID, sectionKey).Scan(&st.order, &st.status, &startedAt, &pausedAt, &plannedMinutes, &extensionMinutes, &pausedSeconds); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil

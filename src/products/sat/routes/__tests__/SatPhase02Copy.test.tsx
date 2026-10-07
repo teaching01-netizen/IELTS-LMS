@@ -312,7 +312,7 @@ describe('SAT Phase 02 copy contracts', () => {
         <SatResultsRoute />
       </MemoryRouter>,
     );
-    expect(screen.getByPlaceholderText('Search Student Access')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search Student Access or cohort')).toBeInTheDocument();
     cleanup();
 
     render(<MemoryRouter initialEntries={['/sat/results?exam=sat-1&access=schedule-1']}><SatResultsRoute /></MemoryRouter>);
@@ -378,12 +378,13 @@ describe('SAT Phase 02 copy contracts', () => {
         <SatResultsRoute />
       </MemoryRouter>,
     );
-    // The exam list has one exam row with one roll-up pill.
+    // The exam list has one exam row. A mixed exam never gets one verdict pill:
+    // it shows disjoint outcome counts instead.
     const groupRows = container.querySelectorAll('.sat-list-row');
     expect(groupRows.length).toBe(1);
-    // One pill per row: the pill is the inline-flex rounded-full tone element.
     groupRows.forEach((row) => {
-      expect(row.querySelectorAll('span[class*="rounded-full"][class*="inline-flex"]').length).toBe(1);
+      expect(row.querySelectorAll('span[class*="rounded-full"][class*="inline-flex"]').length).toBe(0);
+      expect(row.textContent).toContain('completed');
     });
     expect(screen.queryByText(/\u00B7 Practice \u00B7/)).not.toBeInTheDocument();
   });
@@ -406,9 +407,9 @@ describe('SAT Phase 02 copy contracts', () => {
     rows.forEach((row) => {
       expect(row.querySelectorAll('span[class*="rounded-full"][class*="inline-flex"]').length).toBe(1);
     });
-    // The pending result and its roll-up both report completion.
-    expect(screen.getAllByText('Completed')).toHaveLength(2);
-    expect(screen.getByText('Exam terminated by proctor')).toBeInTheDocument();
+    // The pending result reports completion; the terminated one reports its own end.
+    expect(Array.from(rows).filter((row) => row.textContent?.includes('Completed'))).toHaveLength(2);
+    expect(screen.getByText('Ended by proctor')).toBeInTheDocument();
   });
 
   it('jargon footnote is gone; scaled score stays hidden', () => {

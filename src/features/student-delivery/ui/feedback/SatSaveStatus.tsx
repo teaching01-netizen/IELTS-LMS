@@ -57,7 +57,7 @@ export function SatSaveStatus(props: SatSaveStatusProps): React.JSX.Element | nu
             disabled={props.isTakingOver === true}
             className="sat-touch-target sat-pressable shrink-0 rounded-full border border-[var(--sat-danger)] px-4 font-semibold text-[var(--sat-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-wait disabled:opacity-60"
           >
-            {props.isTakingOver === true ? "Taking over" + "\u2026" : SAT_COPY.saveStatus.takeOver}
+            {props.isTakingOver === true ? SAT_COPY.deviceTransfer.writerChecking : SAT_COPY.saveStatus.takeOver}
           </button>
         ) : null
       ) : props.onRetrySave ? (

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { SatPresenceSurface } from "../motion/SatPresenceSurface";
 
 export function SatPreStartScreen({
@@ -6,12 +7,15 @@ export function SatPreStartScreen({
   proctorStatus,
   stageReady,
   startingModuleTwo = false,
+  footer = null,
 }: {
   reason: "waiting" | "loading";
   runtimeStatus: string;
   proctorStatus: string;
   stageReady: boolean;
   startingModuleTwo?: boolean;
+  /** Secondary, non-exam action (e.g. allowing a pre-start device change). */
+  footer?: ReactNode;
 }) {
   const isPaused = proctorStatus === "paused" || runtimeStatus === "paused";
   const title =
@@ -52,6 +56,7 @@ export function SatPreStartScreen({
         >
           {description}
         </p>
+        {footer}
       </main>
     </SatPresenceSurface>
   );

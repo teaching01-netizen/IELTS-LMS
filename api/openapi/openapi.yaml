@@ -868,6 +868,74 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/device-transfers:
+    get:
+      tags: [proctor]
+      summary: Open SAT device-transfer requests for an assigned schedule
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Pending and approved (unredeemed) requests, oldest first
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DeviceTransfer" } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/device-transfers/{requestId}/decision:
+    post:
+      tags: [proctor]
+      summary: Approve or deny a SAT device-transfer request
+      description: >-
+        Approval binds the request's target session and expected owner/lease;
+        ownership changes only when the target browser commits it. Approval
+        requires acknowledging that unconfirmed answers on the old device do
+        not transfer.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, deny] }
+                reason: { type: string, maxLength: 255 }
+                acknowledgeUnconfirmedRisk: { type: boolean }
+      responses:
+        "200":
+          description: Decision recorded
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer: { $ref: "#/components/schemas/DeviceTransfer" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
   /proctor/sessions/{scheduleId}/attempts/{attemptId}/pause:
     post:
       tags: [proctor]
@@ -2777,6 +2845,211 @@ paths:
             application/json:
               schema: { type: object }
         "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/device-transfers:
+    post:
+      tags: [student-v1]
+      summary: Request a SAT device transfer (blocked browser)
+      description: >-
+        Student cookie session. Opens, or returns the identical outstanding,
+        transfer request. Grants no writer or content access. One outstanding
+        request per attempt; a different target conflicts.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operationId, attemptId, clientSessionId, expectedLeaseEpoch, reasonCode]
+              properties:
+                operationId: { type: string, minLength: 8, maxLength: 64 }
+                attemptId: { type: string }
+                clientSessionId: { type: string, maxLength: 36 }
+                expectedLeaseEpoch: { type: integer, minimum: 1 }
+                reasonCode: { type: string, pattern: "^[a-z0-9_]{1,64}$" }
+      responses:
+        "200":
+          description: Request
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer: { $ref: "#/components/schemas/DeviceTransfer" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/device-transfers/{requestId}:
+    get:
+      tags: [student-v1]
+      summary: SAT device-transfer status for its requester
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: clientSessionId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Request (lazy expiry applied; reads never extend expiry)
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer: { $ref: "#/components/schemas/DeviceTransfer" }
+        "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/device-transfers/{requestId}/cancel:
+    post:
+      tags: [student-v1]
+      summary: Cancel an uncommitted SAT device-transfer request
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: clientSessionId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Request (unchanged when already terminal)
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer: { $ref: "#/components/schemas/DeviceTransfer" }
+        "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/device-transfers/{requestId}/commit:
+    post:
+      tags: [student-v1]
+      summary: Redeem an approved SAT device transfer
+      description: >-
+        Atomically increments the lease, makes the target session the writer,
+        revokes other sessions, and issues the target credential. Retrying a
+        committed request recovers the credential only while the target still
+        owns the resulting lease.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientSessionId]
+              properties:
+                clientSessionId: { type: string, maxLength: 36 }
+      responses:
+        "200":
+          description: Committed or recovered
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer: { $ref: "#/components/schemas/DeviceTransfer" }
+                  recovered: { type: boolean }
+                  admission: { type: object, additionalProperties: true }
+                  attemptId: { type: string }
+                  attemptToken: { type: string }
+                  attemptExpiresAt: { type: string, format: date-time }
+                  clientSessionId: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/writer/device-transfer:
+    get:
+      tags: [student-v1]
+      summary: Open device-transfer request visible to the current writer (attempt bearer)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Open request or null
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer:
+                    nullable: true
+                    allOf: [{ $ref: "#/components/schemas/DeviceTransfer" }]
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/writer/device-transfers/{requestId}/confirm:
+    post:
+      tags: [student-v1]
+      summary: Current writer confirms a pre-start SAT device transfer (attempt bearer)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Approved (binding to target and expected lease)
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer: { $ref: "#/components/schemas/DeviceTransfer" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
   /student/sessions/{scheduleId}/mutations:batch:
     post:
       tags: [student-v1]
@@ -3962,6 +4235,10 @@ components:
               INVALID_ASSESSMENT,
               ASSESSMENT_RELEASE_INVARIANT,
               SERVICE_RECOVERY_FAILED,
+              SESSION_ALREADY_ACTIVE,
+              TRANSFER_APPROVAL_REQUIRED,
+              TRANSFER_EXPIRED,
+              TRANSFER_CONFLICT,
             ]
         message: { type: string }
         details:
@@ -3975,6 +4252,33 @@ components:
             tier: { type: string }
           additionalProperties: true
         requestId: { type: string }
+    DeviceTransfer:
+      type: object
+      description: >-
+        SAT device-transfer request. Never carries client session ids,
+        credentials, or answers.
+      properties:
+        requestId: { type: string }
+        operationId: { type: string }
+        attemptId: { type: string }
+        scheduleId: { type: string }
+        state: { type: string, enum: [pending, approved, committed, denied, cancelled, expired, conflicted] }
+        policyStage: { type: string, enum: [pre_start, post_start] }
+        reasonCode: { type: string }
+        expectedLeaseEpoch: { type: integer }
+        requestedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        approvalKind: { type: string, nullable: true, enum: [current_writer, proctor] }
+        approvedAt: { type: string, format: date-time, nullable: true }
+        approvalExpiresAt: { type: string, format: date-time, nullable: true }
+        unconfirmedRiskAcknowledged: { type: boolean }
+        decisionReason: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        resultingLeaseEpoch: { type: integer, nullable: true }
+        committedAt: { type: string, format: date-time, nullable: true }
+        candidateId: { type: string, description: Proctor listing only }
+        candidateName: { type: string, description: Proctor listing only }
+        lastServerSaveAt: { type: string, format: date-time, nullable: true, description: Proctor listing only }
     Actor:
       type: object
       properties:
