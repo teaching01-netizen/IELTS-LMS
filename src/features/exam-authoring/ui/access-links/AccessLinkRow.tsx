@@ -5,6 +5,7 @@ import { SatMenu, type SatMenuItem } from "../../../../products/sat/ui/Menu";
 import { SatStatusPill } from "../../../../products/sat/ui/SatPage";
 import {
   accessLinkStatusDescription,
+  describeAccessLinkAudience,
   accessLinkStatusTone,
   formatAccessLinkStatus,
   formatCompactDateTime,
@@ -32,6 +33,9 @@ export interface AccessLinkRowProps {
    * line so it can never change the row's height or push its neighbours.
    */
   confirmation?: string | null;
+  /** Session state ("Session: Running"), shown beside the funnel counts. Entry and session stay separate. */
+  sessionLabel?: string | null;
+  quickAction?: { label: string; onSelect: () => void } | undefined;
 }
 
 export function rowElementId(linkId: string): string {
@@ -39,13 +43,11 @@ export function rowElementId(linkId: string): string {
 }
 
 function audienceShort(link: AssessmentAccessLink): string {
-  if (link.audienceType === "anyone") return "Anyone with link";
-  if (link.audienceType === "cohort") return link.audienceLabel ?? "Cohort";
-  return `${link.audienceLabel ?? "Selected students"} · ${link.selectedStudentCount} students`;
+  return describeAccessLinkAudience(link);
 }
 
 function availabilityShort(link: AssessmentAccessLink): string {
-  if (link.availabilityType === "anytime") return "Anytime";
+  if (link.availabilityType === "anytime") return "Open now";
   const opens = link.opensAt ? new Date(link.opensAt) : null;
   const closes = link.closesAt ? new Date(link.closesAt) : null;
   const valid = (date: Date | null): date is Date => date instanceof Date && !Number.isNaN(date.getTime());
@@ -75,6 +77,8 @@ export const AccessLinkRow = memo(function AccessLinkRow({
   busy = false,
   pendingLabel = null,
   confirmation = null,
+  sessionLabel = null,
+  quickAction,
 }: AccessLinkRowProps) {
   const tone = accessLinkStatusTone(link.status);
   // Nobody should share a verbal-only link with a math class by accident, so a
@@ -103,10 +107,10 @@ export const AccessLinkRow = memo(function AccessLinkRow({
           <span className="flex items-center gap-2">
             <span className="truncate text-[13px] font-semibold text-slate-900">{link.name}</span>
             {isStaleRelease ? (
-              <span className="shrink-0 text-[10px] font-medium text-slate-400">Version {link.versionNumber}</span>
+              <span className="shrink-0 text-[12px] font-medium text-slate-400">Version {link.versionNumber}</span>
             ) : null}
             {sectionBadge ? (
-              <span className="shrink-0 rounded-full bg-au-fill px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+              <span className="shrink-0 rounded-full bg-au-fill px-2 py-0.5 text-[12px] font-semibold text-slate-600">
                 {sectionBadge}
               </span>
             ) : null}
@@ -115,18 +119,18 @@ export const AccessLinkRow = memo(function AccessLinkRow({
             <SatStatusPill tone={tone} pulse={shouldPulseAccessLinkStatus(link.status) && !busy}>
               {formatAccessLinkStatus(link.status)}
             </SatStatusPill>
-            <span className={"truncate text-[11px] " + (busy ? "font-medium text-slate-600" : "text-slate-500")}>
+            <span className={"truncate text-[12px] " + (busy ? "font-medium text-slate-600" : "text-slate-500")}>
               {metaText}
             </span>
           </span>
           {confirmation ? (
-            <span className="mt-1 flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+            <span className="mt-1 flex items-center gap-1.5 text-[12px] font-semibold text-slate-600">
               <Check size={12} className="text-emerald-600" aria-hidden="true" />
               {confirmation}
             </span>
           ) : (
-            <span className="mt-1 block truncate text-[11px] tabular-nums text-slate-500" title={accessLinkStatusDescription(link)}>
-              {link.metrics.registered} joined · {link.metrics.started} started · {link.metrics.submitted} submitted
+            <span className="mt-1 block truncate text-[12px] tabular-nums text-slate-500" title={accessLinkStatusDescription(link)}>
+              {link.metrics.registered} registered · {link.metrics.started} started · {link.metrics.submitted} submitted{sessionLabel ? ` · ${sessionLabel}` : ""}
             </span>
           )}
         </span>
@@ -142,6 +146,7 @@ export const AccessLinkRow = memo(function AccessLinkRow({
           <SatMenu label={`Actions for ${link.name}`} compact triggerContent={<Ellipsis size={16} aria-hidden="true" />} items={menuItems} />
         )}
       </span>
+      {quickAction ? <div className="flex justify-end px-2 pb-1"><button type="button" onClick={quickAction.onSelect} disabled={busy} aria-label={`${quickAction.label} for ${link.name}`} className="min-h-11 rounded-xl px-3 text-[12px] font-semibold text-au-accent hover:bg-au-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40">{quickAction.label}</button></div> : null}
     </div>
   );
 }, (prev, next) =>
@@ -155,6 +160,8 @@ export const AccessLinkRow = memo(function AccessLinkRow({
   prev.busy === next.busy &&
   prev.pendingLabel === next.pendingLabel &&
   prev.confirmation === next.confirmation &&
+  prev.sessionLabel === next.sessionLabel &&
+  prev.quickAction === next.quickAction &&
   prev.menuItems === next.menuItems &&
   prev.onSelect === next.onSelect,
 );

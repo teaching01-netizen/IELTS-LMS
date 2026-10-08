@@ -27,24 +27,37 @@ export async function copyText(text: string): Promise<void> {
 
 export function formatAccessLinkStatus(status: AccessLinkStatus): string {
   switch (status) {
-    case "live": return "Live";
-    case "upcoming": return "Upcoming";
-    case "ended": return "Ended";
-    case "paused": return "Paused";
-    case "revoked": return "Revoked";
+    case "live": return "Check-in open";
+    case "upcoming": return "Check-in opens later";
+    case "ended": return "Check-in closed";
+    case "paused": return "Check-in paused";
+    case "revoked": return "Check-in revoked";
   }
 }
 
 export function accessLinkStatusDescription(link: AssessmentAccessLink, now = new Date()): string {
-  if (link.status === "paused") return "Student entry is temporarily disabled.";
+  if (link.status === "paused") return "Student check-in is temporarily disabled. Students already in the exam are not affected.";
   if (link.status === "revoked") return "This link can no longer be used.";
-  if (link.availabilityType === "anytime") return "Available whenever the link is active.";
+  if (link.availabilityType === "anytime") return "Check-in stays open until the link is paused or revoked.";
   const opens = link.opensAt ? new Date(link.opensAt) : null;
   const closes = link.closesAt ? new Date(link.closesAt) : null;
   if (link.status === "upcoming" && opens) return `Opens ${formatCompactDateTime(opens, now)}.`;
   if (link.status === "ended" && closes) return `Closed ${formatCompactDateTime(closes, now)}.`;
   if (link.status === "live" && closes) return `Closes ${formatCompactDateTime(closes, now)}.`;
-  return "Availability follows this link's access policy.";
+  return "Availability follows this session's check-in settings.";
+}
+
+/**
+ * Who a session admits. A group label is only a name: it never implies a restriction,
+ * so the restriction ("Listed students") is stated by the audience, not the label.
+ */
+export function describeAccessLinkAudience(link: Pick<AssessmentAccessLink, "audienceType" | "audienceLabel" | "selectedStudentCount">): string {
+  const label = link.audienceLabel?.trim();
+  if (link.audienceType === "selected_students") {
+    const count = `${link.selectedStudentCount} ${link.selectedStudentCount === 1 ? "student" : "students"}`;
+    return label ? `Listed students · ${count} · ${label}` : `Listed students · ${count}`;
+  }
+  return label ? `Anyone with link · ${label}` : "Anyone with link";
 }
 
 /** Map a link lifecycle status to the shared Calm Ops Bento pill tone. Single mapping — rows and detail must reuse this. */
@@ -58,8 +71,8 @@ export function accessLinkStatusTone(status: AccessLinkStatus): "live" | "ready"
   }
 }
 
-export function shouldPulseAccessLinkStatus(status: AccessLinkStatus): boolean {
-  return status === "live";
+export function shouldPulseAccessLinkStatus(_status: AccessLinkStatus): boolean {
+  return false;
 }
 
 export function formatCompactDateTime(date: Date, now = new Date()): string {

@@ -828,7 +828,7 @@ func linkEnabledSections(ctx context.Context, q planQuerier, scheduleID string) 
 	if err != nil {
 		return nil, err
 	}
-	return examdomain.ParseStoredSectionScope(raw.String), nil
+	return examdomain.ParseStoredSectionScope(raw), nil
 }
 
 // filterPlanBySections narrows an already-built plan to a link scope, keeping

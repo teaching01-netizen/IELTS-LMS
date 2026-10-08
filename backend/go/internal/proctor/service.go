@@ -39,6 +39,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/lifecycle"
 	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -65,6 +66,8 @@ type Actor struct {
 
 // AttemptCommand is a per-attempt proctor command envelope.
 type AttemptCommand struct {
+	OperationID             string
+	ModuleID                string
 	Message                 *string
 	Reason                  *string
 	ExpectedRuntimeRevision *int64
@@ -73,6 +76,7 @@ type AttemptCommand struct {
 
 // ExtendSectionCommand extends the active cohort section.
 type ExtendSectionCommand struct {
+	OperationID             string
 	Minutes                 int64
 	Reason                  *string
 	ExpectedRuntimeRevision *int64
@@ -81,7 +85,8 @@ type ExtendSectionCommand struct {
 
 // CompleteExamCommand completes the exam.
 type CompleteExamCommand struct {
-	Reason *string
+	OperationID string
+	Reason      *string
 }
 
 // PresenceAction is join|heartbeat|leave.
@@ -262,13 +267,13 @@ func lockAttemptScope(ctx context.Context, q tx.Tx, scheduleID, attemptID string
 	return nil
 }
 
-// lockScheduleScope locks the runtime row and its sections (B2: the
-// schedule-wide attempt sweep is gone — one schedule no longer serializes
-// the whole cohort behind one admin click. Attempt-scoped effects flow via
-// enqueueAutoSubmitForSchedule's non-locking capture + worker-side batched
-// seal through the outbox). Lock order stays runtime -> section, matching
-// terminalization and runtime command discipline.
+// Room controls and response saves use the same attempt -> runtime -> section
+// lock order. A runtime-first room update otherwise deadlocks with a save
+// holding its attempt while waiting for the shared runtime lock.
 func lockScheduleScope(ctx context.Context, q tx.Tx, scheduleID string) error {
+	if err := examruntime.LockScheduleAttemptsInTx(ctx, q, scheduleID); err != nil {
+		return err
+	}
 	const lockRuntime = "SELECT id FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
 	var runtimeID string
 	err := q.QueryRowContext(ctx, lockRuntime, scheduleID).Scan(&runtimeID)
@@ -281,13 +286,13 @@ func lockScheduleScope(ctx context.Context, q tx.Tx, scheduleID string) error {
 		if err != nil {
 			return err
 		}
-		func() {
-			defer srows.Close()
-			for srows.Next() {
-				var id string
-				_ = srows.Scan(&id)
+		defer srows.Close()
+		for srows.Next() {
+			var id string
+			if err := srows.Scan(&id); err != nil {
+				return err
 			}
-		}()
+		}
 		if err := srows.Err(); err != nil {
 			return err
 		}
@@ -433,7 +438,7 @@ func (s *Service) Warn(ctx context.Context, actor Actor, scheduleID, attemptID s
 		if _, err := q.ExecContext(ctx, ins, warningID, scheduleID, attemptID, warningID, description, string(payload)); err != nil {
 			return err
 		}
-		const upd = "UPDATE student_attempts SET proctor_status = 'warned', proctor_note = ?, proctor_updated_at = UTC_TIMESTAMP(6), proctor_updated_by = ?, last_warning_id = ?, violations_snapshot = JSON_MERGE_PRESERVE(COALESCE(violations_snapshot, JSON_ARRAY()), ?), updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ?"
+		const upd = "UPDATE student_attempts SET proctor_status = CASE WHEN proctor_status = 'paused' THEN 'paused' ELSE 'warned' END, proctor_note = ?, proctor_updated_at = CASE WHEN proctor_status = 'paused' THEN proctor_updated_at ELSE UTC_TIMESTAMP(6) END, proctor_updated_by = ?, last_warning_id = ?, violations_snapshot = JSON_MERGE_PRESERVE(COALESCE(violations_snapshot, JSON_ARRAY()), ?), updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ?"
 		if _, err := q.ExecContext(ctx, upd, description, actor.ID, warningID, string(warnJSON), attemptID, scheduleID); err != nil {
 			return err
 		}
@@ -462,12 +467,31 @@ func (s *Service) ExtendAttempt(ctx context.Context, actor Actor, scheduleID, at
 	if minutes <= 0 {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Extension minutes must be greater than zero.", HTTPStatus: 400}
 	}
+	if strings.TrimSpace(cmd.ModuleID) == "" {
+		return apperrors.New(apperrors.CodeValidation, "moduleId is required for an individual time grant.")
+	}
+	hash, err := lifecycle.Hash("extend_attempt", struct {
+		ActorID string
+		Minutes int64
+		Command AttemptCommand
+	}{actor.ID, minutes, cmd})
+	if err != nil {
+		return err
+	}
+	scope := lifecycle.Scope{ScheduleID: scheduleID, AttemptID: attemptID}
 	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
 			return err
 		}
 		if err := lockAttemptScope(ctx, q, scheduleID, attemptID); err != nil {
 			return err
+		}
+		stored, err := lifecycle.Load(ctx, q, scope, cmd.OperationID, "extend_attempt", hash)
+		if err != nil {
+			return err
+		}
+		if stored != nil {
+			return nil
 		}
 		// Provisional extend-attempt: REJECT with Conflict (post-submit cannot resume).
 		const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
@@ -492,8 +516,8 @@ func (s *Service) ExtendAttempt(ctx context.Context, actor Actor, scheduleID, at
 		if tm := timingModelOfSchedule(ctx, q, scheduleID); examruntime.IsCohortTimed(tm) {
 			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Individual time extensions are disabled for shared-clock SAT sessions; extend the active cohort section instead.", HTTPStatus: 400}
 		}
-		const ext = "UPDATE assessment_module_attempts SET extension_seconds = extension_seconds + (? * 60), revision = revision + 1 WHERE attempt_id = ? AND state = 'active' AND started_at IS NOT NULL"
-		res, err := q.ExecContext(ctx, ext, minutes, attemptID)
+		const ext = "UPDATE assessment_module_attempts SET extension_seconds = extension_seconds + (? * 60), revision = revision + 1 WHERE attempt_id = ? AND module_id = ? AND state IN ('active', 'review') AND started_at IS NOT NULL"
+		res, err := q.ExecContext(ctx, ext, minutes, attemptID, cmd.ModuleID)
 		if err != nil {
 			return err
 		}
@@ -507,10 +531,13 @@ func (s *Service) ExtendAttempt(ctx context.Context, actor Actor, scheduleID, at
 		if _, err := q.ExecContext(ctx, dl, minutes, minutes, attemptID, scheduleID); err != nil {
 			return err
 		}
-		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "EXTENSION_GRANTED", &attemptID, map[string]any{"scope": "attempt", "minutes": minutes, "reason": cmd.Reason}); err != nil {
+		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "EXTENSION_GRANTED", &attemptID, map[string]any{"scope": "attempt", "moduleId": cmd.ModuleID, "operationId": cmd.OperationID, "minutes": minutes, "reason": cmd.Reason}); err != nil {
 			return err
 		}
-		return s.emitRoster(ctx, q, scheduleID, "extend_attempt", &attemptID, map[string]any{"minutes": minutes})
+		if err := s.emitRoster(ctx, q, scheduleID, "extend_attempt", &attemptID, map[string]any{"minutes": minutes}); err != nil {
+			return err
+		}
+		return lifecycle.Store(ctx, q, scope, cmd.OperationID, "extend_attempt", hash, map[string]any{"ok": true})
 	})
 }
 
@@ -533,12 +560,27 @@ func (s *Service) ReArmAttemptStage(ctx context.Context, actor Actor, scheduleID
 	if strings.TrimSpace(breakID) != "" {
 		stage, stageID = "break", breakID
 	}
+	hash, err := lifecycle.Hash("rearm_stage", struct {
+		ActorID, ModuleID, BreakID string
+		Command                    AttemptCommand
+	}{actor.ID, moduleID, breakID, cmd})
+	if err != nil {
+		return err
+	}
+	scope := lifecycle.Scope{ScheduleID: scheduleID, AttemptID: attemptID}
 	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
 			return err
 		}
 		if err := lockAttemptScope(ctx, q, scheduleID, attemptID); err != nil {
 			return err
+		}
+		stored, err := lifecycle.Load(ctx, q, scope, cmd.OperationID, "rearm_stage", hash)
+		if err != nil {
+			return err
+		}
+		if stored != nil {
+			return nil
 		}
 		const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
 		var submittedAny any
@@ -569,7 +611,10 @@ func (s *Service) ReArmAttemptStage(ctx context.Context, actor Actor, scheduleID
 		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "STAGE_REARMED", &attemptID, payload); err != nil {
 			return err
 		}
-		return s.emitRoster(ctx, q, scheduleID, "rearm_stage", &attemptID, map[string]any{"stage": stage, "stageId": stageID})
+		if err := s.emitRoster(ctx, q, scheduleID, "rearm_stage", &attemptID, map[string]any{"stage": stage, "stageId": stageID}); err != nil {
+			return err
+		}
+		return lifecycle.Store(ctx, q, scope, cmd.OperationID, "rearm_stage", hash, map[string]any{"ok": true})
 	})
 }
 
@@ -624,7 +669,15 @@ func (s *Service) Terminate(ctx context.Context, actor Actor, scheduleID, attemp
 // (or completes the exam). It rejects SAT/adaptive schedules and IELTS
 // authentic-mode schedules.
 func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID string, cmd AttemptCommand) error {
-	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	hash, err := lifecycle.Hash("end_section", struct {
+		ActorID string
+		Command AttemptCommand
+	}{actor.ID, cmd})
+	if err != nil {
+		return err
+	}
+	scope := lifecycle.Scope{ScheduleID: scheduleID}
+	err = s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
 			return err
 		}
@@ -637,6 +690,13 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 		}
 		if err := lockScheduleScope(ctx, q, scheduleID); err != nil {
 			return err
+		}
+		stored, err := lifecycle.Load(ctx, q, scope, cmd.OperationID, "end_section", hash)
+		if err != nil {
+			return err
+		}
+		if stored != nil {
+			return nil
 		}
 		const selRt = "SELECT id, status, active_section_key, waiting_for_next_section, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
 		var runtimeID, status string
@@ -772,7 +832,7 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 		if err := examruntime.InsertControlEvent(ctx, q, runtimeID, scheduleID, actor.ID, "end_section_now", &activeKey, nil, cmd.Reason); err != nil {
 			return err
 		}
-		return nil
+		return lifecycle.Store(ctx, q, scope, cmd.OperationID, "end_section", hash, map[string]any{"ok": true})
 	})
 	if err != nil {
 		return err
@@ -788,7 +848,18 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 	if cmd.Minutes <= 0 {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Extension minutes must be greater than zero.", HTTPStatus: 400}
 	}
-	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	if cmd.ExpectedSectionKey == nil || strings.TrimSpace(*cmd.ExpectedSectionKey) == "" {
+		return apperrors.New(apperrors.CodeValidation, "expectedSectionKey is required for a cohort time grant.")
+	}
+	hash, err := lifecycle.Hash("extend_section", struct {
+		ActorID string
+		Command ExtendSectionCommand
+	}{actor.ID, cmd})
+	if err != nil {
+		return err
+	}
+	scope := lifecycle.Scope{ScheduleID: scheduleID}
+	err = s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
 			return err
 		}
@@ -797,6 +868,13 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 		}
 		if err := lockScheduleScope(ctx, q, scheduleID); err != nil {
 			return err
+		}
+		stored, err := lifecycle.Load(ctx, q, scope, cmd.OperationID, "extend_section", hash)
+		if err != nil {
+			return err
+		}
+		if stored != nil {
+			return nil
 		}
 		const selRt = "SELECT id, active_section_key, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
 		var runtimeID string
@@ -845,7 +923,10 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "extend_section"})
-		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, outbox.FamilyRuntimeChanged, payload)
+		if err := s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, outbox.FamilyRuntimeChanged, payload); err != nil {
+			return err
+		}
+		return lifecycle.Store(ctx, q, scope, cmd.OperationID, "extend_section", hash, map[string]any{"ok": true})
 	})
 	if err != nil {
 		return err
@@ -865,7 +946,15 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 // terminalization vocabulary reason (proctor_complete) so the worker seal
 // never fails vocabulary validation and exhausts its outbox retries.
 func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID string, cmd CompleteExamCommand) error {
-	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	hash, err := lifecycle.Hash("complete_exam", struct {
+		ActorID string
+		Command CompleteExamCommand
+	}{actor.ID, cmd})
+	if err != nil {
+		return err
+	}
+	scope := lifecycle.Scope{ScheduleID: scheduleID}
+	err = s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
 			return err
 		}
@@ -879,6 +968,13 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 		if err := lockScheduleScope(ctx, q, scheduleID); err != nil {
 			return err
 		}
+		stored, err := lifecycle.Load(ctx, q, scope, cmd.OperationID, "complete_exam", hash)
+		if err != nil {
+			return err
+		}
+		if stored != nil {
+			return nil
+		}
 		const selRt = "SELECT id, status, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
 		var runtimeID, status string
 		var revision int64
@@ -889,7 +985,7 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 			return err
 		}
 		if status == "completed" || status == "cancelled" {
-			return nil
+			return lifecycle.Store(ctx, q, scope, cmd.OperationID, "complete_exam", hash, map[string]any{"ok": true})
 		}
 		if err := examruntime.CompleteInTx(ctx, q, scheduleID, runtimeID, terminalization.ReasonProctorComplete); err != nil {
 			return err
@@ -910,7 +1006,10 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "complete_exam"})
-		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, outbox.FamilyRuntimeChanged, payload)
+		if err := s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, outbox.FamilyRuntimeChanged, payload); err != nil {
+			return err
+		}
+		return lifecycle.Store(ctx, q, scope, cmd.OperationID, "complete_exam", hash, map[string]any{"ok": true})
 	})
 	if err != nil {
 		return err
@@ -1122,6 +1221,9 @@ func (s *Service) updateAttemptStatus(ctx context.Context, actor Actor, schedule
 		if isNonNullTime(submittedAny) || proctor == "terminated" || delivery == "submitted" || delivery == "terminated" || delivery == "locked" || delivery == "cancelled" {
 			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "The attempt is already terminal and cannot accept this command.", HTTPStatus: 409}
 		}
+		if proctor == proctorStatus {
+			return nil
+		}
 		const upd = "UPDATE student_attempts SET delivery_status = CASE WHEN COALESCE(protocol_version, 1) <> 2 THEN delivery_status WHEN ? = 'paused' THEN CASE WHEN COALESCE(delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN delivery_status ELSE 'paused' END WHEN ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND COALESCE(delivery_status, 'running') = 'paused' THEN 'running' ELSE delivery_status END, closing_grace_until = CASE WHEN COALESCE(protocol_version, 1) = 2 AND ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND deadline_at IS NOT NULL THEN DATE_ADD(DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6)), 0) SECOND), INTERVAL 30 SECOND) ELSE closing_grace_until END, deadline_at = CASE WHEN COALESCE(protocol_version, 1) = 2 AND ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND deadline_at IS NOT NULL THEN DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6)), 0) SECOND) ELSE deadline_at END, proctor_status = ?, phase = COALESCE(?, phase), proctor_note = COALESCE(?, proctor_note), proctor_updated_at = UTC_TIMESTAMP(6), proctor_updated_by = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ?"
 		var reason *string
 		if cmd.Reason != nil {
@@ -1132,17 +1234,8 @@ func (s *Service) updateAttemptStatus(ctx context.Context, actor Actor, schedule
 		if _, err := q.ExecContext(ctx, upd, proctorStatus, proctorStatus, proctorStatus, proctorStatus, proctorStatus, phase, reason, actor.ID, attemptID, scheduleID); err != nil {
 			return err
 		}
-		if actionType == "STUDENT_PAUSE" {
-			const pauseMods = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET ma.paused_at = COALESCE(ma.paused_at, UTC_TIMESTAMP(6)), ma.revision = ma.revision + 1 WHERE ma.attempt_id = ? AND r.timing_model IN (" + examruntime.PersonalClockModelsSQL + ") AND ma.state = 'active' AND ma.started_at IS NOT NULL AND ma.paused_at IS NULL"
-			if _, err := q.ExecContext(ctx, pauseMods, attemptID); err != nil {
-				return err
-			}
-		}
-		if actionType == "STUDENT_RESUME" {
-			const resumeMods = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, UTC_TIMESTAMP(6)), 0), ma.paused_at = NULL, ma.revision = ma.revision + 1 WHERE ma.attempt_id = ? AND r.timing_model IN (" + examruntime.PersonalClockModelsSQL + ") AND ma.state = 'active' AND ma.paused_at IS NOT NULL"
-			if _, err := q.ExecContext(ctx, resumeMods, attemptID); err != nil {
-				return err
-			}
+		if err := examruntime.SyncSATPauseInTx(ctx, q, scheduleID, attemptID); err != nil {
+			return err
 		}
 		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, actionType, &attemptID, map[string]any{"message": cmd.Message, "reason": cmd.Reason}); err != nil {
 			return err

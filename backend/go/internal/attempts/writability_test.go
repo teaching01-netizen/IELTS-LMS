@@ -8,7 +8,7 @@ import (
 )
 
 func liveGate(now time.Time) RuntimeGate {
-	return RuntimeGate{Status: "live", ActiveSectionKey: "*", SectionLive: true, SectionStarted: true, Now: now}
+	return RuntimeGate{Status: "live", TimingModel: "legacy_section_v1", ActiveSectionKey: "*", SectionLive: true, SectionStarted: true, Now: now}
 }
 
 func openAttempt() AttemptState {
@@ -186,12 +186,6 @@ func TestEnsureWritablePersonalSATHasNoRoomClosingGrace(t *testing.T) {
 		t.Fatalf("personal SAT attempt must ignore the room section grace: %v", err)
 	}
 
-	// The row is the durable carrier: a gate that lost the model mid-transition
-	// still reads personal from the locked attempt.
-	runtimeGate := RuntimeGate{Status: "live", SectionLive: true, SectionStarted: true, Now: now}
-	if err := ensureWritable(personal, runtimeGate, now); err != nil {
-		t.Fatalf("personal SAT attempt must ignore the room section grace from the row alone: %v", err)
-	}
 
 	cohort := openAttempt()
 	cohort.ProviderKey = string(ProviderSAT)
@@ -407,5 +401,24 @@ func TestCommandHashDeterministic(t *testing.T) {
 	h3, _ := commandHash(c2)
 	if h3 == h1 {
 		t.Fatal("version change did not affect hash")
+	}
+}
+
+func TestSATWritesFailClosedWithoutKnownRuntime(t *testing.T) {
+	now := time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC)
+	for _, model := range []string{"", "future_unknown_model"} {
+		a := openAttempt()
+		a.ProviderKey = "sat"
+		a.TimingModel = "sat_personal_v1"
+		gate := liveGate(now)
+		gate.TimingModel = model
+		if err := ensureWritable(a, gate, now); err == nil {
+			t.Fatalf("SAT accepted missing/unknown runtime %q", model)
+		}
+		a.ProviderKey = "ielts"
+		a.TimingModel = ""
+		if err := ensureWritable(a, gate, now); err != nil {
+			t.Fatalf("SAT hardening changes IELTS legacy runtime contract: %v", err)
+		}
 	}
 }

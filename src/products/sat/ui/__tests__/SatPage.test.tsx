@@ -211,7 +211,7 @@ describe('SatInlineError', () => {
     render(<SatInlineError title="Results failed" description="Try again." onRetry={onRetry} />);
     expect(screen.getByRole('alert')).toHaveTextContent('Results failed');
     const retry = screen.getByRole('button', { name: 'Retry' });
-    expect(retry.className).toContain('min-h-10');
+    expect(retry.className).toContain('min-h-11');
     // Phase 03: retry uses the accent token (var(--sat-staff-accent) with #0071e3 fallback).
     expect(retry.className).toContain('sat-staff-accent');
     fireEvent.click(retry);

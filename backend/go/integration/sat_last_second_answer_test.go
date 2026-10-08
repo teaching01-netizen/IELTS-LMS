@@ -79,6 +79,14 @@ func writerSessionFor(attemptID string) (clientSessionID, tokenID string) {
 // openWriterSession seeds the durable attempt_sessions row the in-tx writer
 // claim re-checks (a mutation without it fails closed as an invalid credential),
 // and hands the attempt to that session.
+//
+// It also pins the attempt to protocol 1. These suites drive the compatibility
+// answer transport (PATCH /schedules/{id}/responses/{qid}), which is the
+// canonical store for protocol-1 attempts only: for a protocol-2 attempt
+// scoring reads attempt_responses_v2, so the transport refuses with
+// PROTOCOL_UPGRADE_REQUIRED instead of acknowledging an answer the scorer
+// ignores. Every caller here is exercising that legacy gate and its row locks,
+// so the protocol must match the transport under test.
 func (f *adaptiveExam) openWriterSession(t *testing.T, attemptID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -102,7 +110,7 @@ func (f *adaptiveExam) openWriterSession(t *testing.T, attemptID string) {
 		}
 	})
 	if _, err := f.db.ExecContext(ctx,
-		`UPDATE student_attempts SET user_id = ?, active_client_session_id = ? WHERE id = ?`,
+		`UPDATE student_attempts SET user_id = ?, active_client_session_id = ?, protocol_version = 1 WHERE id = ?`,
 		userID, clientSessionID, attemptID); err != nil {
 		t.Fatalf("bind active client session: %v", err)
 	}

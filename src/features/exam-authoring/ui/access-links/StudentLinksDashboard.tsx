@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Link2, Plus, RefreshCw, XCircle } from "lucide-react";
+import { Link2, RefreshCw, XCircle } from "lucide-react";
 import type { ExamEntity } from "../../../../types/domain";
 import {
   useAccessLinkActivity,
   useAccessLinkMembers,
   useCreateAccessLink,
   useDeleteAccessLink,
-  useDuplicateAccessLink,
   useSetAccessLinkLifecycle,
   useUpdateAccessLink,
 } from "../../api/assessmentAccessLinkQueries";
@@ -16,7 +15,6 @@ import type {
   AccessLinkStatus,
   AssessmentAccessLink,
   CreateAssessmentAccessLinkRequest,
-  DuplicateAssessmentAccessLinkRequest,
   UpdateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
 import { logError, useNotificationStore } from "../../infrastructure/authoringUiGateway";
@@ -36,6 +34,10 @@ import {
   SatPageHeader,
   SatPrimaryButton,
 } from "../../../../products/sat/ui/SatPage";
+import { ExamWorkspaceHeader, type ExamShellNavigation } from "../shell/ExamWorkspaceHeader";
+import { DeliverySetupGuide } from "../delivery/DeliverySetupGuide";
+import { SESSION_PHASE_LABEL, type AccessSessionBindings, type AccessSessionInfo } from "../delivery/sessionState";
+import type { SatPublishScope } from "../../contracts/assessment";
 import { copyText, studentJoinUrl } from "./accessLinkUi";
 import { CollaborationHeaderCluster } from "../collaboration/CollaborationHeaderCluster";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
@@ -47,9 +49,29 @@ interface StudentLinksDashboardProps {
   error: string | null;
   onRefresh: () => Promise<unknown>;
   onBackToRelease: () => void;
+  /** Navigation + lifecycle for the shared exam header, supplied by the route. */
+  shell: ExamShellNavigation;
+  /**
+   * Opens the create form immediately when `id` changes (the publish sheet's
+   * "Configure student access"). `versionId` pins the new group to the exact
+   * version that was just published, even if someone publishes again meanwhile.
+   */
+  createRequest?: CreateRequest | null;
+  selectedLinkId?: string | null;
+  onSelectionChange?: (linkId: string | null) => void;
+  /** Session status and actions per access group; omit to show configuration only. */
+  session?: AccessSessionBindings;
+}
+
+export interface CreateRequest {
+  id: number;
+  versionId?: string;
+  versionNumber?: number;
+  publishScope?: SatPublishScope;
 }
 
 const EMPTY_ACCESS_LINKS: AssessmentAccessLink[] = [];
+const EMPTY_MEMBERS: AccessLinkMemberInput[] = [];
 const STATUS_RANK: Record<AccessLinkStatus, number> = { live: 0, upcoming: 1, paused: 2, ended: 3, revoked: 4 };
 /**
  * Search echo budget: filtering this list is a linear scan of a handful of
@@ -70,6 +92,11 @@ type PendingWrite = { linkId: string; label: string };
 type Confirmation = { linkId: string; kind: "copy" | "action"; text: string };
 
 type LinkUpdateOptions = { silent?: boolean };
+
+/** "Session: Running" for the row; null while the status is unknown so a guess is never shown. */
+function sessionRowLabel(info: AccessSessionInfo | null): string | null {
+  return info && info.phase !== "unknown" ? `Session: ${SESSION_PHASE_LABEL[info.phase]}` : null;
+}
 
 /** Present-tense label for an in-flight lifecycle write. */
 function lifecyclePendingLabel(state: "active" | "paused" | "revoked"): string {
@@ -111,7 +138,7 @@ function isRevisionConflict(error: unknown): boolean {
   return /revision|stale|conflict|changed (?:elsewhere|while)|409/i.test(error.message);
 }
 
-export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefresh, onBackToRelease }: StudentLinksDashboardProps) {
+export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefresh, onBackToRelease, shell, createRequest = null, session, selectedLinkId = null, onSelectionChange }: StudentLinksDashboardProps) {
   const version = overview?.currentPublishedVersion ?? null;
   const collaboration = useSatAuthoringCollaboration();
   const announceWorkspaceCommand = useCallback(
@@ -159,9 +186,12 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(selectedLinkId);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingLink, setEditingLink] = useState<AssessmentAccessLink | null>(null);
+  const [prefillLink, setPrefillLink] = useState<AssessmentAccessLink | null>(null);
+  const [createTarget, setCreateTarget] = useState<CreateRequest | null>(null);
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   const [shareLink, setShareLink] = useState<AssessmentAccessLink | null>(null);
   const [presentLink, setPresentLink] = useState<AssessmentAccessLink | null>(null);
   const [confirm, setConfirm] = useState<{ link: AssessmentAccessLink; action: "revoke" | "delete" } | null>(null);
@@ -174,8 +204,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const updateMutation = useUpdateAccessLink(exam.id);
   const lifecycleMutation = useSetAccessLinkLifecycle(exam.id);
   const deleteMutation = useDeleteAccessLink(exam.id);
-  const duplicateMutation = useDuplicateAccessLink(exam.id);
-  const membersQuery = useAccessLinkMembers(editingLink?.id ?? null);
+  const membersQuery = useAccessLinkMembers((editingLink ?? prefillLink)?.id ?? null);
   const { value: confirmation, show: showConfirmation } = useTransientValue<Confirmation>(1600);
 
   const pendingWrite = useMemo<PendingWrite | null>(() => {
@@ -188,16 +217,11 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     if (deleteMutation.isPending && deleteMutation.variables) {
       return { linkId: deleteMutation.variables.linkId, label: "Deleting permanently…" };
     }
-    if (duplicateMutation.isPending && duplicateMutation.variables) {
-      return { linkId: duplicateMutation.variables.linkId, label: "Duplicating…" };
-    }
     if (updateMutation.isPending && updateMutation.variables) {
       return { linkId: updateMutation.variables.linkId, label: "Saving…" };
     }
     return null;
   }, [
-    duplicateMutation.isPending,
-    duplicateMutation.variables,
     deleteMutation.isPending,
     deleteMutation.variables,
     lifecycleMutation.isPending,
@@ -242,13 +266,18 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       .sort((left, right) => STATUS_RANK[left.status] - STATUS_RANK[right.status] || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
   }, [links, effectiveSearch, statusFilter]);
 
+  useEffect(() => { setSelectedId(selectedLinkId); }, [selectedLinkId]);
+
   const selectedLink = visibleLinks.find((link) => link.id === selectedId) ?? null;
   const activityQuery = useAccessLinkActivity(selectedLink?.id ?? null);
 
   useEffect(() => {
     if (selectedId && visibleLinks.some((link) => link.id === selectedId)) return;
-    setSelectedId(visibleLinks[0]?.id ?? null);
-  }, [selectedId, visibleLinks]);
+    if (isLoading || error) return;
+    const nextId = visibleLinks[0]?.id ?? null;
+    setSelectedId(nextId);
+    if (nextId !== selectedLinkId) onSelectionChange?.(nextId);
+  }, [selectedId, visibleLinks, isLoading, error, selectedLinkId, onSelectionChange]);
 
   /**
    * Selecting a link always keeps it under the eye and (optionally) under the
@@ -257,6 +286,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
    */
   const selectLink = useCallback((linkId: string, options?: { focus?: boolean }) => {
     setSelectedId(linkId);
+    onSelectionChange?.(linkId);
     // A freshly created/duplicated row does not exist yet in this commit: retry
     // once on the next frame rather than scrolling nothing.
     const reveal = (attempt: number) => {
@@ -269,7 +299,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       if (options?.focus) element.focus();
     };
     reveal(0);
-  }, []);
+  }, [onSelectionChange]);
 
   const focusSelectedRow = useCallback(() => {
     if (selectedId) document.getElementById(rowElementId(selectedId))?.focus();
@@ -279,14 +309,15 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
+      if (event.defaultPrevented || !(target instanceof HTMLElement) || target.closest('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
       const inField = target instanceof HTMLElement &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
       if (event.key === "/" && !inField && !editorOpen && !shareLink && !presentLink && !confirm) {
         event.preventDefault();
         document.getElementById("student-links-search")?.focus();
         return;
       }
-      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !inField && visibleLinks.length > 1) {
+      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !inField && target.closest('[aria-label="Sessions"]') && visibleLinks.length > 1) {
         const index = visibleLinks.findIndex((link) => link.id === selectedId);
         if (index < 0) return;
         event.preventDefault();
@@ -309,14 +340,26 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   }, []);
 
   const createLink = async (request: CreateAssessmentAccessLinkRequest) => {
-    const created = await createMutation.mutateAsync(request);
+    // A group created from the publish flow is pinned to the exact version that was
+    // just published; any other creation follows the current release as before.
+    const pinned = createTarget?.versionId ? { publishedVersionId: createTarget.versionId } : {};
+    const created = await createMutation.mutateAsync({ ...request, ...pinned });
+    setJustCreatedId(created.id);
+    setCreateTarget(null);
+    setPrefillLink(null);
     collaboration?.setValue(`access/${created.id}`, created);
     announceWorkspaceCommand("access.created", { linkId: created.id });
+    setSearch("");
+    setDebouncedSearch("");
+    setStatusFilter("all");
     selectLink(created.id);
     // The new row lands already confirmed: the page never relies on a global
     // channel to say the write was accepted.
-    showConfirmation({ linkId: created.id, kind: "action", text: "Student Link created" });
-    showToast("Student Link created");
+    showConfirmation({ linkId: created.id, kind: "action", text: "Session created" });
+    showToast("Session created");
+    // The session is the object staff work with next: take runners straight to its waiting room.
+    // Staff who cannot run sessions stay here, where the new row is selected and shareable.
+    if (session?.canRun) session.onOpenRoom(created.scheduleId);
   };
   const updateLink = async (linkId: string, request: UpdateAssessmentAccessLinkRequest, options?: LinkUpdateOptions) => {
     const updated = await updateMutation.mutateAsync({ linkId, request });
@@ -325,7 +368,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     selectLink(updated.id);
     if (!options?.silent) {
       showConfirmation({ linkId: updated.id, kind: "action", text: "Changes saved" });
-      showToast("Student Link updated");
+      showToast("Session updated");
     }
   };
   const setLifecycle = async (
@@ -340,7 +383,6 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         [`access/${link.id}`]: {
           ...updated,
           lifecycleState: state,
-          status: state === "active" ? "live" : state,
         },
       });
       announceWorkspaceCommand("access.lifecycle_changed", { linkId: link.id, state });
@@ -349,7 +391,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         kind: "action",
         text: state === "active" ? "Resumed" : state === "paused" ? "Paused" : "Revoked",
       });
-      showToast(state === "active" ? "Student Link resumed" : state === "paused" ? "Student Link paused" : "Student Link revoked");
+      showToast(state === "active" ? "Check-in resumed" : state === "paused" ? "Check-in paused" : "Student link revoked");
       return true;
     } catch (err) {
       reportActionError(
@@ -386,33 +428,6 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       return false;
     }
   };
-  const duplicate = async (link: AssessmentAccessLink, releaseTarget: "source" | "current" = "source") => {
-    setActionError(null);
-    setStaleConflict(false);
-    const request: DuplicateAssessmentAccessLinkRequest = releaseTarget === "current"
-      ? { revision: link.revision, name: link.name, releaseTarget: "current" }
-      : { revision: link.revision, name: `${link.name} Copy`, releaseTarget: "source" };
-    try {
-      const created = await duplicateMutation.mutateAsync({ linkId: link.id, request });
-      collaboration?.setValue(`access/${created.id}`, created);
-      announceWorkspaceCommand("access.duplicated", { linkId: created.id, sourceLinkId: link.id });
-      selectLink(created.id);
-      showConfirmation({
-        linkId: created.id,
-        kind: "action",
-        text: releaseTarget === "current" ? `Created for Version ${version?.versionNumber ?? "current"}` : "Student Link duplicated",
-      });
-      showToast(releaseTarget === "current" ? `Created for Version ${version?.versionNumber ?? "current"}` : "Student Link duplicated");
-    } catch (err) {
-      reportActionError(
-        isRevisionConflict(err)
-          ? "This link changed elsewhere. Refresh and retry."
-          : "Student Link could not be duplicated.",
-        { action: "duplicate", linkId: link.id, releaseTarget },
-        err,
-      );
-    }
-  };
   const copy = useCallback(async (link: AssessmentAccessLink) => {
     try {
       await copyText(studentJoinUrl(link.id));
@@ -426,43 +441,84 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
 
   const openEditor = useCallback((link: AssessmentAccessLink | null) => {
     setEditingLink(link);
+    setPrefillLink(null);
+    setCreateTarget(!link && version ? { id: Date.now(), versionId: version.id, versionNumber: version.versionNumber, publishScope: version.publishScope } : null);
     setEditorOpen(true);
-  }, []);
+  }, [version]);
+
+  const openDuplicateSetup = useCallback((link: AssessmentAccessLink, target?: CreateRequest) => {
+    setEditingLink(null);
+    setPrefillLink(link);
+    setCreateTarget(target ?? (version ? { id: Date.now(), versionId: version.id, versionNumber: version.versionNumber, publishScope: version.publishScope } : null));
+    setEditorOpen(true);
+  }, [version]);
+
+  // The publish sheet asks for the create form with a request id; each new id opens it once.
+  const handledCreateRequest = useRef<number | null>(null);
+  useEffect(() => {
+    if (!createRequest || handledCreateRequest.current === createRequest.id) return;
+    if (!version || isLoading || error) return;
+    handledCreateRequest.current = createRequest.id;
+    const target = createRequest.versionId ? createRequest : { ...createRequest, versionId: version.id, versionNumber: version.versionNumber, publishScope: version.publishScope };
+    setCreateTarget(target);
+    setEditingLink(null);
+    setPrefillLink(null);
+    setEditorOpen(true);
+  }, [createRequest, version, isLoading, error]);
 
   // While one write is in flight the menu closes behind it; the row keeps the
   // acknowledgement, so the actions stay visible but cannot be re-fired.
-  const menuItemsFor = useCallback((link: AssessmentAccessLink, busy = false): SatMenuItem[] => [
+  const menuItemsFor = (link: AssessmentAccessLink, busy = false): SatMenuItem[] => [
     { id: "copy", label: "Copy link", disabled: busy, onSelect: () => { void copy(link); } },
     { id: "share", label: "Share", disabled: busy, onSelect: () => setShareLink(link) },
     { id: "present", label: "Present to Students", disabled: busy, onSelect: () => setPresentLink(link) },
-    { id: "edit", label: "Edit Link", disabled: busy, onSelect: () => openEditor(link) },
-    { id: "duplicate", label: "Duplicate Link", disabled: busy, onSelect: () => { void duplicate(link); } },
+    { id: "edit", label: "Edit session", disabled: busy, onSelect: () => openEditor(link) },
+    { id: "duplicate", label: "Duplicate setup", disabled: busy, onSelect: () => openDuplicateSetup(link) },
     ...(link.lifecycleState !== "revoked"
-      ? [{ id: "pause", label: link.lifecycleState === "paused" ? "Resume Link" : "Pause Link", disabled: busy, onSelect: () => { void setLifecycle(link, link.lifecycleState === "paused" ? "active" : "paused"); } } as SatMenuItem]
+      ? [{ id: "pause", label: link.lifecycleState === "paused" ? "Resume check-in" : "Pause check-in", disabled: busy, onSelect: () => { void setLifecycle(link, link.lifecycleState === "paused" ? "active" : "paused"); } } as SatMenuItem]
       : []),
-    { id: "revoke", label: "Revoke Link", onSelect: () => setConfirm({ link, action: "revoke" }), destructive: true, separatorBefore: true, disabled: busy || link.lifecycleState === "revoked" },
+    { id: "revoke", label: "Revoke student link", onSelect: () => setConfirm({ link, action: "revoke" }), destructive: true, separatorBefore: true, disabled: busy || link.lifecycleState === "revoked" },
     { id: "delete", label: "Delete permanently", onSelect: () => setConfirm({ link, action: "delete" }), destructive: true, disabled: busy, separatorBefore: true },
-  ], [copy, deleteMutation.isPending, duplicate, openEditor, setLifecycle]);
+  ];
+
+  const workspaceHeader = (
+      <ExamWorkspaceHeader
+        examTitle={exam.title}
+        lifecycle={shell.lifecycle}
+        activeTab="delivery"
+        showResponses={shell.showResponses}
+        onSelectTab={shell.onSelectTab}
+        onBack={shell.onBack}
+        contextLine={version ? `Current release · Version ${version.versionNumber} · ${version.publishScope === "full" ? "Full SAT" : version.publishScope === "math" ? "Math only" : "Reading & Writing only"}` : "Publish an exam version to create sessions"}
+        collaborationSlot={<CollaborationHeaderCluster surface="access" />}
+        onPreview={shell.onPreview}
+        {...(shell.onPublish ? { onPublish: shell.onPublish } : {})}
+        {...(shell.onQuickSettings ? { onQuickSettings: shell.onQuickSettings } : {})}
+        {...(version ? { onCreateSession: () => openEditor(null) } : {})}
+      />
+  );
 
   if (isLoading) {
     return (
       <div className="sat-product min-h-screen bg-au-fill">
+        {workspaceHeader}
         <SatContainer>
-          <SatPageHeader eyebrow="Digital SAT · Release" title="Student Access" description="Share this exam with students." />
-          <SatListSkeleton rows={3} label="Loading Student Access" />
+          <SatPageHeader eyebrow="Digital SAT" title="Sessions" description="Prepare, share and run sittings of this exam." />
+          <SatListSkeleton rows={3} label="Loading Sessions" />
         </SatContainer>
       </div>
     );
   }
-  if (error) {
+  if (error && !overview) {
     return (
       <div className="sat-product min-h-screen bg-au-fill">
+        {workspaceHeader}
         <SatContainer>
           <div role="alert" className="mt-8 rounded-2xl border border-black/[0.06] bg-white p-6">
-            <h1 className="text-[16px] font-semibold text-slate-900">Student Access could not load</h1>
+            <h1 className="text-[16px] font-semibold text-slate-900">Sessions could not load</h1>
             <p className="mt-1.5 text-[13px] leading-5 text-slate-500">{error}</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" onClick={onBackToRelease} className="sat-press sat-press-fill flex min-h-11 items-center rounded-[12px] px-4 text-[13px] font-semibold text-slate-600 hover:bg-black/[0.04]">Release</button>
+              <button type="button" onClick={() => shell.onSelectTab("questions")} className="sat-press sat-press-fill flex min-h-11 items-center rounded-[12px] px-4 text-[13px] font-semibold text-slate-600 hover:bg-black/[0.04]">Questions</button>
               <SatPrimaryButton onClick={() => { void onRefresh(); }} icon={<RefreshCw size={14} aria-hidden="true" />}>Retry</SatPrimaryButton>
             </div>
           </div>
@@ -473,12 +529,13 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   if (!version) {
     return (
       <div className="sat-product min-h-screen bg-au-fill">
+        {workspaceHeader}
         <SatContainer>
           <SatEmptyState
             icon={<Link2 size={20} aria-hidden="true" />}
-            title="Publish before creating Student Access"
-            hint="Student access always uses an immutable published release."
-            action={<SatPrimaryButton onClick={onBackToRelease}>Return to Release</SatPrimaryButton>}
+            title="Publish your exam to create sessions"
+            hint="Publish a version, create a session, then share its student link and start the exam when everyone is ready."
+            action={<SatPrimaryButton onClick={shell.onPublish ?? onBackToRelease}>{shell.onPublish ? "Publish exam" : "Review publishing"}</SatPrimaryButton>}
           />
         </SatContainer>
       </div>
@@ -489,28 +546,18 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
 
   return (
     <div className="sat-product min-h-screen bg-au-fill text-slate-950">
-      <header className="sticky top-0 z-40 border-b border-black/[0.07] authoring-glass">
-        <div className="mx-auto flex min-h-[64px] w-full max-w-[1180px] items-center gap-3 px-4 sm:px-6 lg:px-10">
-          <button type="button" onClick={onBackToRelease} className="sat-press sat-press-fill flex min-h-11 items-center gap-1.5 rounded-[12px] px-2.5 text-[12px] font-semibold text-slate-500 hover:bg-black/[0.04] hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40"><ArrowLeft size={15} aria-hidden="true" />Release</button>
-          <div className="h-5 w-px bg-black/[0.08]" aria-hidden="true" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[13px] font-semibold tracking-[-0.01em]">{exam.title}</p>
-            <p className="truncate text-[11px] font-medium text-slate-500">Student Access · Version {version.versionNumber} · {version.publishScope === "full" ? "Full SAT" : `${version.publishScope === "math" ? "Math" : "Reading & Writing"} only`}</p>
-          </div>
-          <CollaborationHeaderCluster surface="access" />
-          <SatPrimaryButton onClick={() => openEditor(null)} icon={<Plus size={14} aria-hidden="true" />} ariaLabel="New Student Link">New Student Link</SatPrimaryButton>
-        </div>
-      </header>
+      {workspaceHeader}
 
       <SatContainer>
         <SatPageHeader
-          eyebrow="Digital SAT · Release"
-          title="Student Access"
-          description="Share this exam with students. Existing links stay on the release they were created for."
+          eyebrow={`${exam.title} · Version ${version.versionNumber}`}
+          title="Sessions"
+          description="Prepare, share and run sittings of this exam. Each session stays on the version it was created for."
         />
         {/* One polite region for in-place confirmations: the visual copy lives
             at the control, and screen readers hear it once. */}
         <p role="status" aria-live="polite" className="sr-only">{confirmation?.text ?? ""}</p>
+        {error ? <div role="alert" className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Access details could not refresh. Displayed entry information may be out of date. <button type="button" onClick={() => void onRefresh()} className="min-h-11 px-3 font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry</button></div> : null}
         {actionError ? (
           <div role="alert" className="sat-banner-enter mt-4 flex items-center justify-between gap-3 rounded-2xl border border-red-700/20 bg-red-50 px-4 py-3 text-[12px] font-medium text-red-700">
             <span>{actionError}</span>
@@ -523,8 +570,10 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
           </div>
         ) : null}
 
+        <DeliverySetupGuide versionNumber={version.versionNumber} groupCount={links.filter((link) => link.publishedVersionId === version.id && link.lifecycleState !== "revoked").length} runningCount={links.filter((link) => link.publishedVersionId === version.id && session?.infoFor(link.scheduleId)?.phase === "live").length} finishedCount={links.filter((link) => link.publishedVersionId === version.id && session?.infoFor(link.scheduleId)?.phase === "finished").length} onCreate={() => openEditor(null)} />
+
         <div className="mt-4 overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
-          <section aria-label="Student Links" className="flex min-w-0 flex-col border-black/[0.06] max-lg:border-b lg:border-r">
+          <section aria-label="Sessions" className="flex min-w-0 flex-col border-black/[0.06] max-lg:border-b lg:border-r">
             <LinksToolbar
               search={search}
               onSearchChange={setSearch}
@@ -536,7 +585,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
             />
             <div className="p-2 sm:p-3">
               {visibleLinks.length ? (
-                <SatList>
+                <SatList variant="cards">
                   {visibleLinks.map((link, index) => (
                     <AccessLinkRow
                       key={link.id}
@@ -549,6 +598,10 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
                       busy={pendingWrite?.linkId === link.id}
                       pendingLabel={pendingWrite?.linkId === link.id ? pendingWrite.label : null}
                       confirmation={confirmation?.linkId === link.id ? confirmation.text : null}
+                      sessionLabel={session?.canRun ? sessionRowLabel(session.infoFor(link.scheduleId)) : null}
+                      {...(session?.canRun && !session.stale && session.infoFor(link.scheduleId)?.phase === "live" ? {
+                        quickAction: { label: "Open live session", onSelect: () => session.onOpenRoom(link.scheduleId) },
+                      } : {})}
                     />
                   ))}
                 </SatList>
@@ -561,16 +614,16 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
               ) : (
                 <SatEmptyState
                   icon={<Link2 size={20} aria-hidden="true" />}
-                  title="No student access yet"
-                  hint="Create a link when you are ready to share this exam. Links stay pinned to the release they were created for."
-                  action={<SatPrimaryButton onClick={() => openEditor(null)} icon={<Plus size={14} aria-hidden="true" />} ariaLabel="New Student Link">New Student Link</SatPrimaryButton>}
+                  title="No sessions yet"
+                  hint="Create a session when you are ready to run this exam. Each session stays on the version it was created for."
                 />
               )}
             </div>
           </section>
-          <section aria-label="Link details" className="min-w-0 bg-au-fill max-lg:min-h-[420px]">
+          <section aria-label="Session details" className="min-w-0 bg-au-fill max-lg:min-h-[420px]">
             {selectedLink ? (
               <AccessLinkDetail
+                key={selectedLink.id}
                 link={selectedLink}
                 isStaleRelease={selectedLink.publishedVersionId !== version.id}
                 currentVersionNumber={version.versionNumber}
@@ -583,16 +636,20 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
                 onShare={() => setShareLink(selectedLink)}
                 onEdit={() => openEditor(selectedLink)}
                 onPresent={() => setPresentLink(selectedLink)}
-                onCreateForCurrent={() => { void duplicate(selectedLink, "current"); }}
+                onCreateForCurrent={() => openDuplicateSetup(selectedLink)}
                 copyConfirmed={confirmation?.linkId === selectedLink.id && confirmation.kind === "copy"}
                 onEscapeToRow={focusSelectedRow}
+                {...(session ? { session } : {})}
+                justCreated={justCreatedId === selectedLink.id}
+                onDismissNextSteps={() => setJustCreatedId(null)}
+                onDuplicateSetup={() => openDuplicateSetup(selectedLink)}
               />
             ) : (
               <div className="flex h-full items-center justify-center p-8 text-center">
                 <div>
                   <Link2 size={28} className="mx-auto text-slate-300" aria-hidden="true" />
-                  <p className="mt-3 text-[13px] font-semibold text-slate-700">Select a Student Link</p>
-                  <p className="mt-1 text-[12px] leading-5 text-slate-500">Details, activity, sharing, and lifecycle controls appear here.</p>
+                  <p className="mt-3 text-[13px] font-semibold text-slate-700">Select a session</p>
+                  <p className="mt-1 text-[12px] leading-5 text-slate-500">Details, activity, sharing, and check-in controls appear here.</p>
                 </div>
               </div>
             )}
@@ -600,16 +657,33 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         </div>
       </SatContainer>
 
-      <AccessLinkEditorSheet open={editorOpen} link={editingLink} providerKey={exam.providerKey ?? null} publishScope={version?.publishScope ?? "full"} members={(membersQuery.data ?? []) as AccessLinkMemberInput[]} isSaving={saving} onClose={() => { if (!saving) { setEditorOpen(false); setEditingLink(null); } }} onCreate={createLink} onUpdate={updateLink} />
+      <AccessLinkEditorSheet
+        open={editorOpen}
+        link={editingLink}
+        prefill={prefillLink}
+        targetVersionNumber={createTarget?.versionNumber ?? version.versionNumber}
+        providerKey={exam.providerKey ?? null}
+        publishScope={createTarget?.publishScope ?? version?.publishScope ?? "full"}
+        members={(membersQuery.data ?? EMPTY_MEMBERS) as AccessLinkMemberInput[]}
+        membersLoading={Boolean((editingLink ?? prefillLink)?.audienceType === "selected_students" && membersQuery.isLoading)}
+        membersError={(editingLink ?? prefillLink)?.audienceType === "selected_students" && membersQuery.error ? "The student roster could not load. Retry before continuing." : null}
+        onRetryMembers={() => void membersQuery.refetch()}
+        isSaving={saving}
+        reuseOptions={links}
+        onReuseSetup={(link) => openDuplicateSetup(link, createTarget ?? undefined)}
+        onClose={() => { if (!saving) { setEditorOpen(false); setEditingLink(null); setPrefillLink(null); setCreateTarget(null); } }}
+        onCreate={createLink}
+        onUpdate={updateLink}
+      />
       <AccessLinkShareSheet open={Boolean(shareLink)} link={shareLink} onClose={() => setShareLink(null)} onPresent={() => { setPresentLink(shareLink); setShareLink(null); }} />
       <AccessLinkPresentView open={Boolean(presentLink)} link={presentLink} onClose={() => setPresentLink(null)} />
       <AuthoringConfirmDialog
         open={Boolean(confirm)}
-        title={confirm?.action === "delete" ? "Delete this Student Link permanently?" : "Revoke this Student Link?"}
+        title={confirm?.action === "delete" ? "Delete this student link permanently?" : "Revoke this student link?"}
         description={confirm?.action === "delete"
           ? "This URL will no longer let students enter. Schedules, exam attempts, scores, and exam history will be preserved. Deletion cannot be undone."
           : "Students who have not entered yet will permanently lose access through this link. Existing exam attempts are not deleted. Revocation cannot be undone."}
-        confirmLabel={confirm?.action === "delete" ? "Delete permanently" : "Revoke Link"}
+        confirmLabel={confirm?.action === "delete" ? "Delete permanently" : "Revoke student link"}
         destructive
         busy={confirm?.action === "delete" ? deleteMutation.isPending : lifecycleMutation.isPending}
         onCancel={() => setConfirm(null)}

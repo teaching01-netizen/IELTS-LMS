@@ -52,7 +52,7 @@ describe("AccessLinkDetail", () => {
   it("keeps the immutable-version banner and replacement action on Overview", () => {
     renderDetail();
     expect(screen.getByText("Uses Version 4")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create Version 5 Link" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use setup for Version 5" })).toBeInTheDocument();
   });
 
   it("switches to the Activity tab with arrow keys", () => {

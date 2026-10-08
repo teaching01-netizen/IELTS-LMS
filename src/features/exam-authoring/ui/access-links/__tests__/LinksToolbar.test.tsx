@@ -19,7 +19,7 @@ describe("LinksToolbar", () => {
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent("2 of 2 links");
-    fireEvent.click(screen.getByRole("button", { name: /Live 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Check-in open 1/ }));
     expect(onStatusFilterChange).toHaveBeenCalledWith("live");
   });
 

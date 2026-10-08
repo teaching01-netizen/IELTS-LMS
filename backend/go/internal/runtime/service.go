@@ -262,10 +262,10 @@ func LockScheduleRow(ctx context.Context, q tx.Tx, scheduleID string) (*StartSch
 	return &sch, nil
 }
 
-// lockAttemptsFirst acquires schedule attempt rows BEFORE any runtime lock.
-// Lock order: (schedule ->) attempt -> runtime -> section; the schedule row,
-// when a command writes it, is taken before this (see LockScheduleRow).
-func lockAttemptsFirst(ctx context.Context, q tx.Tx, scheduleID string) error {
+// LockScheduleAttemptsInTx acquires cohort attempts before runtime/section
+// locks. Room commands update these same rows; reversing this order creates a
+// cycle with response saves holding an attempt while reading the runtime.
+func LockScheduleAttemptsInTx(ctx context.Context, q tx.Tx, scheduleID string) error {
 	const sel = "SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE"
 	rows, err := q.QueryContext(ctx, sel, scheduleID)
 	if err != nil {
@@ -322,7 +322,7 @@ func (s *Service) Start(ctx context.Context, scheduleID, actorID string, planner
 		if err != nil {
 			return err
 		}
-		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
+		if err := LockScheduleAttemptsInTx(ctx, q, scheduleID); err != nil {
 			return err
 		}
 		var id, status string
@@ -447,7 +447,7 @@ type PlanEntry struct {
 // Pause transitions live->paused with control_epoch bump + V2 sync.
 func (s *Service) Pause(ctx context.Context, scheduleID string, fence RevisionFence, reason *string, actorID string) error {
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
+		if err := LockScheduleAttemptsInTx(ctx, q, scheduleID); err != nil {
 			return err
 		}
 		rt, err := lockRuntime(ctx, q, scheduleID)
@@ -472,7 +472,7 @@ func (s *Service) Pause(ctx context.Context, scheduleID string, fence RevisionFe
 		if _, err := q.ExecContext(ctx, secPaused, rt.ID, active); err != nil {
 			return err
 		}
-		if err := pauseSATModules(ctx, q, scheduleID); err != nil {
+		if err := SyncSATPauseInTx(ctx, q, scheduleID, ""); err != nil {
 			return err
 		}
 		if err := SyncV2TimingInTx(ctx, q, scheduleID, rt.ID, active, strptr("paused")); err != nil {
@@ -494,7 +494,7 @@ func (s *Service) Pause(ctx context.Context, scheduleID string, fence RevisionFe
 // Resume transitions paused->live, accumulating paused seconds + V2 sync.
 func (s *Service) Resume(ctx context.Context, scheduleID string, fence RevisionFence, actorID string) error {
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
+		if err := LockScheduleAttemptsInTx(ctx, q, scheduleID); err != nil {
 			return err
 		}
 		rt, err := lockRuntime(ctx, q, scheduleID)
@@ -537,7 +537,7 @@ func (s *Service) Resume(ctx context.Context, scheduleID string, fence RevisionF
 		if _, err := q.ExecContext(ctx, secLive, pausedSecs, rt.ID, active); err != nil {
 			return err
 		}
-		if err := resumeSATModules(ctx, q, scheduleID); err != nil {
+		if err := SyncSATPauseInTx(ctx, q, scheduleID, ""); err != nil {
 			return err
 		}
 		if err := SyncV2TimingInTx(ctx, q, scheduleID, rt.ID, active, strptr("running")); err != nil {
@@ -562,7 +562,7 @@ func (s *Service) Extend(ctx context.Context, scheduleID string, fence RevisionF
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Extension minutes must be greater than zero.", HTTPStatus: 400}
 	}
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
+		if err := LockScheduleAttemptsInTx(ctx, q, scheduleID); err != nil {
 			return err
 		}
 		rt, err := lockRuntime(ctx, q, scheduleID)
@@ -614,7 +614,7 @@ func (s *Service) Complete(ctx context.Context, scheduleID, completionReason, ac
 		if _, err := LockScheduleRow(ctx, q, scheduleID); err != nil {
 			return err
 		}
-		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
+		if err := LockScheduleAttemptsInTx(ctx, q, scheduleID); err != nil {
 			return err
 		}
 		rt, err := lockRuntime(ctx, q, scheduleID)
@@ -755,31 +755,32 @@ func insertControlEvent(ctx context.Context, q tx.Tx, runtimeID, scheduleID, act
 	return err
 }
 
-func pauseSATModules(ctx context.Context, q tx.Tx, scheduleID string) error {
-	const stmt = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_entities e ON e.id = sa.exam_id SET ma.paused_at = COALESCE(ma.paused_at, UTC_TIMESTAMP(6)), ma.revision = ma.revision + 1 WHERE sa.schedule_id = ? AND e.provider_key = 'sat' AND ma.state = 'active' AND ma.started_at IS NOT NULL AND ma.paused_at IS NULL"
-	if _, err := q.ExecContext(ctx, stmt, scheduleID); err != nil {
+// SyncSATPauseInTx owns the union of room and individual pause. Only effective
+// transitions change clocks; overlapping and repeated controls cannot double
+// credit time. Callers hold the affected attempt(s) and runtime locks first.
+func SyncSATPauseInTx(ctx context.Context, q tx.Tx, scheduleID, attemptID string) error {
+	const effective = "(r.status = 'paused' OR COALESCE(sa.proctor_status, 'active') = 'paused')"
+	scope := "sa.schedule_id = ?"
+	args := []any{scheduleID}
+	if attemptID != "" {
+		scope += " AND sa.id = ?"
+		args = append(args, attemptID)
+	}
+	modules := "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id JOIN exam_entities e ON e.id = sa.exam_id SET " +
+		"ma.accumulated_paused_seconds = ma.accumulated_paused_seconds + CASE WHEN NOT " + effective + " AND ma.paused_at IS NOT NULL AND ma.started_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, UTC_TIMESTAMP(6)), 0) ELSE 0 END, " +
+		"ma.auto_start_at = CASE WHEN NOT " + effective + " AND ma.paused_at IS NOT NULL AND ma.state = 'not_started' THEN DATE_ADD(ma.auto_start_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, ma.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) ELSE ma.auto_start_at END, " +
+		"ma.paused_at = CASE WHEN " + effective + " THEN COALESCE(ma.paused_at, UTC_TIMESTAMP(6)) ELSE NULL END, ma.revision = ma.revision + 1 WHERE " + scope +
+		" AND e.provider_key = 'sat' AND (ma.state IN ('active', 'review') OR (ma.state = 'not_started' AND ma.auto_start_at IS NOT NULL)) AND (" +
+		effective + " AND ma.paused_at IS NULL OR NOT " + effective + " AND ma.paused_at IS NOT NULL)"
+	if _, err := q.ExecContext(ctx, modules, args...); err != nil {
 		return err
 	}
-	const breaks = `UPDATE assessment_attempt_breaks b
-		JOIN student_attempts sa ON sa.id = b.attempt_id
-		SET b.paused_at = UTC_TIMESTAMP(6), b.revision = b.revision + 1
-		WHERE sa.schedule_id = ? AND b.state = 'active' AND b.paused_at IS NULL`
-	_, err := q.ExecContext(ctx, breaks, scheduleID)
-	return err
-}
-
-func resumeSATModules(ctx context.Context, q tx.Tx, scheduleID string) error {
-	const stmt = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_entities e ON e.id = sa.exam_id SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, UTC_TIMESTAMP(6)), 0), ma.paused_at = NULL, ma.revision = ma.revision + 1 WHERE sa.schedule_id = ? AND e.provider_key = 'sat' AND ma.state = 'active' AND ma.paused_at IS NOT NULL"
-	if _, err := q.ExecContext(ctx, stmt, scheduleID); err != nil {
-		return err
-	}
-	const breaks = `UPDATE assessment_attempt_breaks b
-		JOIN student_attempts sa ON sa.id = b.attempt_id
-		SET b.accumulated_paused_seconds = b.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, b.paused_at, UTC_TIMESTAMP(6)), 0),
-		    b.deadline_at = DATE_ADD(b.deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) SECOND),
-		    b.paused_at = NULL, b.revision = b.revision + 1
-		WHERE sa.schedule_id = ? AND b.state = 'active' AND b.paused_at IS NOT NULL`
-	_, err := q.ExecContext(ctx, breaks, scheduleID)
+	breaks := "UPDATE assessment_attempt_breaks b JOIN student_attempts sa ON sa.id = b.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET " +
+		"b.accumulated_paused_seconds = b.accumulated_paused_seconds + CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) ELSE 0 END, " +
+		"b.deadline_at = CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL THEN DATE_ADD(b.deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) ELSE b.deadline_at END, " +
+		"b.paused_at = CASE WHEN " + effective + " THEN COALESCE(b.paused_at, UTC_TIMESTAMP(6)) ELSE NULL END, b.revision = b.revision + 1 WHERE " + scope +
+		" AND b.state = 'active' AND (" + effective + " AND b.paused_at IS NULL OR NOT " + effective + " AND b.paused_at IS NOT NULL)"
+	_, err := q.ExecContext(ctx, breaks, args...)
 	return err
 }
 

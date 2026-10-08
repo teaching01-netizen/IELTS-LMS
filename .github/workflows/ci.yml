@@ -127,6 +127,22 @@ jobs:
           TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
         run: go test ./integration/ -v -count=1
 
+      - name: SAT API contracts (real MySQL, no skipped tests)
+        env:
+          TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/sat-api-contracts.log"
+          go test ./internal/platform/httpx -count=1 -v \
+            -run '^TestDBRateLimiterFreshKeyMySQL$' | tee "$log"
+          go test ./cmd/api -count=1 -v \
+            -run '^(TestSAT|TestStudentRawContentRoutesFenceUnassignedBranch|TestK6SAT)' \
+            | tee -a "$log"
+          if grep -q -- '--- SKIP' "$log"; then
+            echo "SAT API contracts must execute against MySQL; a skipped test is not a pass."
+            exit 1
+          fi
+
       - name: Authoring lifecycle suites (real MySQL)
         env:
           TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"

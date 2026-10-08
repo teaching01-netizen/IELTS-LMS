@@ -95,6 +95,7 @@ func TestSaveResponseFoldedClaimInTx(t *testing.T) {
 	svc := deliverySvc(db)
 	now := time.Now().UTC()
 	deliverySaveBinding(mock)
+	deliverySaveProtocol(mock)
 	deliverySaveBegin(mock)
 	// ensureAttemptCanWorkTx first (attempt row + runtime status)...
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).

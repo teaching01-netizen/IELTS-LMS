@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
+import { AccessLinkSessionPanel } from "../delivery/AccessLinkSessionPanel";
+import type { AccessSessionBindings } from "../delivery/sessionState";
 import {
   Check,
   Copy,
@@ -24,6 +26,7 @@ import {
 import type { SatStatusTone } from "../../../../products/sat/ui/SatPage";
 import {
   accessLinkStatusDescription,
+  describeAccessLinkAudience,
   accessLinkStatusTone,
   formatAccessLinkStatus,
   formatCompactDateTime,
@@ -51,6 +54,13 @@ export interface AccessLinkDetailProps {
   copyConfirmed?: boolean;
   /** Escape in the pane hands focus back to the selected row, never to the body. */
   onEscapeToRow?: () => void;
+  /** Session status + actions for this access group (Delivery page). Omit to hide the panel. */
+  session?: AccessSessionBindings;
+  /** Just created: the panel leads with the Share → Run next steps. */
+  justCreated?: boolean;
+  onDismissNextSteps?: () => void;
+  /** Open the prefilled "Duplicate setup" form for this group. */
+  onDuplicateSetup?: () => void;
 }
 
 const STATUS_TONE: Record<AssessmentAccessLink["status"], SatStatusTone> = {
@@ -82,6 +92,10 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
     defaultTab,
     copyConfirmed = false,
     onEscapeToRow,
+    session,
+    justCreated = false,
+    onDismissNextSteps,
+    onDuplicateSetup,
   } = props;
   const [activeTab, setActiveTab] = useState<DetailTab>(defaultTab ?? "overview");
   const sectionBadge = accessLinkSectionBadge(link.enabledSections, link.publishScope);
@@ -118,6 +132,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
 
   const handlePaneKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Escape" || !onEscapeToRow) return;
+    if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], input, textarea, select'))) return;
     // Never steal Escape from an open overlay/field: the pane only answers it
     // when the pane itself is the surrounding context.
     event.preventDefault();
@@ -145,7 +160,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
             {accessLinkStatusDescription(link)}
           </p>
           {sectionBadge ? (
-            <span className="mt-2 inline-block rounded-full bg-au-fill px-2.5 py-1 text-[10px] font-semibold text-slate-600">
+            <span className="mt-2 inline-block rounded-full bg-au-fill px-2.5 py-1 text-[12px] font-semibold text-slate-600">
               {sectionBadge}
             </span>
           ) : null}
@@ -204,6 +219,21 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
       <div key={activeTab} className="sat-panel-enter min-h-0">
       {activeTab === "overview" ? (
         <div role="tabpanel" id={panelId("overview")} aria-labelledby={tabId("overview")}>
+          {session ? (
+            <AccessLinkSessionPanel
+              key={link.id}
+              link={link}
+              session={session}
+              justCreated={justCreated}
+              copyConfirmed={copyConfirmed}
+              onCopy={onCopy}
+              onShowQr={onShare}
+              onPresent={onPresent}
+              url={url}
+              onDuplicate={onDuplicateSetup ?? onCreateForCurrent}
+              {...(onDismissNextSteps ? { onDismissNextSteps } : {})}
+            />
+          ) : null}
           {isStaleRelease ? (
             <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-black/[0.06] bg-white p-4">
               <div className="min-w-0">
@@ -219,12 +249,12 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
                 onClick={onCreateForCurrent}
                 className="sat-press sat-press-fill-accent flex min-h-11 shrink-0 items-center rounded-[12px] bg-au-accent px-4 text-[12px] font-semibold text-white hover:bg-au-accent-hover"
               >
-                Create Version {currentVersionNumber} Link
+                Use setup for Version {currentVersionNumber}
               </button>
             </div>
           ) : null}
 
-          <SatSectionCard labelledBy={shareLabelId} className="mt-4">
+          {!session ? <SatSectionCard labelledBy={shareLabelId} className="mt-4">
             <p id={shareLabelId} className="text-[12px] font-semibold text-slate-900">
               Share this link
             </p>
@@ -270,22 +300,22 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <ExternalLink size={13} aria-hidden="true" />
               Open student page
             </a>
-          </SatSectionCard>
+          </SatSectionCard> : null}
 
-          <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl border border-black/[0.06] bg-white p-4">
+          {!session ? <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl border border-black/[0.06] bg-white p-4">
             <div>
               <p className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] text-slate-950">
                 {link.metrics.registered}
               </p>
-              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Joined
+              <p className="mt-0.5 text-[12px] font-semibold uppercase tracking-wide text-slate-500">
+                Registered
               </p>
             </div>
             <div>
               <p className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] text-slate-950">
                 {link.metrics.started}
               </p>
-              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              <p className="mt-0.5 text-[12px] font-semibold uppercase tracking-wide text-slate-500">
                 Started
               </p>
             </div>
@@ -293,11 +323,11 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <p className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] text-slate-950">
                 {link.metrics.submitted}
               </p>
-              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              <p className="mt-0.5 text-[12px] font-semibold uppercase tracking-wide text-slate-500">
                 Submitted
               </p>
             </div>
-          </div>
+          </div> : null}
         </div>
       ) : null}
 
@@ -354,11 +384,11 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
                       <p className="truncate text-[12px] font-medium text-slate-900">
                         {item.studentName}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-slate-500">{activityVerb(item.kind)}</p>
+                      <p className="mt-0.5 text-[12px] text-slate-500">{activityVerb(item.kind)}</p>
                     </div>
                     <time
                       dateTime={item.occurredAt}
-                      className="shrink-0 text-[11px] tabular-nums text-slate-500"
+                      className="shrink-0 text-[12px] tabular-nums text-slate-500"
                     >
                       {formatCompactDateTime(new Date(item.occurredAt))}
                     </time>
@@ -378,45 +408,45 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
         <div role="tabpanel" id={panelId("settings")} aria-labelledby={tabId("settings")}>
           <dl className="mt-4 divide-y divide-black/[0.06] rounded-2xl border border-black/[0.06] bg-white px-4">
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[11px] text-slate-500">Exam</dt>
+              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Exam</dt>
               <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
                 {`${link.examTitle} · Version ${link.versionNumber}`}
               </dd>
             </div>
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[11px] text-slate-500">Audience</dt>
+              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Audience</dt>
               <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
                 {audienceText(link)}
               </dd>
             </div>
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[11px] text-slate-500">Identification</dt>
+              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Identification</dt>
               <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
                 {link.accessMode === "student_code" ? "Student code required" : "Name + email"}
               </dd>
             </div>
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[11px] text-slate-500">Sections</dt>
+              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Sections</dt>
               <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
                 {sectionsText(link)}
               </dd>
             </div>
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[11px] text-slate-500">Availability</dt>
+              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Availability</dt>
               <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
                 {availabilityText(link)}
               </dd>
             </div>
             {link.audienceType === "selected_students" ? (
               <div className="flex min-h-11 items-center gap-3 py-2">
-                <dt className="w-28 shrink-0 text-[11px] text-slate-500">Allowed students</dt>
+                <dt className="w-28 shrink-0 text-[12px] text-slate-500">Allowed students</dt>
                 <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
                   {link.selectedStudentCount}
                 </dd>
               </div>
             ) : null}
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[11px] text-slate-500">Link ID</dt>
+              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Link ID</dt>
               <dd className="flex min-w-0 flex-1 items-center justify-end gap-2">
                 <span className="min-w-0 flex-1 truncate break-words text-right font-mono text-[12px] font-semibold text-slate-900">
                   {link.id}
@@ -453,13 +483,11 @@ function sectionsText(link: AssessmentAccessLink): string {
 }
 
 function audienceText(link: AssessmentAccessLink): string {
-  if (link.audienceType === "anyone") return "Anyone with link";
-  if (link.audienceType === "cohort") return link.audienceLabel ?? "Cohort";
-  return `${link.audienceLabel ?? "Selected students"} · ${link.selectedStudentCount} students`;
+  return describeAccessLinkAudience(link);
 }
 
 function availabilityText(link: AssessmentAccessLink): string {
-  if (link.availabilityType === "anytime") return "Anytime while active";
+  if (link.availabilityType === "anytime") return "Open until paused or revoked";
   if (!link.opensAt || !link.closesAt) return "Scheduled";
   const formatter = new Intl.DateTimeFormat(undefined, {
     month: "short",

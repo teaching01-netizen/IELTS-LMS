@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { ExamEntity } from "../../../../types/domain";
 import type {
   AssessmentAuthoringShell,
@@ -9,15 +9,6 @@ import type {
 } from "../../contracts/assessment";
 import type { AssessmentReleaseState } from "../../contracts/release";
 import { SatDeliveryReleasePage } from "../SatDeliveryReleasePage";
-
-const updateMutation = vi.hoisted(() => ({
-  mutateAsync: vi.fn(),
-  isPending: false,
-}));
-
-vi.mock("../../api/assessmentQueries", () => ({
-  useUpdateSectionDeliverySettings: () => updateMutation,
-}));
 
 const exam: ExamEntity = {
   id: "exam-sat-1",
@@ -152,7 +143,7 @@ function pageProps(overrides: Partial<ComponentProps<typeof SatDeliveryReleasePa
     readinessError: null,
     isPublishing: false,
     publishError: null,
-    onBackToBuilder: vi.fn(),
+    onSelectTab: vi.fn(),
     onBackToExams: vi.fn(),
     onRefreshReadiness: vi.fn().mockResolvedValue(undefined),
     onPublishScopeChange: vi.fn(),
@@ -177,11 +168,6 @@ beforeAll(() => {
   }
 });
 
-beforeEach(() => {
-  updateMutation.mutateAsync.mockReset();
-  updateMutation.mutateAsync.mockResolvedValue(shell);
-  updateMutation.isPending = false;
-});
 describe("SatDeliveryReleasePage", () => {
   it("enables publishing only for a checked, current, clean draft", () => {
     render(<SatDeliveryReleasePage {...pageProps()} />);
@@ -197,29 +183,24 @@ describe("SatDeliveryReleasePage", () => {
     expect(screen.getByText(/Only Reading & Writing will be included/)).toBeInTheDocument();
   });
 
-  it("blocks publishing as soon as delivery settings become dirty", () => {
-    render(<SatDeliveryReleasePage {...pageProps()} />);
+  it("points to Settings for timing instead of editing it inline", () => {
+    const onSelectTab = vi.fn();
+    render(<SatDeliveryReleasePage {...pageProps({ onSelectTab })} />);
 
-    fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
-
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
-    expect(screen.getByText("Save all delivery changes before publishing.")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Module 1/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save section" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Edit timing and routing in Settings/ }));
+    expect(onSelectTab).toHaveBeenCalledWith("settings");
   });
 
-  it("protects unsaved delivery settings when leaving release", () => {
-    const onBackToBuilder = vi.fn();
-    render(<SatDeliveryReleasePage {...pageProps({ onBackToBuilder })} />);
+  it("shows the shared exam header with Questions, Settings and the lifecycle", () => {
+    const onSelectTab = vi.fn();
+    render(<SatDeliveryReleasePage {...pageProps({ onSelectTab })} />);
 
-    fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
-    fireEvent.click(screen.getByRole("button", { name: "Back to builder" }));
-
-    expect(onBackToBuilder).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("alertdialog", { name: "Leave with unsaved changes?" }),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
-
-    expect(onBackToBuilder).toHaveBeenCalledOnce();
+    const tabs = screen.getByRole("navigation", { name: "Exam sections" });
+    fireEvent.click(within(tabs).getByRole("button", { name: "Questions" }));
+    expect(onSelectTab).toHaveBeenCalledWith("questions");
+    expect(screen.getByTestId("exam-lifecycle")).toHaveTextContent("Draft");
   });
 
   it("does not surface legacy timing recommendations", () => {
@@ -320,7 +301,9 @@ describe("SatDeliveryReleasePage", () => {
       />
     );
 
-    expect(screen.getByText("Unpublished changes")).toBeInTheDocument();
+    // The header lifecycle pill and the status hero both name the state.
+    expect(screen.getAllByText("Unpublished changes")).toHaveLength(2);
+    expect(screen.getByTestId("exam-lifecycle")).toHaveTextContent("Unpublished changes");
     expect(screen.getByText("Students still receive Version 4.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish Update" })).toBeEnabled();
   });
@@ -341,44 +324,6 @@ describe("SatDeliveryReleasePage", () => {
       "release-publish-reasons",
     );
     expect(screen.getByText(/Publish checks are stale/)).toBeInTheDocument();
-  });
-
-  it("edits the threshold against the blueprint on threshold-only rows (stuck-at-1 regression)", async () => {
-    // Real shells arrive with operationalQuestionCount: 0 (threshold-only
-    // policy_config). The Higher-route field must still accept the RW
-    // contract range instead of clamping every keystroke back to 1.
-    render(
-      <SatDeliveryReleasePage
-        {...pageProps({
-          shell: {
-            ...shell,
-            sections: [
-              {
-                ...shell.sections[0]!,
-                routingPolicy: { ...shell.sections[0]!.routingPolicy!, operationalQuestionCount: 0 },
-              },
-            ],
-          },
-        })}
-      />,
-    );
-
-    expect(screen.getByText(/25 operational questions/)).toBeInTheDocument();
-    const threshold = screen.getByLabelText(/Higher route at/);
-    fireEvent.change(threshold, { target: { value: "13" } });
-    expect(threshold).toHaveValue(13);
-    // Range summary is split across elements (0–12 → Lower · 13–25 → Higher).
-    expect(screen.getByText("0–12")).toBeInTheDocument();
-    expect(screen.getByText("13–25")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Save section" }));
-    await waitFor(() =>
-      expect(updateMutation.mutateAsync).toHaveBeenCalledWith(
-        expect.objectContaining({
-          request: expect.objectContaining({ minimumCorrectForHigher: 13 }),
-        }),
-      ),
-    );
   });
 
   it("keeps release checks visible in read-only mode once published", () => {
@@ -404,29 +349,6 @@ describe("SatDeliveryReleasePage", () => {
 
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
     expect(screen.getByText(/do not have permission to publish/)).toBeInTheDocument();
-  });
-
-  it("disables section save and explains read-only delivery settings", () => {
-    render(
-      <SatDeliveryReleasePage
-        {...pageProps({ exam: { ...exam, canEdit: false } })}
-      />
-    );
-
-    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
-    expect(
-      screen.getAllByText(/do not have permission to edit delivery settings/).length,
-    ).toBeGreaterThanOrEqual(1);
-  });
-
-  it("maps save conflicts to a user-safe alert", async () => {
-    updateMutation.mutateAsync.mockRejectedValueOnce(new Error("revision conflict 409"));
-    render(<SatDeliveryReleasePage {...pageProps()} />);
-
-    fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save section" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(/draft changed/i);
   });
 
   it("submits the publish dialog only once on double click", async () => {

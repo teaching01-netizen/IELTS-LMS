@@ -358,6 +358,22 @@ func (s *Service) Takeover(ctx context.Context, bearer, attemptID, clientSession
 	return out, err
 }
 
+// replayableOwnerRotation reports whether a takeover retry is the lost-response
+// replay of the current owner: same session, current lease, still the active
+// writer, and a live (non-revoked) session row for it.
+func (s *Service) replayableOwnerRotation(ctx context.Context, q tx.Tx, claims crypto.AttemptClaims, attempt AttemptState, active sql.NullString, clientSessionID string) bool {
+	if claims.LeaseEpoch == nil || *claims.LeaseEpoch != attempt.LeaseEpoch ||
+		claims.ClientSessionID != clientSessionID || !active.Valid || active.String != clientSessionID {
+		return false
+	}
+	var live int
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM attempt_sessions WHERE attempt_id=? AND client_session_id=? AND user_id=? AND revoked_at IS NULL AND expires_at > ?`,
+		attempt.ID, clientSessionID, attempt.UserID, s.clock.Now().UTC()).Scan(&live); err != nil {
+		return false
+	}
+	return live > 0
+}
+
 // TakeoverResult is the new writer credential.
 type TakeoverResult struct {
 	AttemptID       string    `json:"attemptId"`
@@ -386,7 +402,14 @@ func (s *Service) takeoverInTx(ctx context.Context, q tx.Tx, claims crypto.Attem
 		return TakeoverResult{}, transferError(apperrors.CodeTransferApprovalRequired, "Changing devices requires an approved device transfer.", "transfer_required")
 	}
 	if err := s.validateTokenSession(ctx, q, claims); err != nil {
-		return TakeoverResult{}, err
+		// A takeover whose response was lost has already rotated this
+		// session's token_id. The retry presents the superseded bearer. It is
+		// recoverable only by the current owner at the current lease asking
+		// to keep that same session; a fenced former writer has a stale lease
+		// or is no longer the owner, so it can never mint a credential here.
+		if !s.replayableOwnerRotation(ctx, q, claims, attempt, active, clientSessionID) {
+			return TakeoverResult{}, err
+		}
 	}
 	// No takeover after terminal closure or past grace.
 	now, err := dbTime(ctx, q)

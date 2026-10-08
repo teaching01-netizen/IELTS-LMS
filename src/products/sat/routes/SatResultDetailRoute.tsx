@@ -7,6 +7,7 @@ import type { SatQuestionResult, SatSectionResult } from '../../../features/resu
 import { useSatResultQuery } from '../../../features/results/api/satResultsQueries';
 import { SatSectionCard, SatStatusPill } from '../ui/SatPage';
 import { formatTestTimeLine, viewerTimeZoneLabel } from './satTestTime';
+import { isExamResponsesPath } from './satReturnPath';
 
 function sectionTitle(key: string): string {
   const normalized = key.toLocaleLowerCase().replace(/[-_]/g, ' ');
@@ -49,8 +50,22 @@ export function SatResultDetailRoute() {
   const location = useLocation();
   const backTarget = (() => {
     const from = (location.state as { from?: unknown } | null)?.from;
-    return typeof from === 'string' && from.startsWith('/sat/results') ? from : '/sat/results';
+    return typeof from === 'string' && (from.startsWith('/sat/results') || isExamResponsesPath(from)) ? from : '/sat/results';
   })();
+  return <SatResultDetailContent resultId={resultId} backTarget={backTarget} onBack={() => navigate(backTarget)} />;
+}
+
+export interface SatResultDetailContentProps {
+  resultId: string | undefined;
+  /** Where "View saved answers" returns to (page mode only). */
+  backTarget?: string;
+  onBack: () => void;
+  /** Renders inside a side sheet: no page chrome, no navigation away. */
+  embedded?: boolean;
+  onOpenAnswers?: (attemptId: string) => void;
+}
+
+export function SatResultDetailContent({ resultId, backTarget = '/sat/results', onBack, embedded = false, onOpenAnswers }: SatResultDetailContentProps) {
   const query = useSatResultQuery(resultId);
   // Hooks must run unconditionally before any early return: the query
   // transitions loading -> data across renders, and hooks after a return
@@ -78,25 +93,26 @@ export function SatResultDetailRoute() {
     );
   }
   if (!query.data) {
-    return <SatPageError title="SAT result could not load" description="The result is unavailable." retryLabel="Back to Results" onRetry={() => navigate('/sat/results')} />;
+    return <SatPageError title="SAT result could not load" description="The result is unavailable." retryLabel="Back to Results" onRetry={onBack} />;
   }
 
   const { summary } = query.data;
   const isScored = summary.outcomeStatus === 'scored';
   const isInvalidated = summary.outcomeStatus === 'invalidated_proctor' || summary.outcomeStatus === 'invalidated_timeout';
 
+  const Title = embedded ? 'h2' : 'h1';
   return (
-    <div className="mx-auto w-full max-w-[900px] px-4 pb-16 pt-6 sm:px-6 md:pt-9 lg:px-10">
-      <button type="button" onClick={() => navigate(backTarget)} aria-label="Back to SAT results" className="-ml-2 flex min-h-10 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-2 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] hover:text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><ArrowLeft size={15} />Results</button>
+    <div className={embedded ? 'w-full pb-8' : 'mx-auto w-full max-w-[900px] px-4 pb-16 pt-6 sm:px-6 md:pt-9 lg:px-10'}>
+      {embedded ? null : <button type="button" onClick={onBack} aria-label="Back to SAT results" className="-ml-2 flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-2 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] hover:text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><ArrowLeft size={15} />Results</button>}
 
-      <div className="mt-5 border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pb-7">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{summary.examTitle} · Version {summary.versionNumber}</p>
+      <div className={(embedded ? '' : 'mt-5 ') + 'border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pb-7'}>
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{summary.examTitle} · Version {summary.versionNumber}</p>
         <div className="mt-2 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div><h1 className="text-balance text-[30px] font-semibold tracking-[-0.045em]">{summary.studentName}</h1><p className="mt-1 text-[12px] text-slate-500">{summary.studentId} · {summary.cohortName}</p><p className="mt-3 text-[15px] font-semibold tabular-nums text-slate-900">Test started: {formatTestTimeLine(query.data.testStartedAt)}</p><p className="mt-1 text-[12px] tabular-nums text-slate-500">Submitted: {summary.submittedAt ? formatTestTimeLine(summary.submittedAt) : 'Not submitted'} · Times shown in {viewerTimeZoneLabel()}</p></div>
+          <div><Title className="text-balance text-[30px] font-semibold tracking-[-0.045em]">{summary.studentName}</Title><p className="mt-1 text-[12px] text-slate-500">{summary.studentId} · {summary.cohortName}</p><p className="mt-3 text-[15px] font-semibold tabular-nums text-slate-900">Test started: {formatTestTimeLine(query.data.testStartedAt)}</p><p className="mt-1 text-[12px] tabular-nums text-slate-500">Submitted: {summary.submittedAt ? formatTestTimeLine(summary.submittedAt) : 'Not submitted'} · Times shown in {viewerTimeZoneLabel()}</p></div>
           <div className="sm:text-right">
             <p className="text-[22px] font-semibold tracking-[-0.035em] text-slate-950">{isInvalidated ? 'Ended' : 'Completed · view answers'}</p>
-            <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-400">{isInvalidated ? `${outcomeLabel(summary.outcomeStatus)} · ${summary.releaseStatus}` : 'Saved response review'}</p>
-            {query.isFetching && !query.isLoading ? <p className="mt-1 text-[11px] text-slate-400">Updating…</p> : null}
+            <p className="mt-2 text-xs font-semibold uppercase tracking-[0.13em] text-slate-400">{isInvalidated ? `${outcomeLabel(summary.outcomeStatus)} · ${summary.releaseStatus}` : 'Saved response review'}</p>
+            {query.isFetching && !query.isLoading ? <p className="mt-1 text-xs text-slate-400">Updating…</p> : null}
           </div>
         </div>
       </div>
@@ -109,8 +125,8 @@ export function SatResultDetailRoute() {
             return (
             <div key={section.sectionKey} style={{ '--sat-row-index': Math.min(sectionIndex, 5) } as CSSProperties} className="sat-row-enter rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-4 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))] sm:p-5">
               <div className="grid min-h-[82px] grid-cols-[minmax(0,1fr)_auto] items-center gap-5">
-                <div><p className="text-[13px] font-semibold text-slate-900">{sectionTitle(section.sectionKey)}</p>{section.route ? <p className="mt-1 text-[11px] font-medium text-slate-400">Adaptive route · {section.route === 'higher' ? 'Higher' : 'Lower'}</p> : null}</div>
-                <div className="text-right sm:text-left"><p className="text-[16px] font-semibold tabular-nums">{section.rawCorrect} / {section.operationalQuestionCount}</p><p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Raw</p></div>
+                <div><p className="text-[13px] font-semibold text-slate-900">{sectionTitle(section.sectionKey)}</p>{section.route ? <p className="mt-1 text-xs font-medium text-slate-400">Adaptive route · {section.route === 'higher' ? 'Higher' : 'Lower'}</p> : null}</div>
+                <div className="text-right sm:text-left"><p className="text-[16px] font-semibold tabular-nums">{section.rawCorrect} / {section.operationalQuestionCount}</p><p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-slate-400">Raw</p></div>
               </div>
               {modules.length > 0 ? (
                 <dl className="mt-2 space-y-1.5 rounded-xl bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))] p-3" aria-label={`${sectionTitle(section.sectionKey)} module raw scores`}>
@@ -118,7 +134,7 @@ export function SatResultDetailRoute() {
                     <div key={module.moduleKey} className="flex items-center justify-between gap-3 text-[12px]">
                       <div>
                         <dt className="font-semibold text-slate-700">{module.moduleKey}</dt>
-                        <dd className="text-[10px] capitalize text-slate-400">{moduleRoleLabel(module.adaptiveRole)} · {module.state}</dd>
+                        <dd className="text-xs capitalize text-slate-400">{moduleRoleLabel(module.adaptiveRole)} · {module.state}</dd>
                       </div>
                       <dd className="font-semibold tabular-nums text-slate-900">{module.rawCorrect} / {module.operationalQuestionCount}</dd>
                     </div>
@@ -135,7 +151,9 @@ export function SatResultDetailRoute() {
           <SatStatusPill tone={isInvalidated ? 'invalidated' : 'ready'}>{outcomeLabel(summary.outcomeStatus)}</SatStatusPill>
         </div>
         <p className="mt-3 max-w-xl text-[13px] leading-6 text-slate-600">{outcomeLabel(summary.outcomeStatus)}. SAT scores are not generated by this completion flow.</p>
-        {!isInvalidated ? <Link to={`/sat/results/attempts/${encodeURIComponent(summary.attemptId)}`} state={{ from: backTarget }} className="mt-3 inline-flex min-h-10 items-center text-[13px] font-semibold text-blue-600 hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">View saved answers</Link> : null}
+        {!isInvalidated ? (embedded
+          ? <button type="button" onClick={() => onOpenAnswers?.(summary.attemptId)} className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-blue-600 hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">View saved answers</button>
+          : <Link to={`/sat/results/attempts/${encodeURIComponent(summary.attemptId)}`} state={{ from: backTarget }} className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-blue-600 hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">View saved answers</Link>) : null}
       </SatSectionCard>}
 
       {isScored ? (
@@ -173,7 +191,7 @@ export function SatResultDetailRoute() {
         </section>
       ) : null}
 
-      <p className="max-w-xl text-[10px] leading-5 text-slate-400">Saved answers are available for review. SAT scaled scores are not generated by this completion flow.</p>
+      <p className="max-w-xl text-xs leading-5 text-slate-400">Saved answers are available for review. SAT scaled scores are not generated by this completion flow.</p>
     </div>
   );
 }

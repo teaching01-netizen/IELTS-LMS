@@ -1,6 +1,7 @@
 import http from 'k6/http';
 import { fail, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
+import { satAttemptUrl, satBatchRequest, assertSatAcknowledgements, assertSatStoredResponses } from './sat-response-contract.js';
 
 // Use synthetic, preprovisioned attempts on one shared SAT runtime. Each
 // credential supplies {attemptId, token, moduleId, moduleAttemptId,
@@ -74,24 +75,38 @@ export default function ({ deadline }) {
   for (const metric of [failed, duplicates, leaks, lost, rejections]) metric.add(0);
   const cred = credentials[__VU - 1];
   const params = { headers: { authorization: `Bearer ${cred.token}`, 'content-type': 'application/json', 'accept-encoding': 'gzip' }, timeout: '20s' };
-  const snapshotURL = `${base}/api/v1/attempts/${cred.attemptId}/responses`;
+  const snapshotURL = satAttemptUrl(base, cred.attemptId, 'responses');
   let snapshot = body(http.get(snapshotURL, params));
   if (!snapshot) refusal('Could not read the initial response snapshot');
+  satBatchRequest(snapshot, []);
   waitUntil(deadline - 500);
   const commands = cred.answers.map((answer) => ({
-    questionId: answer.questionId, clientVersion: answer.clientVersion, writeId: uuid(),
+    questionId: answer.questionId, clientVersion: answer.clientVersion, writeId: answer.writeId || uuid(),
     response: { answer: answer.answer, markedForReview: false, eliminatedOptions: [], annotations: [] },
   }));
   // Delay the final packet, keeping its synthetic click 0.5s before zero.
   waitUntil(deadline - 500 + delayMs);
-  const saved = http.post(`${base}/api/v1/attempts/${cred.attemptId}/responses:batch`, JSON.stringify({
-    leaseEpoch: snapshot.leaseEpoch, controlEpoch: snapshot.controlEpoch, commands,
-  }), params);
-  if (saved.status === 200) finalAck.add((Date.now() - deadline) / 1000);
+  const saveURL = satAttemptUrl(base, cred.attemptId, 'responses:batch');
+  const saveBody = JSON.stringify(satBatchRequest(snapshot, commands));
+  let saved;
+  for (let retry = 0; retry < 4; retry += 1) {
+    saved = http.post(saveURL, saveBody, params);
+    if (![0, 429, 502, 503, 504].includes(saved.status)) break;
+    sleep((250 * 2 ** retry + Math.random() * 250) / 1000);
+  }
+  if (saved.status === 200) {
+    const acks = assertSatAcknowledgements(body(saved), commands);
+    finalAck.add((Date.now() - deadline) / 1000);
+    const replay = assertSatAcknowledgements(body(http.post(saveURL, saveBody, params)), commands);
+    const revisions = new Map(acks.map((ack) => [ack.writeId, ack.serverRevision]));
+    if (replay.some((ack) => ack.serverRevision !== revisions.get(ack.writeId))) refusal('Save replay changed its committed revision');
+  }
   else {
     const error = body(saved)?.error ?? body(saved);
     if (['DEADLINE_EXPIRED', 'ATTEMPT_NOT_WRITABLE'].includes(error?.code)) rejections.add(1);
-    if (!baseline) refusal(`Final batch rejected: HTTP ${saved.status}`);
+    if (!baseline || saved.status !== 422 || !['DEADLINE_EXPIRED', 'ATTEMPT_NOT_WRITABLE'].includes(error?.code)) {
+      refusal(`Final batch rejected: HTTP ${saved.status}`);
+    }
   }
   waitUntil(deadline + 20);
   let close = null;
@@ -135,13 +150,18 @@ export default function ({ deadline }) {
   httpDelta.add(Math.max(0, Date.parse(started.serverNow) - Date.parse(started.startedAt)) / 1000 + (Date.now() - before) / 1000);
   snapshot = body(http.get(snapshotURL, params));
   if (!snapshot) refusal('Could not verify final answers');
-  if (saved.status === 200 && commands.some((command) => !snapshot?.responses?.some((r) => r.questionId === command.questionId && r.clientVersion >= command.clientVersion))) { lost.add(1); refusal('An acknowledged final answer was lost'); }
+  if (saved.status === 200) {
+    try { assertSatStoredResponses(snapshot, commands); }
+    catch (_) { lost.add(1); refusal('An acknowledged final answer was lost or changed'); }
+  }
   const m2 = started.selectedSection?.modules?.find((module) => module.id === cred.expectedModuleId);
   if (!m2?.questions?.length) refusal('M2 start omitted selected content');
-  const nextWrite = http.post(`${base}/api/v1/attempts/${cred.attemptId}/responses:batch`, JSON.stringify({
-    leaseEpoch: snapshot.leaseEpoch, controlEpoch: snapshot.controlEpoch,
-    commands: [{ questionId: m2.questions[0].examQuestionId, writeId: uuid(), clientVersion: 1,
-      response: { answer: cred.m2Answer || 'A', markedForReview: false, eliminatedOptions: [], annotations: [] } }],
-  }), params);
+  const questionId = m2.questions[0].examQuestionId;
+  const previousVersion = snapshot.responses.find((response) => response.questionId === questionId)?.clientVersion || 0;
+  const nextCommands = [{ questionId, writeId: uuid(), clientVersion: previousVersion + 1,
+    response: { answer: cred.m2Answer || 'A', markedForReview: false, eliminatedOptions: [], annotations: [] } }];
+  const nextWrite = http.post(saveURL, JSON.stringify(satBatchRequest(snapshot, nextCommands)), params);
   if (nextWrite.status !== 200) refusal(`M2 write blocked after handoff: HTTP ${nextWrite.status}`);
+  assertSatAcknowledgements(body(nextWrite), nextCommands);
+  assertSatStoredResponses(body(http.get(snapshotURL, params)), nextCommands);
 }

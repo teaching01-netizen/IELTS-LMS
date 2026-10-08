@@ -51,7 +51,7 @@ export function SatStudentResponseEditor({
         <div className="block">
           <span className="mb-1.5 flex items-baseline justify-between gap-3">
             <span className="text-[12px] font-semibold text-slate-800">Primary answer</span>
-            <span className="text-[11px] text-slate-400">Exact numeric answer</span>
+            <span className="text-xs text-slate-400">Exact numeric answer</span>
           </span>
           <input
             id={primaryResponseId}
@@ -69,7 +69,7 @@ export function SatStudentResponseEditor({
             placeholder="12"
           />
         </div>
-        <div id={primaryResponseHelpId} className="mt-1.5 min-h-5 text-[11px] leading-5">
+        <div id={primaryResponseHelpId} className="mt-1.5 min-h-5 text-xs leading-5">
           {primary && !primaryValidation.valid ? (
             <span className="text-au-danger-text">{primaryValidation.message}</span>
           ) : primaryValidation.valid ? (
@@ -88,14 +88,14 @@ export function SatStudentResponseEditor({
       <div>
         <div className="mb-2 flex items-center justify-between gap-3">
           <span className="text-[12px] font-semibold text-slate-800">Accepted equivalents</span>
-          <span className="text-[11px] text-slate-400">Optional</span>
+          <span className="text-xs text-slate-400">Optional</span>
         </div>
         {equivalents.length ? (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {equivalents.map((response) => (
               <span
                 key={response}
-                className="inline-flex items-center gap-1 rounded-full border border-au-separator bg-au-surface px-2.5 py-1.5 font-mono text-[11px] text-slate-700"
+                className="inline-flex items-center gap-1 rounded-full border border-au-separator bg-au-surface px-2.5 py-1.5 font-mono text-xs text-slate-700"
               >
                 {response}
                 <button
@@ -144,9 +144,9 @@ export function SatStudentResponseEditor({
           </button>
         </div>
         {equivalentError ? (
-          <p role="alert" className="mt-1.5 text-[11px] text-au-danger-text">{equivalentError}</p>
+          <p role="alert" className="mt-1.5 text-xs text-au-danger-text">{equivalentError}</p>
         ) : null}
-        <p className="text-[11px] leading-4 text-slate-500">
+        <p className="text-xs leading-4 text-slate-500">
           New publications use exact numeric equivalence and SAT decimal rounding.
           Enter the exact answer; equivalent fractions and decimals are accepted automatically.
         </p>

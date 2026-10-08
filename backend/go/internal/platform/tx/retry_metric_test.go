@@ -7,7 +7,7 @@ package tx
 // an injectable package hook (nil = silent, zero behavior change);
 // services wire it to telemetry. RED: hook must fire once per retry.
 import (
-	"errors"
+	"github.com/go-sql-driver/mysql"
 	"sync/atomic"
 	"testing"
 )
@@ -16,7 +16,7 @@ func TestRetryReportsTransientThroughHook(t *testing.T) {
 	var hooks int64
 	defer SetRetryHook(nil)()
 	SetRetryHook(func(err error) { atomic.AddInt64(&hooks, 1) })
-	deadlock := errors.New("Error 1213 (40001): Deadlock found when trying to get lock; try restarting transaction")
+	deadlock := &mysql.MySQLError{Number: 1213, Message: "Deadlock found when trying to get lock"}
 	if !transient(deadlock) {
 		t.Fatalf("classifier must recognize InnoDB deadlock")
 	}

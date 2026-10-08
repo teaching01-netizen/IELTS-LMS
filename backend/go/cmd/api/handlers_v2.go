@@ -245,55 +245,65 @@ func (v2Resolver) ResolveMany(ctx context.Context, q tx.Tx, attemptID string, qu
 	return verdicts, nil
 }
 
-// normalizedQuestionOwners resolves the batch's questions against the published
-// normalized assessment tree in one statement. A question matches by
-// assessment_exam_questions.id first and by question_id second — the same
-// preference the per-question query expresses with ORDER BY + LIMIT 1.
+func (v2Resolver) CanonicalizeQuestions(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]attempts.QuestionOwner, error) {
+	return normalizedQuestionOwners(ctx, q, attemptID, questionIDs)
+}
+
+// normalizedQuestionOwners resolves pinned sitting-slot IDs. A reusable bank
+// question alias is accepted only when exactly one pinned slot uses it.
 func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]attempts.QuestionOwner, error) {
 	query := `SELECT eq.id, eq.question_id, m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key,` +
-		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds` +
+		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds,` +
+		` COALESCE(r.timing_model, ''), ma.entry_confirmed_at, ma.entry_entered_at` +
 		` FROM assessment_exam_questions eq` +
 		` JOIN assessment_modules m ON m.id = eq.module_id` +
 		` JOIN assessment_sections s ON s.id = m.section_id` +
 		` JOIN exam_versions v ON v.id = s.exam_version_id` +
 		` JOIN exam_entities e ON e.id = v.exam_id` +
+		` JOIN student_attempts sa ON sa.id = ?` +
+		` LEFT JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id` +
 		` LEFT JOIN assessment_module_attempts ma ON ma.module_id = m.id AND ma.attempt_id = ?` +
 		` WHERE (eq.id IN (` + sqlPlaceholders(len(questionIDs)) + `) OR eq.question_id IN (` + sqlPlaceholders(len(questionIDs)) + `))` +
-		` AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ?)`
+		` AND s.exam_version_id = sa.published_version_id`
 	args := make([]any, 0, 2*len(questionIDs)+2)
-	args = append(args, attemptID)
+	args = append(args, attemptID, attemptID)
 	for _, id := range questionIDs {
 		args = append(args, id)
 	}
 	for _, id := range questionIDs {
 		args = append(args, id)
 	}
-	args = append(args, attemptID)
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	owners := make(map[string]attempts.QuestionOwner, len(questionIDs))
-	matchedByID := make(map[string]bool, len(questionIDs))
-	type candidate struct {
-		examQuestionID string
-		questionID     string
-		owner          attempts.QuestionOwner
-	}
-	all := make([]candidate, 0, len(questionIDs))
+	exact := make(map[string]attempts.QuestionOwner, len(questionIDs))
+	aliases := make(map[string]attempts.QuestionOwner, len(questionIDs))
+	ambiguous := make(map[string]bool)
 	for rows.Next() {
 		var examQuestionID, questionID, moduleID, sectionKey, state string
 		var providerKey sql.NullString
-		var startedAt sql.NullTime
+		var startedAt, entryConfirmedAt, entryEnteredAt sql.NullTime
 		var allocated, extension, accumulatedPaused sql.NullInt64
+		var ownerTimingModel string
 		if err := rows.Scan(
 			&examQuestionID, &questionID, &moduleID, &sectionKey, &state, &providerKey,
 			&startedAt, &allocated, &extension, &accumulatedPaused,
+			&ownerTimingModel, &entryConfirmedAt, &entryEnteredAt,
 		); err != nil {
 			return nil, err
 		}
-		owner := attempts.QuestionOwner{ModuleID: moduleID, SectionKey: sectionKey}
+		owner := attempts.QuestionOwner{CanonicalQuestionID: examQuestionID, ModuleID: moduleID, SectionKey: sectionKey, TimingModel: ownerTimingModel}
+		if startedAt.Valid {
+			value := startedAt.Time.UTC()
+			owner.ModuleStartedAt = &value
+		}
+		if entryConfirmedAt.Valid {
+			value := entryConfirmedAt.Time.UTC()
+			owner.EntryConfirmedAt = &value
+		}
 		// Exam-day P1: a normalized question without an assigned module attempt
 		// for this attempt (unassigned adaptive branch, future module) must not
 		// resolve as writable.
@@ -303,29 +313,26 @@ func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, qu
 			owner.ModuleState = state
 		}
 		owner.ModuleDeadlineAt = satModuleDeadline(providerKey, state, startedAt, allocated, extension, accumulatedPaused)
-		all = append(all, candidate{examQuestionID: examQuestionID, questionID: questionID, owner: owner})
+		exact[examQuestionID] = owner
+		if prior, ok := aliases[questionID]; ok && prior.CanonicalQuestionID != examQuestionID {
+			ambiguous[questionID] = true
+		} else {
+			aliases[questionID] = owner
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	for _, questionID := range questionIDs {
-		for _, c := range all {
-			if c.examQuestionID == questionID {
-				owners[questionID] = c.owner
-				matchedByID[questionID] = true
-				break
-			}
-		}
-	}
-	for _, questionID := range questionIDs {
-		if matchedByID[questionID] {
+		if owner, ok := exact[questionID]; ok {
+			owners[questionID] = owner
 			continue
 		}
-		for _, c := range all {
-			if c.questionID == questionID {
-				owners[questionID] = c.owner
-				break
-			}
+		if ambiguous[questionID] {
+			return nil, &apperrors.Error{Code: apperrors.CodeBadRequest, HTTPStatus: 400, Message: "Question alias identifies multiple pinned sitting slots; use the exam-question ID.", Details: map[string]any{"reason": "AMBIGUOUS_QUESTION_ALIAS", "questionId": questionID}}
+		}
+		if owner, ok := aliases[questionID]; ok {
+			owners[questionID] = owner
 		}
 	}
 	return owners, nil
@@ -876,13 +883,19 @@ func v2SnapshotHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Database not configured."))
 			return
 		}
+		snapshot, err := app.DB.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		defer snapshot.Rollback()
 		var (
 			proto, lease, control     sql.NullInt64
 			delivery, schedID, userID sql.NullString
 			respRev                   sql.NullInt64
 			deadline, grace           sql.NullTime
 		)
-		err := app.DB.QueryRowContext(r.Context(), `SELECT protocol_version, delivery_status, lease_epoch, control_epoch, response_revision, deadline_at, closing_grace_until, schedule_id, user_id FROM student_attempts WHERE id = ?`, attemptID).Scan(&proto, &delivery, &lease, &control, &respRev, &deadline, &grace, &schedID, &userID)
+		err = snapshot.QueryRowContext(r.Context(), `SELECT protocol_version, delivery_status, lease_epoch, control_epoch, response_revision, deadline_at, closing_grace_until, schedule_id, user_id FROM student_attempts WHERE id = ?`, attemptID).Scan(&proto, &delivery, &lease, &control, &respRev, &deadline, &grace, &schedID, &userID)
 		if err == sql.ErrNoRows {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Attempt not found."))
 			return
@@ -891,7 +904,7 @@ func v2SnapshotHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		rows, err := app.DB.QueryContext(r.Context(), `SELECT question_id, client_write_id, client_version, server_revision, response_hash, CAST(response AS CHAR) FROM attempt_responses_v2 WHERE attempt_id = ? ORDER BY question_id`, attemptID)
+		rows, err := snapshot.QueryContext(r.Context(), `SELECT question_id, client_write_id, client_version, server_revision, response_hash, CAST(response AS CHAR) FROM attempt_responses_v2 WHERE attempt_id = ? ORDER BY question_id`, attemptID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -957,17 +970,6 @@ func studentEntryBucket(key string) httpx.RateLimitResult {
 	return studentEntryRateLimiter.Allow(httpx.RateLimitConfig{MaxRequests: 30, Window: time.Minute, Tier: "student-entry"}, key)
 }
 
-// isStudentEntryAccountAllowed gates entry on account state only: any ACTIVE
-// account may check in once the schedule/code gate passes. Link-backed entry
-// still verifies its link lifecycle and window through ResolveEntry.
-// Disabled / locked / pending_activation stay blocked; the role never
-// gates. The passwordless entry flow only ever mints a student-scoped
-// session (see studentEntryHandler), so allowing staff emails here grants
-// exam access, never staff privileges.
-func isStudentEntryAccountAllowed(role, state string) bool {
-	_ = role
-	return state == "active"
-}
 
 // studentEntryNotFound is the 404-collapse envelope for student entry:
 // unknown/closed schedules and unknown/expired/paused links render
@@ -1048,6 +1050,20 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 		scheduleID := strings.TrimSpace(body.ScheduleID)
 		linkID := strings.TrimSpace(body.AccessLinkID)
 		var linkMode string
+		entryKey := "entry:" + strings.ToLower(strings.TrimSpace(body.Email)) + "|" + httpx.ClientIPKey(r)
+		if res := studentEntryBucket(entryKey); !res.Allowed {
+			httpx.WriteRateLimitExceeded(w, r, "student-entry", "ip", res.RetryAfter)
+			return
+		}
+		owned, recoveryErr := lookupOwnEntry(r, app, scheduleID, linkID, body.EntrySession, body.Wcode, body.ClientSessionID)
+		if recoveryErr != nil {
+			httpx.WriteError(w, r, MapDBError(recoveryErr))
+			return
+		}
+		if owned != nil {
+			writeStudentEntry(w, r, app, *owned)
+			return
+		}
 		if linkID != "" {
 			if app.AccessLinks == nil {
 				httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Access-links service is unavailable."))
@@ -1078,13 +1094,6 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Entry service is unavailable."))
 			return
 		}
-		// Per-email+IP rate limit for anonymous entry (30/min per key,
-		// mirroring the Rust per-IP/per-schedule student-entry tiers).
-		entryKey := "entry:" + strings.ToLower(strings.TrimSpace(body.Email)) + "|" + httpx.ClientIPKey(r)
-		if res := studentEntryBucket(entryKey); !res.Allowed {
-			httpx.WriteRateLimitExceeded(w, r, "student-entry", "ip", res.RetryAfter)
-			return
-		}
 		// Plan D3: per-schedule check-in bucket (ENTRY_GATE=on). Over-limit
 		// check-ins get a bounded 429 + Retry-After instead of a DB conflict
 		// storm on the schedule row. Off (default) = skipped.
@@ -1105,29 +1114,34 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 				return
 			}
 		}
-		// Case-insensitive email lookup + normalization (mirrors login's
-		// TrimSpace+ToLower): without it `ALICE@x` and `alice@x` mint
-		// duplicate user rows and the second INSERT 500s.
 		email := strings.ToLower(strings.TrimSpace(body.Email))
-		var userID, role, state, displayName string
-		err := app.DB.QueryRowContext(r.Context(), `SELECT id, role, state, COALESCE(display_name, '') FROM users WHERE LOWER(email) = ?`, email).Scan(&userID, &role, &state, &displayName)
-		if err == sql.ErrNoRows {
-			userID = uuid.NewString()
-			if _, err := app.DB.ExecContext(r.Context(), `INSERT INTO users (id, email, display_name, role, state) VALUES (?, ?, ?, 'student', 'active')`, userID, email, strings.TrimSpace(body.StudentName)); err != nil {
-				// Round 159: unguarded user-mint is a bare-cancel 500 source
-				// (r159: 91 x bare `context canceled` after all auth sites
-				// mapped) — client-gone maps to retryable 503.
+		var userID, displayName string
+		proof := auth.SessionProof{Source: auth.SessionSourcePractice, PracticeScheduleID: scheduleID}
+		// Existing-account association requires an independently authenticated
+		// student session and CSRF proof; public display email is never authority.
+		if sess := SessionOf(r.Context()); sess != nil && sess.Role == auth.RoleStudent && sess.Proof.Source == auth.SessionSourceAccount {
+			var accountEmail, state string
+			err := app.DB.QueryRowContext(r.Context(), "SELECT email, state, COALESCE(display_name, '') FROM users WHERE id = ?", sess.UserID).Scan(&accountEmail, &state, &displayName)
+			if err != nil {
 				httpx.WriteError(w, r, MapDBError(err))
 				return
 			}
-			role, state, displayName = auth.RoleStudent, "active", strings.TrimSpace(body.StudentName)
-		} else if err != nil {
-			httpx.WriteError(w, r, MapDBError(err))
-			return
+			if strings.EqualFold(accountEmail, email) && state == "active" {
+				if err := auth.VerifyCSRF(r, sess.CSRFToken); err != nil {
+					httpx.WriteError(w, r, err)
+					return
+				}
+				userID = sess.UserID
+				proof = auth.SessionProof{Source: auth.SessionSourceAccount}
+			}
 		}
-		if !isStudentEntryAccountAllowed(role, state) {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Student account is not available."))
-			return
+		if userID == "" {
+			var err error
+			userID, displayName, err = practiceEntryPrincipal(r.Context(), app.DB, scheduleID, body.EntrySession, body.StudentName)
+			if err != nil {
+				httpx.WriteError(w, r, MapDBError(err))
+				return
+			}
 		}
 		if strings.TrimSpace(displayName) == "" {
 			displayName = strings.TrimSpace(body.StudentName)
@@ -1177,42 +1191,10 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			}
 			att = &minted
 		}
-		now := time.Now().UTC()
-		// One admission boundary: authoritative lease (never a hardcoded
-		// epoch) and, under the SAT single-writer policy, no writer
-		// credential for a browser competing with the current owner.
-		admission, err := admitStudentSession(r.Context(), app, userID, scheduleID, att.AttemptID, clientSessionID)
-		if err != nil {
-			httpx.WriteError(w, r, MapDBError(err))
-			return
-		}
-		// The blocked browser still gets its student session: it is the
-		// scoped capability for requesting a device transfer.
-		_, sessionToken, csrfToken, err := auth.CreateSession(r.Context(), app.DB, app.Config, userID, auth.RoleStudent, nil, nil, now)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		sessionExpiresAt, idleTimeoutAt := auth.SessionExpiry(app.Config, auth.RoleStudent, now)
-		setCreatedSessionCookies(w, app, auth.RoleStudent, sessionToken, csrfToken, sessionExpiresAt, idleTimeoutAt, now)
-		out := map[string]any{
-			"user":             map[string]any{"id": userID, "email": email, "displayName": displayName, "role": auth.RoleStudent, "state": "active"},
-			"csrfToken":        csrfToken,
-			"expiresAt":        sessionExpiresAt,
-			"idleTimeoutAt":    idleTimeoutAt,
-			"scheduleId":       scheduleID,
-			"studentCode":      wcode,
-			"attemptToken":     nil,
-			"attemptId":        att.AttemptID,
-			"attemptExpiresAt": nil,
-			"clientSessionId":  clientSessionID,
-			"admission":        admissionPayload(admission),
-		}
-		if admission.Token != "" {
-			out["attemptToken"] = admission.Token
-			out["attemptExpiresAt"] = admission.ExpiresAt.UTC()
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		writeStudentEntry(w, r, app, studentEntryIdentity{
+			UserID:userID, DisplayName:displayName, Email:email, ScheduleID:scheduleID,
+			Code:wcode, AttemptID:att.AttemptID, ClientSessionID:clientSessionID, Proof:proof,
+		})
 	}
 }
 

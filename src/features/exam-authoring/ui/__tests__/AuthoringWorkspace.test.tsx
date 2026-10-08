@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AssessmentAuthoringShell,
@@ -83,6 +83,15 @@ vi.mock("../../editor/FastQuestionComposer", () => ({
 vi.mock("../../editor/RichQuestionComposer", () => ({ SAT_CHOICE_COMPOSER_CAPABILITIES: {} }));
 vi.mock("../../providers/sat/contentTemplates", () => ({
   createSatSupportingMaterial: (kind: string) => ({ version: 2 as const, nodes: [], document: { type: "doc" as const, content: [{ type: "paragraph", text: kind }] } }),
+}));
+vi.mock("../settings/ExamSettingsSheet", () => ({
+  ExamSettingsSheet: ({ onClose }: { onClose: () => void }) => (
+    <div role="dialog" aria-label="Exam settings">
+      <button type="button" onClick={onClose}>
+        Close settings
+      </button>
+    </div>
+  ),
 }));
 import { SAVE_CONFLICT_COPY } from "../../realtime/connectionCopy";
 import { AuthoringWorkspace } from "../AuthoringWorkspace";
@@ -195,64 +204,132 @@ function renderWorkspace() {
   return render(workspaceTree());
 }
 
+function openOutline() {
+  window.localStorage.setItem("sat-authoring-outline", "open");
+}
+
 describe("AuthoringWorkspace (spine-only)", () => {
   beforeEach(() => { setupDefaults(); });
 
-  it("renders the spine branch with header progress and queue", async () => {
+  it("renders the shared exam header, tabs, and the module's question cards", async () => {
     renderWorkspace();
     expect(await screen.findByRole("heading", { name: "SAT Practice 1" })).toBeInTheDocument();
-    expect(await screen.findByText(/of \d+ authored/)).toBeInTheDocument();
+    const tabs = screen.getByRole("navigation", { name: "Exam sections" });
+    expect(within(tabs).getByRole("button", { name: "Questions" })).toHaveAttribute("aria-current", "page");
+    expect(within(tabs).getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    // Responses is an admin-only tab: this session has no admin role.
+    expect(within(tabs).queryByRole("button", { name: "Responses" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("exam-lifecycle")).toHaveTextContent("Draft");
+    expect(screen.getByText(/2 of 3 questions/)).toBeInTheDocument();
+    // One editor is mounted, in the active card; the other question is a summary.
+    expect(screen.getByRole("region", { name: "Question 1, editing" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Question 2\. .*Open to edit$/ })).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Question prompt")).toHaveLength(1);
   });
 
-  it("keeps paste import reachable from the spine queue", async () => {
-    renderWorkspace();
-    expect(await screen.findByRole("button", { name: /^add question$/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", {name: "More authoring actions"}));
-    expect(screen.getByRole("menuitem", {name: "Import from workbook"})).toBeInTheDocument();
-  });
-
-  it("opens the jump palette with Ctrl+K in the spine branch", async () => {
-    renderWorkspace();
-    await screen.findByRole("heading", { name: "SAT Practice 1" });
-    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
-    expect(await screen.findByRole("dialog", { name: /jump to question/i })).toBeInTheDocument();
-  });
-
-  it("opens shortcut help with ? in the spine branch", async () => {
+  it("keeps the outline closed until asked, then shows the queue beside the cards", async () => {
     renderWorkspace();
     await screen.findByRole("heading", { name: "SAT Practice 1" });
-    fireEvent.keyDown(document.body, { key: "?" });
-    expect(await screen.findByRole("dialog", { name: /keyboard shortcuts/i })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Question navigator" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Question outline" }));
+    expect(screen.getByRole("navigation", { name: "Question navigator" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("sat-authoring-outline")).toBe("open");
   });
 
-  it("reviews module issues from the spine queue", async () => {
+  it("opens another question by choosing its card", async () => {
     renderWorkspace();
-    await screen.findByRole("heading", { name: "SAT Practice 1" });
-    const view = screen.getByRole("button", { name: /question readiness filters/i });
-    void view;
-    expect(await screen.findByText(/first prompt/i)).toBeInTheDocument();
+    await screen.findByRole("region", { name: "Question 1, editing" });
+    fireEvent.click(screen.getByRole("button", { name: /^Question 2\. /i }));
+    expect(await screen.findByRole("region", { name: "Question 2, editing" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Question 1\. /i })).toBeInTheDocument();
   });
 
-  it("keeps import, preview, and release actions reachable in the spine header", async () => {
+  it("offers one Import menu with both import paths for authors", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    renderWorkspace();
+    fireEvent.click(await screen.findByRole("button", { name: "Import questions" }));
+    expect(screen.getByRole("menuitem", { name: /Add questions to this module/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Replace exam from workbook/ })).toBeInTheDocument();
+  });
+
+  it("hides Import from roles that cannot edit", async () => {
     renderWorkspace();
     await screen.findByRole("heading", { name: "SAT Practice 1" });
-    expect(screen.getByRole("button", { name: "More authoring actions" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open the full sat preview/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^release$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Import questions" })).not.toBeInTheDocument();
+  });
+
+  it("adds a question after the active one with an order-protected placement", async () => {
+    harness.mutations.create.mockResolvedValue({ examQuestionId: "eq-3", question: makeDraft("rev-3", "") });
+    harness.mutations.reorder.mockResolvedValue(undefined);
+    renderWorkspace();
+    await screen.findByRole("region", { name: "Question 1, editing" });
+    fireEvent.click(screen.getByRole("button", { name: "Add question below" }));
+    await waitFor(() => expect(harness.mutations.create).toHaveBeenCalledWith("mod-1"));
+    // eq-1 is first of two: the new row lands at index 1, so the order write is
+    // protected by the exact order the server held plus the appended row.
+    await waitFor(() =>
+      expect(harness.mutations.reorder).toHaveBeenCalledWith({
+        moduleId: "mod-1",
+        request: {
+          questionIds: ["eq-1", "eq-3", "eq-2"],
+          expectedQuestionIds: ["eq-1", "eq-2", "eq-3"],
+        },
+      })
+    );
+  });
+
+  it("keeps the exam-level actions reachable in the header", async () => {
+    renderWorkspace();
+    await screen.findByRole("heading", { name: "SAT Practice 1" });
+    expect(screen.getByRole("button", { name: "More exam actions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Preview exam" })).toBeInTheDocument();
+    // The breadcrumb leads back to the library the author came from.
+    expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("button", { name: "Exam Library" })).toBeInTheDocument();
+    // Sessions (student access, check-in and running) live under their own tab, not a header button.
+    expect(screen.queryByRole("button", { name: /^student access$/i })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Exam sections" })).getByRole("button", { name: "Sessions" })).toBeInTheDocument();
+    // Creating a session needs a published version: a draft-only exam is not offered it.
+    expect(screen.queryByRole("button", { name: "Create session" })).not.toBeInTheDocument();
+    // Publish only exists for exams the viewer may publish.
+    expect(screen.queryByRole("button", { name: /^publish$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Authoring view" })).not.toBeInTheDocument();
+  });
+
+  it("edits settings in place from Quick settings, while the Settings tab is a real page", async () => {
+    render(
+      <QueryClientProvider client={renderWorkspaceClient()}>
+        <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
+          <Routes>
+            <Route path="/sat/exams/:examId" element={<AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />} />
+            <Route path="/sat/exams/:examId/settings" element={<p>Settings page</p>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("region", { name: "Question 1, editing" });
+    fireEvent.click(screen.getByRole("button", { name: "Quick settings" }));
+    expect(await screen.findByRole("dialog", { name: "Exam settings" })).toBeInTheDocument();
+    // The sheet sits over the cards: the author stays on Questions with their question open.
+    const tabs = within(screen.getByRole("navigation", { name: "Exam sections" }));
+    expect(tabs.getByRole("button", { name: "Questions" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("region", { name: "Question 1, editing" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    expect(screen.queryByRole("dialog", { name: "Exam settings" })).not.toBeInTheDocument();
+    fireEvent.click(tabs.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByText("Settings page")).toBeInTheDocument();
   });
 
   it("duplicates the explicit noncurrent row after exactly one dirty-draft flush",async()=>{
     harness.autosave.status="unsaved";
     harness.mutations.duplicate.mockResolvedValue({examQuestionId:"eq-3",question:makeDraft("rev-3","Copy")});
-    renderWorkspace();await screen.findByRole("heading",{name:"Question 1"});
+    openOutline();renderWorkspace();await screen.findByRole("heading",{name:"Question 1"});
     fireEvent.click(screen.getByRole("button",{name:"Question 2 actions"}));fireEvent.click(screen.getByRole("menuitem",{name:"Duplicate"}));
     await waitFor(()=>expect(harness.mutations.duplicate).toHaveBeenCalledOnce());
     expect(harness.autosave.flushNow).toHaveBeenCalledOnce();
     expect(harness.mutations.duplicate).toHaveBeenCalledWith(expect.objectContaining({examQuestionId:"eq-2",request:expect.objectContaining({insertAfterExamQuestionId:"eq-2",operationKey:expect.any(String)})}));
   });
   it("confirms deletion of another row without changing the active draft",async()=>{
-    harness.api.deleteQuestion.mockResolvedValue(undefined);renderWorkspace();await screen.findByRole("heading",{name:"Question 1"});
+    harness.api.deleteQuestion.mockResolvedValue(undefined);openOutline();renderWorkspace();await screen.findByRole("heading",{name:"Question 1"});
     fireEvent.click(screen.getByRole("button",{name:"Question 2 actions"}));fireEvent.click(screen.getByRole("menuitem",{name:"Delete"}));
     expect(harness.api.deleteQuestion).not.toHaveBeenCalled();
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button",{name:"Delete question"}));
@@ -261,7 +338,7 @@ describe("AuthoringWorkspace (spine-only)", () => {
     expect(screen.getByRole("heading",{name:"Question 1"})).toBeInTheDocument();
   });
   it("stops row mutations when the dirty draft cannot flush",async()=>{
-    harness.autosave.status="error";harness.autosave.flushNow.mockResolvedValue({ok:false,isLatest:true});renderWorkspace();await screen.findByRole("heading",{name:"Question 1"});
+    harness.autosave.status="error";harness.autosave.flushNow.mockResolvedValue({ok:false,isLatest:true});openOutline();renderWorkspace();await screen.findByRole("heading",{name:"Question 1"});
     fireEvent.click(screen.getByRole("button",{name:"Question 2 actions"}));fireEvent.click(screen.getByRole("menuitem",{name:"Duplicate"}));
     await waitFor(()=>expect(harness.autosave.flushNow).toHaveBeenCalledOnce());expect(harness.mutations.duplicate).not.toHaveBeenCalled();
   });
@@ -284,8 +361,8 @@ describe("AuthoringWorkspace (spine-only)", () => {
     renderWorkspace();
     await screen.findByRole("heading", { name: "SAT Practice 1" });
     fireEvent.click(await screen.findByRole("button", {name:"Question actions"}));
-    fireEvent.click(screen.getByRole("menuitem", {name:/preview question as students/i}));
-    expect(await screen.findByText(/local unsaved edits included|saved draft revision/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", {name:"Preview question"}));
+    expect(await screen.findByText(/includes unsaved edits|saved draft/i)).toBeInTheDocument();
   });
 });
 

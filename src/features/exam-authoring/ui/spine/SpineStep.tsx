@@ -20,7 +20,7 @@ export function SpineStep({
 }) {
   return (
     <section data-authoring-field={field} className="scroll-mt-20">
-      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
         {step} — {title}
       </p>
       {children}

@@ -101,15 +101,15 @@ vi.mock("../../ui/SatDeliveryReleasePage", () => ({
     onIssueClick,
     onPublish,
     onOpenStudentAccess,
-    onBackToBuilder,
+    onSelectTab,
   }: {
     onIssueClick: (issue: AssessmentValidationIssue) => void;
     onPublish: (scope: "full" | "reading-writing" | "math", notes?: string) => Promise<void>;
     onOpenStudentAccess: () => void;
-    onBackToBuilder: () => void;
+    onSelectTab: (tab: "questions" | "settings" | "responses") => void;
   }) => (
     <div>
-      <button type="button" onClick={onBackToBuilder}>
+      <button type="button" onClick={() => onSelectTab("questions")}>
         Back to builder
       </button>
       <button
@@ -234,16 +234,20 @@ beforeEach(() => {
   mocks.refetchReadiness.mockResolvedValue(undefined);
   mocks.refetchRelease.mockResolvedValue(undefined);
   mocks.refetchDistribution.mockResolvedValue(undefined);
+  // The real mutation resolves { publishedVersion, releaseState } (see usePublishAssessment).
   mocks.publish.mockResolvedValue({
-    id: "draft-v5",
-    examId: exam.id,
-    versionNumber: 5,
-    revision: 43,
-    isDraft: false,
-    isPublished: true,
-    publishNotes: "Release notes",
-    publishScope: "full",
-    createdAt: "2026-08-28T08:00:00.000Z",
+    publishedVersion: {
+      id: "draft-v5",
+      examId: exam.id,
+      versionNumber: 5,
+      revision: 43,
+      isDraft: false,
+      isPublished: true,
+      publishNotes: "Release notes",
+      publishScope: "full",
+      createdAt: "2026-08-28T08:00:00.000Z",
+    },
+    releaseState: {},
   });
 });
 describe("SatDeliveryReleaseRoute", () => {
@@ -385,5 +389,29 @@ describe("SatDeliveryReleaseRoute", () => {
     expect(screen.getByText("student-links-dashboard")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to release" }));
     expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
+  });
+
+  it("continues into access setup for the exact version it just published (SAT workspace)", async () => {
+    render(
+      <MemoryRouter initialEntries={[`/sat/exams/${exam.id}/release`]}>
+        <Routes>
+          <Route
+            path="/sat/exams/:examId/release"
+            element={<SatDeliveryReleaseRoute exam={exam} onExamRefresh={vi.fn().mockResolvedValue(undefined)} />}
+          />
+          <Route path="/sat/exams/:examId/access" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    const probe = await screen.findByTestId("location");
+    const location = probe.textContent ?? "";
+    expect(location).toContain(`"pathname":"/sat/exams/${exam.id}/access"`);
+    // The create form opens for Version 5, pinned by id — not "whatever is current later".
+    expect(location).toContain("new=1");
+    expect(location).toContain("version=draft-v5");
+    expect(location).toContain("versionNumber=5");
   });
 });

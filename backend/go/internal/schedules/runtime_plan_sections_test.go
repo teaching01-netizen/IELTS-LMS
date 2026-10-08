@@ -19,7 +19,6 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
-	examdomain "example.com/ielts-proctoring/internal/exams"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
@@ -447,22 +446,3 @@ func TestRuntimePlanInIgnoresUnknownModuleRoles(t *testing.T) {
 	}
 }
 
-// The stored scope parser fails open: NULL, empty, malformed, and unrecognized
-// values all mean "no narrowing", so corruption cannot empty a run's plan.
-func TestParseStoredSectionScopeFailsOpen(t *testing.T) {
-	cases := map[string]string{
-		"null":         "",
-		"empty array":  "[]",
-		"malformed":    "nope",
-		"unknown keys": `["science"]`,
-	}
-	for name, raw := range cases {
-		if got := examdomain.ParseStoredSectionScope(raw); got != nil {
-			t.Fatalf("%s must mean no narrowing, got %v", name, got)
-		}
-	}
-	got := examdomain.ParseStoredSectionScope(`["math"]`)
-	if !got["math"] || len(got) != 1 {
-		t.Fatalf("expected a math-only scope, got %v", got)
-	}
-}

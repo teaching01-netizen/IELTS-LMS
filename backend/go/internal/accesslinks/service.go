@@ -145,16 +145,9 @@ func equalSections(a, b []string) bool {
 	return examdomain.EqualSectionScopes(a, b)
 }
 
-// parseEnabledSections decodes the stored JSON scope. A NULL/absent column, an
-// empty array, or a malformed value all mean "all sections": a corrupted scope
-// must not strand a run with no sections at all, and every fail-open path here
-// matches pre-migration behaviour.
+// parseEnabledSections preserves SQL NULL versus denied non-NULL scope.
 func parseEnabledSections(raw sql.NullString) []string {
-	keys := examdomain.SectionScopeKeys(examdomain.ParseStoredSectionScope(raw.String))
-	if len(keys) == 0 {
-		return nil
-	}
-	return keys
+	return examdomain.SectionScopeKeys(examdomain.ParseStoredSectionScope(raw))
 }
 
 // enabledSectionsJSON renders a scope for storage: NULL for "all sections",
@@ -453,6 +446,9 @@ func scanAccessLink(row interface {
 	l.AvailabilityType = availabilityType
 	l.LifecycleState = lifecycleState
 	l.EnabledSections = parseEnabledSections(enabledSections)
+	if enabledSections.Valid && len(l.EnabledSections) == 0 {
+		return AccessLink{}, badRequest("Stored Student Link scope is corrupt; staff must repair it before admission.")
+	}
 	l.PublishScope = normalizeScopeValue(publishScope.String)
 	if label.Valid {
 		v := label.String
@@ -582,13 +578,11 @@ func validateRequestFields(name string, audience AudienceType, label *string, mo
 	if _, err := normalizeName(name); err != nil {
 		return err
 	}
-	normalizedLabel, err := normalizeOptionalLabel(label)
-	if err != nil {
+	if _, err := normalizeOptionalLabel(label); err != nil {
 		return err
 	}
-	if audience != AudienceAnyone && normalizedLabel == nil {
-		return badRequest("An audience name is required for cohort and selected-student links.")
-	}
+	// The audience label is a staff-facing group name (a class or cohort). It is
+	// optional for every audience: only selected_students restricts admission.
 	if audience == AudienceSelectedStudents {
 		if mode != ModeStudentCode {
 			return badRequest("Selected-student links must require a student code.")
@@ -723,7 +717,7 @@ func hasEffectiveSections(providerKey string, publishScope examdomain.SATPublish
 	}
 	releaseScope := examdomain.ParseSATPublishScope(string(publishScope))
 	var linkScope map[string]bool
-	if len(enabledSections) > 0 {
+	if enabledSections != nil {
 		linkScope = make(map[string]bool, len(enabledSections))
 		for _, key := range enabledSections {
 			linkScope[key] = true
@@ -798,6 +792,9 @@ func lockLinkTx(ctx context.Context, q tx.Tx, linkID string) (linkLock, error) {
 	}
 	lock.lifecycle = state
 	lock.enabledSections = parseEnabledSections(enabledSections)
+	if enabledSections.Valid && len(lock.enabledSections) == 0 {
+		return lock, badRequest("Stored Student Link scope is corrupt; staff must repair it before changing this link.")
+	}
 	lock.publishScope = normalizeScopeValue(publishScope.String)
 	lock.hasParticipation = hasParticipation.Valid && hasParticipation.Int64 != 0
 	return lock, nil
@@ -1384,93 +1381,9 @@ func (s *Service) ResolveEntry(ctx context.Context, linkID, studentCode, student
 	}
 	var gated ResolvedEntry
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		// Fresh link + schedule read: the window/lifecycle gate observes the
-		// latest committed state. No FOR UPDATE: nothing here writes, so a lock
-		// would only serialize a room of concurrent check-ins on one link row.
-		var lifecycle, availability string
-		var opensAt, closesAt sql.NullTime
-		var enabledSections, publishScope sql.NullString
-		var scheduleID, providerKey, accessMode, audienceType string
-		if err := q.QueryRowContext(ctx, "SELECT l.schedule_id, e.provider_key, l.access_mode, l.audience_type, l.lifecycle_state, l.availability_type, l.opens_at, l.closes_at, l.enabled_sections, v.sat_publish_scope FROM assessment_access_links l JOIN exam_entities e ON e.id = l.exam_id JOIN exam_versions v ON v.id = l.published_version_id WHERE l.id = ?", linkID).Scan(&scheduleID, &providerKey, &accessMode, &audienceType, &lifecycle, &availability, &opensAt, &closesAt, &enabledSections, &publishScope); err != nil {
-			if err == sql.ErrNoRows {
-				return notFound("Access link was not found.")
-			}
-			return err
-		}
-		state, err := ParseLifecycleState(lifecycle)
-		if err != nil {
-			return err
-		}
-		audience, err := ParseAudienceType(audienceType)
-		if err != nil {
-			return err
-		}
-		mode, err := ParseMode(accessMode)
-		if err != nil {
-			return err
-		}
-		avail, err := ParseAvailabilityType(availability)
-		if err != nil {
-			return err
-		}
-		if !hasEffectiveSections(providerKey, normalizeScopeValue(publishScope.String), parseEnabledSections(enabledSections)) {
-			return unavailable("This Student Link has no sections enabled in its published release.")
-		}
-		var o, c *time.Time
-		if opensAt.Valid {
-			v := opensAt.Time
-			o = &v
-		}
-		if closesAt.Valid {
-			v := closesAt.Time
-			c = &v
-		}
-		switch deriveStatus(state, avail, o, c, time.Now().UTC()) {
-		case StatusLive:
-		case StatusUpcoming:
-			return unavailable("This Student Link is not open yet.")
-		case StatusEnded:
-			return unavailable("This Student Link has ended.")
-		case StatusPaused:
-			return unavailable("This Student Link is paused.")
-		case StatusRevoked:
-			return unavailable("This Student Link has been revoked.")
-		}
-		var start, end time.Time
-		if err := q.QueryRowContext(ctx, "SELECT start_time, end_time FROM exam_schedules WHERE id = ?", scheduleID).Scan(&start, &end); err != nil {
-			if err == sql.ErrNoRows {
-				return notFound("Schedule not found.")
-			}
-			return err
-		}
-		now := time.Now().UTC()
-		if now.Before(start) {
-			return unavailable("This Student Link is not open yet.")
-		}
-		if !now.Before(end) {
-			return unavailable("This Student Link has ended.")
-		}
-		if audience == AudienceSelectedStudents {
-			code := NormalizeAccessCode(studentCode)
-			if code == "" {
-				return unavailable("A Student ID/WCODE is required for this Student Link.")
-			}
-			var expectedName, expectedEmail sql.NullString
-			if err := q.QueryRowContext(ctx, "SELECT student_name, student_email FROM assessment_access_link_members WHERE link_id = ? AND student_code = ? LIMIT 1", linkID, code).Scan(&expectedName, &expectedEmail); err != nil {
-				if err == sql.ErrNoRows {
-					return unavailable("This Student ID/WCODE is not included in this Student Link.")
-				}
-				return err
-			}
-			if err := validateSelectedStudentIdentity(expectedName, expectedEmail, studentName, studentEmail); err != nil {
-				return err
-			}
-		}
-		gated = ResolvedEntry{ScheduleID: scheduleID, ProviderKey: providerKey, AccessMode: mode, AudienceType: audience, EnabledSections: parseEnabledSections(enabledSections)}
-		return nil
+		var err error
+		gated, err = ResolveEntryTx(ctx, q, linkID, studentCode, studentName, studentEmail)
+		return err
 	})
-	if err != nil {
-		return zero, err
-	}
-	return gated, nil
+	return gated, err
 }

@@ -128,6 +128,12 @@ const SatAttemptAnswersRoute = lazy(() =>
 const SatAccessRoute = lazy(() =>
   import("../../products/sat/routes/SatAccessRoute").then((module) => ({ default: module.SatAccessRoute }))
 );
+const SatExamResponsesRoute = lazy(() =>
+  import("../../products/sat/routes/SatExamResponsesRoute").then((module) => ({ default: module.SatExamResponsesRoute }))
+);
+const ExamSettingsRoute = lazy(() =>
+  import("../../features/exam-authoring/routes/ExamSettingsRoute").then((module) => ({ default: module.ExamSettingsRoute }))
+);
 
 const DevHighlightSelectionRoute = lazy(() =>
   import("./dev/HighlightSelectionDebugRoute").then((module) => ({
@@ -418,6 +424,24 @@ const baseRoutes = [
             element: withAuth(
               <Suspense fallback={<SatRouteLoadingFallback />}><SatAccessRoute /></Suspense>,
               ["admin", "builder"]
+            ),
+          },
+          {
+            path: "exams/:examId/settings",
+            errorElement: <RouteErrorBoundary />,
+            element: withAuth(
+              <Suspense fallback={<SatRouteLoadingFallback />}><ExamSettingsRoute /></Suspense>,
+              ["admin", "builder"]
+            ),
+          },
+          {
+            // Results are admin/grader/proctor only; the builder role must not
+            // gain read access to results through the exam workspace.
+            path: "exams/:examId/responses",
+            errorElement: <RouteErrorBoundary />,
+            element: withAuth(
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatExamResponsesRoute /></Suspense>,
+              ["admin"]
             ),
           },
         ],

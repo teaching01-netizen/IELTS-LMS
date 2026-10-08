@@ -83,7 +83,7 @@ export function CollaboratorStack({
           aria-label={PRESENCE_COPY.overflow(overflow)}
           aria-expanded={open}
           aria-haspopup="dialog"
-          className="ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="ml-1.5 rounded px-1.5 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid="collaborator-overflow"
         >
           {PRESENCE_COPY.overflow(overflow)}
@@ -96,7 +96,7 @@ export function CollaboratorStack({
           onClick={toggle}
           aria-expanded={open}
           aria-haspopup="dialog"
-          className="ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="ml-1.5 rounded px-1.5 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Who&apos;s here
         </button>
@@ -142,7 +142,7 @@ function AvatarGroup({
             animate={{ opacity: 1 }}
             transition={reduceMotion ? { duration: 0 } : authoringMotion.state}
             title={label}
-            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-background text-[10px] font-semibold"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-background text-xs font-semibold"
             style={{ backgroundColor: `${entry.color}18`, color: entry.color }}
             data-presence-state={entry.state}
             data-collaboration-self={entry.isSelf ? "true" : "false"}

@@ -680,7 +680,7 @@ func loadTimeSpentSeconds(ctx context.Context, t tx.Tx, attemptID string) (int64
 // the same result object as the result endpoints. It deliberately does not
 // lock: this is a post-commit read and the terminal projection is immutable
 // for the duration of the request.
-func LoadResultForAttempt(ctx context.Context, db *sql.DB, attemptID string) (*AssessmentResult, error) {
+func LoadResultForAttempt(ctx context.Context, db resultQueryer, attemptID string) (*AssessmentResult, error) {
 	if db == nil || strings.TrimSpace(attemptID) == "" {
 		return nil, nil
 	}

@@ -241,6 +241,7 @@ type Session struct {
 	OrganizationID *string
 	ExpiresAt      time.Time
 	IdleTimeoutAt  time.Time
+	Proof          SessionProof
 }
 
 // idleTimeoutFor returns the idle window: 30m staff, 60m student.
@@ -279,7 +280,10 @@ func SessionExpiry(cfg config.Config, role string, now time.Time) (expiresAt, id
 // CreateSession inserts a user_sessions row + a created audit event and
 // returns the session id, the raw bearer session token (only copy) and the
 // csrf token. now should be UTC (callers may pass DB time).
-func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, role string, userAgentHash *string, ipMetadata *string, now time.Time) (sessionID, sessionToken, csrfToken string, err error) {
+func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, role string, proof SessionProof, userAgentHash *string, ipMetadata *string, now time.Time) (sessionID, sessionToken, csrfToken string, err error) {
+	if err := proof.validate(role); err != nil {
+		return "", "", "", err
+	}
 	now = now.UTC()
 	sessionID = uuid.NewString()
 	sessionToken, err = RandomToken(32)
@@ -303,6 +307,13 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 		return "", "", "", fmt.Errorf("auth: create session begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	var currentRole, currentState string
+	if err := tx.QueryRowContext(ctx, "SELECT role, state FROM users WHERE id = ? FOR SHARE", userID).Scan(&currentRole, &currentState); err != nil {
+		return "", "", "", err
+	}
+	if currentRole != role || currentState != "active" {
+		return "", "", "", apperrors.New(apperrors.CodeUnauthorized, "Account authentication changed; please authenticate again.")
+	}
 
 	var ua any
 	if userAgentHash != nil {
@@ -313,8 +324,8 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 		ipMeta = *ipMetadata
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO user_sessions (id, user_id, session_token_hash, csrf_token, role_snapshot, issued_at, last_seen_at, expires_at, idle_timeout_at, user_agent_hash, ip_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sessionID, userID, tokenHash, csrfToken, role, now, now, expiresAt, idleAt, ua, ipMeta); err != nil {
+		`INSERT INTO user_sessions (id, user_id, session_token_hash, csrf_token, role_snapshot, issued_at, last_seen_at, expires_at, idle_timeout_at, user_agent_hash, ip_metadata, authentication_source, practice_schedule_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`,
+		sessionID, userID, tokenHash, csrfToken, role, now, now, expiresAt, idleAt, ua, ipMeta, proof.Source, proof.PracticeScheduleID); err != nil {
 		// Round 157: same client-gone honesty (r156: 5 masked 500s) —
 		// a client gone mid-session-row insert is retryable 503.
 		if isClientGone(err) {
@@ -351,18 +362,22 @@ func LookupSession(ctx context.Context, db Querier, cfg config.Config, sessionTo
 	var s Session
 	var revokedAt sql.NullTime
 	var orgID sql.NullString
-	var uaHash sql.NullString
-	_ = uaHash
+	var source, practiceScope sql.NullString
+	var currentRole, currentState string
 	err := db.QueryRowContext(ctx,
-		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at
+		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at, s.authentication_source, s.practice_schedule_id, u.role, u.state
 		 FROM user_sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.session_token_hash = ?`, tokenHash).Scan(
-		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt)
+		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt, &source, &practiceScope, &currentRole, &currentState)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("auth: lookup session: %w", err)
+	}
+	s.Proof = SessionProof{Source: source.String, PracticeScheduleID: practiceScope.String}
+	if s.Proof.validateStored(s.Role) != nil || currentRole != s.Role || currentState != "active" {
+		return nil, nil
 	}
 	if orgID.Valid {
 		v := orgID.String

@@ -70,9 +70,18 @@ func newSATPublishFixture(t *testing.T, customTarget bool) *satPublishFixture {
 		t.Fatal("SAT draft has no normalized modules")
 	}
 
+	numericModuleIndex := -1
+	for index := range modules {
+		if modules[index].sectionKey == "math" && numericModuleIndex == -1 {
+			numericModuleIndex = index
+		}
+	}
+	if numericModuleIndex == -1 {
+		t.Fatal("SAT draft has no Math module")
+	}
 	for index := range modules {
 		target := 1
-		if customTarget && index == 0 {
+		if customTarget && index == numericModuleIndex {
 			target = 2
 		}
 		if _, err := h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = ? WHERE id = ?", target, modules[index].id); err != nil {
@@ -81,7 +90,7 @@ func newSATPublishFixture(t *testing.T, customTarget bool) *satPublishFixture {
 		questionCount := target
 		for questionIndex := 0; questionIndex < questionCount; questionIndex++ {
 			draft := validSATPublishQuestion()
-			if customTarget && index == 0 && questionIndex == 1 {
+			if customTarget && index == numericModuleIndex && questionIndex == 1 {
 				draft = validSATPublishSPR()
 			}
 			created, err := h.authors.CreateQuestion(ctx, modules[index].id, h.actor, draft)
@@ -127,6 +136,17 @@ func validSATPublishSPR() authoring.QuestionDraft {
 		Prompt:       json.RawMessage(`{"version":1,"nodes":[{"type":"paragraph","text":"What is 6 times 7?"}]}`),
 		Answer:       json.RawMessage(`{"kind":"student_produced_response","acceptedResponses":["42"]}`),
 	}
+}
+
+func (f *satPublishFixture) mathQuestion(t *testing.T) string {
+	t.Helper()
+	for _, module := range f.modules {
+		if module.sectionKey == "math" && len(module.questions) > 0 {
+			return module.questions[0]
+		}
+	}
+	t.Fatal("SAT fixture has no Math question")
+	return ""
 }
 
 // makeSATDraftPublishable gives every module in the draft one valid question and
@@ -602,7 +622,7 @@ func TestSATPublishStrictSPRValidationMySQL(t *testing.T) {
 	} {
 		t.Run(answer, func(t *testing.T) {
 			f := newSATPublishFixture(t, false)
-			eqID := f.modules[0].questions[0]
+			eqID := f.mathQuestion(t)
 			f.setQuestion(t, eqID, "student_produced_response", string(validSATPublishSPR().Prompt), answer)
 			assertSATPublishRejected(t, f, "sat.spr.answer.invalid", "examQuestion:"+eqID+":answer")
 			var marker any
@@ -616,7 +636,7 @@ func TestSATPublishStrictSPRValidationMySQL(t *testing.T) {
 	}
 	t.Run("long canonical numeric key", func(t *testing.T) {
 		f := newSATPublishFixture(t, false)
-		f.setQuestion(t, f.modules[0].questions[0], "student_produced_response", string(validSATPublishSPR().Prompt), `{"kind":"student_produced_response","acceptedResponses":["100/333"]}`)
+		f.setQuestion(t, f.mathQuestion(t), "student_produced_response", string(validSATPublishSPR().Prompt), `{"kind":"student_produced_response","acceptedResponses":["100/333"]}`)
 		if _, err := f.h.exams.Publish(context.Background(), f.h.examID, f.h.actor, f.publishRequest()); err != nil {
 			t.Fatalf("representable canonical key rejected: %v", err)
 		}

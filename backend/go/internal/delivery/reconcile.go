@@ -161,6 +161,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				UPDATE assessment_attempt_breaks
 				SET state = 'completed', revision = revision + 1
 				WHERE attempt_id = ? AND state = 'active' AND paused_at IS NULL
+				  AND NOT EXISTS (SELECT 1 FROM student_attempts sa WHERE sa.id = assessment_attempt_breaks.attempt_id AND sa.proctor_status = 'paused')
 				  AND deadline_at IS NOT NULL AND deadline_at <= UTC_TIMESTAMP(6)`, attemptID)
 			if err != nil {
 				return err
@@ -199,10 +200,10 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 					WHERE attempt_id = ? AND state = 'not_started'
 					  AND available_at IS NOT NULL
 					  AND COALESCE(auto_start_at, available_at) <= UTC_TIMESTAMP(6)
-					  AND (auto_start_at IS NULL OR paused_at IS NULL)
-					  AND (auto_start_at IS NULL OR NOT EXISTS (
+					  AND paused_at IS NULL
+					  AND NOT EXISTS (
 					    SELECT 1 FROM student_attempts sa
-					    WHERE sa.id = assessment_module_attempts.attempt_id AND sa.proctor_status = 'paused'))
+					    WHERE sa.id = assessment_module_attempts.attempt_id AND sa.proctor_status = 'paused')
 					ORDER BY created_at, id LIMIT 1`, attemptID)
 				if err != nil {
 					return err

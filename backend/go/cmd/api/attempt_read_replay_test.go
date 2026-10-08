@@ -96,6 +96,7 @@ func TestSnapshotLiveBearerReadsBothModes(t *testing.T) {
 				WithArgs("tok-live").
 				WillReturnRows(sqlmock.NewRows([]string{"token_id", "revoked_at", "expires_at", "lease_epoch"}).
 					AddRow("tok-live", nil, now.Add(time.Hour), 3))
+			mock.ExpectBegin()
 			mock.ExpectQuery("FROM student_attempts WHERE id").
 				WillReturnRows(sqlmock.NewRows([]string{
 					"protocol_version", "delivery_status", "lease_epoch", "control_epoch",
@@ -105,6 +106,7 @@ func TestSnapshotLiveBearerReadsBothModes(t *testing.T) {
 				WillReturnRows(sqlmock.NewRows([]string{
 					"question_id", "client_write_id", "client_version", "server_revision", "response_hash", "response",
 				}))
+			mock.ExpectRollback()
 			req := httptest.NewRequest(http.MethodGet, "/api/v2/student/attempts/att-1/responses", nil)
 			req.Header.Set("Authorization", "Bearer "+tok)
 			rctx := chi.NewRouteContext()

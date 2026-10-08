@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useSatAttemptAnswersQuery } from '../../../features/results/api/satResultsQueries';
 import { QuestionRawTable } from '../../../components/results/QuestionRawTable';
 import { SatPageError, SatPageLoading, SatSectionCard } from '../ui/SatPage';
+import { isExamResponsesPath } from './satReturnPath';
 import { formatTestTimeLine, viewerTimeZoneLabel } from './satTestTime';
 
 function formatSavedAt(value: string | null): string {
@@ -35,7 +36,19 @@ export function SatAttemptAnswersRoute() {
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as { from?: unknown } | null)?.from;
-  const backTarget = typeof from === 'string' && from.startsWith('/sat/results?') ? from : '/sat/results';
+  const backTarget = typeof from === 'string' && (from.startsWith('/sat/results?') || isExamResponsesPath(from)) ? from : '/sat/results';
+  return <SatAttemptAnswersContent attemptId={attemptId} onBack={() => navigate(backTarget)} />;
+}
+
+export interface SatAttemptAnswersContentProps {
+  attemptId: string | undefined;
+  /** Page mode: leave to the results list. Embedded mode: return to the result summary (omit when there is none). */
+  onBack?: () => void;
+  /** Renders inside a side sheet: no page chrome. */
+  embedded?: boolean;
+}
+
+export function SatAttemptAnswersContent({ attemptId, onBack, embedded = false }: SatAttemptAnswersContentProps) {
   const query = useSatAttemptAnswersQuery(attemptId);
 
   if (query.isLoading) return <SatPageLoading label="Opening saved SAT answers…" />;
@@ -49,12 +62,13 @@ export function SatAttemptAnswersRoute() {
     section.push(question);
     questionsBySection.set(question.sectionKey, section);
   }
+  const Title = embedded ? 'h2' : 'h1';
   return (
-    <div className="mx-auto w-full max-w-[900px] px-4 pb-16 pt-6 sm:px-6 md:pt-9 lg:px-10">
-      <button type="button" onClick={() => navigate(backTarget)} aria-label="Back to SAT results" className="-ml-2 flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-[12px] font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"><ArrowLeft size={15} aria-hidden="true" />Results</button>
-      <header className="mt-5 border-b border-slate-200 pb-6">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{detail.examTitle} · Version {detail.versionNumber}</p>
-        <h1 className="mt-2 text-[30px] font-semibold tracking-tight text-slate-950">{detail.studentName}</h1>
+    <div className={embedded ? 'w-full pb-8' : 'mx-auto w-full max-w-[900px] px-4 pb-16 pt-6 sm:px-6 md:pt-9 lg:px-10'}>
+      {embedded ? (onBack ? <button type="button" onClick={onBack} className="-ml-2 flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[12px] font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"><ArrowLeft size={15} aria-hidden="true" />Back to result</button> : null) : <button type="button" onClick={onBack} aria-label="Back to SAT results" className="-ml-2 flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[12px] font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"><ArrowLeft size={15} aria-hidden="true" />Results</button>}
+      <header className={(embedded ? '' : 'mt-5 ') + 'border-b border-slate-200 pb-6'}>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{detail.examTitle} · Version {detail.versionNumber}</p>
+        <Title className="mt-2 text-[30px] font-semibold tracking-tight text-slate-950">{detail.studentName}</Title>
         <p className="mt-1 text-[13px] text-slate-600">{detail.studentId} · {detail.cohortName} · {statusLabel(detail.status)}</p>
         <p className="mt-3 text-[15px] font-semibold tabular-nums text-slate-900">Test started: {formatTestTimeLine(detail.testStartedAt)}</p>
         <p className="mt-1 text-[12px] tabular-nums text-slate-600">Submitted: {detail.submittedAt ? formatTestTimeLine(detail.submittedAt) : 'Not submitted'} · Times shown in {viewerTimeZoneLabel()}</p>
@@ -62,8 +76,8 @@ export function SatAttemptAnswersRoute() {
           <div>
             <p className="text-[13px] font-semibold text-slate-900">{detail.savedAnswerCount} server-saved answers</p>
             <p className="mt-1 text-[12px] text-slate-600">Last save: {formatSavedAt(detail.lastSavedAt)}{detail.responseRevision !== null ? ` · Revision ${detail.responseRevision}` : ' · Legacy attempt'}</p>
-            <p className="mt-1 text-[11px] text-slate-500">Only answers accepted by the server appear here. A score is not available for this attempt.</p>
-            <p className="mt-1 text-[11px] text-slate-500" role="status">{query.isFetching ? 'Checking for newer answers…' : `Checks automatically every 15 seconds while visible${query.dataUpdatedAt ? ` · Last checked ${new Date(query.dataUpdatedAt).toLocaleTimeString()}` : ''}`}</p>
+            <p className="mt-1 text-xs text-slate-500">Only answers accepted by the server appear here. A score is not available for this attempt.</p>
+            <p className="mt-1 text-xs text-slate-500" role="status">{query.isFetching ? 'Checking for newer answers…' : `Checks automatically every 15 seconds while visible${query.dataUpdatedAt ? ` · Last checked ${new Date(query.dataUpdatedAt).toLocaleTimeString()}` : ''}`}</p>
             {query.error ? <p className="mt-2 text-[12px] font-medium text-amber-700" role="alert">Could not check for newer answers. Showing the last successful check; try again or wait for the next check.</p> : null}
           </div>
           <button type="button" onClick={() => void query.refetch()} disabled={query.isFetching} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-50"><RefreshCw size={14} aria-hidden="true" />{query.isFetching ? 'Checking…' : 'Check now'}</button>

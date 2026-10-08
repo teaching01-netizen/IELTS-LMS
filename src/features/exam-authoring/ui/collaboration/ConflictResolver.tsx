@@ -189,7 +189,7 @@ export function ConflictResolver({
                     ).map(([label, revision]) => (
                       <div key={label}>
                         <dt className="font-semibold text-muted-foreground">{label}</dt>
-                        <dd className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 px-2 py-1 font-mono text-[11px]">
+                        <dd className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 px-2 py-1 font-mono text-xs">
                           {JSON.stringify(fieldSlice(row.field, revision), null, 2)}
                         </dd>
                       </div>

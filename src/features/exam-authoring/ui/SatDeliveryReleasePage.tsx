@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { Settings2 } from "lucide-react";
 import type { ExamEntity } from "../../../types/domain";
 import type {
   AssessmentAuthoringShell,
@@ -7,18 +8,18 @@ import type {
   SatPublishScope,
 } from "../contracts/assessment";
 import type { AssessmentReleaseState } from "../contracts/release";
-import { AuthoringConfirmDialog } from "./authoringPrimitives";
+import { useOptionalAuthSession } from "../../auth/api/authSession";
 import { PublishAssessmentDialog } from "./release/PublishAssessmentDialog";
 import { ReadinessPanel } from "./release/ReadinessPanel";
-import { ReleaseHeader } from "./release/ReleaseHeader";
 import { ReleaseStatusHero } from "./release/ReleaseStatusHero";
 import { ReleaseSummary } from "./release/ReleaseSummary";
 import { RuntimePolicyPanel } from "./release/RuntimePolicyPanel";
-import { SectionDeliveryEditor } from "./release/SectionDeliveryEditor";
 import { SectionHeading, ReleaseLoadingSurface } from "./release/releaseChrome";
 import {
+  candidateSecondsForSection,
   candidateSecondsForShell,
   canPublishFromBlockers,
+  formatDuration,
   getSATPublishBlockers,
   getFreshWarnings,
   getPublishBlockers,
@@ -28,6 +29,12 @@ import {
   summarizeStaleReadiness,
 } from "./release/releaseSelectors";
 import { releaseSurfaceClass, useReleaseOnline } from "./release/releaseUi";
+import { ExamWorkspaceHeader } from "./shell/ExamWorkspaceHeader";
+import {
+  canViewExamResponses,
+  describeExamLifecycle,
+  type ExamWorkspaceTab,
+} from "./shell/examLifecycle";
 
 export interface SatDeliveryReleasePageProps {
   exam: ExamEntity;
@@ -46,75 +53,22 @@ export interface SatDeliveryReleasePageProps {
    */
   draftBusy?: boolean;
   publishError: string | null;
-  onBackToBuilder: () => void;
   onBackToExams: () => void;
   onRefreshReadiness: () => Promise<unknown>;
   onPublishScopeChange: (scope: SatPublishScope) => void;
   onPublish: (scope: SatPublishScope, publishNotes?: string) => Promise<void>;
   onIssueClick: (issue: AssessmentValidationIssue) => void;
   onOpenStudentAccess: () => void;
+  /** Header tab navigation (Questions / Settings / Responses). */
+  onSelectTab: (tab: ExamWorkspaceTab) => void;
   presenceSlot?: ReactNode;
   saveSlot?: ReactNode;
   collaborationSlot?: ReactNode;
 }
 
 export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
-  const {
-    exam,
-    shell,
-    releaseState,
-    isLoading,
-    loadError,
-    readiness,
-    isChecking,
-    readinessError,
-    publishScope,
-    isPublishing,
-    draftBusy = false,
-    publishError,
-    onBackToBuilder,
-    onBackToExams,
-    onRefreshReadiness,
-    onPublishScopeChange,
-    onPublish,
-    onIssueClick,
-    onOpenStudentAccess,
-    presenceSlot,
-    saveSlot,
-    collaborationSlot,
-  } = props;
-  const [dirtySections, setDirtySections] = useState<Set<string>>(() => new Set());
-  const [showPublishDialog, setShowPublishDialog] = useState(false);
-  const [showLeaveDialog, setShowLeaveDialog] = useState(false);
+  const { shell, releaseState, isLoading, loadError, onBackToExams } = props;
   const online = useReleaseOnline();
-
-  const setSectionDirty = useCallback((sectionId: string, dirty: boolean) => {
-    setDirtySections((current) => {
-      if (current.has(sectionId) === dirty) return current;
-      const next = new Set(current);
-      if (dirty) next.add(sectionId);
-      else next.delete(sectionId);
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || dirtySections.size === 0) return;
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warnBeforeUnload);
-    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [dirtySections.size]);
-
-  const requestBackToBuilder = useCallback(() => {
-    if (dirtySections.size > 0) {
-      setShowLeaveDialog(true);
-      return;
-    }
-    onBackToBuilder();
-  }, [dirtySections.size, onBackToBuilder]);
 
   if (isLoading) {
     return <ReleaseLoadingSurface />;
@@ -142,72 +96,16 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     );
   }
 
-  return (
-    <ReleasePageBody
-      exam={exam}
-      shell={shell}
-      releaseState={releaseState}
-      readiness={readiness}
-      isChecking={isChecking}
-      readinessError={readinessError}
-      publishScope={publishScope}
-      isPublishing={isPublishing}
-      draftBusy={draftBusy}
-      publishError={publishError}
-      dirtySections={dirtySections}
-      showPublishDialog={showPublishDialog}
-      showLeaveDialog={showLeaveDialog}
-      online={online}
-      onBackToBuilder={onBackToBuilder}
-      onRefreshReadiness={onRefreshReadiness}
-      onPublishScopeChange={onPublishScopeChange}
-      onPublish={onPublish}
-      onIssueClick={onIssueClick}
-      onOpenStudentAccess={onOpenStudentAccess}
-      onDirtyChange={setSectionDirty}
-      onRequestBack={requestBackToBuilder}
-      onOpenPublishDialog={() => setShowPublishDialog(true)}
-      onClosePublishDialog={() => setShowPublishDialog(false)}
-      onOpenLeaveDialog={() => setShowLeaveDialog(true)}
-      onCloseLeaveDialog={() => setShowLeaveDialog(false)}
-      presenceSlot={presenceSlot}
-      saveSlot={saveSlot}
-      collaborationSlot={collaborationSlot}
-    />
-  );
+  return <ReleasePageBody {...props} shell={shell} releaseState={releaseState} online={online} />;
 }
 
-function ReleasePageBody(props: {
-  exam: ExamEntity;
-  shell: AssessmentAuthoringShell;
-  releaseState: AssessmentReleaseState;
-  readiness: AssessmentValidationReport | null;
-  isChecking: boolean;
-  readinessError: string | null;
-  publishScope: SatPublishScope;
-  isPublishing: boolean;
-  draftBusy: boolean;
-  publishError: string | null;
-  dirtySections: Set<string>;
-  showPublishDialog: boolean;
-  showLeaveDialog: boolean;
-  online: boolean;
-  onBackToBuilder: () => void;
-  onRefreshReadiness: () => Promise<unknown>;
-  onPublishScopeChange: (scope: SatPublishScope) => void;
-  onPublish: (scope: SatPublishScope, publishNotes?: string) => Promise<void>;
-  onIssueClick: (issue: AssessmentValidationIssue) => void;
-  onOpenStudentAccess: () => void;
-  onDirtyChange: (sectionId: string, dirty: boolean) => void;
-  onRequestBack: () => void;
-  onOpenPublishDialog: () => void;
-  onClosePublishDialog: () => void;
-  onOpenLeaveDialog: () => void;
-  onCloseLeaveDialog: () => void;
-  presenceSlot?: ReactNode;
-  saveSlot?: ReactNode;
-  collaborationSlot?: ReactNode;
-}) {
+function ReleasePageBody(
+  props: SatDeliveryReleasePageProps & {
+    shell: AssessmentAuthoringShell;
+    releaseState: AssessmentReleaseState;
+    online: boolean;
+  }
+) {
   const {
     exam,
     shell,
@@ -217,27 +115,22 @@ function ReleasePageBody(props: {
     readinessError,
     publishScope,
     isPublishing,
-    draftBusy,
+    draftBusy = false,
     publishError,
-    dirtySections,
-    showPublishDialog,
-    showLeaveDialog,
     online,
-    onBackToBuilder,
+    onBackToExams,
     onRefreshReadiness,
     onPublishScopeChange,
     onPublish,
     onIssueClick,
     onOpenStudentAccess,
-    onDirtyChange,
-    onRequestBack,
-    onOpenPublishDialog,
-    onClosePublishDialog,
-    onCloseLeaveDialog,
+    onSelectTab,
     presenceSlot,
     saveSlot,
     collaborationSlot,
   } = props;
+  const [showPublishDialog, setShowPublishDialog] = useState(false);
+  const role = useOptionalAuthSession()?.session?.user.role ?? null;
 
   const readinessFresh = isReadinessFresh(readiness, shell, publishScope);
   const blockers = getSATPublishBlockers(readiness, readinessFresh);
@@ -248,15 +141,14 @@ function ReleasePageBody(props: {
   // section.durationSeconds sums every authored module, which overstates the
   // longest real sitting (see candidateSecondsForShell).
   const totalCandidateSeconds = candidateSecondsForShell(shell, publishScope);
-  // Single source of truth shared with ReleaseGateCard: the page no longer
-  // computes canPublish inline. Authz comes from the exam capabilities; the
-  // offline guard is appended (connectivity is not a selector concern).
+  // Delivery settings are edited on the Settings tab, so nothing on this page
+  // can be unsaved: the gate's "dirty sections" input is always zero here.
   const publishBlockers = getPublishBlockers({
     lifecycleState: releaseState.state,
     readinessFresh,
     readinessValid,
     blockerCount: blockers.length,
-    dirtyCount: dirtySections.size,
+    dirtyCount: 0,
     isPublishing,
     canEdit: exam.canEdit,
     canPublishExam: exam.canPublish,
@@ -274,18 +166,23 @@ function ReleasePageBody(props: {
     ...(offlineBlocker ? [offlineBlocker] : []),
   ];
   const canPublish = online && !draftBusy && canPublishFromBlockers(publishBlockers);
-  const isPublishedCurrentView =
-    releaseState.state === "published_current" && dirtySections.size === 0;
+  const isPublishedCurrentView = releaseState.state === "published_current";
+  const includedSections = shell.sections.filter(
+    (section) => publishScope === "full" || section.sectionKey === publishScope
+  );
 
   return (
     <div className="sat-product min-h-screen bg-background text-foreground">
-      <ReleaseHeader
+      <ExamWorkspaceHeader
         examTitle={exam.title}
-        onBack={onRequestBack}
-        onOpenStudentAccess={releaseState.currentPublishedVersion ? onOpenStudentAccess : undefined}
-        presenceSlot={presenceSlot}
+        lifecycle={describeExamLifecycle(releaseState)}
+        activeTab={null}
+        showResponses={canViewExamResponses(role)}
+        onSelectTab={onSelectTab}
+        onBack={onBackToExams}
+        contextLine="Publish review"
         saveSlot={saveSlot}
-        collaborationSlot={collaborationSlot}
+        collaborationSlot={collaborationSlot ?? presenceSlot}
       />
       <main className="mx-auto w-full max-w-[1240px] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
         <ReleaseStatusHero
@@ -293,7 +190,7 @@ function ReleasePageBody(props: {
           readiness={readinessFresh ? readiness : null}
           readinessValid={readinessValid}
           isChecking={isChecking}
-          dirtyCount={dirtySections.size}
+          dirtyCount={0}
         />
 
         <div className="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -330,29 +227,42 @@ function ReleasePageBody(props: {
                 </div>
               </fieldset>
               {publishScope !== "full" ? (
-                <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">
                   Only {publishScope === "math" ? "Math" : "Reading & Writing"} will be included. The other section and its publish issues will be ignored for this release.
                 </p>
               ) : null}
             </section>
 
-            <section className={`${releaseSurfaceClass} p-5 sm:p-6`}>
+            <section className={`${releaseSurfaceClass} p-5 sm:p-6`} aria-label="Delivery plan summary">
               <SectionHeading
                 eyebrow="Delivery plan"
                 title="Timing & adaptive routing"
-                description="Configure the server-authoritative path a candidate can take. Each section saves independently with optimistic concurrency protection. The runtime routes each candidate to the base module plus exactly one branch — any branch preview here is a staff inspection tool, not the live adaptive decision."
+                description="Timing, breaks and adaptive routing are configured in Settings. This is what the selected scope will deliver."
               />
-              <div className="mt-6 space-y-4">
-                {shell.sections.map((section) => (
-                  <SectionDeliveryEditor
-                    key={section.id}
-                    examId={exam.id}
-                    section={section}
-                    canEdit={exam.canEdit}
-                    onDirtyChange={onDirtyChange}
-                  />
+              <ul className="mt-4 divide-y divide-border rounded-xl border border-border">
+                {includedSections.map((section, index) => (
+                  <li key={section.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                    <span className="font-semibold text-foreground">{section.title}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {formatDuration(
+                        candidateSecondsForSection({
+                          ...section,
+                          breakAfterSeconds:
+                            index === includedSections.length - 1 ? 0 : section.breakAfterSeconds,
+                        })
+                      )}
+                    </span>
+                  </li>
                 ))}
-              </div>
+              </ul>
+              <button
+                type="button"
+                onClick={() => onSelectTab("settings")}
+                className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl bg-muted px-4 text-sm font-semibold text-foreground hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Settings2 size={16} aria-hidden="true" />
+                Edit timing and routing in Settings
+              </button>
             </section>
 
             {isPublishedCurrentView ? (
@@ -386,13 +296,13 @@ function ReleasePageBody(props: {
             releaseState={releaseState}
             blockerCount={blockers.length}
             warningCount={warnings.length}
-            dirtyCount={dirtySections.size}
+            dirtyCount={0}
             publishBlockers={allPublishBlockers}
             canPublish={canPublish}
             isPublishing={isPublishing}
             publishError={publishError}
             online={online}
-            onPublish={onOpenPublishDialog}
+            onPublish={() => setShowPublishDialog(true)}
             onOpenStudentAccess={onOpenStudentAccess}
           />
         </div>
@@ -406,25 +316,14 @@ function ReleasePageBody(props: {
         warningCount={warnings.length}
         candidateSeconds={totalCandidateSeconds}
         publishScope={publishScope}
-        candidateEstimateStale={dirtySections.size > 0}
+        candidateEstimateStale={false}
         isPublishing={isPublishing}
         draftBusy={draftBusy}
         isUpdate={releaseState.state === "unpublished_changes"}
         currentPublishedVersionNumber={releaseState.currentPublishedVersion?.versionNumber ?? null}
-        onClose={onClosePublishDialog}
+        onClose={() => setShowPublishDialog(false)}
         onConfirm={onPublish}
         onOpenIssue={onIssueClick}
-      />
-      <AuthoringConfirmDialog
-        open={showLeaveDialog}
-        title="Leave with unsaved changes?"
-        description="Your delivery settings have not been saved. Leaving now discards those changes."
-        confirmLabel="Leave without saving"
-        onCancel={onCloseLeaveDialog}
-        onConfirm={() => {
-          onCloseLeaveDialog();
-          onBackToBuilder();
-        }}
       />
     </div>
   );

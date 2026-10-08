@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentAccessLink } from "../../../contracts/accessLinks";
 import type { SatAuthoringCollaborationValue } from "../../../realtime/coedit";
@@ -113,13 +113,13 @@ describe("AccessLinkEditorSheet", () => {
         onUpdate={vi.fn().mockResolvedValue(undefined)}
       />,
     );
-    fireEvent.change(screen.getByRole("textbox", { name: "Student Link name" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Session name" }), {
       target: { value: "Reading & Writing Link" },
     });
     expect(screen.getByRole("button", { name: /Reading & Writing/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: /Math/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Create Link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }));
     await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
     expect(onCreate.mock.calls[0]![0]).toMatchObject({ enabledSections: ["reading-writing"] });
   });
@@ -140,7 +140,7 @@ describe("AccessLinkEditorSheet", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/not available in its published version/);
     expect(screen.getByRole("button", { name: /Reading & Writing/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: /Math/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(onUpdate).toHaveBeenCalledOnce());
     expect(onUpdate.mock.calls[0]![1]).toMatchObject({ enabledSections: ["reading-writing"] });
   });
@@ -160,14 +160,14 @@ describe("AccessLinkEditorSheet", () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Student Link name" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Session name" }), {
       target: { value: "Verbal only" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Reading & Writing/ }));
     fireEvent.click(screen.getByRole("button", { name: /Math/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Create Link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }));
 
-    expect(screen.getByText("A Student Link needs at least one section.")).toBeInTheDocument();
+    expect(screen.getByText("A session needs at least one section.")).toBeInTheDocument();
     expect(onCreate).not.toHaveBeenCalled();
   });
 
@@ -186,11 +186,11 @@ describe("AccessLinkEditorSheet", () => {
         onUpdate={onUpdate}
       />,
     );
-    fireEvent.change(screen.getByRole("textbox", { name: "Student Link name" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Session name" }), {
       target: { value: "Verbal only" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Math/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Create Link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }));
     await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
     expect(onCreate.mock.calls[0]![0]).toMatchObject({ enabledSections: ["reading-writing"] });
     unmount();
@@ -208,10 +208,10 @@ describe("AccessLinkEditorSheet", () => {
         onUpdate={onUpdate}
       />,
     );
-    fireEvent.change(screen.getByRole("textbox", { name: "Student Link name" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Session name" }), {
       target: { value: "Verbal only (renamed)" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(onUpdate).toHaveBeenCalledOnce());
     expect(onUpdate.mock.calls[0]![1]).not.toHaveProperty("enabledSections");
   });
@@ -266,9 +266,9 @@ describe("AccessLinkEditorSheet", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Math/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Close Student Link editor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close session setup" }));
     expect(
-      screen.getByRole("alertdialog", { name: "Discard Student Link changes?" }),
+      screen.getByRole("alertdialog", { name: "Discard session setup changes?" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -277,7 +277,7 @@ describe("AccessLinkEditorSheet", () => {
     expect(onUpdate.mock.calls[0]![2]).toEqual({ silent: true });
   });
 
-  it("confirms before discarding dirty Student Link settings", () => {
+  it("confirms before discarding dirty session settings", () => {
     const onClose = vi.fn();
     render(
       <AccessLinkEditorSheet
@@ -291,17 +291,123 @@ describe("AccessLinkEditorSheet", () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Student Link name" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Session name" }), {
       target: { value: "Saturday class" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Close Student Link editor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close session setup" }));
 
     expect(onClose).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("alertdialog", { name: "Discard Student Link changes?" }),
+      screen.getByRole("alertdialog", { name: "Discard session setup changes?" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
 
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("reusing an allowlisted setup", () => {
+  it("waits for its roster and exposes recovery when loading fails", () => {
+    room.value = null;
+    const onCreate = vi.fn();
+    const onRetryMembers = vi.fn();
+    const props = { open: true, link: null, prefill: satLink({ audienceType: "selected_students" }), providerKey: "sat", members: [], isSaving: false, onClose: vi.fn(), onCreate, onUpdate: vi.fn(), onRetryMembers };
+    const view = render(<AccessLinkEditorSheet {...props} membersLoading />);
+    expect(screen.getByText("Loading student roster…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create session" })).toBeDisabled();
+    view.rerender(<AccessLinkEditorSheet {...props} membersError="The student roster could not load." />);
+    expect(screen.getByRole("alert")).toHaveTextContent("roster could not load");
+    fireEvent.click(screen.getByRole("button", { name: "Retry roster" }));
+    expect(onRetryMembers).toHaveBeenCalledOnce();
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+});
+
+
+it("creates only one group when confirmation is pressed twice before pending props update", async () => {
+  room.value = null;
+  let complete: (() => void) | undefined;
+  const onCreate = vi.fn(() => new Promise<void>((resolve) => { complete = resolve; }));
+  render(<AccessLinkEditorSheet open link={null} providerKey="sat" members={[]} isSaving={false} onClose={vi.fn()} onCreate={onCreate} onUpdate={vi.fn()} />);
+  fireEvent.change(screen.getByRole("textbox", { name: "Session name" }), { target: { value: "Morning class" } });
+  const confirm = screen.getByRole("button", { name: "Create session" });
+  fireEvent.click(confirm);
+  fireEvent.click(confirm);
+  expect(onCreate).toHaveBeenCalledTimes(1);
+  await act(async () => { complete?.(); });
+});
+
+describe("who can join vs. a group label", () => {
+  const base = { open: true, providerKey: "sat", members: [], isSaving: false, onClose: vi.fn(), onUpdate: vi.fn().mockResolvedValue(undefined) };
+
+  it("treats a class label as a name only: the session stays open to anyone with the link", async () => {
+    room.value = null;
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(<AccessLinkEditorSheet {...base} link={null} onCreate={onCreate} />);
+    expect(screen.getByRole("button", { name: /Anyone with the link/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("textbox", { name: "Selected students" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Session name" }), { target: { value: "Saturday mock" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Class or group label" }), { target: { value: "SAT September" } });
+    expect(screen.getByRole("button", { name: /Anyone with the link/ })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+    // The label rides along, but nothing in the request restricts admission.
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ audienceLabel: "SAT September", selectedStudents: [] });
+    expect(onCreate.mock.calls[0]![0].audienceType).not.toBe("selected_students");
+  });
+
+  it("creates an unlabeled anyone session without requiring a group name", async () => {
+    room.value = null;
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(<AccessLinkEditorSheet {...base} link={null} onCreate={onCreate} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Session name" }), { target: { value: "Open mock" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ audienceType: "anyone", audienceLabel: null });
+  });
+
+  it("restricts admission only for listed students, and then needs a roster but no group name", async () => {
+    room.value = null;
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(<AccessLinkEditorSheet {...base} link={null} onCreate={onCreate} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Session name" }), { target: { value: "Scholarship mock" } });
+    fireEvent.click(screen.getByRole("button", { name: /Listed students only/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+    expect(screen.getByText("Add at least one selected student.")).toBeInTheDocument();
+    expect(onCreate).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Selected students" }), { target: { value: "W123456, Jane Doe, jane@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({
+      audienceType: "selected_students",
+      accessMode: "student_code",
+      selectedStudents: [{ studentCode: "W123456", studentName: "Jane Doe", studentEmail: "jane@example.com" }],
+    });
+  });
+
+  it("shows a stored cohort audience as anyone with its label, never as a restriction", () => {
+    room.value = null;
+    render(<AccessLinkEditorSheet {...base} link={satLink({ audienceType: "cohort", audienceLabel: "SAT September" })} onCreate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Anyone with the link/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Listed students only/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("textbox", { name: "Class or group label" })).toHaveValue("SAT September");
+  });
+
+  it("lets a new session start from an earlier one and then pre-fills its setup", () => {
+    room.value = null;
+    const earlier = satLink({ id: "link-earlier", name: "Morning class", audienceType: "cohort", audienceLabel: "Morning" });
+    const onReuseSetup = vi.fn();
+    const { rerender } = render(<AccessLinkEditorSheet {...base} link={null} reuseOptions={[earlier]} onReuseSetup={onReuseSetup} onCreate={vi.fn()} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Start from an earlier session" }), { target: { value: "link-earlier" } });
+    expect(onReuseSetup).toHaveBeenCalledWith(earlier);
+
+    rerender(<AccessLinkEditorSheet {...base} link={null} prefill={earlier} reuseOptions={[earlier]} onReuseSetup={onReuseSetup} onCreate={vi.fn()} />);
+    expect(screen.getByRole("textbox", { name: "Session name" })).toHaveValue("Morning class (copy)");
+    expect(screen.getByRole("textbox", { name: "Class or group label" })).toHaveValue("Morning");
+    // Once a setup is chosen the picker is gone: it cannot silently replace typed work.
+    expect(screen.queryByRole("combobox", { name: "Start from an earlier session" })).not.toBeInTheDocument();
   });
 });

@@ -194,6 +194,21 @@ describe('DurableResponseEngine module scopes', () => {
     }
   });
 
+  it('keeps the exact durable write identity after snapshot recovery', async () => {
+    const { engine, transport } = setup({ scoped: true });
+    vi.mocked(transport.fetchSnapshot).mockResolvedValue({
+      ...emptySnapshot(),
+      responses: [{
+        questionId: 'm1q1', writeId: 'durable-final-write', clientVersion: 12,
+        outcome: 'applied', serverRevision: 9, canonicalResponse: payload('B'), contentHash: 'final-hash',
+      }],
+    });
+    await engine.recover();
+    expect(engine.getScopeManifest('ma-1')).toEqual([
+      { questionId: 'm1q1', writeId: 'durable-final-write', clientVersion: 12 },
+    ]);
+  });
+
   it('lists the acknowledged version of every answered question in a close manifest', async () => {
     const { engine } = setup({ scoped: true });
     await engine.recover();

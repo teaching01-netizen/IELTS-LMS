@@ -40,16 +40,16 @@ function ModuleOverviewCard({ stats, disabled, onSelectModule, onOpenIssueModule
     <article aria-label={stats.sectionTitle + " " + module.title} className="spine-card p-4">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">{stats.sectionTitle}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-400">{stats.sectionTitle}</p>
           <h3 className="mt-0.5 truncate text-sm font-semibold text-foreground">{module.title}</h3>
           <p className="mt-1 text-xs tabular-nums text-muted-foreground">{stats.authored}/{stats.target} authored · {stats.ready} ready · {stats.incomplete} need work</p>
         </div>
         <button type="button" disabled={disabled} onClick={() => onSelectModule(module.id)} className="flex min-h-9 shrink-0 items-center rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-35">Open</button>
       </div>
       <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-md bg-muted px-2 py-1.5"><dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Errors</dt><dd className="text-sm font-semibold tabular-nums text-foreground">{stats.errors}</dd></div>
-        <div className="rounded-md bg-muted px-2 py-1.5"><dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Pretest</dt><dd className="text-sm font-semibold tabular-nums text-foreground">{stats.pretest}</dd></div>
-        <div className="rounded-md bg-muted px-2 py-1.5"><dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Status</dt><dd className="text-sm font-semibold text-foreground">{stats.complete ? "Complete" : stats.authored >= stats.target ? "Review" : "Building"}</dd></div>
+        <div className="rounded-md bg-muted px-2 py-1.5"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Errors</dt><dd className="text-sm font-semibold tabular-nums text-foreground">{stats.errors}</dd></div>
+        <div className="rounded-md bg-muted px-2 py-1.5"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Pretest</dt><dd className="text-sm font-semibold tabular-nums text-foreground">{stats.pretest}</dd></div>
+        <div className="rounded-md bg-muted px-2 py-1.5"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</dt><dd className="text-sm font-semibold text-foreground">{stats.complete ? "Complete" : stats.authored >= stats.target ? "Review" : "Building"}</dd></div>
       </dl>
       {stats.errors > 0 && onOpenIssueModule ? (
         <button type="button" disabled={disabled} onClick={() => onOpenIssueModule(module.id)} className="mt-2 min-h-9 text-xs font-semibold text-destructive hover:underline disabled:opacity-40">Review blocking issues in this module</button>

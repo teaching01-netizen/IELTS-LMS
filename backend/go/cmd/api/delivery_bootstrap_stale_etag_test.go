@@ -181,6 +181,15 @@ func seedStaleETagExam(t *testing.T, db *sql.DB) (scheduleID, attemptID, baseID,
 
 	t.Cleanup(func() {
 		ctx := context.Background()
+		var terminal bool
+		if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM attempt_terminalizations WHERE attempt_id = ?)", attemptID).Scan(&terminal); err != nil {
+			t.Errorf("check immutable fixture receipt: %v", err)
+			return
+		}
+		if terminal {
+			// Immutable receipts retain their complete fixture until the isolated test schema is dropped.
+			return
+		}
 		quiet := func(query string, args ...any) {
 			if _, err := db.ExecContext(ctx, query, args...); err != nil {
 				t.Logf("cleanup stale-etag exam (%.60q): %v", query, err)

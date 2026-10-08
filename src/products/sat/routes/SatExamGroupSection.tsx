@@ -5,6 +5,11 @@ import type { SatExamGroup, SatOutcomeCounts } from '../../../features/results/d
 import { SatListRow, SatStatusPill, satOutcomeTone, type SatStatusTone } from '../ui/SatPage';
 import { formatTestTime, testDayKey } from './satTestTime';
 
+/** "1 attempt", "3 attempts": counts never read as "1 attempts". */
+function countLabel(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
 export function formatDate(value: string | null | undefined): string {
   const parts = formatTestTime(value);
   return parts ? parts.day : '—';
@@ -28,11 +33,11 @@ function ColumnHeader({ columns, labels }: { columns: string; labels: string[] }
 }
 
 export function ExamColumnHeader() {
-  return <ColumnHeader columns={EXAM_COLUMNS} labels={['Latest test', 'Exam', 'Access groups', 'Attempts', 'Outcomes', '']} />;
+  return <ColumnHeader columns={EXAM_COLUMNS} labels={['Latest test', 'Exam', 'Sessions', 'Attempts', 'Outcomes', '']} />;
 }
 
 export function AccessColumnHeader() {
-  return <ColumnHeader columns={ACCESS_COLUMNS} labels={['Latest test', 'Student Access', 'Version', 'Attempts', 'Outcomes', '']} />;
+  return <ColumnHeader columns={ACCESS_COLUMNS} labels={['Latest test', 'Session', 'Version', 'Attempts', 'Outcomes', '']} />;
 }
 
 export function AttemptColumnHeader() {
@@ -110,7 +115,8 @@ export function versionLineFor(versions: number[]): string | null {
 }
 
 export function aggregateLineFor(group: SatExamGroup): string {
-  return `${group.total} attempts · ${group.accessGroups?.length ?? 0} Student Access groups`;
+  const groups = group.accessGroups?.length ?? 0;
+  return `${countLabel(group.total, 'attempt')} · ${countLabel(groups, 'session')}`;
 }
 
 /**
@@ -120,24 +126,27 @@ export function aggregateLineFor(group: SatExamGroup): string {
 export function SatExamGroupRow({
   group,
   groupIndex,
+  current = false,
   onOpen,
 }: {
   group: SatExamGroup;
   groupIndex: number;
+  /** The exam last opened from this list (marked when the reviewer returns). */
+  current?: boolean;
   onOpen: (examId: string) => void;
 }) {
   const versionLine = versionLineFor(group.versions);
   const counts = group.outcomeCounts ?? { completed: group.scored + group.pending, running: 0, ended: group.invalidated, other: 0 };
   return (
-    <SatListRow index={Math.min(groupIndex, 5)} onOpen={() => onOpen(group.examId)}>
+    <SatListRow index={Math.min(groupIndex, 5)} rowId={group.examId} current={current} onOpen={() => onOpen(group.examId)}>
       <RowGrid columns={EXAM_COLUMNS}>
         <TestStartCell value={group.latestTestStartedAt} />
         <span className="min-w-0">
           <span className={CELL_PRIMARY}>{group.examTitle}</span>
           {versionLine ? <span className={CELL_SECONDARY}>{versionLine}</span> : null}
         </span>
-        <span className={`${CELL_SECONDARY} text-slate-700`}>{group.accessGroups?.length ?? 0} groups</span>
-        <span className={`${CELL_SECONDARY} text-slate-700 sm:text-right`}>{group.total} attempts</span>
+        <span className={`${CELL_SECONDARY} text-slate-700`}>{countLabel(group.accessGroups?.length ?? 0, 'session')}</span>
+        <span className={`${CELL_SECONDARY} text-slate-700 sm:text-right`}>{countLabel(group.total, 'attempt')}</span>
         <span className={`${CELL_SECONDARY} text-slate-700`}>{group.total === 0 ? 'No attempts' : outcomeCountsLine(counts)}</span>
         <Chevron />
       </RowGrid>
@@ -148,23 +157,26 @@ export function SatExamGroupRow({
 export function SatAccessGroupRow({
   group,
   groupIndex,
+  current = false,
   onOpen,
 }: {
   group: SatAccessGroupSummary;
   groupIndex: number;
+  /** The session last opened from this list. */
+  current?: boolean;
   onOpen: (scheduleId: string) => void;
 }) {
   const closed = group.accessLinkState && group.accessLinkState !== 'active' ? group.accessLinkState : null;
   return (
-    <SatListRow index={Math.min(groupIndex, 5)} onOpen={() => onOpen(group.scheduleId)} ariaLabel={`${group.accessLinkName}, ${group.attemptCount} attempts`}>
+    <SatListRow index={Math.min(groupIndex, 5)} rowId={group.scheduleId} current={current} onOpen={() => onOpen(group.scheduleId)} ariaLabel={`${group.accessLinkName}, ${countLabel(group.attemptCount, 'attempt')}`}>
       <RowGrid columns={ACCESS_COLUMNS}>
         <TestStartCell value={group.latestTestStartedAt} note={hasMultipleTestDates(group) ? 'Multiple test dates' : null} />
         <span className="min-w-0">
           <span className={CELL_PRIMARY}>{group.accessLinkName}</span>
-          <span className={CELL_SECONDARY}>{[group.cohortName, closed ? `Access ${closed}` : null].filter(Boolean).join(' · ') || 'No cohort'}</span>
+          <span className={CELL_SECONDARY}>{[group.cohortName, closed ? `Check-in ${closed}` : null].filter(Boolean).join(' · ') || 'No cohort'}</span>
         </span>
         <span className={`${CELL_SECONDARY} text-slate-700`}>v{group.versionNumber}</span>
-        <span className={`${CELL_SECONDARY} text-slate-700 sm:text-right`}>{group.attemptCount} attempts</span>
+        <span className={`${CELL_SECONDARY} text-slate-700 sm:text-right`}>{countLabel(group.attemptCount, 'attempt')}</span>
         <span className={`${CELL_SECONDARY} text-slate-700`}>{group.attemptCount === 0 ? 'No attempts' : outcomeCountsLine(accessOutcomeCounts(group))}</span>
         <Chevron />
       </RowGrid>
@@ -176,10 +188,13 @@ export function SatAccessGroupRow({
 export function SatExamAttemptRow({
   attempt,
   attemptIndex,
+  current = false,
   onOpen,
 }: {
   attempt: SatAttemptRow;
   attemptIndex: number;
+  /** The attempt open in the inspector. */
+  current?: boolean;
   onOpen: (attempt: SatAttemptRow) => void;
 }) {
   const outcome = attemptOutcome(attempt);
@@ -188,7 +203,7 @@ export function SatExamAttemptRow({
   // Show the submission date too when it falls on a different day than the start.
   const submittedLabel = !submitted ? 'Not submitted' : started && started.day === submitted.day ? submitted.time : `${submitted.day} · ${submitted.time}`;
   return (
-    <SatListRow index={Math.min(attemptIndex, 5)} onOpen={() => onOpen(attempt)}>
+    <SatListRow index={Math.min(attemptIndex, 5)} rowId={attempt.attemptId} current={current} onOpen={() => onOpen(attempt)}>
       <RowGrid columns={ATTEMPT_COLUMNS}>
         <TestStartCell value={attempt.testStartedAt} />
         <span className="min-w-0">

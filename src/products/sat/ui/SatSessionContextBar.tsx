@@ -12,7 +12,7 @@ export function getSatRoomMode(status: ExamSessionRuntime['status']): SatRoomMod
 
 export function runtimeLabel(status: string): string {
   if (status === 'not_started') return 'Ready';
-  if (status === 'live') return 'Live';
+  if (status === 'live') return 'Running';
   if (status === 'paused') return 'Paused';
   if (status === 'completed') return 'Finished';
   return 'Cancelled';

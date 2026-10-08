@@ -1,3 +1,4 @@
+import { practiceEntrySession } from './practice-entry.js';
 import http from 'k6/http';
 import { check, fail, sleep } from 'k6';
 import { SharedArray } from 'k6/data';
@@ -420,6 +421,7 @@ export function studentFlow() {
       wcode: student.wcode,
       email: student.email,
       studentName: student.fullName,
+      entrySession: practiceEntrySession(scheduleId, student),
     }),
     { jar, headers: jsonHeaders() },
   );

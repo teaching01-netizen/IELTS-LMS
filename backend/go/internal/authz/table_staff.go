@@ -148,6 +148,8 @@ func init() {
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/extend":    {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/rearm":     {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/terminate": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"GET /sessions/{scheduleID}/attempts/{attemptID}/late-evidence":         {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/late-evidence/review": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		// Device-transfer review: assigned proctors only (handler second
 		// layer: requireProctorAttemptScope, 404-collapse).
 		"GET /sessions/{scheduleID}/device-transfers":                       {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},

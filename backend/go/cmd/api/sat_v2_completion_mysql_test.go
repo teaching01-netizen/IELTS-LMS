@@ -122,7 +122,7 @@ func (f satV2CompletionFixture) expireLastModule(t *testing.T) {
 func (f satV2CompletionFixture) submit(ctx context.Context) error {
 	_, err := f.submitter.Submit(ctx, f.bearer, attempts.SubmitCommand{
 		AttemptID: f.attemptID, LeaseEpoch: 1, SubmissionID: uuid.NewString(),
-	}, nil, nil, v2ProviderResolver{}, f.sealer)
+	}, nil, v2Locker{}, v2ProviderResolver{}, f.sealer)
 	return err
 }
 

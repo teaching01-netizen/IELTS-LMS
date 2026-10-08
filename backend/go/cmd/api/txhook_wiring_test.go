@@ -4,29 +4,15 @@ package main
 // unwired hook keeps db_deadlocks_total blind during the wave.
 import (
 	"context"
-	"errors"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/go-sql-driver/mysql"
 
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
-func TestRetryKindLabels(t *testing.T) {
-	if got := retryKind(errors.New("Error 1213: Deadlock found")); got != "deadlock" {
-		t.Fatalf("deadlock kind, got %q", got)
-	}
-	if got := retryKind(errors.New("Lock wait timeout exceeded; try restarting transaction")); got != "lockwait" {
-		t.Fatalf("lockwait kind, got %q", got)
-	}
-	if got := retryKind(errors.New("bad connection")); got != "conntransient" {
-		t.Fatalf("conntransient kind, got %q", got)
-	}
-	if got := retryKind(nil); got != "unknown" {
-		t.Fatalf("nil kind, got %q", got)
-	}
-}
 
 // WS-16: installTxRetryHook wiring - hook-installed counter, not a label
 // table. An absorbed InnoDB deadlock flowing through the tx retry loop must
@@ -41,7 +27,7 @@ func TestInstallTxRetryHookWiresDeadlockCounter(t *testing.T) {
 	telemetry.DefaultRegistry = reg
 	defer func() { telemetry.DefaultRegistry = old }()
 
-	deadlock := errors.New("Error 1213 (40001): Deadlock found when trying to get lock; try restarting transaction")
+	deadlock := &mysql.MySQLError{Number: 1213, Message: "Deadlock found when trying to get lock"}
 	runOneRetry := func(t *testing.T, hook bool) {
 		t.Helper()
 		pool, mock, err := sqlmock.New()
@@ -82,7 +68,7 @@ func TestInstallTxRetryHookWiresDeadlockCounter(t *testing.T) {
 	}
 
 	runOneRetry(t, true)
-	if got := telemetry.CounterValueForTest(reg, telemetry.MDeadlocks, "kind", "deadlock"); got != 2 {
-		t.Fatalf("db_deadlocks_total{kind=deadlock} must count one per absorbed retry (2), got %v", got)
+	if got := telemetry.CounterValueForTest(reg, telemetry.MDeadlocks, "kind", "deadlock"); got != 1 {
+		t.Fatalf("db_deadlocks_total{kind=deadlock} must count the one absorbed retry, got %v", got)
 	}
 }

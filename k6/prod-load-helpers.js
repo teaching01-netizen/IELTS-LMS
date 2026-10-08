@@ -1,3 +1,4 @@
+import { practiceEntrySession } from './practice-entry.js';
 import http from 'k6/http';
 import { randomBytes } from 'k6/crypto';
 import { sleep } from 'k6';
@@ -311,6 +312,7 @@ export function bootstrapStudentSession(baseUrl, scheduleId, student, jar, clien
       wcode: student.wcode,
       email: student.email,
       studentName: student.fullName,
+      entrySession: practiceEntrySession(scheduleId, student),
     }),
     { jar, headers: jsonHeaders() },
   );

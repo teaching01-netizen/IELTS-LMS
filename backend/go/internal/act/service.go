@@ -294,7 +294,7 @@ func SealedContentHash(content map[string]any) string {
 // LoadResultForAttempt returns the persisted ACT result for a terminal
 // attempt. Delivery reads this after the terminalization transaction commits;
 // it never recomputes a score during bootstrap.
-func LoadResultForAttempt(ctx context.Context, db *sql.DB, attemptID string) (map[string]any, error) {
+func LoadResultForAttempt(ctx context.Context, db tx.Tx, attemptID string) (map[string]any, error) {
 	if db == nil || strings.TrimSpace(attemptID) == "" {
 		return nil, nil
 	}

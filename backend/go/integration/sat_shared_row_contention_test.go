@@ -291,7 +291,8 @@ func TestSATSectionExtensionStillWaitsForOpenCandidateTransactions(t *testing.T)
 	extend := func(timeout time.Duration) error {
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		return f.proctorSvc().ExtendSection(callCtx, f.proctorActor(), f.scheduleID, proctor.ExtendSectionCommand{Minutes: 5})
+		section := "reading-writing"
+		return f.proctorSvc().ExtendSection(callCtx, f.proctorActor(), f.scheduleID, proctor.ExtendSectionCommand{OperationID: "op-extend-contention", Minutes: 5, ExpectedSectionKey: &section})
 	}
 	if err := extend(time.Second); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("a section extension must wait for an open candidate transaction; got %v, want a lock-wait deadline", err)

@@ -7,6 +7,24 @@ export type AccessLinkLifecycleState = "active" | "paused" | "revoked";
 export type AccessLinkStatus = "live" | "upcoming" | "ended" | "paused" | "revoked";
 
 /**
+ * What staff choose in the setup: who may enter. Only "listed" restricts
+ * admission (the backend checks membership for selected_students alone).
+ * The stored `cohort` audience is a legacy spelling of "anyone, with a group
+ * label", so it reads back as "anyone".
+ */
+export type AccessLinkAudienceChoice = "anyone" | "listed";
+
+export function accessLinkAudienceChoice(type: AccessLinkAudienceType): AccessLinkAudienceChoice {
+  return type === "selected_students" ? "listed" : "anyone";
+}
+
+/** The stored audience for a choice: a group label never changes who is admitted. */
+export function accessLinkAudienceTypeFor(choice: AccessLinkAudienceChoice, groupLabel: string): AccessLinkAudienceType {
+  if (choice === "listed") return "selected_students";
+  return groupLabel.trim() ? "cohort" : "anyone";
+}
+
+/**
  * Sections a Student Access link may be scoped to. SAT-only by decision: the
  * toggles and the backend validator hardcode the pair, and every other provider
  * leaves `enabledSections` null (all sections).

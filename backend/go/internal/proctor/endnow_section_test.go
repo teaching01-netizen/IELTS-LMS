@@ -8,6 +8,7 @@ package proctor
 
 import (
 	"context"
+	"database/sql"
 	"regexp"
 	"testing"
 
@@ -34,12 +35,17 @@ func expectEndNowGuardQueriesWithOpenModules(mock sqlmock.Sqlmock, waiting bool,
 		WillReturnRows(sqlmock.NewRows([]string{"config_snapshot"}).AddRow([]byte(`{"general":{}}`)))
 	// lockScheduleScope: runtime row + section rows FOR UPDATE (no schedule
 	// sweep).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("rt-1"))
 	mock.ExpectQuery(sectionsLock).
 		WithArgs("rt-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("sec-1").AddRow("sec-2"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_lifecycle_receipts WHERE scope_kind = ? AND scope_id = ? AND operation_id = ?")).
+		WillReturnError(sql.ErrNoRows)
 	// EndSectionNow's locked runtime row (no overrun column — see the shared
 	// `commandRuntimeLock` in reconcile_sections_test.go).
 	mock.ExpectQuery(commandRuntimeLock).
@@ -103,10 +109,11 @@ func TestEndSectionNowLiveSectionEnqueuesModuleHandover(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO cohort_control_events")).
 		WithArgs(sqlmock.AnyArg(), "sched-1", "rt-1", "sched-1", "admin-1", "end_section_now", "reading-writing", nil, nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_lifecycle_receipts")).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	actor := Actor{ID: "admin-1", Role: RoleAdmin, CSRFVerified: true}
-	if err := svc.EndSectionNow(context.Background(), actor, "sched-1", AttemptCommand{}); err != nil {
+	if err := svc.EndSectionNow(context.Background(), actor, "sched-1", AttemptCommand{OperationID: "op-end-1"}); err != nil {
 		t.Fatalf("EndSectionNow: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -132,7 +139,7 @@ func TestEndSectionNowRefusesWhileModulesAreStillFinalizing(t *testing.T) {
 	mock.ExpectRollback()
 
 	actor := Actor{ID: "admin-1", Role: RoleAdmin, CSRFVerified: true}
-	err := svc.EndSectionNow(context.Background(), actor, "sched-1", AttemptCommand{})
+	err := svc.EndSectionNow(context.Background(), actor, "sched-1", AttemptCommand{OperationID: "op-end-2"})
 	if err == nil {
 		t.Fatal("expected a conflict while a module from the finished section is still open")
 	}
@@ -178,10 +185,11 @@ func TestEndSectionNowBetweenSectionsAdvancesWithoutRewriting(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO cohort_control_events")).
 		WithArgs(sqlmock.AnyArg(), "sched-1", "rt-1", "sched-1", "admin-1", "end_section_now", "reading-writing", nil, nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_lifecycle_receipts")).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	actor := Actor{ID: "admin-1", Role: RoleAdmin, CSRFVerified: true}
-	if err := svc.EndSectionNow(context.Background(), actor, "sched-1", AttemptCommand{}); err != nil {
+	if err := svc.EndSectionNow(context.Background(), actor, "sched-1", AttemptCommand{OperationID: "op-end-3"}); err != nil {
 		t.Fatalf("EndSectionNow: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

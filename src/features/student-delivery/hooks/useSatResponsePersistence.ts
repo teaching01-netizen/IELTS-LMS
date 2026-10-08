@@ -11,7 +11,6 @@ import {
 } from '@student/api/responseDurabilityTransport';
 import {
   getVisibleResponse,
-  type QuarantinedWrite,
   type ResponsePayload,
   type SubmitAttemptV2Response,
 } from '@shared/durability/types';
@@ -32,6 +31,7 @@ import {
   rotateClientSessionIdForAttempt,
 } from '@student/api/studentAttemptGateway';
 import { emitStudentObservabilityMetric, withStudentObservabilityDimensions } from "../../../utils/studentObservability";
+import { hasBackendStatusCode } from '../../../services/backendBridge';
 
 export interface SatResponsePersistenceOptions {
   scheduleId: string;
@@ -93,7 +93,7 @@ export interface SatResponsePersistence {
    */
   closedModuleAttemptIds?: ReadonlyArray<string>;
   /** The close manifest for one module attempt (see DurableResponseEngine.getScopeManifest). */
-  closeManifest?: (moduleAttemptId: string) => ScopeManifestEntry[];
+  closeManifest?: (moduleAttemptId: string) => Promise<ScopeManifestEntry[]>;
   failure: string | null;
   failureKind: SatResponseFailureKind | null;
   tombstoneCount: number;
@@ -169,6 +169,8 @@ export function useSatResponsePersistence({
   const questionScopeRef = useRef(new Map<string, string>());
   const moduleIdByAttemptRef = useRef(new Map<string, string>());
   const evidenceSentRef = useRef(new Set<string>());
+  const evidenceUploadsRef = useRef(new Map<string, { engine: DurableResponseEngine; timer: number | null }>());
+  const [evidenceTail, setEvidenceTail] = useState('');
   const [closedModuleAttemptIds, setClosedModuleAttemptIds] = useState<string[]>([]);
   const [v2ModePendingDrafts, setV2ModePendingDrafts] = useState<
     Record<string, SatQuestionResponseDraft>
@@ -216,6 +218,7 @@ export function useSatResponsePersistence({
       setV2ModePendingDrafts(pendingDrafts);
       setV2ModeVisibleDrafts(visibleDrafts);
       setBlockedDrafts(blocked);
+      setEvidenceTail(v2EngineRef.current?.getQuarantined().at(-1)?.writeId ?? '');
     },
     []
   );
@@ -234,6 +237,9 @@ export function useSatResponsePersistence({
     questionScopeRef.current.clear();
     moduleIdByAttemptRef.current.clear();
     evidenceSentRef.current.clear();
+    for (const flight of evidenceUploadsRef.current.values()) if (flight.timer !== null) window.clearTimeout(flight.timer);
+    evidenceUploadsRef.current.clear();
+    setEvidenceTail('');
     setClosedModuleAttemptIds([]);
 
     return () => {
@@ -360,6 +366,11 @@ export function useSatResponsePersistence({
 
     return () => {
       engine.destroy();
+      for (const [scope, flight] of evidenceUploadsRef.current) {
+        if (flight.engine !== engine) continue;
+        if (flight.timer !== null) window.clearTimeout(flight.timer);
+        evidenceUploadsRef.current.delete(scope);
+      }
       if (v2EngineRef.current === engine) v2EngineRef.current = null;
       if (v2ReadyRef.current === recovery) v2ReadyRef.current = null;
     };
@@ -421,49 +432,68 @@ export function useSatResponsePersistence({
     engine?.refreshScopes();
   }, []);
 
-  // Late-answer evidence (review only, never scored): once per closed module,
-  // upload the latest answer this device still held for each of its
-  // questions. Failed uploads retry while this attempt remains mounted.
+  // Every immutable held write is uploaded, including writes arriving after
+  // the first close upload. One stream per closed module; bounded batches,
+  // stable per-write identity, and no automatic retry of policy conflicts.
   useEffect(() => {
     const engine = v2EngineRef.current;
     if (!engine || !gateway.recordLateEvidence) return;
-    let cancelled = false;
-    const retryTimers: number[] = [];
+    const generation = identityGenerationRef.current;
     for (const moduleAttemptId of closedModuleAttemptIds) {
-      if (evidenceSentRef.current.has(moduleAttemptId)) continue;
+      if (evidenceUploadsRef.current.has(moduleAttemptId)) continue;
       const moduleId = moduleIdByAttemptRef.current.get(moduleAttemptId);
       const reason = engine.getClosedScopes().get(moduleAttemptId);
       if (!moduleId || !reason) continue;
-      const latest = new Map<string, QuarantinedWrite>();
-      for (const entry of engine.getQuarantined()) {
-        if (entry.reason !== reason || questionScopeRef.current.get(entry.questionId) !== moduleAttemptId) continue;
-        const previous = latest.get(entry.questionId);
-        if (!previous || entry.clientVersion >= previous.clientVersion) latest.set(entry.questionId, entry);
-      }
-      if (latest.size === 0) continue;
-      const answers = [...latest.values()].map((entry) => ({
-        questionId: entry.questionId,
-        writeId: entry.writeId,
-        response: entry.payload,
-        clientReceivedAt: entry.quarantinedAt,
-      }));
+      const flight = { engine, timer: null as number | null };
+      evidenceUploadsRef.current.set(moduleAttemptId, flight);
+      const current = () => mountedRef.current &&
+        identityGenerationRef.current === generation && v2EngineRef.current === engine;
       const upload = async (retry: number): Promise<void> => {
-        if (cancelled || evidenceSentRef.current.has(moduleAttemptId)) return;
+        if (!current()) return;
+        const answers = engine.getQuarantined()
+          .filter((entry) => entry.reason === reason &&
+            questionScopeRef.current.get(entry.questionId) === moduleAttemptId &&
+            !evidenceSentRef.current.has(entry.writeId))
+          .slice(0, 200)
+          .map((entry) => ({
+            questionId: entry.questionId,
+            writeId: entry.writeId,
+            response: entry.payload,
+            originLeaseEpoch: entry.clientVersion > 0 ? entry.leaseEpoch : null,
+            clientVersion: entry.clientVersion > 0 ? entry.clientVersion : null,
+            clientReceivedAt: entry.quarantinedAt,
+          }));
+        if (answers.length === 0) {
+          evidenceUploadsRef.current.delete(moduleAttemptId);
+          return;
+        }
         try {
           await gateway.recordLateEvidence!(scheduleId, attemptId, { moduleId, answers });
-          if (!cancelled) evidenceSentRef.current.add(moduleAttemptId);
-        } catch {
-          if (!cancelled) retryTimers.push(window.setTimeout(() => void upload(retry + 1), Math.min(30_000, 1_000 * 2 ** Math.min(retry, 5))));
+          if (!current()) return;
+          for (const answer of answers) evidenceSentRef.current.add(answer.writeId);
+          void upload(0);
+        } catch (error) {
+          if (!current()) return;
+          if (hasBackendStatusCode(error, 400) || hasBackendStatusCode(error, 401) ||
+              hasBackendStatusCode(error, 403) || hasBackendStatusCode(error, 404) ||
+              hasBackendStatusCode(error, 409) || hasBackendStatusCode(error, 422)) {
+            setFailure('Late answers remain on this device. The review upload needs your proctor’s attention.');
+            setFailureKind('module_closed');
+            return;
+          }
+          flight.timer = window.setTimeout(() => void upload(retry + 1),
+            Math.min(30_000, 1_000 * 2 ** Math.min(retry, 5)));
         }
       };
       void upload(0);
     }
-    return () => { cancelled = true; retryTimers.forEach(window.clearTimeout); };
-  }, [attemptId, closedModuleAttemptIds, gateway, scheduleId]);
+  }, [attemptId, closedModuleAttemptIds, controlEpoch, credentialAttempt?.candidateId,
+      credentialAttempt?.id, credentialAttempt?.scheduleId, evidenceTail, gateway,
+      leaseEpoch, scheduleId]);
 
   const closeManifest = useCallback(
-    (moduleAttemptId: string): ScopeManifestEntry[] =>
-      v2EngineRef.current?.getScopeManifest(moduleAttemptId) ?? [],
+    async (moduleAttemptId: string): Promise<ScopeManifestEntry[]> =>
+      v2EngineRef.current?.prepareScopeManifest(moduleAttemptId) ?? [],
     []
   );
 

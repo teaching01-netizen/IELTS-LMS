@@ -126,6 +126,8 @@ export interface QuarantinedWrite {
   writeId: string;
   questionId: string;
   clientVersion: number;
+  /** Null only for legacy evidence whose original writer era was not stored. */
+  leaseEpoch: number | null;
   payload: ResponsePayload;
   reason: string;
   quarantinedAt: string;

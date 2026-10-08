@@ -95,12 +95,12 @@ describe('SatRoot', () => {
     expect(logout).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the sidebar on session, result and access pages', () => {
+  it('keeps the sidebar on session and result pages', () => {
     authMock.mockReturnValue({
       session: { user: { role: 'admin', displayName: 'Alex Staff', email: 'alex@example.com' } },
       logout: vi.fn(),
     });
-    for (const entry of ['/sat/sessions/sched-1', '/sat/results/res-1', '/sat/exams/ex-1/access']) {
+    for (const entry of ['/sat/sessions/sched-1', '/sat/results/res-1']) {
       const { unmount } = render(
         withExamCache(
           <MemoryRouter initialEntries={[entry]}>
@@ -108,7 +108,6 @@ describe('SatRoot', () => {
               <Route path="/sat" element={<SatRoot />}>
                 <Route path="sessions/:scheduleId" element={<div>Session room content</div>} />
                 <Route path="results/:resultId" element={<div>Result detail content</div>} />
-                <Route path="exams/:examId/access" element={<div>Access content</div>} />
               </Route>
             </Routes>
           </MemoryRouter>,
@@ -200,7 +199,9 @@ describe('SatRoot shell polish', () => {
     ['/sat/exams/ex-1', false],
     ['/sat/exams/ex-1/release', false],
     ['/sat/exams/ex-1/preview/', false],
-    ['/sat/exams/ex-1/access', true],
+    ['/sat/exams/ex-1/access', false],
+    ['/sat/exams/ex-1/settings', false],
+    ['/sat/exams/ex-1/responses', false],
     ['/sat/sessions/s-1', true],
     ['/sat/results/r-1', true],
   ])('detail-regex matrix: %s shows chrome=%s', (entry, chrome) => {

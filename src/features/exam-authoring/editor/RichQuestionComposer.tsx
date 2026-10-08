@@ -546,7 +546,7 @@ export function RichQuestionComposer({
             <button
               type="button"
               data-coedit-retry="true"
-              className="authoring-interactive min-h-8 rounded-lg border border-au-separator bg-au-surface px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-au-fill-strong"
+              className="authoring-interactive min-h-8 rounded-lg border border-au-separator bg-au-surface px-2.5 text-xs font-semibold text-slate-700 hover:bg-au-fill-strong"
               onClick={collaboration.onRetryInitialization}
             >
               Retry
@@ -735,7 +735,7 @@ function MathDialog({
         <div>
           <div className="mb-2 flex items-center justify-between gap-3">
             <span className="text-[12px] font-semibold text-slate-700">Quick build</span>
-            <span className="text-[11px] text-slate-400">Optional</span>
+            <span className="text-xs text-slate-400">Optional</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {equationStructures.map((item) => (
@@ -765,7 +765,7 @@ function MathDialog({
             >
               Equation
             </span>
-            <span className="text-[11px] text-slate-400">LaTeX · no $ delimiters</span>
+            <span className="text-xs text-slate-400">LaTeX · no $ delimiters</span>
           </div>
           <textarea
             ref={inputRef}
@@ -795,11 +795,11 @@ function MathDialog({
           />
           <div className="mt-1.5 min-h-5" aria-live="polite">
             {equation.error ? (
-              <p id="sat-equation-error" className="text-[11px] leading-5 text-au-danger-text">
+              <p id="sat-equation-error" className="text-xs leading-5 text-au-danger-text">
                 {equation.error}
               </p>
             ) : (
-              <p id="sat-equation-help" className="text-[11px] leading-5 text-slate-400">
+              <p id="sat-equation-help" className="text-xs leading-5 text-slate-400">
                 Use the quick controls or type LaTeX directly. Press ⌘Return to update.
               </p>
             )}
@@ -827,7 +827,7 @@ function MathDialog({
             ) : (
               <div className="mx-auto flex flex-col items-center gap-2 text-center text-slate-400">
                 <Sigma size={20} strokeWidth={1.7} aria-hidden="true" />
-                <span className="text-[11px]">
+                <span className="text-xs">
                   {latex.trim()
                     ? "Complete the expression to preview"
                     : "Your equation will appear here"}
@@ -838,7 +838,7 @@ function MathDialog({
         </div>
 
         <div className="flex items-center justify-between border-t border-au-separator pt-4">
-          <span className="hidden text-[11px] text-slate-400 sm:inline">
+          <span className="hidden text-xs text-slate-400 sm:inline">
             Esc to cancel · ⌘Return to update
           </span>
           <div className="ml-auto flex items-center gap-2">
@@ -879,7 +879,7 @@ function EquationChip({
     <button
       type="button"
       onClick={onClick}
-      className={`authoring-interactive h-8 rounded-lg bg-au-fill px-2.5 text-[11px] font-medium text-slate-600 hover:bg-au-fill hover:text-slate-950 ${
+      className={`authoring-interactive h-8 rounded-lg bg-au-fill px-2.5 text-xs font-medium text-slate-600 hover:bg-au-fill hover:text-slate-950 ${
         symbol ? "min-w-8 font-serif text-[14px]" : ""
       }`}
       title={symbol ? `Insert ${label}` : `Insert ${label.toLowerCase()} structure`}
@@ -1169,7 +1169,7 @@ function ImageDialog({
                 initial={reduceMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.82 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={reduceMotion ? { duration: 0.01 } : authoringMotion.spring}
-                className="absolute right-2 top-2 rounded-full bg-au-surface px-2 py-1 text-[10px] font-semibold text-au-success-text shadow-sm"
+                className="absolute right-2 top-2 rounded-full bg-au-surface px-2 py-1 text-xs font-semibold text-au-success-text shadow-sm"
               >
                 Secured ✓
               </motion.span>
@@ -1197,11 +1197,11 @@ function ImageDialog({
       ) : null}
       {ownerId ? (
         <details className="mb-3 rounded-xl border border-au-separator bg-au-fill px-3 py-2">
-          <summary className="cursor-pointer text-[11px] font-semibold text-slate-500">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-500">
             Use existing asset…
           </summary>
           <div className="mt-3 block">
-            <span className="block text-[11px] font-semibold text-slate-600">
+            <span className="block text-xs font-semibold text-slate-600">
               Asset ID or image URL
             </span>
             <input
@@ -1251,7 +1251,7 @@ function ImageDialog({
         className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
         placeholder="Describe the information a student needs from this visual"
       />
-      <p className="mt-1.5 text-[10px] leading-5 text-slate-400">
+      <p className="mt-1.5 text-xs leading-5 text-slate-400">
         Filled from the file name when one is available. Rewrite it to name the information a
         student needs from this visual.
       </p>
@@ -1270,7 +1270,7 @@ function ImageDialog({
         placeholder="Optional"
       />
       {mode === "replace" && !sourceChanged && !uploading ? (
-        <p className="mt-3 text-[11px] leading-5 text-slate-500">
+        <p className="mt-3 text-xs leading-5 text-slate-500">
           Upload a replacement file, or paste a different asset ID, to replace this visual. To
           change only the description, use “Alt text” on the image.
         </p>

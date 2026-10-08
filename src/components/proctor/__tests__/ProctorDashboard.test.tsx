@@ -535,6 +535,7 @@ describe('ProctorDashboard runtime controls', () => {
       runtimeStatus: 'live' as const,
       runtimeCurrentSection: 'reading' as const,
       runtimeTimeRemainingSeconds: 1800,
+      runtimeCurrentModuleId: 'module-1',
       runtimeSectionStatus: 'live',
       runtimeWaiting: false,
       violations: [],
@@ -574,7 +575,7 @@ describe('ProctorDashboard runtime controls', () => {
       fireEvent.click(extendButton);
     });
 
-    expect(extendSpy).toHaveBeenCalledWith('student-1', expect.any(String), 5);
+    expect(extendSpy).toHaveBeenCalledWith('student-1', expect.any(String), 5, 'module-1');
     expect(onUpdateSessions).toHaveBeenCalled();
     const updated = onUpdateSessions.mock.calls.at(-1)?.[0] as Array<typeof satSession> | undefined;
     expect(updated?.find((session) => session.id === 'student-1')?.runtimeTimeRemainingSeconds).toBe(2100);
@@ -597,6 +598,7 @@ describe('ProctorDashboard runtime controls', () => {
       runtimeStatus: 'live' as const,
       runtimeCurrentSection: 'reading' as const,
       runtimeTimeRemainingSeconds: 1800,
+      runtimeCurrentModuleId: 'module-1',
       runtimeSectionStatus: 'live',
       runtimeWaiting: false,
       violations: [] as Array<{ id: string; type: string; severity: 'medium'; timestamp: string; description: string }>,
@@ -1064,6 +1066,17 @@ describe('ProctorDashboard runtime controls', () => {
       });
 
       expect(screen.getByText('extend denied')).toBeInTheDocument();
+    });
+
+    it('does not grant time without the student’s current module identity', async () => {
+      const extendSpy = vi.spyOn(examDeliveryService, 'extendStudentAttempt').mockResolvedValue({ success: true });
+      render(<DashboardHarness {...baseProps()} sessions={[makeSession({ runtimeCurrentModuleId: null })]} />);
+      openDetail();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^\+5 min$/i }));
+      });
+      expect(extendSpy).not.toHaveBeenCalled();
+      expect(screen.getByText('The student’s current module is unavailable. Refresh the session before adding time.')).toBeInTheDocument();
     });
 
     it('warns from the detail drawer and opens the auto-response rules overlay', async () => {

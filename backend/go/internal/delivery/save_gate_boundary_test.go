@@ -45,7 +45,7 @@ func TestEnsureSaveModuleAdmittedHonoursTheSaveGraceWindow(t *testing.T) {
 		{"one second inside the window", deadline.Add(-time.Second), ""},
 		{"exactly on the visible deadline", deadline, ""},
 		{"inside the save grace", deadline.Add(attempts.SATSaveGrace - time.Millisecond), ""},
-		{"exactly on the grace edge", deadline.Add(attempts.SATSaveGrace), ""},
+		{"exactly on the grace edge", deadline.Add(attempts.SATSaveGrace), "MODULE_DEADLINE_EXPIRED"},
 		{"past the grace window", deadline.Add(attempts.SATSaveGrace + time.Millisecond), "MODULE_DEADLINE_EXPIRED"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -69,11 +69,11 @@ func TestEnsureSaveModuleAdmittedClientStartWindow(t *testing.T) {
 	deadline := started.Add(60 * time.Second)
 	module := saveActiveModule{id: "ma-1", moduleID: "mod-1", state: "active", startedAt: &started, allocatedSeconds: 60}
 
-	if err := ensureSaveModuleAdmitted(module, deadline.Add(15*time.Second), (moduleTimingGateResult{gate: timingGatePersonal, handoffMode: "client_start"}).closeWindow()); err != nil {
-		t.Fatalf("personal gate must admit through the close window edge, got %v", err)
+	if err := ensureSaveModuleAdmitted(module, deadline.Add(15*time.Second-time.Microsecond), (moduleTimingGateResult{gate: timingGatePersonal, handoffMode: "client_start"}).closeWindow()); err != nil {
+		t.Fatalf("personal gate must admit before the close window edge, got %v", err)
 	}
-	if err := ensureSaveModuleAdmitted(module, deadline.Add(15*time.Second+time.Millisecond), (moduleTimingGateResult{gate: timingGatePersonal, handoffMode: "client_start"}).closeWindow()); saveGateReason(err) != "MODULE_DEADLINE_EXPIRED" {
-		t.Fatalf("personal gate must refuse past the close window, got %v", err)
+	if err := ensureSaveModuleAdmitted(module, deadline.Add(15*time.Second), (moduleTimingGateResult{gate: timingGatePersonal, handoffMode: "client_start"}).closeWindow()); saveGateReason(err) != "MODULE_DEADLINE_EXPIRED" {
+		t.Fatalf("personal gate must refuse at the close window edge, got %v", err)
 	}
 	if err := ensureSaveModuleAdmitted(module, deadline.Add(attempts.SATSaveGrace+time.Millisecond), (moduleTimingGateResult{gate: timingGateLegacy}).closeWindow()); saveGateReason(err) != "MODULE_DEADLINE_EXPIRED" {
 		t.Fatalf("legacy gate must keep SATSaveGrace, got %v", err)

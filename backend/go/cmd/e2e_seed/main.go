@@ -442,7 +442,7 @@ func createUser(ctx context.Context, db *sql.DB, cfg config.Config, role, email,
 	}
 	fixture := authFixture{userID: id}
 	if withSession {
-		_, fixture.session, fixture.csrf, err = auth.CreateSession(ctx, db, cfg, id, role, nil, nil, now)
+		_, fixture.session, fixture.csrf, err = auth.CreateSession(ctx, db, cfg, id, role, auth.SessionProof{Source: auth.SessionSourceAccount}, nil, nil, now)
 		if err != nil {
 			return authFixture{}, err
 		}

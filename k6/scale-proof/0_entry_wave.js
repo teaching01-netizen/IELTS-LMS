@@ -1,3 +1,4 @@
+import { practiceEntrySession } from '../practice-entry.js';
 import http from 'k6/http';
 import { check, fail } from 'k6';
 import { assertRateLimitContract, requestWithRateLimitRetry } from './rate_limit_contract.js';
@@ -64,7 +65,7 @@ export const options = {
 function entryOnce(row) {
   return http.post(
     `${baseUrl}/api/v1/auth/student/entry`,
-    JSON.stringify({ scheduleId, wcode: row.wcode, email: row.email, studentName: row.fullName }),
+    JSON.stringify({ scheduleId, wcode: row.wcode, email: row.email, studentName: row.fullName, entrySession: practiceEntrySession(scheduleId, row) }),
     { headers: { 'content-type': 'application/json' } },
   );
 }

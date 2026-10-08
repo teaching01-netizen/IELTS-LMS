@@ -12,17 +12,39 @@ type StudentSessionWithModuleRole = StudentSession & {
   runtimeCurrentModuleRole?: StudentSession['runtimeModuleRole'];
 };
 
+/**
+ * Why a student needs a proctor, in words: a pending device change, the most
+ * recent integrity event, and proctor warnings. Null when nothing is open.
+ */
+export function studentAttentionReason(student: StudentSession, deviceChangePending: boolean): string | null {
+  const reasons: string[] = [];
+  if (deviceChangePending) reasons.push('Device change pending');
+  const latest = student.violations.reduce<StudentSession['violations'][number] | null>(
+    (current, violation) => (!current || violation.timestamp > current.timestamp ? violation : current),
+    null,
+  );
+  if (latest) {
+    const more = student.violations.length - 1;
+    reasons.push(`Integrity: ${latest.type.replace(/_/g, ' ')}${more > 0 ? ` (+${more})` : ''}`);
+  }
+  if (student.warnings > 0) reasons.push(`${student.warnings} warning${student.warnings === 1 ? '' : 's'} sent`);
+  return reasons.length ? reasons.join(' · ') : null;
+}
+
 export function SatRoomStudentRow({
   student,
   runtime,
   roomClock,
   selected,
+  attentionReason,
   onSelect,
 }: {
   student: StudentSession;
   runtime: ExamSessionRuntime | null;
   roomClock?: ServerClockSnapshot | null | undefined;
   selected: boolean;
+  /** From `studentAttentionReason`; shown beside the name so the proctor sees why. */
+  attentionReason: string | null;
   onSelect: (trigger: HTMLButtonElement) => void;
 }) {
   const fallbackSeconds = student.runtimeTimeRemainingSeconds ?? student.timeRemaining;
@@ -66,7 +88,6 @@ export function SatRoomStudentRow({
     onBreak ? null : satModuleSlotLabel(moduleRoleFor(student)),
     student.status,
   ].filter(Boolean).join(' · ');
-  const needsAttention = student.warnings > 0 || student.violations.length > 0;
 
   return (
     <button
@@ -74,7 +95,7 @@ export function SatRoomStudentRow({
       id={`sat-room-student-${student.id}`}
       role="option"
       aria-selected={selected}
-      aria-label={`Open ${student.name}${needsAttention ? ', needs attention' : ''}`}
+      aria-label={`Open ${student.name}${attentionReason ? `, needs attention: ${attentionReason}` : ''}`}
       aria-current={selected || undefined}
       tabIndex={-1}
       onClick={(event) => onSelect(event.currentTarget)}
@@ -84,11 +105,14 @@ export function SatRoomStudentRow({
         <span className="flex items-center gap-2">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${studentTone(student)}`} />
           <span className="sat-room__row-name">{student.name}</span>
-          {needsAttention ? (
+          {attentionReason ? (
             <AlertTriangle size={12} className="shrink-0 text-[var(--sat-staff-warning-dot,#d97706)]" aria-hidden="true" />
           ) : null}
         </span>
         <span className="sat-room__row-meta pl-3.5">{rowMeta}</span>
+        {attentionReason ? (
+          <span className="sat-room__row-meta block pl-3.5 font-semibold text-[var(--sat-staff-warning-text,#92400e)]">{attentionReason}</span>
+        ) : null}
       </span>
       <span className="text-right">
         <span className="sat-room__row-time">

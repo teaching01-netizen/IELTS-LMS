@@ -31,8 +31,8 @@ func TestAuthMiddlewareRejectsPersistentCookieForExpiredOrRevokedDatabaseSession
 			defer db.Close()
 
 			rows := sqlmock.NewRows([]string{
-				"id", "user_id", "role_snapshot", "csrf_token", "organization_id", "expires_at", "idle_timeout_at", "revoked_at",
-			}).AddRow("session-1", "student-1", auth.RoleStudent, "csrf-1", nil, tc.expiresAt, now.Add(time.Hour), tc.revokedAt)
+				"id", "user_id", "role_snapshot", "csrf_token", "organization_id", "expires_at", "idle_timeout_at", "revoked_at", "authentication_source", "practice_schedule_id", "role", "state",
+			}).AddRow("session-1", "student-1", auth.RoleStudent, "csrf-1", nil, tc.expiresAt, now.Add(time.Hour), tc.revokedAt, "account", nil, auth.RoleStudent, "active")
 			mock.ExpectQuery("SELECT s.id").WillReturnRows(rows)
 
 			cfg := config.Load()

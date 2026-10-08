@@ -12,7 +12,7 @@ import (
 )
 
 // First request is allowed: pinned-conn upsert + LAST_INSERT_ID() reads 1 of 600.
-// (Fresh inserts leave LAST_INSERT_ID()==0 on that connection; Check maps 0->1.)
+// Both insert and update set their count on the pinned connection.
 func TestDBRateLimiterFirstRequestAllowed(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -24,7 +24,7 @@ func TestDBRateLimiterFirstRequestAllowed(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO distributed_rate_limit_counters")).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT LAST_INSERT_ID()")).WillReturnRows(
-		sqlmock.NewRows([]string{"LAST_INSERT_ID()"}).AddRow(0),
+		sqlmock.NewRows([]string{"LAST_INSERT_ID()"}).AddRow(1),
 	)
 
 	allowed, _, err := limiter.Check(context.Background(), "key-1")

@@ -6,8 +6,8 @@ export type SatSessionRoomConfirmation =
   | { kind: 'complete' }
   | { kind: 'terminate'; studentId: string; studentName: string }
   | { kind: 'warn'; studentId: string; studentName: string }
-  | { kind: 'extend-session'; minutes: number; stage: string; remainingLabel: string }
-  | { kind: 'extend-student'; minutes: number; studentId: string; studentName: string; remainingLabel: string };
+  | { kind: 'extend-session'; minutes: number; stage: string; sectionKey: string; runtimeRevision: number; remainingLabel: string }
+  | { kind: 'extend-student'; minutes: number; moduleId: string; studentId: string; studentName: string; remainingLabel: string };
 
 export function SatSessionRoomConfirmDialog({
   confirm,

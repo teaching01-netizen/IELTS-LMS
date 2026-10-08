@@ -130,7 +130,7 @@ describe("SAT workbook import sheet", () => {
     });
     await waitFor(() => expect(screen.getByText("Complete SAT ready to import")).toBeInTheDocument());
 
-    const importButton = screen.getByRole("button", { name: "Import 147 Questions" });
+    const importButton = screen.getByRole("button", { name: "Import 147 questions" });
     fireEvent.click(importButton);
     expect(await screen.findByText("Version changed; reload and try again.")).toBeInTheDocument();
     expect(importButton).toBeEnabled();
@@ -167,7 +167,11 @@ describe("SAT workbook import sheet", () => {
     await waitFor(() =>
       expect(screen.getByText("Complete SAT ready to import")).toBeInTheDocument()
     );
-    fireEvent.click(screen.getByRole("button", { name: "Import 147 Questions" }));
+    const replace = screen.getByRole("button", { name: "Replace draft with 147 questions" });
+    expect(replace).toBeDisabled();
+    expect(screen.getByText("Confirm the replacement to continue.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /replaces all 12 questions/ }));
+    fireEvent.click(replace);
 
     await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
     expect(commit).toHaveBeenCalledWith("exam-1", expect.objectContaining({
@@ -226,7 +230,7 @@ describe("SAT workbook import sheet", () => {
     await waitFor(() =>
       expect(media.uploadAssessmentImportAsset).toHaveBeenCalledWith(expect.any(File), "import-1")
     );
-    const importButton = screen.getByRole("button", { name: "Import 147 Questions" });
+    const importButton = screen.getByRole("button", { name: "Import 147 questions" });
     await waitFor(() => expect(importButton).toBeEnabled());
     fireEvent.click(importButton);
     await waitFor(() =>
@@ -276,7 +280,7 @@ describe("SAT workbook import sheet", () => {
     });
 
     expect(await screen.findByText("Asset storage unavailable.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Import 147 Questions" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Import 147 questions" })).toBeDisabled();
     expect(commit).not.toHaveBeenCalled();
   });
 
@@ -311,6 +315,58 @@ describe("SAT workbook import sheet", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/Questions · Row 42 ·/)).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Import 146 Questions" })).toBeDisabled();
+    // Nothing is importable yet, so the action stays generic and disabled.
+    expect(screen.getByRole("button", { name: "Import workbook" })).toBeDisabled();
+  });
+
+  it("retries only the failed visual-staging step without re-checking the workbook", async () => {
+    const assetPreview: SatWorkbookPreview = {
+      ...validPreview,
+      assets: [
+        {
+          key: "graph_01",
+          fileName: "graph_01.png",
+          contentType: "image/png",
+          sizeBytes: 1,
+          checksumSha256: "checksum",
+          altText: "A graph",
+          caption: null,
+          dataBase64: "AA==",
+        },
+      ],
+    };
+    const previewSpy = vi
+      .spyOn(assessmentAuthoringApi, "previewSatWorkbook")
+      .mockResolvedValue(assetPreview);
+    const media = await import("../../api/assessmentMediaApi");
+    vi.spyOn(media, "uploadAssessmentImportAsset")
+      .mockRejectedValueOnce(new Error("Asset storage unavailable."))
+      .mockResolvedValueOnce({
+        id: "asset-1",
+        contentType: "image/png",
+        fileName: "graph_01.png",
+        uploadStatus: "finalized",
+        downloadUrl: "https://media.example/asset-1",
+      });
+
+    render(
+      <SatWorkbookImportSheet
+        open
+        examId="exam-1"
+        shell={shell}
+        existingQuestionCount={0}
+        onClose={vi.fn()}
+        onCommitted={vi.fn()}
+      />
+    );
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), {
+      target: { files: [new File(["xlsx"], "SAT.xlsx")] },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry securing visuals" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Import 147 questions" })).toBeEnabled()
+    );
+    expect(previewSpy).toHaveBeenCalledTimes(1);
   });
 });

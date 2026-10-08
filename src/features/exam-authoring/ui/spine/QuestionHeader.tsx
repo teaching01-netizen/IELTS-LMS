@@ -1,10 +1,13 @@
 import type { ReactNode } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { SatMenu } from "@/src/products/sat/ui/Menu";
 import type { AssessmentValidationIssue } from "../../contracts/assessment";
 import { ReadinessControl } from "./ReadinessControl";
 
-/** Question identity, calm co-edit state, and secondary question actions. */
+const ICON_BUTTON =
+  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40";
+
+/** Question identity, calm co-edit state, and the card's own actions. */
 export function QuestionHeader({
   number,
   contextLabel,
@@ -16,6 +19,8 @@ export function QuestionHeader({
   onDuplicate,
   onDelete,
   onMove,
+  onAddBelow,
+  addBelowDisabledReason,
   onSettings,
   busy = false,
   canMoveUp = false,
@@ -32,6 +37,10 @@ export function QuestionHeader({
   onDuplicate: () => void;
   onDelete: () => void;
   onMove?: ((direction: -1 | 1) => void) | undefined;
+  /** Insert a new question after this one. */
+  onAddBelow?: (() => void) | undefined;
+  /** Why Add below is unavailable (module full…); shown as its tooltip. */
+  addBelowDisabledReason?: string | null | undefined;
   onSettings?: (() => void) | undefined;
   busy?: boolean | undefined;
   canMoveUp?: boolean | undefined;
@@ -40,6 +49,7 @@ export function QuestionHeader({
 }) {
   const title = number ? `Question ${number}` : "Edit question";
   const hasCollaboration = presenceSlot != null || saveSlot != null;
+  const locked = readOnly || busy;
 
   return (
     <header className="sat-spine__question-header mb-9 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
@@ -72,13 +82,67 @@ export function QuestionHeader({
           </span>
         ) : null}
         <ReadinessControl issues={issues} onIssueSelect={onIssueSelect} />
+        <div role="group" aria-label={`${title} actions`} className="flex items-center">
+          {onAddBelow ? (
+            <button
+              type="button"
+              className={ICON_BUTTON}
+              aria-label="Add question below"
+              title={addBelowDisabledReason ?? "Add question below"}
+              disabled={locked || Boolean(addBelowDisabledReason)}
+              onClick={onAddBelow}
+            >
+              <Plus size={17} aria-hidden="true" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={ICON_BUTTON}
+            aria-label="Duplicate question"
+            title="Duplicate question"
+            disabled={locked}
+            onClick={onDuplicate}
+          >
+            <Copy size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={ICON_BUTTON}
+            aria-label="Move question up"
+            title="Move question up"
+            disabled={locked || !canMoveUp || !onMove}
+            onClick={() => onMove?.(-1)}
+          >
+            <ArrowUp size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={ICON_BUTTON}
+            aria-label="Move question down"
+            title="Move question down"
+            disabled={locked || !canMoveDown || !onMove}
+            onClick={() => onMove?.(1)}
+          >
+            <ArrowDown size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={`${ICON_BUTTON} hover:text-destructive`}
+            aria-label="Delete question"
+            title="Delete question"
+            disabled={locked}
+            onClick={onDelete}
+          >
+            <Trash2 size={16} aria-hidden="true" />
+          </button>
+        </div>
         {onSettings ? (
           <button
             type="button"
             onClick={onSettings}
-            className={`${hasCollaboration ? "" : "hidden lg:block "}min-h-11 rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring`}
+            className="min-h-11 rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           >
-            Settings
+            Tags &amp; accessibility
           </button>
         ) : null}
         <div className="sat-spine__menu">
@@ -88,12 +152,8 @@ export function QuestionHeader({
             icon={MoreHorizontal}
             align="end"
             items={[
-              { id: "preview", label: "Preview question as students will see it", onSelect: onPreview },
-              { id: "duplicate", label: "Duplicate question", disabled: readOnly || busy, onSelect: onDuplicate },
-              { id: "up", label: "Move up", disabled: readOnly || busy || !canMoveUp || !onMove, onSelect: () => onMove?.(-1) },
-              { id: "down", label: "Move down", disabled: readOnly || busy || !canMoveDown || !onMove, onSelect: () => onMove?.(1) },
+              { id: "preview", label: "Preview question", onSelect: onPreview },
               { id: "settings", label: "Question settings", disabled: !onSettings, onSelect: () => onSettings?.() },
-              { id: "delete", label: "Delete question", destructive: true, separatorBefore: true, disabled: readOnly || busy, onSelect: onDelete },
             ]}
           />
         </div>

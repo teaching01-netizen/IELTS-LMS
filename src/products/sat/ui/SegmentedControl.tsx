@@ -15,7 +15,8 @@ import { motion } from 'motion/react';
 type SatSegmentedControlProps<T extends string> = {
   label: string;
   value: T;
-  options: ReadonlyArray<{ value: T; label: string }>;
+  /** `count` renders beside the label (status tabs: "Live 3"). */
+  options: ReadonlyArray<{ value: T; label: string; count?: number }>;
   onChange: (value: T) => void;
   className?: string;
 };
@@ -61,6 +62,7 @@ export function SatSegmentedControl<T extends string>({ label, value, options, o
             role="radio"
             aria-checked={selected}
             tabIndex={selected ? 0 : -1}
+            aria-label={option.count !== undefined ? `${option.label} ${option.count}` : undefined}
             className="sat-segmented-option capitalize"
             onClick={() => onChange(option.value)}
           >
@@ -73,6 +75,7 @@ export function SatSegmentedControl<T extends string>({ label, value, options, o
               />
             ) : null}
             <span className="sat-segmented-label">{option.label}</span>
+            {option.count !== undefined ? <span className="sat-segmented-count">{option.count}</span> : null}
           </button>
         );
       })}

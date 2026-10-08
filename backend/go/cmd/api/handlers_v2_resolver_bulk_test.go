@@ -12,6 +12,7 @@ import (
 	"database/sql/driver"
 	"regexp"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
@@ -50,8 +51,9 @@ func bulkNormalizedRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key",
 		"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
-	}).AddRow("q-0", "q-0-inner", "mod-a", "reading-writing", "active", "ielts", nil, nil, nil, nil).
-		AddRow("eq-1-other", "q-1", "mod-b", "math", "review", "ielts", nil, nil, nil, nil)
+		"timing_model", "entry_confirmed_at", "entry_entered_at",
+	}).AddRow("q-0", "q-0-inner", "mod-a", "reading-writing", "active", "ielts", nil, nil, nil, nil, "", nil, nil).
+		AddRow("eq-1-other", "q-1", "mod-b", "math", "review", "ielts", nil, nil, nil, nil, "", nil, nil)
 }
 
 func bulkQuestionIDs() []string { return []string{"q-0", "q-1", "q-2", "q-3", "q-4", "q-5"} }
@@ -63,14 +65,13 @@ func TestV2ResolverResolveManyIsSetBased(t *testing.T) {
 	const snapshot = `{"sections":{"reading":[{"questionId":"q-3"}]}}`
 	verdicts := resolveManyWithMockDB(t, func(mock sqlmock.Sqlmock) {
 		ids := bulkQuestionIDs()
-		args := []driver.Value{"att-1"}
+		args := []driver.Value{"att-1", "att-1"}
 		for _, id := range ids {
 			args = append(args, id)
 		}
 		for _, id := range ids {
 			args = append(args, id)
 		}
-		args = append(args, "att-1")
 		mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).WithArgs(args...).WillReturnRows(bulkNormalizedRows())
 		// Provider gate: once for the batch, not once per unanswered question.
 		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts sa JOIN exam_schedules")).
@@ -114,18 +115,18 @@ func TestV2ResolverResolveManyIsSetBased(t *testing.T) {
 func TestV2ResolverResolveManySATGateSkipsSnapshot(t *testing.T) {
 	verdicts := resolveManyWithMockDB(t, func(mock sqlmock.Sqlmock) {
 		ids := bulkQuestionIDs()
-		args := []driver.Value{"att-1"}
+		args := []driver.Value{"att-1", "att-1"}
 		for _, id := range ids {
 			args = append(args, id)
 		}
 		for _, id := range ids {
 			args = append(args, id)
 		}
-		args = append(args, "att-1")
 		mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).WithArgs(args...).
 			WillReturnRows(sqlmock.NewRows([]string{
 				"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key",
 				"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
+				"timing_model", "entry_confirmed_at", "entry_entered_at",
 			}))
 		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts sa JOIN exam_schedules")).
 			WithArgs("att-1").
@@ -137,5 +138,27 @@ func TestV2ResolverResolveManySATGateSkipsSnapshot(t *testing.T) {
 		if !ok || appErr.Code != apperrors.CodeNotFound {
 			t.Fatalf("SAT question %s must be refused per question, got %+v", id, verdicts[id])
 		}
+	}
+}
+
+func TestV2ResolverPersonalSATBulkCarriesAdmissionClock(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	verdicts := resolveManyWithMockDB(t, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).
+			WillReturnRows(sqlmock.NewRows([]string{
+				"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key",
+				"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
+				"timing_model", "entry_confirmed_at", "entry_entered_at",
+			}).AddRow("eq-1", "q-1", "mod-1", "math", "active", "sat", now, 600, 60, 30, "sat_personal_v1", now, nil))
+	}, []string{"eq-1"})
+	owner := verdicts["eq-1"].Owner
+	if owner.ModuleStartedAt == nil || !owner.ModuleStartedAt.Equal(now) {
+		t.Fatalf("bulk owner loses personal SAT start: %+v", owner)
+	}
+	if owner.ModuleDeadlineAt == nil || !owner.ModuleDeadlineAt.Equal(now.Add(690*time.Second)) {
+		t.Fatalf("bulk owner deadline = %+v", owner.ModuleDeadlineAt)
+	}
+	if owner.TimingModel != "sat_personal_v1" || owner.EntryConfirmedAt == nil || !owner.EntryConfirmedAt.Equal(now) {
+		t.Fatalf("bulk owner loses captured timing/entry: %+v", owner)
 	}
 }

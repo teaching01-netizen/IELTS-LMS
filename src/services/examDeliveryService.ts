@@ -1,6 +1,7 @@
 import type { ExamSchedule, ExamSessionRuntime } from '../types/domain';
 import type { ExamConfig, ModuleType, ValidationError } from '../types';
 import { normalizeExamConfig } from '../constants/examDefaults';
+import { createId } from '../utils/idUtils';
 import {
   backendGet,
   backendPost,
@@ -388,6 +389,7 @@ export class ExamDeliveryService {
     attemptId: string,
     actor: string,
     minutes: number,
+    moduleId: string,
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
@@ -396,9 +398,11 @@ export class ExamDeliveryService {
       }
 
       await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/extend`, {
+        operationId: createId('proctor'),
+        moduleId,
         actorId: actor,
         minutes,
-      }, { retries: 0 });
+      }, { retries: 2 });
       return { success: true };
     } catch (error) {
       return {
@@ -499,12 +503,13 @@ export class ExamDeliveryService {
       const runtimePayload = await backendPost<any>(
         `/v1/proctor/sessions/${scheduleId}/control/extend-section`,
         {
+          operationId: createId('proctor'),
           actorId: actor,
           minutes,
           expectedActiveSectionKey: expectedActiveSectionKey ?? undefined,
           expectedRuntimeRevision: expectedRuntimeRevision ?? undefined,
         },
-        { retries: 0 },
+        { retries: 2 },
       );
 
       return {
@@ -530,11 +535,12 @@ export class ExamDeliveryService {
       await backendPost<any>(
         `/v1/proctor/sessions/${scheduleId}/control/end-section-now`,
         {
+          operationId: createId('proctor'),
           actorId: actor,
           expectedActiveSectionKey: expectedActiveSectionKey ?? undefined,
           expectedRuntimeRevision: expectedRuntimeRevision ?? undefined,
         },
-        { retries: 0 },
+        { retries: 2 },
       );
       // The Go compatibility route returns { ok: true } after the command;
       // re-read the authoritative projection instead of mapping that ack as a
@@ -565,9 +571,10 @@ export class ExamDeliveryService {
       await backendPost<any>(
         `/v1/proctor/sessions/${scheduleId}/control/complete-exam`,
         {
+          operationId: createId('proctor'),
           actorId: actor,
         },
-        { retries: 0 },
+        { retries: 2 },
       );
       // The Go compatibility route returns { ok: true } after the command;
       // re-read the authoritative projection instead of mapping that ack as a

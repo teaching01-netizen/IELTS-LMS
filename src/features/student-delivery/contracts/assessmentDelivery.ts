@@ -290,6 +290,8 @@ export interface AssessmentLateEvidenceRequest {
     questionId: string;
     writeId: string;
     response: unknown;
+    originLeaseEpoch: number | null;
+    clientVersion: number | null;
     clientReceivedAt?: string;
   }>;
 }

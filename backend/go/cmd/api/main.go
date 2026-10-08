@@ -717,6 +717,8 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/extend", proctorExtendAttemptHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/rearm", proctorReArmStageHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/terminate", proctorTerminateHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}/attempts/{attemptID}/late-evidence", proctorLateEvidenceHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/late-evidence/review", proctorReviewLateEvidenceHandler(app))
 			authzRoute(r, "GET", "/sessions/{scheduleID}/device-transfers", proctorDeviceTransfersHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/device-transfers/{requestID}/decision", proctorDeviceTransferDecisionHandler(app))
 			authzRoute(r, "POST", "/alerts/{alertID}/ack", proctorAckAlertHandler(app))

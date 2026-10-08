@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatResultDetailRoute } from '../SatResultDetailRoute';
-import { SatResultsRoute } from '../SatResultsRoute';
+import { SatResultsContent, SatResultsRoute } from '../SatResultsRoute';
 import { SatAttemptAnswersRoute } from '../SatAttemptAnswersRoute';
 
 const useSatResultsQueryMock = vi.hoisted(() => vi.fn());
@@ -114,23 +114,42 @@ describe('SAT Results hierarchy', () => {
     expect(screen.queryByRole('button', { name: /Export all group answers/ })).not.toBeInTheDocument();
   });
 
-  it('keeps attempts inside their schedule and opens the existing detail by result id', () => {
+  it('keeps attempts inside their schedule and opens a result beside the list, with the full page one link away', async () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
     expect(screen.getByText('John Smith')).toBeInTheDocument();
     expect(screen.getByText('Student X')).toBeInTheDocument();
     expect(screen.queryByText('Older Student')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /John Smith/ }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-1&access=schedule-1&attempt=attempt-1');
+    const dialog = await screen.findByRole('dialog', { name: 'Student response' });
+    fireEvent.click(within(dialog).getByRole('link', { name: /Open as page/ }));
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results/result-1');
     expect(screen.getByRole('heading', { name: 'John Smith' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Back to SAT results' }));
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-1&access=schedule-1');
   });
 
-  it('opens server-saved answers for an attempt without a score', () => {
+  it('steps to the previous and next student inside the inspector', async () => {
+    renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1&attempt=attempt-1');
+    const dialog = await screen.findByRole('dialog', { name: 'Student response' });
+    expect(within(dialog).getByText(/Student 1 of 2 on this page/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Previous student' })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next student' }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('attempt=attempt-2');
+    const next = await screen.findByRole('dialog', { name: 'Student response' });
+    expect(within(next).getByText(/Student X · Student 2 of 2/)).toBeInTheDocument();
+    expect(within(next).getByRole('button', { name: 'Next student' })).toBeDisabled();
+    expect(within(next).getByText('1 server-saved answers')).toBeInTheDocument();
+  });
+
+  it('opens server-saved answers for an attempt without a score', async () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
     const row = screen.getByText('Student X').closest('button');
     expect(row).toBeEnabled();
     fireEvent.click(row as HTMLElement);
+    const dialog = await screen.findByRole('dialog', { name: 'Student response' });
+    expect(within(dialog).getByRole('link', { name: /Open as page/ })).toHaveAttribute('href', '/sat/results/attempts/attempt-2');
+    fireEvent.click(within(dialog).getByRole('link', { name: /Open as page/ }));
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results/attempts/attempt-2');
     expect(screen.getByText('1 server-saved answers')).toBeInTheDocument();
     expect(screen.getByText(/Revision 4/)).toBeInTheDocument();
@@ -151,14 +170,15 @@ describe('SAT Results hierarchy', () => {
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-1&access=schedule-1');
   });
 
-  it('opens attempt answers when a pending result row exists', () => {
-    useSatAttemptsQueryMock.mockReturnValueOnce({
+  it('opens attempt answers when a pending result row exists', async () => {
+    useSatAttemptsQueryMock.mockReturnValue({
       data: { ...pageOne, items: [{ ...pageOne.items[1], resultId: 'pending-result', outcomeStatus: 'pending', attemptStatus: 'submitted' }] },
       isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
     });
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
     fireEvent.click(screen.getByRole('button', { name: /Student X/ }));
-    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results/attempts/attempt-2');
+    const dialog = await screen.findByRole('dialog', { name: 'Student response' });
+    expect(within(dialog).getByRole('link', { name: /Open as page/ })).toHaveAttribute('href', '/sat/results/attempts/attempt-2');
   });
 
   it('links a directly opened pending result to its saved answers', () => {
@@ -221,5 +241,82 @@ describe('SAT Results hierarchy', () => {
     expect(useSatAttemptsQueryMock).toHaveBeenLastCalledWith('sat-1', 'schedule-1', 50, '', 'all', expect.objectContaining({ status: 'running', from: expect.any(String) }));
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'ended' } });
     expect(useSatAttemptsQueryMock).toHaveBeenLastCalledWith('sat-1', 'schedule-1', 0, '', 'all', expect.objectContaining({ status: 'ended' }));
+  });
+});
+
+describe('SAT Responses tab (exam-scoped results content)', () => {
+  function renderResponses(initialEntry = '/sat/exams/sat-1/responses', lockedExamId = 'sat-1') {
+    return render(
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/sat/exams/:examId/responses" element={<SatResultsContent lockedExamId={lockedExamId} basePath={`/sat/exams/${lockedExamId}/responses`} emptyState={<p>No responses yet for this exam</p>} />} />
+          <Route path="/sat/results/attempts/:attemptId" element={<SatAttemptAnswersRoute />} />
+          <Route path="/sat/results/:resultId" element={<SatResultDetailRoute />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useSatResultsQueryMock.mockReturnValue({ data: accessGroups, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    useSatAttemptsQueryMock.mockImplementation((_examId: string, scheduleId: string, offset: number) => ({
+      data: scheduleId === 'schedule-1' ? (offset === 0 ? pageOne : pageTwo) : { items: [], total: 0, offset, limit: 50, hasMore: false },
+      isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
+    }));
+    useSatResultQueryMock.mockReturnValue({ data: undefined, isLoading: true, error: null, isFetching: false, refetch: vi.fn() });
+    useSatAttemptAnswersQueryMock.mockReturnValue({ data: savedAnswers, isLoading: false, error: null, isFetching: false, dataUpdatedAt: Date.UTC(2026, 8, 1, 8, 6), refetch: vi.fn() });
+  });
+
+  it('opens straight to the access groups of this exam without an exam list', () => {
+    renderResponses();
+    expect(screen.getByRole('button', { name: /Saturday 9 AM/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Previous Student Access/ })).toBeInTheDocument();
+    // Another exam's group is never shown, and there is no way back to the global list from here.
+    expect(screen.queryByRole('button', { name: /Monday Makeup/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back to SAT results' })).not.toBeInTheDocument();
+  });
+
+  it('keeps drill-down inside the tab and ignores a conflicting ?exam= param', () => {
+    renderResponses('/sat/exams/sat-1/responses?exam=sat-2');
+    fireEvent.click(screen.getByRole('button', { name: /Saturday 9 AM/ }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/exams/sat-1/responses?access=schedule-1');
+    expect(useSatAttemptsQueryMock).toHaveBeenLastCalledWith('sat-1', 'schedule-1', 0, '', 'all', { status: 'all' });
+  });
+
+  it('opens a student response beside the list without leaving the tab, then closes back to the same filters', async () => {
+    renderResponses('/sat/exams/sat-1/responses?access=schedule-1&status=running');
+    fireEvent.click(screen.getByRole('button', { name: /Student X/ }));
+    // Still on the Responses tab; the response is a URL-backed sheet.
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/exams/sat-1/responses?access=schedule-1&status=running&attempt=attempt-2');
+    const dialog = await screen.findByRole('dialog', { name: 'Student response' });
+    expect(within(dialog).getByText('1 server-saved answers')).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: /Open as page/ })).toHaveAttribute('href', '/sat/results/attempts/attempt-2');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Student response' })).not.toBeInTheDocument());
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/exams/sat-1/responses?access=schedule-1&status=running');
+    expect(screen.getByTestId('test-location')).not.toHaveTextContent('attempt=');
+  });
+
+  it('restores an open student response from the URL after a refresh', async () => {
+    renderResponses('/sat/exams/sat-1/responses?access=schedule-1&attempt=attempt-2');
+    expect(await screen.findByRole('dialog', { name: 'Student response' })).toBeInTheDocument();
+  });
+
+  it('shows applied filters as removable chips and clears them together', () => {
+    renderResponses('/sat/exams/sat-1/responses?access=schedule-1&status=running&q=Student');
+    const chips = within(screen.getByRole('list', { name: 'Active filters' }));
+    expect(chips.getByRole('button', { name: 'Remove filter Status: In progress' })).toBeInTheDocument();
+    fireEvent.click(chips.getByRole('button', { name: 'Remove filter Search: Student' }));
+    expect(screen.getByTestId('test-location')).not.toHaveTextContent('q=Student');
+    expect(screen.getByTestId('test-location')).toHaveTextContent('status=running');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+    expect(screen.getByTestId('test-location')).not.toHaveTextContent('status=');
+    expect(screen.queryByRole('list', { name: 'Active filters' })).not.toBeInTheDocument();
+  });
+
+  it('shows the supplied empty state when the exam has no responses yet', () => {
+    renderResponses('/sat/exams/sat-9/responses', 'sat-9');
+    expect(screen.getByText('No responses yet for this exam')).toBeInTheDocument();
   });
 });

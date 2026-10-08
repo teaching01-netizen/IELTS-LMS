@@ -3,10 +3,13 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"sort"
 	"log/slog"
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/lifecycle"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
@@ -93,6 +96,17 @@ func (s *Service) CloseModule(ctx context.Context, bearerScheduleID, bearerAttem
 	if len(req.Answers) > maxCloseManifest {
 		return nil, apperrors.New(apperrors.CodeValidation, "The close manifest is too large.")
 	}
+	req.Answers = append([]ModuleCloseAnswer(nil), req.Answers...)
+	sort.Slice(req.Answers, func(i, j int) bool { return req.Answers[i].QuestionID < req.Answers[j].QuestionID })
+	for i, answer := range req.Answers {
+		if strings.TrimSpace(answer.QuestionID) == "" || strings.TrimSpace(answer.WriteID) == "" || len(answer.WriteID) > 64 || answer.ClientVersion < 1 || (i > 0 && answer.QuestionID == req.Answers[i-1].QuestionID) {
+			return nil, apperrors.New(apperrors.CodeValidation, "The close manifest requires unique question IDs, exact write IDs, and positive versions.")
+		}
+	}
+	requestHash, err := lifecycle.Hash("close_module", req)
+	if err != nil {
+		return nil, err
+	}
 	scheduleID, examID, providerKey, versionID, err := s.startScheduleBinding(ctx, bearerScheduleID)
 	if err != nil {
 		return nil, err
@@ -112,8 +126,11 @@ func (s *Service) CloseModule(ctx context.Context, bearerScheduleID, bearerAttem
 		sealCreated   bool
 		needsComplete bool
 	)
+	var committedAck *SatModuleCloseAck
+	scope := lifecycle.Scope{ScheduleID: scheduleID, AttemptID: bearerAttemptID}
 	err = s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		hubEvents, nextModuleID, alreadyClosed, sealed, sealCreated, needsComplete = nil, "", false, false, false, false
+		committedAck = nil
 		workErr := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID)
 		if workErr != nil {
 			e, ok := apperrors.As(workErr)
@@ -123,6 +140,27 @@ func (s *Service) CloseModule(ctx context.Context, bearerScheduleID, bearerAttem
 		}
 		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, writerBinding...); err != nil {
 			return err
+		}
+		stored, err := lifecycle.Load(ctx, t, scope, req.CloseID, "close_module", requestHash)
+		if err != nil {
+			return err
+		}
+		if stored != nil {
+			if err := json.Unmarshal(stored, &committedAck); err != nil {
+				return err
+			}
+			alreadyClosed = true
+			return nil
+		}
+		storeClose := func() error {
+			snapshot := *s
+			snapshot.db, snapshot.runner = t, nil
+			var err error
+			committedAck, err = snapshot.closeAck(ctx, scheduleID, bearerAttemptID, versionID, req.ModuleID, nextModuleID, alreadyClosed)
+			if err != nil {
+				return err
+			}
+			return lifecycle.Store(ctx, t, scope, req.CloseID, "close_module", requestHash, committedAck)
 		}
 		var timingModel sql.NullString
 		if err := t.QueryRowContext(ctx,
@@ -144,7 +182,7 @@ func (s *Service) CloseModule(ctx context.Context, bearerScheduleID, bearerAttem
 		switch module.state {
 		case "locked", "submitted":
 			alreadyClosed = true
-			return nil
+			return storeClose()
 		case "active", "review":
 		default:
 			return assessmentConflict("MODULE_NOT_ACTIVE", "The SAT module is not active.")
@@ -164,7 +202,6 @@ func (s *Service) CloseModule(ctx context.Context, bearerScheduleID, bearerAttem
 				details["deadlineAt"] = *deadline
 			}
 			conflict.Details = details
-			telemetry.IncCounter(telemetry.MSATModuleCloseRequestTotal, "basis", routeBasisClientConfirmed, "outcome", closeOutcomeNotExpired)
 			return conflict
 		}
 		pending, err := pendingCloseWritesTx(ctx, t, bearerAttemptID, module.moduleID, req.Answers)
@@ -174,8 +211,6 @@ func (s *Service) CloseModule(ctx context.Context, bearerScheduleID, bearerAttem
 		if len(pending) > 0 {
 			conflict := assessmentConflict("CLOSE_WRITES_PENDING", "Some answers have not reached the server yet.")
 			conflict.Details = map[string]any{"reason": "CLOSE_WRITES_PENDING", "questionIds": pending}
-			telemetry.IncCounter(telemetry.MSATModuleCloseRequestTotal, "basis", routeBasisClientConfirmed, "outcome", closeOutcomeWritesPending)
-			telemetry.IncCounter(telemetry.MSATCloseWritesPendingTotal)
 			return conflict
 		}
 		next, err := s.finalizeModuleWithBasisTx(ctx, t, bearerAttemptID, module, "time_expired", routeBasisClientConfirmed)
@@ -200,9 +235,18 @@ func (s *Service) CloseModule(ctx context.Context, bearerScheduleID, bearerAttem
 			return err
 		}
 		hubEvents = dualModuleEvents(scheduleID, bearerAttemptID, rev, liveEventModuleSubmitted)
-		return nil
+		return storeClose()
 	})
 	if err != nil {
+		if e, ok := apperrors.As(err); ok {
+			switch e.Details["reason"] {
+			case "MODULE_NOT_EXPIRED":
+				telemetry.IncCounter(telemetry.MSATModuleCloseRequestTotal, "basis", routeBasisClientConfirmed, "outcome", closeOutcomeNotExpired)
+			case "CLOSE_WRITES_PENDING":
+				telemetry.IncCounter(telemetry.MSATModuleCloseRequestTotal, "basis", routeBasisClientConfirmed, "outcome", closeOutcomeWritesPending)
+				telemetry.IncCounter(telemetry.MSATCloseWritesPendingTotal)
+			}
+		}
 		return nil, err
 	}
 	s.publishHubEvents(hubEvents)
@@ -223,20 +267,16 @@ func (s *Service) CloseModule(ctx context.Context, bearerScheduleID, bearerAttem
 		outcome = closeOutcomeAlreadyClosed
 	}
 	telemetry.IncCounter(telemetry.MSATModuleCloseRequestTotal, "basis", routeBasisClientConfirmed, "outcome", outcome)
-	ack, err := s.closeAck(ctx, scheduleID, bearerAttemptID, versionID, req.ModuleID, nextModuleID, alreadyClosed)
-	if err == nil {
-		slog.InfoContext(ctx, "SAT module close", "attempt_id", bearerAttemptID,
-			"module_attempt_id", req.ModuleAttemptID, "close_id", req.CloseID,
-			"route_basis", ack.RouteBasis, "late_answer_count", ack.lateAnswerCount,
-			"selected_route", ack.selectedRoute, "outcome", outcome)
-	}
-	return ack, err
+	slog.InfoContext(ctx, "SAT module close", "attempt_id", bearerAttemptID,
+		"module_attempt_id", req.ModuleAttemptID, "close_id", req.CloseID,
+		"route_basis", committedAck.RouteBasis, "late_answer_count", committedAck.lateAnswerCount,
+		"selected_route", committedAck.selectedRoute, "outcome", outcome)
+	return committedAck, nil
 }
 
-// pendingCloseWritesTx returns the manifest questions whose listed write is
-// not yet durable for this module: no row, a row in another module, or a row
-// older than the listed client version. Runs under the attempt row lock, so
-// no write can land between this check and the finalize that follows it.
+// pendingCloseWritesTx requires the manifest's exact write, not a comparable
+// version from an unrelated writer. The projection and immutable ledger must
+// agree on originating lease, version and canonical response hash.
 func pendingCloseWritesTx(ctx context.Context, t tx.Tx, attemptID, moduleID string, manifest []ModuleCloseAnswer) ([]string, error) {
 	if len(manifest) == 0 {
 		return nil, nil
@@ -244,37 +284,46 @@ func pendingCloseWritesTx(ctx context.Context, t tx.Tx, attemptID, moduleID stri
 	ids := []any{attemptID, moduleID}
 	seen := make(map[string]bool, len(manifest))
 	for _, entry := range manifest {
-		if strings.TrimSpace(entry.QuestionID) == "" || entry.ClientVersion < 1 || seen[entry.QuestionID] {
-			return nil, apperrors.New(apperrors.CodeValidation, "The close manifest requires unique question ids and positive client versions.")
+		if strings.TrimSpace(entry.QuestionID) == "" || strings.TrimSpace(entry.WriteID) == "" || len(entry.WriteID) > 64 || entry.ClientVersion < 1 || seen[entry.QuestionID] {
+			return nil, apperrors.New(apperrors.CodeValidation, "The close manifest requires unique question ids, write ids and positive client versions.")
 		}
 		seen[entry.QuestionID] = true
 		ids = append(ids, entry.QuestionID)
 	}
 	rows, err := t.QueryContext(ctx,
-		"SELECT eq.id, v.client_version FROM assessment_exam_questions eq LEFT JOIN attempt_responses_v2 v ON v.attempt_id = ? AND v.module_id = eq.module_id AND v.question_id = eq.id WHERE eq.module_id = ? AND eq.id IN ("+sqlPlaceholders(len(manifest))+")", ids...)
+		"SELECT eq.id, v.client_version, v.lease_epoch, v.client_write_id, v.response_hash, l.client_write_id, l.client_version, l.lease_epoch, l.response_hash FROM assessment_exam_questions eq LEFT JOIN attempt_responses_v2 v ON v.attempt_id = ? AND v.module_id = eq.module_id AND v.question_id = eq.id LEFT JOIN attempt_mutations_v2 l ON l.attempt_id = v.attempt_id AND l.client_write_id = v.client_write_id AND l.question_id = eq.id WHERE eq.module_id = ? AND eq.id IN ("+sqlPlaceholders(len(manifest))+")", ids...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	stored := make(map[string]sql.NullInt64, len(manifest))
+	type durableWrite struct {
+		version, lease, ledgerVersion, ledgerLease sql.NullInt64
+		write, hash, ledgerWrite, ledgerHash sql.NullString
+	}
+	stored := make(map[string]durableWrite, len(manifest))
 	for rows.Next() {
 		var questionID string
-		var version sql.NullInt64
-		if err := rows.Scan(&questionID, &version); err != nil {
+		var durable durableWrite
+		if err := rows.Scan(&questionID, &durable.version, &durable.lease, &durable.write, &durable.hash, &durable.ledgerWrite, &durable.ledgerVersion, &durable.ledgerLease, &durable.ledgerHash); err != nil {
 			return nil, err
 		}
-		stored[questionID] = version
+		stored[questionID] = durable
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	var pending []string
 	for _, entry := range manifest {
-		version, belongs := stored[entry.QuestionID]
+		durable, belongs := stored[entry.QuestionID]
 		if !belongs {
 			return nil, apperrors.New(apperrors.CodeValidation, "The close manifest names a question outside this module.")
 		}
-		if !version.Valid || version.Int64 < entry.ClientVersion {
+		if !durable.version.Valid || durable.version.Int64 != entry.ClientVersion ||
+			!durable.write.Valid || durable.write.String != entry.WriteID ||
+			!durable.ledgerWrite.Valid || durable.ledgerWrite.String != entry.WriteID ||
+			!durable.ledgerVersion.Valid || durable.ledgerVersion.Int64 != entry.ClientVersion ||
+			!durable.lease.Valid || !durable.ledgerLease.Valid || durable.lease.Int64 != durable.ledgerLease.Int64 ||
+			!durable.hash.Valid || !durable.ledgerHash.Valid || durable.hash.String != durable.ledgerHash.String {
 			pending = append(pending, entry.QuestionID)
 		}
 	}

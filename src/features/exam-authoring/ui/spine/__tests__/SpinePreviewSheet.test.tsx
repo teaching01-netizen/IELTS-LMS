@@ -31,7 +31,7 @@ describe("SpinePreviewSheet", () => {
         onRestoreOpener={vi.fn()}
       />,
     );
-    expect(screen.getByText("Student preview")).toBeInTheDocument();
+    expect(screen.getByText("Question preview")).toBeInTheDocument();
     expect(screen.getByTestId("delivery-renderer")).toBeInTheDocument();
   });
 

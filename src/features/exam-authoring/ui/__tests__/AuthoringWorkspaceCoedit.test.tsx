@@ -1238,7 +1238,7 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       transport.sentStateless.length = 0;
       vi.useFakeTimers();
       try {
-        fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+        fireEvent.click(screen.getByRole("button", { name: "Preview exam" }));
         await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });
         expect(screen.getByText(/This exam's latest changes are still being confirmed/)).toBeInTheDocument();
         expect(screen.queryByText("Preview landed")).not.toBeInTheDocument();
@@ -1253,13 +1253,13 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       } finally {
         vi.useRealTimers();
       }
-      fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+      fireEvent.click(screen.getByRole("button", { name: "Preview exam" }));
       await waitFor(() => expect(screen.getByText("Preview landed")).toBeInTheDocument());
     });
 
     it("navigates once this tab's exact room state is durable", async () => {
       await renderWorkspaceRoomWithRoutes();
-      fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+      fireEvent.click(screen.getByRole("button", { name: "Preview exam" }));
       await waitFor(() => expect(screen.getByText("Preview landed")).toBeInTheDocument());
     });
 
@@ -1272,7 +1272,7 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
         transport.drop();
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+      fireEvent.click(screen.getByRole("button", { name: "Preview exam" }));
 
       // The author keeps their editor and is told why: the next screen reads
       // MySQL, and this tab's work has not reached it.
@@ -1304,7 +1304,7 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
         });
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+      fireEvent.click(screen.getByRole("button", { name: "Preview exam" }));
       await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
       expect(screen.queryByText("Preview landed")).not.toBeInTheDocument();
     });

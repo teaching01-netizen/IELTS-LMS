@@ -1,3 +1,4 @@
+import { practiceEntrySession } from './practice-entry.js';
 import http from 'k6/http';
 import { check, fail, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
@@ -109,7 +110,7 @@ export const options = {
 function enter(jar, student, clientSessionId) {
   const resp = http.post(
     `${baseUrl}/api/v1/auth/student/entry`,
-    JSON.stringify({ scheduleId, wcode: student.wcode, email: student.email, studentName: student.fullName, clientSessionId }),
+    JSON.stringify({ scheduleId, wcode: student.wcode, email: student.email, studentName: student.fullName, clientSessionId, entrySession: practiceEntrySession(scheduleId, student) }),
     { jar, headers: jsonHeaders(), responseCallback: http.expectedStatuses(200) },
   );
   if (resp.status !== 200) fail(`entry failed (${student.wcode}): ${resp.status} ${String(resp.body).slice(0, 200)}`);

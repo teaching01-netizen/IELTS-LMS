@@ -171,7 +171,7 @@ export function PublishAssessmentDialog({
           <span id="sat-publish-notes-label" className="block text-xs font-medium text-muted-foreground">
             Publish notes <span className="font-normal text-muted-foreground">Optional</span>
           </span>
-          <span id="sat-publish-notes-count" aria-live="polite" className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          <span id="sat-publish-notes-count" aria-live="polite" className="shrink-0 text-xs tabular-nums text-muted-foreground">
             {notes.length}/{MAX_PUBLISH_NOTES_LENGTH}
           </span>
         </div>

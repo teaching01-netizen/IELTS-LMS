@@ -38,7 +38,7 @@ import (
 
 // Service wires delivery reads explicitly.
 type Service struct {
-	db     *sql.DB
+	db     tx.Tx
 	runner *tx.Runner
 	// versions caches immutable published trees (plan D1, nil = off).
 	versions *VersionCache
@@ -395,10 +395,30 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
-	sections = deliverySectionsForScope(sections, scope)
-	if err := s.ensureBaseModuleAttempt(ctx, attemptID, sections); err != nil {
+	if err := s.ensureBaseModuleAttempt(ctx, attemptID, deliverySectionsForScope(sections, scope)); err != nil {
 		return nil, err
 	}
+	var bootstrap *Bootstrap
+	err = s.runner.WithTxReadOnly(ctx, func(ctx context.Context, q tx.Tx) error {
+		snapshot := *s
+		snapshot.db, snapshot.runner = q, nil
+		var readErr error
+		bootstrap, readErr = snapshot.bootstrapSnapshot(ctx, scheduleID, examID, providerKey, versionID, attemptID, versionRev, sections)
+		return readErr
+	})
+	return bootstrap, err
+}
+
+func (s *Service) bootstrapSnapshot(ctx context.Context, scheduleID, examID, providerKey, versionID, attemptID string, versionRev int64, sections []DeliverySection) (*Bootstrap, error) {
+	now, err := s.dbNow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := s.effectiveSectionScope(ctx, scheduleID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	sections = deliverySectionsForScope(sections, scope)
 	moduleAttempts, err := s.loadModuleAttempts(ctx, attemptID, now)
 	if err != nil {
 		return nil, err
@@ -469,18 +489,30 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 // loadBootstrapResult reads a result only after the attempt crossed its
 // terminal projection boundary. Open attempts stay on the cheap read path and
 // never expose a transient result while the receipt transaction is in flight.
+//
+// The stored result is then passed through the student release policy
+// (studentSafeBootstrapResult): a terminal attempt always gets its receipt, but
+// score fields appear only under an approved release status.
 func (s *Service) loadBootstrapResult(ctx context.Context, providerKey, attemptID string, control attemptControl) (any, error) {
 	if control.submittedAt == nil && control.deliveryStatus != "terminated" && control.deliveryStatus != "locked" && control.deliveryStatus != "cancelled" {
 		return nil, nil
 	}
+	var (
+		result any
+		err    error
+	)
 	switch providerKey {
 	case "sat":
-		return sat.LoadResultForAttempt(ctx, s.db, attemptID)
+		result, err = sat.LoadResultForAttempt(ctx, s.db, attemptID)
 	case "act":
-		return act.LoadResultForAttempt(ctx, s.db, attemptID)
+		result, err = act.LoadResultForAttempt(ctx, s.db, attemptID)
 	default:
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	return studentSafeBootstrapResult(providerKey, result), nil
 }
 
 // VersionETag renders the weak ETag for a bootstrap/static payload:
@@ -703,7 +735,7 @@ func (s *Service) linkSectionScope(ctx context.Context, scheduleID string) (map[
 	if err != nil {
 		return nil, err
 	}
-	return examdomain.ParseStoredSectionScope(raw.String), nil
+	return examdomain.ParseStoredSectionScope(raw), nil
 }
 
 func (s *Service) effectiveSectionScope(ctx context.Context, scheduleID, versionID string) (map[string]bool, error) {
@@ -1425,6 +1457,12 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 	if err := s.saveAttemptBinding(ctx, scheduleID, bearerAttemptID, examID); err != nil {
 		return nil, err
 	}
+	// F4/D1: fence the legacy answer store to the protocol that owns it. See
+	// ensureLegacyAnswerTransportAllowed — acknowledging here would hand the
+	// student a success the scorer and every result projection then ignore.
+	if err := s.ensureLegacyAnswerTransportAllowed(ctx, bearerAttemptID); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	var out *ResponseSnapshot
 	// B1: single-response save is a point-write tx (RC-safe).
@@ -1698,6 +1736,43 @@ func (s *Service) saveScheduleBinding(ctx context.Context, scheduleID string) (i
 		return "", "", "", err
 	}
 	return id, examID, examdomain.EffectiveProviderKey(providerKey, examType), nil
+}
+
+// ensureLegacyAnswerTransportAllowed fences the compatibility answer transport
+// (PATCH /schedules/{scheduleID}/responses/{examQuestionID}) to protocol 1.
+//
+// protocol 2 owns attempt_responses_v2 + attempt_mutations_v2; the scorer reads
+// that ledger first, so a write to assessment_question_responses for a
+// protocol-2 attempt is durable but invisible (defect F4: "multiple answer
+// identities can acknowledge an answer that scoring ignores"). Refusing with a
+// stable, non-retryable conflict is the only honest answer; the client moves to
+// the V2 save boundary (attempts.SaveResponses).
+//
+// Protocol-1 attempts keep the exact legacy behavior: for them
+// assessment_question_responses is genuinely canonical.
+func (s *Service) ensureLegacyAnswerTransportAllowed(ctx context.Context, attemptID string) error {
+	var protocolVersion int
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT COALESCE(protocol_version, 1) FROM student_attempts WHERE id = ?",
+		attemptID).Scan(&protocolVersion); err != nil {
+		if err == sql.ErrNoRows {
+			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+		}
+		return err
+	}
+	if protocolVersion < 2 {
+		return nil
+	}
+	// Counted so a stray caller (an un-migrated harness, a stale client) is
+	// visible instead of silently losing answers.
+	telemetry.IncCounter(telemetry.MSATCompatSaveRefused, "reason", "PROTOCOL_UPGRADE_REQUIRED")
+	err := apperrors.New(apperrors.CodeProtocolUpgradeRequired,
+		"This answer transport is retired for protocol-2 SAT attempts; use the V2 response save endpoint.")
+	err.Details = map[string]any{
+		"reason":          "PROTOCOL_UPGRADE_REQUIRED",
+		"protocolVersion": protocolVersion,
+	}
+	return err
 }
 
 // saveAttemptBinding mirrors ensure_attempt_binding: the attempt must belong
@@ -2152,7 +2227,7 @@ func ensureSaveModuleAdmitted(m saveActiveModule, now time.Time, closeWindow tim
 	if deadline == nil {
 		return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT module deadline is unavailable.")
 	}
-	if now.After(deadline.Add(closeWindow)) {
+	if !now.Before(deadline.Add(closeWindow)) {
 		return reject("MODULE_DEADLINE_EXPIRED", "The SAT module timer has expired.")
 	}
 	return nil

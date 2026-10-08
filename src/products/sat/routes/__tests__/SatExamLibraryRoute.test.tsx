@@ -108,15 +108,22 @@ describe('SatExamLibraryRoute', () => {
     expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
   });
 
-  it('toggles archived exams without losing search results', () => {
+  it('separates active and archived exams into counted status tabs', () => {
     useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, satExam, { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
     expect(screen.queryByText('SAT Archived 01')).not.toBeInTheDocument();
-    const toggle = screen.getByRole('button', { name: 'Show archived' });
-    expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(toggle);
+    expect(screen.getByRole('radio', { name: 'Active 1' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('radio', { name: 'Archived 1' }));
     expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Hide archived' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText('SAT Practice 06')).not.toBeInTheDocument();
+  });
+
+  it('reaches archived exams when every exam in the library is archived', () => {
+    useExamListQueryMock.mockReturnValue({ data: { entities: [{ ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute();
+    expect(screen.getByText('No active SAT exams')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show archived' }));
+    expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
   });
 
   it('keeps Create disabled for the placeholder alone and enables it once a name is typed', () => {
@@ -134,15 +141,15 @@ describe('SatExamLibraryRoute', () => {
     expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
   });
 
-  it('preserves search text when the archived toggle changes (04A composition guard)', () => {
+  it('preserves search text when the status tab changes (04A composition guard)', () => {
     useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, satExam, { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
-    fireEvent.change(screen.getByPlaceholderText('Search exam title'), { target: { value: 'SAT Practice' } });
+    fireEvent.change(screen.getByPlaceholderText('Search exam title'), { target: { value: 'SAT' } });
     expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Show archived' }));
-    expect(screen.getByPlaceholderText('Search exam title')).toHaveValue('SAT Practice');
-    expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('1 of 2 exam');
+    fireEvent.click(screen.getByRole('radio', { name: 'Archived 1' }));
+    expect(screen.getByPlaceholderText('Search exam title')).toHaveValue('SAT');
+    expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('1 exam');
   });
 
   it('closes a pristine dialog on Cancel with no alertdialog', () => {

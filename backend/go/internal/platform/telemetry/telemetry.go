@@ -10,6 +10,7 @@ const (
 	MSATCloseWritesPendingTotal    = "sat_close_writes_pending_total"
 	MSATAdmissionTotal             = "sat_admission_total"
 	MSATTransferTotal              = "sat_device_transfer_total"
+	MSATCompatSaveRefused          = "sat_compat_save_refused_total"
 )
 
 var metricHelpText = map[string]string{
@@ -33,6 +34,7 @@ var metricHelpText = map[string]string{
 	MSATResultQuestionDetailFailure: "Total SAT result question-detail reads that failed instead of returning an empty list.",
 	MSATTimeoutFinalize:             "Total SAT modules finalized by authoritative timeout reconciliation.",
 	MSATResponseReplayAfterTerminal: "Total exact SAT response replays served at or after the authoritative deadline.",
+	MSATCompatSaveRefused:           "Total compatibility answer saves refused because the attempt's canonical store is the V2 response ledger.",
 	MSATAdmissionTotal:              "Total SAT writer admission decisions by outcome (authorized, blocked, closed).",
 	MSATTransferTotal:               "Total SAT device-transfer workflow transitions by action and outcome.",
 	MSATAdaptiveIntegrityViolation:  "Total SAT adaptive-routing integrity violations where the recorded route decision and the administered module disagreed.",

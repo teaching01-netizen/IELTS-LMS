@@ -56,17 +56,17 @@ paths:
     post:
       security: []
       tags: [auth]
-      summary: Student entry by invite code (closed by default; open entry only via an access link)
+      summary: Practice self-registration with an isolated sitting principal
       description: |-
-        Invite code required by default: link-less (direct schedule) entry
-        must present a live selected-student invite code for the schedule
-        (bound name/email rows bind identity; codes cannot be shared).
-        The only open-entry path is the link branch (accessLinkId +
-        ResolveEntry): open links admit without a per-student code, gated
-        by link lifecycle/window. Wrong/unknown code, unknown schedule,
-        and unknown/expired/paused link all collapse to 404
-        NOT_FOUND "Resource not found." (indistinguishable by design).
-        The gate runs before any user/registration/attempt mint.
+        Direct entry accepts a nonempty practice code on an open schedule.
+        Access-link entry additionally enforces link lifecycle, window and scope.
+        Display name/email label a practice attempt; they do not authenticate an
+        existing account. Anonymous clients retain a cryptographically random
+        entrySession before their first request and reuse it after response loss.
+        Existing-account association requires an authenticated student session
+        with matching account email and CSRF proof. Missing legacy recovery
+        capabilities receive an actionable validation response, never account
+        authority. Admitted-attempt resume is separate from new admission.
       parameters:
         - $ref: "#/components/parameters/RequestId"
       requestBody:
@@ -75,10 +75,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [wcode, email]
+              required: [wcode, email, studentName]
               properties:
-                wcode: { type: string, description: 'Live invite code for the schedule (selected-student code on an active access link); empty only on the access-link branch for open links.', example: alice }
-                email: { type: string, format: email }
+                scheduleId: { type: string }
+                accessLinkId: { type: string }
+                wcode: { type: string, description: 'Practice sitting code; empty only for open access links.' }
+                email: { type: string, format: email, description: 'Display/contact label, not authentication.' }
+                studentName: { type: string }
+                clientSessionId: { type: string, format: uuid }
+                entrySession: { type: string, pattern: '^[a-fA-F0-9]{64}$', description: '32-byte opaque recovery capability required for anonymous practice entry. Keep private and retain across retries.' }
       responses:
         "200":
           description: Attempt token issued
@@ -4234,6 +4239,7 @@ components:
               UNSUPPORTED_PROVIDER,
               INVALID_ASSESSMENT,
               ASSESSMENT_RELEASE_INVARIANT,
+              PROTOCOL_UPGRADE_REQUIRED,
               SERVICE_RECOVERY_FAILED,
               SESSION_ALREADY_ACTIVE,
               TRANSFER_APPROVAL_REQUIRED,

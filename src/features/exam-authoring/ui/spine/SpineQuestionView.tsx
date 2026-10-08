@@ -31,6 +31,7 @@ import { SpineSaveFooter } from "./SpineSaveFooter";
 import { QuestionHeader } from './QuestionHeader';
 import { SectionRule } from './SectionRule';
 import { issuesForField } from './readinessFamilies';
+import { ClassificationFieldset } from './ClassificationFieldset';
 
 export interface SpineQuestionViewProps {
   question: QuestionRevision;
@@ -38,6 +39,9 @@ export interface SpineQuestionViewProps {
   onRequestDelete?: (()=>void)|undefined;
   onOpenSettings?: (()=>void)|undefined;
   onMove?: ((direction:-1|1)=>void)|undefined;
+  /** Insert a new question after this one (insert-after authoring). */
+  onAddBelow?: (()=>void)|undefined;
+  addBelowDisabledReason?: string|null|undefined;
   canMoveUp?: boolean|undefined;
   canMoveDown?: boolean|undefined;
   readOnly?: boolean | undefined;
@@ -96,7 +100,7 @@ function emptyContent(): StructuredContent {
 export function SpineQuestionView(props:SpineQuestionViewProps) { return <QuestionCanvas key={props.question.id} {...props}/>; }
 
 function QuestionCanvas({
-  focusField,onRequestDelete,onOpenSettings,onMove,canMoveUp,canMoveDown,isMutating,
+  focusField,onRequestDelete,onOpenSettings,onMove,onAddBelow,addBelowDisabledReason,canMoveUp,canMoveDown,isMutating,
   readOnly = false,
   question,
   questionNumber,
@@ -243,8 +247,8 @@ function QuestionCanvas({
 
   return (
     <article aria-labelledby="spine-question-heading">
-      <QuestionHeader number={questionNumber} contextLabel={questionContext} presenceSlot={headerPresenceSlot} saveSlot={headerSaveSlot} issues={issues} onIssueSelect={jump} onPreview={onPreview} onDuplicate={onDuplicate} onDelete={onRequestDelete??(()=>setDeleteOpen(true))} onSettings={onOpenSettings} onMove={onMove} canMoveUp={canMoveUp} canMoveDown={canMoveDown} busy={isMutating} readOnly={readOnly}/>
-      <div className="space-y-10">
+      <QuestionHeader number={questionNumber} contextLabel={questionContext} presenceSlot={headerPresenceSlot} saveSlot={headerSaveSlot} issues={issues} onIssueSelect={jump} onPreview={onPreview} onDuplicate={onDuplicate} onDelete={onRequestDelete??(()=>setDeleteOpen(true))} onSettings={onOpenSettings} onMove={onMove} onAddBelow={onAddBelow} addBelowDisabledReason={addBelowDisabledReason} canMoveUp={canMoveUp} canMoveDown={canMoveDown} busy={isMutating} readOnly={readOnly}/>
+      <div className="space-y-8">
         <SectionRule title="Question" field="prompt" issues={issuesForField(issues,'prompt')}>
           <FastQuestionComposer label="Question prompt" onOpenShortcutHelp={onOpenShortcutHelp} value={question.prompt} onChange={prompt=>onChange({...question,prompt})} {...(onLocalRichChange && !promptBinding ? { onLocalChange: prompt => onLocalRichChange({...question,prompt}) } : {})} placeholder="Write or paste your question…" assetOwnerId={question.questionId} minHeightClassName="min-h-[140px]" onSmartPaste={handleSmartPaste("prompt")} {...(promptBinding ? { collaboration: promptBinding } : {})}/>
           {suggestion?.field === "prompt" ? <ImportSuggestion analysis={suggestion.analysis} targetField="prompt" sectionKey={suggestion.sectionKey} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} onOutcome={setSuggestionOutcome}/> : null}
@@ -262,6 +266,9 @@ function QuestionCanvas({
         <SectionRule title="Answer" field="answer" issues={issuesForField(issues,'answer')} actions={<AuthoringSegmented ariaLabel="Response type" value={isSpr?'spr':'choice'} disabled={readOnly} onChange={kind=>changeKind(kind==='spr'?'student_produced_response':'single_choice')} options={[{value:'choice',label:'Multiple choice'},...(question.metadata.sectionKey==='math'?[{value:'spr' as const,label:'Student response'}]:[])]}/>}>
           {isSpr?<SatStudentResponseEditor acceptedResponses={answer.acceptedResponses} readOnly={readOnly} onChange={acceptedResponses=>onChange({...question,answer:{...answer,acceptedResponses}})}/>:<AnswerKeyField question={question} readOnly={readOnly} onChange={onChange} {...(onLocalRichChange && !fieldCollaboration ? { onLocalChange: onLocalRichChange } : {})} {...(fieldCollaboration ? { collaborationFor: (optionId) => fieldCollaboration(`choice/${optionId}`) } : {})}/>}
         </SectionRule>
+        <div data-authoring-section="classification" className="rounded-xl border border-border bg-muted/40 p-4">
+          <ClassificationFieldset fields="core" question={question} issues={issues} readOnly={readOnly} onChange={onChange} />
+        </div>
         <SectionRule title="Explanation" field="rationale" hint="Optional" issues={issuesForField(issues,'rationale')}>
           {showRationale?<FastQuestionComposer label="Question explanation" onOpenShortcutHelp={onOpenShortcutHelp} value={question.rationale} onChange={rationale=>onChange({...question,rationale})} {...(onLocalRichChange && !fieldCollaboration?.("rationale") ? { onLocalChange: rationale => onLocalRichChange({...question,rationale}) } : {})} placeholder="Explain why the answer is correct…" assetOwnerId={question.questionId} minHeightClassName="min-h-[120px]" onSmartPaste={handleSmartPaste("rationale")} {...(fieldCollaboration?.("rationale") ? { collaboration: fieldCollaboration("rationale")! } : {})}/> :<button type="button" disabled={readOnly} className="sat-spine__add-content disabled:cursor-not-allowed disabled:opacity-50" onClick={()=>setExpanded(current=>({...current,rationale:true}))}>+ Add an explanation…</button>}
           {suggestion?.field === "rationale" ? <ImportSuggestion analysis={suggestion.analysis} targetField="rationale" sectionKey={suggestion.sectionKey} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} onOutcome={setSuggestionOutcome}/> : null}

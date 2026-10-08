@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExamEntity } from '../../../../../types/domain';
 import type { AccessDistributionOverview, AssessmentAccessLink } from '../../../contracts/accessLinks';
@@ -88,9 +88,11 @@ beforeEach(() => {
   mocks.duplicate.mockResolvedValue({ ...overview.links[0], id: 'link-copy', name: 'Saturday Class Copy' });
 });
 
+const shellNav = { lifecycle: { label: 'Published · Version 1', detail: null, tone: 'published' as const }, showResponses: false, onSelectTab: vi.fn(), onBack: vi.fn(), onPreview: vi.fn() };
+
 describe('StudentLinksDashboard', () => {
   it('keeps older-release links visible by default after a newer release is published', () => {
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
+    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
 
     expect(screen.getAllByText('Saturday Class').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Monday Class').length).toBeGreaterThan(0);
@@ -98,11 +100,11 @@ describe('StudentLinksDashboard', () => {
     expect(screen.queryByText('No matching links')).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByText('Old Scholarship')[0]!);
     expect(screen.getByText('Uses Version 4')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create Version 5 Link' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use setup for Version 5' })).toBeInTheDocument();
   });
 
   it('reconciles detail selection with the visible search result', async () => {
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
+    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
     fireEvent.change(screen.getByLabelText('Search Student Links'), { target: { value: 'Monday' } });
 
     // Search is debounced (150ms) to avoid re-sorting on every keystroke.
@@ -112,29 +114,28 @@ describe('StudentLinksDashboard', () => {
   });
 
   it('runs lifecycle and duplicate actions without mutating a published release', async () => {
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
+    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
 
     fireEvent.click(screen.getByLabelText('Actions for Saturday Class'));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Pause Link' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Pause check-in' }));
     await waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledWith({
       linkId: 'link-current', request: { revision: 3, state: 'paused' },
     }));
 
     fireEvent.click(screen.getByLabelText('Actions for Saturday Class'));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate Link' }));
-    await waitFor(() => expect(mocks.duplicate).toHaveBeenCalledWith({
-      linkId: 'link-current', request: { revision: 3, name: 'Saturday Class Copy', releaseTarget: 'source' },
-    }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate setup' }));
+    expect(screen.getByTestId('link-editor')).toBeInTheDocument();
+    expect(mocks.duplicate).not.toHaveBeenCalled();
   });
 
-  it('creates a replacement link explicitly against the current release', async () => {
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
+  it('reviews a replacement setup before creating a current-version group', () => {
+    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
     fireEvent.click(screen.getByText('Old Scholarship'));
-    fireEvent.click(screen.getByRole('button', { name: 'Create Version 5 Link' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use setup for Version 5' }));
 
-    await waitFor(() => expect(mocks.duplicate).toHaveBeenCalledWith({
-      linkId: 'link-old', request: { revision: 3, name: 'Old Scholarship', releaseTarget: 'current' },
-    }));
+    expect(screen.getByTestId('link-editor')).toBeInTheDocument();
+    expect(mocks.duplicate).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("confirms permanent deletion, sends the displayed revision, and removes the link", async () => {
@@ -143,11 +144,11 @@ describe('StudentLinksDashboard', () => {
       ...overview,
       links: overview.links.map((item) => item.id === "link-current" ? { ...item, revision: 0 } : item),
     };
-    render(<StudentLinksDashboard exam={exam} overview={revisionZeroOverview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
+    render(<StudentLinksDashboard exam={exam} overview={revisionZeroOverview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
 
     fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
-    const dialog = screen.getByRole("alertdialog", { name: "Delete this Student Link permanently?" });
+    const dialog = screen.getByRole("alertdialog", { name: "Delete this student link permanently?" });
     expect(dialog).toHaveTextContent("URL will no longer let students enter");
     expect(dialog).toHaveTextContent("Schedules, exam attempts, scores, and exam history will be preserved");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -169,7 +170,7 @@ describe('StudentLinksDashboard', () => {
   it("keeps a link and offers refresh when deletion loses the revision race", async () => {
     mocks.remove.mockRejectedValue(new Error("409 revision conflict: Student Link changed while you were editing it"));
     const onRefresh = vi.fn().mockResolvedValue(undefined);
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={onRefresh} onBackToRelease={vi.fn()} />);
+    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={onRefresh} onBackToRelease={vi.fn()} shell={shellNav} />);
 
     fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
@@ -181,11 +182,11 @@ describe('StudentLinksDashboard', () => {
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
-  it('makes Student Access creation the primary empty-state action', () => {
-    render(<StudentLinksDashboard exam={exam} overview={{ ...overview, links: [] }} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
-    // Header and empty state both offer the primary creation action.
-    expect(screen.getAllByRole('button', { name: 'New Student Link' }).length).toBeGreaterThanOrEqual(2);
-    fireEvent.click(screen.getAllByRole('button', { name: 'New Student Link' })[0]!);
+  it('makes session creation the primary empty-state action', () => {
+    render(<StudentLinksDashboard exam={exam} overview={{ ...overview, links: [] }} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
+    expect(screen.queryByRole('button', { name: 'New access group' })).not.toBeInTheDocument();
+    // The header offers the same action, so the first-time guide's button is scoped to its own region.
+    fireEvent.click(within(screen.getByRole('region', { name: 'Set up a session' })).getByRole('button', { name: 'Create session' }));
     expect(screen.getByTestId('link-editor')).toBeInTheDocument();
   });
 });

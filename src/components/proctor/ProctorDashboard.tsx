@@ -466,10 +466,15 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
 
   const runStudentExtension = useCallback(
     async (studentId: string, minutes: number) => {
+      const moduleId = sessions.find((session) => session.id === studentId)?.runtimeCurrentModuleId;
+      if (!moduleId) {
+        throw new Error('The student’s current module is unavailable. Refresh the session before adding time.');
+      }
       const result = await examDeliveryService.extendStudentAttempt(
         studentId,
         currentProctorName ?? 'Proctor',
         minutes,
+        moduleId,
       );
       if (!result.success) {
         throw new Error(result.error ?? 'Failed to extend student time');

@@ -43,8 +43,8 @@ describe("AccessLinkRow", () => {
       />,
     );
     expect(screen.getByText("Saturday Class")).toBeInTheDocument();
-    expect(screen.getByText("Live")).toBeInTheDocument();
-    expect(screen.getByText(/10 joined/)).toBeInTheDocument();
+    expect(screen.getByText("Check-in open")).toBeInTheDocument();
+    expect(screen.getByText(/10 registered/)).toBeInTheDocument();
   });
 
   it("badges a narrowed link so it is not shared with the wrong class", () => {

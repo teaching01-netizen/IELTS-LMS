@@ -19,8 +19,8 @@ export function SpineFieldLabel({
       <span
         className={
           required
-            ? "shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary"
-            : "shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+            ? "shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary"
+            : "shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
         }
       >
         {required ? "Required" : hint ?? "Optional"}

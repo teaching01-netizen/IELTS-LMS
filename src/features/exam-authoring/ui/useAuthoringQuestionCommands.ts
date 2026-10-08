@@ -187,7 +187,7 @@ export interface AuthoringQuestionCommands {
    * render, exactly like the command guards above.
    */
   rowMutationFlightRef: { current: boolean };
-  createQuestion: (inheritFrom?: QuestionRevision) => Promise<void>;
+  createQuestion: (inheritFrom?: QuestionRevision, insertAfterExamQuestionId?: string) => Promise<void>;
   batchImport: (drafts: BatchQuestionDraft[]) => Promise<void>;
   duplicateQuestion: (targetId?: string | null) => Promise<void>;
   deleteQuestion: (targetId?: string | null) => Promise<boolean>;
@@ -239,7 +239,7 @@ export function useAuthoringQuestionCommands(
   const [rowMutationBusy, setRowMutationBusy] = useState(false);
 
   const createQuestion = useCallback(
-    async (inheritFrom?: QuestionRevision) => {
+    async (inheritFrom?: QuestionRevision, insertAfterExamQuestionId?: string) => {
       if (
         rowMutationFlight.current ||
         !selectedModuleId ||
@@ -247,8 +247,10 @@ export function useAuthoringQuestionCommands(
         selectedModule.questions.length >= selectedModule.targetQuestionCount
       )
         return;
-      if (!(await flushBeforeNavigation())) return;
+      rowMutationFlight.current = true;
+      setRowMutationBusy(true);
       try {
+        if (!(await flushBeforeNavigation())) return;
         const created = await createQuestionMutation(selectedModuleId);
         let createdQuestion = created.question;
         if (inheritFrom) {
@@ -281,10 +283,42 @@ export function useAuthoringQuestionCommands(
           questionId: created.examQuestionId,
           moduleId: selectedModuleId,
         });
+        // The create endpoint only appends. Placing the new question after the
+        // active one is a second, order-protected write: the expected order is
+        // exactly what the server held before the append plus the new row, so a
+        // concurrent reorder by another author is rejected instead of clobbered.
+        const anchorIndex = insertAfterExamQuestionId
+          ? selectedModule.questions.findIndex(
+              (question) => question.examQuestionId === insertAfterExamQuestionId
+            )
+          : -1;
+        if (anchorIndex >= 0 && anchorIndex < selectedModule.questions.length - 1) {
+          const expected = [
+            ...selectedModule.questions.map((question) => question.examQuestionId),
+            created.examQuestionId,
+          ];
+          const placed = [...expected];
+          placed.pop();
+          placed.splice(anchorIndex + 1, 0, created.examQuestionId);
+          try {
+            await reorderQuestions({
+              moduleId: selectedModuleId,
+              request: { questionIds: placed, expectedQuestionIds: expected },
+            });
+            announce("question.reordered", { moduleId: selectedModuleId, questionIds: placed });
+          } catch {
+            setNavigationError(
+              "The new question was added at the end of the module because the order changed while it was being placed. Move it where you want it."
+            );
+          }
+        }
       } catch (error) {
         setNavigationError(
           error instanceof Error ? error.message : "Question could not be created."
         );
+      } finally {
+        rowMutationFlight.current = false;
+        setRowMutationBusy(false);
       }
     },
     [
@@ -293,6 +327,7 @@ export function useAuthoringQuestionCommands(
       flushBeforeNavigation,
       selectedModule,
       selectedModuleId,
+      reorderQuestions,
       setDraft,
       setNavigationError,
       setSelectedExamQuestionId,

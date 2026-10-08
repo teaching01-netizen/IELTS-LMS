@@ -50,7 +50,6 @@ import { buildStaffDraftKey } from "../../../utils/staffDraftKey";
 import { AuthoringConfirmDialog, restoreAuthoringFocus } from "./authoringPrimitives";
 import {
   EditorSkeleton,
-  EmptyEditor,
   IssuesPane,
   QuestionLoadError,
 } from "./authoringWorkspaceSurfaces";
@@ -67,7 +66,7 @@ import { useWorkspaceProjectionWrites } from "./useWorkspaceProjectionWrites";
 import { serverQuestionDocument, useAuthoringDraft } from "./useAuthoringDraft";
 import { useAuthoringEdits } from "./useAuthoringEdits";
 import { SpineLayout } from "./spine/SpineLayout";
-import { SpineHeader } from "./spine/SpineHeader";
+
 import { SpinePreviewSheet } from "./spine/SpinePreviewSheet";
 import { SpineQueueSheet } from "./spine/SpineQueueSheet";
 import { QuestionQueueRail } from "./spine/QuestionQueueRail";
@@ -92,13 +91,36 @@ import { SaveCluster } from "./spine/SaveCluster";
 import { flashAuthoringField } from "./spine/TargetFlash";
 import { motion, useReducedMotion } from "motion/react";
 import { spineMotion } from "@/src/shared/motion";
+import { ExamWorkspaceHeader } from "./shell/ExamWorkspaceHeader";
+import { deliveryDestination, describeExamLifecycle, examWorkspacePath, type ExamLifecycleCopy } from "./shell/examLifecycle";
+import { QuestionCardStack } from "./spine/QuestionCardStack";
+import { useOutlinePreference } from "./spine/useOutlinePreference";
+import { ExamPublishSheet } from "./publish/ExamPublishSheet";
+import { ExamSettingsSheet } from "./settings/ExamSettingsSheet";
+import { satListReturnTarget } from "@/src/products/sat/ui/useSatListReturn";
+
+/** Exam-level facts the shared header needs; supplied by the route so this surface stays query-free. */
+export interface AuthoringWorkspaceChrome {
+  lifecycle: ExamLifecycleCopy;
+  showResponses: boolean;
+  canPublish: boolean;
+  /** A published version exists; the header offers "Create session". */
+  canCreateSession?: boolean;
+}
+
+const DEFAULT_CHROME: AuthoringWorkspaceChrome = {
+  lifecycle: describeExamLifecycle(null),
+  showResponses: false,
+  canPublish: false,
+};
 
 export interface AuthoringWorkspaceProps {
   examId: string;
   examTitle: string;
+  chrome?: AuthoringWorkspaceChrome;
 }
 
-export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProps) {
+export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME }: AuthoringWorkspaceProps) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const authSession = useOptionalAuthSession();
@@ -188,13 +210,16 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     setDeleteTarget,
   } = useAuthoringOverlays();
   const rail = useRailWidth();
+  const [outlineOpen, setOutlineOpenPreference] = useOutlinePreference();
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [focusField, setFocusField] = useState<string | null>(null);
   // Which FIELD an inspector shortcut belongs to is a workspace concern (the
   // deep-link path names fields, not overlays), so the rule stays here and asks
   // the overlays hook to open the inspector.
-  const requestField=useCallback((path:string|null)=>{const field=resolveAuthoringField(path);if(['domain','skill','difficulty','tags','accessibility'].includes(field))openInspector();setFocusField(field);},[openInspector]);
+  const requestField=useCallback((path:string|null)=>{const field=resolveAuthoringField(path);if(['tags','accessibility'].includes(field))openInspector();setFocusField(field);},[openInspector]);
   const questionSheetFocusRef = useRef<HTMLElement | null>(null);
   const inspectorSheetFocusRef = useRef<HTMLElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -958,6 +983,48 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     ? Math.max(0, selectedModule.targetQuestionCount - selectedModule.questions.length)
     : 0;
 
+  // The outline (search, filters, bulk actions) is an optional panel beside the
+  // card canvas. Overview and Issues still live in that panel, so it is shown
+  // for them regardless of the preference.
+  const railVisible = !compactViewport && (workspaceMode !== "build" || outlineOpen);
+  const toggleOutline = () => {
+    if (compactViewport) {
+      setQuestionListOpen(true);
+      return;
+    }
+    if (workspaceMode !== "build") {
+      setWorkspaceMode("build");
+      setOutlineOpenPreference(true);
+      return;
+    }
+    setOutlineOpenPreference(!outlineOpen);
+  };
+  const goAfterFlush = (path: string) => {
+    void (async () => {
+      if (await flushBeforeRouteChange()) navigate(path);
+    })();
+  };
+  const openPublish = () => {
+    void (async () => {
+      if (await flushBeforeRouteChange()) setPublishOpen(true);
+    })();
+  };
+  const addDisabledReason = !selectedModule
+    ? "Choose a module first"
+    : selectedModule.questions.length >= selectedModule.targetQuestionCount
+      ? `${selectedModule.title} already has all ${selectedModule.targetQuestionCount} questions`
+      : rowMutationBusy
+        ? "Another change is still in progress"
+        : null;
+  // Add inserts after the question being edited. Copying Domain, Skill and
+  // Difficulty is an explicit preference (the footer checkbox) and only ever
+  // seeds the NEW question.
+  const handleAddQuestion = () =>
+    handleCreateQuestion(
+      keepMetadataForNext && draft ? draft : undefined,
+      selectedExamQuestionId ?? undefined
+    );
+
   {
     const examOverview = buildExamOverview(shell.sections);
     const spineQueue = (() => {
@@ -1051,26 +1118,21 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       >
         <SpineLayout
           header={
-            <SpineHeader
+            <ExamWorkspaceHeader
               examTitle={examTitle}
-              sectionTitle={selectedSection?.title ?? null}
-              moduleTitle={selectedModule?.title ?? null}
-              issueCount={totalErrors}
-              onOpenSampleExam={() => setSampleDialogOpen(true)}
-              sampleExamDisabled={loadSampleExam.isPending}
-              onOpenShortcuts={() => setShortcutHelpOpen(true)}
-              workspaceMode={workspaceMode}
-              onModeChange={(mode) => {
-                if (mode === "issues") {
-                  setQuestionListOpen(false);
-                  void openIssues();
-                } else if (mode === "overview") {
-                  setQuestionListOpen(false);
-                  setWorkspaceMode("overview");
-                } else {
-                  setWorkspaceMode(mode);
-                }
+              lifecycle={chrome.lifecycle}
+              activeTab="questions"
+              showResponses={chrome.showResponses}
+              onSelectTab={(tab) => {
+                // Tabs are pages (Back, refresh and links behave); Quick settings
+                // is the in-place sheet that keeps the author's question and text.
+                if (tab !== "questions") goAfterFlush(examWorkspacePath(examId, tab));
               }}
+              onQuickSettings={() => setSettingsOpen(true)}
+              onBack={() => goAfterFlush(satListReturnTarget("/sat/exams").to)}
+              contextLine={
+                [selectedSection?.title, selectedModule?.title].filter(Boolean).join(" · ") || null
+              }
               saveSlot={
                 !coeditUiActive && draft ? (
                   <SaveCluster
@@ -1084,31 +1146,77 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   />
                 ) : null
               }
-              workbookImportDisabled={!shell}
-              onOpenWorkbookImport={() => void openWorkbookImport()}
+              onPreview={() => goAfterFlush(`/sat/exams/${examId}/preview`)}
               previewDisabled={!shell}
-              onOpenFullPreview={() => {
-                void (async () => {
-                  if (await flushBeforeRouteChange()) navigate(`/sat/exams/${examId}/preview`);
-                })();
+              {...(chrome.canPublish ? { onPublish: openPublish } : {})}
+              {...(chrome.canCreateSession ? { onCreateSession: () => goAfterFlush(deliveryDestination(examId)) } : {})}
+              issueCount={totalErrors}
+              onOpenIssues={() => {
+                setQuestionListOpen(false);
+                void openIssues();
               }}
-              onOpenRelease={() => {
-                void (async () => {
-                  if (await flushBeforeRouteChange()) navigate(`/sat/exams/${examId}/release`);
-                })();
-              }}
-              onBack={() => {
-                void (async () => {
-                  if (await flushBeforeRouteChange()) navigate("/sat/exams");
-                })();
-              }}
-              onOpenQueue={() => setQuestionListOpen(true)}
+              {...(canOpenDraft
+                ? {
+                    importItems: [
+                      {
+                        id: "module-import",
+                        label: "Add questions to this module…",
+                        disabled: importRemaining === 0,
+                        onSelect: () => setImportOpen(true),
+                      },
+                      {
+                        id: "workbook-import",
+                        label: "Replace exam from workbook…",
+                        onSelect: () => void openWorkbookImport(),
+                      },
+                    ],
+                  }
+                : {})}
+              menuItems={[
+                {
+                  id: "outline",
+                  label: "Question outline",
+                  current: railVisible && workspaceMode === "build",
+                  onSelect: toggleOutline,
+                },
+                {
+                  id: "overview",
+                  label: "Exam overview",
+                  current: workspaceMode === "overview",
+                  onSelect: () => {
+                    setQuestionListOpen(false);
+                    setWorkspaceMode("overview");
+                  },
+                },
+                {
+                  id: "issues",
+                  label: "Review issues" + (totalErrors > 0 ? " (" + totalErrors + ")" : ""),
+                  current: workspaceMode === "issues",
+                  onSelect: () => {
+                    setQuestionListOpen(false);
+                    void openIssues();
+                  },
+                },
+                {
+                  id: "sample",
+                  label: "Load sample exam…",
+                  separatorBefore: true,
+                  disabled: loadSampleExam.isPending,
+                  onSelect: () => setSampleDialogOpen(true),
+                },
+                {
+                  id: "shortcuts",
+                  label: "Keyboard shortcuts",
+                  separatorBefore: true,
+                  onSelect: () => setShortcutHelpOpen(true),
+                },
+              ]}
               collaborationSlot={
                 !coeditUiActive && effectiveCapabilities.presence ? (
                   <span className="flex items-center gap-2">
                     {editorHere ? (
                       <span
-                        className="text-[11px] text-muted-foreground"
+                        className="text-xs text-muted-foreground"
                         data-testid="editing-elsewhere-label"
                         title={PRESENCE_COPY.editingThisQuestion(
                           editorHere.displayName.trim() || "Another author"
@@ -1129,7 +1237,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               }
             />
           }
-          queue={compactViewport?null:spineQueue}
+          queue={railVisible ? spineQueue : null}
           railWidth={rail.width}
           onRailWidthChange={rail.setWidth}
           inspector={draft?<Inspector open={inspectorOpen&&(!inspectorModal||overlayStack.openSheet==='inspector')} modal={inspectorModal} question={draft} issues={selectedQuestionIssues} onChange={handleChange} onClose={closeInspector} readOnly={collaborationReadOnly} isPretest={sharedQuestionScalar?.isPretest ?? questionQuery.data?.isPretest} onPretestChange={selectedExamQuestionId && !collaborationReadOnly ? handlePretestChange : undefined}/>:undefined}
@@ -1197,7 +1305,33 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             </>
           }
         >
-          {renderableDraft ? (
+          {selectedModule && selectedSection ? (
+          <QuestionCardStack
+            module={selectedModule}
+            sections={shell.sections}
+            sectionTitle={selectedSection.title}
+            selectedQuestionId={selectedExamQuestionId}
+            isMutating={rowMutationBusy}
+            showModuleSwitcher={!(railVisible && workspaceMode === "build")}
+            onSelectModule={(moduleId) => void selectModule(moduleId)}
+            onSelectQuestion={(questionId, field) => {
+              void selectQuestion(questionId).then((opened) => {
+                if (opened && field) requestField(field);
+              });
+            }}
+            onAddQuestion={() => void handleAddQuestion()}
+            {...(compactViewport
+              ? { onOpenOutlineSheet: () => setQuestionListOpen(true) }
+              : { outlineOpen: railVisible && workspaceMode === "build", onToggleOutline: toggleOutline })}
+            {...(effectiveCapabilities.presence
+              ? {
+                  presenceSlot: (examQuestionId: string) => (
+                    <QuestionPresenceBadge occupants={occupantsOf(presence.occupants, examQuestionId)} />
+                  ),
+                }
+              : {})}
+            activeCard={
+          renderableDraft ? (
               <motion.div
                 key={selectedExamQuestionId}
                 initial={reduceMotion ? false : { opacity: 0.96 }}
@@ -1214,9 +1348,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   canMoveDown={Boolean(selectedModule && selectedModuleIndex<selectedModule.questions.length-1)}
                   onMove={direction=>{if(!selectedModule)return;const expected=selectedModule.questions.map(q=>q.examQuestionId);const next=[...expected];const i=selectedModuleIndex,j=i+direction;const from=next[i],to=next[j];if(!from||!to)return;next[i]=to;next[j]=from;void handleReorder(next,expected).catch(()=>undefined);}}
                   {...(selectedModuleIndex >= 0 ? { questionNumber: selectedModuleIndex + 1 } : {})}
-                  questionContext={
-                    [selectedSection?.title, selectedModule?.title].filter(Boolean).join(" · ") || null
-                  }
                   readOnly={collaborationReadOnly}
                   onOpenShortcutHelp={() => setShortcutHelpOpen(true)}
                   headerPresenceSlot={coeditHeaderPresenceSlot}
@@ -1243,6 +1374,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   onDuplicate={() => void handleDuplicate()}
                   onDelete={() => handleDelete()}
                   onPreview={() => setPreviewOpen(true)}
+                  onAddBelow={() => void handleAddQuestion()}
+                  addBelowDisabledReason={addDisabledReason}
                   onIssueSelect={requestField}
                 />
               </motion.div>
@@ -1269,15 +1402,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               )}
               onRetry={() => void questionQuery.refetch()}
             />
-          ) : (
-            <EmptyEditor
-              moduleTitle={selectedModule?.title ?? null}
-              {...(selectedModule &&
-              selectedModule.questions.length < selectedModule.targetQuestionCount
-                ? { onCreate: () => void handleCreateQuestion() }
-                : {})}
-            />
-          )}
+          ) : null
+            }
+          />
+          ) : null}
         </SpineLayout>
         {conflictOpen && (baseDocument || remoteDocument) ? (
           <ConflictResolver
@@ -1309,7 +1437,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               {id:'duplicate',label:'Duplicate question',group:'Question',onSelect:()=>void handleDuplicate(),disabledReason:rowMutationBusy?'Another operation is running':!draft?'Select a question first':selectedModule.questions.length>=selectedModule.targetQuestionCount?'Module is full':undefined},
               {id:'delete',label:'Delete question',group:'Question',onSelect:()=>setDeleteTarget(selectedExamQuestionId),disabledReason:!draft?'Select a question first':rowMutationBusy?'Another operation is running':undefined},
               ...([-1,1] as const).map(direction=>({id:direction===-1?'up':'down',label:direction===-1?'Move question up':'Move question down',group:'Question' as const,disabledReason:!draft?'Select a question first':rowMutationBusy?'Another operation is running':!selectedModule.questions[selectedModuleIndex+direction]?'Already at module boundary':undefined,onSelect:()=>{const expected=selectedModule.questions.map(q=>q.examQuestionId),next=[...expected],i=selectedModuleIndex,j=i+direction;const from=next[i],to=next[j];if(!from||!to)return;next[i]=to;next[j]=from;void handleReorder(next,expected).catch(()=>undefined);}})),
-              {id:'question-preview',label:'Preview as student',group:'Question',onSelect:()=>setPreviewOpen(true),disabledReason:!draft?'Select a question first':undefined},
+              {id:'question-preview',label:'Preview question',group:'Question',onSelect:()=>setPreviewOpen(true),disabledReason:!draft?'Select a question first':undefined},
               {id:'preview',label:'Preview exam',group:'Exam',onSelect:()=>{void flushBeforeRouteChange().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/preview`);});}},
               {id:'release',label:'Release exam',group:'Exam',onSelect:()=>{void flushBeforeRouteChange().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/release`);});}},
               {id:'overview',label:'Exam overview',group:'Exam',onSelect:()=>setWorkspaceMode('overview')},
@@ -1392,6 +1520,22 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           }}
           onConfirm={() => void handleLoadSampleExam()}
         />
+        {publishOpen ? (
+          <ExamPublishSheet
+            examId={examId}
+            open
+            onClose={() => setPublishOpen(false)}
+            onOpenIssue={(issue) => void openIssue(issue)}
+            onOpenStudentAccess={(target) => goAfterFlush(deliveryDestination(examId, target))}
+          />
+        ) : null}
+        {settingsOpen ? (
+          <ExamSettingsSheet
+            examId={examId}
+            open
+            onClose={() => setSettingsOpen(false)}
+          />
+        ) : null}
       </div>
     );
   }

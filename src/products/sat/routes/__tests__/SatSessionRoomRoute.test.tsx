@@ -4,15 +4,23 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatSessionRoomRoute } from '../SatSessionRoomRoute';
+import { examDeliveryService } from '../../../../features/proctor/infrastructure/proctorGateway';
 
 const controllerMock = vi.hoisted(() => vi.fn());
-vi.mock('../../../../features/proctor/hooks/useProctorRouteController', () => ({ useProctorRouteController: controllerMock }));
+const accessOverviewMock = vi.hoisted(() => vi.fn());
+const roleMock = vi.hoisted(() => ({ role: undefined as string | undefined }));
+// The real controller always reports `scheduleMetrics`; fixtures only list what they exercise.
+vi.mock('../../../../features/proctor/hooks/useProctorRouteController', () => ({
+  useProctorRouteController: (...args: unknown[]) => ({ scheduleMetrics: {}, ...controllerMock(...args) }),
+}));
+vi.mock('../../../../features/exam-authoring/api/assessmentAccessLinkQueries', () => ({ useAccessDistributionOverview: accessOverviewMock }));
 vi.mock('../../../../features/auth/authSession', () => ({
-  useAuthSession: () => ({ session: { user: { displayName: 'SAT Proctor', email: 'p@example.com' } } }),
+  useAuthSession: () => ({ session: { user: { displayName: 'SAT Proctor', email: 'p@example.com', role: roleMock.role } } }),
 }));
 vi.mock('qrcode', () => ({ toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,QR') }));
 vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => ({
   examDeliveryService: {
+    extendCurrentSection: vi.fn(),
     extendStudentAttempt: vi.fn(), warnStudent: vi.fn(), pauseStudentAttempt: vi.fn(), resumeStudentAttempt: vi.fn(), terminateStudentAttempt: vi.fn(),
   },
 }));
@@ -24,6 +32,7 @@ const schedule = {
   status: 'live', createdAt: '2026-08-30T00:00:00Z', createdBy: 'Admin', updatedAt: '2026-08-30T00:00:00Z',
 };
 const runtime = {
+  revision: 7,
   id: 'runtime-1', scheduleId: 'sched-1', examId: 'sat-1', providerKey: 'sat', examTitle: 'Practice Test 06', cohortName: 'Morning',
   deliveryMode: 'proctor_start', status: 'live', timingModel: 'cohort_section_v3', actualStartAt: '2026-08-30T02:00:00Z', actualEndAt: null,
   activeSectionKey: 'reading-writing', currentSectionKey: 'reading-writing', currentSectionRemainingSeconds: 1603, waitingForNextSection: false, isOverrun: false,
@@ -88,6 +97,8 @@ function useTabletMediaQuery() {
 describe('SatSessionRoomRoute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    roleMock.role = undefined;
+    accessOverviewMock.mockReturnValue({ data: undefined });
     controllerMock.mockReturnValue({
       schedules: [schedule], runtimeSnapshots: [runtime], sessions: [student], alerts: [], error: null, isLoading: false,
       roomClock: resolvedRoomClock,
@@ -199,10 +210,72 @@ describe('SatSessionRoomRoute', () => {
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start exam' }));
 
     expect(await screen.findByText('Session started.')).toBeInTheDocument();
     expect(startSession).toHaveBeenCalledWith('sched-1');
+  });
+
+  describe('waiting room and status line', () => {
+    const prestartRuntime = { ...runtime, status: 'not_started', actualStartAt: null, currentSectionKey: null, sections: [] };
+    const accessLink = { id: 'link-1', scheduleId: 'sched-1', status: 'live', versionNumber: 3, enabledSections: null, publishScope: 'reading-writing' };
+    const renderRoom = () => render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    const prestartController = (overrides: Record<string, unknown> = {}) => controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [prestartRuntime], sessions: [student], alerts: [], error: null, isLoading: false,
+      scheduleMetrics: { 'sched-1': { joinReadyCount: 1 } },
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(), ...overrides,
+    });
+
+    it('states check-in and exam run state separately, and puts Start in the waiting room with its facts', () => {
+      roleMock.role = 'admin';
+      accessOverviewMock.mockReturnValue({ data: { links: [accessLink] } });
+      prestartController();
+      renderRoom();
+
+      expect(screen.getByTestId('sat-room-status-line')).toHaveTextContent('Check-in open · Exam not started');
+      const waiting = within(screen.getByRole('region', { name: 'Waiting room' }));
+      expect(waiting.getByRole('button', { name: 'Start exam' })).toBeEnabled();
+      expect(waiting.getByText('Version 3')).toBeInTheDocument();
+      expect(waiting.getByText('Reading & Writing')).toBeInTheDocument();
+      expect(waiting.getByText('Joined').nextSibling).toHaveTextContent('1');
+      expect(waiting.getByText('Ready').nextSibling).toHaveTextContent('1');
+      // The header no longer carries a competing Start control.
+      expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
+    });
+
+    it('reports check-in as paused without claiming the exam stopped', () => {
+      roleMock.role = 'admin';
+      accessOverviewMock.mockReturnValue({ data: { links: [{ ...accessLink, status: 'paused' }] } });
+      prestartController({ runtimeSnapshots: [{ ...runtime }], schedules: [schedule] });
+      renderRoom();
+
+      expect(screen.getByTestId('sat-room-status-line')).toHaveTextContent('Check-in paused · Exam running');
+    });
+
+    it('never guesses check-in for a viewer who cannot read the access setup', () => {
+      roleMock.role = 'proctor';
+      prestartController();
+      renderRoom();
+
+      expect(screen.getByTestId('sat-room-status-line')).toHaveTextContent(/^Exam not started$/);
+      expect(accessOverviewMock).toHaveBeenCalledWith('sat-1', false);
+      const waiting = within(screen.getByRole('region', { name: 'Waiting room' }));
+      expect(waiting.getByText('Not shown')).toBeInTheDocument();
+    });
+
+    it('offers results only to an administrator once the session has finished', () => {
+      const finished = { ...runtime, status: 'completed', actualEndAt: '2026-08-30T04:00:00Z' };
+      prestartController({ runtimeSnapshots: [finished] });
+      roleMock.role = 'admin';
+      const { unmount } = renderRoom();
+      expect(screen.getByRole('button', { name: 'View results' })).toBeInTheDocument();
+      unmount();
+
+      roleMock.role = 'proctor';
+      renderRoom();
+      expect(screen.queryByRole('button', { name: 'View results' })).not.toBeInTheDocument();
+    });
   });
 
   // Bug fix: the staff page must say which SECTION and which MODULE the room is
@@ -277,7 +350,7 @@ describe('SatSessionRoomRoute', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes…' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes for Ananda S.?');
     fireEvent.click(screen.getByRole('button', { name: 'Add 5 Minutes' }));
-    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Pause exam' })).toBeEnabled();
     releaseExtend?.({ success: true });
     await screen.findByText(/Added 5 minutes for Ananda S/);
   });
@@ -290,8 +363,8 @@ describe('SatSessionRoomRoute', () => {
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Session paused. However, the live view could not refresh. Retry to confirm.');
+    fireEvent.click(screen.getByRole('button', { name: 'Pause exam' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Exam paused. However, the live view could not refresh. Retry to confirm.');
   });
 
   it('moves through the roster with an arrow key from its single tab stop', () => {
@@ -449,7 +522,7 @@ describe('SatSessionRoomRoute', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Open Budi T.' }));
     expect(screen.getByRole('heading', { name: 'Budi T.' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Needs attention 1' }));
-    expect(screen.getByRole('option', { name: 'Open Ananda S., needs attention' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /^Open Ananda S\., needs attention: / })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Open Budi T.' })).not.toBeInTheDocument();
     expect(screen.getByRole('listbox')).not.toHaveAttribute('aria-activedescendant');
     expect(screen.getByRole('heading', { name: 'Budi T.' })).toBeInTheDocument();
@@ -532,7 +605,7 @@ describe('SatSessionRoomRoute', () => {
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     expect(screen.getByRole('alert')).toHaveTextContent('Data may be out of date');
-    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Pause exam' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
@@ -578,7 +651,7 @@ describe('SatSessionRoomRoute', () => {
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: /Filter roster to students needing attention/ }));
-    expect(screen.getByRole('option', { name: 'Open Ananda S., needs attention' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /^Open Ananda S\., needs attention: / })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Open Budi T.' })).not.toBeInTheDocument();
   });
 
@@ -596,6 +669,7 @@ describe('SatSessionRoomRoute', () => {
   });
 
   it('keeps banners on the entrance hook and confirms extend-session success copy', async () => {
+    (examDeliveryService.extendCurrentSection as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true });
     controllerMock.mockReset();
     controllerMock.mockReturnValue({
       schedules: [schedule], runtimeSnapshots: [runtime], sessions: [student], alerts: [], error: null, isLoading: false,
@@ -607,8 +681,21 @@ describe('SatSessionRoomRoute', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes to Reading & Writing?');
     fireEvent.click(screen.getByRole('button', { name: 'Add 5 Minutes' }));
-    expect(await screen.findByText('Added 5 minutes to the current stage.')).toBeInTheDocument();
+    expect(await screen.findByText('Added 5 minutes to Reading & Writing.')).toBeInTheDocument();
+    expect(examDeliveryService.extendCurrentSection).toHaveBeenCalledWith('sched-1', 'SAT Proctor', 5, 'reading-writing', 7);
     expect(document.querySelector('.sat-banner-enter')).toBeInTheDocument();
+  });
+
+  it('refuses a time grant when the runtime revision has not arrived', () => {
+    controllerMock.mockReturnValue({
+      ...controllerMock(), runtimeSnapshots: [{ ...runtime, revision: undefined }],
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Refresh the session before adding time.');
+    expect(examDeliveryService.extendCurrentSection).not.toHaveBeenCalled();
   });
 
   // The room's timers are the one thing a proctor cross-checks by eye: the hero

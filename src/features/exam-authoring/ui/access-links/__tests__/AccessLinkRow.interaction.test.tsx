@@ -94,13 +94,13 @@ describe("AccessLinkRow interaction contract", () => {
     expect(row).not.toHaveAttribute("aria-busy");
     expect(screen.queryByText("Pausing…")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Actions for Saturday Class")).toBeInTheDocument();
-    expect(screen.getByText("10 joined · 8 started · 4 submitted")).toBeInTheDocument();
+    expect(screen.getByText("10 registered · 8 started · 4 submitted")).toBeInTheDocument();
   });
 
   it("AT-11: the confirmation replaces the funnel line instead of pushing new rows", () => {
     renderRow({ confirmation: "Link copied" });
     expect(screen.getByText("Link copied")).toBeInTheDocument();
-    expect(screen.queryByText(/joined/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/registered/)).not.toBeInTheDocument();
     const row = screen.getByRole("button", { name: "Open Saturday Class" });
     // One line either way: the meta slots are fixed, so nothing below moves.
     expect(row.querySelectorAll("span.mt-1").length).toBe(2);
@@ -113,6 +113,6 @@ describe("AccessLinkRow interaction contract", () => {
     expect(row).not.toHaveAttribute("aria-busy");
     fireEvent.click(row);
     expect(onSelect).toHaveBeenCalledOnce();
-    expect(screen.getByText("10 joined · 8 started · 4 submitted")).toBeInTheDocument();
+    expect(screen.getByText("10 registered · 8 started · 4 submitted")).toBeInTheDocument();
   });
 });

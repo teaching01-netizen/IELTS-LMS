@@ -5,7 +5,6 @@ export function SatSessionControls({
   runtimeStatus,
   pendingActions,
   blocked,
-  onStart,
   onPause,
   onResume,
   onExtend,
@@ -14,19 +13,18 @@ export function SatSessionControls({
   runtimeStatus: string;
   pendingActions: ReadonlySet<string>;
   blocked: boolean;
-  onStart: () => void;
   onPause: () => void;
   onResume: () => void;
   onExtend: (minutes: number) => void;
   onComplete: () => void;
 }) {
-  const primary = runtimeStatus === 'not_started'
-    ? { label: 'Start', icon: Play, key: 'start', action: onStart }
-    : runtimeStatus === 'live'
-      ? { label: 'Pause', icon: Pause, key: 'pause', action: onPause }
-      : runtimeStatus === 'paused'
-        ? { label: 'Resume', icon: Play, key: 'resume', action: onResume }
-        : null;
+  // Starting the exam is not a header control: it lives in the waiting room next
+  // to the readiness facts it depends on. Once started, the header runs the session.
+  const primary = runtimeStatus === 'live'
+    ? { label: 'Pause exam', icon: Pause, key: 'pause', action: onPause }
+    : runtimeStatus === 'paused'
+      ? { label: 'Resume exam', icon: Play, key: 'resume', action: onResume }
+      : null;
   const Icon = primary?.icon;
   const primaryBusy = primary ? pendingActions.has(primary.key) : false;
   const active = runtimeStatus === 'live' || runtimeStatus === 'paused';
@@ -44,7 +42,7 @@ export function SatSessionControls({
           onClick={primary.action}
           disabled={primaryBusy || blocked}
           aria-busy={primaryBusy || undefined}
-          className="flex min-h-10 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[12px] font-semibold text-white shadow-[var(--sat-staff-accent-glow-sm,0_1px_2px_rgba(0,113,227,0.35))] transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] hover:shadow-[var(--sat-staff-accent-glow-md,0_4px_14px_rgba(0,113,227,0.35))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+          className="flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {primaryBusy ? (
             <span aria-hidden="true" className="sat-spinner block h-3 w-3 shrink-0 rounded-full border-2 border-white/40 border-t-white" />

@@ -1,43 +1,48 @@
-# SAT Module 1 → Module 2 handoff
+# SAT module handoff and answer recovery
 
-Deploy migrations `0074` and `0075` before the new API and student client. Existing runtimes keep their captured mode; NULL means `server_start`. Set these values before starting a new personal SAT runtime:
+Use this runbook for route-lag, client-start-lag, auto-start, module rejection, or late-answer route-risk alerts. Correlate by schedule, attempt, module attempt, and request ID. Keep student answers and credentials out of incident logs.
 
-```dotenv
-SAT_HANDOFF_MODE=client_start
-SAT_PERSONAL_CLOSE_WINDOW_SECS=15
-SAT_M2_AUTO_START_SECS=60
-SAT_RECONCILE_CONCURRENCY=4
+## Authority and timing
+
+The database owns accepted responses, clocks, route decisions, and close receipts. Answer writes and module closure serialize on the attempt row. A committed route must not be changed after its selected module has been administered.
+
+The student response protocol is:
+
+- `GET /api/v2/student/attempts/{attemptId}/responses`
+- `POST /api/v2/student/attempts/{attemptId}/responses:batch`
+- `POST /api/v2/student/attempts/{attemptId}/submit`
+
+Use an authoritative snapshot's lease and control epochs. Retry an uncertain save with the same write IDs, versions, and answer content. A conflict is not an acknowledgement. A snapshot must confirm the intended final write, version, and answer.
+
+For personal `client_start` sessions, `POST /api/v1/assessment-delivery/schedules/{scheduleId}/modules/close` carries the module and module-attempt IDs, a stable close ID, and an exact final-write manifest. `CLOSE_WRITES_PENDING` means the manifest has not been persisted; drain those saves before retrying. Retry the same committed close intent with the same close ID. A changed manifest is a different intent and requires a new close ID.
+
+The normal save-only grace is 3 seconds. Personal client-start sessions use `SAT_PERSONAL_CLOSE_WINDOW_SECS`, 15 seconds by default. A confirmed close can route earlier. An unsent browser answer cannot prove a pre-deadline click; after closure it is evidence, not a canonical save.
+
+## During an incident
+
+1. Check API and worker health, database connection wait/in-use, failed save rates, transaction retries, and worker `sat_personal_timeout_reconcile`/`sat_timeout_reconcile` failures. Distinguish delayed routing from a wrong branch.
+2. Check the affected module's state, deadline, pause/extension state, and the stored route decision. Check `sat_module_close_total`, `sat_close_writes_pending_total`, `sat_route_lag_seconds`, and `sat_module_scoped_rejection_total`.
+3. If the module is still open, recover outstanding saves using the current owner. Do not transfer ownership merely to retry a lost acknowledgement. If the API response was lost, recover through the same write/close identity or an authoritative snapshot.
+4. If the module is closed, keep its answers in the late-evidence path. Use the staff late-evidence review surface/API to inspect and record a review outcome. Never insert the evidence into canonical response rows or manually reroute the student. An alert that evidence would change the route requires a documented proctor decision about the sitting.
+5. If the worker stopped, restart its normal reconciliation lane after database health recovers. Request reads also reconcile attempts. Verify progress through persisted module/terminal facts; do not rely on a successful heartbeat alone.
+6. If final submission fails, retry the same submission intent and check the authoritative terminal receipt. Final-module closure and sealing must either commit together or roll back. Escalate persistent failures with IDs and structured error reasons.
+
+## Deployment and rehearsal
+
+Keep API and worker handoff-window configuration identical throughout an active sitting. Runtime handoff mode is stored, but close-window duration is process configuration. Do not change that duration in a rolling deployment while exams are active.
+
+The automated real-HTTP regression runs against a disposable, migrated database:
+
+```sh
+cd backend/go
+TEST_MYSQL_DSN="$SAT_REHEARSAL_DSN" go test ./cmd/api -count=1 -v \
+  -run '^TestSATCommittedSaveSurvivesAPIKillAndConcurrentCloseMySQL$'
 ```
 
-Personal reconcile concurrency is capped at `DB_POOL_MAX_WORKER - 2`, with a minimum of one. Ensure the worker pool has headroom for the configured concurrency. Live/cohort timing keeps its existing three-second save grace.
+It kills an API after commit before the acknowledgement, retries through fresh processes, races close replays, verifies one route/receipt and exact database answers, saves in Module 2, and runs a 20-candidate wave sharing one runtime. This is a correctness rehearsal, not a production capacity claim.
 
-Before the exam, verify the schedule uses `sat_personal_v1` and check the started runtime:
+With k6 installed, set `SAT_REHEARSAL_K6=1` on the same command to run the actual handoff script through a round-robin proxy to the two API processes. The test seeds the synthetic credentials and deadlines, delays final packets until 250 ms after zero, and checks database answers and branch counts independently after k6 completes. Credentials stay in a temporary file with mode 0600.
 
-```sql
-SELECT schedule_id, timing_model, sat_handoff_mode, status
-FROM exam_session_runtimes WHERE schedule_id = '<schedule-id>';
-```
+Use `k6/sat-m1-m2-handoff.js` for a larger synchronized boundary wave and `k6/sat-exam-day.js` for the full sitting. Supply one synthetic admitted credential per candidate and an isolated schedule. The handoff fixture's deadline must match `K6_WAVE_AT_MS`; final answers must cross a known routing threshold. Scripts use V2 batches and check stored exact answers, rather than treating 409 as success. Save the k6 summary, worker/API versions, database version, pool limits, cohort size, and server-side invariants with each rehearsal.
 
-The runtime must report `sat_personal_v1` and `client_start`. Do not enable this flow for legacy cohort schedules. Verify the shared-IP check-in rate limit supports at least 3,000 requests during the planned arrival window; this rollout does not change that limit.
-
-At zero, the browser freezes Module 1 input, flushes its final writes, and confirms their versions through `/modules/close`. The server routes under the same attempt lock as answer writes. Without confirmation it routes after the 15-second window. Routed Module 2 has no running clock or question content until `/modules/start` delivers the selected content. Its 60-second backstop runs only while the runtime and student are unpaused.
-
-“Starting Module 2” persisting beyond 60 seconds calls for a device/network check. A backstop start begins the clock even if the device remains disconnected. On reconnect, Module 1 rejections preserve the local draft and do not disable Module 2. “Late Module 1 answer” alerts require review of the stored evidence and scored route. Evidence can flag a route difference but never changes the assigned branch or canonical scored responses. Follow the institution’s review policy; do not manually reroute an active attempt.
-
-Check `/metrics` and `backend/monitoring/prometheus-alert-rules.yml`: route lag p99 ≤ W+5 seconds, client-start lag p99 ≤ 5 seconds, auto-starts ≤ 1% of routes, scoped rejections ≤ 0.5% of closes, and no unreviewed route-changing late evidence. The initial route-lag alert assumes W=15; update its threshold when changing W. Histograms use seconds. Logs/audits use attempt/module identifiers, never answer content in telemetry.
-
-For rollout acceptance, provision 400 synthetic attempts on one shared runtime, with the same Module 1 deadline and distinct credentials. Each credential JSON entry contains `attemptId`, `token`, `moduleId`, `moduleAttemptId`, `expectedModuleId`, `otherModuleId`, and 1–3 final `answers` (`questionId`, `answer`, increasing positive `clientVersion`). Keep this file outside version control.
-
-```bash
-K6_BASE_URL=https://staging.example.com \
-K6_SCHEDULE_ID=<schedule-id> \
-K6_ATTEMPT_TOKENS_PATH=/secure/synthetic-attempts.json \
-K6_WAVE_AT_MS=<shared-deadline-unix-ms> \
-K6_VUS=400 \
-K6_FINAL_SAVE_DELAY_MS=4000 \
-k6 run k6/sat-m1-m2-handoff.js
-```
-
-Use freshly seeded attempts for each run. Run a `server_start` baseline with `K6_BASELINE=1`, then the new flow at 1–2, 4, and 8 seconds of final-packet delay. The harness checks final write durability, single routing, withheld content, and compressed start response time. HTTP receipt is a proxy for rendering: separately measure browser `sat_first_answerable_frame_at.m2AllotmentDeltaSeconds` (p99 ≤ 2 seconds). Run real shared Wi-Fi/latency checks, an offline student through W, and a reload during handoff. Record route lag from the API histogram, database pool utilization, lock waits, and gzip transfer size. Do not declare the N=400 or exam-network gates passed from unit tests.
-
-Rollback: set `SAT_HANDOFF_MODE=server_start` for newly started runtimes. Existing `client_start` runtimes retain their mode and backstops; keep the new API deployed until they finish. Leave both additive migrations in place. Deploy the new client before enabling `client_start` to avoid old clients relying on the backstop.
+Completed test fixtures have immutable terminal receipts. Drop the disposable test schema when finished; never disable immutability triggers to clean up a shared or application database.

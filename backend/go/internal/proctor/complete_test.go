@@ -2,6 +2,7 @@ package proctor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"regexp"
 	"testing"
@@ -87,12 +88,17 @@ func TestCompleteExamCustomReasonKeepsVocabularyPayload(t *testing.T) {
 			AddRow("sched-1", "exam-1", "sat", "", "ver-1", "live", 4, 154))
 	// lockScheduleScope (B2 narrowed): runtime id + sections only — no
 	// schedule-wide attempt sweep.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("rt-1"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtime_sections WHERE runtime_id = ? ORDER BY section_order ASC FOR UPDATE")).
 		WithArgs("rt-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_lifecycle_receipts WHERE scope_kind = ? AND scope_id = ? AND operation_id = ?")).
+		WillReturnError(sql.ErrNoRows)
 	// CompleteExam runtime row.
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
@@ -113,9 +119,10 @@ func TestCompleteExamCustomReasonKeepsVocabularyPayload(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_lifecycle_receipts")).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	if err := svc.CompleteExam(context.Background(), actor, "sched-1", CompleteExamCommand{Reason: &custom}); err != nil {
+	if err := svc.CompleteExam(context.Background(), actor, "sched-1", CompleteExamCommand{OperationID: "op-complete-1", Reason: &custom}); err != nil {
 		t.Fatalf("CompleteExam must succeed, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

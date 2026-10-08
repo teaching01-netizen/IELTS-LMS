@@ -12,6 +12,8 @@ export interface ClassificationFieldsetProps {
   onChange: (question: QuestionRevision) => void;
   issues: AssessmentValidationIssue[];
   readOnly?: boolean | undefined;
+  /** `core` = Domain, Skill, Difficulty (in the question card); `extra` = Tags (in the settings panel). */
+  fields?: "all" | "core" | "extra";
 }
 
 /**
@@ -20,7 +22,7 @@ export interface ClassificationFieldsetProps {
  * as a radiogroup, and blocking domain/skill issues inline via
  * aria-describedby — never a far rail, never a second copy.
  */
-export function ClassificationFieldset({ question, onChange, issues, readOnly = false }: ClassificationFieldsetProps) {
+export function ClassificationFieldset({ question, onChange, issues, readOnly = false, fields = "all" }: ClassificationFieldsetProps) {
   const baseId = useId();
   const domainId = `${baseId}-domain`;
   const skillId = `${baseId}-skill`;
@@ -46,13 +48,21 @@ export function ClassificationFieldset({ question, onChange, issues, readOnly = 
     onChange({ ...question, metadata: { ...question.metadata, domain, skill } });
   };
 
+  const showCore = fields !== "extra";
+  const showExtra = fields !== "core";
   return (
     <fieldset className="min-w-0">
-      <legend className="px-1 text-sm font-semibold text-foreground">Classification</legend>
+      <legend className="px-1 text-sm font-semibold text-foreground">
+        {fields === "extra" ? "More details" : "Classification"}
+      </legend>
       <p className="mb-4 text-xs leading-5 text-muted-foreground">
-        Organize this question for review and reuse.
+        {fields === "extra"
+          ? "Optional labels for review and reuse."
+          : "Domain and Skill are required before this question can be published."}
       </p>
-      <div className="space-y-4">
+      <div className={fields === "core" ? "grid gap-4 md:grid-cols-3" : "space-y-4"}>
+        {showCore ? (
+        <>
         <div data-authoring-field="domain" className="flex flex-col gap-1.5">
           <Label htmlFor={domainId}>Domain</Label>
           <select
@@ -141,7 +151,10 @@ export function ClassificationFieldset({ question, onChange, issues, readOnly = 
             })}
           </div>
         </div>
+        </>
+        ) : null}
 
+        {showExtra ? (
         <div data-authoring-field="tags" className="flex flex-col gap-1.5">
           <Label htmlFor={tagsId}>Tags</Label>
           <input
@@ -168,6 +181,7 @@ export function ClassificationFieldset({ question, onChange, issues, readOnly = 
             Use commas to add searchable internal tags.
           </p>
         </div>
+        ) : null}
       </div>
     </fieldset>
   );

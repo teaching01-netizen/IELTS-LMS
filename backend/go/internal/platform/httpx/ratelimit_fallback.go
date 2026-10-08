@@ -49,17 +49,14 @@ func (l *DBRateLimiter) Check(ctx context.Context, key string) (bool, time.Durat
 		return true, 0, err
 	}
 	defer func() { _ = conn.Close() }()
-	if _, err := conn.ExecContext(ctx, "INSERT INTO distributed_rate_limit_counters (route_key, bucket_key, window_start, request_count, expires_at) VALUES (?, ?, ?, 1, ?) ON DUPLICATE KEY UPDATE request_count = LAST_INSERT_ID(request_count + 1), expires_at = VALUES(expires_at)", l.routeKey, key, winStart, expires); err != nil {
+	// Both arms set the connection-local result. A fresh bucket must never
+	// inherit LAST_INSERT_ID from an earlier pooled-connection use.
+	if _, err := conn.ExecContext(ctx, "INSERT INTO distributed_rate_limit_counters (route_key, bucket_key, window_start, request_count, expires_at) VALUES (?, ?, ?, LAST_INSERT_ID(1), ?) ON DUPLICATE KEY UPDATE request_count = LAST_INSERT_ID(request_count + 1), expires_at = VALUES(expires_at)", l.routeKey, key, winStart, expires); err != nil {
 		return true, 0, err
 	}
 	var count int
 	if err := conn.QueryRowContext(ctx, "SELECT LAST_INSERT_ID()").Scan(&count); err != nil {
 		return true, 0, err
-	}
-	if count == 0 {
-		// Fresh insert: LAST_INSERT_ID() is only set by the UPDATE arm,
-		// so 0 means this checker created the row (count is 1).
-		count = 1
 	}
 	if count > l.maxRequests {
 		retry := now.Truncate(l.window).Add(l.window).Sub(now)

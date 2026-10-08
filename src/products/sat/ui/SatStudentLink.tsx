@@ -33,9 +33,9 @@ function useCopyLink(url: string) {
 }
 
 const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
-const PRIMARY_BUTTON = `sat-pressable flex min-h-10 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[12px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] ${FOCUS_RING}`;
-const SECONDARY_BUTTON = `sat-pressable flex min-h-10 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] ${FOCUS_RING}`;
-const SURFACE_BUTTON = `sat-pressable flex min-h-10 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-surface,#fff)] px-3 text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] ring-1 ring-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] ${FOCUS_RING}`;
+const PRIMARY_BUTTON = `sat-pressable flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[12px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] ${FOCUS_RING}`;
+const SECONDARY_BUTTON = `sat-pressable flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] ${FOCUS_RING}`;
+const SURFACE_BUTTON = `sat-pressable flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-surface,#fff)] px-3 text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] ring-1 ring-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] ${FOCUS_RING}`;
 
 function CopyButton({ copied, onCopy, className }: { copied: boolean; onCopy: () => void; className: string }) {
   return (
@@ -49,7 +49,7 @@ function CopyButton({ copied, onCopy, className }: { copied: boolean; onCopy: ()
 function QrImage({ dataUrl, error, label }: { dataUrl: string | null; error: string | null; label: string }) {
   return dataUrl
     ? <img src={dataUrl} alt={label} className="h-full w-full" />
-    : <span role="status" className="px-3 text-center text-[11px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{error ?? 'Generating QR code…'}</span>;
+    : <span role="status" className="px-3 text-center text-[12px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{error ?? 'Generating QR code…'}</span>;
 }
 
 export function SatStudentLinkDialog({
@@ -84,7 +84,7 @@ export function SatStudentLinkDialog({
             : <span />}
           <a href={url} target="_blank" rel="noreferrer" className={SECONDARY_BUTTON}><ExternalLink size={14} aria-hidden="true" />Open student page</a>
         </div>
-        {error ? <p role="alert" className="mt-3 text-[11px] font-medium text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
+        {error ? <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
       </div>
     </SatFormDialog>
   );
@@ -185,7 +185,7 @@ export function SatStudentLinkCard({
           <CopyButton copied={copied} onCopy={() => void copy()} className={PRIMARY_BUTTON} />
           <button type="button" onClick={onPresent} className={SURFACE_BUTTON}><Presentation size={14} aria-hidden="true" />Present</button>
         </div>
-        {error ? <p role="alert" className="mt-2 text-[11px] font-medium text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
+        {error ? <p role="alert" className="mt-2 text-[12px] font-medium text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
       </div>
     </div>
   );

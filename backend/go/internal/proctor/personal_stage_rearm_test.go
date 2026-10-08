@@ -18,6 +18,7 @@ package proctor
 
 import (
 	"context"
+	"database/sql"
 	"regexp"
 	"strings"
 	"testing"
@@ -38,6 +39,8 @@ func personalRearmPrologue(mock sqlmock.Sqlmock, timingModel string) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "active_section_key"}).AddRow("rt-1", nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_lifecycle_receipts WHERE scope_kind = ? AND scope_id = ? AND operation_id = ?")).
+		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"submitted_at", "proctor_status", "delivery_status"}).AddRow(nil, "active", "running"))
@@ -75,10 +78,11 @@ func TestReArmAttemptStageResetsAnUnenteredModuleOffer(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO session_audit_logs (id, schedule_id, actor, action_type, target_student_id, payload, created_at)")).
 		WithArgs(sqlmock.AnyArg(), "sched-1", "admin-1", "STAGE_REARMED", "att-1", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_lifecycle_receipts")).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	reason := "device could not paint the offer"
-	if err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "ma-1", "", AttemptCommand{Reason: &reason}); err != nil {
+	if err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "ma-1", "", AttemptCommand{OperationID: "op-rearm-1", Reason: &reason}); err != nil {
 		t.Fatalf("re-arm module: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -124,9 +128,10 @@ func TestReArmAttemptStageResetsAnUnenteredBreak(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO session_audit_logs (id, schedule_id, actor, action_type, target_student_id, payload, created_at)")).
 		WithArgs(sqlmock.AnyArg(), "sched-1", "admin-1", "STAGE_REARMED", "att-1", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_lifecycle_receipts")).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	if err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "", "br-1", AttemptCommand{}); err != nil {
+	if err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "", "br-1", AttemptCommand{OperationID: "op-rearm-2"}); err != nil {
 		t.Fatalf("re-arm break: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -148,7 +153,7 @@ func TestReArmAttemptStageRefusesAStageTheCandidateAlreadyEntered(t *testing.T) 
 	// silently re-armed clock.
 	mock.ExpectRollback()
 
-	err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "ma-1", "", AttemptCommand{})
+	err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "ma-1", "", AttemptCommand{OperationID: "op-rearm-3"})
 	if err == nil {
 		t.Fatal("a stage the candidate has already entered must not be re-armed")
 	}
@@ -170,7 +175,7 @@ func TestReArmAttemptStageRefusesAStageWithAnAcceptedResponse(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"has_response"}).AddRow(true))
 	mock.ExpectRollback()
 
-	err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "ma-1", "", AttemptCommand{})
+	err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "ma-1", "", AttemptCommand{OperationID: "op-rearm-4"})
 	if err == nil {
 		t.Fatal("a stage with an accepted response must never have its timer reset")
 	}
@@ -188,7 +193,7 @@ func TestReArmAttemptStageRefusesSharedClockSessions(t *testing.T) {
 	personalRearmPrologue(mock, "cohort_section_v3")
 	mock.ExpectRollback()
 
-	err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "ma-1", "", AttemptCommand{})
+	err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", "ma-1", "", AttemptCommand{OperationID: "op-rearm-5"})
 	if err == nil {
 		t.Fatal("a cohort-timed SAT session must refuse a per-stage re-arm")
 	}
@@ -202,7 +207,7 @@ func TestReArmAttemptStageRequiresExactlyOneStage(t *testing.T) {
 	admin := Actor{ID: "admin-1", Role: RoleAdmin, CSRFVerified: true}
 
 	for _, target := range [][2]string{{"", ""}, {"ma-1", "br-1"}} {
-		if err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", target[0], target[1], AttemptCommand{}); err == nil {
+		if err := svc.ReArmAttemptStage(context.Background(), admin, "sched-1", "att-1", target[0], target[1], AttemptCommand{OperationID: "op-rearm-6"}); err == nil {
 			t.Fatalf("re-arm with module=%q break=%q must be refused before any write", target[0], target[1])
 		}
 	}

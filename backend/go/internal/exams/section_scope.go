@@ -4,7 +4,7 @@ package exams
 //
 // A Student Access link can be narrowed to a subset of the exam's sections
 // (assessment_access_links.enabled_sections, migration 0066). Three packages
-// need the same vocabulary and the same fail-open read:
+// need the same vocabulary and the same fail-closed read:
 //
 //   - internal/accesslinks  writes and validates the operator's selection,
 //   - internal/schedules    intersects the runtime plan with it (runtimePlanIn),
@@ -85,29 +85,23 @@ func EqualSectionScopes(a, b []string) bool {
 	return true
 }
 
-// ParseStoredSectionScope decodes a link's stored scope into a membership set of
-// RECOGNIZED section keys. NULL, an empty array, malformed JSON, or a value with
-// nothing recognizable left all mean "no narrowing": the fail-open default that
-// matches every pre-migration link. Unrecognized keys are dropped rather than
-// honored, because honoring one would admit no real section and hand the run an
-// empty plan — a link that cannot start at all.
-func ParseStoredSectionScope(raw string) map[string]bool {
-	if strings.TrimSpace(raw) == "" {
+// ParseStoredSectionScope preserves unrestricted scope only for SQL NULL.
+// Corrupt, empty, and unknown non-NULL values deny every section.
+func ParseStoredSectionScope(raw sql.NullString) map[string]bool {
+	if !raw.Valid {
 		return nil
 	}
 	var keys []string
-	if err := json.Unmarshal([]byte(raw), &keys); err != nil {
-		return nil
+	if err := json.Unmarshal([]byte(raw.String), &keys); err != nil || len(keys) == 0 {
+		return map[string]bool{}
 	}
 	allowed := make(map[string]bool, len(keys))
 	for _, key := range keys {
 		trimmed := strings.TrimSpace(key)
-		if trimmed == LinkSectionReadingWriting || trimmed == LinkSectionMath {
-			allowed[trimmed] = true
+		if trimmed != LinkSectionReadingWriting && trimmed != LinkSectionMath {
+			return map[string]bool{}
 		}
-	}
-	if len(allowed) == 0 {
-		return nil
+		allowed[trimmed] = true
 	}
 	return allowed
 }
@@ -118,13 +112,8 @@ func AllowsSection(allowed map[string]bool, sectionKey string) bool {
 	return allowed == nil || allowed[sectionKey]
 }
 
-// SectionScopeKeys returns a scope's keys in canonical order, for rendering and
-// for building parameterized IN clauses. Keys outside the section vocabulary
-// are dropped: the vocabulary is fixed, so an unrecognized key is corruption,
-// and honoring it would scope a link to a section that cannot exist. A nil
-// scope (all sections) AND a scope with nothing recognizable left both return
-// nil, so callers know to omit the clause entirely rather than enumerate every
-// section key.
+// SectionScopeKeys returns canonical keys. A non-nil empty scope remains
+// non-nil empty; callers must not turn denied scope into unrestricted access.
 func SectionScopeKeys(allowed map[string]bool) []string {
 	if allowed == nil {
 		return nil
@@ -134,9 +123,6 @@ func SectionScopeKeys(allowed map[string]bool) []string {
 		if allowed[key] {
 			keys = append(keys, key)
 		}
-	}
-	if len(keys) == 0 {
-		return nil
 	}
 	return keys
 }
@@ -183,7 +169,7 @@ func AttemptSectionScope(ctx context.Context, q RowQueryer, attemptID string) (m
 	}
 	return IntersectSectionScopes(
 		ParseSATPublishScope(rawRelease.String),
-		ParseStoredSectionScope(rawLink.String),
+		ParseStoredSectionScope(rawLink),
 	), nil
 }
 

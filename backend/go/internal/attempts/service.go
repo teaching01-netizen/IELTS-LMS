@@ -19,6 +19,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 	"github.com/google/uuid"
 )
 
@@ -72,6 +73,7 @@ func NewService(runner *tx.Runner, clk clock.Clock, secret []byte) *Service {
 // QuestionOwner resolves question -> module/section ownership. Providers plug
 // IELTS/SAT/ACT validation behind this port; the core stays neutral (plan 15).
 type QuestionOwner struct {
+	CanonicalQuestionID string
 	ModuleID         string
 	SectionKey       string
 	ModuleState      string // must be active|review for writes
@@ -102,6 +104,12 @@ type QuestionVerdict struct {
 // implement it keep the per-question contract.
 type BulkQuestionResolver interface {
 	ResolveMany(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]QuestionVerdict, error)
+}
+
+// CanonicalQuestionResolver resolves SAT sitting-slot identities before hashes,
+// collision keys, replay, or projection writes are computed.
+type CanonicalQuestionResolver interface {
+	CanonicalizeQuestions(context.Context, tx.Tx, string, []string) (map[string]QuestionOwner, error)
 }
 
 // RuntimeGate is the runtime projection used for writability. Every field is
@@ -229,6 +237,12 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 	}
 	if err := s.validateTokenSession(ctx, q, claims); err != nil {
 		return SaveResult{}, err
+	}
+	if attempt.ProviderKey == string(ProviderSAT) {
+		cmd, qr, err = canonicalizeSATCommand(ctx, q, cmd, qr)
+		if err != nil {
+			return SaveResult{}, err
+		}
 	}
 	// Exact-replay fast path: authorized at current lease, skips epoch
 	// equality + runtime gate; never mutates twice (plan 21).
@@ -618,6 +632,13 @@ func exactReplay(ctx context.Context, q tx.Tx, io saveIO, cmd SaveResponsesComma
 
 // ensureWritable enforces terminal/pause/deadline/grace/proctor gates.
 func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
+	if a.ProviderKey == string(ProviderSAT) {
+		switch gate.TimingModel {
+		case examruntime.TimingModelLegacy, examruntime.TimingModelCohortStage, examruntime.TimingModelCohortSection, examruntime.TimingModelPersonal:
+		default:
+			return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT runtime or timing policy is unavailable.", HTTPStatus: 422, Details: map[string]any{"reason": "SAT_RUNTIME_UNAVAILABLE", "retryable": false}}
+		}
+	}
 	// Either the runtime gate or the locked attempt row may carry the model
 	// (the attempt row is the durable one: a schedule whose runtime row is
 	// missing mid-transition must still read as personal).
@@ -698,8 +719,7 @@ func ensureQuestionAdmittedForProvider(owner QuestionOwner, gate RuntimeGate, qu
 	if provider == string(ProviderSAT) && owner.ModuleDeadlineAt == nil {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "SAT module deadline is unavailable.", HTTPStatus: 422}
 	}
-	// The close window needs the runtime's model. The bulk resolver does not
-	// stamp it on the owner; the runtime gate read on this transaction does.
+	// The owner and runtime share the captured module timing contract.
 	windowModel := owner.TimingModel
 	if windowModel == "" {
 		windowModel = gate.TimingModel

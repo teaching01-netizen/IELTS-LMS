@@ -186,7 +186,7 @@ func (l integrationRuntimeLocker) Lock(ctx context.Context, q tx.Tx, _ string) (
 	if err := q.QueryRowContext(ctx, `SELECT UTC_TIMESTAMP(6)`).Scan(&now); err != nil {
 		return attempts.RuntimeGate{}, err
 	}
-	return attempts.RuntimeGate{Status: "live", ActiveSectionKey: "*", SectionLive: true, SectionStarted: true, Now: now.UTC()}, nil
+	return attempts.RuntimeGate{Status: "live", TimingModel: "legacy_section_v1", ActiveSectionKey: "*", SectionLive: true, SectionStarted: true, Now: now.UTC()}, nil
 }
 
 type integrationSATSealer struct{ terminalizer *terminalization.Service }

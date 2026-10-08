@@ -1,8 +1,10 @@
+import { practiceEntrySession } from './practice-entry.js';
 import http from 'k6/http';
 import { check, fail, sleep } from 'k6';
 import { Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
 import { randomBytes } from 'k6/crypto';
+import { satAttemptUrl, satBatchRequest, assertSatAcknowledgements, assertSatStoredResponses } from './sat-response-contract.js';
 
 // SAT exam-day distributed scenario (plan docs/sat-exam-day-10000-test-plan.md).
 //
@@ -13,7 +15,7 @@ import { randomBytes } from 'k6/crypto';
 // terminalization. This script drives the real SAT delivery paths:
 //
 //   entry -> V1 bootstrap (attempt credential) -> delivery bootstrap
-//     -> modules/start -> responses (PATCH per question, idempotent)
+//     -> modules/start -> V2 response batches (exact write acknowledgements)
 //     -> route handoff poll -> gap -> Math -> delivery submit
 //
 // Fixture is read at runtime from the pinned published version: question
@@ -90,7 +92,7 @@ function csrfHeader(jar, baseUrl) {
 }
 
 function jsonHeaders(extra) {
-  return Object.assign({ 'content-type': 'application/json' }, extra || {});
+  return Object.assign({ 'content-type': 'application/json' }, csrfHeader(http.cookieJar(), baseUrl), extra || {});
 }
 
 function boundedRetryAfterSeconds(resp) {
@@ -159,6 +161,7 @@ export const options = {
     },
   },
   thresholds: {
+    checks: ['rate==1'],
     // Bounded 429 with retry guidance is admission shed, not failure; only
     // unexpected statuses fail. Tail budgets per plan §5 (online requests).
     http_req_failed: ['rate<0.02'],
@@ -319,7 +322,7 @@ function deliveryBootstrapOrFail(bearerToken, label) {
   const resp = http.post(
     `${baseUrl}/api/v1/assessment-delivery/schedules/${scheduleId}/bootstrap`,
     null,
-    { headers: { authorization: `Bearer ${bearerToken}` }, responseCallback: EXPECT_2XX },
+    { headers: jsonHeaders({ authorization: `Bearer ${bearerToken}` }), responseCallback: EXPECT_2XX },
   );
   tBootstrap.add(Date.now() - t0);
   check(resp, { [`sat delivery bootstrap 200 (${label})`]: (r) => r.status === 200 })
@@ -333,47 +336,79 @@ function deliveryBootstrapOrFail(bearerToken, label) {
 }
 
 function startModuleOrFail(bearerToken, moduleId, label) {
-  const t0 = Date.now();
-  const resp = http.post(
-    `${baseUrl}/api/v1/assessment-delivery/schedules/${scheduleId}/modules/start`,
-    JSON.stringify({ moduleId }),
-    {
-      headers: jsonHeaders({ authorization: `Bearer ${bearerToken}` }),
-      responseCallback: EXPECT_2XX_OR_409,
-    },
-  );
-  tModuleStart.add(Date.now() - t0);
-  check(resp, { [`sat module start 200/409 (${label})`]: (r) => r.status === 200 || r.status === 409 })
-    || fail(`Start module failed (${label} ${moduleId}): status=${resp.status} body=${String(resp.body).slice(0, 300)}`);
-  try {
-    return resp.json();
-  } catch (_) {
-    return null;
+  const budget = clampInt(__ENV.K6_SAT_ENTRY_TIMEOUT_SECONDS || '7200', 10, 21600);
+  const until = Date.now() + budget * 1000;
+  while (Date.now() < until) {
+    const t0 = Date.now();
+    const resp = http.post(
+      `${baseUrl}/api/v1/assessment-delivery/schedules/${scheduleId}/modules/start`,
+      JSON.stringify({ moduleId, needContent: true }),
+      { headers: jsonHeaders({ authorization: `Bearer ${bearerToken}` }), responseCallback: EXPECT_2XX_OR_409 },
+    );
+    if (resp.status === 200) {
+      tModuleStart.add(Date.now() - t0);
+      return resp.json();
+    }
+    let reason;
+    try { const body = resp.json(); reason = (body.error || body).details?.reason; } catch (_) {}
+    if (resp.status !== 409 || !['SECTION_NOT_ACTIVE', 'RUNTIME_NOT_LIVE'].includes(reason)) {
+      fail(`Start module rejected (${label} ${moduleId}): status=${resp.status} reason=${reason || 'unknown'}`);
+    }
+    sleep(2 + Math.random());
   }
+  fail(`Module never became available (${label}) within ${budget}s.`);
 }
 
-function saveResponseOrFail(bearerToken, examQuestionId, payload, label) {
-  const t0 = Date.now();
-  const resp = http.patch(
-    `${baseUrl}/api/v1/assessment-delivery/schedules/${scheduleId}/responses/${examQuestionId}`,
-    JSON.stringify(payload),
-    {
-      headers: jsonHeaders({ authorization: `Bearer ${bearerToken}` }),
-      responseCallback: EXPECT_2XX_OR_409,
-    },
-  );
-  tResponseAck.add(Date.now() - t0);
-  const ok = check(resp, {
-    [`sat response ack 200/409 (${label})`]: (r) => r.status === 200 || r.status === 409,
+function deliveredModule(bootstrap, sectionKey, moduleId) {
+  return findSection(bootstrap, sectionKey)?.modules.find((module) => module.id === moduleId);
+}
+
+function deadlineMs(moduleAttempt) {
+  const value = moduleAttempt?.deadlineAt
+    ? Date.parse(moduleAttempt.deadlineAt)
+    : Date.parse(moduleAttempt?.startedAt) +
+      (Number(moduleAttempt?.allocatedSeconds) + Number(moduleAttempt?.extensionSeconds || 0) + Number(moduleAttempt?.accumulatedPausedSeconds || 0)) * 1000;
+  if (!Number.isFinite(value)) fail('SAT handoff rehearsal requires an authoritative module deadline.');
+  return value;
+}
+
+function responseSnapshotOrFail(bearerToken, attemptId) {
+  const resp = http.get(satAttemptUrl(baseUrl, attemptId, 'responses'), {
+    headers: jsonHeaders({ authorization: `Bearer ${bearerToken}` }), responseCallback: EXPECT_2XX,
   });
-  if (!ok) {
-    fail(`Save response failed (${label} ${examQuestionId}): status=${resp.status} body=${String(resp.body).slice(0, 300)}`);
+  if (resp.status !== 200) fail(`SAT response snapshot failed: status=${resp.status}`);
+  const snapshot = resp.json();
+  satBatchRequest(snapshot, []);
+  return snapshot;
+}
+
+function saveResponseOrFail(writer, command, label) {
+  const t0 = Date.now();
+  let request = satBatchRequest(writer.snapshot, [command]);
+  for (let retry = 0; retry < 4; retry += 1) {
+    const resp = http.post(satAttemptUrl(baseUrl, writer.attemptId, 'responses:batch'), JSON.stringify(request), {
+      headers: jsonHeaders({ authorization: `Bearer ${writer.token}` }),
+      responseCallback: http.expectedStatuses(200, 409, 429, 502, 503, 504), timeout: '15s',
+    });
+    if (resp.status === 200) {
+      const ack = assertSatAcknowledgements(resp.json(), [command])[0];
+      tResponseAck.add(Date.now() - t0);
+      check(ack, { [`sat exact write acknowledged (${label})`]: (value) => value.writeId === command.writeId });
+      return { status: 200, ack };
+    }
+    let error = null;
+    try { const body = resp.json(); error = body.error || body; } catch (_) {}
+    if (resp.status === 409 && error?.code === 'CONTROL_EPOCH_STALE') {
+      const snapshot = responseSnapshotOrFail(writer.token, writer.attemptId);
+      if (snapshot.leaseEpoch !== request.leaseEpoch) fail('SAT writer changed during the save rehearsal.');
+      writer.snapshot = snapshot;
+      request = satBatchRequest(snapshot, [command]);
+    } else if (![0, 429, 502, 503, 504].includes(resp.status)) {
+      fail(`Save response rejected (${label}): status=${resp.status} code=${error?.code || 'unknown'}`);
+    }
+    sleep((Math.min(2000, 250 * 2 ** retry) + Math.random() * 250) / 1000);
   }
-  let ack = null;
-  try {
-    ack = resp.json();
-  } catch (_) {}
-  return { status: resp.status, ack };
+  fail(`Save response did not settle (${label}); no answer acknowledgement was received.`);
 }
 
 function findSection(bootstrap, sectionKey) {
@@ -427,7 +462,7 @@ export function studentFlow() {
   // identity for entry AND bootstrap: under the SAT single-writer policy a
   // second identity is a second device and is blocked.
   const clientSessionId = uuidV4();
-  const entryBody = JSON.stringify({ scheduleId, wcode: student.wcode, email: student.email, studentName: student.fullName, clientSessionId });
+  const entryBody = JSON.stringify({ scheduleId, wcode: student.wcode, email: student.email, studentName: student.fullName, clientSessionId, entrySession: practiceEntrySession(scheduleId, student) });
   const tEntry0 = Date.now();
   let entryResp = http.post(
     `${baseUrl}/api/v1/auth/student/entry`,
@@ -505,12 +540,12 @@ export function studentFlow() {
   bootstrap = deliveryBootstrapOrFail(attemptToken, `rw-m1-started ${student.wcode}`);
   const rwM1Attempt = moduleAttemptById(bootstrap, rwM1.id);
 
-  answerModule(attemptToken, attemptId, rwM1Attempt, rwM1, 'reading-writing', band, vuIndex, student, faultLoss);
+  answerModule(attemptToken, attemptId, rwM1Attempt, deliveredModule(bootstrap, 'reading-writing', rwM1.id), 'reading-writing', band, vuIndex, student, faultLoss);
 
   // 5. Route handoff: poll until exactly one branch attempt exists. The
   // server owns expiry; the client never chooses the branch.
-  const handoff0 = Date.now();
-  const handoffTimeout = clampInt(__ENV.K6_SAT_HANDOFF_TIMEOUT_SECONDS || '300', 10, 3600);
+  const rwDeadline = deadlineMs(rwM1Attempt);
+  const handoffTimeout = clampInt(__ENV.K6_SAT_HANDOFF_TIMEOUT_SECONDS || '7200', 10, 21600);
   let rwM2 = null;
   let handoffStart = Date.now();
   while (Date.now() - handoffStart < handoffTimeout * 1000) {
@@ -527,7 +562,7 @@ export function studentFlow() {
     }
     sleep(2);
   }
-  tHandoff.add(Date.now() - handoff0);
+  tHandoff.add(Math.max(0, Date.now() - rwDeadline));
   if (!rwM2) fail(`RW handoff never landed for ${student.wcode} within ${handoffTimeout}s.`);
   check(rwM2, {
     'sat rw branch is lower/higher': (m) => ['lower_branch', 'higher_branch'].indexOf(String(m.adaptiveRole)) >= 0,
@@ -535,7 +570,7 @@ export function studentFlow() {
   console.log(`SAT_ROUTE run=${runId} attempt=${attemptId} section=reading-writing branch=${rwM2.adaptiveRole} module=${rwM2.id}`);
   startModuleOrFail(attemptToken, rwM2.id, `rw-m2 ${student.wcode}`);
   bootstrap = deliveryBootstrapOrFail(attemptToken, `rw-m2-started ${student.wcode}`);
-  answerModule(attemptToken, attemptId, moduleAttemptById(bootstrap, rwM2.id), rwM2, 'reading-writing', band, vuIndex, student, faultLoss);
+  answerModule(attemptToken, attemptId, moduleAttemptById(bootstrap, rwM2.id), deliveredModule(bootstrap, 'reading-writing', rwM2.id), 'reading-writing', band, vuIndex, student, faultLoss);
 
   // 6. Gap: wait for Math per the server runtime plan (nextSectionStartAt).
   // The client blocks closed-module editing while waiting; bootstrap stays
@@ -553,9 +588,10 @@ export function studentFlow() {
   if (!mathM1) fail(`Math base module missing for ${student.wcode}`);
   startModuleOrFail(attemptToken, mathM1.id, `math-m1 ${student.wcode}`);
   bootstrap = deliveryBootstrapOrFail(attemptToken, `math-m1-started ${student.wcode}`);
-  answerModule(attemptToken, attemptId, moduleAttemptById(bootstrap, mathM1.id), mathM1, 'math', band, vuIndex, student, faultLoss);
+  const mathM1Attempt = moduleAttemptById(bootstrap, mathM1.id);
+  answerModule(attemptToken, attemptId, mathM1Attempt, deliveredModule(bootstrap, 'math', mathM1.id), 'math', band, vuIndex, student, faultLoss);
 
-  const mathHandoff0 = Date.now();
+  const mathDeadline = deadlineMs(mathM1Attempt);
   let mathM2 = null;
   handoffStart = Date.now();
   while (Date.now() - handoffStart < handoffTimeout * 1000) {
@@ -572,46 +608,69 @@ export function studentFlow() {
     }
     sleep(2);
   }
-  tHandoff.add(Date.now() - mathHandoff0);
+  tHandoff.add(Math.max(0, Date.now() - mathDeadline));
   if (!mathM2) fail(`Math handoff never landed for ${student.wcode} within ${handoffTimeout}s.`);
   console.log(`SAT_ROUTE run=${runId} attempt=${attemptId} section=math branch=${mathM2.adaptiveRole} module=${mathM2.id}`);
   startModuleOrFail(attemptToken, mathM2.id, `math-m2 ${student.wcode}`);
   bootstrap = deliveryBootstrapOrFail(attemptToken, `math-m2-started ${student.wcode}`);
-  answerModule(attemptToken, attemptId, moduleAttemptById(bootstrap, mathM2.id), mathM2, 'math', band, vuIndex, student, faultLoss);
+  answerModule(attemptToken, attemptId, moduleAttemptById(bootstrap, mathM2.id), deliveredModule(bootstrap, 'math', mathM2.id), 'math', band, vuIndex, student, faultLoss);
 
   // 8. Terminal submit (server-owned). Exactly one receipt/submission/result.
-  const submissionId = uuidV4();
+  const terminalUntil = Date.now() + handoffTimeout * 1000;
+  let terminal = false;
+  while (Date.now() < terminalUntil) {
+    const snap = deliveryBootstrapOrFail(attemptToken, `terminal-poll ${student.wcode}`);
+    const modules = snap.attempt?.moduleAttempts || [];
+    if (modules.length > 0 && modules.every((module) => ['locked', 'submitted'].includes(module.state))) {
+      terminal = true;
+      break;
+    }
+    sleep(2 + Math.random());
+  }
+  if (!terminal) fail(`SAT modules did not terminalize for ${student.wcode}.`);
+  const snapshot = responseSnapshotOrFail(attemptToken, attemptId);
+  const submissionId = attemptId;
+  const submitBody = JSON.stringify({ submissionId, leaseEpoch: snapshot.leaseEpoch, controlEpoch: snapshot.controlEpoch });
   const tSub0 = Date.now();
   const submitResp = http.post(
-    `${baseUrl}/api/v1/assessment-delivery/schedules/${scheduleId}/submit`,
-    JSON.stringify({ submissionId }),
+    satAttemptUrl(baseUrl, attemptId, 'submit'),
+    submitBody,
     {
       headers: jsonHeaders({ authorization: `Bearer ${attemptToken}` }),
       responseCallback: EXPECT_2XX_OR_409,
     },
   );
   tSubmit.add(Date.now() - tSub0);
-  check(submitResp, { 'sat submit 200/409': (r) => r.status === 200 || r.status === 409 })
+  check(submitResp, { 'sat submit receipt 200': (r) => r.status === 200 })
     || fail(`SAT submit failed (${student.wcode}): status=${submitResp.status} body=${String(submitResp.body).slice(0, 300)}`);
+  const receipt = submitResp.json();
+  if (receipt.attemptId !== attemptId || !receipt.submissionId || !receipt.submittedAt ||
+      !/^[a-f0-9]{64}$/.test(receipt.finalResponseDigest || '')) fail('SAT submit returned no durable terminal receipt.');
   // Idempotent replay must return the identical receipt.
   const replayResp = http.post(
-    `${baseUrl}/api/v1/assessment-delivery/schedules/${scheduleId}/submit`,
-    JSON.stringify({ submissionId }),
+    satAttemptUrl(baseUrl, attemptId, 'submit'),
+    submitBody,
     {
       headers: jsonHeaders({ authorization: `Bearer ${attemptToken}` }),
       responseCallback: EXPECT_2XX_OR_409,
     },
   );
-  check(replayResp, { 'sat submit replay 200/409': (r) => r.status === 200 || r.status === 409 });
+  if (replayResp.status !== 200) fail(`SAT submit replay failed: status=${replayResp.status}`);
+  const replay = replayResp.json();
+  if (replay.submissionId !== receipt.submissionId || replay.finalResponseDigest !== receipt.finalResponseDigest ||
+      replay.submittedAt !== receipt.submittedAt) fail('SAT submit replay changed the terminal receipt.');
   console.log(`SAT_SUBMIT run=${runId} attempt=${attemptId} student=${student.wcode} status=${submitResp.status}`);
 }
 
 function answerModule(bearerToken, attemptId, moduleAttempt, mod, sectionKey, band, vuIndex, student, faultLoss) {
-  if (!mod || !Array.isArray(mod.questions)) {
+  if (!mod || !Array.isArray(mod.questions) || mod.questions.length === 0) {
     fail(`Module ${sectionKey}/${(mod && mod.moduleKey) || '?'} has no delivered questions for ${student.wcode}`);
   }
   const moduleAttemptId = (moduleAttempt && moduleAttempt.id) || null;
   const questions = mod.questions;
+  const writer = { attemptId, token: bearerToken, snapshot: responseSnapshotOrFail(bearerToken, attemptId) };
+  const versions = new Map(writer.snapshot.responses.map((response) => [response.questionId, response.clientVersion]));
+  const finalWrites = new Map();
   for (let i = 0; i < questions.length; i += 1) {
     const q = questions[i];
     const examQuestionId = q.examQuestionId || q.exam_question_id || q.id;
@@ -620,31 +679,25 @@ function answerModule(bearerToken, attemptId, moduleAttempt, mod, sectionKey, ba
     if (value === null) continue; // explicit unanswered slot (null, never sent)
     const writeId = uuidV4();
     const payload = {
-      revision: 0,
-      response: { answer: String(value) },
-      markedForReview: i % 9 === 8,
-      eliminatedOptions: [],
-      annotations: {},
-      clientWriteId: writeId,
+      writeId, questionId: examQuestionId, clientVersion: (versions.get(examQuestionId) || 0) + 1,
+      response: { answer: String(value), markedForReview: i % 9 === 8, eliminatedOptions: [], annotations: [] },
     };
-    const { ack } = saveResponseOrFail(bearerToken, examQuestionId, payload, `${sectionKey}/${mod.moduleKey} q${i} ${student.wcode}`);
+    const { ack } = saveResponseOrFail(writer, payload, `${sectionKey}/${mod.moduleKey} q${i} ${student.wcode}`);
+    finalWrites.set(examQuestionId, payload);
     journal(runId, attemptId, moduleAttemptId, examQuestionId, writeId, { answer: String(value) }, ack);
     // Answer-change edge: rewrite one slot per module with a new write ID;
     // final accepted version wins. Replayed write IDs must not duplicate.
     if (i === 2) {
       const changeId = uuidV4();
       const changed = {
-        revision: 1,
-        response: { answer: sectionKey === 'math' ? '7' : 'A' },
-        markedForReview: false,
-        eliminatedOptions: [],
-        annotations: {},
-        clientWriteId: changeId,
+        writeId: changeId, questionId: examQuestionId, clientVersion: payload.clientVersion + 1,
+        response: { answer: sectionKey === 'math' ? '7' : 'A', markedForReview: false, eliminatedOptions: [], annotations: [] },
       };
-      const changedAck = saveResponseOrFail(bearerToken, examQuestionId, changed, `${sectionKey}/${mod.moduleKey} q${i}-change ${student.wcode}`);
+      const changedAck = saveResponseOrFail(writer, changed, `${sectionKey}/${mod.moduleKey} q${i}-change ${student.wcode}`);
+      finalWrites.set(examQuestionId, changed);
       journal(runId, attemptId, moduleAttemptId, examQuestionId, changeId, changed.response, changedAck.ack);
       // Replay the ORIGINAL write ID: must not create a second version.
-      saveResponseOrFail(bearerToken, examQuestionId, payload, `${sectionKey}/${mod.moduleKey} q${i}-replay ${student.wcode}`);
+      saveResponseOrFail(writer, payload, `${sectionKey}/${mod.moduleKey} q${i}-replay ${student.wcode}`);
     }
     if (faultLoss && i % 13 === 12) {
       // Staggered reconnect: pause writes briefly so backlog drainage is
@@ -652,6 +705,7 @@ function answerModule(bearerToken, attemptId, moduleAttempt, mod, sectionKey, ba
       sleep(2);
     }
   }
+  assertSatStoredResponses(responseSnapshotOrFail(bearerToken, attemptId), [...finalWrites.values()]);
   // Heartbeat cadence between modules mirrors UI polling.
   sleep(1);
 }

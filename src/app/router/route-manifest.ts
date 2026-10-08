@@ -41,6 +41,8 @@ export const routeManifest = {
       examRelease: '/sat/exams/:examId/release',
       examPreview: '/sat/exams/:examId/preview',
       examAccess: '/sat/exams/:examId/access',
+      examSettings: '/sat/exams/:examId/settings',
+      examResponses: '/sat/exams/:examId/responses',
       sessionRoom: '/sat/sessions/:scheduleId',
     },
   },

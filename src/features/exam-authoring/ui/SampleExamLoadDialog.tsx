@@ -45,7 +45,7 @@ export function SampleExamLoadDialog({
           Published versions are untouched. The operation is transactional: it either loads the
           entire sample or changes nothing.
         </div>
-        <p className="mt-3 text-[11px] leading-5 text-slate-400">
+        <p className="mt-3 text-xs leading-5 text-slate-400">
           Sample items are original practice content, not copied College Board questions.
         </p>
         <div className="mt-5 flex justify-end gap-2">

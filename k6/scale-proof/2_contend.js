@@ -1,6 +1,7 @@
 import http from 'k6/http';
 import { check, fail } from 'k6';
 import { randomBytes } from 'k6/crypto';
+import { satAttemptUrl, satBatchRequest, assertSatAcknowledgements, assertSatStoredResponses } from '../sat-response-contract.js';
 
 // Plan E3/B1: 500-way same-schedule save contention must produce ZERO
 // deadlocks. 500 VUs hammer one schedule with DISTINCT questions per VU
@@ -40,17 +41,23 @@ try {
 if (creds.length === 0 || questions.length === 0) {
   throw new Error('Need non-empty attempt creds + question ids for contention');
 }
+const vus = Number(__ENV.K6_VUS || 500);
+if (!Number.isSafeInteger(vus) || vus < 1 || creds.length < vus ||
+    new Set(creds.slice(0, vus).map((cred) => cred.attemptId || cred.attempt_id || cred.id)).size !== vus) {
+  throw new Error('Contention requires one distinct attempt per VU; set K6_VUS to the available roster size.');
+}
 
 export const options = {
   scenarios: {
     contend: {
       executor: 'shared-iterations',
-      vus: 500,
-      iterations: 500,
+      vus,
+      iterations: vus,
       maxDuration: '10m',
     },
   },
   thresholds: {
+    checks: ['rate==1'],
     http_req_failed: ['rate<0.01'],
     http_req_duration: ['p(99)<3000'],
   },
@@ -67,34 +74,20 @@ function isDeadlock(body) {
 
 export default function () {
   const vu = __VU;
-  const cred = creds[vu % creds.length];
+  const cred = creds[vu - 1];
   const attemptId = cred.attemptId || cred.attempt_id || cred.id;
   const token = cred.token || cred.attemptToken;
-  const questionId = questions[vu % questions.length];
-  // Route truth (handlers_delivery.go): the handler decodes
-  // delivery.SaveResponseRequest {revision, response, markedForReview,
-  // eliminatedOptions, annotations, moduleAttemptId?, stageKey?,
-  // runtimeRevision?, clientWriteId?}. clientWriteId is the idempotency
-  // key (write_id UNIQUE backstop); revision 0 + fresh write IDs keep
-  // DISTINCT questions collision-free by construction.
-  const resp = http.patch(
-    `${baseUrl}/api/v1/assessment-delivery/schedules/${scheduleId}/responses/${questionId}`,
-    JSON.stringify({
-      revision: 0,
-      response: { answer: `k6-contend vu=${vu} iter=${__ITER}` },
-      markedForReview: false,
-      eliminatedOptions: [],
-      annotations: {},
-      clientWriteId: uuidV4(),
-    }),
-    {
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-      responseCallback: http.expectedStatuses({ min: 200, max: 499 }),
-    },
-  );
+  const questionId = questions[(vu - 1) % questions.length];
+  const params = { headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, responseCallback: http.expectedStatuses(200) };
+  const snapshotURL = satAttemptUrl(baseUrl, attemptId, 'responses');
+  const before = http.get(snapshotURL, params);
+  if (before.status !== 200) fail(`contend snapshot failed (vu=${vu}): status=${before.status}`);
+  const snapshot = before.json();
+  const previousVersion = snapshot.responses?.find((response) => response.questionId === questionId)?.clientVersion || 0;
+  const command = { questionId, writeId: uuidV4(), clientVersion: previousVersion + 1,
+    response: { answer: cred.answer || 'A', markedForReview: false, eliminatedOptions: [], annotations: [] } };
+  const resp = http.post(satAttemptUrl(baseUrl, attemptId, 'responses:batch'),
+    JSON.stringify(satBatchRequest(snapshot, [command])), params);
   if (resp.status >= 500) {
     fail(`contend 5xx (vu=${vu}): status=${resp.status} body=${String(resp.body).slice(0, 200)}`);
   }
@@ -105,6 +98,9 @@ export default function () {
   if (isDeadlock(body)) {
     fail(`contend deadlock surfaced (vu=${vu}): body=${String(resp.body).slice(0, 200)}`);
   }
-  check(resp, { 'contend accepted/replayed/conflict (no 5xx, no deadlock)': (r) => r.status < 500 });
-  void attemptId;
+  if (!check(resp, { 'contend save acknowledged': (r) => r.status === 200 })) fail(`contend save rejected (vu=${vu}): status=${resp.status}`);
+  assertSatAcknowledgements(body, [command]);
+  const after = http.get(snapshotURL, params);
+  if (after.status !== 200) fail(`contend verification failed (vu=${vu}): status=${after.status}`);
+  assertSatStoredResponses(after.json(), [command]);
 }

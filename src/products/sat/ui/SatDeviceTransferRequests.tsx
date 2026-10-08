@@ -13,7 +13,7 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute:
 const formatTime = (value: string | null) => (value ? timeFormat.format(new Date(value)) : 'No answers saved yet');
 
 const chipClass =
-  'min-h-9 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] disabled:cursor-wait disabled:opacity-60';
+  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] disabled:cursor-wait disabled:opacity-60';
 
 /**
  * Proctor review queue for SAT device changes. Approval binds the request to
@@ -21,8 +21,20 @@ const chipClass =
  * only when that browser redeems it. Approving requires acknowledging that
  * answers the old device never saved to the server will not move.
  */
-export function SatDeviceTransferRequests({ scheduleId, blocked }: { scheduleId: string; blocked: boolean }) {
+export function SatDeviceTransferRequests({
+  scheduleId,
+  blocked,
+  onPendingChange,
+}: {
+  scheduleId: string;
+  blocked: boolean;
+  /** Attempt ids with a device change awaiting a proctor decision (roster attention reasons). */
+  onPendingChange?: (attemptIds: ReadonlySet<string>) => void;
+}) {
   const [items, setItems] = useState<ProctorDeviceTransfer[]>([]);
+  useEffect(() => {
+    onPendingChange?.(new Set(items.filter((item) => item.state === 'pending').map((item) => item.attemptId)));
+  }, [items, onPendingChange]);
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [reason, setReason] = useState('');
@@ -87,14 +99,14 @@ export function SatDeviceTransferRequests({ scheduleId, blocked }: { scheduleId:
           <Smartphone size={14} aria-hidden="true" />
           Device change requests ({items.length})
         </h2>
-        <p role="status" aria-live="polite" className="mt-1 text-[11px] text-[var(--sat-staff-text-secondary,#515154)]">
+        <p role="status" aria-live="polite" className="mt-1 text-[12px] text-[var(--sat-staff-text-secondary,#515154)]">
           {status}
         </p>
         <ul className="mt-2 space-y-2">
           {items.map((item) => {
             const open = reviewing === item.requestId;
             return (
-              <li key={item.requestId} className="rounded-xl bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 py-2 text-[11px] text-[var(--sat-staff-text-secondary,#515154)]">
+              <li key={item.requestId} className="rounded-xl bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 py-2 text-[12px] text-[var(--sat-staff-text-secondary,#515154)]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
@@ -134,7 +146,7 @@ export function SatDeviceTransferRequests({ scheduleId, blocked }: { scheduleId:
                         value={reason}
                         maxLength={255}
                         onChange={(event) => setReason(event.target.value)}
-                        className="mt-1 min-h-9 w-full rounded-[10px] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] px-2 text-[12px] font-normal"
+                        className="mt-1 min-h-11 w-full rounded-[10px] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] px-2 text-[12px] font-normal"
                       />
                     </label>
                     <label htmlFor={ackId} className="flex items-start gap-2">

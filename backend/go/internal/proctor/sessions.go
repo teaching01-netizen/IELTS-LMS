@@ -958,7 +958,7 @@ func loadScopedExamPlan(ctx context.Context, q sessionQuerier, scheduleID, versi
 	}
 	linkScope := map[string]bool(nil)
 	if err == nil {
-		linkScope = examdomain.ParseStoredSectionScope(raw.String)
+		linkScope = examdomain.ParseStoredSectionScope(raw)
 	}
 	effectiveScope := examdomain.IntersectSectionScopes(
 		examdomain.ParseSATPublishScope(string(publishScope)),
@@ -1024,7 +1024,7 @@ func LoadExamPlanBySchedule(ctx context.Context, db *sql.DB, scheduleID string) 
 // skipped — one fewer statement per bootstrap on the 2k-herd hot path).
 // Only the schedule row (exam link) + sections leg run here; the hydrated
 // status comes from the pre-probed row the caller already holds.
-func LoadSessionRuntimeByStatus(ctx context.Context, db *sql.DB, scheduleID, status string) (SessionRuntime, error) {
+func LoadSessionRuntimeByStatus(ctx context.Context, db sessionQuerier, scheduleID, status string) (SessionRuntime, error) {
 	var schedule SessionSchedule
 	var satTimingModel sql.NullString
 	if err := db.QueryRowContext(ctx, `
@@ -1057,7 +1057,7 @@ func LoadSessionRuntimeByStatus(ctx context.Context, db *sql.DB, scheduleID, sta
 
 // hydrateSessionRuntimeByRow runs the sections leg + hydrate for a header
 // row the caller already holds (shared with loadSessionRuntime).
-func hydrateSessionRuntimeByRow(ctx context.Context, db *sql.DB, row sessionRuntimeRow, now time.Time) (SessionRuntime, error) {
+func hydrateSessionRuntimeByRow(ctx context.Context, db sessionQuerier, row sessionRuntimeRow, now time.Time) (SessionRuntime, error) {
 	sections, err := loadRuntimeSections(ctx, db, row.id)
 	if err != nil {
 		return SessionRuntime{}, err

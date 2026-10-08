@@ -48,8 +48,8 @@ describe("accessLinkStatusTone", () => {
     expect(accessLinkStatusTone("revoked")).toBe("invalidated");
   });
 
-  it("pulses only the live status", () => {
-    expect(shouldPulseAccessLinkStatus("live")).toBe(true);
+  it("keeps entry status static so it cannot imply a running session", () => {
+    expect(shouldPulseAccessLinkStatus("live")).toBe(false);
     for (const status of ["upcoming", "ended", "paused", "revoked"] as const) {
       expect(shouldPulseAccessLinkStatus(status)).toBe(false);
     }

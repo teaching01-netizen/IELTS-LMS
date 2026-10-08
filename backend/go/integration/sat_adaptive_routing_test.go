@@ -233,15 +233,21 @@ func (f *adaptiveExam) seedStudent(branch adaptiveBranch, correctAnswers int, ex
 
 func (f *adaptiveExam) cleanup() {
 	ctx := context.Background()
+	var terminal bool
+	if err := f.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM attempt_terminalizations WHERE schedule_id = ?)", f.scheduleID).Scan(&terminal); err != nil {
+		f.t.Errorf("check immutable fixture receipt: %v", err)
+		return
+	}
+	if terminal {
+		// Immutable receipts retain their complete fixture until the isolated test schema is dropped.
+		return
+	}
 	quiet := func(query string, args ...any) {
 		if _, err := f.db.ExecContext(ctx, query, args...); err != nil {
 			f.t.Logf("cleanup adaptive exam (%.60q): %v", query, err)
 		}
 	}
-	// Best-effort cleanup: UUID-scoped rows never collide across tests.
-	// attempt_terminalizations rows are immutable by schema trigger, so a
-	// test that completes an assessment leaves its terminal chain behind;
-	// every id in that chain is a fresh UUID, so the residue is isolated.
+	// UUID-scoped nonterminal fixtures can be removed without weakening receipt immutability.
 	quiet(`DELETE FROM attempt_responses_v2 WHERE attempt_id IN (SELECT id FROM student_attempts WHERE schedule_id = ?)`, f.scheduleID)
 	quiet(`DELETE FROM assessment_question_responses WHERE module_attempt_id IN (SELECT id FROM assessment_module_attempts WHERE attempt_id IN (SELECT id FROM student_attempts WHERE schedule_id = ?))`, f.scheduleID)
 	quiet(`DELETE FROM assessment_section_results WHERE assessment_result_id IN (SELECT id FROM assessment_results WHERE attempt_id IN (SELECT id FROM student_attempts WHERE schedule_id = ?))`, f.scheduleID)

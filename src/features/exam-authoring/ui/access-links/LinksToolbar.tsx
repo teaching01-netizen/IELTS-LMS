@@ -48,7 +48,7 @@ export function LinksToolbar({
           placeholder="Search by name, audience, or version"
           widthClassName="sm:max-w-xs"
         />
-        <p role="status" aria-live="polite" className="ml-auto shrink-0 text-[11px] tabular-nums text-slate-500">
+        <p role="status" aria-live="polite" className="ml-auto shrink-0 text-[12px] tabular-nums text-slate-500">
           {resultCount} of {total} links
         </p>
       </div>
@@ -63,7 +63,7 @@ export function LinksToolbar({
               aria-pressed={active}
               onClick={() => onStatusFilterChange(status)}
               className={
-                "sat-press relative flex min-h-11 shrink-0 items-center rounded-full px-3.5 text-[11px] font-semibold capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 " +
+                "sat-press relative flex min-h-11 shrink-0 items-center rounded-full px-3.5 text-[12px] font-semibold capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 " +
                 (active
                   ? "sat-press-fill-accent text-white"
                   : "sat-press-fill border border-black/[0.08] bg-white text-slate-500 hover:text-slate-900")

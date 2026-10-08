@@ -43,9 +43,11 @@ export function SpineLayout({
       {header}
       {banner}
       <div className="sat-spine__body">
-        <div className="sat-spine__queue" aria-label="Question queue">
-          {queue}
-        </div>
+        {queue ? (
+          <div className="sat-spine__queue" aria-label="Question queue">
+            {queue}
+          </div>
+        ) : null}
         {queue && railWidth && onRailWidthChange ? (
           <RailResizer width={railWidth} onWidthChange={onRailWidthChange} />
         ) : null}

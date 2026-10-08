@@ -57,7 +57,7 @@ export function QuestionPresenceBadge({
           <span
             key={entry.connectionId}
             title={PRESENCE_COPY.stackTitle(name, STATE_WORD[entry.state], "this question")}
-            className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-muted text-[9px] font-semibold leading-none text-muted-foreground"
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-muted text-xs font-semibold leading-none text-muted-foreground"
             data-presence-state={entry.state}
           >
             {initialsOf(name)}
@@ -66,7 +66,7 @@ export function QuestionPresenceBadge({
       })}
       {overflow > 0 ? (
         <span
-          className="text-[9px] font-semibold text-muted-foreground"
+          className="text-xs font-semibold text-muted-foreground"
           data-testid="question-presence-overflow"
         >
           {PRESENCE_COPY.overflow(overflow)}

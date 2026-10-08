@@ -15,6 +15,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"github.com/google/uuid"
+	"example.com/ielts-proctoring/internal/proctor"
 )
 
 func seedHandoffWriter(t *testing.T, db *sql.DB, schedule, attempt string) (string, string) {
@@ -62,7 +63,8 @@ func TestSATClientStartHandoffMySQL(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT question_id FROM attempt_responses_v2 WHERE attempt_id = ? LIMIT 1", attempt).Scan(&question); err != nil {
 		t.Fatal(err)
 	}
-	req.Answers = []delivery.ModuleCloseAnswer{{QuestionID: question, ClientVersion: 4}}
+	finalWriteID := uuid.NewString()
+	req.Answers = []delivery.ModuleCloseAnswer{{QuestionID: question, WriteID: finalWriteID, ClientVersion: 4}}
 	_, err = svc.CloseModule(ctx, schedule, attempt, schedule, req, session, token)
 	if e, ok := apperrors.As(err); !ok || e.Details["reason"] != "CLOSE_WRITES_PENDING" {
 		t.Fatalf("missing final write: %v", err)
@@ -81,7 +83,7 @@ func TestSATClientStartHandoffMySQL(t *testing.T) {
 	writeService := attempts.NewService(tx.NewRunner(db), clock.System{}, []byte(submitTestSecret)).SetRowFirst(true)
 	result, err := writeService.SaveResponses(ctx, bearer, attempts.SaveResponsesCommand{
 		AttemptID: attempt, LeaseEpoch: 1, ControlEpoch: 1,
-		Commands: []attempts.ResponseCommand{{QuestionID: question, WriteID: uuid.NewString(), ClientVersion: 4, Response: attempts.ResponsePayload{Answer: "B"}}},
+		Commands: []attempts.ResponseCommand{{QuestionID: question, WriteID: finalWriteID, ClientVersion: 4, Response: attempts.ResponsePayload{Answer: "B"}}},
 	}, v2Resolver{}, v2Locker{})
 	if err != nil || len(result.Acks) != 1 || result.Acks[0].Outcome != "applied" {
 		t.Fatalf("final write after old grace must be admitted: %+v %v", result, err)
@@ -221,9 +223,11 @@ func TestSATLateEvidenceMySQL(t *testing.T) {
 	}
 	var count, alerts int
 	var selected string
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM assessment_late_answer_evidence WHERE attempt_id = ? AND would_change_route = TRUE", attempt).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
+	reviewer := proctor.Actor{ID:"evidence-reviewer", Role:proctor.RoleAdmin, CSRFVerified:true}
+	reviewService := proctor.NewService(tx.NewRunner(db), db, nil, nil, nil)
+	page, err := reviewService.ListLateEvidence(ctx, reviewer, schedule, attempt, "", 100)
+	if err != nil { t.Fatal(err) }
+	for _, row := range page.Rows { if row.WouldChangeRoute { count++ } }
 	if err := db.QueryRowContext(ctx, "SELECT selected_module_id FROM assessment_route_decisions WHERE attempt_id = ?", attempt).Scan(&selected); err != nil {
 		t.Fatal(err)
 	}
@@ -233,6 +237,51 @@ func TestSATLateEvidenceMySQL(t *testing.T) {
 	if count != 3 || alerts != 1 || selected != low {
 		t.Fatalf("flagged=%d alerts=%d selected=%s", count, alerts, selected)
 	}
+	// A later write for the same question is independent immutable evidence.
+	// The historical write's missing origin remains unknown, not restamped.
+	lease, version := int64(1), int64(2)
+	later := delivery.LateEvidenceRequest{ModuleID:base, Answers:[]delivery.LateEvidenceAnswer{{
+		QuestionID:req.Answers[0].QuestionID, WriteID:"later-evidence",
+		Response:json.RawMessage(`{"answer":"A","markedForReview":false,"annotations":[],"eliminatedOptions":[]}`),
+		OriginLeaseEpoch:&lease, ClientVersion:&version,
+	}}}
+	ack, err = svc.RecordLateEvidence(ctx, schedule, attempt, schedule, later, session, token)
+	if err != nil || ack.Recorded != 1 { t.Fatalf("later evidence: %+v %v", ack, err) }
+	later.Answers[0].ClientVersion = new(int64)
+	*later.Answers[0].ClientVersion = 3
+	if _, err = svc.RecordLateEvidence(ctx, schedule, attempt, schedule, later, session, token); err == nil {
+		t.Fatal("changed metadata reused an immutable evidence write id")
+	}
+	first, err := reviewService.ListLateEvidence(ctx, reviewer, schedule, attempt, "", 2)
+	if err != nil || len(first.Rows) != 2 || !first.HasMore { t.Fatalf("first page: %+v %v", first, err) }
+	second, err := reviewService.ListLateEvidence(ctx, reviewer, schedule, attempt, first.NextCursor, 2)
+	if err != nil || len(second.Rows) != 2 || second.HasMore { t.Fatalf("second page: %+v %v", second, err) }
+	if first.Rows[0].OriginLeaseEpoch != nil || first.Rows[0].ClientVersion != nil {
+		t.Fatal("historical evidence provenance was invented")
+	}
+	last := second.Rows[1]
+	if last.WriteID != "later-evidence" || last.ClientVersion == nil || *last.ClientVersion != 2 || !last.ProvenanceConflict {
+		t.Fatalf("later immutable write not retained for review: %+v", last)
+	}
+	if _, err := reviewService.ListLateEvidence(ctx, proctor.Actor{ID:"student", Role:"student"}, schedule, attempt, "", 2); err == nil {
+		t.Fatal("student read protected late evidence")
+	}
+	if _, err := reviewService.ListLateEvidence(ctx, proctor.Actor{ID:uuid.NewString(), Role:proctor.RoleProctor}, schedule, attempt, "", 2); err == nil {
+		t.Fatal("unassigned proctor read late evidence")
+	}
+	review := proctor.LateEvidenceReviewRequest{OperationID:"review-once", EvidenceIDs:[]string{first.Rows[0].ID}, Outcome:"investigated", Note:"Device record inspected; official result unchanged."}
+	for range 2 {
+		if err:=reviewService.ReviewLateEvidence(ctx, reviewer, schedule, attempt, review);err!=nil {t.Fatal(err)}
+	}
+	review.Note="Different intent"
+	if err:=reviewService.ReviewLateEvidence(ctx, reviewer, schedule, attempt, review);err==nil {t.Fatal("review operation id accepted changed intent")}
+	var reviews int
+	if err:=db.QueryRow("SELECT COUNT(*) FROM assessment_late_evidence_reviews WHERE attempt_id = ?",attempt).Scan(&reviews);err!=nil {t.Fatal(err)}
+	if reviews != 1 {t.Fatalf("replayed review duplicated history: %d",reviews)}
+	page, err = reviewService.ListLateEvidence(ctx, reviewer, schedule, attempt, "", 100)
+	if err != nil || page.Rows[0].ReviewOutcome == nil || *page.Rows[0].ReviewOutcome != "investigated" {t.Fatalf("review outcome not visible: %+v %v", page, err)}
+	if err:=db.QueryRow("SELECT selected_module_id FROM assessment_route_decisions WHERE attempt_id = ?",attempt).Scan(&selected);err!=nil {t.Fatal(err)}
+	if selected!=low {t.Fatal("evidence review changed official routing")}
 	// Late evidence does not mutate the canonical answer or route.
 	var canonicalCorrect int
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM attempt_responses_v2 WHERE attempt_id = ? AND JSON_UNQUOTE(JSON_EXTRACT(response, '$.answer')) = 'B'", attempt).Scan(&canonicalCorrect); err != nil {

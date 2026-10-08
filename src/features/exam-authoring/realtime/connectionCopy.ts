@@ -3,7 +3,7 @@ import type { QuestionSaveStatus } from "../hooks/useQuestionAutosave";
 
 /**
  * The ONLY source of connection + divergence status copy. Rendered exclusively
- * in the save area (SaveCluster header/footer and the SpineHeader connection
+ * in the save area (SaveCluster header/footer and the exam workspace header connection
  * slot) — never duplicated into banners, toasts, rail rows, or popovers.
  *
  * Raw transport internals must never reach a user-visible string: no close

@@ -136,4 +136,21 @@ describe("ClassificationFieldset", () => {
     expect(screen.getByText("Choose the SAT domain for this question.")).toBeInTheDocument();
     expect(screen.getByText("Choose the SAT skill for this question.")).toBeInTheDocument();
   });
+
+  it("splits into required classification (card) and optional extras (settings panel)", () => {
+    const { rerender } = render(
+      <ClassificationFieldset fields="core" question={questionWith({})} onChange={vi.fn()} issues={[]} />,
+    );
+    expect(screen.getByLabelText("Domain")).toBeInTheDocument();
+    expect(screen.getByLabelText("Skill")).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Difficulty" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Tags")).not.toBeInTheDocument();
+    expect(screen.getByText(/required before this question can be published/i)).toBeInTheDocument();
+
+    rerender(<ClassificationFieldset fields="extra" question={questionWith({})} onChange={vi.fn()} issues={[]} />);
+    expect(screen.getByLabelText("Tags")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Domain")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Skill")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Difficulty" })).not.toBeInTheDocument();
+  });
 });

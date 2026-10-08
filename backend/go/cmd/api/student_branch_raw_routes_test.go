@@ -82,6 +82,10 @@ func TestStudentRawContentRoutesFenceUnassignedBranch(t *testing.T) {
 			if _, err := db.ExecContext(ctx, `UPDATE student_attempts SET user_id = ? WHERE id = ?`, userID, attemptID); err != nil {
 				t.Fatal(err)
 			}
+			if _, err := db.ExecContext(ctx, `INSERT INTO users (id, email, display_name, role, state) VALUES (?, ?, 'Canary Candidate', 'student', 'active')`, userID, "canary-"+userID+"@example.test"); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = ?`, userID) })
 			registrationID := uuid.NewString()
 			if _, err := db.ExecContext(ctx, `INSERT INTO schedule_registrations
 				(id, schedule_id, student_key, student_id, student_name, student_email, access_state, user_id, wcode)

@@ -57,19 +57,22 @@ func LookupSessionWithCache(ctx context.Context, db Querier, cache *SessionCache
 	}
 	var s Session
 	var revokedAt sql.NullTime
-	var orgID sql.NullString
-	var uaHash sql.NullString
-	_ = uaHash
+	var orgID, source, practiceScope sql.NullString
+	var currentRole, currentState string
 	err := db.QueryRowContext(ctx,
-		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at
+		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at, s.authentication_source, s.practice_schedule_id, u.role, u.state
 		 FROM user_sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.session_token_hash = ?`, tokenHash).Scan(
-		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt)
+		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt, &source, &practiceScope, &currentRole, &currentState)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("auth: lookup session: %w", err)
+	}
+	s.Proof = SessionProof{Source: source.String, PracticeScheduleID: practiceScope.String}
+	if s.Proof.validateStored(s.Role) != nil || currentRole != s.Role || currentState != "active" {
+		return nil, nil
 	}
 	if orgID.Valid {
 		v := orgID.String

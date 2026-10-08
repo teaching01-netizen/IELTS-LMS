@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,6 +159,21 @@ func TestCreateSelectedStudentsRequiresCodeMode(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The audience label is only a group name: listed students and cohort links
+// are valid without one, and an over-long label is still rejected.
+func TestValidateRequestFieldsAudienceLabelIsOptional(t *testing.T) {
+	members := []MemberInput{{StudentCode: "W123456"}}
+	for _, audience := range []AudienceType{AudienceAnyone, AudienceCohort, AudienceSelectedStudents} {
+		if err := validateRequestFields("Mock", audience, nil, ModeStudentCode, AvailabilityAnytime, nil, nil, members); err != nil {
+			t.Fatalf("audience %s without a label should be valid, got %v", audience, err)
+		}
+	}
+	long := strings.Repeat("a", MaxAudienceLabelChars+1)
+	if err := validateRequestFields("Mock", AudienceAnyone, &long, ModeStudentCode, AvailabilityAnytime, nil, nil, nil); codeOf(err) != apperrors.CodeBadRequest {
+		t.Fatalf("expected BAD_REQUEST for an over-long label, got %v", err)
 	}
 }
 

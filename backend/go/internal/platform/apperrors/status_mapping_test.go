@@ -50,6 +50,7 @@ func TestStatusForMapsEveryCode(t *testing.T) {
 		{CodeUnsupportedProvider, http.StatusUnprocessableEntity},
 		{CodeInvalidAssessment, http.StatusUnprocessableEntity},
 		{CodeAssessmentReleaseInvariant, http.StatusInternalServerError},
+		{CodeProtocolUpgradeRequired, http.StatusConflict},
 		{CodeStudentWSRetired, http.StatusGone},
 	}
 	for _, tc := range cases {

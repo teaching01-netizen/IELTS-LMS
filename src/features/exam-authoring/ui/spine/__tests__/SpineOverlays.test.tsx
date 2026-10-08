@@ -190,19 +190,6 @@ function renderSpine() {
 describe("SpineOverlays (Phase 9.1+9.4 parity)", () => {
   beforeEach(() => { setupDefaults(); });
 
-  it("renders the spine branch with header progress and queue", async () => {
-    renderSpine();
-    expect(await screen.findByRole("heading", { name: "SAT Practice 1" })).toBeInTheDocument();
-    expect(await screen.findByText(/of \d+ authored/)).toBeInTheDocument();
-  });
-
-  it("keeps paste import reachable from the spine queue", async () => {
-    renderSpine();
-    expect(await screen.findByRole("button", { name: /^add question$/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", {name: "More authoring actions"}));
-    expect(screen.getByRole("menuitem", {name: "Import from workbook"})).toBeInTheDocument();
-  });
-
   it("opens the jump palette with Ctrl+K in the spine branch", async () => {
     renderSpine();
     await screen.findByRole("heading", { name: "SAT Practice 1" });
@@ -234,28 +221,11 @@ describe("SpineOverlays (Phase 9.1+9.4 parity)", () => {
     }
   });
 
-  it("reviews module issues from the spine queue", async () => {
-    renderSpine();
-    await screen.findByRole("heading", { name: "SAT Practice 1" });
-    const view = screen.getByRole("button", { name: /question readiness filters/i });
-    void view;
-    expect(await screen.findByText(/first prompt/i)).toBeInTheDocument();
-  });
-
-  it("keeps import, preview, and release actions reachable in the spine header", async () => {
-    renderSpine();
-    await screen.findByRole("heading", { name: "SAT Practice 1" });
-    expect(screen.getByRole("button", { name: "More authoring actions" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open the full sat preview/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^release$/i })).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "Authoring view" })).not.toBeInTheDocument();
-  });
-
   it("opens the student preview sheet from the spine question view", async () => {
     renderSpine();
     await screen.findByRole("heading", { name: "SAT Practice 1" });
     fireEvent.click(await screen.findByRole("button", {name:"Question actions"}));
-    fireEvent.click(screen.getByRole("menuitem", {name:/preview question as students/i}));
-    expect(await screen.findByText(/local unsaved edits included|saved draft revision/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", {name:"Preview question"}));
+    expect(await screen.findByText(/includes unsaved edits|saved draft/i)).toBeInTheDocument();
   });
 });

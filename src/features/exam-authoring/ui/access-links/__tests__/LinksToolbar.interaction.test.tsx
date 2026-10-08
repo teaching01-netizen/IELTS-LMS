@@ -26,7 +26,7 @@ function renderToolbar(statusFilter: "all" | "live" = "all") {
 describe("LinksToolbar interaction contract", () => {
   it("AT-18: the selection thumb marks the active pill only", () => {
     renderToolbar("live");
-    const live = screen.getByRole("button", { name: /Live 1/ });
+    const live = screen.getByRole("button", { name: /Check-in open 1/ });
     const all = screen.getByRole("button", { name: /All 2/ });
 
     expect(live).toHaveAttribute("aria-pressed", "true");
@@ -37,7 +37,7 @@ describe("LinksToolbar interaction contract", () => {
 
   it("AT-18: every pill presses through the shared vocabulary", () => {
     renderToolbar("live");
-    const live = screen.getByRole("button", { name: /Live 1/ });
+    const live = screen.getByRole("button", { name: /Check-in open 1/ });
     const all = screen.getByRole("button", { name: /All 2/ });
     // The selected pill presses with the accent fill; the quiet ones with the
     // neutral fill. Both keep the 44px hit box while doing so.

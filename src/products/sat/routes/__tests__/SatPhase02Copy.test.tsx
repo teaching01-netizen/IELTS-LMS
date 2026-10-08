@@ -31,13 +31,13 @@ vi.mock('../../../../features/exam-authoring/api/examAuthoringFacade', () => ({
 }));
 
 const useSummariesMock = vi.hoisted(() => vi.fn());
-const useSaveScheduleMock = vi.hoisted(() => vi.fn());
+const useAccessOverviewMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/proctor/api/proctorQueries', () => ({
   proctorKeys: { sessions: (provider?: string) => ['proctor', 'sessions', provider ?? 'all'] },
   useProctorSessionSummaries: useSummariesMock,
 }));
-vi.mock('../../../../features/scheduling/api/scheduleQueries', () => ({
-  useSaveScheduleMutation: useSaveScheduleMock,
+vi.mock('../../../../features/exam-authoring/api/assessmentAccessLinkQueries', () => ({
+  useAccessDistributionOverview: useAccessOverviewMock,
 }));
 vi.mock('../../../../features/proctor/application/proctorFacade', () => ({
   proctorFacade: { isPreviewRuntimeCohortName: () => false },
@@ -45,7 +45,8 @@ vi.mock('../../../../features/proctor/application/proctorFacade', () => ({
 
 const controllerMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/proctor/hooks/useProctorRouteController', () => ({
-  useProctorRouteController: controllerMock,
+  // The real controller always reports scheduleMetrics; the fixture lists only what it exercises.
+  useProctorRouteController: (...args: unknown[]) => ({ scheduleMetrics: {}, ...controllerMock(...args) }),
 }));
 vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => ({
   examDeliveryService: {
@@ -279,7 +280,7 @@ describe('SAT Phase 02 copy contracts', () => {
     invalidateExamListMock.mockResolvedValue(undefined);
     createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
     useSummariesMock.mockReturnValue({ data: [sessionSummary], isLoading: false, error: null, refetch: vi.fn() });
-    useSaveScheduleMock.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    useAccessOverviewMock.mockReturnValue({ data: undefined });
     controllerMock.mockReturnValue({
       schedules: [roomSchedule],
       runtimeSnapshots: [roomRuntime],
@@ -297,7 +298,7 @@ describe('SAT Phase 02 copy contracts', () => {
   });
 
   it('placeholders name their filter scope', () => {
-    // Search scope follows the hierarchy: exams, then access groups, then students.
+    // Search scope follows the hierarchy: exams, then sessions, then students.
     const { unmount: unmountResults } = render(
       <MemoryRouter>
         <SatResultsRoute />
@@ -312,7 +313,7 @@ describe('SAT Phase 02 copy contracts', () => {
         <SatResultsRoute />
       </MemoryRouter>,
     );
-    expect(screen.getByPlaceholderText('Search Student Access or cohort')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search sessions or cohort')).toBeInTheDocument();
     cleanup();
 
     render(<MemoryRouter initialEntries={['/sat/results?exam=sat-1&access=schedule-1']}><SatResultsRoute /></MemoryRouter>);

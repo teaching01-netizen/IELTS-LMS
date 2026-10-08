@@ -62,7 +62,7 @@ export function ModuleScopePicker({
           className="group flex min-h-11 max-w-full flex-1 items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45"
         >
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
+            <div className="truncate text-xs font-semibold uppercase tracking-[0.06em] text-slate-400">
               {selected.section.title}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
@@ -77,7 +77,7 @@ export function ModuleScopePicker({
             </div>
           </div>
           <div className="w-[54px] shrink-0 text-right">
-            <div className="text-[11px] font-semibold tabular-nums text-slate-500">
+            <div className="text-xs font-semibold tabular-nums text-slate-500">
               {authored}/{target}
             </div>
             <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-muted" aria-hidden="true">
@@ -108,10 +108,10 @@ export function ModuleScopePicker({
             <div key={section.id}>
               {sectionIndex ? <DropdownMenuSeparator className="my-2" /> : null}
               <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
-                <DropdownMenuLabel className="p-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
+                <DropdownMenuLabel className="p-0 text-xs font-semibold uppercase tracking-[0.06em] text-slate-400">
                   {section.title}
                 </DropdownMenuLabel>
-                <span className="text-[10px] tabular-nums text-slate-400">
+                <span className="text-xs tabular-nums text-slate-400">
                   {Math.round(section.durationSeconds / 60)} min
                 </span>
               </div>
@@ -145,7 +145,7 @@ export function ModuleScopePicker({
                           <span className="truncate text-[12px] font-semibold tracking-[-0.008em]">
                             {module.title}
                           </span>
-                          <span className="shrink-0 text-[10px] tabular-nums text-slate-400">
+                          <span className="shrink-0 text-xs tabular-nums text-slate-400">
                             {module.questions.length}/{module.targetQuestionCount}
                           </span>
                         </div>
@@ -160,15 +160,15 @@ export function ModuleScopePicker({
                             />
                           </div>
                           {errors ? (
-                            <span className="text-[10px] font-semibold text-destructive">
+                            <span className="text-xs font-semibold text-destructive">
                               {errors} error{errors === 1 ? "" : "s"}
                             </span>
                           ) : incomplete ? (
-                            <span className="text-[10px] font-medium text-slate-400">
+                            <span className="text-xs font-medium text-slate-400">
                               {incomplete} incomplete
                             </span>
                           ) : module.questions.length === module.targetQuestionCount ? (
-                            <span className="text-[10px] font-semibold text-green-800">
+                            <span className="text-xs font-semibold text-green-800">
                               Complete
                             </span>
                           ) : null}
@@ -281,7 +281,7 @@ function StaticModuleScopePicker({
         className="group flex min-h-11 max-w-full items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45"
       >
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
+          <div className="truncate text-xs font-semibold uppercase tracking-[0.06em] text-slate-400">
             {selected.section.title}
           </div>
           <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
@@ -296,7 +296,7 @@ function StaticModuleScopePicker({
           </div>
         </div>
         <div className="w-[54px] shrink-0 text-right">
-          <div className="text-[11px] font-semibold tabular-nums text-slate-500">
+          <div className="text-xs font-semibold tabular-nums text-slate-500">
             {authored}/{target}
           </div>
           <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-muted" aria-hidden="true">
@@ -322,10 +322,10 @@ function StaticModuleScopePicker({
             <div key={section.id}>
               {sectionIndex ? <div className="my-2 h-px bg-border" role="separator" /> : null}
               <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
+                <span className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-400">
                   {section.title}
                 </span>
-                <span className="text-[10px] tabular-nums text-slate-400">
+                <span className="text-xs tabular-nums text-slate-400">
                   {Math.round(section.durationSeconds / 60)} min
                 </span>
               </div>
@@ -366,7 +366,7 @@ function StaticModuleScopePicker({
                           <span className="truncate text-[12px] font-semibold tracking-[-0.008em]">
                             {module.title}
                           </span>
-                          <span className="shrink-0 text-[10px] tabular-nums text-slate-400">
+                          <span className="shrink-0 text-xs tabular-nums text-slate-400">
                             {module.questions.length}/{module.targetQuestionCount}
                           </span>
                         </div>
@@ -378,15 +378,15 @@ function StaticModuleScopePicker({
                             />
                           </div>
                           {errors ? (
-                            <span className="text-[10px] font-semibold text-destructive">
+                            <span className="text-xs font-semibold text-destructive">
                               {errors} error{errors === 1 ? "" : "s"}
                             </span>
                           ) : incomplete ? (
-                            <span className="text-[10px] font-medium text-slate-400">
+                            <span className="text-xs font-medium text-slate-400">
                               {incomplete} incomplete
                             </span>
                           ) : module.questions.length === module.targetQuestionCount ? (
-                            <span className="text-[10px] font-semibold text-green-800">
+                            <span className="text-xs font-semibold text-green-800">
                               Complete
                             </span>
                           ) : null}

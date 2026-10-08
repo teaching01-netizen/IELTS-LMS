@@ -513,7 +513,7 @@ export function useSatExamController({
             moduleId,
             moduleAttemptId,
             closeId,
-            answers: persistenceRef.current.closeManifest?.(moduleAttemptId) ?? [],
+            answers: await persistenceRef.current.closeManifest?.(moduleAttemptId) ?? [],
           });
           if (!live()) return;
           const base = dataRef.current;

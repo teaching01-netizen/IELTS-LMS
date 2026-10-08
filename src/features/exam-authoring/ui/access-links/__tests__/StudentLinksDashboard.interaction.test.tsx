@@ -143,7 +143,7 @@ function DashboardHarness(props: { onRefresh: () => Promise<unknown> }) {
       isLoading={false}
       error={null}
       onRefresh={props.onRefresh}
-      onBackToRelease={vi.fn()}
+      onBackToRelease={vi.fn()} shell={shellNav}
     />
   );
 }
@@ -171,6 +171,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const shellNav = { lifecycle: { label: 'Published · Version 1', detail: null, tone: 'published' as const }, showResponses: false, onSelectTab: vi.fn(), onBack: vi.fn(), onPreview: vi.fn() };
+
 describe("StudentLinksDashboard interaction contract", () => {
   it("AT-07/08/09: a lifecycle write is acknowledged on its own row and settles in place", async () => {
     let resolveLifecycle: ((value: unknown) => void) | undefined;
@@ -180,7 +182,7 @@ describe("StudentLinksDashboard interaction contract", () => {
     render(<DashboardHarness onRefresh={vi.fn()} />);
 
     fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Pause Link" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pause check-in" }));
     await waitFor(() =>
       expect(mocks.lifecycle).toHaveBeenCalledWith({
         linkId: "link-current",
@@ -220,7 +222,7 @@ describe("StudentLinksDashboard interaction contract", () => {
     render(<DashboardHarness onRefresh={onRefresh} />);
 
     fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Pause Link" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pause check-in" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("This link changed elsewhere. Refresh and retry.");
@@ -269,7 +271,7 @@ describe("StudentLinksDashboard interaction contract", () => {
       expect(screen.getByRole("button", { name: "Open Saturday Class" })).toHaveAttribute("aria-current", "true"),
     );
 
-    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Open Saturday Class" }), { key: "ArrowDown" });
 
     const mondayRow = screen.getByRole("button", { name: "Open Monday Class" });
     expect(mondayRow).toHaveAttribute("aria-current", "true");

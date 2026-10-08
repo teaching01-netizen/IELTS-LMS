@@ -143,11 +143,14 @@ export function fetchProctorSessionDetail(
 export function useProctorSessionSummaries(
   refetchInterval: number,
   providerKey?: 'sat' | 'ielts' | 'act',
+  /** Pages that only sometimes need session state (Delivery, for roles that can run sessions). */
+  enabled = true,
 ) {
   return useQuery({
     queryKey: proctorKeys.sessions(providerKey),
     queryFn: () => fetchProctorSessionSummaries(providerKey),
     ...liveQueryPolicy,
     refetchInterval,
+    enabled,
   });
 }

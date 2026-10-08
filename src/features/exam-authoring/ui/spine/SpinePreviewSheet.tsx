@@ -46,11 +46,11 @@ export function SpinePreviewSheet({
         className="flex w-[min(94vw,560px)] max-w-[560px] flex-col gap-0 p-0"
       >
         <SheetHeader className="border-b border-border px-4 py-3 text-left">
-          <SheetTitle className="text-xs font-semibold">Student preview</SheetTitle>
-          <SheetDescription className="text-[11px]">
+          <SheetTitle className="text-xs font-semibold">Question preview</SheetTitle>
+          <SheetDescription className="text-xs">
             {saveStatus === "saved"
-              ? "Saved draft revision · matches the full SAT preview"
-              : "Local unsaved edits included · save to update the full SAT preview"}
+              ? "This question as students see it · saved draft, same as Preview exam"
+              : "This question as students see it · includes unsaved edits; save to update Preview exam"}
           </SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">

@@ -65,6 +65,17 @@ func buildSessionResponse(ctx context.Context, app *App, userID, role, csrfToken
 		Scan(&email, &displayName, &state); err != nil {
 		return nil, err
 	}
+	if role == auth.RoleStudent && strings.HasSuffix(email, "@practice.invalid") {
+		var contact sql.NullString
+		var distinctContacts int
+		if err := app.DB.QueryRowContext(ctx, "SELECT MIN(candidate_email), COUNT(DISTINCT candidate_email) FROM student_attempts WHERE user_id = ?", userID).Scan(&contact, &distinctContacts); err != nil {
+			return nil, err
+		}
+		if !contact.Valid || distinctContacts != 1 {
+			return nil, apperrors.New(apperrors.CodeConflict, "Practice identity has no unambiguous owned sitting.")
+		}
+		email = contact.String
+	}
 	return map[string]any{
 		"user": map[string]any{
 			"id":          userID,
@@ -126,7 +137,7 @@ func loginHandler(app *App) http.HandlerFunc {
 			}
 			sum := sha256.Sum256([]byte(r.UserAgent()))
 			uaHex := hex.EncodeToString(sum[:])
-			_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, auth.RoleAdmin, &uaHex, nil, now)
+			_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, auth.RoleAdmin, auth.SessionProof{Source: auth.SessionSourceAccount}, &uaHex, nil, now)
 			if err != nil {
 				httpx.WriteError(w, r, err)
 				return
@@ -194,7 +205,7 @@ func loginHandler(app *App) http.HandlerFunc {
 		}
 		sum := sha256.Sum256([]byte(r.UserAgent()))
 		uaHex := hex.EncodeToString(sum[:])
-		_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, role, &uaHex, nil, now)
+		_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, role, auth.SessionProof{Source: auth.SessionSourceAccount}, &uaHex, nil, now)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -483,7 +494,7 @@ func passwordResetCompleteHandler(app *App) http.HandlerFunc {
 		}
 		sum := sha256.Sum256([]byte(r.UserAgent()))
 		uaHex := hex.EncodeToString(sum[:])
-		_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, role, &uaHex, nil, now)
+		_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, role, auth.SessionProof{Source: auth.SessionSourceAccount}, &uaHex, nil, now)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -583,7 +594,7 @@ func activateHandler(app *App) http.HandlerFunc {
 		}
 		sum := sha256.Sum256([]byte(r.UserAgent()))
 		uaHex := hex.EncodeToString(sum[:])
-		_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, role, &uaHex, nil, now)
+		_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, role, auth.SessionProof{Source: auth.SessionSourceAccount}, &uaHex, nil, now)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

@@ -1,7 +1,26 @@
-# Student Access (access-links)
+# Sessions (access-links)
 
-Staff UI for sharing a published SAT exam with students. Route: `SatAccessRoute` →
-`StudentLinksDashboard`. Also reachable from the release page via `?view=access`.
+Staff UI for preparing, sharing and running sittings of a published SAT exam. A
+**session** is the object staff work with: it owns the audience, the student link,
+the check-in window, the waiting room and the results. Storage is unchanged — a
+session is one `assessment_access_links` row plus its backing schedule, created
+atomically. Route: `SatAccessRoute` (kept at `/sat/exams/:id/access`; the tab is
+labelled **Sessions**) → `StudentLinksDashboard`. The global Sessions page
+(`SatSessionsRoute` → `SatNewSessionFlow`) opens the same `AccessLinkEditorSheet`,
+so both entry points create the same thing.
+
+## Vocabulary
+
+- **Who can join** is a choice of two: *Anyone with the link* or *Listed students
+  only*. Only `selected_students` restricts admission (`ResolveEntryTx`).
+- **Class or group** is an optional label (`audienceLabel`) and never restricts
+  anyone. The stored `cohort` audience is the legacy spelling of "anyone, with a
+  label": it reads back as *Anyone with the link* (`accessLinkAudienceChoice`), and
+  a label saves as `cohort` only so older readers keep working.
+- **Check-in** (link status: open / opens later / paused / closed) is separate from
+  the **exam run state** (not started / running / paused / finished).
+  `sessionStatusLine` renders both: "Check-in open · Exam not started". Opening
+  check-in never starts the exam; pausing it never stops attempts in progress.
 
 ## Invariants (do not change without a backend migration)
 

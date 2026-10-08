@@ -68,7 +68,7 @@ describe('SatRunSheet', () => {
     expect(screen.getByText('10:14–11:24')).toBeInTheDocument();
     // A projected run says so out loud.
     expect(screen.getByText(/Projected from the scheduled start at 09:00/)).toBeInTheDocument();
-    expect(screen.queryByText('Live')).not.toBeInTheDocument();
+    expect(screen.queryByText('Running')).not.toBeInTheDocument();
     expect(screen.getAllByText('Module 2 · Adaptive')).toHaveLength(2);
     expect(screen.getAllByText('One branch per student')).toHaveLength(2);
     expect(screen.queryByText('Scheduled start')).not.toBeInTheDocument();
@@ -234,7 +234,7 @@ describe('SatRunSheet', () => {
 
     // Section + Module 1 are live; both Module 2 alternatives, the break, and
     // every Math row (section, Module 1, both Module 2 alternatives) are ahead.
-    expect(screen.getAllByText('Live')).toHaveLength(2);
+    expect(screen.getAllByText('Running')).toHaveLength(2);
     expect(screen.getAllByText('Upcoming')).toHaveLength(7);
     expect(screen.queryByText('Planned')).not.toBeInTheDocument();
     expect(screen.getByText(/Anchored to the proctor's start at 09:00/)).toBeInTheDocument();

@@ -99,6 +99,8 @@ var expectedAnnotated = []string{
 	"POST /sessions/{scheduleID}/attempts/{attemptID}/extend",
 	"POST /sessions/{scheduleID}/attempts/{attemptID}/rearm",
 	"POST /sessions/{scheduleID}/attempts/{attemptID}/terminate",
+	"GET /sessions/{scheduleID}/attempts/{attemptID}/late-evidence",
+	"POST /sessions/{scheduleID}/attempts/{attemptID}/late-evidence/review",
 	"GET /sessions/{scheduleID}/device-transfers",
 	"POST /sessions/{scheduleID}/device-transfers/{requestID}/decision",
 	"POST /alerts/{alertID}/ack", "GET /live-mode",

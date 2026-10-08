@@ -7,10 +7,11 @@ package main
 // contention on the dashboard. Labels stay low-cardinality (I5): kind is
 // deadlock | lockwait | conntransient, never raw SQL text.
 import (
-	"strings"
+	"errors"
 
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"github.com/go-sql-driver/mysql"
 )
 
 // installTxRetryHook reports each absorbed transient. Returns a restore
@@ -23,15 +24,16 @@ func installTxRetryHook() func() {
 
 // retryKind classifies the absorbed transient for the dashboard slice.
 func retryKind(err error) string {
-	if err == nil {
+	var dbErr *mysql.MySQLError
+	if !errors.As(err, &dbErr) {
 		return "unknown"
 	}
-	s := strings.ToLower(err.Error())
-	if strings.Contains(s, "deadlock") {
+	switch dbErr.Number {
+	case 1213:
 		return "deadlock"
-	}
-	if strings.Contains(s, "lock wait timeout") || strings.Contains(s, "try restarting transaction") {
+	case 1205:
 		return "lockwait"
+	default:
+		return "unknown"
 	}
-	return "conntransient"
 }

@@ -194,14 +194,25 @@ func admitInTx(ctx context.Context, q tx.Tx, cmd AdmitCommand, session string, i
 	}
 	enforced := row.enforced()
 	claimable := !enforced && cmd.SingleWriterEnabled && row.ProviderKey == string(ProviderSAT)
-	if enforced || claimable {
-		if row.UserID.Valid && row.UserID.String != "" && row.UserID.String != cmd.UserID {
-			return Admission{}, apperrors.New(apperrors.CodeForbidden, "This student ID is checked in with a different account.")
+	// Identity ownership is independent of the single-writer rollout. Public
+	// codes and profile fields cannot claim a historical, unbound attempt.
+	if strings.TrimSpace(cmd.UserID) == "" {
+		return Admission{}, apperrors.New(apperrors.CodeUnauthorized, "An authenticated student principal is required.")
+	}
+	if row.UserID.Valid && row.UserID.String != "" && row.UserID.String != cmd.UserID {
+		return Admission{}, apperrors.New(apperrors.CodeForbidden, "This student ID is checked in with a different account.")
+	}
+	if !row.UserID.Valid || row.UserID.String == "" {
+		var registrationUser, registrationActor sql.NullString
+		err := q.QueryRowContext(ctx, `SELECT sr.user_id, sr.actor_id FROM schedule_registrations sr JOIN student_attempts sa ON sa.registration_id = sr.id AND sa.schedule_id = sr.schedule_id WHERE sa.id = ? FOR SHARE`, row.ID).Scan(&registrationUser, &registrationActor)
+		if err != nil && err != sql.ErrNoRows {
+			return Admission{}, err
 		}
-		if !row.UserID.Valid || row.UserID.String == "" {
-			if _, err := q.ExecContext(ctx, `UPDATE student_attempts SET user_id = ? WHERE id = ? AND user_id IS NULL`, cmd.UserID, row.ID); err != nil {
-				return Admission{}, err
-			}
+		if err == sql.ErrNoRows || !((registrationUser.Valid && registrationUser.String == cmd.UserID) || (registrationActor.Valid && registrationActor.String == cmd.UserID)) {
+			return Admission{}, apperrors.New(apperrors.CodeForbidden, "This sitting has no verified ownership association.")
+		}
+		if _, err := q.ExecContext(ctx, `UPDATE student_attempts SET user_id = ? WHERE id = ? AND (user_id IS NULL OR user_id = '')`, cmd.UserID, row.ID); err != nil {
+			return Admission{}, err
 		}
 	}
 	out := Admission{AttemptID: row.ID, ClientSessionID: session, LeaseEpoch: row.LeaseEpoch, SingleWriter: enforced || claimable}

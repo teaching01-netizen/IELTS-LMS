@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/go-sql-driver/mysql"
 )
 
-func errDeadlockForTest() error { return errors.New("Deadlock found when trying to get lock") }
+func errDeadlockForTest() error { return &mysql.MySQLError{Number: 1213, Message: "Deadlock found when trying to get lock"} }
 
 func errBusinessForTest() error { return errors.New("validation: bad input") }
 

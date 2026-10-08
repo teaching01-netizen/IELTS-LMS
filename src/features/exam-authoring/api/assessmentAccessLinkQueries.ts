@@ -3,6 +3,7 @@ import { assessmentAccessLinksApi } from "./assessmentAccessLinksApi";
 import { accessLinkKeys } from "./accessLinkKeys";
 import { authoringEffects } from "./authoringQueryEffects";
 import type {
+  AccessDistributionOverview,
   CreateAssessmentAccessLinkRequest,
   DeleteAssessmentAccessLinkRequest,
   DuplicateAssessmentAccessLinkRequest,
@@ -58,6 +59,10 @@ export function useCreateAccessLink(examId: string) {
     mutationFn: (request: CreateAssessmentAccessLinkRequest) => assessmentAccessLinksApi.create(examId, request),
     onSuccess: (link) => {
       queryClient.setQueryData(accessLinkKeys.link(link.id), link);
+      queryClient.setQueryData<AccessDistributionOverview>(accessLinkKeys.overview(examId), (overview) => overview ? {
+        ...overview,
+        links: [...overview.links.filter((existing) => existing.id !== link.id), link],
+      } : overview);
       authoringEffects.accessChanged(queryClient, examId);
     },
   });

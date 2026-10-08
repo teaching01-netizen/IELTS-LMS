@@ -96,7 +96,7 @@ func codeOf(err error) apperrors.Code {
 
 func liveStubs() (stubResolver, stubLocker) {
 	qr := stubResolver{owner: QuestionOwner{ModuleID: "m-listening", SectionKey: "*", ModuleState: "active"}}
-	rl := stubLocker{gate: RuntimeGate{Status: "live", ActiveSectionKey: "*", SectionLive: true, SectionStarted: true, Now: time.Now().UTC()}}
+	rl := stubLocker{gate: RuntimeGate{Status: "live", TimingModel: "legacy_section_v1", ActiveSectionKey: "*", SectionLive: true, SectionStarted: true, Now: time.Now().UTC()}}
 	return qr, rl
 }
 

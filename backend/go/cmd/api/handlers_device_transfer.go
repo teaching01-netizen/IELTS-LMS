@@ -57,8 +57,12 @@ func transferBlockedError() *apperrors.Error {
 // transaction that authorized it.
 func attemptCredentialIssuer(app *App, userID, scheduleID, attemptID, clientSessionID string) attempts.CredentialIssuer {
 	return func(ctx context.Context, q tx.Tx, lease uint64) (string, time.Time, error) {
+		now, err := authorizeStudentCredentialTx(ctx, q, userID, scheduleID, attemptID)
+		if err != nil {
+			return "", time.Time{}, err
+		}
 		l := lease
-		return auth.IssueAttemptTokenTx(ctx, q, app.Config, userID, scheduleID, attemptID, clientSessionID, nil, &l, time.Now().UTC())
+		return auth.IssueAttemptTokenTx(ctx, q, app.Config, userID, scheduleID, attemptID, clientSessionID, nil, &l, now)
 	}
 }
 

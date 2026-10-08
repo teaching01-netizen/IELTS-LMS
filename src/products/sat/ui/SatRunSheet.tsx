@@ -15,7 +15,7 @@ import {
 
 const STATUS_LABEL: Record<SatRunSheetRowStatus, string> = {
   done: 'Done',
-  live: 'Live',
+  live: 'Running',
   paused: 'Paused',
   upcoming: 'Upcoming',
   projected: 'Planned',

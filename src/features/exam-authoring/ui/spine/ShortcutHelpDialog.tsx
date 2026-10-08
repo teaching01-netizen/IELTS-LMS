@@ -13,7 +13,7 @@ const ROWS: Array<{ keys: string; action: string; scope: string }> = [
   {keys:'Ctrl/⌘ D',action:'Duplicate question',scope:'Outside controls'},
   {keys:'Ctrl/⌘ K',action:'Open command palette',scope:'Outside controls'},
   {keys:'Alt ↑ / ↓',action:'Previous / next question',scope:'Outside controls; ↑ / ↓ or j / k also work'},
-  {keys:'Space',action:'Toggle student preview',scope:'Outside controls'},
+  {keys:'Space',action:'Toggle question preview',scope:'Outside controls'},
   {keys:'Esc',action:'Close overlay / leave editor',scope:'Inside editors too'},
   {keys:'Ctrl/⌘ /',action:'Keyboard shortcuts',scope:'Anywhere except overlays; ? also works outside text inputs'},
   {keys:'Ctrl/⌘ Z · Shift Z',action:'Undo · Redo',scope:'Inside rich-text editors'},
@@ -48,7 +48,7 @@ export function ShortcutHelpDialog({ open, onClose }: ShortcutHelpDialogProps) {
               </dt>
               <dd className="min-w-0 flex-1 text-right">
                 <span className="block text-xs font-medium text-foreground">{row.action}</span>
-                <span className="block text-[11px] text-muted-foreground">{row.scope}</span>
+                <span className="block text-xs text-muted-foreground">{row.scope}</span>
               </dd>
             </div>
           ))}

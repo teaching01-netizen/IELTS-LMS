@@ -40,6 +40,8 @@ func readProctorCmd(r *http.Request) (proctor.AttemptCommand, error) {
 		expectedSectionKey = body.ExpectedActiveSectionKey
 	}
 	return proctor.AttemptCommand{
+		OperationID:             body.OperationID,
+		ModuleID:                body.ModuleID,
 		Message:                 body.Message,
 		Reason:                  body.Reason,
 		ExpectedRuntimeRevision: body.ExpectedRuntimeRevision,
@@ -50,6 +52,8 @@ func readProctorCmd(r *http.Request) (proctor.AttemptCommand, error) {
 // proctorCmdBody is the wire envelope for per-attempt proctor commands.
 // All fields are optional; unknown fields are rejected by DecodeLimited.
 type proctorCmdBody struct {
+	OperationID              string  `json:"operationId"`
+	ModuleID                 string  `json:"moduleId"`
 	// ActorID is accepted for wire compatibility with the pre-migration
 	// frontend. Authorization always comes from the authenticated session;
 	// this client value is intentionally ignored.
@@ -633,6 +637,7 @@ func proctorExtendSectionHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var body struct {
+			OperationID              string  `json:"operationId"`
 			// ActorID is a legacy client field; the session remains authoritative.
 			ActorID                  *string `json:"actorId"`
 			Minutes                  int64   `json:"minutes"`
@@ -650,6 +655,7 @@ func proctorExtendSectionHandler(app *App) http.HandlerFunc {
 			expectedSectionKey = body.ExpectedActiveSectionKey
 		}
 		cmd := proctor.ExtendSectionCommand{
+			OperationID:             body.OperationID,
 			Minutes:                 body.Minutes,
 			Reason:                  body.Reason,
 			ExpectedRuntimeRevision: body.ExpectedRuntimeRevision,
@@ -671,6 +677,7 @@ func proctorCompleteExamHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var body struct {
+			OperationID string  `json:"operationId"`
 			// ActorID is a legacy client field; the session remains authoritative.
 			ActorID *string `json:"actorId"`
 			Reason  *string `json:"reason"`
@@ -679,7 +686,7 @@ func proctorCompleteExamHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if err := app.Proctor.CompleteExam(r.Context(), *actor, chi.URLParam(r, "scheduleID"), proctor.CompleteExamCommand{Reason: body.Reason}); err != nil {
+		if err := app.Proctor.CompleteExam(r.Context(), *actor, chi.URLParam(r, "scheduleID"), proctor.CompleteExamCommand{OperationID: body.OperationID, Reason: body.Reason}); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
@@ -771,6 +778,8 @@ func proctorExtendAttemptHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var body struct {
+			OperationID             string  `json:"operationId"`
+			ModuleID                string  `json:"moduleId"`
 			// ActorID is a legacy client field; the session remains authoritative.
 			ActorID                 *string `json:"actorId"`
 			Minutes                 int64   `json:"minutes"`
@@ -784,6 +793,8 @@ func proctorExtendAttemptHandler(app *App) http.HandlerFunc {
 			return
 		}
 		cmd := proctor.AttemptCommand{
+			OperationID:             body.OperationID,
+			ModuleID:                body.ModuleID,
 			Message:                 body.Message,
 			Reason:                  body.Reason,
 			ExpectedRuntimeRevision: body.ExpectedRuntimeRevision,
@@ -812,6 +823,7 @@ func proctorReArmStageHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var body struct {
+			OperationID string  `json:"operationId"`
 			// ActorID is a legacy client field; the session remains authoritative.
 			ActorID  *string `json:"actorId"`
 			ModuleID string  `json:"moduleId"`
@@ -823,7 +835,7 @@ func proctorReArmStageHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		cmd := proctor.AttemptCommand{Message: body.Message, Reason: body.Reason}
+		cmd := proctor.AttemptCommand{OperationID: body.OperationID, Message: body.Message, Reason: body.Reason}
 		if err := app.Proctor.ReArmAttemptStage(r.Context(), *actor, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "attemptID"), body.ModuleID, body.BreakID, cmd); err != nil {
 			httpx.WriteError(w, r, err)
 			return

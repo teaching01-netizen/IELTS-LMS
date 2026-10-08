@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StudentSession } from '../../../../types';
 import type { ExamSessionRuntime } from '../../../../types/domain';
-import { SatRoomStudentRow, StudentDetail } from '../SatSessionRoomStudents';
+import { SatRoomStudentRow, StudentDetail, studentAttentionReason } from '../SatSessionRoomStudents';
+import { SatSessionRoomRoster, sortRoster } from '../SatSessionRoomRoster';
 
 const NO_OPTIONAL_RUNTIME = {
   nextSectionStartAt: null,
@@ -163,6 +164,7 @@ describe('session room clocks', () => {
           runtime={liveRuntime({ currentSectionDeadlineAt: deadline })}
           roomClock={roomClock}
           selected
+          attentionReason={null}
           onSelect={vi.fn()}
         />
         <StudentDetail
@@ -244,5 +246,59 @@ describe('StudentDetail inspector priority', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Student actions' }));
     expect(screen.getByRole('menuitem', { name: 'Add 5 minutes…' })).toBeDisabled();
     expect(screen.getByRole('menuitem', { name: 'End attempt…' })).toBeDisabled();
+  });
+});
+
+describe('roster attention and ordering', () => {
+  const flagged: StudentSession = {
+    ...student,
+    id: 'attempt-2',
+    name: 'Budi T.',
+    warnings: 1,
+    violations: [
+      { id: 'v1', studentId: 'B002', type: 'tab_switch', severity: 'medium', timestamp: '2026-09-20T02:01:00Z', description: 'Left the exam tab' },
+      { id: 'v2', studentId: 'B002', type: 'fullscreen_exit', severity: 'medium', timestamp: '2026-09-20T02:05:00Z', description: 'Exited fullscreen' },
+    ],
+  } as StudentSession;
+  const lowTime: StudentSession = { ...student, id: 'attempt-3', name: 'Citra W.', runtimeModuleRemainingSeconds: 60 };
+
+  it('names the reason a student needs attention, newest integrity event first', () => {
+    expect(studentAttentionReason(student, false)).toBeNull();
+    expect(studentAttentionReason(student, true)).toBe('Device change pending');
+    expect(studentAttentionReason(flagged, false)).toBe('Integrity: fullscreen exit (+1) · 1 warning sent');
+  });
+
+  it('sorts by name, by attention, and by the clock the row shows', () => {
+    const reasons = new Map([['attempt-2', 'x']]);
+    const roster = [lowTime, flagged, student];
+    expect(sortRoster(roster, 'name', reasons).map((s) => s.name)).toEqual(['Ananda S.', 'Budi T.', 'Citra W.']);
+    expect(sortRoster(roster, 'attention', reasons)[0]?.name).toBe('Budi T.');
+    expect(sortRoster(roster, 'time', reasons)[0]?.name).toBe('Citra W.');
+  });
+
+  it('holds row order while the pointer is in the list, then re-sorts when it leaves', () => {
+    const props = {
+      students: [student, lowTime],
+      selectedStudent: null,
+      runtime: liveRuntime(),
+      search: '',
+      onSearchChange: vi.fn(),
+      attentionFilter: 'all' as const,
+      onAttentionFilterChange: vi.fn(),
+      attentionCount: 0,
+      sort: 'name' as const,
+      onSortChange: vi.fn(),
+      onSelect: vi.fn(),
+    };
+    const names = () => within(screen.getByRole('listbox')).getAllByRole('option').map((row) => row.querySelector('.sat-room__row-name')?.textContent);
+    const { rerender } = render(<SatSessionRoomRoster {...props} visibleStudents={[student, lowTime]} attentionReasons={new Map()} />);
+    expect(names()).toEqual(['Ananda S.', 'Citra W.']);
+    fireEvent.pointerEnter(screen.getByRole('listbox'));
+    // A live update flags Citra while the proctor's pointer is over the list.
+    rerender(<SatSessionRoomRoster {...props} sort="attention" visibleStudents={[student, lowTime]} attentionReasons={new Map([['attempt-3', 'Device change pending']])} />);
+    expect(names()).toEqual(['Ananda S.', 'Citra W.']);
+    expect(screen.getByRole('option', { name: 'Open Citra W., needs attention: Device change pending' })).toBeInTheDocument();
+    fireEvent.pointerLeave(screen.getByRole('listbox'));
+    expect(names()).toEqual(['Citra W.', 'Ananda S.']);
   });
 });

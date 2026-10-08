@@ -199,6 +199,15 @@ func deliverySaveBinding(mock sqlmock.Sqlmock) {
 			AddRow("att-1", "sched-1", "exam-1"))
 }
 
+// deliverySaveProtocol mocks the D1 transport fence read. The compatibility
+// answer save is fenced to protocol 1; these tests drive the legacy contract,
+// so the attempt must report protocol 1.
+func deliverySaveProtocol(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(protocol_version, 1) FROM student_attempts WHERE id = ?")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"protocol_version"}).AddRow(1))
+}
+
 // deliveryWriterClaimTx mocks the in-tx writer-session fence: revocation
 // re-check + conditional claim UPDATE (no-op match) + SELECT FOR UPDATE
 // returning the same session. Every mutation-tx test needs it after the
@@ -250,6 +259,7 @@ func TestDeliverySaveResponseRevisionMismatch(t *testing.T) {
 	svc := deliverySvc(db)
 	now := time.Now().UTC()
 	deliverySaveBinding(mock)
+	deliverySaveProtocol(mock)
 	deliverySaveBegin(mock)
 	deliverySaveWorkableTx(mock, now.Add(-time.Minute))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_question_responses WHERE module_attempt_id = ? AND exam_question_id = ? FOR UPDATE")).
@@ -290,6 +300,7 @@ func TestDeliverySaveResponseExactReplay(t *testing.T) {
 	svc := deliverySvc(db)
 	now := time.Now().UTC()
 	deliverySaveBinding(mock)
+	deliverySaveProtocol(mock)
 	deliverySaveBegin(mock)
 	deliverySaveWorkableTx(mock, now.Add(-time.Minute))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_question_responses WHERE module_attempt_id = ? AND exam_question_id = ? FOR UPDATE")).

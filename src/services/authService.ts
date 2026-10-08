@@ -82,6 +82,8 @@ interface StudentEntryPayload {
   nickname?: string | undefined;
   ieltsCourse?: string | undefined;
   clientSessionId?: string | undefined;
+  /** An explicit practice recovery capability, never an identity label. */
+  entrySession?: string | undefined;
 }
 
 function extractEnvelopeData<T>(response: { data?: BackendEnvelope<T> | T | undefined }): T {
@@ -190,7 +192,17 @@ class AuthService {
   }
 
   async studentEntry(payload: StudentEntryPayload): Promise<StudentEntryResult> {
-    const response = await post<BackendEnvelope<StudentEntryResult>>('/v1/auth/student/entry', payload, {
+    const scope = JSON.stringify([payload.scheduleId ?? payload.accessLinkId, payload.wcode.trim(), payload.email.trim().toLowerCase()]);
+    const key = `practice-entry:v1:${scope}`;
+    let entrySession = payload.entrySession ?? window.localStorage.getItem(key);
+    if (!entrySession) {
+      const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
+      entrySession = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+      // Persist before making the request: a lost response must not mint
+      // another principal. Storage failure stops entry rather than hiding it.
+      window.localStorage.setItem(key, entrySession);
+    }
+    const response = await post<BackendEnvelope<StudentEntryResult>>('/v1/auth/student/entry', { ...payload, entrySession }, {
       retries: 0,
     });
     return extractEnvelopeData<StudentEntryResult>(response);

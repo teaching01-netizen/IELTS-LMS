@@ -90,7 +90,7 @@ export function SpineStageNav({
       })}
       <span
         role="status"
-        className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${blockingCount === 0 ? "bg-green-800/10 text-green-800" : "bg-destructive/10 text-destructive"}`}
+        className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${blockingCount === 0 ? "bg-green-800/10 text-green-800" : "bg-destructive/10 text-destructive"}`}
       >
         <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${blockingCount === 0 ? "bg-green-800" : "bg-destructive"}`} />
         {readiness}

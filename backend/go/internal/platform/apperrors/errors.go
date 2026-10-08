@@ -47,6 +47,14 @@ const (
 	CodeUnsupportedProvider        Code = "UNSUPPORTED_PROVIDER"
 	CodeInvalidAssessment          Code = "INVALID_ASSESSMENT"
 	CodeAssessmentReleaseInvariant Code = "ASSESSMENT_RELEASE_INVARIANT"
+	// CodeProtocolUpgradeRequired retires a legacy transport for an attempt it
+	// cannot serve. The compatibility answer save writes
+	// assessment_question_responses, which scoring does not read for a
+	// protocol-2 attempt (attempt_responses_v2 is canonical), so accepting it
+	// would acknowledge an answer that scoring ignores. The request is refused
+	// with a stable, non-retryable conflict instead; clients use the V2 save
+	// boundary.
+	CodeProtocolUpgradeRequired Code = "PROTOCOL_UPGRADE_REQUIRED"
 	// CodeStudentWSRetired marks the plan-C3 student-socket retirement:
 	// student WS attempts render 410 + {use: runtime-poll}.
 	CodeStudentWSRetired Code = "STUDENT_WS_RETIRED"
@@ -113,7 +121,8 @@ func statusFor(c Code) int {
 	case CodeConflict, CodeControlEpochStale, CodeVersionCollision, CodeWriteIDConflict,
 		CodeTerminalConflict, CodeSubmissionReplayMisuse, CodeResponseRevisionMismatch,
 		CodeRuntimeRevisionStale, CodeAssessmentConflict, CodeActiveSessionSuperseded,
-		CodeSessionAlreadyActive, CodeTransferApprovalRequired, CodeTransferConflict:
+		CodeSessionAlreadyActive, CodeTransferApprovalRequired, CodeTransferConflict,
+		CodeProtocolUpgradeRequired:
 		return http.StatusConflict
 	case CodeTransferExpired:
 		return http.StatusGone

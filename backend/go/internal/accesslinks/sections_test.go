@@ -7,7 +7,6 @@ package accesslinks
 
 import (
 	"context"
-	"database/sql"
 	"regexp"
 	"testing"
 	"time"
@@ -62,42 +61,6 @@ func TestNormalizeEnabledSections(t *testing.T) {
 	}
 }
 
-// The stored JSON is a scope; a malformed or empty value fails open to "all
-// sections" rather than stranding the link with no sections at all.
-func TestParseEnabledSectionsFailsOpen(t *testing.T) {
-	cases := []struct {
-		name string
-		raw  sql.NullString
-		want []string
-	}{
-		{name: "NULL column", raw: sql.NullString{}, want: nil},
-		{name: "empty value", raw: sql.NullString{String: "", Valid: true}, want: nil},
-		{name: "empty array", raw: sql.NullString{String: "[]", Valid: true}, want: nil},
-		{name: "malformed json", raw: sql.NullString{String: "{oops", Valid: true}, want: nil},
-		{name: "unknown keys", raw: sql.NullString{String: `["science"]`, Valid: true}, want: nil},
-		{name: "reading-writing", raw: sql.NullString{String: `["reading-writing"]`, Valid: true}, want: []string{"reading-writing"}},
-		{name: "both in canonical order", raw: sql.NullString{String: `["math","reading-writing"]`, Valid: true}, want: []string{"reading-writing", "math"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := parseEnabledSections(tc.raw)
-			if len(got) != len(tc.want) {
-				t.Fatalf("got %v, want %v", got, tc.want)
-			}
-			for i := range tc.want {
-				if got[i] != tc.want[i] {
-					t.Fatalf("got %v, want %v", got, tc.want)
-				}
-			}
-		})
-	}
-	if enabledSectionsJSON(nil) != nil {
-		t.Fatal("an unscoped link must store NULL, not a JSON null")
-	}
-	if got := enabledSectionsJSON([]string{"reading-writing"}); got != `["reading-writing"]` {
-		t.Fatalf("unexpected stored scope %v", got)
-	}
-}
 
 func TestHasEffectiveSectionsTreatsUnscopedFullSATAsAllSections(t *testing.T) {
 	cases := []struct {

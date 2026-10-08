@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { Search, X } from 'lucide-react';
+import { ArrowLeft, Search, X } from 'lucide-react';
 
 /**
  * Shared Calm Ops Bento primitives for the Digital SAT staff list pages
@@ -21,22 +21,33 @@ export function SatPageHeader({
   title,
   description,
   actions,
+  backLabel,
+  onBack,
 }: {
   eyebrow: string;
   title: string;
   description?: string;
   actions?: ReactNode;
+  /** Optional location/back link rendered above the eyebrow (both props required to render). */
+  backLabel?: string;
+  onBack?: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-5 border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pb-6 sm:flex-row sm:items-end sm:justify-between">
+    <div className="flex flex-col gap-4 border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pb-6 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
-        <h1 className="mt-1 text-balance text-[30px] font-semibold tracking-[-0.045em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
+        {backLabel && onBack ? (
+          <button type="button" onClick={onBack} className="-ml-2 mb-1 inline-flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-2 text-[14px] font-medium text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] hover:text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">
+            <ArrowLeft size={16} aria-hidden="true" />
+            {backLabel}
+          </button>
+        ) : null}
+        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
+        <h1 className="mt-1 text-balance text-[24px] font-semibold tracking-[-0.04em] sm:text-[30px] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
         {description ? (
-          <p className="mt-1.5 max-w-xl text-pretty text-[13px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
+          <p className="mt-2 max-w-xl text-pretty text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0">{actions}</div> : null}
+      {actions ? <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">{actions}</div> : null}
     </div>
   );
 }
@@ -73,7 +84,7 @@ export function SatSearchField({
           }
         }}
         placeholder={placeholder}
-        className="h-11 w-full rounded-[var(--sat-staff-radius-input,12px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] pl-9 pr-8 text-sm text-[var(--sat-staff-text-primary,#1d1d1f)] outline-none transition placeholder:text-[var(--sat-staff-text-tertiary,#6e6e73)] focus:border-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] focus:ring-4 focus:ring-[var(--sat-staff-accent-ring-soft,rgba(0,113,227,0.1))] [&::-webkit-search-cancel-button]:hidden"
+        className="h-11 w-full rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] pl-9 pr-8 text-[14px] text-[var(--sat-staff-text-primary,#1d1d1f)] outline-none transition placeholder:text-[var(--sat-staff-text-tertiary,#6e6e73)] focus:border-[var(--sat-staff-accent,#0071e3)] focus:ring-2 focus:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] [&::-webkit-search-cancel-button]:hidden"
       />
       {value ? (
         <button
@@ -112,7 +123,7 @@ export function SatPrimaryButton({
       aria-label={ariaLabel}
       aria-busy={pending || undefined}
       disabled={isDisabled}
-      className="sat-press sat-press-fill-accent flex h-11 min-h-11 shrink-0 items-center gap-1.5 rounded-[var(--sat-staff-radius-input,12px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[12px] font-semibold text-white shadow-[var(--sat-staff-accent-glow-sm,0_1px_2px_rgba(0,113,227,0.35))] hover:bg-[var(--sat-staff-accent-hover,#0077ed)] hover:shadow-[var(--sat-staff-accent-glow-md,0_4px_14px_rgba(0,113,227,0.35))] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+      className="sat-press sat-press-fill-accent flex h-11 min-h-11 shrink-0 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sat-staff-canvas,#f5f5f7)] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
     >
       {pending ? (
         <span aria-hidden="true" className="sat-spinner block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white/40 border-t-white" />
@@ -195,22 +206,77 @@ export function SatStatusPill({
   children: ReactNode;
 }) {
   return (
-    <span className={'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ' + TONE_PILL_CLASS[tone]}>
+    <span className={'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-semibold ' + TONE_PILL_CLASS[tone]}>
       <span aria-hidden="true" className={'h-1.5 w-1.5 rounded-full ' + TONE_DOT_CLASS[tone] + (pulse ? ' sat-live-dot' : '')} />
       <span>{children}</span>
     </span>
   );
 }
 
-export function SatList({ children }: { children: ReactNode }) {
-  return <div className="mt-4 space-y-2">{children}</div>;
+/**
+ * Routine records sit in ONE grouped surface separated by hairlines (no card
+ * per row). `cards` keeps separately framed rows for callers whose rows carry
+ * their own frame (Student link rows).
+ */
+export function SatList({ children, variant = 'grouped' }: { children: ReactNode; variant?: 'grouped' | 'cards' }) {
+  if (variant === 'cards') return <div className="mt-4 space-y-2">{children}</div>;
+  return (
+    <div className="mt-3 divide-y divide-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] overflow-hidden rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)]">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * One toolbar grammar for every staff list, under the page header:
+ * status tabs (with counts) → search / filters / sort. Render it in every
+ * state (loading, empty, error-free) so filters never disappear.
+ */
+export function SatListToolbar({ tabs, children, label = 'List controls' }: { tabs?: ReactNode; children?: ReactNode; label?: string }) {
+  return (
+    <div className="mt-5 flex flex-col gap-3" role="group" aria-label={label}>
+      {tabs ? <div className="max-w-full overflow-x-auto">{tabs}</div> : null}
+      {children ? <div className="flex flex-wrap items-end gap-2">{children}</div> : null}
+    </div>
+  );
+}
+
+/** Labelled native select sized like every other toolbar control. */
+export function SatToolbarSelect<T extends string>({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <label htmlFor={id} className="flex flex-col gap-1 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">
+      {label}
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+        className="h-11 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] px-3 text-[14px] font-normal text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+      >
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+  );
 }
 
 /**
  * SatListRow contract (call sites own the chevron slot): the row owns the
- * <button> frame + ariaLabel passthrough; callers render title at 13px
- * semibold, meta lines at 10px, and an always-visible trailing chevron
- * (`.sat-row-chevron`) so affordance never depends on hover alone.
+ * <button> frame + ariaLabel passthrough; callers render title at 14px
+ * semibold, meta lines at 12px (the staff floor), and an always-visible trailing chevron
+ * (`.sat-row-chevron`) so affordance never depends on hover alone. Rows are
+ * flat (the grouped SatList draws the frame); 56px keeps a comfortable touch
+ * target while showing more records per screen.
  */
 export function SatListRow({
   onOpen,
@@ -218,6 +284,8 @@ export function SatListRow({
   disabled = false,
   children,
   index,
+  rowId,
+  current = false,
 }: {
   onOpen: () => void;
   ariaLabel?: string;
@@ -225,16 +293,22 @@ export function SatListRow({
   children: ReactNode;
   /** Optional position for a capped stagger (first 6 rows). Omit for no entrance. */
   index?: number;
+  /** Record id, so a page can return focus to the record it opened. */
+  rowId?: string;
+  /** The record the reviewer last opened from this list. */
+  current?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onOpen}
       aria-label={ariaLabel}
+      aria-current={current ? 'true' : undefined}
+      data-sat-row-id={rowId}
       disabled={disabled}
       style={index !== undefined ? ({ '--sat-row-index': index } as CSSProperties) : undefined}
       className={
-        'sat-list-row group flex min-h-[76px] w-full items-center rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-4 text-left shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sat-staff-canvas,#f5f5f7)]' +
+        'sat-list-row group flex min-h-14 w-full items-center bg-[var(--sat-staff-surface,#fff)] px-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-staff-accent,#0071e3)] aria-[current=true]:bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))]' +
         (index !== undefined ? ' sat-row-enter' : '')
       }
     >
@@ -274,23 +348,32 @@ export function SatResultCount({ total, visible, itemLabel, scopeLabel }: { tota
   const unit = scopeLabel ?? itemLabel;
   const text = visible === total ? `${total} ${unit}` : `${visible} of ${total} ${unit}`;
   return (
-    <p role="status" aria-live="polite" className="mt-3 text-[11px] font-medium tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+    <p role="status" aria-live="polite" className="mt-3 text-[12px] font-medium tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">
       {text}
     </p>
   );
 }
 
+/** Columns follow the stat count so a row never ends with one orphaned card. */
+const STAT_COLUMNS: Record<number, string> = {
+  1: 'grid-cols-1',
+  2: 'grid-cols-2',
+  3: 'grid-cols-3',
+  4: 'grid-cols-2 sm:grid-cols-4',
+  5: 'grid-cols-2 sm:grid-cols-5',
+};
+
 export function SatStatStrip({ stats, label = 'Summary' }: { stats: SatStat[]; label?: string }) {
   return (
-    <section aria-label={label} className="sat-route-enter mt-5 grid grid-cols-3 gap-2">
+    <section aria-label={label} className={'sat-route-enter mt-5 grid gap-2 ' + (STAT_COLUMNS[stats.length] ?? 'grid-cols-2 sm:grid-cols-3')}>
       {stats.map((stat) => {
         const cardClassName =
           'min-w-0 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3.5 py-3 text-left shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]';
         const body = (
           <>
-            <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.label}</p>
+            <p className="truncate text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.label}</p>
             <p className="mt-1 truncate text-[22px] font-semibold tabular-nums tracking-[-0.03em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{stat.value}</p>
-            {stat.hint ? <p className="mt-0.5 truncate text-[10px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.hint}</p> : null}
+            {stat.hint ? <p className="mt-0.5 truncate text-[12px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.hint}</p> : null}
           </>
         );
         if (stat.onSelect) {
@@ -333,7 +416,7 @@ export function SatEmptyState({
         {icon}
       </div>
       <h2 className="mt-4 text-balance text-[16px] font-semibold tracking-[-0.02em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
-      <p className="mt-1 max-w-sm text-pretty text-[12px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{hint}</p>
+      <p className="mt-1 max-w-sm text-pretty text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{hint}</p>
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );
@@ -341,13 +424,13 @@ export function SatEmptyState({
 
 export function SatListSkeleton({ rows = 3, label = 'Loading' }: { rows?: number; label?: string }) {
   return (
-    <div role="status" aria-label={label} className="mt-4 space-y-2">
+    <div role="status" aria-label={label} className="mt-3 divide-y divide-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] overflow-hidden rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)]">
       <span className="sr-only">{label}</span>
       {Array.from({ length: rows }, (_, index) => (
         <div
           key={index}
           aria-hidden="true"
-          className="sat-skeleton-shimmer flex min-h-[76px] items-center gap-3 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-4 py-3"
+          className="sat-skeleton-shimmer flex min-h-14 items-center gap-3 bg-[var(--sat-staff-surface,#fff)] px-4 py-3"
        >
           <div className="min-w-0 flex-1">
             <div className="h-3.5 w-2/5 rounded-full bg-[var(--sat-staff-skeleton-bar,rgba(0,0,0,0.07))]" />
@@ -363,7 +446,7 @@ export function SatListSkeleton({ rows = 3, label = 'Loading' }: { rows?: number
 /**
  * Workspace-styled inline error (NOT a full-page surface): white card with
  * title, description, and an optional primary retry action. role="alert"
- * announces it; the retry button keeps a min 40px target with the workspace
+ * announces it; the retry button keeps a min 44px target with the workspace
  * accent. Never pair with SatListSkeleton — error replaces loading output.
  */
 export function SatInlineError({
@@ -380,12 +463,12 @@ export function SatInlineError({
   return (
     <div role="alert" className="mt-4 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-5 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]">
       <h2 className="text-[14px] font-semibold tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
-      <p className="mt-1 text-[12px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
+      <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
       {onRetry ? (
         <button
           type="button"
           onClick={onRetry}
-          className="mt-4 min-h-10 rounded-[var(--sat-staff-radius-input,12px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[12px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
+          className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-input,12px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
         >
           {retryLabel}
         </button>
@@ -396,7 +479,7 @@ export function SatInlineError({
 
 /** Trivial release-status tag for results rows: small text, no tone pill. */
 export function SatReleaseTag({ releaseStatus }: { releaseStatus: string }) {
-  return <span className="text-[10px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">Practice · {releaseStatus}</span>;
+  return <span className="text-[12px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">Practice · {releaseStatus}</span>;
 }
 
 export function SatEyebrow({
@@ -409,7 +492,7 @@ export function SatEyebrow({
   children: ReactNode;
 }) {
   return (
-    <p id={id} className={'text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]' + (className ? ' ' + className : '')}>
+    <p id={id} className={'text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]' + (className ? ' ' + className : '')}>
       {children}
     </p>
   );
@@ -482,7 +565,7 @@ export function SatPageError({
             <button
               type="button"
               onClick={onRetry}
-              className="mt-4 min-h-10 rounded-[var(--sat-staff-radius-input,12px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[12px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
+              className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-input,12px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
             >
               {retryLabel}
             </button>
@@ -501,6 +584,6 @@ export function SatMeta({
   children: ReactNode;
 }) {
   return (
-    <p className={'text-[11px] text-[var(--sat-staff-text-tertiary,#6e6e73)]' + (className ? ' ' + className : '')}>{children}</p>
+    <p className={'text-[12px] text-[var(--sat-staff-text-tertiary,#6e6e73)]' + (className ? ' ' + className : '')}>{children}</p>
   );
 }

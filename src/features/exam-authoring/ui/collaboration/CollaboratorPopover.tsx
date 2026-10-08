@@ -94,7 +94,7 @@ export function CollaboratorPopover({
             const label = id ? (labelFor?.(id) ?? questionLabel(null)) : "No question open";
             return (
               <li key={key}>
-                <p className="px-2 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <p className="px-2 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {id ? PRESENCE_COPY.peopleOn(label) : label}
                 </p>
                 <ul>
@@ -103,7 +103,7 @@ export function CollaboratorPopover({
                     const row = (
                       <>
                         <span
-                          className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold"
+                          className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold"
                           style={{ backgroundColor: `${entry.color}18`, color: entry.color }}
                           aria-hidden="true"
                         >

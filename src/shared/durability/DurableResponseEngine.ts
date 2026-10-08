@@ -408,6 +408,7 @@ export class DurableResponseEngine {
   private readonly states = new Map<string, import("./types").QuestionResponseState>();
   private readonly versionTrackers = new Map<string, number>();
   private readonly confirmedVersions = new Map<string, number>();
+  private readonly confirmedWriteIds = new Map<string, string>();
   private readonly outbox = new Map<string, ResponseCommandV2>();
   private readonly inFlight = new Map<string, ResponseCommandV2>();
   private readonly issuedCommands = new Map<string, ResponseCommandV2>();
@@ -536,8 +537,25 @@ export class DurableResponseEngine {
       }
       const confirmedVersion = this.confirmedVersions.get(questionId) ?? 0;
       if (state.confirmed && confirmedVersion > 0) {
-        manifest.push({ questionId, writeId: "", clientVersion: confirmedVersion });
+        manifest.push({ questionId, writeId: this.confirmedWriteIds.get(questionId) ?? "", clientVersion: confirmedVersion });
       }
+    }
+    return manifest;
+  }
+
+  /** A superseded acknowledgement cannot identify the canonical write. Read
+   * the authoritative snapshot only when that identity is still unknown. */
+  public async prepareScopeManifest(scope: string): Promise<ScopeManifestEntry[]> {
+    let manifest = this.getScopeManifest(scope);
+    if (manifest.some((entry) => !entry.writeId)) {
+      const snapshot = await this.transport.fetchSnapshot(this.attemptId);
+      for (const response of Array.isArray(snapshot) ? snapshot : snapshot.responses) {
+        this.installServerResponse(response);
+      }
+      manifest = this.getScopeManifest(scope);
+    }
+    if (manifest.some((entry) => !entry.writeId)) {
+      throw new Error("The final answer identity is not yet confirmed by the server.");
     }
     return manifest;
   }
@@ -1566,6 +1584,7 @@ export class DurableResponseEngine {
           writeId: record["writeId"] as string,
           questionId: record["questionId"] as string,
           clientVersion: typeof record["clientVersion"] === "number" ? (record["clientVersion"] as number) : 0,
+          leaseEpoch: typeof record["leaseEpoch"] === "number" && Number.isSafeInteger(record["leaseEpoch"]) ? record["leaseEpoch"] as number : null,
           payload: clonePayload(record["payload"] as ResponsePayload),
           reason: record["reason"] as string,
           quarantinedAt: record["quarantinedAt"] as string,
@@ -1598,6 +1617,7 @@ export class DurableResponseEngine {
     }
 
     this.confirmedVersions.set(response.questionId, response.clientVersion);
+    if (response.writeId) this.confirmedWriteIds.set(response.questionId, response.writeId);
     const existing = this.states.get(response.questionId);
     this.states.set(response.questionId, {
       confirmed: {
@@ -2111,6 +2131,14 @@ export class DurableResponseEngine {
     if (acknowledgement.clientVersion >= confirmedVersion) {
       this.confirmedVersions.set(acknowledgement.questionId, acknowledgement.clientVersion);
       const existing = this.states.get(acknowledgement.questionId);
+      if (acknowledgement.outcome === "superseded") {
+        if (existing?.confirmed?.serverRevision !== acknowledgement.serverRevision ||
+          existing.confirmed.contentHash !== acknowledgement.contentHash) {
+          this.confirmedWriteIds.delete(acknowledgement.questionId);
+        }
+      } else if (!existing?.confirmed || acknowledgement.serverRevision >= existing.confirmed.serverRevision) {
+        this.confirmedWriteIds.set(acknowledgement.questionId, acknowledgement.writeId);
+      }
       const nextConfirmed: ConfirmedResponseState = {
         payload: clonePayload(acknowledgement.canonicalResponse),
         serverRevision: acknowledgement.serverRevision,
@@ -2666,6 +2694,7 @@ export class DurableResponseEngine {
       writeId: command.writeId,
       questionId: command.questionId,
       clientVersion: command.clientVersion,
+      leaseEpoch: this.commandOriginLease(command),
       payload: clonePayload(command.response),
       reason,
       quarantinedAt: new Date().toISOString(),

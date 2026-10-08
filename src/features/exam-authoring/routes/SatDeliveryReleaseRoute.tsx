@@ -1,28 +1,15 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import type { ExamEntity } from "../../../types/domain";
-import {
-  useAssessmentReleaseReadiness,
-  useAssessmentReleaseState,
-  usePublishAssessment,
-} from "../api/assessmentQueries";
-import { useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
 import { requestAuthoringDraftOnEntry } from "../application/authoringEntryIntent";
-import { useAccessDistributionOverview } from "../api/assessmentAccessLinkQueries";
 import type { AssessmentValidationIssue, SatPublishScope } from "../contracts/assessment";
-import {
-  isSATPublishReadinessValid,
-  parseIssueLink,
-  publishMediaIssueDiagnostic,
-} from "../ui/release/releaseSelectors";
+import { parseIssueLink } from "../ui/release/releaseSelectors";
 import { SatDeliveryReleasePage } from "../ui/SatDeliveryReleasePage";
 import { CollaborationHeaderCluster } from "../ui/collaboration/CollaborationHeaderCluster";
-import {
-  COEDIT_MUTATION_FLUSH_TIMEOUT_MS,
-  coeditRoomBlockMessage,
-  coeditRoomHoldsUnconfirmedWork,
-} from "../ui/collaboration/coeditNavigationGate";
-import { useSatAuthoringCollaboration } from "../realtime/coedit";
+import { useSatPublish } from "../ui/publish/useSatPublish";
+import { canViewExamResponses, deliveryDestination, describeExamLifecycle, examWorkspacePath } from "../ui/shell/examLifecycle";
+import { useOptionalAuthSession } from "../../auth/api/authSession";
+import { satListReturnTarget } from "@/src/products/sat/ui/useSatListReturn";
 
 const StudentLinksDashboard = lazy(() =>
   import("../ui/access-links/StudentLinksDashboard").then((module) => ({
@@ -40,41 +27,24 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const inSatWorkspace = location.pathname.startsWith("/sat/");
-  const shellLifecycle = useAuthoringShellLifecycle(exam.id);
-  const [publishScope, setPublishScope] = useState<SatPublishScope>("full");
-  const publishMutation = usePublishAssessment(exam.id);
-  // The room is the source of truth while it is open, and this page reads the
-  // committed MySQL projection. Publish is the same boundary a route change is,
-  // so it uses the same acknowledgement mechanism.
-  const collaboration = useSatAuthoringCollaboration();
-  const roomPending = Boolean(
-    collaboration && coeditRoomHoldsUnconfirmedWork(collaboration.workspaceSnapshot)
-  );
-  const releaseQuery = useAssessmentReleaseState(exam.id);
-  const distributionQuery = useAccessDistributionOverview(exam.id);
-  const shellState = shellLifecycle.state;
-  // Publish needs READY. Every other lifecycle state is reported through
-  // loadError instead of being passed off as a missing draft.
-  const shell = shellState.kind === "ready" ? shellState.shell : null;
-  const shellLoadError =
-    shellState.kind === "error"
-      ? shellState.error.message
-      : shellState.kind === "exam-not-found"
-        ? "This exam does not exist."
-        : shellState.kind === "forbidden"
-          ? "You do not have permission to view this exam."
-          : null;
-  const releaseState = releaseQuery.data ?? null;
-  const shouldCheckReadiness = releaseState?.state !== "published_current";
-  const readinessQuery = useAssessmentReleaseReadiness(
-    exam.id,
-    shell?.versionId,
-    shell?.versionRevision,
+  const {
+    shellState,
+    shell,
+    shellLoadError,
+    releaseQuery,
+    releaseState,
+    distributionQuery,
+    readinessQuery,
     publishScope,
-    shouldCheckReadiness
-  );
+    setPublishScope,
+    isPublishing,
+    publishError,
+    draftBusy,
+    publish,
+  } = useSatPublish(exam, onExamRefresh);
   const view = searchParams.get("view");
   const showStudentAccess = view === "access" || view === "links";
+  const role = useOptionalAuthSession()?.session?.user.role ?? null;
 
   const openStudentAccess = () => {
     if (inSatWorkspace) {
@@ -92,73 +62,11 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
   };
 
   const handlePublish = async (scope: SatPublishScope, publishNotes?: string) => {
-    if (!shell) throw new Error("The SAT draft is not loaded.");
-    // Before anything else: prove this tab's room content is durable. Publish
-    // seals whatever MySQL holds, so an unconfirmed prompt/image edit must be
-    // flushed and acknowledged first — the same `flushAndWaitForSaved` the
-    // builder awaits before leaving, not a sleep and not a second writer.
-    if (collaboration && coeditRoomHoldsUnconfirmedWork(collaboration.workspaceSnapshot)) {
-      const flushed = await collaboration.flushAndWaitForSaved(COEDIT_MUTATION_FLUSH_TIMEOUT_MS);
-      // Read the snapshot AFTER the wait: a refusal or a fresh acknowledgement
-      // both arrive while it is pending.
-      const block = coeditRoomBlockMessage(collaboration.workspaceSnapshot, flushed.outcome);
-      if (block !== null) throw new Error(block);
-    }
-    // Publish must act on what the server has committed, not on the revision
-    // this page last rendered. An image replacement saved a moment ago would
-    // otherwise be checked against — and sent with — the previous revision,
-    // which is exactly how the old (missing) asset ID reaches the media gate.
-    // Awaiting the read is the existing acknowledgement path: it creates no
-    // state, it just waits for the committed draft to be visible here.
-    const committed = await shellLifecycle.refresh();
-    if (committed.kind !== "ready") {
-      throw new Error(
-        "The latest saved draft could not be read. Refresh the release page before publishing."
-      );
-    }
-    const committedShell = committed.shell;
-    if (typeof exam.revision !== "number" || !Number.isInteger(exam.revision)) {
-      throw new Error(
-        "The latest exam revision is unavailable. Refresh the release page before publishing."
-      );
-    }
-    const readiness = readinessQuery.data;
-    if (!readiness || !isSATPublishReadinessValid(readiness, true, scope)) {
-      throw new Error("Run publish checks and resolve all blocking issues first.");
-    }
-    if (
-      readiness.versionId !== committedShell.versionId ||
-      readiness.versionRevision !== committedShell.versionRevision ||
-      readiness.publishScope !== scope
-    ) {
-      await readinessQuery.refetch();
-      throw new Error("The SAT draft changed. Publish checks were refreshed; review them again.");
-    }
-
-    const trimmedNotes = (publishNotes ?? "").trim();
-    // One key per publish confirmation: a double-click or lost response
-    // replays the same release instead of sealing a second version.
-    await publishMutation.mutateAsync({
-      revision: exam.revision,
-      expectedDraftVersionId: committedShell.versionId,
-      expectedDraftRevision: committedShell.versionRevision,
-      publishScope: scope,
-      ...(trimmedNotes ? { publishNotes: trimmedNotes.slice(0, 1000) } : {}),
-      operationKey: crypto.randomUUID(),
-    });
-    // Refetch failures must never block navigation: the publish already
-    // succeeded, so settle every refresh independently and continue.
-    const settled = await Promise.allSettled([
-      onExamRefresh(),
-      releaseQuery.refetch(),
-      distributionQuery.refetch(),
-    ]);
-    for (const result of settled) {
-      if (result.status === "rejected") {
-        console.error("[sat-release] post-publish refresh failed", result.reason);
-      }
-    }
-    openStudentAccess();
+    const published = await publish(scope, publishNotes);
+    // In the SAT workspace the next step is configuring access for the exact
+    // version that was just published, not hunting for the New Student Link button.
+    if (inSatWorkspace) navigate(deliveryDestination(exam.id, published));
+    else openStudentAccess();
   };
 
   /**
@@ -194,8 +102,6 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
     openBuilder(exam.id, params.toString());
   };
 
-
-
   if (showStudentAccess) {
     return (
       <Suspense
@@ -215,6 +121,14 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
           error={distributionQuery.error instanceof Error ? distributionQuery.error.message : null}
           onRefresh={() => distributionQuery.refetch()}
           onBackToRelease={openRelease}
+          shell={{
+            lifecycle: describeExamLifecycle(releaseState),
+            showResponses: canViewExamResponses(role),
+            onSelectTab: (tab) =>
+              tab === "questions" ? openBuilder(exam.id) : navigate(examWorkspacePath(exam.id, tab)),
+            onBack: () => navigate(inSatWorkspace ? satListReturnTarget("/sat/exams").to : "/admin/exams"),
+            onPreview: () => navigate(`/sat/exams/${encodeURIComponent(exam.id)}/preview`),
+          }}
         />
       </Suspense>
     );
@@ -236,16 +150,13 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       publishScope={publishScope}
       onPublishScopeChange={setPublishScope}
       onOpenStudentAccess={openStudentAccess}
-      isPublishing={publishMutation.isPending}
-      draftBusy={shellState.kind === "loading" || shellLifecycle.isFetching || roomPending}
-      publishError={
-        publishMutation.error
-          ? (publishMediaIssueDiagnostic(publishMutation.error)?.message ??
-            (publishMutation.error instanceof Error ? publishMutation.error.message : null))
-          : null
+      isPublishing={isPublishing}
+      draftBusy={draftBusy}
+      publishError={publishError}
+      onSelectTab={(tab) =>
+        tab === "questions" ? openBuilder(exam.id) : navigate(examWorkspacePath(exam.id, tab))
       }
-      onBackToBuilder={() => openBuilder(exam.id)}
-      onBackToExams={() => navigate(inSatWorkspace ? "/sat/exams" : "/admin/exams")}
+      onBackToExams={() => navigate(inSatWorkspace ? satListReturnTarget("/sat/exams").to : "/admin/exams")}
       onRefreshReadiness={() => readinessQuery.refetch()}
       onPublish={handlePublish}
       onIssueClick={handleIssue}

@@ -6,10 +6,12 @@ package tx
 import (
 	"context"
 	"database/sql"
-	"math/rand"
-	"strings"
+	"errors"
+	"math/rand/v2"
 	"sync/atomic"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 // retryHook reports each retried transient (deadlock/lock-wait/connection
@@ -123,11 +125,14 @@ func (r *Runner) withTxRetryLevelCounted(ctx context.Context, level sql.Isolatio
 		if err == nil || !transient(err) {
 			return retried, err
 		}
+		if i+1 == attempts {
+			return retried, err
+		}
 		retried++
 		noteRetry(err)
 		// Bounded backoff with jitter: 25ms * 2^i + [0,25ms).
 		backoff := time.Duration(25*(1<<uint(i))) * time.Millisecond
-		backoff += time.Duration(rand.Int63n(int64(25 * time.Millisecond)))
+		backoff += time.Duration(rand.Int64N(int64(25 * time.Millisecond)))
 		t, cancel := context.WithTimeout(ctx, backoff)
 		<-t.Done()
 		cancel()
@@ -150,13 +155,8 @@ func (r *Runner) WithTxRCRetryCounted(ctx context.Context, attempts int, fn func
 }
 
 func transient(err error) bool {
-	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "deadlock") ||
-		strings.Contains(s, "lock wait timeout") ||
-		strings.Contains(s, "try restarting transaction") ||
-		strings.Contains(s, "connection refused") ||
-		strings.Contains(s, "broken pipe") ||
-		strings.Contains(s, "bad connection")
+	var dbErr *mysql.MySQLError
+	return errors.As(err, &dbErr) && (dbErr.Number == 1213 || dbErr.Number == 1205)
 }
 
 // WithTxReadOnly runs fn in a read-only REPEATABLE READ transaction: every
