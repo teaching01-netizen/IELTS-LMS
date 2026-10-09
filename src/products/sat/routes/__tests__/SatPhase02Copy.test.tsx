@@ -357,13 +357,13 @@ describe('SAT Phase 02 copy contracts', () => {
     expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
   });
 
-  it('exam creation is named Create SAT', () => {
+  it('exam creation is named Create test', () => {
     createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
     renderLibrary();
-    expect(screen.getByRole('button', { name: 'Create SAT' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create test' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New SAT' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Create SAT' }));
-    expect(screen.getByRole('dialog', { name: 'Create SAT' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create test' }));
+    expect(screen.getByRole('dialog', { name: 'Create test' })).toBeInTheDocument();
   });
 
   it('result rows expose a single status signal', () => {

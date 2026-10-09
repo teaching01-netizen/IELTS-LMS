@@ -677,7 +677,7 @@ describe('SatSessionRoomRoute', () => {
       handleExtendCurrentSection: vi.fn().mockResolvedValue(undefined), handleCompleteExam: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add time' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes to Reading & Writing?');
     fireEvent.click(screen.getByRole('button', { name: 'Add 5 Minutes' }));
@@ -691,7 +691,7 @@ describe('SatSessionRoomRoute', () => {
       ...controllerMock(), runtimeSnapshots: [{ ...runtime, revision: undefined }],
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add time' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Refresh the session before adding time.');

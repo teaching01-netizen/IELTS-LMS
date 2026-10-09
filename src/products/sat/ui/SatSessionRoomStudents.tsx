@@ -222,7 +222,7 @@ export function StudentDetail({
           >
             {student.name}
           </h2>
-          <p className="mt-1 text-[12px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+          <p className="mt-1 text-[14px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">
             {student.studentId}{student.email ? ` · ${student.email}` : ''}
           </p>
         </div>

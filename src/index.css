@@ -2918,16 +2918,16 @@ button:not(:disabled):active > .sat-annotation-press {
   --sat-staff-surface: var(--color-au-surface);
   --sat-staff-surface-raised: var(--color-au-surface-raised);
   --sat-staff-surface-solid-fallback: #ffffff;
-  /* Glass materials: translucent value + opaque twin for reduced-transparency
-   * + no-backdrop-filter environments. Values mirror current TSX alphas. */
-  --sat-staff-glass-sidebar: rgba(255, 255, 255, 0.82);
-  --sat-staff-glass-header: rgba(255, 255, 255, 0.88);
-  --sat-staff-glass-room: rgba(255, 255, 255, 0.9);
-  --sat-staff-glass-bottomnav: rgba(255, 255, 255, 0.92);
-  --sat-staff-glass-roster: rgba(255, 255, 255, 0.45);
+  /* Staff chrome is solid: glass tokens are opaque and blur is off. Fallbacks
+   * stay for reduced-transparency environments. */
+  --sat-staff-glass-sidebar: #ffffff;
+  --sat-staff-glass-header: #ffffff;
+  --sat-staff-glass-room: #ffffff;
+  --sat-staff-glass-bottomnav: #ffffff;
+  --sat-staff-glass-roster: #ffffff;
   --sat-staff-glass-fallback: var(--sat-surface);
-  --sat-staff-blur-nav: blur(24px) saturate(1.4);
-  --sat-staff-blur-scrim: blur(3px) saturate(1.2);
+  --sat-staff-blur-nav: none;
+  --sat-staff-blur-scrim: none;
   /* Borders / separators / fills: one token per audited alpha. */
   --sat-staff-border-hairline: rgba(0, 0, 0, 0.06);
   --sat-staff-border-header: rgba(0, 0, 0, 0.065);
@@ -3303,7 +3303,7 @@ button:not(:disabled):active > .sat-annotation-press {
   border-radius: 9px;
   padding: 0 10px;
   text-align: left;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--sat-secondary-label);
   outline: none;
@@ -3425,7 +3425,7 @@ button:not(:disabled):active > .sat-annotation-press {
   min-height: 32px;
   border-radius: 8px;
   padding: 0 12px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--sat-secondary-label);
   outline: none;
@@ -4971,6 +4971,26 @@ button:not(:disabled):active > .sat-annotation-press {
 .sat-product .authoring-topbar[data-scrolled="true"] {
   border-bottom-color: var(--sat-separator);
   box-shadow: inset 0 -1px 0 var(--sat-separator);
+}
+
+/* SAT staff chrome is solid and unblurred, with the 14px label floor. Scoped to
+ * .sat-staff-root because .sat-product also wraps IELTS builder surfaces. */
+.sat-staff-root .authoring-topbar,
+.sat-staff-root .authoring-glass,
+.sat-staff-root .authoring-sidebar {
+  background: #fff;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.sat-staff-root .text-xs {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.sat-staff-root .text-\[12px\],
+.sat-staff-root .text-\[13px\] {
+  font-size: 14px;
 }
 
 .sat-product .authoring-workspace {

@@ -11,7 +11,7 @@ import { useSearchParams } from 'react-router-dom';
  */
 export type SatListBucket = 'upcoming' | 'live' | 'finished';
 export type SatScoreFilter = 'all' | 'available' | 'unavailable';
-export type SatArchiveTab = 'active' | 'archived';
+export type SatLibraryTab = 'active' | 'drafts' | 'published' | 'archived';
 export type SatListSort = 'updated' | 'title' | 'soonest' | 'latest';
 
 export type SatListParams = {
@@ -19,7 +19,7 @@ export type SatListParams = {
   q?: string;
   score?: SatScoreFilter;
   student?: string;
-  tab?: SatArchiveTab;
+  tab?: SatLibraryTab;
   sort?: SatListSort;
 };
 
@@ -27,7 +27,7 @@ type SatListParamsPatch = { [K in keyof SatListParams]?: SatListParams[K] | '' }
 
 const BUCKETS: Record<string, true> = { upcoming: true, live: true, finished: true };
 const SCORES: Record<string, true> = { all: true, available: true, unavailable: true };
-const TABS: Record<string, true> = { active: true, archived: true };
+const TABS: Record<string, true> = { active: true, drafts: true, published: true, archived: true };
 const SORTS: Record<string, true> = { updated: true, title: true, soonest: true, latest: true };
 const has = (table: Record<string, true>, value: string): boolean => Object.hasOwn(table, value);
 
@@ -42,7 +42,7 @@ function parseParams(searchParams: URLSearchParams): SatListParams {
   const student = searchParams.get('student');
   if (student) params.student = student;
   const tab = searchParams.get('tab');
-  if (tab && has(TABS, tab)) params.tab = tab as SatArchiveTab;
+  if (tab && has(TABS, tab)) params.tab = tab as SatLibraryTab;
   const sort = searchParams.get('sort');
   if (sort && has(SORTS, sort)) params.sort = sort as SatListSort;
   return params;

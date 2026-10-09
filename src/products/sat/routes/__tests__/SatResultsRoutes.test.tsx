@@ -78,17 +78,18 @@ describe('SAT Results hierarchy', () => {
 
   it('exports the RAWDATA workbook for the selected Student Access group', async () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
-    fireEvent.click(screen.getByRole('button', { name: /Export all group answers/ }));
+    expect(screen.getByText('All attempts in this session; filters do not affect export.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Export session answers/ }));
     await waitFor(() => expect(downloadSatRawdataXlsxMock).toHaveBeenCalledWith('sat-1', 'schedule-1', 'Saturday 9 AM'));
   });
 
   it('surfaces a failed RAWDATA export and offers the button again', async () => {
     downloadSatRawdataXlsxMock.mockRejectedValue(new Error('Export failed: 500'));
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
-    fireEvent.click(screen.getByRole('button', { name: /Export all group answers/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Export session answers/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Export failed: 500');
-    await waitFor(() => expect(screen.getByRole('button', { name: /Export all group answers/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export session answers/ })).toBeEnabled());
   });
 
   it('blocks a second RAWDATA export while the first is still running', async () => {
@@ -98,7 +99,7 @@ describe('SAT Results hierarchy', () => {
     );
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
 
-    fireEvent.click(screen.getByRole('button', { name: /Export all group answers/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Export session answers/ }));
 
     const pendingButton = await screen.findByRole('button', { name: /Exporting/ });
     expect(pendingButton).toBeDisabled();
@@ -106,12 +107,12 @@ describe('SAT Results hierarchy', () => {
     expect(downloadSatRawdataXlsxMock).toHaveBeenCalledTimes(1);
 
     finishExport();
-    await waitFor(() => expect(screen.getByRole('button', { name: /Export all group answers/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export session answers/ })).toBeEnabled());
   });
 
   it('only offers the RAWDATA export inside a Student Access group', () => {
     renderResultsRoute('/sat/results?exam=sat-1');
-    expect(screen.queryByRole('button', { name: /Export all group answers/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Export session answers/ })).not.toBeInTheDocument();
   });
 
   it('keeps attempts inside their schedule and opens a result beside the list, with the full page one link away', async () => {
@@ -129,6 +130,17 @@ describe('SAT Results hierarchy', () => {
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-1&access=schedule-1');
   });
 
+  it('shows Pending or Unavailable in the Total column instead of a zero', () => {
+    useSatAttemptsQueryMock.mockReturnValue({
+      data: { items: [pageOne.items[0], pageOne.items[1], { ...pageOne.items[1], attemptId: 'attempt-3', studentName: 'Student Y', attemptStatus: 'ended', outcomeStatus: 'unscored' }], total: 3, offset: 0, limit: 50, hasMore: false },
+      isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
+    });
+    renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
+    expect(within(screen.getByRole('button', { name: /John Smith/ })).getByText('1380')).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: /Student X/ })).getByText('Pending')).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: /Student Y/ })).getByText('Unavailable')).toBeInTheDocument();
+  });
+
   it('steps to the previous and next student inside the inspector', async () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1&attempt=attempt-1');
     const dialog = await screen.findByRole('dialog', { name: 'Student response' });
@@ -140,6 +152,16 @@ describe('SAT Results hierarchy', () => {
     expect(within(next).getByText(/Student X · Student 2 of 2/)).toBeInTheDocument();
     expect(within(next).getByRole('button', { name: 'Next student' })).toBeDisabled();
     expect(within(next).getByText('1 server-saved answers')).toBeInTheDocument();
+  });
+
+  it('returns focus to the last inspected row when the inspector closes', async () => {
+    renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1&attempt=attempt-1');
+    const dialog = await screen.findByRole('dialog', { name: 'Student response' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next student' }));
+    const next = await screen.findByRole('dialog', { name: 'Student response' });
+    fireEvent.keyDown(next, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Student response' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Student X/ })).toHaveFocus());
   });
 
   it('opens server-saved answers for an attempt without a score', async () => {

@@ -13,7 +13,7 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute:
 const formatTime = (value: string | null) => (value ? timeFormat.format(new Date(value)) : 'No answers saved yet');
 
 const chipClass =
-  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] disabled:cursor-wait disabled:opacity-60';
+  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] disabled:cursor-wait disabled:opacity-60';
 
 /**
  * Proctor review queue for SAT device changes. Approval binds the request to
@@ -95,21 +95,21 @@ export function SatDeviceTransferRequests({
   return (
     <section aria-labelledby={headingId} className="sat-banner-enter mx-auto w-full max-w-[1500px] px-4 pt-3" data-testid="sat-device-transfer-requests">
       <div className="rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3.5 py-3">
-        <h2 id={headingId} className="flex items-center gap-1.5 text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
+        <h2 id={headingId} className="flex items-center gap-1.5 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
           <Smartphone size={14} aria-hidden="true" />
           Device change requests ({items.length})
         </h2>
-        <p role="status" aria-live="polite" className="mt-1 text-[12px] text-[var(--sat-staff-text-secondary,#515154)]">
+        <p role="status" aria-live="polite" className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">
           {status}
         </p>
         <ul className="mt-2 space-y-2">
           {items.map((item) => {
             const open = reviewing === item.requestId;
             return (
-              <li key={item.requestId} className="rounded-xl bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 py-2 text-[12px] text-[var(--sat-staff-text-secondary,#515154)]">
+              <li key={item.requestId} className="rounded-xl bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 py-2 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
+                    <p className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
                       {item.candidateName} · {item.candidateId}
                     </p>
                     <p>
@@ -146,7 +146,7 @@ export function SatDeviceTransferRequests({
                         value={reason}
                         maxLength={255}
                         onChange={(event) => setReason(event.target.value)}
-                        className="mt-1 min-h-11 w-full rounded-[10px] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] px-2 text-[12px] font-normal"
+                        className="mt-1 min-h-11 w-full rounded-[10px] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] px-2 text-[16px] font-normal"
                       />
                     </label>
                     <label htmlFor={ackId} className="flex items-start gap-2">

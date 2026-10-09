@@ -11,4 +11,4 @@ export function resolveAuthoringField(path:string|null):AuthoringField {
  return 'answer';
 }
 export function issuesForField(issues:AssessmentValidationIssue[],field:AuthoringField){return issues.filter(issue=>resolveAuthoringField(issue.path||issue.field||null)===field);}
-export const FIELD_LABELS:Record<AuthoringField,string>={prompt:'Question',stimulus:'Supporting material',answer:'Answer',rationale:'Explanation',domain:'Domain',skill:'Skill',difficulty:'Difficulty',tags:'Tags',accessibility:'Accessibility'};
+export const FIELD_LABELS:Record<AuthoringField,string>={prompt:'Question text',stimulus:'Passage or image',answer:'Answer',rationale:'Explanation',domain:'Domain',skill:'Skill',difficulty:'Difficulty',tags:'Tags',accessibility:'Accessibility'};

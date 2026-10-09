@@ -31,7 +31,7 @@ import {
   rotateClientSessionIdForAttempt,
 } from '@student/api/studentAttemptGateway';
 import { emitStudentObservabilityMetric, withStudentObservabilityDimensions } from "../../../utils/studentObservability";
-import { hasBackendStatusCode } from '../../../services/backendBridge';
+import { hasBackendStatusCode } from '@student/api/backendStatus';
 
 export interface SatResponsePersistenceOptions {
   scheduleId: string;

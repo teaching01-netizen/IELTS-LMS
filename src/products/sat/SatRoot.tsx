@@ -14,7 +14,7 @@ type SatNavItem = {
 };
 
 function navForRole(role: string | undefined): SatNavItem[] {
-  if (role === 'builder') return [{ label: 'Exam Library', path: '/sat/exams', icon: BookOpen }];
+  if (role === 'builder') return [{ label: 'Tests', path: '/sat/exams', icon: BookOpen }];
   if (role === 'grader') return [{ label: 'Results', path: '/sat/results', icon: BarChart3 }];
   if (role === 'proctor') {
     return [
@@ -23,7 +23,7 @@ function navForRole(role: string | undefined): SatNavItem[] {
     ];
   }
   return [
-    { label: 'Exam Library', path: '/sat/exams', icon: BookOpen },
+    { label: 'Tests', path: '/sat/exams', icon: BookOpen },
     { label: 'Sessions', path: '/sat/sessions', icon: Radio },
     { label: 'Results', path: '/sat/results', icon: BarChart3 },
   ];
@@ -62,7 +62,7 @@ export function SatRoot() {
   const collaborationExamId = authoringExamMatch?.[1]
     ? decodeURIComponent(authoringExamMatch[1])
     : null;
-  // The exam workspace owns its own persistent header (Exam Library breadcrumb,
+  // The exam workspace owns its own persistent header (Tests breadcrumb,
   // Questions / Sessions / Results / Settings tabs + Publish), so EVERY /sat/exams/:examId page is
   // full-bleed with the product sidebar hidden — the navigation never changes
   // shape between authoring, settings, publish review, access and responses.
@@ -72,7 +72,7 @@ export function SatRoot() {
 
   return (
     <MotionConfig reducedMotion="user" transition={{ duration: 0.18 }}>
-    <div className="sat-product min-h-screen bg-[var(--sat-staff-canvas,var(--sat-canvas))] text-[var(--sat-staff-text-primary,var(--sat-label))] md:flex">
+    <div className="sat-product sat-staff-root min-h-screen bg-[var(--sat-staff-canvas,var(--sat-canvas))] text-[var(--sat-staff-text-primary,var(--sat-label))] md:flex">
       <a href="#sat-main" className="skip-link">Skip to main content</a>
       {isDetailPage ? null : (
       <aside className="hidden w-[244px] shrink-0 border-r border-[var(--sat-staff-border-nav,var(--sat-separator))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] md:flex md:min-h-screen md:flex-col md:[background:var(--sat-staff-glass-sidebar)] md:[backdrop-filter:var(--sat-staff-blur-nav)] md:[-webkit-backdrop-filter:var(--sat-staff-blur-nav)]">
@@ -83,10 +83,10 @@ export function SatRoot() {
             width={212}
             triggerContent={
               <>
-                <span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-[var(--sat-staff-text-primary,var(--sat-label))] text-[12px] font-semibold tracking-[-0.02em] text-[var(--sat-staff-text-inverse,#fff)]">SAT</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-[var(--sat-staff-text-primary,var(--sat-label))] text-[14px] font-semibold tracking-[-0.02em] text-[var(--sat-staff-text-inverse,#fff)]">SAT</span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] font-semibold tracking-[-0.01em]">Digital SAT</span>
-                  <span className="mt-0.5 block text-[12px] font-medium text-slate-500">Workspace</span>
+                  <span className="mt-0.5 block text-[14px] font-medium text-slate-500">Workspace</span>
                 </span>
               </>
             }
@@ -133,10 +133,10 @@ export function SatRoot() {
 
         <div className="border-t border-[var(--sat-staff-border-hairline,var(--sat-separator))] p-3">
           <div className="flex min-h-12 items-center gap-2.5 rounded-xl px-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--sat-staff-fill-avatar,rgba(120,120,128,0.12))] text-[12px] font-semibold text-[var(--sat-staff-text-secondary,var(--sat-secondary-label))]">{displayName.slice(0, 2).toUpperCase()}</div>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--sat-staff-fill-avatar,rgba(120,120,128,0.12))] text-[14px] font-semibold text-[var(--sat-staff-text-secondary,var(--sat-secondary-label))]">{displayName.slice(0, 2).toUpperCase()}</div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[12px] font-semibold text-slate-800">{displayName}</p>
-              <p className="mt-0.5 text-[12px] capitalize text-slate-500">{session?.user.role ?? 'staff'}</p>
+              <p className="truncate text-[14px] font-semibold text-slate-800">{displayName}</p>
+              <p className="mt-0.5 text-[14px] capitalize text-slate-500">{session?.user.role ?? 'staff'}</p>
             </div>
             <button type="button" onClick={() => void logout()} className="flex h-11 w-11 items-center justify-center rounded-full text-slate-500 hover:bg-[var(--sat-staff-fill-chip,rgba(120,120,128,0.06))] hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]" aria-label="Sign Out">
               <LogOut size={16} aria-hidden="true" />
@@ -155,8 +155,8 @@ export function SatRoot() {
             width={208}
             triggerContent={
               <>
-                <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[var(--sat-staff-text-primary,var(--sat-label))] text-[12px] text-[var(--sat-staff-text-inverse,#fff)]">SAT</span>
-                <span className="text-[13px] font-semibold">Digital SAT</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[var(--sat-staff-text-primary,var(--sat-label))] text-[14px] text-[var(--sat-staff-text-inverse,#fff)]">SAT</span>
+                <span className="text-[14px] font-semibold">Digital SAT</span>
               </>
             }
             items={[
@@ -198,7 +198,7 @@ export function SatRoot() {
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
-                <NavLink key={item.path} to={item.path} className={({ isActive }) => `relative flex min-h-12 min-w-[72px] flex-col items-center justify-center gap-1 rounded-xl text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'text-[var(--sat-staff-accent,var(--sat-accent-core))]' : 'text-slate-500'}`}>
+                <NavLink key={item.path} to={item.path} className={({ isActive }) => `relative flex min-h-12 min-w-[72px] flex-col items-center justify-center gap-1 rounded-xl text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'text-[var(--sat-staff-accent,var(--sat-accent-core))]' : 'text-slate-500'}`}>
                   {({ isActive }) => (
                     <>
                       {isActive ? <span aria-hidden="true" className="sat-route-enter absolute inset-x-6 top-0 h-0.5 rounded-full bg-[var(--sat-staff-accent,var(--sat-accent-core))]" /> : null}

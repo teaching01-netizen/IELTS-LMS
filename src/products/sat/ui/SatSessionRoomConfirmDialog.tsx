@@ -21,7 +21,7 @@ export function SatSessionRoomConfirmDialog({
   if (!confirm) return null;
 
   const title = confirm.kind === 'complete'
-    ? 'Finish this SAT session?'
+    ? 'End this SAT session?'
     : confirm.kind === 'terminate'
       ? `End ${confirm.studentName}’s attempt?`
       : confirm.kind === 'warn'
@@ -45,7 +45,7 @@ export function SatSessionRoomConfirmDialog({
       title={title}
       description={description}
       confirmLabel={confirm.kind === 'complete'
-        ? 'Finish Session'
+        ? 'End Session'
         : confirm.kind === 'terminate'
           ? 'End Attempt'
           : confirm.kind === 'warn'

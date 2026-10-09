@@ -40,6 +40,8 @@ interface AccessLinkEditorSheetProps {
   publishScope?: SatPublishScope;
   /** The version a NEW link will be pinned to, shown so the target is never implicit. */
   targetVersionNumber?: number | null;
+  /** The test's title, shown in the SAT pre-submit summary. An existing link carries its own. */
+  examTitle?: string | null;
   /**
    * Duplicate setup: a new group pre-filled from this one's audience, entry
    * requirement and sections. Availability starts from the defaults so the new
@@ -124,6 +126,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const pinnedPublishScope = props.link?.publishScope ?? props.publishScope ?? "full";
   const releaseSections = availableAccessLinkSections(pinnedPublishScope);
   const sectionsLocked = Boolean(props.link?.hasParticipation);
+  const summaryTest = props.link?.examTitle ?? props.examTitle ?? "Selected test";
+  const summaryVersion = props.link?.versionNumber ?? props.targetVersionNumber ?? "being published";
+  const checkInSummary = availabilityType === "scheduled"
+    ? `${formatLocalDateTime(opensAt)} to ${formatLocalDateTime(closesAt)} (${localTimeZone()})`
+    : "Open now, until paused or revoked";
 
   const updateShared = (patch: Record<string, unknown>) => {
     if (!props.link || readOnly) return;
@@ -501,6 +508,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     </select>
                   </Field>
                 ) : null}
+                {isSat ? <h2 className="mb-2 text-sm font-semibold text-slate-950">Session details</h2> : null}
                 <Field label="Session name" description="Use the name staff will recognize when sharing or monitoring this session." error={nameError} errorId="access-link-name-error"><input value={name} onChange={(event) => { setName(event.target.value); updateShared({ name: event.target.value }); if (nameError) setNameError(validateName(event.target.value)); }} onBlur={() => setNameError(validateName(name))} maxLength={160} aria-label="Session name" aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? "access-link-name-error" : undefined} className={inputClass} placeholder="Saturday morning mock" /></Field>
                 <Field label="Class or group (optional)" description="A label for your own organization. It does not limit who can join.">
                   <input
@@ -522,6 +530,8 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     placeholder="SAT September · Saturday"
                   />
                 </Field>
+                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this session. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[12px] leading-4 text-amber-800">{sectionsLocked ? "This session has no available sections and is fixed because a student has joined. Create a new session with an available section." : "This session’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[12px] leading-4 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
+                {isSat ? <h2 className="mb-2 text-sm font-semibold text-slate-950">Students</h2> : null}
                 <Field label="Who can join?" description={audienceChoice === "listed" ? "Only students on the list below are admitted. Anyone else is turned away at check-in." : "Anyone who has the session link can check in. A student code identifies a student; it is not checked against a roster."}>
                   <div className="grid grid-cols-2 gap-2">
                     <Choice active={audienceChoice === "anyone"} onClick={() => { const nextType = accessLinkAudienceTypeFor("anyone", audienceLabel); setAudienceType(nextType); updateShared({ audienceType: nextType }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Anyone with the link" subtitle="No roster check" />
@@ -534,8 +544,8 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
                   </div>
                 </Field>
-                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this session. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[12px] leading-4 text-amber-800">{sectionsLocked ? "This session has no available sections and is fixed because a student has joined. Create a new session with an available section." : "This session’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[12px] leading-4 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
                 {audienceType === "selected_students" ? <Field label="Selected students" description="One student per line: code, name, email. Name and email are optional; code is required." error={rosterError} errorId="access-link-roster-error"><div className="mb-2 flex flex-wrap items-center gap-2"><button type="button" onClick={() => { const next = membersSource ? `${membersSource.trimEnd()}\nW123456, Jane Doe, jane@example.com` : rosterTemplate(); setMembersSource(next); updateShared({ membersSource: next }); setRosterError(null); }} className="sat-press sat-press-fill flex min-h-11 items-center rounded-lg bg-au-fill px-3 text-[12px] font-semibold text-slate-600 hover:bg-au-fill-strong">Insert template</button><button type="button" onClick={() => { void copyRosterFormat(); }} className="sat-press sat-press-fill flex min-h-11 items-center rounded-lg px-3 text-[12px] font-semibold text-slate-500 hover:bg-au-fill">Copy format</button><span role="status" aria-live="polite" className="text-[12px] font-medium text-slate-500">{rosterSummary}</span></div><textarea aria-label="Selected students" value={membersSource} onChange={(event) => { setMembersSource(event.target.value); updateShared({ membersSource: event.target.value }); if (rosterError) setRosterError(validateRoster(event.target.value)); }} onBlur={() => setRosterError(validateRoster(membersSource))} aria-invalid={rosterError ? true : undefined} aria-describedby={rosterError ? "access-link-roster-error access-link-roster-hint" : "access-link-roster-hint"} spellCheck={false} className="min-h-36 w-full resize-y rounded-xl border border-au-separator bg-au-surface px-3 py-2.5 font-mono text-[12px] leading-5 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10" placeholder={'W123456, Jane Doe, jane@example.com\nW123457, John Doe, john@example.com'} /><p id="access-link-roster-hint" className="mt-1.5 text-[12px] leading-4 text-slate-500">Codes must be unique. Email is optional but must look like name@example.com.</p>{rosterRowErrors.length ? <ul className="mt-2 space-y-1" aria-label="Roster issues">{rosterRowErrors.map((issue) => <li key={issue.row} className="text-[12px] font-medium text-au-danger-text">Row {issue.row}: {issue.message.replace(/^Row \d+[:\s]*/, "")}</li>)}{rosterResult.errors.length > rosterRowErrors.length ? <li className="text-[12px] text-slate-500">+{rosterResult.errors.length - rosterRowErrors.length} more — fix these first, then review the rest.</li> : null}</ul> : null}</Field> : null}
+                {isSat ? <h2 className="mb-2 text-sm font-semibold text-slate-950">Check-in window</h2> : null}
                 <Field label="Check-in" description="Students can join during this window. The proctor starts the exam.">
                   <div className="grid grid-cols-2 gap-2">
                     <Choice active={availabilityType === "scheduled"} onClick={() => { setAvailabilityType("scheduled"); updateShared({ availabilityType: "scheduled" }); }} icon={<Clock3 size={15} aria-hidden="true"/>} title="Scheduled window" subtitle="Choose when it opens" />
@@ -544,6 +554,22 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                   {availabilityType === "scheduled" ? <><div className="mt-2 grid grid-cols-2 gap-2"><label htmlFor="access-link-opens-at" className="text-[12px] font-medium text-slate-500">Opens<input id="access-link-opens-at" aria-label="Opens" type="datetime-local" value={opensAt} onChange={(event) => { setOpensAt(event.target.value); updateShared({ opensAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, event.target.value, closesAt)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label><label htmlFor="access-link-closes-at" className="text-[12px] font-medium text-slate-500">Closes<input id="access-link-closes-at" aria-label="Closes" type="datetime-local" value={closesAt} onChange={(event) => { setClosesAt(event.target.value); updateShared({ closesAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, opensAt, event.target.value)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label></div>{windowError ? <p id="access-link-window-error" role="alert" className="mt-1.5 text-[12px] font-medium text-au-danger-text">{windowError}</p> : null}</> : <div className="mt-2 rounded-xl bg-au-surface px-3 py-3 text-[12px] leading-5 text-slate-500">Students can check in until you pause or revoke this session’s link. Pausing check-in does not stop students who are already taking the exam.</div>}
                   <p className="mt-2 text-[12px] leading-4 text-slate-500">{availabilityType === "scheduled" ? `Times use your local timezone (${localTimeZone()}). ` : ""}Opening check-in never starts the exam.</p>
                 </Field>
+                {isSat ? (
+                  <section aria-labelledby="access-link-summary-heading" className="rounded-xl bg-au-surface px-4 py-3">
+                    <h2 id="access-link-summary-heading" className="mb-2 text-sm font-semibold text-slate-950">Summary</h2>
+                    <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 text-[12px] leading-5">
+                      <dt className="font-medium text-slate-500">Test</dt>
+                      <dd className="text-slate-900">{summaryTest} · Version {summaryVersion}</dd>
+                      <dt className="font-medium text-slate-500">Who can join</dt>
+                      <dd className="text-slate-900">{audienceChoice === "listed" ? "Listed students only" : "Anyone with the link"}</dd>
+                      <dt className="font-medium text-slate-500">Sections</dt>
+                      <dd className="text-slate-900">{sectionsPlainText(sections)}</dd>
+                      <dt className="font-medium text-slate-500">Check-in</dt>
+                      <dd className="text-slate-900">{checkInSummary}</dd>
+                    </dl>
+                    <p className="mt-3 text-[12px] leading-4 text-slate-600">The proctor starts the exam.</p>
+                  </section>
+                ) : null}
               </div>
             </fieldset>
             <footer className="border-t border-au-separator px-5 py-4 authoring-glass">
@@ -568,6 +594,18 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       />
     </Sheet>
   );
+}
+
+function formatLocalDateTime(value: string): string {
+  const iso = localDateTimeToIso(value);
+  return iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "not set";
+}
+
+/** The summary's plain-language scope: which sections a sitting includes. */
+function sectionsPlainText(selection: readonly AccessLinkSectionKey[]): string {
+  if (selection.length === 0) return "None selected";
+  if (ACCESS_LINK_SECTION_KEYS.every((key) => selection.includes(key))) return "Both sections, with a total score";
+  return `${sectionLabels(selection)} only`;
 }
 
 function localTimeZone(): string {

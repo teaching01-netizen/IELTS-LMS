@@ -20,7 +20,7 @@ const STATUS_OPTIONS: Array<{ value: AttemptStatus; label: string }> = [
   { value: 'ended', label: 'Ended' },
   { value: 'other', label: 'Other / unknown' },
 ];
-const FIELD_CLASS = 'h-11 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-white px-3 text-[14px] text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
+const FIELD_CLASS = 'h-11 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-white px-3 text-[16px] text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
 
 function parseStatus(value: string | null): AttemptStatus {
   return STATUS_OPTIONS.some((option) => option.value === value) ? (value as AttemptStatus) : 'all';
@@ -126,11 +126,11 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
     { id: 'ended', label: 'Ended', value: counts.ended },
   ];
   const backButton = (label: string, target: string) => (
-    <button ref={backButtonRef} type="button" onClick={() => navigate(target)} aria-label={label} className="-ml-2 flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-2 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">
+    <button ref={backButtonRef} type="button" onClick={() => navigate(target)} aria-label={label} className="-ml-2 flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-2 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">
       <ArrowLeft size={15} aria-hidden="true" />{label}
     </button>
   );
-  const timeZoneNote = <p className="mt-2 text-[12px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">Times shown in {viewerTimeZoneLabel()}.</p>;
+  const timeZoneNote = <p className="mt-2 text-[14px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">Times shown in {viewerTimeZoneLabel()}.</p>;
 
   if (examIdParam) {
     if (query.isLoading) return <SatContainer>{embedded ? null : backButton('Back to Results', '/sat/results')}<SatListSkeleton rows={5} label="Loading SAT results" /></SatContainer>;
@@ -142,7 +142,7 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
         <SatContainer>
           {embedded ? null : backButton('Back to SAT results', '/sat/results')}
           {embedded ? <p className="text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">{aggregateLineFor(selectedGroup)}</p> : <SatPageHeader eyebrow="Digital SAT" title={selectedGroup.examTitle} description={aggregateLineFor(selectedGroup)} />}
-          {versionLine ? <p className="mt-3 text-[12px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{versionLine}</p> : null}
+          {versionLine ? <p className="mt-3 text-[14px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{versionLine}</p> : null}
           <SatStatStrip label="Exam summary" stats={statsFor(selectedGroup.total, countsOf(selectedGroup), 'Attempts')} />
           <SatListToolbar label="Session list controls">
             <SatSearchField id="sat-results-access-search" label="Search sessions" value={search} onChange={setSearch} placeholder="Search sessions or cohort" widthClassName="w-full sm:w-80 sm:flex-none" />
@@ -195,20 +195,20 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
           eyebrow="Session"
           title={selectedAccess.accessLinkName}
           description={`${selectedGroup.examTitle} · Version ${selectedAccess.versionNumber}${selectedAccess.cohortName ? ` · ${selectedAccess.cohortName}` : ''}`}
-          actions={<SatPrimaryButton icon={<Download size={15} aria-hidden="true" />} pending={exporting} onClick={() => void runExport()}>{exporting ? 'Exporting...' : 'Export all group answers (.xlsx)'}</SatPrimaryButton>}
+          actions={<SatPrimaryButton icon={<Download size={15} aria-hidden="true" />} pending={exporting} onClick={() => void runExport()}>{exporting ? 'Exporting...' : 'Export session answers'}</SatPrimaryButton>}
         />
-        <p className="mt-2 text-[12px] text-[var(--sat-staff-text-tertiary,#6e6e73)] sm:text-right">Exports {selectedGroup.examTitle} · {selectedAccess.accessLinkName}: every attempt in this session. Filters do not change the export.</p>
-        {exportError ? <p role="alert" className="mt-3 flex flex-wrap items-center gap-3 text-[12px] font-medium text-[var(--sat-staff-danger,#b42318)]">{exportError}<button type="button" onClick={() => void runExport()} className="min-h-11 font-semibold underline">Try again</button></p> : null}
-        <p role="status" aria-live="polite" className="mt-2 min-h-5 text-[12px] font-medium text-[var(--sat-staff-success-text,#067647)] sm:text-right">{exportDone ? 'Export downloaded.' : ''}</p>
-        <p className="mt-3 text-[13px] tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">{dateRange}</p>
+        <p className="mt-2 text-[14px] text-[var(--sat-staff-text-tertiary,#6e6e73)] sm:text-right">All attempts in this session; filters do not affect export.</p>
+        {exportError ? <p role="alert" className="mt-3 flex flex-wrap items-center gap-3 text-[14px] font-medium text-[var(--sat-staff-danger,#b42318)]">{exportError}<button type="button" onClick={() => void runExport()} className="min-h-11 font-semibold underline">Try again</button></p> : null}
+        <p role="status" aria-live="polite" className="mt-2 min-h-5 text-[14px] font-medium text-[var(--sat-staff-success-text,#067647)] sm:text-right">{exportDone ? 'Export downloaded.' : ''}</p>
+        <p className="mt-3 text-[14px] tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">{dateRange}</p>
         <SatStatStrip label="Session summary" stats={statsFor(selectedAccess.attemptCount, accessOutcomeCounts(selectedAccess), 'Attempts')} />
         <SatListToolbar label="Attempt list controls">
           <SatSearchField id="sat-results-student-search" label="Search students" value={search} onChange={setSearch} placeholder="Search name, ID, cohort" widthClassName="w-full sm:w-80 sm:flex-none" />
           <SatToolbarSelect<AttemptStatus> id="sat-results-status" label="Status" value={status} options={STATUS_OPTIONS} onChange={(value) => updateParams({ status: value === 'all' ? null : value })} />
-          <label htmlFor="sat-results-from" className="flex flex-col gap-1 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">Test date from
+          <label htmlFor="sat-results-from" className="flex flex-col gap-1 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">Test date from
             <input id="sat-results-from" type="date" className={FIELD_CLASS} value={fromDay} max={toDay || undefined} onChange={(event) => updateParams({ from: event.target.value || null })} />
           </label>
-          <label htmlFor="sat-results-to" className="flex flex-col gap-1 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">Test date to
+          <label htmlFor="sat-results-to" className="flex flex-col gap-1 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">Test date to
             <input id="sat-results-to" type="date" className={FIELD_CLASS} value={toDay} min={fromDay || undefined} onChange={(event) => updateParams({ to: event.target.value || null })} />
           </label>
         </SatListToolbar>
@@ -218,7 +218,7 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
           <AttemptColumnHeader />
           <SatList>{visibleAttempts.map((attempt, index) => <SatExamAttemptRow key={attempt.attemptId} attempt={attempt} attemptIndex={index} current={attempt.attemptId === attemptParam} onOpen={(row) => openAttempt(row.attemptId)} />)}</SatList>
         </> : <SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title={hasFilters ? 'No matching attempts' : 'No student attempts'} hint={hasFilters ? 'No attempts match the current search, status, and test date filters.' : 'Attempts for this session will appear here.'} action={hasFilters ? <SatPrimaryButton onClick={clearFilters}>Clear filters</SatPrimaryButton> : undefined} />}
-        <div className="mt-4 flex items-center justify-between gap-3 text-[12px] text-slate-500">
+        <div className="mt-4 flex items-center justify-between gap-3 text-[14px] text-slate-500">
           <span aria-live="polite">{rangeStart}–{rangeEnd} of {total} {hasFilters ? 'matching attempts' : 'attempts'}</span>
           <div className="flex gap-2">
             <button type="button" disabled={offset === 0 || attemptsQuery.isFetching} onClick={() => updateParams({ offset: offset > PAGE_SIZE ? String(offset - PAGE_SIZE) : null, attempt: null }, true)} className="flex min-h-11 items-center gap-1 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-white px-3 disabled:opacity-40"><ArrowLeft size={14} aria-hidden="true" />Previous</button>

@@ -93,6 +93,7 @@ export interface ExamEntity {
   currentDraftVersionId: string | null;
   currentPublishedVersionId: string | null;
   currentPublishedScope?: SatPublishScope | null | undefined;
+  currentPublishedVersionNumber?: number | null | undefined;
 
   // Permissions summary (simplified for now, can be expanded)
   canEdit: boolean;

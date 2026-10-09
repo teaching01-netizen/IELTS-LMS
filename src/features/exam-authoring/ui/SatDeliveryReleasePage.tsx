@@ -89,7 +89,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
             onClick={onBackToExams}
             className="mt-5 min-h-11 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            Exam Library
+            Tests
           </button>
         </div>
       </div>

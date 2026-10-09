@@ -11,7 +11,7 @@ import type { ExamEntity } from '../../../types/domain';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { SatConfirmDialog, SatFormDialog, isSatCreationDirty } from '../ui/ConfirmDialog';
 import { SatSegmentedControl } from '../ui/SegmentedControl';
-import { useSatListParams, type SatArchiveTab } from '../ui/useSatListParams';
+import { useSatListParams, type SatLibraryTab } from '../ui/useSatListParams';
 import { useSatListReturn } from '../ui/useSatListReturn';
 import {
   SatContainer,
@@ -38,18 +38,32 @@ function formatDate(value: string | null | undefined): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(time));
 }
 
-function statusLabel(exam: ExamEntity): string {
-  if (exam.status === 'published') return 'Published';
-  if (exam.status === 'archived') return 'Archived';
-  if (exam.currentPublishedVersionId) return 'Changes';
-  return 'Draft';
+const TAB_NOUN: Record<SatLibraryTab, string> = { active: 'active', drafts: 'draft', published: 'published', archived: 'archived' };
+
+function libraryTabMatches(tab: SatLibraryTab, exam: ExamEntity): boolean {
+  if (tab === 'archived') return exam.status === 'archived';
+  if (exam.status === 'archived') return false;
+  if (tab === 'published') return exam.status === 'published';
+  if (tab === 'drafts') return exam.status !== 'published';
+  return true;
 }
 
-function statusTone(label: string): SatStatusTone {
-  if (label === 'Published') return 'published';
-  if (label === 'Changes') return 'changes';
-  if (label === 'Archived') return 'archived';
+function statusTone(exam: ExamEntity): SatStatusTone {
+  if (exam.status === 'published') return 'published';
+  if (exam.status === 'archived') return 'archived';
+  if (exam.currentPublishedVersionId) return 'changes';
   return 'draft';
+}
+
+function statusLabel(exam: ExamEntity): string {
+  const tone = statusTone(exam);
+  if (tone === 'published') {
+    const version = exam.currentPublishedVersionNumber;
+    return version ? `Published · Version ${version}` : 'Published';
+  }
+  if (tone === 'changes') return 'Unpublished changes';
+  if (tone === 'archived') return 'Archived';
+  return 'Draft';
 }
 
 export function SatExamLibraryRoute() {
@@ -59,7 +73,7 @@ export function SatExamLibraryRoute() {
   const query = useExamListQuery(true, 'sat');
   const { params, setParams } = useSatListParams();
   const search = params.q ?? '';
-  const tab = params.tab ?? 'active';
+  const tab: SatLibraryTab = params.tab ?? 'active';
   const sort: LibrarySort = params.sort === 'title' ? 'title' : 'updated';
   const [creating, setCreating] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -69,8 +83,9 @@ export function SatExamLibraryRoute() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const satExams = useMemo(() => (query.data?.entities ?? []).filter((exam) => exam.providerKey === 'sat'), [query.data?.entities]);
   const counts = useMemo(() => {
-    const archived = satExams.filter((exam) => exam.status === 'archived').length;
-    return { active: satExams.length - archived, archived };
+    const active = satExams.filter((exam) => exam.status !== 'archived');
+    const published = active.filter((exam) => exam.status === 'published').length;
+    return { active: active.length, drafts: active.length - published, published, archived: satExams.length - active.length };
   }, [satExams]);
   const exams = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
@@ -80,7 +95,7 @@ export function SatExamLibraryRoute() {
       return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
     };
     return satExams
-      .filter((exam) => (tab === 'archived') === (exam.status === 'archived'))
+      .filter((exam) => libraryTabMatches(tab, exam))
       .filter((exam) => !needle || exam.title.toLocaleLowerCase().includes(needle))
       .sort((left, right) => sort === 'title'
         ? left.title.localeCompare(right.title, undefined, { sensitivity: 'base', numeric: true })
@@ -132,29 +147,31 @@ export function SatExamLibraryRoute() {
     }
   };
 
-  if (query.error) return <SatPageError title="Exam Library could not load" description={query.error instanceof Error ? query.error.message : 'The exam library is unavailable.'} retryLabel="Retry" onRetry={() => void query.refetch()} />;
+  if (query.error) return <SatPageError title="Tests could not load" description={query.error instanceof Error ? query.error.message : 'The exam library is unavailable.'} retryLabel="Retry" onRetry={() => void query.refetch()} />;
 
   return (
     <SatContainer>
       <SatPageHeader
         eyebrow="Digital SAT"
-        title="Exam Library"
+        title="Tests"
         description="Practice tests with adaptive Reading & Writing and Math modules."
-        actions={<SatPrimaryButton onClick={openCreate} icon={<Plus size={15} aria-hidden="true" />}>Create SAT</SatPrimaryButton>}
+        actions={<SatPrimaryButton onClick={openCreate} icon={<Plus size={15} aria-hidden="true" />}>Create test</SatPrimaryButton>}
       />
 
       <SatListToolbar
         label="Exam list controls"
         tabs={
-          <SatSegmentedControl<SatArchiveTab>
+          <SatSegmentedControl<SatLibraryTab>
             label="Exam status"
             value={tab}
             options={[
-              { value: 'active', label: 'Active', count: counts.active },
+              { value: 'active', label: 'All active', count: counts.active },
+              { value: 'drafts', label: 'Drafts', count: counts.drafts },
+              { value: 'published', label: 'Published', count: counts.published },
               { value: 'archived', label: 'Archived', count: counts.archived },
             ]}
             onChange={(next) => setParams({ tab: next === 'active' ? '' : next })}
-            className="sm:max-w-[280px]"
+            className="sm:max-w-[480px]"
           />
         }
       >
@@ -182,10 +199,11 @@ export function SatExamLibraryRoute() {
         <SatListSkeleton rows={5} label="Loading SAT exams" />
       ) : exams.length ? (
         <>
-        <SatResultCount total={tab === 'archived' ? counts.archived : counts.active} visible={exams.length} itemLabel={exams.length === 1 ? 'exam' : 'exams'} />
+        <SatResultCount total={counts[tab]} visible={exams.length} itemLabel={exams.length === 1 ? 'exam' : 'exams'} />
         <SatList>
           {exams.map((exam, rowIndex) => {
             const status = statusLabel(exam);
+            const tone = statusTone(exam);
             return (
               <SatListRow
                 key={exam.id}
@@ -205,9 +223,10 @@ export function SatExamLibraryRoute() {
                 <span className="flex w-full items-center gap-3 py-2.5">
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[14px] font-semibold tracking-[-0.012em] text-slate-900">{exam.title}</span>
-                    <span className="mt-0.5 block truncate text-[12px] tabular-nums text-slate-500">{exam.currentPublishedVersionId ? `${satPublishScopeCopy(exam.currentPublishedScope ?? 'full')} · ` : ''}{exam.totalQuestions ?? 0} questions · {formatDate(exam.updatedAt)}</span>
+                    <span className="mt-0.5 block truncate text-[14px] tabular-nums text-slate-500">{exam.totalQuestions ?? 0} questions{exam.currentPublishedVersionId ? ` · ${satPublishScopeCopy(exam.currentPublishedScope ?? 'full')}` : ''}<span className="md:hidden"> · {formatDate(exam.updatedAt)}</span></span>
                   </span>
-                  <SatStatusPill tone={statusTone(status)}>{status}</SatStatusPill>
+                  <SatStatusPill tone={tone}>{status}</SatStatusPill>
+                  <span className="hidden w-32 shrink-0 text-right text-[14px] tabular-nums text-slate-500 md:block">{formatDate(exam.updatedAt)}</span>
                   <ArrowRight size={15} className="sat-row-chevron shrink-0 text-slate-400 group-hover:text-slate-500" aria-hidden="true" />
                 </span>
               </SatListRow>
@@ -219,7 +238,7 @@ export function SatExamLibraryRoute() {
         <SatEmptyState
           icon={<Plus size={18} aria-hidden="true" />}
           title="No matching SAT exams"
-          hint={`No ${tab === 'archived' ? 'archived' : 'active'} exams match “${search.trim()}”.`}
+          hint={`No ${TAB_NOUN[tab]} exams match “${search.trim()}”.`}
           action={<SatPrimaryButton onClick={() => setSearch('')}>Clear Search</SatPrimaryButton>}
         />
       ) : tab === 'archived' ? (
@@ -228,6 +247,13 @@ export function SatExamLibraryRoute() {
           title="No archived SAT exams"
           hint="Archived exams appear here and stay available for reference."
           action={<SatPrimaryButton onClick={() => setParams({ tab: '' })}>Show active exams</SatPrimaryButton>}
+        />
+      ) : tab !== 'active' ? (
+        <SatEmptyState
+          icon={<Plus size={18} aria-hidden="true" />}
+          title={`No ${TAB_NOUN[tab]} SAT exams`}
+          hint="Exams move between these groups as they are edited and published."
+          action={<SatPrimaryButton onClick={() => setParams({ tab: '' })}>Show all active</SatPrimaryButton>}
         />
       ) : counts.archived > 0 ? (
         <SatEmptyState
@@ -241,22 +267,22 @@ export function SatExamLibraryRoute() {
           icon={<Plus size={18} aria-hidden="true" />}
           title="No SAT exams yet"
           hint="Create one exam. The standard Digital SAT structure is ready immediately."
-          action={<SatPrimaryButton onClick={openCreate}>Create SAT</SatPrimaryButton>}
+          action={<SatPrimaryButton onClick={openCreate}>Create test</SatPrimaryButton>}
         />
       )}
 
-      <SatFormDialog open={createOpen} eyebrow="Digital SAT" title="Create SAT" onClose={requestExamClose}>
+      <SatFormDialog open={createOpen} eyebrow="Digital SAT" title="Create test" onClose={requestExamClose}>
         <form onSubmit={createExam}>
           <div className="px-5 py-4">
-            <label htmlFor="sat-title" className="block text-[12px] font-semibold text-slate-600">Name
-              <input ref={inputRef} id="sat-title" aria-label="SAT exam name" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Practice Test 06" maxLength={255} className="mt-1.5 h-12 w-full rounded-[12px] border border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] px-3 text-[14px] outline-none focus:border-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] focus:ring-4 focus:ring-[var(--sat-staff-accent-ring-soft,rgba(0,113,227,0.1))]" />
+            <label htmlFor="sat-title" className="block text-[14px] font-semibold text-slate-600">Name
+              <input ref={inputRef} id="sat-title" aria-label="SAT exam name" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Practice Test 06" maxLength={255} className="mt-1.5 h-12 w-full rounded-[12px] border border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] px-3 text-[16px] outline-none focus:border-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] focus:ring-4 focus:ring-[var(--sat-staff-accent-ring-soft,rgba(0,113,227,0.1))]" />
             </label>
-            {createError ? <p role="alert" className="mt-2 text-[12px] font-medium text-red-600">{createError}</p> : null}
-            <p className="mt-3 text-[12px] leading-4 text-slate-400">Reading & Writing, Math, adaptive modules, and SAT tool policy are created as part of the exam.</p>
+            {createError ? <p role="alert" className="mt-2 text-[14px] font-medium text-red-600">{createError}</p> : null}
+            <p className="mt-3 text-[14px] leading-4 text-slate-400">Reading & Writing, Math, adaptive modules, and SAT tool policy are created as part of the exam.</p>
           </div>
           <div className="flex justify-end gap-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-5 py-3">
-            <button type="button" onClick={requestExamClose} className="min-h-11 rounded-[10px] px-3 text-[12px] font-semibold text-slate-500 hover:bg-black/[0.04]">Cancel</button>
-            <button type="submit" disabled={!title.trim() || creating} className="min-h-11 rounded-[10px] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[12px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] active:bg-[var(--sat-staff-accent-active,#0067c9)] disabled:bg-slate-200 disabled:text-slate-400">{creating ? 'Creating…' : 'Create'}</button>
+            <button type="button" onClick={requestExamClose} className="min-h-11 rounded-[10px] px-3 text-[14px] font-semibold text-slate-500 hover:bg-black/[0.04]">Cancel</button>
+            <button type="submit" disabled={!title.trim() || creating} className="min-h-11 rounded-[10px] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] active:bg-[var(--sat-staff-accent-active,#0067c9)] disabled:bg-slate-200 disabled:text-slate-400">{creating ? 'Creating…' : 'Create'}</button>
           </div>
         </form>
       </SatFormDialog>

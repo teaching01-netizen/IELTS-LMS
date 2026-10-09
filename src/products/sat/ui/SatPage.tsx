@@ -3,7 +3,7 @@ import { ArrowLeft, Search, X } from 'lucide-react';
 
 /**
  * Shared Calm Ops Bento primitives for the Digital SAT staff list pages
- * (Exam Library, Sessions, Results). Operate mode: the tool disappears into
+ * (Tests, Sessions, Results). Operate mode: the tool disappears into
  * the task - one sans, one accent (var(--sat-staff-accent)), soft 16-20px card rows,
  * dot+label status (color never carries state alone), 150-200ms transitions.
  */
@@ -41,7 +41,7 @@ export function SatPageHeader({
             {backLabel}
           </button>
         ) : null}
-        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
+        <p className="text-[14px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
         <h1 className="mt-1 text-balance text-[24px] font-semibold tracking-[-0.04em] sm:text-[30px] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
         {description ? (
           <p className="mt-2 max-w-xl text-pretty text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
@@ -84,7 +84,7 @@ export function SatSearchField({
           }
         }}
         placeholder={placeholder}
-        className="h-11 w-full rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] pl-9 pr-8 text-[14px] text-[var(--sat-staff-text-primary,#1d1d1f)] outline-none transition placeholder:text-[var(--sat-staff-text-tertiary,#6e6e73)] focus:border-[var(--sat-staff-accent,#0071e3)] focus:ring-2 focus:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] [&::-webkit-search-cancel-button]:hidden"
+        className="h-11 w-full rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] pl-9 pr-8 text-[16px] text-[var(--sat-staff-text-primary,#1d1d1f)] outline-none transition placeholder:text-[var(--sat-staff-text-tertiary,#6e6e73)] focus:border-[var(--sat-staff-accent,#0071e3)] focus:ring-2 focus:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] [&::-webkit-search-cancel-button]:hidden"
       />
       {value ? (
         <button
@@ -206,7 +206,7 @@ export function SatStatusPill({
   children: ReactNode;
 }) {
   return (
-    <span className={'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-semibold ' + TONE_PILL_CLASS[tone]}>
+    <span className={'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[14px] font-semibold ' + TONE_PILL_CLASS[tone]}>
       <span aria-hidden="true" className={'h-1.5 w-1.5 rounded-full ' + TONE_DOT_CLASS[tone] + (pulse ? ' sat-live-dot' : '')} />
       <span>{children}</span>
     </span>
@@ -256,13 +256,13 @@ export function SatToolbarSelect<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <label htmlFor={id} className="flex flex-col gap-1 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">
+    <label htmlFor={id} className="flex flex-col gap-1 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">
       {label}
       <select
         id={id}
         value={value}
         onChange={(event) => onChange(event.target.value as T)}
-        className="h-11 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] px-3 text-[14px] font-normal text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+        className="h-11 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] px-3 text-[16px] font-normal text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
       >
         {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
@@ -272,8 +272,8 @@ export function SatToolbarSelect<T extends string>({
 
 /**
  * SatListRow contract (call sites own the chevron slot): the row owns the
- * <button> frame + ariaLabel passthrough; callers render title at 14px
- * semibold, meta lines at 12px (the staff floor), and an always-visible trailing chevron
+ * <button> frame + ariaLabel passthrough; callers render the title and meta lines (meta is never below
+ * 12px, the staff floor), and an always-visible trailing chevron
  * (`.sat-row-chevron`) so affordance never depends on hover alone. Rows are
  * flat (the grouped SatList draws the frame); 56px keeps a comfortable touch
  * target while showing more records per screen.
@@ -348,7 +348,7 @@ export function SatResultCount({ total, visible, itemLabel, scopeLabel }: { tota
   const unit = scopeLabel ?? itemLabel;
   const text = visible === total ? `${total} ${unit}` : `${visible} of ${total} ${unit}`;
   return (
-    <p role="status" aria-live="polite" className="mt-3 text-[12px] font-medium tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+    <p role="status" aria-live="polite" className="mt-3 text-[14px] font-medium tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">
       {text}
     </p>
   );
@@ -371,9 +371,9 @@ export function SatStatStrip({ stats, label = 'Summary' }: { stats: SatStat[]; l
           'min-w-0 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3.5 py-3 text-left shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]';
         const body = (
           <>
-            <p className="truncate text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.label}</p>
+            <p className="truncate text-[14px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.label}</p>
             <p className="mt-1 truncate text-[22px] font-semibold tabular-nums tracking-[-0.03em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{stat.value}</p>
-            {stat.hint ? <p className="mt-0.5 truncate text-[12px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.hint}</p> : null}
+            {stat.hint ? <p className="mt-0.5 truncate text-[14px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.hint}</p> : null}
           </>
         );
         if (stat.onSelect) {
@@ -479,7 +479,7 @@ export function SatInlineError({
 
 /** Trivial release-status tag for results rows: small text, no tone pill. */
 export function SatReleaseTag({ releaseStatus }: { releaseStatus: string }) {
-  return <span className="text-[12px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">Practice · {releaseStatus}</span>;
+  return <span className="text-[14px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">Practice · {releaseStatus}</span>;
 }
 
 export function SatEyebrow({
@@ -492,7 +492,7 @@ export function SatEyebrow({
   children: ReactNode;
 }) {
   return (
-    <p id={id} className={'text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]' + (className ? ' ' + className : '')}>
+    <p id={id} className={'text-[14px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]' + (className ? ' ' + className : '')}>
       {children}
     </p>
   );
@@ -560,7 +560,7 @@ export function SatPageError({
           className="w-full max-w-md rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-6 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]"
         >
           <h1 className="text-[17px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
-          <p className="mt-1.5 text-[13px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
+          <p className="mt-1.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
           {onRetry ? (
             <button
               type="button"
@@ -584,6 +584,6 @@ export function SatMeta({
   children: ReactNode;
 }) {
   return (
-    <p className={'text-[12px] text-[var(--sat-staff-text-tertiary,#6e6e73)]' + (className ? ' ' + className : '')}>{children}</p>
+    <p className={'text-[14px] text-[var(--sat-staff-text-tertiary,#6e6e73)]' + (className ? ' ' + className : '')}>{children}</p>
   );
 }

@@ -7,6 +7,9 @@ import { ReadinessControl } from "./ReadinessControl";
 const ICON_BUTTON =
   "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40";
 
+const LABELLED_BUTTON =
+  "inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40";
+
 /** Question identity, calm co-edit state, and the card's own actions. */
 export function QuestionHeader({
   number,
@@ -86,44 +89,48 @@ export function QuestionHeader({
           {onAddBelow ? (
             <button
               type="button"
-              className={ICON_BUTTON}
+              className={LABELLED_BUTTON}
               aria-label="Add question below"
               title={addBelowDisabledReason ?? "Add question below"}
               disabled={locked || Boolean(addBelowDisabledReason)}
               onClick={onAddBelow}
             >
               <Plus size={17} aria-hidden="true" />
+              <span className="hidden sm:inline">Add question</span>
             </button>
           ) : null}
           <button
             type="button"
-            className={ICON_BUTTON}
+            className={LABELLED_BUTTON}
             aria-label="Duplicate question"
             title="Duplicate question"
             disabled={locked}
             onClick={onDuplicate}
           >
             <Copy size={16} aria-hidden="true" />
+            <span className="hidden sm:inline">Duplicate</span>
           </button>
           <button
             type="button"
-            className={ICON_BUTTON}
-            aria-label="Move question up"
+            className={LABELLED_BUTTON}
+            aria-label="Move up"
             title="Move question up"
             disabled={locked || !canMoveUp || !onMove}
             onClick={() => onMove?.(-1)}
           >
             <ArrowUp size={16} aria-hidden="true" />
+            <span className="hidden sm:inline">Move up</span>
           </button>
           <button
             type="button"
-            className={ICON_BUTTON}
-            aria-label="Move question down"
+            className={LABELLED_BUTTON}
+            aria-label="Move down"
             title="Move question down"
             disabled={locked || !canMoveDown || !onMove}
             onClick={() => onMove?.(1)}
           >
             <ArrowDown size={16} aria-hidden="true" />
+            <span className="hidden sm:inline">Move down</span>
           </button>
           <button
             type="button"

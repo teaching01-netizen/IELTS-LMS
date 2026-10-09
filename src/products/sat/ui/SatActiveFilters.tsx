@@ -22,7 +22,7 @@ export function SatActiveFilters({ chips, onClear }: { chips: ActiveFilterChip[]
             type="button"
             onClick={chip.onRemove}
             aria-label={`Remove filter ${chip.label}`}
-            className="sat-press inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] pl-3 pr-2 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] transition-colors hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+            className="sat-press inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] pl-3 pr-2 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] transition-colors hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
           >
             {chip.label}
             <X size={13} aria-hidden="true" />
@@ -33,7 +33,7 @@ export function SatActiveFilters({ chips, onClear }: { chips: ActiveFilterChip[]
         <button
           type="button"
           onClick={onClear}
-          className="inline-flex min-h-9 items-center rounded-full px-2 text-[12px] font-semibold text-[var(--sat-staff-accent,#0071e3)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+          className="inline-flex min-h-9 items-center rounded-full px-2 text-[14px] font-semibold text-[var(--sat-staff-accent,#0071e3)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
         >
           Clear all
         </button>

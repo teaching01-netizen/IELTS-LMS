@@ -95,7 +95,7 @@ export function sessionActionPlan(phase: SessionPhase, options: { canRun: boolea
   switch (phase) {
     case "ready":
       return {
-        primary: { kind: "start", label: "Start session" },
+        primary: { kind: "start", label: "Start exam" },
         supporting: [{ kind: "open-room", label: "Open session room" }],
       };
     case "live":

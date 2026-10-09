@@ -276,8 +276,8 @@ describe('SatSessionsRoute', () => {
     expect(row).toHaveTextContent('Ready');
     const meta = row?.querySelector('.tabular-nums');
     expect(meta).not.toBeNull();
-    // Staff metadata never drops below 12px.
-    expect(meta?.className).toMatch(/text-\[12px\]/);
+    // Staff metadata never drops below 14px.
+    expect(meta?.className).toMatch(/text-\[14px\]/);
     expect(container.innerHTML).not.toMatch(/bg-gradient|backdrop-blur/);
   });
 });

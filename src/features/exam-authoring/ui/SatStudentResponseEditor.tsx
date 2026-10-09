@@ -130,7 +130,7 @@ export function SatStudentResponseEditor({
             spellCheck={false}
             maxLength={256}
             aria-label="Add accepted equivalent"
-            className="min-w-0 flex-1 rounded-[12px] border border-au-separator-strong bg-au-surface px-3 py-2.5 font-mono text-[13px] text-slate-900 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
+            className="min-w-0 flex-1 rounded-[12px] border border-au-separator-strong bg-au-surface px-3 py-2.5 font-mono text-[16px] text-slate-900 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
             placeholder="Example: 24/2"
           />
           <button

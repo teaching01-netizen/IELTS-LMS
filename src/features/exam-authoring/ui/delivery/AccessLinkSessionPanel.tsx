@@ -145,7 +145,7 @@ export function AccessLinkSessionPanel({
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" onClick={onCopy} className={SECONDARY}>
           <Copy size={14} aria-hidden="true" />
-          {copyConfirmed ? "Copied" : "Copy link"}
+          {copyConfirmed ? "Copied" : "Copy student link"}
         </button>
         <button type="button" onClick={onShowQr} className={SECONDARY}>
           <QrCode size={14} aria-hidden="true" />

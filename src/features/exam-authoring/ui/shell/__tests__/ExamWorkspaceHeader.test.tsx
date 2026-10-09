@@ -45,7 +45,7 @@ describe("ExamWorkspaceHeader", () => {
 
   it("only renders actions the host provides", () => {
     render(<ExamWorkspaceHeader {...props()} />);
-    expect(screen.queryByRole("button", { name: /^publish$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^publish version$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /preview/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /student access/i })).not.toBeInTheDocument();
   });
@@ -53,7 +53,7 @@ describe("ExamWorkspaceHeader", () => {
   it("gives Publish a stated reason instead of a silent disabled button", () => {
     const onPublish = vi.fn();
     render(<ExamWorkspaceHeader {...props({ onPublish, publishDisabledReason: "Save your timing changes first" })} />);
-    const publish = screen.getByRole("button", { name: /^publish$/i });
+    const publish = screen.getByRole("button", { name: /^publish version$/i });
     expect(publish).toBeDisabled();
     expect(publish).toHaveAttribute("title", "Save your timing changes first");
     fireEvent.click(publish);

@@ -284,7 +284,7 @@ describe("AuthoringWorkspace (spine-only)", () => {
     expect(screen.getByRole("button", { name: "More exam actions" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview exam" })).toBeInTheDocument();
     // The breadcrumb leads back to the library the author came from.
-    expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("button", { name: "Exam Library" })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("button", { name: "Tests" })).toBeInTheDocument();
     // Sessions (student access, check-in and running) live under their own tab, not a header button.
     expect(screen.queryByRole("button", { name: /^student access$/i })).not.toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Exam sections" })).getByRole("button", { name: "Sessions" })).toBeInTheDocument();
@@ -307,7 +307,9 @@ describe("AuthoringWorkspace (spine-only)", () => {
       </QueryClientProvider>,
     );
     await screen.findByRole("region", { name: "Question 1, editing" });
-    fireEvent.click(screen.getByRole("button", { name: "Quick settings" }));
+    expect(screen.queryByRole("button", { name: "Quick settings" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "More exam actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Quick settings" }));
     expect(await screen.findByRole("dialog", { name: "Exam settings" })).toBeInTheDocument();
     // The sheet sits over the cards: the author stays on Questions with their question open.
     const tabs = within(screen.getByRole("navigation", { name: "Exam sections" }));

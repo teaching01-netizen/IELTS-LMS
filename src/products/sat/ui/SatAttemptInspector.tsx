@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/src/components/ui/sheet';
@@ -43,6 +43,13 @@ export function SatAttemptInspector({
   const attemptId = attempt?.attemptId ?? null;
   const hasResult = Boolean(attempt?.resultId);
 
+  // Closing returns focus to the row last inspected, not the row that opened the
+  // sheet: Previous / Next move through other rows while the sheet stays mounted.
+  const lastInspectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (attemptId) lastInspectedRef.current = attemptId;
+  }, [attemptId]);
+
   // Each student starts on their own summary, never on the previous student's tab.
   useEffect(() => {
     setView(hasResult ? 'result' : 'answers');
@@ -63,6 +70,13 @@ export function SatAttemptInspector({
       <SheetContent
         side="right"
         className="sat-product flex w-[min(96vw,780px)] max-w-[780px] flex-col gap-0 p-0 sm:max-w-[780px]"
+        onCloseAutoFocus={(event) => {
+          const id = lastInspectedRef.current;
+          const row = id ? document.querySelector<HTMLElement>(`[data-sat-row-id="${CSS.escape(id)}"]`) : null;
+          if (!row) return;
+          event.preventDefault();
+          row.focus({ preventScroll: true });
+        }}
         onKeyDown={(event) => {
           // Alt + ↑ / ↓ steps through students without leaving the sheet.
           if (!event.altKey) return;
@@ -73,7 +87,7 @@ export function SatAttemptInspector({
         <SheetHeader className="flex-row items-center justify-between gap-3 border-b border-border px-5 py-3 pr-14 text-left">
           <div className="min-w-0">
             <SheetTitle className="text-base">Student response</SheetTitle>
-            <SheetDescription className="truncate text-xs">{subtitle || 'Review without leaving the attempts list.'}</SheetDescription>
+            <SheetDescription className="truncate text-sm">{subtitle || 'Review without leaving the attempts list.'}</SheetDescription>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {position ? (
@@ -90,7 +104,7 @@ export function SatAttemptInspector({
               <Link
                 to={fullPage}
                 state={{ from: returnPath }}
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]"
               >
                 <ExternalLink size={14} aria-hidden="true" />
                 Open as page

@@ -33,11 +33,11 @@ const CONFIRM_CLASS = 'sat-dialog sat-dialog-center sat-product w-[calc(100vw-40
 const FORM_CLASS = 'sat-dialog sat-dialog-center sat-product w-[calc(100vw-40px)] max-w-[480px] overflow-hidden';
 
 const CANCEL_BUTTON_CLASS =
-  'sat-quiet-button min-h-11 rounded-[var(--sat-staff-radius-control,10px)] px-3.5 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
+  'sat-quiet-button min-h-11 rounded-[var(--sat-staff-radius-control,10px)] px-3.5 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
 const CONFIRM_BUTTON_CLASS =
-  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
+  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3.5 text-[14px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
 const DESTRUCTIVE_BUTTON_CLASS =
-  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-strong,#d70015)] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-danger-hover,#c00d10)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-danger-strong,#d70015)]/40';
+  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-strong,#d70015)] px-3.5 text-[14px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-danger-hover,#c00d10)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-danger-strong,#d70015)]/40';
 
 function StaticConfirmDialog({
   title,
@@ -72,7 +72,7 @@ function StaticConfirmDialog({
         className={CONFIRM_CLASS}
       >
         <h2 id={titleId} className="text-[18px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
-        <p id={descriptionId} className="mt-2 text-[12px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
+        <p id={descriptionId} className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
         <div className="mt-5 flex justify-end gap-2">
           <button ref={cancelRef} type="button" className={CANCEL_BUTTON_CLASS} onClick={onCancel}>
             Cancel
@@ -118,7 +118,7 @@ export function SatConfirmDialog({
         <AlertDialog.Overlay className={OVERLAY_CLASS} />
         <AlertDialog.Content className={CONFIRM_CLASS}>
           <AlertDialog.Title className="text-[18px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</AlertDialog.Title>
-          <AlertDialog.Description className="mt-2 text-[12px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</AlertDialog.Description>
+          <AlertDialog.Description className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</AlertDialog.Description>
           <div className="mt-5 flex justify-end gap-2">
             <AlertDialog.Cancel asChild>
               <button type="button" className={CANCEL_BUTTON_CLASS}>Cancel</button>
@@ -171,7 +171,7 @@ function StaticFormDialog({ eyebrow, title, onClose, children }: Omit<SatFormDia
       <div role="dialog" aria-modal="true" aria-labelledby={titleId} className={FORM_CLASS}>
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
           <div>
-            <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
+            <p className="text-[14px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
             <h2 id={titleId} className="mt-1 text-[19px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
           </div>
           <button type="button" onClick={onClose} className={CLOSE_BUTTON_CLASS} aria-label="Close">
@@ -196,7 +196,7 @@ export function SatFormDialog({ open, eyebrow, title, onClose, children }: SatFo
         <Dialog.Content className={FORM_CLASS}>
           <div className="flex items-center justify-between px-5 pb-2 pt-4">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
+              <p className="text-[14px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
               <Dialog.Title asChild>
                 <h2 className="mt-1 text-[19px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
               </Dialog.Title>

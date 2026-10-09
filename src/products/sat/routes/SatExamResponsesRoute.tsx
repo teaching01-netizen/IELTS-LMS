@@ -28,15 +28,15 @@ export function SatExamResponsesRoute() {
   };
 
   if (!examId) {
-    return <SatPageError title="Responses could not load" description="A valid SAT exam is required." retryLabel="Back to Exam Library" onRetry={backToLibrary} />;
+    return <SatPageError title="Responses could not load" description="A valid SAT exam is required." retryLabel="Back to Tests" onRetry={backToLibrary} />;
   }
   if (examQuery.isLoading) return <SatPageLoading label="Opening exam responses…" />;
   if (examQuery.error || !examQuery.data) {
-    return <SatPageError title="Responses could not load" description={examQuery.error instanceof Error ? examQuery.error.message : 'The SAT exam is unavailable.'} retryLabel="Back to Exam Library" onRetry={backToLibrary} />;
+    return <SatPageError title="Responses could not load" description={examQuery.error instanceof Error ? examQuery.error.message : 'The SAT exam is unavailable.'} retryLabel="Back to Tests" onRetry={backToLibrary} />;
   }
   const exam = examQuery.data;
   if (exam.providerKey !== 'sat') {
-    return <SatPageError title="This is not a SAT exam" description="Open this exam from its IELTS workspace instead." retryLabel="Back to Exam Library" onRetry={backToLibrary} />;
+    return <SatPageError title="This is not a SAT exam" description="Open this exam from its IELTS workspace instead." retryLabel="Back to Tests" onRetry={backToLibrary} />;
   }
   const accessPath = `/sat/exams/${encodeURIComponent(exam.id)}/access`;
   return (

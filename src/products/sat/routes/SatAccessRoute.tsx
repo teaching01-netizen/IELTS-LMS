@@ -13,7 +13,7 @@ import {
   parseDeliveryCreate,
 } from '../../../features/exam-authoring/ui/shell/examLifecycle';
 import { useExamWorkspaceChrome } from '../../../features/exam-authoring/ui/shell/useExamWorkspaceChrome';
-import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/application/authoringEntryIntent';
+import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/api/authoringEntryIntent';
 import { parseIssueLink } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import type { AssessmentValidationIssue } from '../../../features/exam-authoring/contracts/assessment';
 import { useOptionalAuthSession } from '../../../features/auth/api/authSession';
@@ -69,16 +69,16 @@ export function SatAccessRoute() {
     onOpenResponses: (scheduleId) => navigate(examId ? `${examWorkspacePath(examId, 'responses')}?${new URLSearchParams({ access: scheduleId })}` : '/sat/results'),
   });
   if (!examId) {
-    return <SatPageError title="Sessions could not load" description="A valid SAT exam is required." retryLabel="Back to Exam Library" onRetry={() => navigate('/sat/exams')} />;
+    return <SatPageError title="Sessions could not load" description="A valid SAT exam is required." retryLabel="Back to Tests" onRetry={() => navigate('/sat/exams')} />;
   }
 
   if (examQuery.isLoading) return <SatPageLoading label="Opening Sessions…" />;
   if (examQuery.error || !examQuery.data) {
-    return <SatPageError title="Sessions could not load" description={examQuery.error instanceof Error ? examQuery.error.message : 'The SAT exam is unavailable.'} retryLabel="Back to Exam Library" onRetry={() => navigate('/sat/exams')} />;
+    return <SatPageError title="Sessions could not load" description={examQuery.error instanceof Error ? examQuery.error.message : 'The SAT exam is unavailable.'} retryLabel="Back to Tests" onRetry={() => navigate('/sat/exams')} />;
   }
   const exam = examQuery.data;
   if (exam.providerKey !== 'sat') {
-    return <SatPageError title="This is not a SAT exam" description="Open this exam from its IELTS workspace instead." retryLabel="Back to Exam Library" onRetry={() => navigate('/sat/exams')} />;
+    return <SatPageError title="This is not a SAT exam" description="Open this exam from its IELTS workspace instead." retryLabel="Back to Tests" onRetry={() => navigate('/sat/exams')} />;
   }
 
   const openIssue = (issue: AssessmentValidationIssue) => {

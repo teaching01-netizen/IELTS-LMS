@@ -42,6 +42,6 @@ function view(issues: Parameters<typeof SpineQuestionView>[0]["issues"] = []) {
 }
 
 describe("Question canvas", () => {
- it("uses content sections instead of stages and numbered cards",()=>{render(view());expect(screen.queryByRole("navigation",{name:/question stages/i})).not.toBeInTheDocument();expect(screen.getByRole("heading",{name:"Question",exact:true})).toBeInTheDocument();expect(screen.getByRole("button",{name:/add an explanation/i})).toBeInTheDocument();});
+ it("uses content sections instead of stages and numbered cards",()=>{render(view());expect(screen.queryByRole("navigation",{name:/question stages/i})).not.toBeInTheDocument();expect(screen.getByRole("heading",{name:"Question text",exact:true})).toBeInTheDocument();expect(screen.getByRole("button",{name:/add an explanation/i})).toBeInTheDocument();});
  it("shows existing blockers in readiness and routes their real field",()=>{render(view([{code:"b.1",path:"metadata.domain",message:"Choose the SAT domain",blocking:true}]));fireEvent.click(screen.getByRole("button",{name:/1 issue/i}));expect(screen.getByRole("menuitem",{name:/Choose the SAT domain/})).toBeInTheDocument();});
 });

@@ -15,8 +15,7 @@
   z-index: 40;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  background: var(--sat-staff-glass-room, rgba(255, 255, 255, 0.9));
-  backdrop-filter: saturate(140%) blur(16px);
+  background: var(--sat-staff-glass-room, #fff);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 8px rgba(20, 27, 36, 0.025);
 }
 
@@ -48,7 +47,7 @@
   margin: 2px 0 0;
   overflow: hidden;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -65,7 +64,7 @@
   border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
   padding: 10px 20px;
   background: var(--sat-staff-surface, #fff);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .sat-room__context-timing,
@@ -81,7 +80,7 @@
 .sat-room__context-timing p {
   margin: 0;
   color: var(--sat-staff-text-primary, #18181b);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
@@ -184,7 +183,7 @@ button.sat-room__context-stat:focus-visible,
   padding: 3px 8px;
   background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
   color: var(--sat-staff-warning-text, #92400e);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 650;
 }
 
@@ -204,7 +203,7 @@ button.sat-room__context-stat:focus-visible,
   min-width: 0;
   flex-direction: column;
   border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  background: linear-gradient(180deg, #fff 0%, #fbfcfd 48%, #f8fafc 100%);
+  background: #fff;
 }
 
 .sat-room__roster-head {
@@ -216,10 +215,7 @@ button.sat-room__context-stat:focus-visible,
   grid-area: workspace;
   min-width: 0;
   padding: 24px 16px;
-  background:
-    radial-gradient(900px 520px at 50% -40px, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.6) 38%, rgba(255, 255, 255, 0) 72%),
-    radial-gradient(660px 400px at 78% 8%, rgba(90, 145, 255, 0.035), transparent 70%),
-    linear-gradient(180deg, #f8fafc 0%, #f4f7fa 52%, #f1f4f8 100%);
+  background: var(--sat-staff-canvas, #f7f7f8);
 }
 
 .sat-room__inspector {
@@ -267,7 +263,7 @@ button.sat-room__context-stat:focus-visible,
 .sat-room__eyebrow {
   margin: 0;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -301,7 +297,7 @@ button.sat-room__attention-filter:hover {
   padding: 1px 5px;
   background: rgba(255, 255, 255, 0.7);
   color: var(--sat-staff-warning-text, #92400e);
-  font-size: 12px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -335,7 +331,7 @@ button.sat-room__attention-filter:hover {
 .sat-room__stage-slot {
   margin: 6px 0 0;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -344,14 +340,14 @@ button.sat-room__attention-filter:hover {
   max-width: 52ch;
   margin: 6px 0 0;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
 .sat-room__stage-clock-caption {
   margin: 6px 0 0;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -374,13 +370,13 @@ button.sat-room__attention-filter:hover {
   gap: 6px 10px;
   margin: 10px 0 0;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .sat-room__next-stage span:first-child {
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -405,10 +401,9 @@ button.sat-room__attention-filter:hover {
   margin: -24px -16px -44px;
   border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
   padding: 0 16px;
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(12px);
+  background: #fff;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   opacity: 0;
   visibility: hidden;
@@ -445,7 +440,7 @@ button.sat-room__attention-filter:hover {
 .sat-run-sheet__anchor {
   margin: 4px 0 0;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -461,7 +456,7 @@ button.sat-room__attention-filter:hover {
   gap: 4px 8px;
   margin: 8px 0 0;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -473,7 +468,7 @@ button.sat-room__attention-filter:hover {
 .sat-run-sheet__delta {
   margin: 8px 0 0;
   color: var(--sat-staff-warning-text, #92400e);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -512,14 +507,14 @@ button.sat-room__attention-filter:hover {
 
 .sat-run-sheet__row-label strong {
   color: var(--sat-staff-text-primary, #18181b);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
 }
 
 .sat-run-sheet__row-label > span,
 .sat-run-sheet__row-window > span + span {
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -529,7 +524,7 @@ button.sat-room__attention-filter:hover {
   grid-area: window;
   gap: 2px;
   color: var(--sat-staff-text-primary, #25282d);
-  font-size: 12px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -540,7 +535,7 @@ button.sat-room__attention-filter:hover {
   justify-self: end;
   gap: 6px;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -553,7 +548,7 @@ button.sat-room__attention-filter:hover {
 
 .sat-run-sheet__remaining-label {
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   font-variant-numeric: normal;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -562,7 +557,7 @@ button.sat-room__attention-filter:hover {
 .sat-run-sheet__status {
   grid-area: status;
   justify-self: end;
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
@@ -623,7 +618,7 @@ button.sat-room__attention-filter:hover {
 .sat-run-sheet__adaptive-group {
   margin: 10px 0 2px 14px;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -632,7 +627,7 @@ button.sat-room__attention-filter:hover {
 .sat-run-sheet__adaptive-group span {
   margin-left: 6px;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -685,7 +680,7 @@ button.sat-room__attention-filter:hover {
   gap: 8px;
   margin-top: 12px;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -702,7 +697,7 @@ button.sat-room__attention-filter:hover {
   padding: 10px 12px;
   background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
   color: var(--sat-staff-warning-text, #92400e);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .sat-room__student-attention-event p {
@@ -741,14 +736,14 @@ button.sat-room__attention-filter:hover {
   max-width: 34ch;
   margin: 0 auto;
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.55;
 }
 
 .sat-room__empty-hint {
   margin: 14px 0 0;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .sat-room__student-detail {
@@ -780,7 +775,7 @@ button.sat-room__attention-filter:hover {
 }
 
 .sat-room__row[aria-selected="true"] {
-  background: linear-gradient(90deg, rgba(236, 245, 255, 0.95), rgba(249, 252, 255, 0.8));
+  background: #ecf5ff;
   color: var(--sat-staff-text-primary, #17191d);
 }
 
@@ -810,7 +805,7 @@ button.sat-room__attention-filter:hover {
   margin: 2px 0 0;
   overflow: hidden;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -818,7 +813,7 @@ button.sat-room__attention-filter:hover {
 
 .sat-room__row-time {
   color: var(--sat-staff-text-secondary, #515154);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -827,7 +822,7 @@ button.sat-room__attention-filter:hover {
   display: block;
   margin: 2px 0 0;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
@@ -1005,7 +1000,7 @@ button.sat-room__attention-filter:hover {
     min-height: 0;
     overflow: hidden;
     border-left: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-    background: linear-gradient(180deg, #fff 0%, #fcfdfe 100%);
+    background: #fff;
   }
 
   .sat-room__inspector-panel {

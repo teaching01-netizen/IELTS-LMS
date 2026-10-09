@@ -32,7 +32,7 @@ export interface ExamWorkspaceHeaderProps {
    * surface flushes unconfirmed edits before it lets a route change happen).
    */
   onSelectTab: (tab: ExamWorkspaceTab) => void;
-  /** Leaves to the Exam Library (the breadcrumb's first crumb). */
+  /** Leaves to the Tests list (the breadcrumb's first crumb). */
   onBack: () => void;
   /** Server-confirmed save state, rendered beside (never inside) lifecycle. */
   saveSlot?: ReactNode;
@@ -81,7 +81,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
   const {
     examTitle, lifecycle, activeTab, showResponses, onSelectTab, onBack, saveSlot, collaborationSlot,
     onPreview, previewDisabled, onPublish, onCreateSession, onQuickSettings,
-    publishDisabledReason, publishLabel = "Publish", issueCount = 0, onOpenIssues,
+    publishDisabledReason, publishLabel = "Publish version", issueCount = 0, onOpenIssues,
     importItems, menuItems, contextLine,
   } = props;
   // A draft with changes leads with Publish; once a version is current the next step is a session.
@@ -89,6 +89,11 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
   const tabs: ExamWorkspaceTab[] = showResponses
     ? ["questions", "delivery", "responses", "settings"]
     : ["questions", "delivery", "settings"];
+  // Quick settings lives in the overflow menu so the header keeps to primary actions.
+  const overflowItems: SatMenuItem[] = [
+    ...(menuItems ?? []),
+    ...(onQuickSettings ? [{ id: "quick-settings", label: "Quick settings", icon: Settings2, separatorBefore: true, onSelect: onQuickSettings }] : []),
+  ];
   return (
     <header className="exam-workspace-header sticky top-0 z-40 shrink-0 border-b border-border bg-card" data-testid="exam-workspace-header">
       <div className="mx-auto flex w-full max-w-[1240px] flex-wrap items-center gap-x-3 gap-y-2 px-4 pb-1 pt-2 sm:px-6">
@@ -96,9 +101,9 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
           <nav aria-label="Breadcrumb" className="shrink-0">
             <ol className="flex items-center gap-1">
               <li>
-                <button type="button" onClick={onBack} aria-label="Exam Library" className={`${QUIET} min-w-11 px-2 text-muted-foreground hover:text-foreground`}>
+                <button type="button" onClick={onBack} aria-label="Tests" className={`${QUIET} min-w-11 px-2 text-muted-foreground hover:text-foreground`}>
                   <ArrowLeft size={17} aria-hidden="true" className="sm:hidden" />
-                  <span className="hidden sm:inline">Exam Library</span>
+                  <span className="hidden sm:inline">Tests</span>
                 </button>
               </li>
               <li aria-hidden="true" className="hidden text-muted-foreground sm:block">/</li>
@@ -144,12 +149,6 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
               items={importItems}
             />
           ) : null}
-          {onQuickSettings ? (
-            <button type="button" onClick={onQuickSettings} aria-label="Quick settings" className={QUIET}>
-              <Settings2 size={16} aria-hidden="true" />
-              <span className="hidden sm:inline">Quick settings</span>
-            </button>
-          ) : null}
           {onPreview ? (
             <button type="button" onClick={onPreview} disabled={previewDisabled} aria-label="Preview exam" className={QUIET}>
               <Eye size={16} aria-hidden="true" />
@@ -174,8 +173,8 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
               Create session
             </button>
           ) : null}
-          {menuItems && menuItems.length > 0 ? (
-            <SatMenu compact label="More exam actions" icon={MoreHorizontal} align="end" items={menuItems} />
+          {overflowItems.length > 0 ? (
+            <SatMenu compact label="More exam actions" icon={MoreHorizontal} align="end" items={overflowItems} />
           ) : null}
         </div>
       </div>

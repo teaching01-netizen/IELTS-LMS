@@ -112,7 +112,7 @@ export function SatSessionRoomRoster({
               type="button"
               aria-pressed={attentionFilter === 'all'}
               onClick={() => onAttentionFilterChange('all')}
-              className={`min-h-11 rounded-full px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))]'}`}
+              className={`min-h-11 rounded-full px-3 text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))]'}`}
             >
               All
             </button>
@@ -122,13 +122,13 @@ export function SatSessionRoomRoster({
                 aria-label={`Filter roster to students needing attention, ${attentionCount}`}
                 aria-pressed={attentionFilter === 'needs'}
                 onClick={() => onAttentionFilterChange(attentionFilter === 'needs' ? 'all' : 'needs')}
-                className={`sat-room__attention-filter min-h-11 rounded-full px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'needs' ? 'is-active' : ''}`}
+                className={`sat-room__attention-filter min-h-11 rounded-full px-3 text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'needs' ? 'is-active' : ''}`}
               >
                 <span>Needs attention</span>
                 <span className="sat-room__attention-count">{attentionCount}</span>
               </button>
             ) : (
-              <span className="sat-room__attention-filter is-empty min-h-11 rounded-full px-3 text-[12px] font-semibold">
+              <span className="sat-room__attention-filter is-empty min-h-11 rounded-full px-3 text-[14px] font-semibold">
                 <span>Needs attention</span>
                 <span className="sat-room__attention-count">0</span>
               </span>
@@ -178,17 +178,17 @@ export function SatSessionRoomRoster({
           />
         )) : (
           <div className="px-6 py-12 text-center">
-            <p className="text-[13px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">
+            <p className="text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">
               {students.length ? 'No matching students.' : 'No students have joined yet.'}
             </p>
-            <p className="mt-1.5 text-[12px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+            <p className="mt-1.5 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
               {students.length ? 'Change the search or the filter.' : 'Students appear here the moment they open their exam link.'}
             </p>
             {!students.length && onShareLink ? (
               <button
                 type="button"
                 onClick={onShareLink}
-                className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3.5 text-[12px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+                className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3.5 text-[14px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
               >
                 Share student link
               </button>

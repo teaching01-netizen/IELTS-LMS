@@ -167,26 +167,27 @@ func (s *Service) SetMediaVerifier(verifier interface {
 // Exam is the list/detail row mirrored from ExamEntity (camelCase wire shape
 // is the handler's job; this struct keeps snake parity with columns).
 type Exam struct {
-	ID                      string           `json:"id"`
-	Slug                    string           `json:"slug"`
-	Title                   string           `json:"title"`
-	ProviderKey             string           `json:"providerKey"`
-	ProviderExamType        *string          `json:"providerExamType,omitempty"`
-	ExamType                string           `json:"examType"`
-	Status                  string           `json:"status"`
-	Visibility              string           `json:"visibility"`
-	OrganizationID          *string          `json:"organizationId,omitempty"`
-	OwnerID                 string           `json:"ownerId"`
-	CurrentDraftVersionID   *string          `json:"currentDraftVersionId,omitempty"`
-	CurrentPublishedVersion *string          `json:"currentPublishedVersionId,omitempty"`
-	CurrentPublishedScope   *SATPublishScope `json:"currentPublishedScope,omitempty"`
-	SchemaVersion           int              `json:"schemaVersion"`
-	Revision                int              `json:"revision"`
-	CreatedAt               time.Time        `json:"createdAt"`
-	UpdatedAt               time.Time        `json:"updatedAt"`
-	CanEdit                 bool             `json:"canEdit"`
-	CanPublish              bool             `json:"canPublish"`
-	CanDelete               bool             `json:"canDelete"`
+	ID                            string           `json:"id"`
+	Slug                          string           `json:"slug"`
+	Title                         string           `json:"title"`
+	ProviderKey                   string           `json:"providerKey"`
+	ProviderExamType              *string          `json:"providerExamType,omitempty"`
+	ExamType                      string           `json:"examType"`
+	Status                        string           `json:"status"`
+	Visibility                    string           `json:"visibility"`
+	OrganizationID                *string          `json:"organizationId,omitempty"`
+	OwnerID                       string           `json:"ownerId"`
+	CurrentDraftVersionID         *string          `json:"currentDraftVersionId,omitempty"`
+	CurrentPublishedVersion       *string          `json:"currentPublishedVersionId,omitempty"`
+	CurrentPublishedScope         *SATPublishScope `json:"currentPublishedScope,omitempty"`
+	CurrentPublishedVersionNumber *int             `json:"currentPublishedVersionNumber,omitempty"`
+	SchemaVersion                 int              `json:"schemaVersion"`
+	Revision                      int              `json:"revision"`
+	CreatedAt                     time.Time        `json:"createdAt"`
+	UpdatedAt                     time.Time        `json:"updatedAt"`
+	CanEdit                       bool             `json:"canEdit"`
+	CanPublish                    bool             `json:"canPublish"`
+	CanDelete                     bool             `json:"canDelete"`
 }
 
 // Version is the exam_versions row projection used by ListVersions.
@@ -311,14 +312,15 @@ func claimPublishOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, f
 	return storedResult, false, nil
 }
 
-const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id)"
+const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), (SELECT v.version_number FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id)"
 
 func scanExam(row interface {
 	Scan(dest ...any) error
 }) (Exam, error) {
 	var e Exam
 	var providerExamType, orgID, draftID, pubID, publishedScope sql.NullString
-	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope); err != nil {
+	var publishedVersionNumber sql.NullInt64
+	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope, &publishedVersionNumber); err != nil {
 		return Exam{}, err
 	}
 	if providerExamType.Valid {
@@ -341,6 +343,10 @@ func scanExam(row interface {
 			scope = SATPublishScope(publishedScope.String)
 		}
 		e.CurrentPublishedScope = &scope
+		if publishedVersionNumber.Valid {
+			v := int(publishedVersionNumber.Int64)
+			e.CurrentPublishedVersionNumber = &v
+		}
 	}
 	return e, nil
 }

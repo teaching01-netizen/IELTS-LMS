@@ -182,7 +182,7 @@ function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align =
         {triggerContent ?? (
           <>
             {Icon ? <Icon size={16} aria-hidden="true" /> : null}
-            {!compact ? <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{label}</span> : null}
+            {!compact ? <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{label}</span> : null}
           </>
         )}
         {!compact ? <ChevronDown size={14} data-open={open || undefined} className="sat-menu-trigger-chevron shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)]" aria-hidden="true" /> : null}
@@ -235,7 +235,7 @@ export function SatMenu(props: SatMenuProps) {
           {triggerContent ?? (
             <>
               {Icon ? <Icon size={16} aria-hidden="true" /> : null}
-              {!compact ? <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{label}</span> : null}
+              {!compact ? <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{label}</span> : null}
             </>
           )}
           {!compact ? <ChevronDown size={14} className="sat-menu-trigger-chevron shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)] group-data-[state=open]:rotate-180" aria-hidden="true" /> : null}

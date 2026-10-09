@@ -17,7 +17,7 @@ function Detail() {
   const navigate = useNavigate();
   return (
     <button type="button" onClick={() => { const back = satListReturnTarget('/sat/exams'); navigate(back.to, back.state ? { state: back.state } : undefined); }}>
-      Exam Library
+      Tests
     </button>
   );
 }
@@ -46,7 +46,7 @@ describe('useSatListReturn', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Practice 2' }));
     expect(screen.getByTestId('where')).toHaveTextContent('/sat/exams/exam-2');
-    fireEvent.click(screen.getByRole('button', { name: 'Exam Library' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tests' }));
     expect(screen.getByTestId('where')).toHaveTextContent('/sat/exams?q=Practice&tab=archived');
     expect(screen.getByText('Last opened: exam-2')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Practice 2' })).toHaveFocus();

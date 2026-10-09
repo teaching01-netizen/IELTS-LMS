@@ -161,9 +161,9 @@ export function SatSessionsRoute() {
                 <span className="grid w-full items-center gap-x-4 gap-y-1 py-2.5 sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_120px_16px]">
                   <span className="min-w-0">
                     <span className="block truncate text-[14px] font-semibold tracking-[-0.012em] text-slate-900">{summary.schedule.examTitle}</span>
-                    <span className="mt-0.5 block truncate text-[12px] text-slate-500">{summary.schedule.cohortName}{summary.schedule.institution ? ' · ' + summary.schedule.institution : ''} · {satPublishScopeCopy(summary.schedule.publishScope ?? 'full')}</span>
+                    <span className="mt-0.5 block truncate text-[14px] text-slate-500">{summary.schedule.cohortName}{summary.schedule.institution ? ' · ' + summary.schedule.institution : ''} · {satPublishScopeCopy(summary.schedule.publishScope ?? 'full')}</span>
                   </span>
-                  <span className="min-w-0 text-[12px] tabular-nums text-slate-600">
+                  <span className="min-w-0 text-[14px] tabular-nums text-slate-600">
                     <span className="block truncate">{formatSessionTime(summary.schedule.startTime)}</span>
                     <span className="block truncate text-slate-500">{summary.studentCount ?? 0} joined · {summary.activeCount ?? 0} active</span>
                   </span>

@@ -182,7 +182,7 @@ describe("ExamSettingsPage", () => {
   it("protects unsaved timing when changing tabs, and leaves on confirmation", () => {
     renderPage();
     fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish version" })).toBeDisabled();
 
     fireEvent.click(within(screen.getByRole("navigation", { name: "Exam sections" })).getByRole("button", { name: "Questions" }));
     expect(screen.getByRole("alertdialog", { name: "Leave with unsaved changes?" })).toBeInTheDocument();
@@ -200,7 +200,7 @@ describe("ExamSettingsPage", () => {
 
   it("opens the publish sheet over Settings", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
     expect(screen.getByRole("dialog", { name: "Publish exam" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close publish" }));
     expect(screen.queryByRole("dialog", { name: "Publish exam" })).not.toBeInTheDocument();

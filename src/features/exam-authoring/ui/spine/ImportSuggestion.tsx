@@ -93,7 +93,7 @@ export function ImportSuggestion({ analysis, targetField, sectionKey, onAccept, 
         {stimulusPreview ? (<><dt>Passage</dt><dd>{stimulusPreview}</dd></>) : null}
       </dl>
       {targetField === "answer-choice" ? <p>Choices will replace the current 4 options.</p> : null}
-      {analysis.stimulus ? <p>Passage moves to Supporting material.</p> : null}
+      {analysis.stimulus ? <p>Passage moves to Passage or image.</p> : null}
       {!analysis.correctChoice && analysis.choices.length > 0 ? <p>No answer key detected \u2014 you will pick the key after splitting.</p> : null}
       <p>You can edit any field after splitting.</p>
       <div>

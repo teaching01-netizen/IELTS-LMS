@@ -48,7 +48,7 @@ describe('SatRoot', () => {
 
   it('keeps the SAT workspace to three primary admin destinations', () => {
     renderRoot('admin');
-    expect(screen.getAllByText('Exam Library').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Tests').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Sessions').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Results').length).toBeGreaterThan(0);
     expect(screen.queryByText('Grading')).not.toBeInTheDocument();
@@ -142,7 +142,7 @@ describe('SatRoot', () => {
 
   it('gives proctors sessions and results without exposing exam authoring', () => {
     renderRoot('proctor');
-    expect(screen.queryByText('Exam Library')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tests')).not.toBeInTheDocument();
     expect(screen.getAllByText('Sessions').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Results').length).toBeGreaterThan(0);
   });
@@ -177,19 +177,19 @@ describe('SatRoot shell polish', () => {
 
   it('covers the full navForRole matrix (builder/grader/proctor)', () => {
     const { unmount: u1 } = renderRoot('builder');
-    expect(screen.getAllByText('Exam Library').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Tests').length).toBeGreaterThan(0);
     expect(screen.queryByText('Sessions')).not.toBeInTheDocument();
     expect(screen.queryByText('Results')).not.toBeInTheDocument();
     u1();
 
     const { unmount: u2 } = renderRoot('grader');
     expect(screen.getAllByText('Results').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Exam Library')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tests')).not.toBeInTheDocument();
     expect(screen.queryByText('Sessions')).not.toBeInTheDocument();
     u2();
 
     renderRoot('proctor');
-    expect(screen.queryByText('Exam Library')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tests')).not.toBeInTheDocument();
     expect(screen.getAllByText('Sessions').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Results').length).toBeGreaterThan(0);
   });

@@ -40,7 +40,7 @@ export function SatWaitingRoomPanel({
           onClick={onStart}
           disabled={startPending || startBlocked}
           aria-busy={startPending || undefined}
-          className="flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] disabled:opacity-50"
+          className="flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] disabled:opacity-50"
         >
           {startPending ? (
             <span aria-hidden="true" className="sat-spinner block h-3 w-3 shrink-0 rounded-full border-2 border-white/40 border-t-white" />
@@ -48,13 +48,13 @@ export function SatWaitingRoomPanel({
           {startPending ? 'Starting…' : 'Start exam'}
         </button>
       </div>
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[12px] sm:grid-cols-4">
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[14px] sm:grid-cols-4">
         <Fact label="Version" value={versionLabel ?? 'Not shown'} />
         <Fact label="Sections" value={sectionsLabel} />
         <Fact label="Joined" value={String(joinedCount)} />
         <Fact label="Ready" value={readyCount === null ? 'Not reported' : String(readyCount)} />
       </dl>
-      <p className="mt-3 text-[12px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+      <p className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
         Students who have joined are waiting. The exam begins only when you start it.
       </p>
       {children}

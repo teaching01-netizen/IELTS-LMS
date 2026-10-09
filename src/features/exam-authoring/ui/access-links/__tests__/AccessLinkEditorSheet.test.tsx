@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentAccessLink } from "../../../contracts/accessLinks";
 import type { SatAuthoringCollaborationValue } from "../../../realtime/coedit";
@@ -96,6 +96,47 @@ describe("AccessLinkEditorSheet", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /Reading & Writing/ })).not.toBeInTheDocument();
+  });
+
+  it("summarizes a SAT session before submit and shows no summary for IELTS", () => {
+    const { unmount } = render(
+      <AccessLinkEditorSheet
+        open
+        link={null}
+        providerKey="sat"
+        examTitle="Digital SAT"
+        targetVersionNumber={5}
+        members={[]}
+        isSaving={false}
+        onClose={vi.fn()}
+        onCreate={vi.fn().mockResolvedValue(undefined)}
+        onUpdate={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    for (const heading of ["Session details", "Students", "Check-in window"]) {
+      expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+    }
+    const summary = screen.getByRole("region", { name: "Summary" });
+    expect(within(summary).getByText("Digital SAT · Version 5")).toBeInTheDocument();
+    expect(within(summary).getByText("Anyone with the link")).toBeInTheDocument();
+    expect(within(summary).getByText("Both sections, with a total score")).toBeInTheDocument();
+    expect(within(summary).getByText("Open now, until paused or revoked")).toBeInTheDocument();
+    unmount();
+
+    render(
+      <AccessLinkEditorSheet
+        open
+        link={null}
+        providerKey="ielts"
+        members={[]}
+        isSaving={false}
+        onClose={vi.fn()}
+        onCreate={vi.fn().mockResolvedValue(undefined)}
+        onUpdate={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    expect(screen.queryByRole("heading", { name: "Session details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
   });
 
   it("limits a new link to the sections in its pinned release", async () => {

@@ -160,7 +160,7 @@ describe("Delivery: first-time setup", () => {
     // Staff who can run sessions are taken straight to the new session's waiting room.
     expect(bindings.onOpenRoom).toHaveBeenCalledWith("sched-new");
     // Starting is offered right there; copying is not a prerequisite.
-    expect(screen.getByRole("button", { name: "Start session" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Start exam" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(within(screen.getByRole("region", { name: "Session" })).queryByText("Session created")).not.toBeInTheDocument();
   });
@@ -188,7 +188,7 @@ describe("Delivery: running a group", () => {
   it("reviews the scoped start, explains the stored timing model, and opens that group's room on success", async () => {
     const bindings = session({ "sched-a": READY });
     renderDashboard([link("a", "Morning class"), link("b", "Evening class")], { session: bindings });
-    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start exam" }));
     const dialog = await screen.findByRole("dialog", { name: "Start Morning class?" });
     expect(dialog).toHaveTextContent("Version 3");
     expect(within(dialog).getByText("12")).toBeInTheDocument();
@@ -204,7 +204,7 @@ describe("Delivery: running a group", () => {
   it("keeps the review open with a retryable error when the start is refused", async () => {
     const bindings = session({ "sched-a": READY }, { onStart: vi.fn().mockRejectedValueOnce(new Error("Another session is running")).mockResolvedValue(undefined) });
     renderDashboard([link("a", "Morning class")], { session: bindings });
-    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start exam" }));
     const dialog = await screen.findByRole("dialog", { name: "Start Morning class?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Start and open session" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Another session is running");
@@ -216,7 +216,7 @@ describe("Delivery: running a group", () => {
   it("offers Refresh status instead of guessing when session state is stale", () => {
     const bindings = session({}, { stale: true });
     renderDashboard([link("a", "Morning class")], { session: bindings });
-    expect(screen.queryByRole("button", { name: "Start session" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start exam" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
     expect(bindings.onRefresh).toHaveBeenCalledOnce();
     expect(screen.getByText(/could not be refreshed/i)).toBeInTheDocument();
@@ -224,10 +224,10 @@ describe("Delivery: running a group", () => {
 
   it("hides session actions for roles that cannot open the session room", () => {
     renderDashboard([link("a", "Morning class")], { session: session({ "sched-a": READY }, { canRun: false }) });
-    expect(screen.queryByRole("button", { name: "Start session" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start exam" })).not.toBeInTheDocument();
     expect(screen.getByText(/available to administrators/i)).toBeInTheDocument();
     // Sharing still works for them.
-    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy student link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open Morning class" })).not.toHaveTextContent("Session:");
   });
 
@@ -271,7 +271,7 @@ describe("Delivery continuity and action safety", () => {
   it("preserves the reviewed group when arrow keys are pressed inside Start review", async () => {
     const bindings = session({ "sched-a": READY, "sched-b": READY });
     renderDashboard([link("a", "Morning class"), link("b", "Evening class")], { session: bindings });
-    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start exam" }));
     const dialog = screen.getByRole("dialog", { name: "Start Morning class?" });
     fireEvent.keyDown(within(dialog).getByRole("button", { name: "Cancel" }), { key: "ArrowDown" });
     expect(screen.getByRole("dialog", { name: "Start Morning class?" })).toBeInTheDocument();
@@ -283,7 +283,7 @@ describe("Delivery continuity and action safety", () => {
     const group = link("a", "Morning class");
     const bindings = session({ "sched-a": READY });
     const view = renderDashboard([group], { session: bindings });
-    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start exam" }));
     view.rerender(<StudentLinksDashboard exam={exam} overview={overviewWith([group])} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shell} session={{ ...bindings, stale: true }} />);
     const dialog = screen.getByRole("dialog", { name: "Start Morning class?" });
     expect(within(dialog).getByRole("button", { name: "Start and open session" })).toBeDisabled();

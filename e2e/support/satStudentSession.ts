@@ -32,7 +32,7 @@ export async function createRunningSatSession(
   const studentEmail = `sat-${label}-${suffix}@example.com`;
 
   await adminPage.goto("/sat/exams");
-  const createSatButton = adminPage.getByRole("button", { name: "Create SAT" }).first();
+  const createSatButton = adminPage.getByRole("button", { name: "Create test" }).first();
   await expect(createSatButton).toBeVisible({ timeout: 30_000 });
   await createSatButton.click();
   await adminPage.getByLabel("SAT exam name").fill(examTitle);

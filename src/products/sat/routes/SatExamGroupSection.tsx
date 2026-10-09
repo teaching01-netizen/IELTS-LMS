@@ -19,15 +19,15 @@ export function formatDate(value: string | null | undefined): string {
 // Below sm each record stacks; every cell stays self-describing.
 const EXAM_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_88px_76px_minmax(0,1.3fr)_16px]';
 const ACCESS_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_64px_76px_minmax(0,1.3fr)_16px]';
-const ATTEMPT_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_minmax(0,1fr)_88px_minmax(0,1fr)_16px]';
+const ATTEMPT_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_minmax(0,1fr)_88px_minmax(0,1fr)_72px_16px]';
 
 const CELL_PRIMARY = 'block text-[14px] font-semibold leading-[1.45] tracking-[-0.012em] text-slate-900';
-const CELL_SECONDARY = 'block text-[12px] leading-[1.45] tabular-nums text-slate-500';
+const CELL_SECONDARY = 'block text-[14px] leading-[1.45] tabular-nums text-slate-500';
 
 function ColumnHeader({ columns, labels }: { columns: string; labels: string[] }) {
   return (
-    <div aria-hidden="true" className={`mt-4 hidden gap-4 px-4 text-[12px] font-semibold text-slate-500 sm:grid ${columns}`}>
-      {labels.map((label, index) => <span key={label + index} className={label === 'Attempts' ? 'text-right' : undefined}>{label}</span>)}
+    <div aria-hidden="true" className={`mt-4 hidden gap-4 px-4 text-[14px] font-semibold text-slate-500 sm:grid ${columns}`}>
+      {labels.map((label, index) => <span key={label + index} className={['Attempts', 'Total'].includes(label) ? 'text-right' : undefined}>{label}</span>)}
     </div>
   );
 }
@@ -41,7 +41,7 @@ export function AccessColumnHeader() {
 }
 
 export function AttemptColumnHeader() {
-  return <ColumnHeader columns={ATTEMPT_COLUMNS} labels={['Test started', 'Student', 'Cohort', 'Submitted', 'Outcome', '']} />;
+  return <ColumnHeader columns={ATTEMPT_COLUMNS} labels={['Test started', 'Student', 'Cohort', 'Submitted', 'Status', 'Total', '']} />;
 }
 
 /** Date over time; never substitutes another timestamp when the start is unknown. */
@@ -103,6 +103,14 @@ function attemptOutcome(attempt: SatAttemptRow): { label: string; tone: SatStatu
     case 'locked': return { label: 'Ended', tone: satOutcomeTone('invalidated_timeout') };
     default: return { label: 'Status unavailable', tone: 'neutral' };
   }
+}
+
+/** A number only when a score exists; never a zero stand-in. Pending while one can still arrive. */
+function totalScoreLabel(attempt: SatAttemptRow): string {
+  if (attempt.totalScore != null) return String(attempt.totalScore);
+  const invalidated = attempt.outcomeStatus.startsWith('invalidated_');
+  const awaiting = !invalidated && (attempt.outcomeStatus === 'pending' || ['running', 'paused', 'submitted'].includes(attempt.attemptStatus ?? ''));
+  return awaiting ? 'Pending' : 'Unavailable';
 }
 
 export function versionLineFor(versions: number[]): string | null {
@@ -215,6 +223,10 @@ export function SatExamAttemptRow({
         <span className="flex min-w-0 flex-col items-start gap-0.5">
           <SatStatusPill tone={outcome.tone}>{outcome.label}</SatStatusPill>
           <span className={CELL_SECONDARY}>{attempt.outcomeStatus === 'scored' ? 'View answers' : 'View saved answers'}</span>
+        </span>
+        <span className={`${attempt.totalScore != null ? CELL_PRIMARY : CELL_SECONDARY} tabular-nums sm:text-right`}>
+          <span className="sm:hidden">Total </span>
+          {totalScoreLabel(attempt)}
         </span>
         <Chevron />
       </RowGrid>

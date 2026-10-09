@@ -33,9 +33,9 @@ function useCopyLink(url: string) {
 }
 
 const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
-const PRIMARY_BUTTON = `sat-pressable flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[12px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] ${FOCUS_RING}`;
-const SECONDARY_BUTTON = `sat-pressable flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] ${FOCUS_RING}`;
-const SURFACE_BUTTON = `sat-pressable flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-surface,#fff)] px-3 text-[12px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] ring-1 ring-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] ${FOCUS_RING}`;
+const PRIMARY_BUTTON = `sat-pressable flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[14px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] ${FOCUS_RING}`;
+const SECONDARY_BUTTON = `sat-pressable flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] ${FOCUS_RING}`;
+const SURFACE_BUTTON = `sat-pressable flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-surface,#fff)] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] ring-1 ring-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] ${FOCUS_RING}`;
 
 function CopyButton({ copied, onCopy, className }: { copied: boolean; onCopy: () => void; className: string }) {
   return (
@@ -49,7 +49,7 @@ function CopyButton({ copied, onCopy, className }: { copied: boolean; onCopy: ()
 function QrImage({ dataUrl, error, label }: { dataUrl: string | null; error: string | null; label: string }) {
   return dataUrl
     ? <img src={dataUrl} alt={label} className="h-full w-full" />
-    : <span role="status" className="px-3 text-center text-[12px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{error ?? 'Generating QR code…'}</span>;
+    : <span role="status" className="px-3 text-center text-[14px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{error ?? 'Generating QR code…'}</span>;
 }
 
 export function SatStudentLinkDialog({
@@ -71,11 +71,11 @@ export function SatStudentLinkDialog({
   return (
     <SatFormDialog open={open} eyebrow="Student link" title={cohortName} onClose={onClose}>
       <div className="px-5 pb-5 pt-2">
-        <p className="text-[12px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Students scan the code or open the link to join this session. They wait in the roster until you start.</p>
+        <p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Students scan the code or open the link to join this session. They wait in the roster until you start.</p>
         <div className="mx-auto mt-4 flex h-52 w-52 items-center justify-center rounded-[18px] bg-white p-3 ring-1 ring-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))]">
           <QrImage dataUrl={dataUrl} error={qrError} label={`QR code for ${cohortName}`} />
         </div>
-        <p className="mt-4 select-all break-all rounded-[12px] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 py-2.5 font-mono text-[12px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{url}</p>
+        <p className="mt-4 select-all break-all rounded-[12px] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 py-2.5 font-mono text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{url}</p>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <CopyButton copied={copied} onCopy={() => void copy()} className={PRIMARY_BUTTON} />
           <button type="button" onClick={onPresent} className={SECONDARY_BUTTON}><Presentation size={14} aria-hidden="true" />Present</button>
@@ -84,7 +84,7 @@ export function SatStudentLinkDialog({
             : <span />}
           <a href={url} target="_blank" rel="noreferrer" className={SECONDARY_BUTTON}><ExternalLink size={14} aria-hidden="true" />Open student page</a>
         </div>
-        {error ? <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
+        {error ? <p role="alert" className="mt-3 text-[14px] font-medium text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
       </div>
     </SatFormDialog>
   );
@@ -115,7 +115,7 @@ export function SatStudentLinkPresent({
         <Dialog.Content className="sat-product fixed inset-0 z-[112] flex flex-col bg-[var(--sat-staff-surface,#fff)] text-[var(--sat-staff-text-primary,#1d1d1f)]">
           <header className="flex items-start justify-between gap-4 px-6 py-5">
             <div className="min-w-0">
-              <p className="text-[13px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">{examTitle}</p>
+              <p className="text-[14px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">{examTitle}</p>
               <Dialog.Title className="mt-1 truncate text-2xl font-semibold tracking-[-0.03em]">{cohortName}</Dialog.Title>
               <Dialog.Description className="sr-only">QR code and link students use to join this session.</Dialog.Description>
             </div>
@@ -146,7 +146,7 @@ function PresentMetric({ value, label }: { value: number; label: string }) {
   return (
     <div>
       <p className="text-4xl font-semibold tabular-nums tracking-[-0.04em]">{value}</p>
-      <p className="mt-1 text-[13px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">{label}</p>
+      <p className="mt-1 text-[14px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">{label}</p>
     </div>
   );
 }
@@ -178,14 +178,14 @@ export function SatStudentLinkCard({
         <QrImage dataUrl={dataUrl} error={qrError} label={`QR code for ${cohortName}`} />
       </button>
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 text-[13px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]"><QrCode size={14} aria-hidden="true" />Student link</p>
-        <p className="mt-1 truncate font-mono text-[12px] text-[var(--sat-staff-text-secondary,#515154)]" title={url}>{url}</p>
-        <p className="mt-1 text-[12px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{joinedCount === 0 ? 'No students have joined yet.' : `${joinedCount} student${joinedCount === 1 ? '' : 's'} joined so far.`}</p>
+        <p className="flex items-center gap-1.5 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]"><QrCode size={14} aria-hidden="true" />Student link</p>
+        <p className="mt-1 truncate font-mono text-[14px] text-[var(--sat-staff-text-secondary,#515154)]" title={url}>{url}</p>
+        <p className="mt-1 text-[14px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{joinedCount === 0 ? 'No students have joined yet.' : `${joinedCount} student${joinedCount === 1 ? '' : 's'} joined so far.`}</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <CopyButton copied={copied} onCopy={() => void copy()} className={PRIMARY_BUTTON} />
           <button type="button" onClick={onPresent} className={SURFACE_BUTTON}><Presentation size={14} aria-hidden="true" />Present</button>
         </div>
-        {error ? <p role="alert" className="mt-2 text-[12px] font-medium text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
+        {error ? <p role="alert" className="mt-2 text-[14px] font-medium text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
       </div>
     </div>
   );

@@ -1449,6 +1449,30 @@
   letter-spacing: 0.02em;
 }
 
+/* SAT staff: routine spine labels sit at the 14px floor, and the canvas, selected
+ * tab and save footer are flat. The IELTS builder shares this spine and keeps its
+ * 12px labels and gradients. */
+.sat-staff-root .sat-spine__section > div:first-child h3 span,
+.sat-staff-root .answer-choice__key,
+.sat-staff-root .answer-choice__letter,
+.sat-staff-root .sat-spine__kbd {
+  font-size: 14px;
+}
+
+.sat-staff-root .sat-spine__main {
+  background: var(--sat-staff-canvas, #f7f7f8);
+}
+
+.sat-staff-root .sat-spine__tab.is-selected {
+  background: #ecf5ff;
+}
+
+.sat-staff-root .sat-spine__save-footer {
+  background: #fff;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 @media (max-width: 700px) {
   .sat-spine {
     --spine-document: 100%;

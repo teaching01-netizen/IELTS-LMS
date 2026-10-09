@@ -30,7 +30,7 @@ describe('SAT system-contracts CSS (sat-* rules only)', () => {
   it('LIGHT-02: SAT surfaces keep their light material tokens', () => {
     expect(css).toMatch(/\.sat-ui\s*\{[\s\S]*?color-scheme:\s*light/);
     expect(css).toContain('--sat-staff-surface-solid-fallback: #ffffff');
-    expect(css).toContain('--sat-staff-glass-sidebar: rgba(255, 255, 255, 0.82)');
+    expect(css).toContain('--sat-staff-glass-sidebar: #ffffff');
   });
 
   it('LIGHT-03: accessibility color overrides remain available', () => {

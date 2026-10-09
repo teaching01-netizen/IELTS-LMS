@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { proctorFacade } from "../../../proctor/application/proctorFacade";
+import { proctorFacade } from "../../../proctor/api/proctorFacade";
 import { fetchProctorSessionSummaries, proctorKeys, useProctorSessionSummaries } from "../../../proctor/api/proctorQueries";
 import {
   sessionPhaseFromRuntime,

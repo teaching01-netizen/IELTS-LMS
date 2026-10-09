@@ -433,11 +433,11 @@ async function startSatAttempt(
   const studentEmail = `sat-adaptive-${stamp}@example.com`;
 
   await page.goto("/sat/exams");
-  await expect(page.getByRole("heading", { name: "Exam Library" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tests" })).toBeVisible();
   await expect(page.getByText("Digital SAT").first()).toBeVisible();
   await expect(page.getByText("IELTS", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Create SAT", exact: true }).first().click();
+  await page.getByRole("button", { name: "Create test", exact: true }).first().click();
   await page.getByLabel("SAT exam name").fill(examTitle);
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i, { timeout: 30_000 });

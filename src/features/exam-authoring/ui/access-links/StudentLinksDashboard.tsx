@@ -663,6 +663,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         prefill={prefillLink}
         targetVersionNumber={createTarget?.versionNumber ?? version.versionNumber}
         providerKey={exam.providerKey ?? null}
+        examTitle={exam.title}
         publishScope={createTarget?.publishScope ?? version?.publishScope ?? "full"}
         members={(membersQuery.data ?? EMPTY_MEMBERS) as AccessLinkMemberInput[]}
         membersLoading={Boolean((editingLink ?? prefillLink)?.audienceType === "selected_students" && membersQuery.isLoading)}
