@@ -92,7 +92,7 @@ describe('SatExamLibraryRoute', () => {
   it('renders header plus skeleton while loading, without blanking the page', () => {
     useExamListQueryMock.mockReturnValue({ data: undefined, isLoading: true, error: null, refetch: vi.fn() });
     renderRoute();
-    expect(screen.getByText('Tests')).toBeInTheDocument();
+    expect(screen.getByText('Exams')).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Loading SAT exams' })).toBeInTheDocument();
     expect(screen.queryByText('SAT Practice 06')).not.toBeInTheDocument();
   });

@@ -134,8 +134,9 @@ test.describe("SAT student transitions", () => {
         studentPage.getByRole("heading", { name: /Waiting for your proctor/ })
       ).toBeVisible({ timeout: 30_000 });
 
-      await page.getByRole("button", { name: "Start" }).click();
-      await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
+      await page.getByRole("button", { name: "Review and start exam" }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: "Start exam" }).click();
+      await expect(page.getByText("Exam started.")).toBeVisible({ timeout: 20_000 });
       await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
       await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
       await studentPage.reload({ waitUntil: "domcontentloaded" });

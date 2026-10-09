@@ -27,13 +27,13 @@ describe("ExamWorkspaceHeader", () => {
   it("reports the chosen tab and leaves navigation to the host", () => {
     const onSelectTab = vi.fn();
     render(<ExamWorkspaceHeader {...props({ onSelectTab })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Results" }));
+    fireEvent.click(screen.getByRole("button", { name: "Responses" }));
     expect(onSelectTab).toHaveBeenCalledWith("responses");
   });
 
   it("omits Results for roles that cannot read results", () => {
     render(<ExamWorkspaceHeader {...props({ showResponses: false })} />);
-    expect(screen.queryByRole("button", { name: "Results" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Responses" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Questions" })).toBeInTheDocument();
   });
 

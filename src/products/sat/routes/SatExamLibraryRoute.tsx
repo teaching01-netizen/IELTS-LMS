@@ -147,13 +147,13 @@ export function SatExamLibraryRoute() {
     }
   };
 
-  if (query.error) return <SatPageError title="Tests could not load" description={query.error instanceof Error ? query.error.message : 'The exam library is unavailable.'} retryLabel="Retry" onRetry={() => void query.refetch()} />;
+  if (query.error) return <SatPageError title="Exams could not load" description={query.error instanceof Error ? query.error.message : 'The exam library is unavailable.'} retryLabel="Retry" onRetry={() => void query.refetch()} />;
 
   return (
     <SatContainer>
       <SatPageHeader
         eyebrow="Digital SAT"
-        title="Tests"
+        title="Exams"
         description="Practice tests with adaptive Reading & Writing and Math modules."
         actions={<SatPrimaryButton onClick={openCreate} icon={<Plus size={15} aria-hidden="true" />}>Create test</SatPrimaryButton>}
       />

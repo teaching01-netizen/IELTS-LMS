@@ -16,19 +16,19 @@ function buildItems(onSelect: (id: string) => void): SatMenuItem[] {
   return [
     { id: 'extend-5', label: 'Add 5 minutes', onSelect: () => onSelect('extend-5') },
     { id: 'extend-10', label: 'Add 10 minutes', onSelect: () => onSelect('extend-10') },
-    { id: 'finish', label: 'Finish session…', onSelect: () => onSelect('finish'), destructive: true, separatorBefore: true },
+    { id: 'finish', label: 'Finish room…', onSelect: () => onSelect('finish'), destructive: true, separatorBefore: true },
   ];
 }
 
 function renderMenu(onSelect: (id: string) => void) {
-  return render(<SatMenu label="Session actions" compact items={buildItems(onSelect)} align="end" />);
+  return render(<SatMenu label="Room actions" compact items={buildItems(onSelect)} align="end" />);
 }
 
 describe('SatMenu', () => {
   it('opens from the trigger and selects an item, closing the menu', () => {
     const onSelect = vi.fn();
     renderMenu(onSelect);
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Room actions' }));
     const item = screen.getByRole('menuitem', { name: 'Add 5 minutes' });
     expect(item).toBeInTheDocument();
     fireEvent.click(item);
@@ -39,15 +39,15 @@ describe('SatMenu', () => {
   it('marks the destructive item and renders the group separator', () => {
     const onSelect = vi.fn();
     renderMenu(onSelect);
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
-    expect(screen.getByRole('menuitem', { name: 'Finish session…' })).toHaveAttribute('data-destructive');
+    fireEvent.click(screen.getByRole('button', { name: 'Room actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Finish room…' })).toHaveAttribute('data-destructive');
     expect(screen.getByRole('separator')).toBeInTheDocument();
   });
 
   it('closes on Escape without selecting', () => {
     const onSelect = vi.fn();
     renderMenu(onSelect);
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Room actions' }));
     expect(screen.getByRole('menuitem', { name: 'Add 5 minutes' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('menuitem', { name: 'Add 5 minutes' })).not.toBeInTheDocument();
@@ -61,7 +61,7 @@ describe('SatMenu', () => {
 
   it('animates the menu surface on open with an origin-aware enter', () => {
     renderMenu(vi.fn());
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Room actions' }));
     const menu = screen.getByRole('menu');
     expect(menu).toHaveAttribute('data-sat-menu-animate');
   });
@@ -95,14 +95,14 @@ describe('SatMenu', () => {
     const onSelect = vi.fn();
     render(
       <SatMenu
-        label="Session actions"
+        label="Room actions"
         compact
         items={[
           { id: 'only', label: 'Locked action', onSelect: () => onSelect('only'), disabled: true },
         ]}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Room actions' }));
     const item = screen.getByRole('menuitem', { name: 'Locked action' });
     expect(item).toBeDisabled();
     fireEvent.click(item);
@@ -112,12 +112,12 @@ describe('SatMenu', () => {
   it('renders no separator when separatorBefore is set on the first item (index guard)', () => {
     render(
       <SatMenu
-        label="Session actions"
+        label="Room actions"
         compact
         items={[{ id: 'first', label: 'First', onSelect: vi.fn(), separatorBefore: true }]}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Room actions' }));
     expect(screen.getByRole('menuitem', { name: 'First' })).toBeInTheDocument();
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
   });
@@ -178,9 +178,9 @@ describe('popup placement', () => {
 
   it('renders in the document body when no container is given', () => {
     renderMenu(vi.fn());
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Session actions' }), { button: 0 });
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Room actions' }), { button: 0 });
 
-    const portalled = screen.getByRole('menu', { name: 'Session actions' });
+    const portalled = screen.getByRole('menu', { name: 'Room actions' });
     expect(document.body.contains(portalled)).toBe(true);
     expect(portalled.parentElement?.parentElement).toBe(document.body);
   });

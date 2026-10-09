@@ -49,7 +49,7 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
   const [searchParams, setSearchParams] = useSearchParams();
   const embedded = lockedExamId !== undefined;
   const examIdParam = (lockedExamId ?? searchParams.get('exam') ?? '').trim();
-  const accessIdParam = (searchParams.get('access') ?? '').trim();
+  const requestedAccessId = (searchParams.get('access') ?? '').trim();
   // Every level keeps its list state in the URL (`q` is the search of whichever
   // level is showing), so refresh, deep links and Back restore the same view.
   const search = searchParams.get('q') ?? '';
@@ -71,15 +71,19 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
   }, [status, fromDay, toDay]);
   const hasFilters = search.trim() !== '' || status !== 'all' || fromDay !== '' || toDay !== '';
   const query = useSatResultsQuery();
+  const allGroups = useMemo(() => groupSatAccessGroups(query.data ?? []), [query.data]);
+  const selectedGroup: SatExamGroup | null = examIdParam ? allGroups.find((group) => group.examId === examIdParam) ?? null : null;
+  const roomGroups = selectedGroup?.accessGroups ?? [];
+  // An exam's Responses tab with a single room shows its students directly.
+  const roomAutoSelected = !requestedAccessId && embedded && roomGroups.length === 1;
+  const accessIdParam = roomAutoSelected ? roomGroups[0]!.scheduleId : requestedAccessId;
   const studentSearch = accessIdParam ? search.trim() : '';
   const attemptsQuery = useSatAttemptsQuery(examIdParam, accessIdParam, offset, studentSearch, 'all', filters);
   const backButtonRef = useRef<HTMLButtonElement>(null);
-  const allGroups = useMemo(() => groupSatAccessGroups(query.data ?? []), [query.data]);
   const needle = search.trim().toLocaleLowerCase();
   const listGroups = needle && !examIdParam ? allGroups.filter((group) => group.examTitle.toLocaleLowerCase().includes(needle)) : allGroups;
-  const selectedGroup: SatExamGroup | null = examIdParam ? allGroups.find((group) => group.examId === examIdParam) ?? null : null;
-  const selectedAccess = selectedGroup?.accessGroups?.find((group) => group.scheduleId === accessIdParam) ?? null;
-  const visibleAccessGroups = (selectedGroup?.accessGroups ?? []).filter((group) => `${group.accessLinkName} ${group.cohortName}`.toLocaleLowerCase().includes(needle));
+  const selectedAccess = roomGroups.find((group) => group.scheduleId === accessIdParam) ?? null;
+  const visibleAccessGroups = roomGroups.filter((group) => `${group.accessLinkName} ${group.cohortName}`.toLocaleLowerCase().includes(needle));
   const page = attemptsQuery.data;
   const visibleAttempts = useMemo(() => filterSatAttempts(page?.items ?? [], { needle: studentSearch, scoreFilter: 'all' }), [page, studentSearch]);
   const returnPath = location.pathname + location.search;
@@ -117,7 +121,7 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
   }, [examIdParam, accessIdParam]);
 
   if (query.error) return <SatPageError title="SAT results could not load" description={query.error instanceof Error ? query.error.message : 'Results are unavailable.'} retryLabel="Retry" onRetry={() => void query.refetch()} />;
-  if (attemptsQuery.error) return <SatPageError title="Student attempts could not load" description="This session's attempts are unavailable." retryLabel="Retry" onRetry={() => void attemptsQuery.refetch()} />;
+  if (attemptsQuery.error) return <SatPageError title="Student attempts could not load" description="This room's attempts are unavailable." retryLabel="Retry" onRetry={() => void attemptsQuery.refetch()} />;
 
   const statsFor = (attempts: number, counts: SatOutcomeCounts, scopeLabel: string) => [
     { id: 'scope', label: scopeLabel, value: attempts },
@@ -133,31 +137,31 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
   const timeZoneNote = <p className="mt-2 text-[14px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">Times shown in {viewerTimeZoneLabel()}.</p>;
 
   if (examIdParam) {
-    if (query.isLoading) return <SatContainer>{embedded ? null : backButton('Back to Results', '/sat/results')}<SatListSkeleton rows={5} label="Loading SAT results" /></SatContainer>;
-    if (!selectedGroup) return embedded ? <SatContainer>{emptyState}</SatContainer> : <SatContainer>{backButton('Back to Results', '/sat/results')}<SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title="Exam not found" hint="This exam link looks invalid or the exam has no results. Go back and choose another exam." /></SatContainer>;
+    if (query.isLoading) return <SatContainer>{embedded ? null : backButton('Back to Responses', '/sat/results')}<SatListSkeleton rows={5} label="Loading SAT results" /></SatContainer>;
+    if (!selectedGroup) return embedded ? <SatContainer>{emptyState}</SatContainer> : <SatContainer>{backButton('Back to Responses', '/sat/results')}<SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title="Exam not found" hint="This exam link looks invalid or the exam has no results. Go back and choose another exam." /></SatContainer>;
 
     if (!accessIdParam) {
       const versionLine = versionLineFor(selectedGroup.versions);
       return (
         <SatContainer>
-          {embedded ? null : backButton('Back to SAT results', '/sat/results')}
+          {embedded ? null : backButton('Back to Responses', '/sat/results')}
           {embedded ? <p className="text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">{aggregateLineFor(selectedGroup)}</p> : <SatPageHeader eyebrow="Digital SAT" title={selectedGroup.examTitle} description={aggregateLineFor(selectedGroup)} />}
           {versionLine ? <p className="mt-3 text-[14px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{versionLine}</p> : null}
           <SatStatStrip label="Exam summary" stats={statsFor(selectedGroup.total, countsOf(selectedGroup), 'Attempts')} />
-          <SatListToolbar label="Session list controls">
-            <SatSearchField id="sat-results-access-search" label="Search sessions" value={search} onChange={setSearch} placeholder="Search sessions or cohort" widthClassName="w-full sm:w-80 sm:flex-none" />
+          <SatListToolbar label="Room list controls">
+            <SatSearchField id="sat-results-access-search" label="Search rooms" value={search} onChange={setSearch} placeholder="Search rooms or cohort" widthClassName="w-full sm:w-80 sm:flex-none" />
           </SatListToolbar>
           {timeZoneNote}
           {visibleAccessGroups.length ? <>
-            <SatResultCount total={selectedGroup.accessGroups?.length ?? 0} visible={visibleAccessGroups.length} itemLabel={visibleAccessGroups.length === 1 ? 'session' : 'sessions'} />
+            <SatResultCount total={selectedGroup.accessGroups?.length ?? 0} visible={visibleAccessGroups.length} itemLabel={visibleAccessGroups.length === 1 ? 'room' : 'rooms'} />
             <AccessColumnHeader />
             <SatList>{visibleAccessGroups.map((group, index) => <SatAccessGroupRow key={group.scheduleId} group={group} groupIndex={index} current={group.scheduleId === lastOpenedId} onOpen={(scheduleId) => openRecord(scheduleId, examHref(scheduleId))} />)}</SatList>
-          </> : <SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title={needle ? 'No matching sessions' : 'No sessions'} hint={needle ? `No sessions match “${search.trim()}”.` : 'No sessions of this exam have attempts yet.'} action={needle ? <SatPrimaryButton onClick={() => setSearch('')}>Clear Search</SatPrimaryButton> : undefined} />}
+          </> : <SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title={needle ? 'No matching rooms' : 'No rooms'} hint={needle ? `No rooms match “${search.trim()}”.` : 'No rooms of this exam have attempts yet.'} action={needle ? <SatPrimaryButton onClick={() => setSearch('')}>Clear Search</SatPrimaryButton> : undefined} />}
         </SatContainer>
       );
     }
 
-    if (!selectedAccess) return <SatContainer>{backButton(embedded ? 'All sessions' : `${selectedGroup.examTitle}`, examHref())}<SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title="Session not found" hint="This session is unavailable for the selected exam." /></SatContainer>;
+    if (!selectedAccess) return <SatContainer>{backButton(embedded ? 'All rooms' : `${selectedGroup.examTitle}`, examHref())}<SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title="Room not found" hint="This room is unavailable for the selected exam." /></SatContainer>;
     const currentRows = page?.items ?? [];
     const total = page?.total ?? 0;
     const rangeStart = total ? offset + 1 : 0;
@@ -190,19 +194,20 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
     const next = inspectedIndex >= 0 ? visibleAttempts[inspectedIndex + 1] : undefined;
     return (
       <SatContainer>
-        {backButton(embedded ? 'All sessions' : selectedGroup.examTitle, examHref())}
+        {roomAutoSelected ? null : backButton(embedded ? 'All rooms' : selectedGroup.examTitle, examHref())}
         <SatPageHeader
-          eyebrow="Session"
+          eyebrow="Room"
           title={selectedAccess.accessLinkName}
           description={`${selectedGroup.examTitle} · Version ${selectedAccess.versionNumber}${selectedAccess.cohortName ? ` · ${selectedAccess.cohortName}` : ''}`}
-          actions={<SatPrimaryButton icon={<Download size={15} aria-hidden="true" />} pending={exporting} onClick={() => void runExport()}>{exporting ? 'Exporting...' : 'Export session answers'}</SatPrimaryButton>}
+          actions={<SatPrimaryButton icon={<Download size={15} aria-hidden="true" />} pending={exporting} onClick={() => void runExport()}>{exporting ? 'Exporting...' : 'Download room responses (.xlsx)'}</SatPrimaryButton>}
         />
-        <p className="mt-2 text-[14px] text-[var(--sat-staff-text-tertiary,#6e6e73)] sm:text-right">All attempts in this session; filters do not affect export.</p>
+        <p className="mt-2 text-[14px] text-[var(--sat-staff-text-tertiary,#6e6e73)] sm:text-right">All attempts in this room; filters do not affect export.</p>
         {exportError ? <p role="alert" className="mt-3 flex flex-wrap items-center gap-3 text-[14px] font-medium text-[var(--sat-staff-danger,#b42318)]">{exportError}<button type="button" onClick={() => void runExport()} className="min-h-11 font-semibold underline">Try again</button></p> : null}
         <p role="status" aria-live="polite" className="mt-2 min-h-5 text-[14px] font-medium text-[var(--sat-staff-success-text,#067647)] sm:text-right">{exportDone ? 'Export downloaded.' : ''}</p>
         <p className="mt-3 text-[14px] tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">{dateRange}</p>
-        <SatStatStrip label="Session summary" stats={statsFor(selectedAccess.attemptCount, accessOutcomeCounts(selectedAccess), 'Attempts')} />
+        <SatStatStrip label="Room summary" stats={statsFor(selectedAccess.attemptCount, accessOutcomeCounts(selectedAccess), 'Attempts')} />
         <SatListToolbar label="Attempt list controls">
+          {embedded && roomGroups.length > 1 ? <SatToolbarSelect<string> id="sat-results-room" label="Room" value={selectedAccess.scheduleId} options={roomGroups.map((group) => ({ value: group.scheduleId, label: group.cohortName ? `${group.accessLinkName} · ${group.cohortName}` : group.accessLinkName }))} onChange={(value) => updateParams({ access: value, attempt: null })} /> : null}
           <SatSearchField id="sat-results-student-search" label="Search students" value={search} onChange={setSearch} placeholder="Search name, ID, cohort" widthClassName="w-full sm:w-80 sm:flex-none" />
           <SatToolbarSelect<AttemptStatus> id="sat-results-status" label="Status" value={status} options={STATUS_OPTIONS} onChange={(value) => updateParams({ status: value === 'all' ? null : value })} />
           <label htmlFor="sat-results-from" className="flex flex-col gap-1 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">Test date from
@@ -216,8 +221,8 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
         {timeZoneNote}
         {attemptsQuery.isLoading ? <SatListSkeleton rows={5} label="Loading student attempts" /> : visibleAttempts.length ? <>
           <AttemptColumnHeader />
-          <SatList>{visibleAttempts.map((attempt, index) => <SatExamAttemptRow key={attempt.attemptId} attempt={attempt} attemptIndex={index} current={attempt.attemptId === attemptParam} onOpen={(row) => openAttempt(row.attemptId)} />)}</SatList>
-        </> : <SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title={hasFilters ? 'No matching attempts' : 'No student attempts'} hint={hasFilters ? 'No attempts match the current search, status, and test date filters.' : 'Attempts for this session will appear here.'} action={hasFilters ? <SatPrimaryButton onClick={clearFilters}>Clear filters</SatPrimaryButton> : undefined} />}
+          <SatList>{visibleAttempts.map((attempt, index) => <SatExamAttemptRow key={attempt.attemptId} attempt={attempt} roomName={selectedAccess.accessLinkName} attemptIndex={index} current={attempt.attemptId === attemptParam} onOpen={(row) => openAttempt(row.attemptId)} />)}</SatList>
+        </> : <SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title={hasFilters ? 'No matching attempts' : 'No student attempts'} hint={hasFilters ? 'No attempts match the current search, status, and test date filters.' : 'Attempts for this room will appear here.'} action={hasFilters ? <SatPrimaryButton onClick={clearFilters}>Clear filters</SatPrimaryButton> : undefined} />}
         <div className="mt-4 flex items-center justify-between gap-3 text-[14px] text-slate-500">
           <span aria-live="polite">{rangeStart}–{rangeEnd} of {total} {hasFilters ? 'matching attempts' : 'attempts'}</span>
           <div className="flex gap-2">
@@ -251,7 +256,7 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
 
   return (
     <SatContainer>
-      <SatPageHeader eyebrow="Digital SAT" title="SAT results" description="Find a test and review student attempts." />
+      <SatPageHeader eyebrow="Digital SAT" title="Responses" description="Find an exam and review student responses." />
       <SatStatStrip label="Results summary" stats={indexStats} />
       <SatListToolbar label="Exam list controls">
         <SatSearchField id="sat-results-search" label="Search exams" value={search} onChange={setSearch} placeholder="Search exams" widthClassName="w-full sm:w-80 sm:flex-none" />
@@ -261,7 +266,7 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
         <SatResultCount total={allGroups.length} visible={listGroups.length} itemLabel={listGroups.length === 1 ? 'exam' : 'exams'} />
         <ExamColumnHeader />
         <SatList>{listGroups.map((group, index) => <SatExamGroupRow key={group.examId} group={group} groupIndex={index} current={group.examId === lastOpenedId} onOpen={(examId) => openRecord(examId, '/sat/results?exam=' + encodeURIComponent(examId))} />)}</SatList>
-      </> : <SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title={needle ? 'No matching SAT exams' : 'No SAT results yet'} hint={needle ? 'Try a different exam name.' : 'SAT attempts will appear here when students check in to a session.'} action={needle ? <SatPrimaryButton onClick={() => { setSearch(''); document.getElementById('sat-results-search')?.focus(); }}>Clear Search</SatPrimaryButton> : undefined} />}
+      </> : <SatEmptyState icon={<BarChart3 size={18} aria-hidden="true" />} title={needle ? 'No matching SAT exams' : 'No SAT results yet'} hint={needle ? 'Try a different exam name.' : 'SAT attempts will appear here when students check in to a room.'} action={needle ? <SatPrimaryButton onClick={() => { setSearch(''); document.getElementById('sat-results-search')?.focus(); }}>Clear Search</SatPrimaryButton> : undefined} />}
     </SatContainer>
   );
 }

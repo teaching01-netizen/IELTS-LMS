@@ -5,6 +5,7 @@ import {
   accessLinkStatusTone,
   formatAccessLinkStatus,
   parseAccessLinkMembers,
+  roomEntryUrl,
   shouldPulseAccessLinkStatus,
   studentJoinUrl,
 } from "../accessLinkUi";
@@ -48,7 +49,7 @@ describe("accessLinkStatusTone", () => {
     expect(accessLinkStatusTone("revoked")).toBe("invalidated");
   });
 
-  it("keeps entry status static so it cannot imply a running session", () => {
+  it("keeps entry status static so it cannot imply a running room", () => {
     expect(shouldPulseAccessLinkStatus("live")).toBe(false);
     for (const status of ["upcoming", "ended", "paused", "revoked"] as const) {
       expect(shouldPulseAccessLinkStatus(status)).toBe(false);
@@ -66,6 +67,13 @@ describe("accessLinkStatusTone", () => {
 describe("studentJoinUrl", () => {
   it("encodes the link id", () => {
     expect(studentJoinUrl("a/b?c")).toContain(encodeURIComponent("a/b?c"));
+  });
+});
+
+describe("roomEntryUrl", () => {
+  it("uses the access link when the room has one, else the schedule entry", () => {
+    expect(roomEntryUrl({ accessLinkId: "link 1", scheduleId: "sched-1" })).toBe(`${window.location.origin}/join/link%201`);
+    expect(roomEntryUrl({ accessLinkId: null, scheduleId: "sched 1" })).toBe(`${window.location.origin}/student/sched%201`);
   });
 });
 

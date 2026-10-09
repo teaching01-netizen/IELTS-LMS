@@ -96,7 +96,7 @@ export const AccessLinkRow = memo(function AccessLinkRow({
         aria-label={`Open ${link.name}`}
         style={resultIndex !== undefined && resultIndex < 6 ? ({ "--sat-row-index": resultIndex } as React.CSSProperties) : undefined}
         className={
-          "sat-list-row sat-press-row flex min-h-[76px] w-full items-center rounded-2xl border px-4 py-3.5 pr-14 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 " +
+          "sat-list-row sat-press-row flex min-h-[76px] w-full items-center rounded-2xl border px-4 py-3.5 pr-14 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 " +
           (resultIndex !== undefined && resultIndex < 6 ? "sat-row-enter " : "") +
           (selected
             ? "border-au-accent/30 bg-au-accent-tint"

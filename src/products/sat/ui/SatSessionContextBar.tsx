@@ -11,7 +11,7 @@ export function getSatRoomMode(status: ExamSessionRuntime['status']): SatRoomMod
 }
 
 export function runtimeLabel(status: string): string {
-  if (status === 'not_started') return 'Ready';
+  if (status === 'not_started') return 'Not started';
   if (status === 'live') return 'Running';
   if (status === 'paused') return 'Paused';
   if (status === 'completed') return 'Finished';
@@ -56,11 +56,11 @@ export function SatSessionContextBar({
     : mode === 'review' && startedAt && finishedAt
       ? `${startedAt}–${finishedAt} ICT · ${duration ?? 'Duration unavailable'}`
       : mode === 'review'
-        ? [startedAt ? `Started ${startedAt} ICT` : null, finishedAt ? `Finished ${finishedAt} ICT` : null, duration].filter(Boolean).join(' · ') || 'Session timing unavailable'
-        : startedAt ? `Started ${startedAt} ICT` : 'Session started';
+        ? [startedAt ? `Started ${startedAt} ICT` : null, finishedAt ? `Finished ${finishedAt} ICT` : null, duration].filter(Boolean).join(' · ') || 'Room timing unavailable'
+        : startedAt ? `Started ${startedAt} ICT` : 'Room started';
 
   return (
-    <section className="sat-room__context" aria-label="Session context" data-sat-room-context>
+    <section className="sat-room__context" aria-label="Room context" data-sat-room-context>
       <div className="sat-room__context-timing">
         <p data-testid="sat-room-session-timing">{timing}</p>
         {runtime.isOverrun ? <span className="sat-room__context-overrun">Overrun · review extensions before ending</span> : null}
@@ -75,7 +75,7 @@ export function SatSessionContextBar({
         ) : <ContextStat value={0} label="Needs attention" />}
         <ContextStat value={openAlerts} label={openAlerts === 1 ? 'Open alert' : 'Open alerts'} warning={openAlerts > 0} />
       </div>
-      <div className="sat-room__context-health" aria-label="Session health">
+      <div className="sat-room__context-health" aria-label="Room health">
         <span className={isStale ? 'is-stale' : ''}>{isStale ? 'Reconnecting' : 'Live data'}</span>
         <span>Updated {lastUpdatedLabel}</span>
       </div>

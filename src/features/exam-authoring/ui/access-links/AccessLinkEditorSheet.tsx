@@ -21,8 +21,8 @@ import {
   type UpdateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
 import type { SatPublishScope } from "../../contracts/assessment";
-import { copyText, localDateTimeToIso, parseAccessLinkMembers, serializeAccessLinkMembers, toLocalDateTimeInput } from "./accessLinkUi";
-import { describeRosterResult, rosterTemplate, validateRosterSource } from "./rosterValidation";
+import { localDateTimeToIso, parseAccessLinkMembers, serializeAccessLinkMembers, toLocalDateTimeInput } from "./accessLinkUi";
+import { describeRosterResult, rosterCellsLine, rosterLineCells, rosterLinesFromPaste, validateRosterSource, type RosterRowError } from "./rosterValidation";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "../../../../components/ui/sheet";
 import { AuthoringConfirmDialog, restoreAuthoringFocus } from "../authoringPrimitives";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
@@ -100,6 +100,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const [sectionsError, setSectionsError] = useState<string | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const initialSnapshotRef = useRef("");
   const hydratingRef = useRef(false);
@@ -246,7 +247,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   ]);
 
   const validateName = (value: string): string | null => {
-    if (!value.trim()) return "Give this session a name people will recognize.";
+    if (!value.trim()) return "Give this room a name people will recognize.";
     return null;
   };
   const validateWindow = (kind: AccessLinkAvailabilityType, opens: string, closes: string): string | null => {
@@ -265,7 +266,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   };
   const validateSections = (selection: readonly AccessLinkSectionKey[]): string | null => {
     if (!isSat) return null;
-    if (selection.length === 0) return "A session needs at least one section.";
+    if (selection.length === 0) return "A room needs at least one section.";
     return null;
   };
   const toggleSection = (key: AccessLinkSectionKey) => {
@@ -279,14 +280,6 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   };
   const rosterResult = validateRosterSource(membersSource);
   const rosterSummary = audienceType === "selected_students" ? describeRosterResult(rosterResult) : "";
-  const rosterRowErrors = audienceType === "selected_students" ? rosterResult.errors.slice(0, 3) : [];
-  const copyRosterFormat = async () => {
-    try {
-      await copyText("student_code, student_name, student_email\nW123456, Jane Doe, jane@example.com");
-    } catch {
-      setError("Roster format could not be copied.");
-    }
-  };
   const validateRoster = (source: string): string | null => {
     const result = validateRosterSource(source);
     if (result.totalRows === 0) return "Add at least one selected student.";
@@ -361,7 +354,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
           setIsDirty(false);
         })
         .catch((saveError: unknown) => {
-          setError(saveError instanceof Error ? saveError.message : "The session could not be saved.");
+          setError(saveError instanceof Error ? saveError.message : "The room could not be saved.");
         });
     }, 700);
     return () => globalThis.clearTimeout(timer);
@@ -425,7 +418,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     submittingRef.current = true;
     try {
       if (props.link) {
-        if (!props.onUpdate) throw new Error("This session cannot be edited here.");
+        if (!props.onUpdate) throw new Error("This room cannot be edited here.");
         await props.onUpdate(props.link.id, {
           revision: props.link.revision,
           ...shared,
@@ -440,7 +433,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       setIsDirty(false);
       props.onClose();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "The session could not be saved.");
+      setError(saveError instanceof Error ? saveError.message : "The room could not be saved.");
     } finally {
       submittingRef.current = false;
     }
@@ -479,9 +472,9 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
         className="sat-product authoring-mobile-sheet au-elevation-sheet flex h-full w-full max-w-[520px] flex-col gap-0 border-l border-au-separator bg-au-fill p-0 sm:max-w-[520px]"
       >
             <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4 authoring-glass">
-              <div className="min-w-0 flex-1"><p className="text-[12px] font-medium text-slate-400">Digital SAT · Version {props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}</p><SheetTitle className="mt-0.5 text-lg font-semibold tracking-[-0.02em] text-slate-950">{props.link ? "Edit session setup" : props.prefill ? "Duplicate session setup" : "Create session"}</SheetTitle>
-                <SheetDescription className="sr-only">Set up who can join this session, how they identify themselves, and when check-in is open.</SheetDescription></div>
-              <button type="button" onClick={requestClose} disabled={props.isSaving} aria-label="Close session setup" className="authoring-icon-button"><X size={16} aria-hidden="true"/></button>
+              <div className="min-w-0 flex-1"><p className="text-[12px] font-medium text-slate-400">Digital SAT · Version {props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}</p><SheetTitle className="mt-0.5 text-lg font-semibold tracking-[-0.02em] text-slate-950">{props.link ? "Room settings" : props.prefill ? "Duplicate room" : "Create room"}</SheetTitle>
+                <SheetDescription className="sr-only">Set up who can join this room, how they identify themselves, and when check-in is open.</SheetDescription></div>
+              <button type="button" onClick={requestClose} disabled={props.isSaving} aria-label="Close room settings" className="authoring-icon-button"><X size={16} aria-hidden="true"/></button>
             </header>
             {props.membersLoading ? <p role="status" className="px-5 py-3 text-sm text-slate-600">Loading student roster…</p> : null}
             {props.membersError ? <div role="alert" className="px-5 py-3 text-sm text-red-700">{props.membersError}<button type="button" onClick={props.onRetryMembers} className="min-h-11 px-3 font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry roster</button></div> : null}
@@ -489,13 +482,56 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
               <div className="space-y-5">
                 {!props.link && props.prefill ? (
                   <p role="note" className="rounded-xl bg-au-accent/10 p-3 text-[12px] leading-5 text-slate-700">
-                    Creates a new session on <strong>Version {props.targetVersionNumber ?? "—"}</strong> with the audience, identification and sections of “{props.prefill.name}”. Choose its check-in window below.
+                    Creates a new room on <strong>Version {props.targetVersionNumber ?? "—"}</strong> with the audience, identification and sections of “{props.prefill.name}”. Choose its check-in window below.
                   </p>
                 ) : null}
+                <Field label="Room name" description="Use the name staff will recognize when sharing or monitoring this room." error={nameError} errorId="access-link-name-error"><input value={name} onChange={(event) => { setName(event.target.value); updateShared({ name: event.target.value }); if (nameError) setNameError(validateName(event.target.value)); }} onBlur={() => setNameError(validateName(name))} maxLength={160} aria-label="Room name" aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? "access-link-name-error" : undefined} className={inputClass} placeholder="Saturday morning mock" /></Field>
+                <Field label="Who can join?" description={audienceChoice === "listed" ? "Only students on the list below are admitted. Anyone else is turned away at check-in." : "Anyone who has the room link can check in. A student code identifies a student; it is not checked against a roster."}>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Choice active={audienceChoice === "anyone"} onClick={() => { const nextType = accessLinkAudienceTypeFor("anyone", audienceLabel); setAudienceType(nextType); updateShared({ audienceType: nextType }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Anyone with the link" subtitle="No roster check" />
+                    <Choice active={audienceChoice === "listed"} onClick={() => { setAudienceType("selected_students"); setAccessMode("student_code"); updateShared({ audienceType: "selected_students", accessMode: "student_code" }); }} icon={<LockKeyhole size={15} aria-hidden="true"/>} title="Listed students only" subtitle="Checked at check-in" />
+                  </div>
+                </Field>
+                {audienceType === "selected_students" ? (
+                  <Field label="Listed students" description="Student code is required. Name and email are optional." error={rosterError} errorId="access-link-roster-error">
+                    <RosterRows
+                      source={membersSource}
+                      errors={rosterResult.errors}
+                      onChange={(next) => {
+                        setMembersSource(next);
+                        updateShared({ membersSource: next });
+                        if (rosterError) setRosterError(validateRoster(next));
+                      }}
+                      onBlur={() => setRosterError(validateRoster(membersSource))}
+                    />
+                    <p role="status" aria-live="polite" className="mt-2 text-[12px] font-medium text-slate-500">{rosterSummary}</p>
+                  </Field>
+                ) : null}
+                <Field label="Student identification" description={audienceChoice === "listed" ? "Listed students must enter their listed student code. It is checked at check-in." : "Choose how students identify themselves. This identifies a student; it does not verify them."}>
+                  <div className="authoring-segmented flex w-full rounded-xl p-1">
+                    <Segment active={accessMode === "student_code"} onClick={() => { setAccessMode("student_code"); updateShared({ accessMode: "student_code" }); }}>Require student code</Segment>
+                    <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
+                  </div>
+                </Field>
+                <Field label="Check-in" description="Students can join during this window. The proctor starts the exam.">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Choice active={availabilityType === "anytime"} onClick={() => { setAvailabilityType("anytime"); updateShared({ availabilityType: "anytime", opensAt: null, closesAt: null }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Open now" subtitle="Until paused or revoked" />
+                    <Choice active={availabilityType === "scheduled"} onClick={() => { setAvailabilityType("scheduled"); updateShared({ availabilityType: "scheduled" }); }} icon={<Clock3 size={15} aria-hidden="true"/>} title="Scheduled" subtitle="Choose when it opens" />
+                  </div>
+                  {availabilityType === "scheduled" ? <><div className="mt-2 grid grid-cols-2 gap-2"><label htmlFor="access-link-opens-at" className="text-[12px] font-medium text-slate-500">Opens<input id="access-link-opens-at" aria-label="Opens" type="datetime-local" value={opensAt} onChange={(event) => { setOpensAt(event.target.value); updateShared({ opensAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, event.target.value, closesAt)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label><label htmlFor="access-link-closes-at" className="text-[12px] font-medium text-slate-500">Closes<input id="access-link-closes-at" aria-label="Closes" type="datetime-local" value={closesAt} onChange={(event) => { setClosesAt(event.target.value); updateShared({ closesAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, opensAt, event.target.value)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label></div>{windowError ? <p id="access-link-window-error" role="alert" className="mt-1.5 text-[12px] font-medium text-au-danger-text">{windowError}</p> : null}</> : <div className="mt-2 rounded-xl bg-au-surface px-3 py-3 text-[12px] leading-5 text-slate-500">Students can check in until you pause or revoke this room’s link. Pausing check-in does not stop students who are already taking the exam.</div>}
+                  <p className="mt-2 text-[12px] leading-4 text-slate-500">{availabilityType === "scheduled" ? `Times use your local timezone (${localTimeZone()}). ` : ""}Opening check-in never starts the exam.</p>
+                </Field>
+                <details
+                  open={moreOpen || Boolean(sectionsError)}
+                  onToggle={(event) => setMoreOpen(event.currentTarget.open)}
+                  className="rounded-xl border border-au-separator bg-au-surface"
+                >
+                  <summary className="flex min-h-11 cursor-pointer items-center px-4 text-sm font-semibold text-slate-800">More options</summary>
+                  <div className="space-y-5 px-4 pb-4 pt-1">
                 {!props.link && !props.prefill && !isDirty && props.onReuseSetup && props.reuseOptions && props.reuseOptions.length > 0 ? (
-                  <Field label="Start from an earlier session (optional)" description="Copies its audience, identification and sections. You still choose the check-in window.">
+                  <Field label="Start from an earlier room (optional)" description="Copies its audience, identification and sections. You still choose the check-in window.">
                     <select
-                      aria-label="Start from an earlier session"
+                      aria-label="Start from an earlier room"
                       value=""
                       onChange={(event) => {
                         const chosen = props.reuseOptions?.find((link) => link.id === event.target.value);
@@ -508,8 +544,6 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     </select>
                   </Field>
                 ) : null}
-                {isSat ? <h2 className="mb-2 text-sm font-semibold text-slate-950">Session details</h2> : null}
-                <Field label="Session name" description="Use the name staff will recognize when sharing or monitoring this session." error={nameError} errorId="access-link-name-error"><input value={name} onChange={(event) => { setName(event.target.value); updateShared({ name: event.target.value }); if (nameError) setNameError(validateName(event.target.value)); }} onBlur={() => setNameError(validateName(name))} maxLength={160} aria-label="Session name" aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? "access-link-name-error" : undefined} className={inputClass} placeholder="Saturday morning mock" /></Field>
                 <Field label="Class or group (optional)" description="A label for your own organization. It does not limit who can join.">
                   <input
                     aria-label="Class or group label"
@@ -530,30 +564,9 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     placeholder="SAT September · Saturday"
                   />
                 </Field>
-                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this session. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[12px] leading-4 text-amber-800">{sectionsLocked ? "This session has no available sections and is fixed because a student has joined. Create a new session with an available section." : "This session’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[12px] leading-4 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
-                {isSat ? <h2 className="mb-2 text-sm font-semibold text-slate-950">Students</h2> : null}
-                <Field label="Who can join?" description={audienceChoice === "listed" ? "Only students on the list below are admitted. Anyone else is turned away at check-in." : "Anyone who has the session link can check in. A student code identifies a student; it is not checked against a roster."}>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Choice active={audienceChoice === "anyone"} onClick={() => { const nextType = accessLinkAudienceTypeFor("anyone", audienceLabel); setAudienceType(nextType); updateShared({ audienceType: nextType }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Anyone with the link" subtitle="No roster check" />
-                    <Choice active={audienceChoice === "listed"} onClick={() => { setAudienceType("selected_students"); setAccessMode("student_code"); updateShared({ audienceType: "selected_students", accessMode: "student_code" }); }} icon={<LockKeyhole size={15} aria-hidden="true"/>} title="Listed students only" subtitle="Checked at check-in" />
+                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this room. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[12px] leading-4 text-amber-800">{sectionsLocked ? "This room has no available sections and is fixed because a student has joined. Create a new room with an available section." : "This room’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[12px] leading-4 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
                   </div>
-                </Field>
-                <Field label="Student identification" description={audienceChoice === "listed" ? "Listed students must enter their listed student code. It is checked at check-in." : "Choose how students identify themselves. This identifies a student; it does not verify them."}>
-                  <div className="authoring-segmented flex w-full rounded-xl p-1">
-                    <Segment active={accessMode === "student_code"} onClick={() => { setAccessMode("student_code"); updateShared({ accessMode: "student_code" }); }}>Require student code</Segment>
-                    <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
-                  </div>
-                </Field>
-                {audienceType === "selected_students" ? <Field label="Selected students" description="One student per line: code, name, email. Name and email are optional; code is required." error={rosterError} errorId="access-link-roster-error"><div className="mb-2 flex flex-wrap items-center gap-2"><button type="button" onClick={() => { const next = membersSource ? `${membersSource.trimEnd()}\nW123456, Jane Doe, jane@example.com` : rosterTemplate(); setMembersSource(next); updateShared({ membersSource: next }); setRosterError(null); }} className="sat-press sat-press-fill flex min-h-11 items-center rounded-lg bg-au-fill px-3 text-[12px] font-semibold text-slate-600 hover:bg-au-fill-strong">Insert template</button><button type="button" onClick={() => { void copyRosterFormat(); }} className="sat-press sat-press-fill flex min-h-11 items-center rounded-lg px-3 text-[12px] font-semibold text-slate-500 hover:bg-au-fill">Copy format</button><span role="status" aria-live="polite" className="text-[12px] font-medium text-slate-500">{rosterSummary}</span></div><textarea aria-label="Selected students" value={membersSource} onChange={(event) => { setMembersSource(event.target.value); updateShared({ membersSource: event.target.value }); if (rosterError) setRosterError(validateRoster(event.target.value)); }} onBlur={() => setRosterError(validateRoster(membersSource))} aria-invalid={rosterError ? true : undefined} aria-describedby={rosterError ? "access-link-roster-error access-link-roster-hint" : "access-link-roster-hint"} spellCheck={false} className="min-h-36 w-full resize-y rounded-xl border border-au-separator bg-au-surface px-3 py-2.5 font-mono text-[12px] leading-5 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10" placeholder={'W123456, Jane Doe, jane@example.com\nW123457, John Doe, john@example.com'} /><p id="access-link-roster-hint" className="mt-1.5 text-[12px] leading-4 text-slate-500">Codes must be unique. Email is optional but must look like name@example.com.</p>{rosterRowErrors.length ? <ul className="mt-2 space-y-1" aria-label="Roster issues">{rosterRowErrors.map((issue) => <li key={issue.row} className="text-[12px] font-medium text-au-danger-text">Row {issue.row}: {issue.message.replace(/^Row \d+[:\s]*/, "")}</li>)}{rosterResult.errors.length > rosterRowErrors.length ? <li className="text-[12px] text-slate-500">+{rosterResult.errors.length - rosterRowErrors.length} more — fix these first, then review the rest.</li> : null}</ul> : null}</Field> : null}
-                {isSat ? <h2 className="mb-2 text-sm font-semibold text-slate-950">Check-in window</h2> : null}
-                <Field label="Check-in" description="Students can join during this window. The proctor starts the exam.">
-                  <div className="grid grid-cols-2 gap-2">
-                    <Choice active={availabilityType === "scheduled"} onClick={() => { setAvailabilityType("scheduled"); updateShared({ availabilityType: "scheduled" }); }} icon={<Clock3 size={15} aria-hidden="true"/>} title="Scheduled window" subtitle="Choose when it opens" />
-                    <Choice active={availabilityType === "anytime"} onClick={() => { setAvailabilityType("anytime"); updateShared({ availabilityType: "anytime", opensAt: null, closesAt: null }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Open now" subtitle="Until paused or revoked" />
-                  </div>
-                  {availabilityType === "scheduled" ? <><div className="mt-2 grid grid-cols-2 gap-2"><label htmlFor="access-link-opens-at" className="text-[12px] font-medium text-slate-500">Opens<input id="access-link-opens-at" aria-label="Opens" type="datetime-local" value={opensAt} onChange={(event) => { setOpensAt(event.target.value); updateShared({ opensAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, event.target.value, closesAt)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label><label htmlFor="access-link-closes-at" className="text-[12px] font-medium text-slate-500">Closes<input id="access-link-closes-at" aria-label="Closes" type="datetime-local" value={closesAt} onChange={(event) => { setClosesAt(event.target.value); updateShared({ closesAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, opensAt, event.target.value)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label></div>{windowError ? <p id="access-link-window-error" role="alert" className="mt-1.5 text-[12px] font-medium text-au-danger-text">{windowError}</p> : null}</> : <div className="mt-2 rounded-xl bg-au-surface px-3 py-3 text-[12px] leading-5 text-slate-500">Students can check in until you pause or revoke this session’s link. Pausing check-in does not stop students who are already taking the exam.</div>}
-                  <p className="mt-2 text-[12px] leading-4 text-slate-500">{availabilityType === "scheduled" ? `Times use your local timezone (${localTimeZone()}). ` : ""}Opening check-in never starts the exam.</p>
-                </Field>
+                </details>
                 {isSat ? (
                   <section aria-labelledby="access-link-summary-heading" className="rounded-xl bg-au-surface px-4 py-3">
                     <h2 id="access-link-summary-heading" className="mb-2 text-sm font-semibold text-slate-950">Summary</h2>
@@ -576,13 +589,13 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
               {error ? <p role="alert" className="mb-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[12px] font-medium text-au-danger-text">{error}</p> : null}
               <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-press sat-press-fill min-h-11 rounded-xl px-4 text-sm font-semibold text-slate-600 hover:bg-au-fill">Cancel</button>{/* The primary action keeps its own box while pending (min-w covers the
                   longest label and the spinner) and stays enabled so the press is never
-                  cancelled by focus loss; the handler and aria-disabled own the guard. */}<button type="button" onClick={() => { if (props.isSaving) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError)} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-press sat-press-fill-accent flex min-h-11 min-w-[8.5rem] items-center justify-center gap-2 rounded-xl bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover disabled:opacity-45">{props.isSaving ? <span aria-hidden="true" className="sat-spinner block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white/40 border-t-white" /> : null}{props.isSaving ? "Saving…" : readOnly ? "View only" : props.link ? "Save changes" : "Create session"}</button></div>
+                  cancelled by focus loss; the handler and aria-disabled own the guard. */}<button type="button" onClick={() => { if (props.isSaving) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError)} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-press sat-press-fill-accent flex min-h-11 min-w-[8.5rem] items-center justify-center gap-2 rounded-xl bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover disabled:opacity-45">{props.isSaving ? <span aria-hidden="true" className="sat-spinner block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white/40 border-t-white" /> : null}{props.isSaving ? "Saving…" : readOnly ? "View only" : props.link ? "Save changes" : "Create room"}</button></div>
             </footer>
       </SheetContent>
       <AuthoringConfirmDialog
         open={showDiscardDialog}
-        title="Discard session setup changes?"
-        description="Your unsaved session settings will be lost."
+        title="Discard room settings changes?"
+        description="Your unsaved room settings will be lost."
         confirmLabel="Discard changes"
         destructive
         onCancel={() => setShowDiscardDialog(false)}
@@ -662,3 +675,130 @@ function sectionLabels(selection: readonly AccessLinkSectionKey[]): string {
 }
 
 function Segment({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" disabled={disabled} aria-pressed={active} onClick={onClick} className={`sat-press sat-press-fill flex min-h-11 flex-1 items-center justify-center rounded-lg px-2 text-[12px] font-semibold ${active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"} disabled:opacity-35`}>{children}</button>; }
+
+const ROSTER_COLUMNS = ["Student code", "Name", "Email"] as const;
+
+/**
+ * The roster as Student code / Name / Email rows. The source text stays the
+ * single value (one line per row, shared with co-editors and the validator), so
+ * row N's error is the validator's line N. Pasting several rows into any cell,
+ * or into "Paste a list", appends them as rows.
+ */
+function RosterRows({ source, errors, onChange, onBlur }: { source: string; errors: readonly RosterRowError[]; onChange: (next: string) => void; onBlur: () => void }) {
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const lines = source.split(/\r?\n/);
+  const rows = lines.map(rosterLineCells);
+  const errorByRow = new Map(errors.map((issue) => [issue.row, issue.message.replace(/^Row \d+[:\s]*/, "")]));
+  const write = (nextLines: string[]) => onChange(nextLines.join("\n"));
+  const setCell = (rowIndex: number, column: number, value: string) => {
+    const next = [...rows[rowIndex]!] as [string, string, string];
+    next[column] = value;
+    write(lines.map((line, index) => (index === rowIndex ? rosterCellsLine(next) : line)));
+  };
+  // Rows land where the paste happened (a blank row is filled, not pushed down); blank rows are dropped.
+  const appendLines = (added: string[], at = lines.length) => {
+    if (added.length === 0) return;
+    const after = lines.slice(at);
+    if (after[0] !== undefined && !after[0].trim()) after.shift();
+    const next = [...lines.slice(0, at), ...added, ...after].filter((line) => line.trim());
+    write(next.length > 0 ? next : [""]);
+  };
+  const focusRow = (rowIndex: number) => {
+    globalThis.requestAnimationFrame?.(() => document.getElementById(`roster-cell-${rowIndex}-0`)?.focus());
+  };
+  return (
+    <div>
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.4fr)_2.75rem] gap-x-1.5 px-0.5 pb-1 text-[11px] font-semibold text-slate-500" aria-hidden="true">
+        {ROSTER_COLUMNS.map((label) => <span key={label}>{label}</span>)}
+        <span />
+      </div>
+      <ol aria-label="Listed students" className="space-y-1.5">
+        {rows.map((cells, rowIndex) => {
+          const error = errorByRow.get(rowIndex + 1);
+          const errorId = error ? `roster-row-error-${rowIndex}` : undefined;
+          return (
+            <li key={rowIndex}>
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.4fr)_2.75rem] items-center gap-x-1.5">
+                {cells.map((value, column) => (
+                  <input
+                    key={column}
+                    id={`roster-cell-${rowIndex}-${column}`}
+                    value={value}
+                    aria-label={`${ROSTER_COLUMNS[column]}, row ${rowIndex + 1}`}
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={errorId}
+                    spellCheck={false}
+                    {...(column === 2 ? { type: "email" } : {})}
+                    onChange={(event) => setCell(rowIndex, column, event.target.value)}
+                    onBlur={onBlur}
+                    onPaste={(event) => {
+                      const text = event.clipboardData.getData("text");
+                      if (!/[\n\t]/.test(text.trim())) return;
+                      event.preventDefault();
+                      appendLines(rosterLinesFromPaste(text), lines[rowIndex]?.trim() ? rowIndex + 1 : rowIndex);
+                    }}
+                    className={`${inputClass} px-2 text-[13px] ${error ? "border-au-danger-text/60" : ""}`}
+                  />
+                ))}
+                <button
+                  type="button"
+                  aria-label={`Remove row ${rowIndex + 1}`}
+                  onClick={() => write(lines.length === 1 ? [""] : lines.filter((_, index) => index !== rowIndex))}
+                  className="authoring-icon-button flex h-11 w-11 items-center justify-center"
+                >
+                  <X size={15} aria-hidden="true" />
+                </button>
+              </div>
+              {error ? <p id={errorId} className="mt-1 text-[12px] font-medium text-au-danger-text">Row {rowIndex + 1}: {error}</p> : null}
+            </li>
+          );
+        })}
+      </ol>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            write(lines[lines.length - 1]?.trim() ? [...lines, ""] : lines);
+            focusRow(lines[lines.length - 1]?.trim() ? lines.length : lines.length - 1);
+          }}
+          className="sat-press sat-press-fill flex min-h-11 items-center rounded-lg bg-au-fill px-3 text-[12px] font-semibold text-slate-600 hover:bg-au-fill-strong"
+        >
+          Add student
+        </button>
+        <button
+          type="button"
+          aria-expanded={pasteOpen}
+          onClick={() => setPasteOpen((open) => !open)}
+          className="sat-press sat-press-fill flex min-h-11 items-center rounded-lg px-3 text-[12px] font-semibold text-slate-500 hover:bg-au-fill"
+        >
+          Paste a list
+        </button>
+      </div>
+      {pasteOpen ? (
+        <div className="mt-2">
+          <textarea
+            aria-label="Paste students"
+            value={pasteText}
+            onChange={(event) => setPasteText(event.target.value)}
+            spellCheck={false}
+            className="min-h-24 w-full resize-y rounded-xl border border-au-separator bg-au-surface px-3 py-2.5 font-mono text-[12px] leading-5 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
+            placeholder={"W123456, Jane Doe, jane@example.com\nor paste columns from a spreadsheet"}
+          />
+          <button
+            type="button"
+            disabled={!pasteText.trim()}
+            onClick={() => {
+              appendLines(rosterLinesFromPaste(pasteText));
+              setPasteText("");
+              setPasteOpen(false);
+            }}
+            className="sat-press sat-press-fill mt-1 flex min-h-11 items-center rounded-lg bg-au-fill px-3 text-[12px] font-semibold text-slate-600 hover:bg-au-fill-strong disabled:opacity-45"
+          >
+            Add these students
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}

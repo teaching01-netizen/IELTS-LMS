@@ -18,8 +18,10 @@ import { SatSessionRoomRoster, type SatRosterSort } from '../ui/SatSessionRoomRo
 import { SatSessionRoomTimeline } from '../ui/SatSessionRoomTimeline';
 import { StudentDetail, studentAttentionReason } from '../ui/SatSessionRoomStudents';
 import { satListReturnTarget } from '../ui/useSatListReturn';
-import { SatStudentLinkCard, SatStudentLinkDialog, SatStudentLinkPresent } from '../ui/SatStudentLink';
-import { buildSatRunSheet, formatRunSheetRemaining, satRunSheetCurrentRows } from '../ui/sessionRunSheet';
+import { SatStudentLinkCard, SatStudentLinkPresent } from '../ui/SatStudentLink';
+import { StudentShareDialog } from '../../../features/exam-authoring/ui/access-links/AccessLinkShareSheet';
+import { describeAccessLinkAudience, formatAccessLinkStatus, roomEntryUrl } from '../../../features/exam-authoring/ui/access-links/accessLinkUi';
+import { buildSatRunSheet, formatRunSheetRemaining, satRunSheetCurrentRows, satRunSheetTimingPlan } from '../ui/sessionRunSheet';
 import { isSatStageLive } from '../ui/satStage';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { useAccessDistributionOverview } from '../../../features/exam-authoring/api/assessmentAccessLinkQueries';
@@ -33,7 +35,7 @@ const RELOAD_FAILED_SUFFIX = ' However, the live view could not refresh. Retry t
 export function SatSessionRoomRoute() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useNavigate();
-  // Arriving from Delivery (Start exam / Open session room) keeps a way back to that group.
+  // Arriving from a test's Sessions tab keeps Back pointed at that test and session.
   const from = (useLocation().state as { from?: unknown } | null)?.from;
   const deliveryReturn = isExamDeliveryPath(from) ? from : null;
   const { session } = useAuthSession();
@@ -119,9 +121,9 @@ export function SatSessionRoomRoute() {
   const sessionLive = runtime?.status === 'live' || runtime?.status === 'paused';
   const sessionFinished = runtime?.status === 'completed';
   const currentStage = sessionFinished
-    ? 'Session finished'
+    ? 'Room finished'
     : runtime?.status === 'cancelled'
-      ? 'Session cancelled'
+      ? 'Room cancelled'
       : stageRows.break
         ? 'Break'
         : runtime?.sections.find((section) => section.sectionKey === runtime.currentSectionKey)?.label
@@ -204,8 +206,12 @@ export function SatSessionRoomRoute() {
     const action = confirm;
     setConfirm(null);
     if (!action || !scheduleId) return;
+    if (action.kind === 'start') {
+      void run('start', () => controller.handleStartScheduledSession(scheduleId), 'Exam started.');
+      return;
+    }
     if (action.kind === 'complete') {
-      void run('complete', () => controller.handleCompleteExam(scheduleId), 'Session completed.');
+      void run('complete', () => controller.handleCompleteExam(scheduleId), 'Room completed.');
       return;
     }
     if (action.kind === 'extend-session') {
@@ -220,7 +226,7 @@ export function SatSessionRoomRoute() {
           : action.kind === 'extend-student'
             ? 'no time was added'
             : 'their attempt was not ended';
-        setMessage({ kind: 'error', text: `${action.studentName} is no longer in this session, so ${outcome}.` });
+        setMessage({ kind: 'error', text: `${action.studentName} is no longer in this room, so ${outcome}.` });
       }
       return;
     }
@@ -264,7 +270,7 @@ export function SatSessionRoomRoute() {
         <div className="sat-room__empty">
           <div className="sat-room__empty-content">
             <span className="sat-room__empty-icon" aria-hidden="true"><UserRound size={20} /></span>
-          <p className="sat-room__empty-title">{sessionFinished ? 'Session finished' : sessionLive ? 'Select a student' : runtimeStatus === 'not_started' ? 'Waiting to begin' : 'Session cancelled'}</p>
+          <p className="sat-room__empty-title">{sessionFinished ? 'Room finished' : sessionLive ? 'Select a student' : runtimeStatus === 'not_started' ? 'Waiting to begin' : 'Room cancelled'}</p>
             <p className="sat-room__empty-text">
               {sessionLive
                 ? 'Choose a student in the roster to inspect their progress, timing, and integrity events.'
@@ -272,7 +278,7 @@ export function SatSessionRoomRoute() {
                   ? 'The run sheet remains available above for a review of the completed session.'
                   : runtimeStatus === 'not_started'
                     ? 'This workspace becomes operational as soon as you start the session. Students appear in the roster as they open their exam link.'
-                    : 'This session was cancelled. The run sheet above shows the timeline recorded so far.'}
+                    : 'This room was cancelled. The run sheet above shows the timeline recorded so far.'}
             </p>
             {runtimeStatus === 'not_started' ? <p className="sat-room__empty-hint">{students.length ? `${students.length} student${students.length === 1 ? '' : 's'} already connected.` : 'No students have joined yet.'}</p> : null}
             {runtimeStatus === 'not_started' ? <button type="button" onClick={() => setShareOpen(true)} className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3.5 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">Share student link</button> : null}
@@ -280,27 +286,40 @@ export function SatSessionRoomRoute() {
         </div>
       );
 
-  if (!scheduleId) return <SatPageError title="SAT session not found" description="A valid SAT session is required." retryLabel="Back to Sessions" onRetry={() => navigate('/sat/sessions')} />;
-  if (controller.isLoading && !schedule) return <SatPageLoading label="Opening SAT session…" />;
-  if (controller.error && !schedule) return <SatPageError title="SAT session could not load" description={controller.error} retryLabel="Retry" onRetry={() => void controller.reload()} />;
-  if (!schedule || !runtime) return <SatPageError title="SAT session not found" description="This session is not part of the Digital SAT workspace." retryLabel="Back to Sessions" onRetry={() => navigate('/sat/sessions')} />;
+  if (!scheduleId) return <SatPageError title="SAT room not found" description="A valid SAT room is required." retryLabel="Back to Rooms" onRetry={() => navigate('/sat/sessions')} />;
+  if (controller.isLoading && !schedule) return <SatPageLoading label="Opening SAT room…" />;
+  if (controller.error && !schedule) return <SatPageError title="SAT room could not load" description={controller.error} retryLabel="Retry" onRetry={() => void controller.reload()} />;
+  if (!schedule || !runtime) return <SatPageError title="SAT room not found" description="This room is not part of the Digital SAT workspace." retryLabel="Back to Rooms" onRetry={() => navigate('/sat/sessions')} />;
+
+  // The test's Sessions tab reopens with this session selected.
+  const entryUrl = roomEntryUrl({ accessLinkId: accessLink?.id ?? null, scheduleId });
+  const testSessionsPath = `${examWorkspacePath(schedule.examId, 'delivery')}${accessLink ? `?${new URLSearchParams({ link: accessLink.id })}` : ''}`;
+  // Admins review inside the test workspace; proctors use the global Results list, filtered to this session.
+  const resultsPath = isAdmin
+    ? `${examWorkspacePath(schedule.examId, 'responses')}?${new URLSearchParams({ access: schedule.id })}`
+    : `/sat/results?${new URLSearchParams({ exam: schedule.examId, access: schedule.id })}`;
+  const goBack = () => {
+    if (deliveryReturn) { navigate(deliveryReturn); return; }
+    const back = satListReturnTarget('/sat/sessions');
+    navigate(back.to, back.state ? { state: back.state } : undefined);
+  };
 
   return (
     <div className="sat-room sat-product" data-sat-room-mode={roomMode}>
       <header className="sat-room__header">
         <div className="sat-room__header-inner">
-          <button type="button" onClick={() => { if (deliveryReturn) { navigate(deliveryReturn); return; } const back = satListReturnTarget('/sat/sessions'); navigate(back.to, back.state ? { state: back.state } : undefined); }} className="flex min-h-11 shrink-0 items-center gap-1 rounded-[10px] px-2 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><ArrowLeft size={16} />Sessions</button>
+          <button type="button" onClick={goBack} className="flex min-h-11 shrink-0 items-center gap-1 rounded-[10px] px-2 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><ArrowLeft size={16} aria-hidden="true" />{deliveryReturn ? 'Rooms' : 'Rooms'}</button>
           <div className="h-5 w-px bg-[var(--sat-staff-border-input,rgba(0,0,0,0.075))]" aria-hidden="true" />
           <div className="sat-room__title"><div className="flex items-center gap-2"><h1>{schedule.examTitle}</h1><SatStatusPill tone={roomStatusTone(runtime.status)} pulse={runtime.status === 'live'}>{runtimeLabel(runtime.status)}</SatStatusPill></div><p className="sat-room__cohort">{schedule.cohortName} · {satPublishScopeCopy(schedule.publishScope ?? 'full')}{accessLink ? ` · Version ${accessLink.versionNumber}` : ''}</p><p className="sat-room__cohort" data-testid="sat-room-status-line">{statusLine}</p></div>
           {controller.error ? <span className="inline-flex items-center gap-1 text-[14px] font-semibold tabular-nums text-[var(--sat-staff-warning-text,#92400e)]"><AlertTriangle size={11} aria-hidden="true" />Reconnecting</span> : null}
           {roomMode !== 'review' ? <button type="button" onClick={() => setShareOpen(true)} className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><QrCode size={14} aria-hidden="true" />Student link</button> : null}
-          {isAdmin ? <button type="button" onClick={() => navigate(examWorkspacePath(schedule.examId, 'delivery'))} className="flex min-h-11 shrink-0 items-center rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">Exam sessions</button> : null}
-          {isAdmin && roomMode === 'review' ? <button type="button" onClick={() => navigate(`${examWorkspacePath(schedule.examId, 'responses')}?${new URLSearchParams({ access: schedule.id })}`)} className="flex min-h-11 shrink-0 items-center rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[14px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">View results</button> : null}
+          {isAdmin && !deliveryReturn ? <button type="button" onClick={() => navigate(testSessionsPath)} className="hidden min-h-11 shrink-0 items-center rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] sm:flex">Rooms</button> : null}
+          {roomMode === 'review' ? <button type="button" onClick={() => navigate(resultsPath)} className="flex min-h-11 shrink-0 items-center rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[14px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">View results</button> : null}
           <SatSessionControls runtimeStatus={runtime.status} pendingActions={pendingActions} blocked={isStale} onPause={() => void run('pause', () => controller.handlePauseCohort(scheduleId), 'Exam paused.')} onResume={() => void run('resume', () => controller.handleResumeCohort(scheduleId), 'Exam resumed.')} onExtend={(minutes) => {
             if (isStale) return;
             const revision = runtime.revision;
             if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0 || !runtime.activeSectionKey) {
-              setMessage({ kind: 'error', text: 'Refresh the session before adding time. Its current stage could not be confirmed.' });
+              setMessage({ kind: 'error', text: 'Refresh the room before adding time. Its current stage could not be confirmed.' });
               return;
             }
             setConfirm({ kind: 'extend-session', minutes, stage: currentStage, sectionKey: runtime.activeSectionKey, runtimeRevision: revision, remainingLabel: formatRunSheetRemaining(cohortStageRemainingSeconds) });
@@ -320,7 +339,7 @@ export function SatSessionRoomRoute() {
         onNeedsAttention={() => setAttentionFilter('needs')}
       />
 
-      {isStale ? <div role="alert" className="sat-banner-enter mx-auto flex w-full max-w-[1500px] items-center justify-between gap-3 px-4 pt-3"><div className="rounded-2xl border border-amber-700/15 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3.5 py-2.5 text-[14px] font-medium text-amber-800"><span className="font-semibold">Data may be out of date.</span> Risky session actions are paused until reconnection.</div><button type="button" onClick={() => void controller.reload()} className="min-h-11 shrink-0 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-surface,#fff)] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] shadow-sm ring-1 ring-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">Retry</button></div> : null}
+      {isStale ? <div role="alert" className="sat-banner-enter mx-auto flex w-full max-w-[1500px] items-center justify-between gap-3 px-4 pt-3"><div className="rounded-2xl border border-amber-700/15 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3.5 py-2.5 text-[14px] font-medium text-amber-800"><span className="font-semibold">Data may be out of date.</span> Risky room actions are paused until reconnection.</div><button type="button" onClick={() => void controller.reload()} className="min-h-11 shrink-0 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-surface,#fff)] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] ring-1 ring-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">Retry</button></div> : null}
       {message ? <div role={message.kind === 'error' ? 'alert' : 'status'} className="sat-banner-enter mx-auto max-w-[1500px] px-4 pt-3"><div className={message.kind === 'error' ? 'rounded-2xl border border-red-700/20 bg-[var(--sat-staff-danger-tint,rgba(217,45,32,0.08))] px-3.5 py-2.5 text-[14px] font-medium text-[var(--sat-staff-danger,#b42318)]' : 'rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3.5 py-2.5 text-[14px] font-medium text-[var(--sat-staff-text-secondary,#515154)]'}>{message.text}</div></div> : null}
       {roomMode !== 'review' ? <SatDeviceTransferRequests scheduleId={scheduleId} blocked={isStale} onPendingChange={setPendingTransfers} /> : null}
 
@@ -360,9 +379,9 @@ export function SatSessionRoomRoute() {
               readyCount={readyCount}
               startPending={pendingActions.has('start')}
               startBlocked={isStale}
-              onStart={() => void run('start', () => controller.handleStartScheduledSession(scheduleId), 'Session started.')}
+              onStart={() => setConfirm({ kind: 'start', joinedCount: students.length, readyCount, sectionsLabel, perCandidateTiming: satRunSheetTimingPlan(runtime.timingModel)?.perCandidate ?? null })}
             >
-              <SatStudentLinkCard scheduleId={scheduleId} cohortName={schedule.cohortName} joinedCount={students.length} onOpenShare={() => setShareOpen(true)} onPresent={() => setPresentOpen(true)} />
+              <SatStudentLinkCard url={entryUrl} cohortName={schedule.cohortName} joinedCount={students.length} onOpenShare={() => setShareOpen(true)} onPresent={() => setPresentOpen(true)} />
             </SatWaitingRoomPanel>
           ) : undefined}
         />
@@ -382,16 +401,21 @@ export function SatSessionRoomRoute() {
         onConfirm={confirmCurrentAction}
       />
 
-      <SatStudentLinkDialog
+      <StudentShareDialog
         open={shareOpen}
-        scheduleId={scheduleId}
-        cohortName={schedule.cohortName}
+        url={entryUrl}
+        roomName={accessLink?.name ?? schedule.cohortName}
+        examTitle={schedule.examTitle}
+        versionNumber={accessLink?.versionNumber ?? null}
+        audience={accessLink ? describeAccessLinkAudience(accessLink) : null}
+        checkIn={accessLink ? formatAccessLinkStatus(accessLink.status) : null}
+        checkInOpen={!accessLink || accessLink.status === 'live'}
         onClose={() => setShareOpen(false)}
         onPresent={() => { setShareOpen(false); setPresentOpen(true); }}
       />
       <SatStudentLinkPresent
         open={presentOpen}
-        scheduleId={scheduleId}
+        url={entryUrl}
         examTitle={schedule.examTitle}
         cohortName={schedule.cohortName}
         joinedCount={students.length}

@@ -172,7 +172,7 @@ export function satRunSheetTimingPlan(
       return {
         model,
         label: `Timing plan ${model}`,
-        note: "This session is on a timing model this build does not describe; read the rows as the runtime reports them.",
+        note: "This room is on a timing model this build does not describe; read the rows as the runtime reports them.",
         perCandidate: false,
       };
   }

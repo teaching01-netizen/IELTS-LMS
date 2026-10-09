@@ -448,7 +448,7 @@ async function startSatAttempt(
   const studentEmail = `sat-smoke-${stamp}@example.com`;
 
   await page.goto("/sat/exams");
-  await expect(page.getByRole("heading", { name: "Tests" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Exams" })).toBeVisible();
   await expect(page.getByText("Digital SAT").first()).toBeVisible();
   await expect(page.getByText("IELTS", { exact: true })).toHaveCount(0);
 
@@ -538,7 +538,7 @@ async function startSatAttempt(
     throw new Error("Student handoff did not include schedule and candidate ids");
 
   await page.goto("/sat/sessions");
-  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Rooms" })).toBeVisible({ timeout: 30_000 });
   const sessionRow = page
     .locator("button")
     .filter({ hasText: examTitle })
@@ -553,8 +553,9 @@ async function startSatAttempt(
     await expect(runSheet).toContainText("Reading & Writing");
     await expect(runSheet).not.toContainText("Math");
   }
-  await page.getByRole("button", { name: "Start" }).click();
-  await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "Review and start exam" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Start exam" }).click();
+  await expect(page.getByText("Exam started.")).toBeVisible({ timeout: 20_000 });
 
   // Phase 5 entry assertion: the proctor's Start is the ONLY action taken
   // against the exam. The student page is refreshed (never clicked) and the
@@ -865,7 +866,7 @@ test.describe("Digital SAT product workspace", () => {
       expect(mathSection?.route).toBe("higher");
 
       await page.goto("/sat/results");
-      await expect(page.getByRole("heading", { name: "Results" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Responses" })).toBeVisible();
       await page.getByLabel("Search SAT results").fill(studentName);
       const resultRow = page
         .locator("button")
@@ -1194,7 +1195,7 @@ test.describe("Digital SAT product workspace", () => {
       // assertions apply verbatim, so a zero-answer attempt is a first-class
       // result rather than a shell that merely stopped erroring.
       await page.goto("/sat/results");
-      await expect(page.getByRole("heading", { name: "Results" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Responses" })).toBeVisible();
       await page.getByLabel("Search SAT results").fill(studentName);
       const resultRow = page
         .locator("button")

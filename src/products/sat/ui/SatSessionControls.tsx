@@ -59,7 +59,7 @@ export function SatSessionControls({
             disabled={blocked}
             className="flex min-h-11 items-center rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-danger,#b42318)]/30 px-3 text-[14px] font-semibold text-[var(--sat-staff-danger,#b42318)] transition-colors hover:bg-[var(--sat-staff-danger-tint,rgba(217,45,32,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-danger,#b42318)] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            End session
+            End room
           </button>
         </>
       ) : null}

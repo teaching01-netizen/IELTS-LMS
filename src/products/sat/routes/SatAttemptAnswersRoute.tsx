@@ -84,7 +84,7 @@ export function SatAttemptAnswersContent({ attemptId, onBack, embedded = false }
         </div>
       </header>
       <section aria-labelledby="saved-answers-heading" className="border-t border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] py-7">
-        <h2 id="saved-answers-heading" className="text-[17px] font-semibold tracking-[-0.025em]">Question-level responses ({detail.questions.length})</h2>
+        <h2 id="saved-answers-heading" className="text-[18px] font-semibold tracking-[-0.025em]">Question-level responses ({detail.questions.length})</h2>
         {detail.questions.length === 0 ? <p className="mt-3 text-[14px] text-slate-500">No administered questions are available for this attempt.</p> : (
           <div className="mt-4 space-y-8">
             {Array.from(questionsBySection, ([sectionKey, questions]) => {

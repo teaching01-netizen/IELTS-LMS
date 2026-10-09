@@ -43,7 +43,7 @@ describe("describeExamLifecycle", () => {
     ).toBe("Published · Version 3");
     expect(
       describeExamLifecycle({ state: "published_current", currentPublishedVersion: published(3), access: access(0) }).label,
-    ).toBe("Published · Version 3 · No sessions yet");
+    ).toBe("Published · Version 3 · No rooms yet");
   });
 });
 

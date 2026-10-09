@@ -50,7 +50,7 @@ export function SatNewSessionFlow({
   const selection = draftChoice || exams[0]?.id || '';
   const selectedExam = exams.find((exam) => exam.id === selection) ?? null;
   return (
-    <SatFormDialog open eyebrow="Digital SAT" title="New Session" onClose={onClose}>
+    <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -59,15 +59,15 @@ export function SatNewSessionFlow({
       >
         <div className="space-y-4 px-5 py-4">
           {examsLoading && !exams.length ? (
-            <p role="status" className="rounded-[12px] bg-black/[0.035] px-4 py-4 text-[14px] leading-5 text-slate-500">Loading published SAT exams…</p>
+            <p role="status" className="rounded-[12px] bg-black/[0.035] px-4 py-4 text-[14px] leading-5 text-slate-500">Loading published SAT tests…</p>
           ) : exams.length ? (
             <>
               <label htmlFor="sat-session-exam" className="block text-[14px] font-semibold text-slate-600">
-                Exam
+                Test
                 <select
                   ref={firstFieldRef}
                   id="sat-session-exam"
-                  aria-label="SAT exam"
+                  aria-label="SAT test"
                   value={selection}
                   onChange={(event) => setDraftChoice(event.target.value)}
                   className="mt-1.5 h-11 w-full rounded-[11px] border border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] bg-white px-3 text-[16px] outline-none focus:border-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] focus:ring-4 focus:ring-[var(--sat-staff-accent-ring-soft,rgba(0,113,227,0.1))]"
@@ -83,7 +83,7 @@ export function SatNewSessionFlow({
             </>
           ) : (
             <div className="rounded-[12px] bg-black/[0.035] px-4 py-4">
-              <p className="text-[14px] font-semibold text-slate-900">Publish a SAT exam before creating a session.</p>
+              <p className="text-[14px] font-semibold text-slate-900">Publish a SAT test before creating a session.</p>
               <button
                 type="button"
                 onClick={onGoToExamLibrary}
@@ -118,11 +118,11 @@ function NewSessionSetup({ exam, onClose, onCreated }: { exam: SatNewSessionExam
 
   if (overview.error && !overview.data) {
     return (
-      <SatFormDialog open eyebrow="Digital SAT" title="New Session" onClose={onClose}>
+      <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
         <div className="px-5 py-4">
           <SatPageError
-            title="Session setup could not load"
-            description={overview.error instanceof Error ? overview.error.message : 'The exam’s published version is unavailable.'}
+            title="Room settings could not load"
+            description={overview.error instanceof Error ? overview.error.message : 'The test’s published version is unavailable.'}
             retryLabel="Retry"
             onRetry={() => void overview.refetch()}
           />
@@ -132,7 +132,7 @@ function NewSessionSetup({ exam, onClose, onCreated }: { exam: SatNewSessionExam
   }
   if (!version) {
     return (
-      <SatFormDialog open eyebrow="Digital SAT" title="New Session" onClose={onClose}>
+      <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
         <p role="status" className="px-5 py-6 text-[14px] leading-5 text-slate-500">
           {overview.isLoading ? `Loading ${exam.title}…` : `${exam.title} has no published version. Publish it before creating a session.`}
         </p>

@@ -39,7 +39,7 @@ const ROSTER_EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
  * @returns Trimmed column values.
  * @throws Error when the line contains an unclosed quote.
  */
-function parseRosterCsvLine(line: string): string[] {
+export function parseRosterCsvLine(line: string): string[] {
   const values: string[] = [];
   let value = "";
   let quoted = false;
@@ -159,4 +159,33 @@ export function describeRosterResult(result: RosterParseResult): string {
   }
   const attention = issues === 1 ? "1 needs attention" : issues + " need attention";
   return ready + " ready \u00B7 " + attention;
+}
+
+/**
+ * One roster line as editable cells (code, name, email). Lenient: a line the
+ * validator rejects still renders, so its row error can be fixed in place.
+ */
+export function rosterLineCells(line: string): [string, string, string] {
+  let columns: string[];
+  try {
+    columns = parseRosterCsvLine(line.trim());
+  } catch {
+    return [line.trim(), "", ""];
+  }
+  const [code = "", name = "", ...rest] = columns;
+  return [code, name, rest.join(", ")];
+}
+
+/** The inverse of rosterLineCells; an all-blank row stays a blank line. */
+export function rosterCellsLine(cells: readonly string[]): string {
+  if (cells.every((cell) => !cell.trim())) return "";
+  return cells.map((cell) => (/[",\n]/.test(cell) ? `"${cell.replaceAll('"', '""')}"` : cell)).join(", ");
+}
+
+/** Spreadsheet paste (tab-separated) or CSV text, as roster lines. */
+export function rosterLinesFromPaste(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .map((line) => (line.includes("\t") ? rosterCellsLine(line.split("\t").map((cell) => cell.trim())) : line.trim()));
 }

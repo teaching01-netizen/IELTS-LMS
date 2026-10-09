@@ -34,7 +34,7 @@ export interface ExamPublishSheetProps {
   onClose: () => void;
   /** Opens the question + field a blocking check names. */
   onOpenIssue: (issue: AssessmentValidationIssue) => void;
-  /** Opens session setup for the version just published (pinned to it even if another author publishes again). */
+  /** Opens room setup for the version just published (pinned to it even if another author publishes again). */
   onOpenStudentAccess: (target?: DeliveryTarget) => void;
   /** Optional: when omitted, timing and routing are edited inside this sheet instead of on another page. */
   onOpenSettings?: (() => void) | undefined;
@@ -67,7 +67,7 @@ export function ExamPublishSheet(props: ExamPublishSheetProps) {
             <SheetDescription>
               {view === "settings"
                 ? "Change timing, breaks and routing without leaving publishing. Saved changes re-run the checks."
-                : "Review the checks, then release a new student-facing version. Existing links and attempts keep their version."}
+                : "Review the checks, then release a new student-facing version. Existing rooms and attempts keep their version."}
             </SheetDescription>
           </SheetHeader>
           {examQuery.data ? (
@@ -143,32 +143,16 @@ function PublishSheetBody({
 
   if (didPublish) {
     const version = publishedTarget?.versionNumber ?? releaseState?.currentPublishedVersion?.versionNumber ?? null;
-    const steps = [
-      { label: "Publish", state: "done" as const },
-      { label: "Create session", state: "next" as const },
-      { label: "Share and run", state: "later" as const },
-    ];
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-6">
-        <ol aria-label="Setup progress" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-muted-foreground">
-          {steps.map((step, index) => (
-            <li key={step.label} aria-current={step.state === "next" ? "step" : undefined} className="flex items-center gap-2">
-              {index > 0 ? <span aria-hidden="true">→</span> : null}
-              <span className={step.state === "done" ? "text-green-700" : step.state === "next" ? "text-foreground" : undefined}>
-                {index + 1}. {step.label}
-                {step.state === "done" ? " ✓" : ""}
-              </span>
-            </li>
-          ))}
-        </ol>
         <div role="status" className="flex items-start gap-3 rounded-2xl bg-muted p-4">
           <CheckCircle2 size={20} className="sat-pop mt-0.5 shrink-0 text-green-700" aria-hidden="true" />
           <div>
             <p className="text-base font-semibold text-foreground">
-              {version ? `Version ${version} is published and ready to use in a session.` : "Published and ready to use in a session."}
+              {version ? `Version ${version} published.` : "Published."} Create a room to give students access.
             </p>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Existing sessions continue using their current version. Publishing does not let anyone in.
+              Existing rooms keep the version they were created with.
             </p>
           </div>
         </div>
@@ -181,7 +165,7 @@ function PublishSheetBody({
               onOpenStudentAccess(publishedTarget ?? undefined);
             }}
           >
-            Create session
+            Create room
           </button>
           <button type="button" className={`${BUTTON} text-muted-foreground hover:bg-muted`} onClick={onClose}>
             Done

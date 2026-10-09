@@ -95,7 +95,7 @@ type LinkUpdateOptions = { silent?: boolean };
 
 /** "Session: Running" for the row; null while the status is unknown so a guess is never shown. */
 function sessionRowLabel(info: AccessSessionInfo | null): string | null {
-  return info && info.phase !== "unknown" ? `Session: ${SESSION_PHASE_LABEL[info.phase]}` : null;
+  return info && info.phase !== "unknown" ? `Room: ${SESSION_PHASE_LABEL[info.phase]}` : null;
 }
 
 /** Present-tense label for an in-flight lifecycle write. */
@@ -317,7 +317,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         document.getElementById("student-links-search")?.focus();
         return;
       }
-      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !inField && target.closest('[aria-label="Sessions"]') && visibleLinks.length > 1) {
+      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !inField && target.closest('[aria-label="Rooms"]') && visibleLinks.length > 1) {
         const index = visibleLinks.findIndex((link) => link.id === selectedId);
         if (index < 0) return;
         event.preventDefault();
@@ -355,8 +355,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     selectLink(created.id);
     // The new row lands already confirmed: the page never relies on a global
     // channel to say the write was accepted.
-    showConfirmation({ linkId: created.id, kind: "action", text: "Session created" });
-    showToast("Session created");
+    showConfirmation({ linkId: created.id, kind: "action", text: "Room created" });
+    showToast("Room created");
     // The session is the object staff work with next: take runners straight to its waiting room.
     // Staff who cannot run sessions stay here, where the new row is selected and shareable.
     if (session?.canRun) session.onOpenRoom(created.scheduleId);
@@ -368,7 +368,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     selectLink(updated.id);
     if (!options?.silent) {
       showConfirmation({ linkId: updated.id, kind: "action", text: "Changes saved" });
-      showToast("Session updated");
+      showToast("Room updated");
     }
   };
   const setLifecycle = async (
@@ -469,10 +469,10 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   // While one write is in flight the menu closes behind it; the row keeps the
   // acknowledgement, so the actions stay visible but cannot be re-fired.
   const menuItemsFor = (link: AssessmentAccessLink, busy = false): SatMenuItem[] => [
-    { id: "copy", label: "Copy link", disabled: busy, onSelect: () => { void copy(link); } },
+    { id: "copy", label: "Copy student link", disabled: busy, onSelect: () => { void copy(link); } },
     { id: "share", label: "Share", disabled: busy, onSelect: () => setShareLink(link) },
     { id: "present", label: "Present to Students", disabled: busy, onSelect: () => setPresentLink(link) },
-    { id: "edit", label: "Edit session", disabled: busy, onSelect: () => openEditor(link) },
+    { id: "edit", label: "Edit room", disabled: busy, onSelect: () => openEditor(link) },
     { id: "duplicate", label: "Duplicate setup", disabled: busy, onSelect: () => openDuplicateSetup(link) },
     ...(link.lifecycleState !== "revoked"
       ? [{ id: "pause", label: link.lifecycleState === "paused" ? "Resume check-in" : "Pause check-in", disabled: busy, onSelect: () => { void setLifecycle(link, link.lifecycleState === "paused" ? "active" : "paused"); } } as SatMenuItem]
@@ -489,7 +489,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         showResponses={shell.showResponses}
         onSelectTab={shell.onSelectTab}
         onBack={shell.onBack}
-        contextLine={version ? `Current release · Version ${version.versionNumber} · ${version.publishScope === "full" ? "Full SAT" : version.publishScope === "math" ? "Math only" : "Reading & Writing only"}` : "Publish an exam version to create sessions"}
+        contextLine={version ? `Current release · Version ${version.versionNumber} · ${version.publishScope === "full" ? "Full SAT" : version.publishScope === "math" ? "Math only" : "Reading & Writing only"}` : "Publish an exam version to create rooms"}
         collaborationSlot={<CollaborationHeaderCluster surface="access" />}
         onPreview={shell.onPreview}
         {...(shell.onPublish ? { onPublish: shell.onPublish } : {})}
@@ -503,8 +503,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       <div className="sat-product min-h-screen bg-au-fill">
         {workspaceHeader}
         <SatContainer>
-          <SatPageHeader eyebrow="Digital SAT" title="Sessions" description="Prepare, share and run sittings of this exam." />
-          <SatListSkeleton rows={3} label="Loading Sessions" />
+          <SatPageHeader eyebrow="Digital SAT" title="Rooms" description="Prepare, share and run sittings of this exam." />
+          <SatListSkeleton rows={3} label="Loading Rooms" />
         </SatContainer>
       </div>
     );
@@ -515,7 +515,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         {workspaceHeader}
         <SatContainer>
           <div role="alert" className="mt-8 rounded-2xl border border-black/[0.06] bg-white p-6">
-            <h1 className="text-[16px] font-semibold text-slate-900">Sessions could not load</h1>
+            <h1 className="text-[16px] font-semibold text-slate-900">Rooms could not load</h1>
             <p className="mt-1.5 text-[13px] leading-5 text-slate-500">{error}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <button type="button" onClick={() => shell.onSelectTab("questions")} className="sat-press sat-press-fill flex min-h-11 items-center rounded-[12px] px-4 text-[13px] font-semibold text-slate-600 hover:bg-black/[0.04]">Questions</button>
@@ -533,8 +533,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         <SatContainer>
           <SatEmptyState
             icon={<Link2 size={20} aria-hidden="true" />}
-            title="Publish your exam to create sessions"
-            hint="Publish a version, create a session, then share its student link and start the exam when everyone is ready."
+            title="Publish your exam to create rooms"
+            hint="Publish a version, create a room, then share its student link and start the exam when everyone is ready."
             action={<SatPrimaryButton onClick={shell.onPublish ?? onBackToRelease}>{shell.onPublish ? "Publish exam" : "Review publishing"}</SatPrimaryButton>}
           />
         </SatContainer>
@@ -551,8 +551,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       <SatContainer>
         <SatPageHeader
           eyebrow={`${exam.title} · Version ${version.versionNumber}`}
-          title="Sessions"
-          description="Prepare, share and run sittings of this exam. Each session stays on the version it was created for."
+          title="Rooms"
+          description="Prepare, share and run sittings of this exam. Each room stays on the version it was created for."
         />
         {/* One polite region for in-place confirmations: the visual copy lives
             at the control, and screen readers hear it once. */}
@@ -572,8 +572,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
 
         <DeliverySetupGuide versionNumber={version.versionNumber} groupCount={links.filter((link) => link.publishedVersionId === version.id && link.lifecycleState !== "revoked").length} runningCount={links.filter((link) => link.publishedVersionId === version.id && session?.infoFor(link.scheduleId)?.phase === "live").length} finishedCount={links.filter((link) => link.publishedVersionId === version.id && session?.infoFor(link.scheduleId)?.phase === "finished").length} onCreate={() => openEditor(null)} />
 
-        <div className="mt-4 overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
-          <section aria-label="Sessions" className="flex min-w-0 flex-col border-black/[0.06] max-lg:border-b lg:border-r">
+        <div className="mt-4 overflow-hidden rounded-2xl border border-black/[0.06] bg-white lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+          <section aria-label="Rooms" className="flex min-w-0 flex-col border-black/[0.06] max-lg:border-b lg:border-r">
             <LinksToolbar
               search={search}
               onSearchChange={setSearch}
@@ -600,7 +600,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
                       confirmation={confirmation?.linkId === link.id ? confirmation.text : null}
                       sessionLabel={session?.canRun ? sessionRowLabel(session.infoFor(link.scheduleId)) : null}
                       {...(session?.canRun && !session.stale && session.infoFor(link.scheduleId)?.phase === "live" ? {
-                        quickAction: { label: "Open live session", onSelect: () => session.onOpenRoom(link.scheduleId) },
+                        quickAction: { label: "Open live room", onSelect: () => session.onOpenRoom(link.scheduleId) },
                       } : {})}
                     />
                   ))}
@@ -614,13 +614,13 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
               ) : (
                 <SatEmptyState
                   icon={<Link2 size={20} aria-hidden="true" />}
-                  title="No sessions yet"
-                  hint="Create a session when you are ready to run this exam. Each session stays on the version it was created for."
+                  title="No rooms yet"
+                  hint="Create a room when you are ready to run this exam. Each room stays on the version it was created for."
                 />
               )}
             </div>
           </section>
-          <section aria-label="Session details" className="min-w-0 bg-au-fill max-lg:min-h-[420px]">
+          <section aria-label="Room details" className="min-w-0 bg-au-fill max-lg:min-h-[420px]">
             {selectedLink ? (
               <AccessLinkDetail
                 key={selectedLink.id}
@@ -648,7 +648,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
               <div className="flex h-full items-center justify-center p-8 text-center">
                 <div>
                   <Link2 size={28} className="mx-auto text-slate-300" aria-hidden="true" />
-                  <p className="mt-3 text-[13px] font-semibold text-slate-700">Select a session</p>
+                  <p className="mt-3 text-[13px] font-semibold text-slate-700">Select a room</p>
                   <p className="mt-1 text-[12px] leading-5 text-slate-500">Details, activity, sharing, and check-in controls appear here.</p>
                 </div>
               </div>

@@ -66,15 +66,15 @@ export function SatAccessRoute() {
         state: { from: examId ? `${examWorkspacePath(examId, 'delivery')}${params.size ? `?${params}` : ''}` : '/sat/exams' },
       });
     },
-    onOpenResponses: (scheduleId) => navigate(examId ? `${examWorkspacePath(examId, 'responses')}?${new URLSearchParams({ access: scheduleId })}` : '/sat/results'),
+    onOpenResults: (scheduleId) => navigate(examId ? `${examWorkspacePath(examId, 'responses')}?${new URLSearchParams({ access: scheduleId })}` : '/sat/results'),
   });
   if (!examId) {
-    return <SatPageError title="Sessions could not load" description="A valid SAT exam is required." retryLabel="Back to Tests" onRetry={() => navigate('/sat/exams')} />;
+    return <SatPageError title="Rooms could not load" description="A valid SAT exam is required." retryLabel="Back to Tests" onRetry={() => navigate('/sat/exams')} />;
   }
 
-  if (examQuery.isLoading) return <SatPageLoading label="Opening Sessions…" />;
+  if (examQuery.isLoading) return <SatPageLoading label="Opening Rooms…" />;
   if (examQuery.error || !examQuery.data) {
-    return <SatPageError title="Sessions could not load" description={examQuery.error instanceof Error ? examQuery.error.message : 'The SAT exam is unavailable.'} retryLabel="Back to Tests" onRetry={() => navigate('/sat/exams')} />;
+    return <SatPageError title="Rooms could not load" description={examQuery.error instanceof Error ? examQuery.error.message : 'The SAT exam is unavailable.'} retryLabel="Back to Tests" onRetry={() => navigate('/sat/exams')} />;
   }
   const exam = examQuery.data;
   if (exam.providerKey !== 'sat') {

@@ -78,7 +78,7 @@ function renderRoute() {
 
 /** Opens the unified setup for the (only) SAT exam: exam question first, then the shared session form. */
 function openSetup() {
-  fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 }
 
@@ -92,16 +92,16 @@ describe('SatSessionsRoute', () => {
     createMutateMock.mockResolvedValue({ id: 'link-new', scheduleId: 'sched-new' });
   });
 
-  it('requests SAT-only session and exam boundaries', () => {
+  it('requests SAT-only room and exam boundaries', () => {
     renderRoute();
     expect(useSummariesMock).toHaveBeenCalledWith(4_000, 'sat');
     expect(useExamListQueryMock).toHaveBeenCalledWith(true, 'sat');
     expect(screen.getByText('SAT Published')).toBeInTheDocument();
   });
 
-  it('never offers IELTS exams when creating a SAT session', () => {
+  it('never offers IELTS exams when creating a SAT room', () => {
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(screen.getByRole('option', { name: 'SAT Published' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'IELTS Published' })).not.toBeInTheDocument();
     expect(screen.getByText('Students will receive Reading & Writing only in this session.')).toBeInTheDocument();
@@ -110,27 +110,27 @@ describe('SatSessionsRoute', () => {
   it('renders header plus skeleton while loading, without blanking the page', () => {
     useSummariesMock.mockReturnValue({ data: undefined, isLoading: true, error: null, refetch: vi.fn() });
     renderRoute();
-    expect(screen.getByText('Sessions')).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: 'Loading SAT sessions' })).toBeInTheDocument();
+    expect(screen.getByText('Rooms')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading SAT rooms' })).toBeInTheDocument();
   });
 
-  it('announces the visible session count once data is present', () => {
+  it('announces the visible room count once data is present', () => {
     renderRoute();
-    expect(screen.getByRole('status')).toHaveTextContent('1 session');
+    expect(screen.getByRole('status')).toHaveTextContent('1 room');
   });
 
   it('focuses the first sheet field on open', () => {
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
-    expect(screen.getByLabelText('SAT exam')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    expect(screen.getByLabelText('SAT test')).toBeInTheDocument();
   });
 
-  it('opens the same session setup the exam uses, pinned to the exam’s published version, then lands in the new session', async () => {
+  it('opens the same room settings the exam uses, pinned to the exam’s published version, then lands in the new room', async () => {
     renderRoute();
     openSetup();
     expect(screen.getByText('Digital SAT · Version 9')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Saturday mock' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
 
     await waitFor(() => expect(createMutateMock).toHaveBeenCalledOnce());
     expect(createMutateMock.mock.calls[0]![0]).toMatchObject({
@@ -140,13 +140,13 @@ describe('SatSessionsRoute', () => {
   });
 
   it('keeps the form and stays on the list when creation fails, so a retry cannot be lost', async () => {
-    createMutateMock.mockRejectedValueOnce(new Error('The session could not be created.'));
+    createMutateMock.mockRejectedValueOnce(new Error('The room could not be created.'));
     renderRoute();
     openSetup();
-    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Saturday mock' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('The session could not be created.');
-    expect(screen.getByLabelText('Session name')).toHaveValue('Saturday mock');
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The room could not be created.');
+    expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
     expect(screen.queryByTestId('location')).not.toBeInTheDocument();
   });
 
@@ -154,24 +154,24 @@ describe('SatSessionsRoute', () => {
     // Far-future fixtures: the D2 past-start rule must not shadow the end>start assertion.
     renderRoute();
     openSetup();
-    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
-    fireEvent.click(screen.getByRole('button', { name: /Scheduled window/ }));
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
+    fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2099-09-01T13:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2099-09-01T10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByText('Closing time must be after opening time.')).toBeInTheDocument();
     expect(screen.getByLabelText('Opens')).toHaveValue('2099-09-01T13:00');
     expect(createMutateMock).not.toHaveBeenCalled();
   });
 
-  it('rejects a past opening time for a new session (D2 policy)', async () => {
+  it('rejects a past opening time for a new room (D2 policy)', async () => {
     renderRoute();
     openSetup();
-    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
-    fireEvent.click(screen.getByRole('button', { name: /Scheduled window/ }));
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
+    fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2000-09-01T10:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2000-09-01T13:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByText('Start time is in the past.')).toBeInTheDocument();
     expect(createMutateMock).not.toHaveBeenCalled();
   });
@@ -179,16 +179,16 @@ describe('SatSessionsRoute', () => {
   it('rejects a check-in window shorter than 15 minutes (D2 policy)', async () => {
     renderRoute();
     openSetup();
-    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
-    fireEvent.click(screen.getByRole('button', { name: /Scheduled window/ }));
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
+    fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2099-09-01T10:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2099-09-01T10:10' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
-    expect(await screen.findByText('Sessions must be at least 15 minutes long.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    expect(await screen.findByText('Rooms must be at least 15 minutes long.')).toBeInTheDocument();
     expect(createMutateMock).not.toHaveBeenCalled();
   });
 
-  it('offers an earlier session’s setup as a starting point', () => {
+  it('offers an earlier room’s setup as a starting point', () => {
     const earlier = {
       id: 'link-1', name: 'Morning class', versionNumber: 8, audienceType: 'cohort', audienceLabel: 'Morning', accessMode: 'student_code',
       availabilityType: 'anytime', opensAt: null, closesAt: null, enabledSections: null, publishScope: 'reading-writing', providerKey: 'sat', selectedStudentCount: 0,
@@ -196,23 +196,23 @@ describe('SatSessionsRoute', () => {
     useOverviewMock.mockReturnValue({ data: { currentPublishedVersion: publishedVersion, links: [earlier] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
     openSetup();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Start from an earlier session' }), { target: { value: 'link-1' } });
-    expect(screen.getByLabelText('Session name')).toHaveValue('Morning class (copy)');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Start from an earlier room' }), { target: { value: 'link-1' } });
+    expect(screen.getByLabelText('Room name')).toHaveValue('Morning class (copy)');
     expect(screen.getByLabelText('Class or group label')).toHaveValue('Morning');
   });
 
   it('confirms before discarding a dirty setup, closes quietly when pristine', () => {
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     openSetup();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     openSetup();
-    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('Discard session setup changes?');
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Discard room settings changes?');
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(createMutateMock).not.toHaveBeenCalled();
@@ -221,9 +221,9 @@ describe('SatSessionsRoute', () => {
   it('distinguishes filtered-zero from bucket-empty with query echo and clear action', () => {
     renderRoute();
     fireEvent.change(screen.getByPlaceholderText('Search exam, cohort, institution'), { target: { value: 'zzz-no-match' } });
-    expect(screen.getByText('No matching sessions')).toBeInTheDocument();
-    expect(screen.getByText(/No sessions match/)).toHaveTextContent('zzz-no-match');
-    expect(screen.getByRole('status')).toHaveTextContent('0 of 1 sessions');
+    expect(screen.getByText('No matching rooms')).toBeInTheDocument();
+    expect(screen.getByText(/No rooms match/)).toHaveTextContent('zzz-no-match');
+    expect(screen.getByRole('status')).toHaveTextContent('0 of 1 rooms');
     fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }));
     expect(screen.getByText('SAT Published')).toBeInTheDocument();
   });
@@ -233,47 +233,47 @@ describe('SatSessionsRoute', () => {
     fireEvent.change(screen.getByPlaceholderText('Search exam, cohort, institution'), { target: { value: 'zzz-no-match' } });
     fireEvent.click(screen.getByRole('radio', { name: 'Live 0' }));
     expect(screen.getByPlaceholderText('Search exam, cohort, institution')).toHaveValue('zzz-no-match');
-    expect(screen.getByText('No matching sessions')).toBeInTheDocument();
-    expect(screen.getByText(/No sessions match/)).toHaveTextContent('zzz-no-match');
+    expect(screen.getByText('No matching rooms')).toBeInTheDocument();
+    expect(screen.getByText(/No rooms match/)).toHaveTextContent('zzz-no-match');
   });
 
   it('closes a pristine exam chooser on Escape with no alertdialog', () => {
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
-    expect(screen.getByRole('dialog', { name: 'New Session' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    expect(screen.getByRole('dialog', { name: 'Create room' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'New Session' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Create room' })).not.toBeInTheDocument();
   });
 
   it('keeps the setup open while creation is pending', () => {
     createStateMock.isPending = true;
     renderRoute();
     openSetup();
-    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Close session setup' }));
-    expect(screen.getByLabelText('Session name')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close room settings' }));
+    expect(screen.getByLabelText('Room name')).toBeInTheDocument();
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
-  it('returns focus to the New Session trigger after pristine Cancel', () => {
+  it('returns focus to the Create room trigger after pristine Cancel', () => {
     renderRoute();
-    const trigger = screen.getByRole('button', { name: 'New Session' });
+    const trigger = screen.getByRole('button', { name: 'Create room' });
     trigger.focus();
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog', { name: 'New Session' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Create room' })).not.toBeInTheDocument();
     expect(document.activeElement).toBe(trigger);
   });
 
-  it('keeps every session data point on one merged meta line (04A hierarchy guard)', () => {
+  it('keeps every room data point on one merged meta line (04A hierarchy guard)', () => {
     const { container } = renderRoute();
     const row = screen.getByText('SAT Published').closest('.sat-list-row');
     expect(row).not.toBeNull();
     expect(row).toHaveTextContent('Morning');
     expect(row).toHaveTextContent('0 joined');
     expect(row).toHaveTextContent('0 active');
-    expect(row).toHaveTextContent('Ready');
+    expect(row).toHaveTextContent('Not started');
     const meta = row?.querySelector('.tabular-nums');
     expect(meta).not.toBeNull();
     // Staff metadata never drops below 14px.

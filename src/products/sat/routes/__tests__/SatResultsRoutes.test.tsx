@@ -78,18 +78,18 @@ describe('SAT Results hierarchy', () => {
 
   it('exports the RAWDATA workbook for the selected Student Access group', async () => {
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
-    expect(screen.getByText('All attempts in this session; filters do not affect export.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Export session answers/ }));
+    expect(screen.getByText('All attempts in this room; filters do not affect export.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Download room responses/ }));
     await waitFor(() => expect(downloadSatRawdataXlsxMock).toHaveBeenCalledWith('sat-1', 'schedule-1', 'Saturday 9 AM'));
   });
 
   it('surfaces a failed RAWDATA export and offers the button again', async () => {
     downloadSatRawdataXlsxMock.mockRejectedValue(new Error('Export failed: 500'));
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
-    fireEvent.click(screen.getByRole('button', { name: /Export session answers/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Download room responses/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Export failed: 500');
-    await waitFor(() => expect(screen.getByRole('button', { name: /Export session answers/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Download room responses/ })).toBeEnabled());
   });
 
   it('blocks a second RAWDATA export while the first is still running', async () => {
@@ -99,7 +99,7 @@ describe('SAT Results hierarchy', () => {
     );
     renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
 
-    fireEvent.click(screen.getByRole('button', { name: /Export session answers/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Download room responses/ }));
 
     const pendingButton = await screen.findByRole('button', { name: /Exporting/ });
     expect(pendingButton).toBeDisabled();
@@ -107,12 +107,12 @@ describe('SAT Results hierarchy', () => {
     expect(downloadSatRawdataXlsxMock).toHaveBeenCalledTimes(1);
 
     finishExport();
-    await waitFor(() => expect(screen.getByRole('button', { name: /Export session answers/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Download room responses/ })).toBeEnabled());
   });
 
   it('only offers the RAWDATA export inside a Student Access group', () => {
     renderResultsRoute('/sat/results?exam=sat-1');
-    expect(screen.queryByRole('button', { name: /Export session answers/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Download room responses/ })).not.toBeInTheDocument();
   });
 
   it('keeps attempts inside their schedule and opens a result beside the list, with the full page one link away', async () => {

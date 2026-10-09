@@ -33,7 +33,7 @@ export function SatWaitingRoomPanel({
     <section aria-label="Waiting room" className="mt-5 rounded-[18px] bg-[var(--sat-staff-surface,#fff)] p-4 ring-1 ring-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))]" data-sat-room-waiting>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">Waiting room</h2>
+          <h2 className="text-[18px] font-semibold tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">Waiting room</h2>
         </div>
         <button
           type="button"
@@ -45,7 +45,7 @@ export function SatWaitingRoomPanel({
           {startPending ? (
             <span aria-hidden="true" className="sat-spinner block h-3 w-3 shrink-0 rounded-full border-2 border-white/40 border-t-white" />
           ) : <Play size={14} aria-hidden="true" />}
-          {startPending ? 'Starting…' : 'Start exam'}
+          {startPending ? 'Starting…' : 'Review and start exam'}
         </button>
       </div>
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[14px] sm:grid-cols-4">

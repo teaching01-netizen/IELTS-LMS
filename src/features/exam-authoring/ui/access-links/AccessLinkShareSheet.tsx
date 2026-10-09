@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, Download, ExternalLink, Presentation, Share2, X } from "lucide-react";
+import { Check, Copy, Download, Presentation, X } from "lucide-react";
 import { accessLinkSectionStudentCopy, effectiveAccessLinkSections, type AssessmentAccessLink } from "../../contracts/accessLinks";
-import { copyText, studentJoinUrl } from "./accessLinkUi";
+import { copyText, describeAccessLinkAudience, formatAccessLinkStatus, roomEntryUrl, studentJoinUrl } from "./accessLinkUi";
 import { useTransientFlag } from "./useTransientValue";
 import { AuthoringDialog } from "../authoringPrimitives";
 export function useQrCodeDataUrl(url: string | null, size = 640) {
@@ -27,61 +27,100 @@ export function useAccessLinkQrCode(linkId: string | null, size = 640) {
   return useQrCodeDataUrl(linkId ? studentJoinUrl(linkId) : null, size);
 }
 
-export function AccessLinkShareSheet({ open, link, onClose, onPresent }: { open: boolean; link: AssessmentAccessLink | null; onClose: () => void; onPresent: () => void }) {
+export interface StudentShareDialogProps {
+  open: boolean;
+  url: string;
+  roomName: string;
+  examTitle: string;
+  versionNumber?: number | null;
+  /** "Anyone with link" / "Listed students · N"; omitted when the viewer cannot read the room's access. */
+  audience?: string | null;
+  /** "Check-in open", "Check-in opens later"…; omitted when unknown. */
+  checkIn?: string | null;
+  /** False when check-in is not open right now, so the copy never promises entry. */
+  checkInOpen?: boolean;
+  sectionCopy?: string | null;
+  /** Shown instead of the link when the room cannot be shared as configured. */
+  blockedMessage?: string | null;
+  onClose: () => void;
+  onPresent: () => void;
+}
+
+/** "Share with students": the one sharing surface for a room, from the exam's Rooms tab or the room itself. */
+export function StudentShareDialog({ open, url, roomName, examTitle, versionNumber, audience, checkIn, checkInOpen = true, sectionCopy, blockedMessage, onClose, onPresent }: StudentShareDialogProps) {
   const { active: copied, trigger: confirmCopied, clear: clearCopied } = useTransientFlag(1800);
-  const [shareError, setShareError] = useState<string | null>(null);
-  const { dataUrl, error: qrError } = useAccessLinkQrCode(open ? link?.id ?? null : null, 640);
-  useEffect(() => { if (open) { clearCopied(); setShareError(null); } }, [open, link?.id, clearCopied]);
-  if (!link) return null;
-  const sectionCopy = accessLinkSectionStudentCopy(link.enabledSections, link.publishScope);
-  const hasAvailableSections = effectiveAccessLinkSections(link.enabledSections, link.publishScope).length > 0;
-  const url = studentJoinUrl(link.id);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const { dataUrl, error: qrError } = useQrCodeDataUrl(open && !blockedMessage ? url : null, 640);
+  useEffect(() => { if (open) { clearCopied(); setCopyError(null); } }, [open, url, clearCopied]);
   const copy = async () => {
+    setCopyError(null);
     try {
       await copyText(url);
       confirmCopied();
     } catch (error) {
-      setShareError(error instanceof Error ? error.message : "Link could not be copied.");
+      setCopyError(error instanceof Error ? error.message : "Link could not be copied.");
     }
   };
-  const share = async () => {
-    setShareError(null);
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: link.name,
-          text: `${link.examTitle} · Version ${link.versionNumber}${sectionCopy ? ` · ${sectionCopy}` : ""}`,
-          url,
-        });
-      } else {
-        await copy();
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      setShareError(error instanceof Error ? error.message : "Share could not be opened.");
-    }
-  };
+  const fileName = `${roomName.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "room"}-qr.png`;
   return (
     <AuthoringDialog
       open={open}
-      title={`Share ${link.name}`}
-      description="Copy or present this Student Link to learners."
+      title={`Share ${roomName} with students`}
+      description="Copy the student link or show its QR code."
       onClose={onClose}
       showHeader={false}
       contentClassName="w-[calc(100vw-2rem)] max-w-[440px] overflow-hidden rounded-[22px] p-0"
     >
-          <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4"><div className="min-w-0 flex-1"><p className="text-[12px] font-medium text-slate-400">Share with students · Version {link.versionNumber}</p><h2 className="truncate text-[16px] font-semibold text-slate-950">{link.name}</h2>{sectionCopy ? <p className="mt-1 text-[12px] font-semibold text-slate-500">{sectionCopy}</p> : null}</div><button type="button" aria-label="Close share sheet" onClick={onClose} className="authoring-icon-button"><X size={15} aria-hidden="true"/></button></header>
-          <div className="p-5">
-            {!hasAvailableSections ? <p role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-[12px] leading-5 text-amber-900">{sectionCopy} Update this Student Link’s section scope before sharing.</p> : <>
-            <div className="mx-auto flex h-52 w-52 items-center justify-center rounded-[18px] bg-au-fill p-3">{dataUrl ? <img src={dataUrl} alt={`QR code for ${link.name}`} className="h-full w-full" /> : <span role="status" className="px-4 text-center text-[12px] text-slate-500">{qrError ?? "Generating QR code…"}</span>}</div>
-            <div className="mt-4 rounded-xl bg-au-fill px-3 py-2.5"><p className="break-all font-mono text-[12px] leading-5 text-slate-600 select-all">{url}</p></div>
-            <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => void share()} className="sat-press sat-press-fill-accent flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-accent px-3 text-[12px] font-semibold text-white hover:bg-au-accent-hover"><Share2 size={15} aria-hidden="true"/>Share</button><button type="button" onClick={() => void copy()} aria-live="polite" className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-fill px-3 text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong">{copied ? <Check size={15} className="text-au-success" aria-hidden="true"/> : <Copy size={15} aria-hidden="true"/>} {copied ? "Copied" : "Copy Link"}</button></div>
-            <div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={onPresent} className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl text-[12px] font-semibold text-slate-600 hover:bg-au-fill"><Presentation size={14} aria-hidden="true"/>Present</button>{dataUrl ? <a href={dataUrl} download={`${link.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "student-link"}-qr.png`} className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl text-[12px] font-semibold text-slate-600 hover:bg-au-fill"><Download size={14} aria-hidden="true"/>Download QR</a> : <span />}</div>
-            <a href={url} target="_blank" rel="noreferrer" className="sat-press sat-press-fill mt-2 flex min-h-11 items-center justify-center gap-2 rounded-xl text-[12px] font-semibold text-slate-500 hover:bg-au-fill"><ExternalLink size={13} aria-hidden="true"/>Open student link</a>
-            </>}
-            {shareError ? <p role="alert" className="mt-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[12px] text-au-danger-text">{shareError}</p> : null}
+      <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] font-medium text-slate-500">Share with students</p>
+          <h2 className="truncate text-[16px] font-semibold text-slate-950">{roomName}</h2>
+          <p className="mt-0.5 truncate text-[12px] text-slate-500">{examTitle}{versionNumber ? ` · Version ${versionNumber}` : ""}{sectionCopy ? ` · ${sectionCopy}` : ""}</p>
+        </div>
+        <button type="button" aria-label="Close share sheet" onClick={onClose} className="authoring-icon-button h-11 w-11"><X size={15} aria-hidden="true"/></button>
+      </header>
+      <div className="p-5">
+        {audience || checkIn ? (
+          <dl className="mb-4 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5 text-[12px] leading-5">
+            {audience ? <><dt className="font-medium text-slate-500">Who can join</dt><dd className="text-slate-900">{audience}</dd></> : null}
+            {checkIn ? <><dt className="font-medium text-slate-500">Check-in</dt><dd className="text-slate-900">{checkIn}</dd></> : null}
+          </dl>
+        ) : null}
+        {blockedMessage ? <p role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-[12px] leading-5 text-amber-900">{blockedMessage}</p> : <>
+          <p className="text-[13px] leading-5 text-slate-600">{checkInOpen ? "Students can check in now. They wait until you start the exam." : "Students can check in once check-in opens. They wait until you start the exam."}</p>
+          <div className="mx-auto mt-4 flex h-52 w-52 items-center justify-center rounded-[18px] bg-au-fill p-3">{dataUrl ? <img src={dataUrl} alt={`QR code for ${roomName}`} className="h-full w-full" /> : <span role="status" className="px-4 text-center text-[12px] text-slate-500">{qrError ?? "Generating QR code…"}</span>}</div>
+          <div className="mt-4 rounded-xl bg-au-fill px-3 py-2.5"><p className="break-all font-mono text-[12px] leading-5 text-slate-600 select-all">{url}</p></div>
+          <button type="button" onClick={() => void copy()} className="sat-press sat-press-fill-accent mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-au-accent px-3 text-[13px] font-semibold text-white hover:bg-au-accent-hover">{copied ? <Check size={15} aria-hidden="true"/> : <Copy size={15} aria-hidden="true"/>}<span aria-live="polite">{copied ? "Copied" : "Copy link"}</span></button>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button type="button" onClick={onPresent} className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-fill text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong"><Presentation size={14} aria-hidden="true"/>Present QR</button>
+            {dataUrl ? <a href={dataUrl} download={fileName} className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-fill text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong"><Download size={14} aria-hidden="true"/>Download QR</a> : <span />}
           </div>
+        </>}
+        {copyError ? <p role="alert" className="mt-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[12px] text-au-danger-text">{copyError}</p> : null}
+      </div>
     </AuthoringDialog>
+  );
+}
+
+export function AccessLinkShareSheet({ open, link, onClose, onPresent }: { open: boolean; link: AssessmentAccessLink | null; onClose: () => void; onPresent: () => void }) {
+  if (!link) return null;
+  const sectionCopy = accessLinkSectionStudentCopy(link.enabledSections, link.publishScope);
+  const hasAvailableSections = effectiveAccessLinkSections(link.enabledSections, link.publishScope).length > 0;
+  return (
+    <StudentShareDialog
+      open={open}
+      url={roomEntryUrl({ accessLinkId: link.id, scheduleId: link.scheduleId })}
+      roomName={link.name}
+      examTitle={link.examTitle}
+      versionNumber={link.versionNumber}
+      audience={describeAccessLinkAudience(link)}
+      checkIn={formatAccessLinkStatus(link.status)}
+      checkInOpen={link.status === "live"}
+      sectionCopy={sectionCopy}
+      blockedMessage={hasAvailableSections ? null : `${sectionCopy} Update this room’s sections before sharing.`}
+      onClose={onClose}
+      onPresent={onPresent}
+    />
   );
 }
 
@@ -111,7 +150,7 @@ export function AccessLinkPresentView({ open, link, onClose }: { open: boolean; 
         </button>
       </header>
       <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10 text-center">
-        {!hasAvailableSections ? <p role="alert" className="max-w-xl rounded-2xl bg-amber-50 px-6 py-5 text-base leading-7 text-amber-900">{sectionCopy} Update this Student Link’s section scope before presenting it.</p> : <>
+        {!hasAvailableSections ? <p role="alert" className="max-w-xl rounded-2xl bg-amber-50 px-6 py-5 text-base leading-7 text-amber-900">{sectionCopy} Update this room’s sections before presenting it.</p> : <>
         <p className="text-lg font-semibold text-slate-700">Scan to join</p>
         <div className="mt-5 flex h-[min(52vh,500px)] w-[min(52vh,500px)] items-center justify-center rounded-[32px] bg-au-fill p-7">
           {dataUrl ? <img src={dataUrl} alt={`QR code for ${link.name}`} className="h-full w-full" /> : <span className="text-sm text-slate-400">Preparing QR code…</span>}

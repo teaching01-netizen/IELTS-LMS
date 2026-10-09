@@ -3,6 +3,7 @@ import { SatConfirmDialog } from './ConfirmDialog';
 export const SAT_SESSION_WARN_MESSAGE = 'Please return your attention to the exam.';
 
 export type SatSessionRoomConfirmation =
+  | { kind: 'start'; joinedCount: number; readyCount: number | null; sectionsLabel: string; perCandidateTiming: boolean | null }
   | { kind: 'complete' }
   | { kind: 'terminate'; studentId: string; studentName: string }
   | { kind: 'warn'; studentId: string; studentName: string }
@@ -20,8 +21,10 @@ export function SatSessionRoomConfirmDialog({
 }) {
   if (!confirm) return null;
 
-  const title = confirm.kind === 'complete'
-    ? 'End this SAT session?'
+  const title = confirm.kind === 'start'
+    ? 'Start the exam for this room?'
+    : confirm.kind === 'complete'
+    ? 'End this SAT room?'
     : confirm.kind === 'terminate'
       ? `End ${confirm.studentName}’s attempt?`
       : confirm.kind === 'warn'
@@ -29,8 +32,10 @@ export function SatSessionRoomConfirmDialog({
         : confirm.kind === 'extend-session'
           ? `Add ${confirm.minutes} minutes to ${confirm.stage}?`
           : `Add ${confirm.minutes} minutes for ${confirm.studentName}?`;
-  const description = confirm.kind === 'complete'
-    ? 'The session will be completed for the cohort. This should only be used when testing is finished.'
+  const description = confirm.kind === 'start'
+    ? `${confirm.joinedCount} joined${confirm.readyCount === null ? '' : ` · ${confirm.readyCount} ready`}. ${confirm.sectionsLabel} begins for students who have joined. ${confirm.perCandidateTiming === null ? 'Timing is shown in the run sheet once the exam starts.' : confirm.perCandidateTiming ? 'Each student receives the full configured time; late arrivals start their own clock.' : 'Students share the room clock; late arrivals receive the time left in the current window.'} Starting cannot be undone.`
+    : confirm.kind === 'complete'
+    ? 'The room will be completed for the cohort. This should only be used when testing is finished.'
     : confirm.kind === 'terminate'
       ? 'This ends the student’s current attempt. Their recorded answers remain available.'
       : confirm.kind === 'warn'
@@ -44,13 +49,15 @@ export function SatSessionRoomConfirmDialog({
       open
       title={title}
       description={description}
-      confirmLabel={confirm.kind === 'complete'
-        ? 'End Session'
+      confirmLabel={confirm.kind === 'start'
+        ? 'Start exam'
+        : confirm.kind === 'complete'
+        ? 'End room'
         : confirm.kind === 'terminate'
-          ? 'End Attempt'
+          ? 'End attempt'
           : confirm.kind === 'warn'
-            ? 'Send Warning'
-            : `Add ${confirm.minutes} Minutes`}
+            ? 'Send warning'
+            : `Add ${confirm.minutes} minutes`}
       destructive={confirm.kind === 'terminate' || confirm.kind === 'complete'}
       onCancel={onCancel}
       onConfirm={onConfirm}

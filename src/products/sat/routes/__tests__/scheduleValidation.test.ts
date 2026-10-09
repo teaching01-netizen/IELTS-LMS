@@ -39,7 +39,7 @@ describe('validateSatScheduleTimes', () => {
 
   it('rejects a session shorter than 15 minutes (D2 policy)', () => {
     expect(validateSatScheduleTimes('2026-09-01T10:00', '2026-09-01T10:14', new Date('2026-09-01T09:00'))).toEqual({
-      end: 'Sessions must be at least 15 minutes long.',
+      end: 'Rooms must be at least 15 minutes long.',
     });
   });
 

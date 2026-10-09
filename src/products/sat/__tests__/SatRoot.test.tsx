@@ -48,9 +48,9 @@ describe('SatRoot', () => {
 
   it('keeps the SAT workspace to three primary admin destinations', () => {
     renderRoot('admin');
-    expect(screen.getAllByText('Tests').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Sessions').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Results').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Exams').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Rooms').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Responses').length).toBeGreaterThan(0);
     expect(screen.queryByText('Grading')).not.toBeInTheDocument();
     expect(screen.queryByText('Dashboard')).not.toBeInTheDocument();
   });
@@ -95,7 +95,7 @@ describe('SatRoot', () => {
     expect(logout).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the sidebar on session and result pages', () => {
+  it('keeps the sidebar on room and result pages', () => {
     authMock.mockReturnValue({
       session: { user: { role: 'admin', displayName: 'Alex Staff', email: 'alex@example.com' } },
       logout: vi.fn(),
@@ -106,7 +106,7 @@ describe('SatRoot', () => {
           <MemoryRouter initialEntries={[entry]}>
             <Routes>
               <Route path="/sat" element={<SatRoot />}>
-                <Route path="sessions/:scheduleId" element={<div>Session room content</div>} />
+                <Route path="sessions/:scheduleId" element={<div>Room content</div>} />
                 <Route path="results/:resultId" element={<div>Result detail content</div>} />
               </Route>
             </Routes>
@@ -140,11 +140,11 @@ describe('SatRoot', () => {
     expect(screen.queryByRole('button', { name: 'Sign Out' })).not.toBeInTheDocument();
   });
 
-  it('gives proctors sessions and results without exposing exam authoring', () => {
+  it('gives proctors rooms and results without exposing exam authoring', () => {
     renderRoot('proctor');
-    expect(screen.queryByText('Tests')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Sessions').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Results').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Exams')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Rooms').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Responses').length).toBeGreaterThan(0);
   });
 });
 
@@ -166,7 +166,7 @@ describe('SatRoot shell polish', () => {
               <Route path="exams/:examId/release" element={<div>Release content</div>} />
               <Route path="exams/:examId/preview" element={<div>Preview content</div>} />
               <Route path="exams/:examId/access" element={<div>Access content</div>} />
-              <Route path="sessions/:scheduleId" element={<div>Session room content</div>} />
+              <Route path="sessions/:scheduleId" element={<div>Room content</div>} />
               <Route path="results/:resultId" element={<div>Result detail content</div>} />
             </Route>
           </Routes>
@@ -177,21 +177,21 @@ describe('SatRoot shell polish', () => {
 
   it('covers the full navForRole matrix (builder/grader/proctor)', () => {
     const { unmount: u1 } = renderRoot('builder');
-    expect(screen.getAllByText('Tests').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Sessions')).not.toBeInTheDocument();
-    expect(screen.queryByText('Results')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Exams').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Rooms')).not.toBeInTheDocument();
+    expect(screen.queryByText('Responses')).not.toBeInTheDocument();
     u1();
 
     const { unmount: u2 } = renderRoot('grader');
-    expect(screen.getAllByText('Results').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Tests')).not.toBeInTheDocument();
-    expect(screen.queryByText('Sessions')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Responses').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Exams')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rooms')).not.toBeInTheDocument();
     u2();
 
     renderRoot('proctor');
-    expect(screen.queryByText('Tests')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Sessions').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Results').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Exams')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Rooms').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Responses').length).toBeGreaterThan(0);
   });
 
   it.each([

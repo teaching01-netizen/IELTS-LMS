@@ -433,7 +433,7 @@ async function startSatAttempt(
   const studentEmail = `sat-adaptive-${stamp}@example.com`;
 
   await page.goto("/sat/exams");
-  await expect(page.getByRole("heading", { name: "Tests" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Exams" })).toBeVisible();
   await expect(page.getByText("Digital SAT").first()).toBeVisible();
   await expect(page.getByText("IELTS", { exact: true })).toHaveCount(0);
 
@@ -501,7 +501,7 @@ async function startSatAttempt(
   ]);
 
   await page.goto("/sat/sessions");
-  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Rooms" })).toBeVisible({ timeout: 30_000 });
   const sessionRow = page
     .locator("button")
     .filter({ hasText: examTitle })

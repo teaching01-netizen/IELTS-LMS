@@ -8,7 +8,8 @@ describe("sessionPhaseFromRuntime", () => {
     ["not_started", undefined, "ready"],
     ["completed", undefined, "finished"],
     // A cancelled or completed schedule wins even when the runtime row lags behind.
-    ["not_started", "cancelled", "finished"],
+    ["not_started", "cancelled", "cancelled"],
+    ["cancelled", undefined, "cancelled"],
     [undefined, "completed", "finished"],
     ["something-new", undefined, "unknown"],
     [null, null, "unknown"],
@@ -22,20 +23,31 @@ describe("sessionActionPlan", () => {
 
   it("never offers more than one primary action and puts the next sensible step first", () => {
     const primaries: Record<Exclude<SessionPhase, "unknown">, string> = {
-      ready: "start",
+      ready: "open-room",
       live: "open-live",
-      paused: "resume",
-      finished: "view-responses",
+      paused: "open-room",
+      finished: "view-results",
+      cancelled: "open-room",
     };
     for (const [phase, kind] of Object.entries(primaries)) {
       expect(sessionActionPlan(phase as SessionPhase, run).primary?.kind).toBe(kind);
     }
   });
 
-  it("gives staff who cannot run sessions no session actions in any phase", () => {
-    for (const phase of ["ready", "live", "paused", "finished", "unknown"] as const) {
+  it("gives staff who cannot run rooms no room actions in any phase", () => {
+    for (const phase of ["ready", "live", "paused", "finished", "cancelled", "unknown"] as const) {
       expect(sessionActionPlan(phase, { canRun: false, stale: false })).toEqual({ primary: null, supporting: [] });
     }
+  });
+
+  it("keeps start and resume in the room: lists only navigate there", () => {
+    for (const phase of ["ready", "live", "paused", "finished", "cancelled"] as const) {
+      const plan = sessionActionPlan(phase, run);
+      const kinds = [plan.primary, ...plan.supporting].map((action) => action?.kind);
+      expect(kinds).not.toContain("start");
+      expect(kinds).not.toContain("resume");
+    }
+    expect(sessionActionPlan("cancelled", run).primary?.label).toBe("Review room");
   });
 
   it("replaces every action with a refresh when state is stale or unknown, never a guess", () => {
@@ -44,7 +56,7 @@ describe("sessionActionPlan", () => {
     expect(sessionActionPlan("unknown", run).primary?.kind).toBe("refresh");
   });
 
-  it("keeps Duplicate setup off active sessions", () => {
+  it("keeps Duplicate setup off active rooms", () => {
     for (const phase of ["ready", "live", "paused"] as const) {
       expect(sessionActionPlan(phase, run).supporting.map((action) => action.kind)).not.toContain("duplicate");
     }
@@ -53,7 +65,7 @@ describe("sessionActionPlan", () => {
 });
 
 describe("entryLabel", () => {
-  it("describes check-in, not the exam, so pausing check-in cannot read as pausing a session", () => {
+  it("describes check-in, not the exam, so pausing check-in cannot read as pausing a room", () => {
     expect(entryLabel("paused")).toBe("Check-in paused");
     expect(entryLabel("live")).toBe("Check-in open");
     expect(entryLabel("upcoming")).toBe("Check-in opens later");

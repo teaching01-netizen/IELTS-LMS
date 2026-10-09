@@ -71,7 +71,7 @@ function renderSat(entry: string) {
           />
           <Route path="exams/:examId/release" element={<div>Release content</div>} />
           <Route path="exams/:examId/access" element={<div>Access content</div>} />
-          <Route path="sessions/:scheduleId" element={<div>Session room content</div>} />
+          <Route path="sessions/:scheduleId" element={<div>Room content</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -126,7 +126,7 @@ describe('SatRoot collaboration boundary', () => {
 
   it('does not open an exam room for a non-authoring SAT route', () => {
     renderSat('/sat/sessions/s-1');
-    expect(screen.getByText('Session room content')).toBeInTheDocument();
+    expect(screen.getByText('Room content')).toBeInTheDocument();
     expect(screen.queryByTestId('coedit-boundary')).not.toBeInTheDocument();
     expect(boundary.mounts).toBe(0);
   });

@@ -25,12 +25,12 @@ vi.mock("../../../../features/exam-authoring/ui/access-links/StudentLinksDashboa
   StudentLinksDashboard: (props: {
     selectedLinkId: string | null;
     createRequest: { versionId?: string } | null;
-    session: { onOpenRoom: (id: string) => void; onOpenResponses: (id: string) => void };
+    session: { onOpenRoom: (id: string) => void; onOpenResults: (id: string) => void };
   }) => <>
     <p>Selected group: {props.selectedLinkId}</p>
     {props.createRequest ? <p>Setup: {props.createRequest.versionId ?? "current"}</p> : null}
     <button onClick={() => props.session.onOpenRoom("schedule-b")}>Open room</button>
-    <button onClick={() => props.session.onOpenResponses("schedule-b")}>View responses</button>
+    <button onClick={() => props.session.onOpenResults("schedule-b")}>View results</button>
   </>,
 }));
 
@@ -49,20 +49,20 @@ function open(path = "/sat/exams/exam-1/access?link=b") {
   </Routes></MemoryRouter>);
 }
 
-describe("Sessions navigation", () => {
-  it("returns from the session room to the same session", () => {
+describe("Rooms navigation", () => {
+  it("returns from the room to the same room", () => {
     open();
     fireEvent.click(screen.getByRole("button", { name: "Open room" }));
     expect(screen.getByTestId("location")).toHaveTextContent("/sat/sessions/schedule-b · Return: /sat/exams/exam-1/access?link=b");
   });
 
-  it("opens results scoped to that session's backing schedule", () => {
+  it("opens results scoped to that room's backing schedule", () => {
     open();
-    fireEvent.click(screen.getByRole("button", { name: "View responses" }));
+    fireEvent.click(screen.getByRole("button", { name: "View results" }));
     expect(screen.getByTestId("location")).toHaveTextContent("/sat/exams/exam-1/responses?access=schedule-b");
   });
 
-  it("consumes a pinned create-session request while preserving session selection in the URL", async () => {
+  it("consumes a pinned create-room request while preserving room selection in the URL", async () => {
     open("/sat/exams/exam-1/access?link=b&new=1&version=v-4&versionNumber=4&scope=math");
     expect(screen.getByText("Setup: v-4")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/sat/exams/exam-1/access?link=b · Return:"));

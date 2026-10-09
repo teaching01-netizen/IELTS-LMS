@@ -19,25 +19,25 @@ export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0
   const steps = [
     { label: "Publish", detail: `Version ${versionNumber} is published.`, done: true },
     {
-      label: "Create session",
+      label: "Create room",
       detail: groupCount > 0
-        ? `${groupCount} ${groupCount === 1 ? "session" : "sessions"} prepared on this version.`
-        : configured ? "A session was prepared for this exam."
-        : `Version ${versionNumber} has no session yet. Name it, choose who can join and when check-in is open.`,
+        ? `${groupCount} ${groupCount === 1 ? "room" : "rooms"} prepared on this version.`
+        : configured ? "A room was prepared for this exam."
+        : `Version ${versionNumber} has no room yet. Name it, choose who can join and when check-in is open.`,
       done: configured,
     },
     {
       label: "Share and run",
       detail: finishedCount > 0
-        ? `${finishedCount} ${finishedCount === 1 ? "session has" : "sessions have"} finished. View results or start from an earlier session.`
+        ? `${finishedCount} ${finishedCount === 1 ? "room has" : "rooms have"} finished. View results or start from an earlier session.`
         : runningCount > 0
-          ? `${runningCount} ${runningCount === 1 ? "session is" : "sessions are"} running. Open a session to monitor students.`
-          : "Select a session to copy its student link or show its QR code. Students wait in check-in until the proctor starts the exam. Copying does not confirm that the link was shared.",
+          ? `${runningCount} ${runningCount === 1 ? "room is" : "rooms are"} running. Open a room to monitor students.`
+          : "Select a room to copy its student link or show its QR code. Students wait in check-in until the proctor starts the exam. Copying does not confirm that the link was shared.",
       done: runningCount > 0 || finishedCount > 0,
     },
   ];
   const list = (
-    <ol aria-label="Session setup steps" className="grid gap-3 sm:grid-cols-3">
+    <ol aria-label="Room settings steps" className="grid gap-3 sm:grid-cols-3">
       {steps.map((step, index) => {
         const current = !step.done && steps.slice(0, index).every((previous) => previous.done);
         return (
@@ -74,7 +74,7 @@ export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0
     );
   }
   return (
-    <section aria-label="Set up a session" className="sat-route-enter mt-4 rounded-2xl border border-black/[0.06] bg-white p-4">
+    <section aria-label="Set up a room" className="sat-route-enter mt-4 rounded-2xl border border-black/[0.06] bg-white p-4">
       <h2 className="text-[15px] font-semibold text-slate-950">Run this exam in three steps</h2>
       <div className="mt-3">{list}</div>
       <button
@@ -82,7 +82,7 @@ export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0
         onClick={onCreate}
         className="sat-press mt-4 flex min-h-11 items-center rounded-[12px] bg-au-accent px-4 text-[13px] font-semibold text-white hover:bg-au-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40"
       >
-        Create session
+        Create room
       </button>
     </section>
   );

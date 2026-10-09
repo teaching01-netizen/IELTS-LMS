@@ -104,7 +104,7 @@ export interface AuthoringWorkspaceChrome {
   lifecycle: ExamLifecycleCopy;
   showResponses: boolean;
   canPublish: boolean;
-  /** A published version exists; the header offers "Create session". */
+  /** A published version exists; the header offers "Create room". */
   canCreateSession?: boolean;
 }
 

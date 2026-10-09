@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { motion } from "motion/react";
 import { AlertTriangle, ArrowLeft, CalendarPlus, Eye, FileUp, MoreHorizontal, Send, Settings2 } from "lucide-react";
+import { SatWorkspaceSwitcher } from "@/src/products/sat/ui/SatWorkspaceNav";
 import { SatMenu, type SatMenuItem } from "@/src/products/sat/ui/Menu";
 import { SatStatusPill } from "@/src/products/sat/ui/SatPage";
 import type { ExamLifecycleCopy, ExamWorkspaceTab } from "./examLifecycle";
@@ -67,8 +68,8 @@ const QUIET = "authoring-button authoring-button--quiet min-h-11";
 
 const TAB_LABEL: Record<ExamWorkspaceTab, string> = {
   questions: "Questions",
-  delivery: "Sessions",
-  responses: "Results",
+  delivery: "Rooms",
+  responses: "Responses",
   settings: "Settings",
 };
 
@@ -100,10 +101,11 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
         <div className="flex min-w-0 flex-1 basis-48 items-center gap-1">
           <nav aria-label="Breadcrumb" className="shrink-0">
             <ol className="flex items-center gap-1">
+              <li><SatWorkspaceSwitcher /></li>
               <li>
-                <button type="button" onClick={onBack} aria-label="Tests" className={`${QUIET} min-w-11 px-2 text-muted-foreground hover:text-foreground`}>
+                <button type="button" onClick={onBack} aria-label="Exams" className={`${QUIET} min-w-11 px-2 text-muted-foreground hover:text-foreground`}>
                   <ArrowLeft size={17} aria-hidden="true" className="sm:hidden" />
-                  <span className="hidden sm:inline">Tests</span>
+                  <span className="hidden sm:inline">Exams</span>
                 </button>
               </li>
               <li aria-hidden="true" className="hidden text-muted-foreground sm:block">/</li>
@@ -170,7 +172,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
           {onCreateSession ? (
             <button type="button" onClick={onCreateSession} className={createIsPrimary ? PRIMARY : ACTION}>
               <CalendarPlus size={16} aria-hidden="true" />
-              Create session
+              Create room
             </button>
           ) : null}
           {overflowItems.length > 0 ? (

@@ -5,6 +5,17 @@ export function studentJoinUrl(linkId: string): string {
   return typeof window === "undefined" ? path : `${window.location.origin}${path}`;
 }
 
+/**
+ * The one student entry URL for a room. Access-backed rooms use their link
+ * (/join/:linkId, where admission policy is checked up front); rooms without a
+ * known link fall back to the schedule entry (/student/:scheduleId).
+ */
+export function roomEntryUrl(room: { accessLinkId?: string | null; scheduleId: string }): string {
+  if (room.accessLinkId) return studentJoinUrl(room.accessLinkId);
+  const path = `/student/${encodeURIComponent(room.scheduleId)}`;
+  return typeof window === "undefined" ? path : `${window.location.origin}${path}`;
+}
+
 export async function copyText(text: string): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -44,7 +55,7 @@ export function accessLinkStatusDescription(link: AssessmentAccessLink, now = ne
   if (link.status === "upcoming" && opens) return `Opens ${formatCompactDateTime(opens, now)}.`;
   if (link.status === "ended" && closes) return `Closed ${formatCompactDateTime(closes, now)}.`;
   if (link.status === "live" && closes) return `Closes ${formatCompactDateTime(closes, now)}.`;
-  return "Availability follows this session's check-in settings.";
+  return "Availability follows this room's check-in settings.";
 }
 
 /**

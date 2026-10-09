@@ -313,7 +313,7 @@ describe('SAT Phase 02 copy contracts', () => {
         <SatResultsRoute />
       </MemoryRouter>,
     );
-    expect(screen.getByPlaceholderText('Search sessions or cohort')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search rooms or cohort')).toBeInTheDocument();
     cleanup();
 
     render(<MemoryRouter initialEntries={['/sat/results?exam=sat-1&access=schedule-1']}><SatResultsRoute /></MemoryRouter>);
@@ -325,10 +325,10 @@ describe('SAT Phase 02 copy contracts', () => {
     expect(screen.queryByPlaceholderText('Search exams')).not.toBeInTheDocument();
   });
 
-  it('sessions and room placeholders name their filter scope', () => {
+  it('rooms and room placeholders name their filter scope', () => {
     renderSessions();
     expect(screen.getByPlaceholderText('Search exam, cohort, institution')).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('Search sessions')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Search rooms')).not.toBeInTheDocument();
 
     render(
       <MemoryRouter initialEntries={['/sat/sessions/sched-1']}>
@@ -348,7 +348,7 @@ describe('SAT Phase 02 copy contracts', () => {
     expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
   });
 
-  it('sessions empty-state CTA is Title Case', () => {
+  it('rooms empty-state CTA is Title Case', () => {
     renderSessions();
     fireEvent.change(screen.getByPlaceholderText('Search exam, cohort, institution'), {
       target: { value: 'zzz-no-match' },

@@ -74,17 +74,17 @@ export function SatSessionRoomTimeline({
   }, [runtime.scheduleId]);
 
   return (
-    <section ref={workspaceRef} className="sat-room__workspace" aria-label="Session timeline" data-sat-room-workspace data-sat-room-timeline>
-      <div className={`sat-room__sticky-context${showStickyContext ? ' is-visible' : ''}`} role="group" aria-label="Current session context">
+    <section ref={workspaceRef} className="sat-room__workspace" aria-label="Room timeline" data-sat-room-workspace data-sat-room-timeline>
+      <div className={`sat-room__sticky-context${showStickyContext ? ' is-visible' : ''}`} role="group" aria-label="Current room context">
         <span>{currentStage}{stageSlot ? ` · ${stageSlot}` : ''}</span>
         {sessionLive ? <strong>{formatRunSheetRemaining(remainingSeconds)}</strong> : null}
       </div>
       <div className="min-w-0">
         <div ref={stageRef} className={`sat-room__stage sat-room__stage--${roomMode}`} data-sat-room-stage>
-          <SatEyebrow>{roomMode === 'review' ? 'Session review' : roomMode === 'prestart' ? 'Ready to begin' : 'Current stage'}</SatEyebrow>
+          <SatEyebrow>{roomMode === 'review' ? 'Room review' : roomMode === 'prestart' ? 'Ready to begin' : 'Current stage'}</SatEyebrow>
           <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
-              <h2>{roomMode === 'review' ? (sessionFinished ? 'Session finished' : 'Session cancelled') : roomMode === 'prestart' ? upcomingSection?.label.replace(/^Section \d+ · /, '') ?? 'Session schedule' : currentStage}</h2>
+              <h2>{roomMode === 'review' ? (sessionFinished ? 'Room finished' : 'Room cancelled') : roomMode === 'prestart' ? upcomingSection?.label.replace(/^Section \d+ · /, '') ?? 'Room schedule' : currentStage}</h2>
               {roomMode === 'review' ? null : roomMode === 'prestart' ? (
                 <>
                   <p className="sat-room__stage-note">Starts when the proctor starts the session.</p>
@@ -101,8 +101,8 @@ export function SatSessionRoomTimeline({
                         : stageRows.section
                           ? `Section ends ${currentSectionEnd} ICT`
                           : sessionLive
-                            ? 'Server-authoritative session clock'
-                            : 'Session timing is no longer running.'}
+                            ? 'Server-authoritative room clock'
+                            : 'Room timing is no longer running.'}
                   </p>
                   {nextStageRow && nextStageLabel ? (
                     <p className="sat-room__next-stage">

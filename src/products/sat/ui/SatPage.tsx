@@ -42,7 +42,7 @@ export function SatPageHeader({
           </button>
         ) : null}
         <p className="text-[14px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
-        <h1 className="mt-1 text-balance text-[24px] font-semibold tracking-[-0.04em] sm:text-[30px] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
+        <h1 className="mt-1 text-balance text-[26px] font-semibold tracking-[-0.03em] sm:text-[28px] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
         {description ? (
           <p className="mt-2 max-w-xl text-pretty text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
         ) : null}
@@ -415,7 +415,7 @@ export function SatEmptyState({
       <div className="flex h-12 w-12 items-center justify-center rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] text-[var(--sat-staff-text-tertiary,#6e6e73)] shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]">
         {icon}
       </div>
-      <h2 className="mt-4 text-balance text-[16px] font-semibold tracking-[-0.02em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
+      <h2 className="mt-4 text-balance text-[18px] font-semibold tracking-[-0.02em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
       <p className="mt-1 max-w-sm text-pretty text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{hint}</p>
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
@@ -462,13 +462,13 @@ export function SatInlineError({
 }) {
   return (
     <div role="alert" className="mt-4 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-5 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]">
-      <h2 className="text-[14px] font-semibold tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
+      <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
       <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
       {onRetry ? (
         <button
           type="button"
           onClick={onRetry}
-          className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-input,12px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
+          className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
         >
           {retryLabel}
         </button>
@@ -559,13 +559,13 @@ export function SatPageError({
           role="alert"
           className="w-full max-w-md rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-6 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]"
         >
-          <h1 className="text-[17px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
+          <h1 className="text-[18px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
           <p className="mt-1.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
           {onRetry ? (
             <button
               type="button"
               onClick={onRetry}
-              className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-input,12px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
+              className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
             >
               {retryLabel}
             </button>

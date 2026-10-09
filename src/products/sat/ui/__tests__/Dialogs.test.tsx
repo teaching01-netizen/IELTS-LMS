@@ -10,16 +10,16 @@ describe('SatConfirmDialog', () => {
       <SatConfirmDialog
         open
         title="Finish this SAT session?"
-        description="The session will be completed for the cohort."
-        confirmLabel="Finish Session"
+        description="The room will be completed for the cohort."
+        confirmLabel="Finish Room"
         destructive
         onCancel={onCancel}
         onConfirm={onConfirm}
       />,
     );
     expect(screen.getByRole('alertdialog', { name: 'Finish this SAT session?' })).toBeInTheDocument();
-    expect(screen.getByText('The session will be completed for the cohort.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Finish Session' }));
+    expect(screen.getByText('The room will be completed for the cohort.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Room' }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(onCancel).not.toHaveBeenCalled();
   });
@@ -49,8 +49,8 @@ describe('SatConfirmDialog', () => {
       <SatConfirmDialog
         open
         title="Finish this SAT session?"
-        description="The session will be completed for the cohort."
-        confirmLabel="Finish Session"
+        description="The room will be completed for the cohort."
+        confirmLabel="Finish Room"
         onCancel={onCancel}
         onConfirm={onConfirm}
       />,
@@ -65,8 +65,8 @@ describe('SatConfirmDialog', () => {
       <SatConfirmDialog
         open={false}
         title="Finish this SAT session?"
-        description="The session will be completed for the cohort."
-        confirmLabel="Finish Session"
+        description="The room will be completed for the cohort."
+        confirmLabel="Finish Room"
         onCancel={vi.fn()}
         onConfirm={vi.fn()}
       />,
@@ -79,14 +79,14 @@ describe('SatFormDialog', () => {
   it('exposes a named dialog that contains the form and closes on Escape', () => {
     const onClose = vi.fn();
     render(
-      <SatFormDialog open eyebrow="Digital SAT" title="New Session" onClose={onClose}>
-        <form aria-label="New session form">
-          <input aria-label="Session name" readOnly />
+      <SatFormDialog open eyebrow="Digital SAT" title="New Room" onClose={onClose}>
+        <form aria-label="New room form">
+          <input aria-label="Room name" readOnly />
         </form>
       </SatFormDialog>,
     );
-    expect(screen.getByRole('dialog', { name: 'New Session' })).toBeInTheDocument();
-    expect(screen.getByRole('form', { name: 'New session form' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'New Room' })).toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'New room form' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -171,8 +171,8 @@ describe('SatConfirmDialog dismissal + focus (additive)', () => {
       <SatConfirmDialog
         open
         title="Finish this SAT session?"
-        description="The session will be completed for the cohort."
-        confirmLabel="Finish Session"
+        description="The room will be completed for the cohort."
+        confirmLabel="Finish Room"
         onCancel={onCancel}
         onConfirm={onConfirm}
       />,
@@ -233,8 +233,8 @@ describe('SatConfirmDialog portal scope', () => {
       <SatConfirmDialog
         open
         title="Finish this SAT session?"
-        description="The session will be completed for the cohort."
-        confirmLabel="Finish Session"
+        description="The room will be completed for the cohort."
+        confirmLabel="Finish Room"
         onCancel={vi.fn()}
         onConfirm={vi.fn()}
       />,

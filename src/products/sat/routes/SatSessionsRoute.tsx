@@ -29,7 +29,7 @@ import {
 import { SatNewSessionFlow } from './SatNewSessionFlow';
 
 type SessionSort = 'soonest' | 'latest';
-type SessionStatus = 'Ready' | 'Running' | 'Paused' | 'Finished' | 'Cancelled';
+type SessionStatus = 'Not started' | 'Running' | 'Paused' | 'Finished' | 'Cancelled';
 
 function bucketFor(status: string, runtimeStatus: string): SatListBucket {
   if (runtimeStatus === 'live' || runtimeStatus === 'paused' || status === 'live') return 'live';
@@ -45,7 +45,7 @@ function formatSessionTime(value: string | null | undefined): string {
 }
 
 const STATUS_TONE: Record<SessionStatus, { tone: SatStatusTone; pulse: boolean }> = {
-  Ready: { tone: 'ready', pulse: false },
+  'Not started': { tone: 'ready', pulse: false },
   Running: { tone: 'live', pulse: true },
   Paused: { tone: 'paused', pulse: false },
   Finished: { tone: 'finished', pulse: false },
@@ -53,9 +53,9 @@ const STATUS_TONE: Record<SessionStatus, { tone: SatStatusTone; pulse: boolean }
 };
 
 const EMPTY_HINT: Record<SatListBucket, string> = {
-  upcoming: 'Scheduled SAT sessions wait here until a proctor starts the exam.',
-  live: 'Sessions appear here as soon as a proctor starts the exam.',
-  finished: 'Finished SAT sessions move here automatically.',
+  upcoming: 'Scheduled SAT rooms wait here until a proctor starts the exam.',
+  live: 'Rooms appear here as soon as a proctor starts the exam.',
+  finished: 'Finished SAT rooms move here automatically.',
 };
 
 export function SatSessionsRoute() {
@@ -87,24 +87,24 @@ export function SatSessionsRoute() {
       .sort((left, right) => direction * (new Date(left.schedule.startTime).getTime() - new Date(right.schedule.startTime).getTime()));
   }, [bucket, search, sort, summaries]);
 
-  if (summariesQuery.error) return <SatPageError title="SAT sessions could not load" description={summariesQuery.error instanceof Error ? summariesQuery.error.message : 'Sessions are unavailable.'} retryLabel="Retry" onRetry={() => void summariesQuery.refetch()} />;
+  if (summariesQuery.error) return <SatPageError title="SAT rooms could not load" description={summariesQuery.error instanceof Error ? summariesQuery.error.message : 'Rooms are unavailable.'} retryLabel="Retry" onRetry={() => void summariesQuery.refetch()} />;
 
   return (
     <SatContainer>
       <SatPageHeader
         eyebrow="Digital SAT"
-        title="Sessions"
-        description="Every SAT sitting, across exams. Create one here or from an exam’s Sessions tab."
+        title="Rooms"
+        description="Every SAT room across tests. Open a room to share, start and run it."
         actions={session?.user.role === 'admin' ? (
-          <SatPrimaryButton onClick={() => setCreateOpen(true)} icon={<CalendarPlus size={15} aria-hidden="true" />}>New Session</SatPrimaryButton>
+          <SatPrimaryButton onClick={() => setCreateOpen(true)} icon={<CalendarPlus size={15} aria-hidden="true" />}>Create room</SatPrimaryButton>
         ) : undefined}
       />
 
       <SatListToolbar
-        label="Session list controls"
+        label="Room list controls"
         tabs={
           <SatSegmentedControl<SatListBucket>
-            label="Session status"
+            label="Room status"
             value={bucket}
             options={[
               { value: 'upcoming', label: 'Upcoming', count: counts.upcoming },
@@ -119,7 +119,7 @@ export function SatSessionsRoute() {
       >
         <SatSearchField
           id="sat-session-search"
-          label="Search SAT sessions"
+          label="Search SAT rooms"
           value={search}
           onChange={(value) => setParams({ q: value })}
           placeholder="Search exam, cohort, institution"
@@ -138,16 +138,16 @@ export function SatSessionsRoute() {
       </SatListToolbar>
 
       {summariesQuery.isLoading ? (
-        <SatListSkeleton rows={5} label="Loading SAT sessions" />
+        <SatListSkeleton rows={5} label="Loading SAT rooms" />
       ) : visible.length ? (
         <>
-        <SatResultCount total={counts[bucket]} visible={visible.length} itemLabel={visible.length === 1 ? 'session' : 'sessions'} />
+        <SatResultCount total={counts[bucket]} visible={visible.length} itemLabel={visible.length === 1 ? 'room' : 'rooms'} />
         <SatList>
           {visible.map((summary, rowIndex) => {
             const state = bucketFor(summary.schedule.status, summary.runtime.status);
             const status: SessionStatus = summary.runtime.status === 'paused'
               ? 'Paused'
-              : state === 'live' ? 'Running' : state === 'finished' ? summary.schedule.status === 'cancelled' ? 'Cancelled' : 'Finished' : 'Ready';
+              : state === 'live' ? 'Running' : state === 'finished' ? summary.schedule.status === 'cancelled' ? 'Cancelled' : 'Finished' : 'Not started';
             const pill = STATUS_TONE[status];
             const target = '/sat/sessions/' + summary.schedule.id;
             return (
@@ -177,11 +177,11 @@ export function SatSessionsRoute() {
         </>
       ) : (
         <>
-        <SatResultCount total={counts[bucket]} visible={0} itemLabel="sessions" />
+        <SatResultCount total={counts[bucket]} visible={0} itemLabel="rooms" />
         <SatEmptyState
           icon={<span aria-hidden="true" className="h-2 w-2 rounded-full bg-slate-300" />}
-          title={search.trim() ? 'No matching sessions' : 'No ' + bucket + ' sessions'}
-          hint={search.trim() ? `No sessions match “${search.trim()}” in ${bucket === 'live' ? 'Live' : bucket === 'finished' ? 'Finished' : 'Upcoming'}.` : EMPTY_HINT[bucket]}
+          title={search.trim() ? 'No matching rooms' : 'No ' + bucket + ' rooms'}
+          hint={search.trim() ? `No rooms match “${search.trim()}” in ${bucket === 'live' ? 'Live' : bucket === 'finished' ? 'Finished' : 'Upcoming'}.` : EMPTY_HINT[bucket]}
           action={search.trim() ? <SatPrimaryButton onClick={() => setParams({ q: '' })}>Clear Search</SatPrimaryButton> : undefined}
         />
         </>

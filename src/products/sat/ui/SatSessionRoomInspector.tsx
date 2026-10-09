@@ -77,7 +77,7 @@ export function SatSessionRoomInspector({
             }}
           >
             <Dialog.Title className="sr-only">Selected student inspector</Dialog.Title>
-            <Dialog.Description className="sr-only">Inspect the selected student's session, timing, and attention details.</Dialog.Description>
+            <Dialog.Description className="sr-only">Inspect the selected student's room, timing, and attention details.</Dialog.Description>
             {content}
           </Dialog.Content>
         </Dialog.Portal>

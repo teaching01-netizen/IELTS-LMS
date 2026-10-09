@@ -4,7 +4,8 @@ import { BarChart3, BookOpen, LogOut, Radio, UserRound } from 'lucide-react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthSession } from '../../features/auth/authSession';
 import { SatAuthoringCollaborationBoundary } from '../../features/exam-authoring/realtime/coedit';
-import { SatMenu } from './ui/Menu';
+import { SatMenu, type SatMenuItem } from './ui/Menu';
+import { SatWorkspaceNavContext } from './ui/SatWorkspaceNav';
 import { useSatScrollMemory } from './ui/useSatListReturn';
 
 type SatNavItem = {
@@ -14,18 +15,18 @@ type SatNavItem = {
 };
 
 function navForRole(role: string | undefined): SatNavItem[] {
-  if (role === 'builder') return [{ label: 'Tests', path: '/sat/exams', icon: BookOpen }];
-  if (role === 'grader') return [{ label: 'Results', path: '/sat/results', icon: BarChart3 }];
+  if (role === 'builder') return [{ label: 'Exams', path: '/sat/exams', icon: BookOpen }];
+  if (role === 'grader') return [{ label: 'Responses', path: '/sat/results', icon: BarChart3 }];
   if (role === 'proctor') {
     return [
-      { label: 'Sessions', path: '/sat/sessions', icon: Radio },
-      { label: 'Results', path: '/sat/results', icon: BarChart3 },
+      { label: 'Rooms', path: '/sat/sessions', icon: Radio },
+      { label: 'Responses', path: '/sat/results', icon: BarChart3 },
     ];
   }
   return [
-    { label: 'Tests', path: '/sat/exams', icon: BookOpen },
-    { label: 'Sessions', path: '/sat/sessions', icon: Radio },
-    { label: 'Results', path: '/sat/results', icon: BarChart3 },
+    { label: 'Exams', path: '/sat/exams', icon: BookOpen },
+    { label: 'Rooms', path: '/sat/sessions', icon: Radio },
+    { label: 'Responses', path: '/sat/results', icon: BarChart3 },
   ];
 }
 
@@ -48,7 +49,18 @@ export function SatRoot() {
   const navigate = useNavigate();
   const location = useLocation();
   const { session, logout } = useAuthSession();
-  const navItems = useMemo(() => navForRole(session?.user.role), [session?.user.role]);
+  const role = session?.user.role;
+  const navItems = useMemo(() => navForRole(role), [role]);
+  const workspaceItems = useMemo<SatMenuItem[]>(() => [
+    ...navItems.map((item) => ({
+      id: item.path,
+      label: item.label,
+      icon: item.icon,
+      current: location.pathname.startsWith(item.path),
+      onSelect: () => navigate(item.path),
+    })),
+    { id: 'ielts', label: 'Switch to IELTS', separatorBefore: true, onSelect: () => navigate(ieltsLanding(role)) },
+  ], [location.pathname, navItems, navigate, role]);
   useSatScrollMemory();
   const displayName = session?.user.displayName?.trim() || session?.user.email || 'Staff';
   // Every surface that renders exam content stays inside ONE collaboration
@@ -62,8 +74,8 @@ export function SatRoot() {
   const collaborationExamId = authoringExamMatch?.[1]
     ? decodeURIComponent(authoringExamMatch[1])
     : null;
-  // The exam workspace owns its own persistent header (Tests breadcrumb,
-  // Questions / Sessions / Results / Settings tabs + Publish), so EVERY /sat/exams/:examId page is
+  // The exam workspace owns its own persistent header (Exams breadcrumb,
+  // Questions / Rooms / Responses / Settings tabs + Publish), so EVERY /sat/exams/:examId page is
   // full-bleed with the product sidebar hidden — the navigation never changes
   // shape between authoring, settings, publish review, access and responses.
   // Session room (/sat/sessions/:id) and result detail (/sat/results/:id) keep
@@ -178,6 +190,7 @@ export function SatRoot() {
         </header>
         )}
 
+        <SatWorkspaceNavContext.Provider value={workspaceItems}>
         <main id="sat-main" tabIndex={-1} className={`min-h-screen focus:outline-none ${isDetailPage ? '' : 'pb-20 md:pb-0'}`}>
           {collaborationExamId ? (
             <SatAuthoringCollaborationBoundary examId={collaborationExamId}>
@@ -191,6 +204,7 @@ export function SatRoot() {
             </SatRouteFade>
           )}
         </main>
+        </SatWorkspaceNavContext.Provider>
 
         {isDetailPage ? null : (
         <nav aria-label="Digital SAT" className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--sat-staff-border-nav,var(--sat-separator))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] px-2 pb-[max(env(safe-area-inset-bottom),8px)] pt-1.5 [backdrop-filter:var(--sat-staff-blur-nav)] [-webkit-backdrop-filter:var(--sat-staff-blur-nav)] [background:var(--sat-staff-glass-bottomnav)] md:hidden">

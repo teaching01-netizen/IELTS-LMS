@@ -31,8 +31,8 @@ export function describeExamLifecycle(
     case "published_current":
       if (releaseState.access.totalLinks === 0) {
         return {
-          label: versionLabel ? `Published · ${versionLabel} · No sessions yet` : "Published · No sessions yet",
-          detail: "Create a session so students can check in",
+          label: versionLabel ? `Published · ${versionLabel} · No rooms yet` : "Published · No rooms yet",
+          detail: "Create a room so students can check in",
           tone: "info",
         };
       }
@@ -79,7 +79,7 @@ export function examDeliveryPath(examId: string, create?: DeliveryTarget): strin
 }
 
 /**
- * Where "Create session" leads from any exam surface. With a target it pins
+ * Where "Create room" leads from any exam surface. With a target it pins
  * the setup to the exact version a publish just returned.
  */
 export function deliveryDestination(examId: string, target?: DeliveryTarget): string {

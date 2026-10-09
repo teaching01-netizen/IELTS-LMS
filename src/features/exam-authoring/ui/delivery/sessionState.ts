@@ -8,7 +8,7 @@ import type { AccessLinkStatus } from "../../contracts/accessLinks";
  * "Entry open" never implies "Running", and pausing entry never pauses a
  * running exam.
  */
-export type SessionPhase = "ready" | "live" | "paused" | "finished" | "unknown";
+export type SessionPhase = "ready" | "live" | "paused" | "finished" | "cancelled" | "unknown";
 
 export interface AccessSessionInfo {
   phase: SessionPhase;
@@ -20,10 +20,8 @@ export interface AccessSessionInfo {
 }
 
 export type SessionActionKind =
-  | "start"
   | "open-live"
-  | "resume"
-  | "view-responses"
+  | "view-results"
   | "refresh"
   | "open-room"
   | "duplicate";
@@ -35,9 +33,10 @@ export interface SessionActionPlan {
 
 /** Runtime status strings as the session summaries report them. */
 export function sessionPhaseFromRuntime(status: string | null | undefined, scheduleStatus?: string | null): SessionPhase {
-  if (status === "completed" || status === "cancelled" || scheduleStatus === "completed" || scheduleStatus === "cancelled") {
-    return "finished";
-  }
+  // A cancelled schedule wins even when the runtime row lags behind; it is an
+  // outcome of its own, never folded into Finished.
+  if (status === "cancelled" || scheduleStatus === "cancelled") return "cancelled";
+  if (status === "completed" || scheduleStatus === "completed") return "finished";
   if (status === "live") return "live";
   if (status === "paused") return "paused";
   if (status === "not_started" || status === "ready" || status === "scheduled") return "ready";
@@ -45,10 +44,11 @@ export function sessionPhaseFromRuntime(status: string | null | undefined, sched
 }
 
 export const SESSION_PHASE_LABEL: Record<SessionPhase, string> = {
-  ready: "Ready to start",
+  ready: "Not started",
   live: "Running",
   paused: "Paused",
   finished: "Finished",
+  cancelled: "Cancelled",
   unknown: "Status unavailable",
 };
 
@@ -70,6 +70,7 @@ const EXAM_RUN_LABEL: Record<SessionPhase, string> = {
   live: "Exam running",
   paused: "Exam paused",
   finished: "Exam finished",
+  cancelled: "Exam cancelled",
   unknown: "Exam status unavailable",
 };
 
@@ -83,9 +84,12 @@ export function sessionStatusLine(entry: AccessLinkStatus | null, phase: Session
 }
 
 /**
- * The visible actions for a session phase. Staff who may not run sessions get
- * no session actions at all (the destination routes would refuse them), and a
- * stale or unknown state offers a refresh rather than a guess.
+ * The visible actions for a session phase. Lists locate work; the session room
+ * runs it, so starting and resuming are never offered here: those entry points
+ * lead into the room, where the version, students and readiness are in view.
+ * Staff who may not run sessions get no session actions at all (the
+ * destination routes would refuse them), and a stale or unknown state offers a
+ * refresh rather than a guess.
  */
 export function sessionActionPlan(phase: SessionPhase, options: { canRun: boolean; stale: boolean }): SessionActionPlan {
   if (!options.canRun) return { primary: null, supporting: [] };
@@ -94,23 +98,21 @@ export function sessionActionPlan(phase: SessionPhase, options: { canRun: boolea
   }
   switch (phase) {
     case "ready":
-      return {
-        primary: { kind: "start", label: "Start exam" },
-        supporting: [{ kind: "open-room", label: "Open session room" }],
-      };
+    case "paused":
+      return { primary: { kind: "open-room", label: "Open room" }, supporting: [] };
     case "live":
       return {
-        primary: { kind: "open-live", label: "Open live session" },
-        supporting: [{ kind: "view-responses", label: "View responses" }],
-      };
-    case "paused":
-      return {
-        primary: { kind: "resume", label: "Resume exam" },
-        supporting: [{ kind: "open-room", label: "Open session room" }],
+        primary: { kind: "open-live", label: "Open live room" },
+        supporting: [{ kind: "view-results", label: "View results" }],
       };
     case "finished":
       return {
-        primary: { kind: "view-responses", label: "View responses" },
+        primary: { kind: "view-results", label: "View results" },
+        supporting: [{ kind: "duplicate", label: "Duplicate setup" }],
+      };
+    case "cancelled":
+      return {
+        primary: { kind: "open-room", label: "Review room" },
         supporting: [{ kind: "duplicate", label: "Duplicate setup" }],
       };
   }
@@ -125,8 +127,6 @@ export interface AccessSessionBindings {
   stale: boolean;
   refreshing: boolean;
   onRefresh: () => void;
-  onStart: (scheduleId: string) => Promise<void>;
-  onResume: (scheduleId: string) => Promise<void>;
   onOpenRoom: (scheduleId: string) => void;
-  onOpenResponses: (scheduleId: string) => void;
+  onOpenResults: (scheduleId: string) => void;
 }

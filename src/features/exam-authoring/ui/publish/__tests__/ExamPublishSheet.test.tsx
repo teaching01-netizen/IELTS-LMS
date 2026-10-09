@@ -233,7 +233,7 @@ describe("ExamPublishSheet", () => {
     await waitFor(() => expect(state.publish).toHaveBeenCalledTimes(1));
   });
 
-  it("after publishing, makes session creation the next step for the exact version published", async () => {
+  it("after publishing, makes room creation the next step for the exact version published", async () => {
     const { props, rerender } = renderSheet();
     fireEvent.click(screen.getByRole("button", { name: "Publish Full SAT" }));
     await waitFor(() => expect(state.publish).toHaveBeenCalled());
@@ -251,21 +251,17 @@ describe("ExamPublishSheet", () => {
       }),
     });
     rerender(<ExamPublishSheet {...props} />);
-    expect(await screen.findByText("Version 3 is published and ready to use in a session.")).toBeInTheDocument();
-    expect(screen.getByText(/Existing sessions continue using their current version/)).toBeInTheDocument();
-    // Three connected steps, with step 2 marked as the next one.
-    const steps = within(screen.getByRole("list", { name: "Setup progress" }));
-    expect(steps.getByText(/1\. Publish/)).toHaveTextContent("✓");
-    expect(steps.getByText(/2\. Create session/).closest("li")).toHaveAttribute("aria-current", "step");
+    expect(await screen.findByText(/Version 3 published\. Create a room to give students access\./)).toBeInTheDocument();
+    expect(screen.getByText(/Existing rooms keep the version they were created with/)).toBeInTheDocument();
     // Publishing alone opens access to nobody and navigates nowhere.
     expect(props.onOpenStudentAccess).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
     // The form opens for the exact version this publish returned, not "whatever is current".
     expect(props.onOpenStudentAccess).toHaveBeenCalledWith({ versionId: "pv-3", versionNumber: 3, publishScope: "full" });
     expect(props.onClose).toHaveBeenCalled();
   });
 
-  it("offers only Create session and Done after publishing, even when sessions already exist", async () => {
+  it("offers only Create room and Done after publishing, even when rooms already exist", async () => {
     const { props, rerender } = renderSheet();
     fireEvent.click(screen.getByRole("button", { name: "Publish Full SAT" }));
     await waitFor(() => expect(state.publish).toHaveBeenCalled());
@@ -277,8 +273,8 @@ describe("ExamPublishSheet", () => {
       }),
     });
     rerender(<ExamPublishSheet {...props} />);
-    expect(await screen.findByRole("button", { name: "Create session" })).toBeInTheDocument();
-    // Reusing an earlier setup belongs to session creation, not to a second branch here.
+    expect(await screen.findByRole("button", { name: "Create room" })).toBeInTheDocument();
+    // Reusing an earlier setup belongs to room creation, not to a second branch here.
     expect(screen.queryByRole("button", { name: "Use an existing setup" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(props.onClose).toHaveBeenCalled();

@@ -23,7 +23,7 @@ describe('SatStatusPill', () => {
     expect(dot?.className).toContain('rounded-full');
   });
 
-  it('pulses the dot for live sessions only', () => {
+  it('pulses the dot for live rooms only', () => {
     const { container, rerender } = render(
       <SatStatusPill tone="live" pulse>Live</SatStatusPill>,
     );
@@ -190,17 +190,17 @@ describe('satOutcomeTone', () => {
 
 describe('SatResultCount', () => {
   it('keeps the itemLabel path when scopeLabel is absent', () => {
-    render(<SatResultCount total={3} visible={2} itemLabel="sessions" />);
-    expect(screen.getByRole('status')).toHaveTextContent('2 of 3 sessions');
+    render(<SatResultCount total={3} visible={2} itemLabel="rooms" />);
+    expect(screen.getByRole('status')).toHaveTextContent('2 of 3 rooms');
   });
 
   it('uses scopeLabel as the unit word when provided', () => {
-    render(<SatResultCount total={3} visible={3} itemLabel="sessions" scopeLabel="filtered sessions" />);
-    expect(screen.getByRole('status')).toHaveTextContent('3 filtered sessions');
+    render(<SatResultCount total={3} visible={3} itemLabel="rooms" scopeLabel="filtered rooms" />);
+    expect(screen.getByRole('status')).toHaveTextContent('3 filtered rooms');
   });
 
   it('stays null when total is zero (skeleton-XOR: empty-state owns the announce)', () => {
-    const { container } = render(<SatResultCount total={0} visible={0} itemLabel="sessions" />);
+    const { container } = render(<SatResultCount total={0} visible={0} itemLabel="rooms" />);
     expect(container).toBeEmptyDOMElement();
   });
 });

@@ -33,7 +33,7 @@ export function validateSatScheduleTimes(start: string, end: string, now: Date =
     } else if (endTime <= startTime) {
       errors.end = 'End time must be after the start time.';
     } else if (endTime - startTime < MIN_SAT_SESSION_DURATION_MS) {
-      errors.end = 'Sessions must be at least 15 minutes long.';
+      errors.end = 'Rooms must be at least 15 minutes long.';
     }
   }
 

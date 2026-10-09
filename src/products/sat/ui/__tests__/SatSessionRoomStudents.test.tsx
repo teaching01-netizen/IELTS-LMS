@@ -95,7 +95,7 @@ function renderDetail(overrides: Partial<Parameters<typeof StudentDetail>[0]> = 
 // These tests run on fake timers so a tick is observable: the shared clock is
 // driven by `setInterval`, and the coarse band inside it fires only every 15s,
 // which is exactly the staleness a proctor sees as "the timer is not in sync".
-describe('session room clocks', () => {
+describe('room clocks', () => {
   afterEach(() => {
     vi.useRealTimers();
   });

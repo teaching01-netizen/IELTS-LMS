@@ -61,8 +61,8 @@ export function SatExamResponsesRoute() {
           <SatEmptyState
             icon={<BarChart3 size={18} aria-hidden="true" />}
             title="No results yet"
-            hint="Results appear here once students check in to a session for this exam."
-            action={<SatPrimaryButton onClick={() => navigate(chrome.canCreateSession ? deliveryDestination(exam.id) : accessPath)}>{chrome.canCreateSession ? 'Create session' : 'Open sessions'}</SatPrimaryButton>}
+            hint="Results appear here once students check in to a room for this exam."
+            action={<SatPrimaryButton onClick={() => navigate(chrome.canCreateSession ? deliveryDestination(exam.id) : accessPath)}>{chrome.canCreateSession ? 'Create room' : 'Open rooms'}</SatPrimaryButton>}
           />
         }
       />

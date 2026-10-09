@@ -182,11 +182,11 @@ describe('StudentLinksDashboard', () => {
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
-  it('makes session creation the primary empty-state action', () => {
+  it('makes room creation the primary empty-state action', () => {
     render(<StudentLinksDashboard exam={exam} overview={{ ...overview, links: [] }} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
     expect(screen.queryByRole('button', { name: 'New access group' })).not.toBeInTheDocument();
     // The header offers the same action, so the first-time guide's button is scoped to its own region.
-    fireEvent.click(within(screen.getByRole('region', { name: 'Set up a session' })).getByRole('button', { name: 'Create session' }));
+    fireEvent.click(within(screen.getByRole('region', { name: 'Set up a room' })).getByRole('button', { name: 'Create room' }));
     expect(screen.getByTestId('link-editor')).toBeInTheDocument();
   });
 });

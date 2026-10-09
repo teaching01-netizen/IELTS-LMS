@@ -140,7 +140,7 @@ describe("ExamSettingsPage", () => {
     expect(within(tabs).getByRole("button", { name: "Settings" })).toHaveAttribute("aria-current", "page");
     expect(within(tabs).getByRole("button", { name: "Questions" })).not.toHaveAttribute("aria-current");
     // A builder is never offered the results tab.
-    expect(within(tabs).queryByRole("button", { name: "Results" })).not.toBeInTheDocument();
+    expect(within(tabs).queryByRole("button", { name: "Responses" })).not.toBeInTheDocument();
   });
 
   it("edits the threshold against the blueprint on threshold-only rows (stuck-at-1 regression)", async () => {
@@ -194,7 +194,7 @@ describe("ExamSettingsPage", () => {
 
   it("navigates straight away when nothing is unsaved", () => {
     renderPage();
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Exam sections" })).getByRole("button", { name: "Sessions" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Exam sections" })).getByRole("button", { name: "Rooms" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/sat/exams/exam-sat-1/access");
   });
 

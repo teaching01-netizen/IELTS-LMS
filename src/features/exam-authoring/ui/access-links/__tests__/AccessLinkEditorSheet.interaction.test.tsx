@@ -55,8 +55,8 @@ describe("AccessLinkEditorSheet interaction contract", () => {
     const onCreate = vi.fn(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
     const { rerender, props } = renderSheet({ onCreate });
 
-    fireEvent.change(screen.getByLabelText("Session name"), { target: { value: "Saturday Class — September" } });
-    const save = screen.getByRole("button", { name: "Create session" });
+    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday Class — September" } });
+    const save = screen.getByRole("button", { name: "Create room" });
     save.focus();
     fireEvent.click(save);
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));

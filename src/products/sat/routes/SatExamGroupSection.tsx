@@ -19,7 +19,7 @@ export function formatDate(value: string | null | undefined): string {
 // Below sm each record stacks; every cell stays self-describing.
 const EXAM_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_88px_76px_minmax(0,1.3fr)_16px]';
 const ACCESS_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_64px_76px_minmax(0,1.3fr)_16px]';
-const ATTEMPT_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_minmax(0,1fr)_88px_minmax(0,1fr)_72px_16px]';
+const ATTEMPT_COLUMNS = 'sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_72px_minmax(0,1fr)_16px]';
 
 const CELL_PRIMARY = 'block text-[14px] font-semibold leading-[1.45] tracking-[-0.012em] text-slate-900';
 const CELL_SECONDARY = 'block text-[14px] leading-[1.45] tabular-nums text-slate-500';
@@ -27,21 +27,21 @@ const CELL_SECONDARY = 'block text-[14px] leading-[1.45] tabular-nums text-slate
 function ColumnHeader({ columns, labels }: { columns: string; labels: string[] }) {
   return (
     <div aria-hidden="true" className={`mt-4 hidden gap-4 px-4 text-[14px] font-semibold text-slate-500 sm:grid ${columns}`}>
-      {labels.map((label, index) => <span key={label + index} className={['Attempts', 'Total'].includes(label) ? 'text-right' : undefined}>{label}</span>)}
+      {labels.map((label, index) => <span key={label + index} className={['Attempts', 'Score'].includes(label) ? 'text-right' : undefined}>{label}</span>)}
     </div>
   );
 }
 
 export function ExamColumnHeader() {
-  return <ColumnHeader columns={EXAM_COLUMNS} labels={['Latest test', 'Exam', 'Sessions', 'Attempts', 'Outcomes', '']} />;
+  return <ColumnHeader columns={EXAM_COLUMNS} labels={['Latest test', 'Exam', 'Rooms', 'Attempts', 'Outcomes', '']} />;
 }
 
 export function AccessColumnHeader() {
-  return <ColumnHeader columns={ACCESS_COLUMNS} labels={['Latest test', 'Session', 'Version', 'Attempts', 'Outcomes', '']} />;
+  return <ColumnHeader columns={ACCESS_COLUMNS} labels={['Latest test', 'Room', 'Version', 'Attempts', 'Outcomes', '']} />;
 }
 
 export function AttemptColumnHeader() {
-  return <ColumnHeader columns={ATTEMPT_COLUMNS} labels={['Test started', 'Student', 'Cohort', 'Submitted', 'Status', 'Total', '']} />;
+  return <ColumnHeader columns={ATTEMPT_COLUMNS} labels={['Student', 'Room', 'Attempt status', 'Score', 'Submitted', '']} />;
 }
 
 /** Date over time; never substitutes another timestamp when the start is unknown. */
@@ -124,7 +124,7 @@ export function versionLineFor(versions: number[]): string | null {
 
 export function aggregateLineFor(group: SatExamGroup): string {
   const groups = group.accessGroups?.length ?? 0;
-  return `${countLabel(group.total, 'attempt')} · ${countLabel(groups, 'session')}`;
+  return `${countLabel(group.total, 'attempt')} · ${countLabel(groups, 'room')}`;
 }
 
 /**
@@ -153,7 +153,7 @@ export function SatExamGroupRow({
           <span className={CELL_PRIMARY}>{group.examTitle}</span>
           {versionLine ? <span className={CELL_SECONDARY}>{versionLine}</span> : null}
         </span>
-        <span className={`${CELL_SECONDARY} text-slate-700`}>{countLabel(group.accessGroups?.length ?? 0, 'session')}</span>
+        <span className={`${CELL_SECONDARY} text-slate-700`}>{countLabel(group.accessGroups?.length ?? 0, 'room')}</span>
         <span className={`${CELL_SECONDARY} text-slate-700 sm:text-right`}>{countLabel(group.total, 'attempt')}</span>
         <span className={`${CELL_SECONDARY} text-slate-700`}>{group.total === 0 ? 'No attempts' : outcomeCountsLine(counts)}</span>
         <Chevron />
@@ -195,11 +195,13 @@ export function SatAccessGroupRow({
 /** One row per attempt; the route owns navigation via onOpen. */
 export function SatExamAttemptRow({
   attempt,
+  roomName,
   attemptIndex,
   current = false,
   onOpen,
 }: {
   attempt: SatAttemptRow;
+  roomName: string;
   attemptIndex: number;
   /** The attempt open in the inspector. */
   current?: boolean;
@@ -207,27 +209,27 @@ export function SatExamAttemptRow({
 }) {
   const outcome = attemptOutcome(attempt);
   const submitted = formatTestTime(attempt.submittedAt);
-  const started = formatTestTime(attempt.testStartedAt);
-  // Show the submission date too when it falls on a different day than the start.
-  const submittedLabel = !submitted ? 'Not submitted' : started && started.day === submitted.day ? submitted.time : `${submitted.day} · ${submitted.time}`;
+  const submittedLabel = submitted ? `${submitted.day} · ${submitted.time}` : 'Not submitted';
   return (
     <SatListRow index={Math.min(attemptIndex, 5)} rowId={attempt.attemptId} current={current} onOpen={() => onOpen(attempt)}>
       <RowGrid columns={ATTEMPT_COLUMNS}>
-        <TestStartCell value={attempt.testStartedAt} />
         <span className="min-w-0">
           <span className={`${CELL_PRIMARY} break-words`}>{attempt.studentName}</span>
           <span className={CELL_SECONDARY}>{attempt.studentId}</span>
         </span>
-        <span className={`${CELL_SECONDARY} text-slate-700 break-words`}>{attempt.cohortName || '—'}</span>
-        <span className={`${CELL_SECONDARY} text-slate-700`}>{submittedLabel}</span>
+        <span className="min-w-0">
+          <span className={`${CELL_SECONDARY} text-slate-700 break-words`}>{roomName}</span>
+          {attempt.cohortName ? <span className={`${CELL_SECONDARY} break-words`}>{attempt.cohortName}</span> : null}
+        </span>
         <span className="flex min-w-0 flex-col items-start gap-0.5">
           <SatStatusPill tone={outcome.tone}>{outcome.label}</SatStatusPill>
           <span className={CELL_SECONDARY}>{attempt.outcomeStatus === 'scored' ? 'View answers' : 'View saved answers'}</span>
         </span>
         <span className={`${attempt.totalScore != null ? CELL_PRIMARY : CELL_SECONDARY} tabular-nums sm:text-right`}>
-          <span className="sm:hidden">Total </span>
+          <span className="sm:hidden">Score </span>
           {totalScoreLabel(attempt)}
         </span>
+        <span className={`${CELL_SECONDARY} text-slate-700`}><span className="sm:hidden">Submitted </span>{submittedLabel}</span>
         <Chevron />
       </RowGrid>
     </SatListRow>

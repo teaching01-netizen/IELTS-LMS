@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { proctorFacade } from "../../../proctor/api/proctorFacade";
-import { fetchProctorSessionSummaries, proctorKeys, useProctorSessionSummaries } from "../../../proctor/api/proctorQueries";
+import { proctorKeys, useProctorSessionSummaries } from "../../../proctor/api/proctorQueries";
 import {
   sessionPhaseFromRuntime,
   type AccessSessionBindings,
@@ -14,16 +13,16 @@ interface Options {
   /** Only roles whose routes allow running sessions read session state at all. */
   canRun: boolean;
   onOpenRoom: (scheduleId: string) => void;
-  onOpenResponses: (scheduleId: string) => void;
+  onOpenResults: (scheduleId: string) => void;
 }
 
 /**
- * Session status and commands for the Delivery page, built from the same
- * session summaries and runtime commands the session room uses (no second
- * source of truth). A failed read is reported as stale instead of being turned
- * into a guess about whether a session is running.
+ * Session status and navigation for a test's Sessions tab, built from the same
+ * session summaries the session room uses (no second source of truth). Runtime
+ * commands live in the room only. A failed read is reported as stale instead of
+ * being turned into a guess about whether a session is running.
  */
-export function useAccessSessionBindings({ canRun, onOpenRoom, onOpenResponses }: Options): AccessSessionBindings {
+export function useAccessSessionBindings({ canRun, onOpenRoom, onOpenResults }: Options): AccessSessionBindings {
   const queryClient = useQueryClient();
   const summaries = useProctorSessionSummaries(POLL_MS, "sat", canRun);
   // A malformed payload is treated like a failed read (stale), never iterated: a bad
@@ -46,37 +45,13 @@ export function useAccessSessionBindings({ canRun, onOpenRoom, onOpenResponses }
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: proctorKeys.sessions("sat") });
 
-  const command = async (scheduleId: string, expectedPhase: "ready" | "paused", run: () => Promise<{ success: boolean; error?: string }>, fallback: string) => {
-    if (!canRun) throw new Error("You do not have permission to run this session.");
-    // Read again at confirmation: cached list status cannot authorize a live command.
-    const current = await queryClient.fetchQuery({
-      queryKey: proctorKeys.sessions("sat"),
-      queryFn: () => fetchProctorSessionSummaries("sat"),
-      staleTime: 0,
-    });
-    const summary = current.find((item) => item.schedule.id === scheduleId);
-    if (!summary || sessionPhaseFromRuntime(summary.runtime.status, summary.schedule.status) !== expectedPhase) {
-      throw new Error("Session status changed. Review the refreshed status before continuing.");
-    }
-    const result = await run();
-    if (!result.success) {
-      await queryClient.invalidateQueries({ queryKey: proctorKeys.sessions("sat") });
-      throw new Error(`${result.error ?? fallback} Refresh status to confirm the outcome before retrying.`);
-    }
-    await queryClient.invalidateQueries({ queryKey: proctorKeys.sessions("sat") });
-  };
-
   return {
     canRun,
     infoFor: (scheduleId) => infoByScheduleId.get(scheduleId) ?? null,
     stale: canRun && (summaries.isError || (summaries.isFetched && !data)),
     refreshing: summaries.isFetching,
     onRefresh: refresh,
-    onStart: (scheduleId) =>
-      command(scheduleId, "ready", () => proctorFacade.delivery.startRuntime(scheduleId, "Staff"), "We could not confirm whether the session started."),
-    onResume: (scheduleId) =>
-      command(scheduleId, "paused", () => proctorFacade.delivery.resumeRuntime(scheduleId, "Staff"), "We could not confirm whether the session resumed."),
     onOpenRoom,
-    onOpenResponses,
+    onOpenResults,
   };
 }

@@ -84,7 +84,7 @@ export function SatRunSheet({
       ? `Anchored to the proctor's start at ${formatRunSheetClock(sheet.anchorAt)} ${SAT_RUN_SHEET_TIME_ZONE_LABEL}`
       : sheet.anchor === 'scheduled'
       ? `Projected from the scheduled start at ${formatRunSheetClock(sheet.anchorAt)} — times shift if the proctor starts late`
-      : 'Times appear once this session is scheduled or started';
+      : 'Times appear once this room is scheduled or started';
   const extensionMinutes = (runtime?.sections ?? []).reduce((total, section) => total + Math.max(0, section.extensionMinutes), 0);
   const pausedSeconds = (runtime?.sections ?? []).reduce((total, section) => total + Math.max(0, section.accumulatedPausedSeconds), 0);
   const originalPlannedEndAt = originalPlannedFinishAt(sheet);
