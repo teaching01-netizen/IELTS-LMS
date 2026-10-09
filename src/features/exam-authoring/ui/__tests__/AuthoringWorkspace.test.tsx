@@ -284,7 +284,7 @@ describe("AuthoringWorkspace (spine-only)", () => {
     expect(screen.getByRole("button", { name: "More exam actions" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview exam" })).toBeInTheDocument();
     // The breadcrumb leads back to the library the author came from.
-    expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("button", { name: "Exams" })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "Exams" })).toBeInTheDocument();
     // Sessions (student access, check-in and running) live under their own tab, not a header button.
     expect(screen.queryByRole("button", { name: /^student access$/i })).not.toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Exam sections" })).getByRole("button", { name: "Rooms" })).toBeInTheDocument();

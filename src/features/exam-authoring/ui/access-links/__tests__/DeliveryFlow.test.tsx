@@ -115,7 +115,7 @@ describe("Delivery: first-time setup", () => {
   it("collapses the guide once access exists, but keeps it reopenable", () => {
     renderDashboard([link("a", "Morning class")]);
     expect(screen.queryByRole("region", { name: "Set up a room" })).not.toBeInTheDocument();
-    const guide = screen.getByText("Setup guide").closest("details");
+    const guide = screen.getByText("How rooms work").closest("details");
     expect(guide).not.toHaveAttribute("open");
   });
 
@@ -176,10 +176,11 @@ describe("Delivery: first-time setup", () => {
 describe("Delivery: running a group", () => {
   it("shows entry and room separately on the row and in the panel", () => {
     renderDashboard([link("a", "Morning class", { status: "paused" })], { session: session({ "sched-a": { phase: "live", timingModel: null, joined: 12 } }) });
-    expect(screen.getByRole("button", { name: "Open Morning class" })).toHaveTextContent("Room: Running");
+    expect(screen.getByRole("button", { name: "Open Morning class" })).toHaveTextContent("Exam: Running");
     const panel = within(screen.getByRole("region", { name: "Room" }));
     // Pausing check-in must not read as pausing the running exam.
-    expect(panel.getByText("Check-in paused · Exam running")).toBeInTheDocument();
+    expect(panel.getByText("Check-in").nextElementSibling).toHaveTextContent("Paused");
+    expect(panel.getByText("Exam").nextElementSibling).toHaveTextContent("Running");
     expect(panel.getByRole("button", { name: "Open live room" })).toBeInTheDocument();
   });
 
@@ -232,7 +233,7 @@ describe("Delivery: running a group", () => {
   it("keeps a cancelled room distinct from a finished one", () => {
     const bindings = session({ "sched-a": { phase: "cancelled", timingModel: null, joined: 12 } });
     renderDashboard([link("a", "Morning class")], { session: bindings });
-    expect(screen.getByRole("button", { name: "Open Morning class" })).toHaveTextContent("Room: Cancelled");
+    expect(screen.getByRole("button", { name: "Open Morning class" })).toHaveTextContent("Exam: Cancelled");
     fireEvent.click(screen.getByRole("button", { name: "Review room" }));
     expect(bindings.onOpenRoom).toHaveBeenCalledWith("sched-a");
   });

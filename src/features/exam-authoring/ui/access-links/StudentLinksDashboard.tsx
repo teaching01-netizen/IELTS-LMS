@@ -93,9 +93,9 @@ type Confirmation = { linkId: string; kind: "copy" | "action"; text: string };
 
 type LinkUpdateOptions = { silent?: boolean };
 
-/** "Session: Running" for the row; null while the status is unknown so a guess is never shown. */
+/** "Exam: Running" for the row; null while the status is unknown so a guess is never shown. */
 function sessionRowLabel(info: AccessSessionInfo | null): string | null {
-  return info && info.phase !== "unknown" ? `Room: ${SESSION_PHASE_LABEL[info.phase]}` : null;
+  return info && info.phase !== "unknown" ? `Exam: ${SESSION_PHASE_LABEL[info.phase]}` : null;
 }
 
 /** Present-tense label for an in-flight lifecycle write. */
@@ -516,9 +516,9 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         <SatContainer>
           <div role="alert" className="mt-8 rounded-2xl border border-black/[0.06] bg-white p-6">
             <h1 className="text-[16px] font-semibold text-slate-900">Rooms could not load</h1>
-            <p className="mt-1.5 text-[13px] leading-5 text-slate-500">{error}</p>
+            <p className="mt-1.5 text-[14px] leading-5 text-slate-500">{error}</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" onClick={() => shell.onSelectTab("questions")} className="sat-press sat-press-fill flex min-h-11 items-center rounded-[12px] px-4 text-[13px] font-semibold text-slate-600 hover:bg-black/[0.04]">Questions</button>
+              <button type="button" onClick={() => shell.onSelectTab("questions")} className="sat-btn sat-btn--quiet sat-press">Questions</button>
               <SatPrimaryButton onClick={() => { void onRefresh(); }} icon={<RefreshCw size={14} aria-hidden="true" />}>Retry</SatPrimaryButton>
             </div>
           </div>
@@ -559,11 +559,11 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         <p role="status" aria-live="polite" className="sr-only">{confirmation?.text ?? ""}</p>
         {error ? <div role="alert" className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Access details could not refresh. Displayed entry information may be out of date. <button type="button" onClick={() => void onRefresh()} className="min-h-11 px-3 font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry</button></div> : null}
         {actionError ? (
-          <div role="alert" className="sat-banner-enter mt-4 flex items-center justify-between gap-3 rounded-2xl border border-red-700/20 bg-red-50 px-4 py-3 text-[12px] font-medium text-red-700">
+          <div role="alert" className="sat-banner-enter mt-4 flex items-center justify-between gap-3 rounded-2xl border border-red-700/20 bg-red-50 px-4 py-3 text-[14px] font-medium text-red-700">
             <span>{actionError}</span>
             <span className="flex shrink-0 items-center gap-1">
               {staleConflict ? (
-                <button type="button" onClick={() => { setActionError(null); setStaleConflict(false); void onRefresh(); }} className="sat-press sat-press-fill flex min-h-11 items-center gap-1 rounded-[10px] px-2.5 text-[12px] font-semibold hover:bg-red-100"><RefreshCw size={13} aria-hidden="true" />Refresh</button>
+                <button type="button" onClick={() => { setActionError(null); setStaleConflict(false); void onRefresh(); }} className="sat-press sat-press-fill flex min-h-11 items-center gap-1 rounded-[10px] px-2.5 text-[14px] font-semibold hover:bg-red-100"><RefreshCw size={13} aria-hidden="true" />Refresh</button>
               ) : null}
               <button type="button" onClick={() => { setActionError(null); setStaleConflict(false); }} aria-label="Dismiss error" className="sat-press sat-press-fill flex h-11 w-11 items-center justify-center rounded-[10px] hover:bg-red-100"><XCircle size={15} aria-hidden="true" /></button>
             </span>
@@ -648,8 +648,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
               <div className="flex h-full items-center justify-center p-8 text-center">
                 <div>
                   <Link2 size={28} className="mx-auto text-slate-300" aria-hidden="true" />
-                  <p className="mt-3 text-[13px] font-semibold text-slate-700">Select a room</p>
-                  <p className="mt-1 text-[12px] leading-5 text-slate-500">Details, activity, sharing, and check-in controls appear here.</p>
+                  <p className="mt-3 text-[14px] font-semibold text-slate-700">Select a room</p>
+                  <p className="mt-1 text-[14px] leading-5 text-slate-500">Details, activity, sharing, and check-in controls appear here.</p>
                 </div>
               </div>
             )}

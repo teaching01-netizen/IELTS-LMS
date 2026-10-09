@@ -105,12 +105,12 @@ export const AccessLinkRow = memo(function AccessLinkRow({
       >
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className="truncate text-[13px] font-semibold text-slate-900">{link.name}</span>
+            <span className="truncate text-[14px] font-semibold text-slate-900">{link.name}</span>
             {isStaleRelease ? (
-              <span className="shrink-0 text-[12px] font-medium text-slate-400">Version {link.versionNumber}</span>
+              <span className="shrink-0 text-[14px] font-medium text-slate-400">Version {link.versionNumber}</span>
             ) : null}
             {sectionBadge ? (
-              <span className="shrink-0 rounded-full bg-au-fill px-2 py-0.5 text-[12px] font-semibold text-slate-600">
+              <span className="shrink-0 rounded-full bg-au-fill px-2 py-0.5 text-[14px] font-semibold text-slate-600">
                 {sectionBadge}
               </span>
             ) : null}
@@ -119,17 +119,17 @@ export const AccessLinkRow = memo(function AccessLinkRow({
             <SatStatusPill tone={tone} pulse={shouldPulseAccessLinkStatus(link.status) && !busy}>
               {formatAccessLinkStatus(link.status)}
             </SatStatusPill>
-            <span className={"truncate text-[12px] " + (busy ? "font-medium text-slate-600" : "text-slate-500")}>
+            <span className={"truncate text-[14px] " + (busy ? "font-medium text-slate-600" : "text-slate-500")}>
               {metaText}
             </span>
           </span>
           {confirmation ? (
-            <span className="mt-1 flex items-center gap-1.5 text-[12px] font-semibold text-slate-600">
+            <span className="mt-1 flex items-center gap-1.5 text-[14px] font-semibold text-slate-600">
               <Check size={12} className="text-emerald-600" aria-hidden="true" />
               {confirmation}
             </span>
           ) : (
-            <span className="mt-1 block truncate text-[12px] tabular-nums text-slate-500" title={accessLinkStatusDescription(link)}>
+            <span className="mt-1 block truncate text-[14px] tabular-nums text-slate-500" title={accessLinkStatusDescription(link)}>
               {link.metrics.registered} registered · {link.metrics.started} started · {link.metrics.submitted} submitted{sessionLabel ? ` · ${sessionLabel}` : ""}
             </span>
           )}
@@ -146,7 +146,7 @@ export const AccessLinkRow = memo(function AccessLinkRow({
           <SatMenu label={`Actions for ${link.name}`} compact triggerContent={<Ellipsis size={16} aria-hidden="true" />} items={menuItems} />
         )}
       </span>
-      {quickAction ? <div className="flex justify-end px-2 pb-1"><button type="button" onClick={quickAction.onSelect} disabled={busy} aria-label={`${quickAction.label} for ${link.name}`} className="min-h-11 rounded-xl px-3 text-[12px] font-semibold text-au-accent hover:bg-au-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40">{quickAction.label}</button></div> : null}
+      {quickAction ? <div className="flex justify-end px-2 pb-1"><button type="button" onClick={quickAction.onSelect} disabled={busy} aria-label={`${quickAction.label} for ${link.name}`} className="min-h-11 rounded-xl px-3 text-[14px] font-semibold text-au-accent hover:bg-au-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40">{quickAction.label}</button></div> : null}
     </div>
   );
 }, (prev, next) =>

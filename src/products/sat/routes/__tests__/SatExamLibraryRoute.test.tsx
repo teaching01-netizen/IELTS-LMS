@@ -80,9 +80,9 @@ describe('SatExamLibraryRoute', () => {
   it('creates a SAT directly without exposing a provider selector', async () => {
     createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'Create test' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
     expect(screen.queryByText('Assessment provider')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('SAT exam name'), { target: { value: 'October Practice' } });
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'October Practice' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(createProviderExamMock).toHaveBeenCalledWith(
       { providerKey: 'sat', providerExamType: 'SAT', title: 'October Practice' }, 'Admin',
@@ -93,7 +93,7 @@ describe('SatExamLibraryRoute', () => {
     useExamListQueryMock.mockReturnValue({ data: undefined, isLoading: true, error: null, refetch: vi.fn() });
     renderRoute();
     expect(screen.getByText('Exams')).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: 'Loading SAT exams' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading exams' })).toBeInTheDocument();
     expect(screen.queryByText('SAT Practice 06')).not.toBeInTheDocument();
   });
 
@@ -102,11 +102,11 @@ describe('SatExamLibraryRoute', () => {
     expect(screen.getByRole('status')).toHaveTextContent('1 exam');
   });
 
-  it('offers Clear Search from a filtered-zero state', () => {
+  it('offers Clear search from a filtered-zero state', () => {
     renderRoute();
-    fireEvent.change(screen.getByPlaceholderText('Search exam title'), { target: { value: 'zzz-no-match' } });
-    expect(screen.getByText('No matching SAT exams')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }));
+    fireEvent.change(screen.getByPlaceholderText('Search exams'), { target: { value: 'zzz-no-match' } });
+    expect(screen.getByText('No matching exams')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
     expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
   });
 
@@ -123,7 +123,7 @@ describe('SatExamLibraryRoute', () => {
   it('reaches archived exams when every exam in the library is archived', () => {
     useExamListQueryMock.mockReturnValue({ data: { entities: [{ ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
-    expect(screen.getByText('No active SAT exams')).toBeInTheDocument();
+    expect(screen.getByText('No active exams')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Show archived' }));
     expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
   });
@@ -134,8 +134,8 @@ describe('SatExamLibraryRoute', () => {
     // to correct behavior instead of a form-state defect.
     createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'Create test' }));
-    const name = screen.getByLabelText('SAT exam name');
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    const name = screen.getByLabelText('Exam name');
     expect(name).toHaveAttribute('placeholder', 'Practice Test 06');
     expect(name).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
@@ -146,70 +146,70 @@ describe('SatExamLibraryRoute', () => {
   it('preserves search text when the status tab changes (04A composition guard)', () => {
     useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, satExam, { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
-    fireEvent.change(screen.getByPlaceholderText('Search exam title'), { target: { value: 'SAT' } });
+    fireEvent.change(screen.getByPlaceholderText('Search exams'), { target: { value: 'SAT' } });
     expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: 'Archived 1' }));
-    expect(screen.getByPlaceholderText('Search exam title')).toHaveValue('SAT');
+    expect(screen.getByPlaceholderText('Search exams')).toHaveValue('SAT');
     expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('1 exam');
   });
 
   it('closes a pristine dialog on Cancel with no alertdialog', () => {
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'Create test' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'Create test' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Create exam' })).not.toBeInTheDocument();
   });
 
   it('opens the discard alert on dirty Cancel and keeps the typed name on alert Cancel', () => {
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'Create test' }));
-    fireEvent.change(screen.getByLabelText('SAT exam name'), { target: { value: 'October Practice' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'October Practice' } });
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    const discardAlert = screen.getByRole('alertdialog', { name: 'Discard this SAT?' });
+    const discardAlert = screen.getByRole('alertdialog', { name: 'Discard this exam?' });
     expect(discardAlert).toHaveTextContent('The name you entered will be lost.');
     const alertDismissButtons = screen.getAllByRole('button', { name: 'Cancel' });
     fireEvent.click(alertDismissButtons[alertDismissButtons.length - 1]);
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('SAT exam name')).toHaveValue('October Practice');
+    expect(screen.getByLabelText('Exam name')).toHaveValue('October Practice');
   });
 
   it('reopens the discard alert from X and Escape, then discards both', () => {
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'Create test' }));
-    fireEvent.change(screen.getByLabelText('SAT exam name'), { target: { value: 'October Practice' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'October Practice' } });
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.getByRole('alertdialog', { name: 'Discard this SAT?' })).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog', { name: 'Discard this exam?' })).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'Cancel' }).pop() as HTMLElement);
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.getByRole('alertdialog', { name: 'Discard this SAT?' })).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog', { name: 'Discard this exam?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'Create test' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Create exam' })).not.toBeInTheDocument();
   });
 
   it('keeps the dialog mounted on Cancel while creating and keeps the failed draft intact', async () => {
     createProviderExamMock.mockRejectedValue(new Error('boom'));
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'Create test' }));
-    fireEvent.change(screen.getByLabelText('SAT exam name'), { target: { value: 'October Practice' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'October Practice' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('boom');
-    expect(screen.getByLabelText('SAT exam name')).toHaveValue('October Practice');
+    expect(screen.getByLabelText('Exam name')).toHaveValue('October Practice');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByRole('alertdialog', { name: 'Discard this SAT?' })).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog', { name: 'Discard this exam?' })).toBeInTheDocument();
   });
 
   it('keeps the dialog mounted on Cancel while the create request is in flight', () => {
     createProviderExamMock.mockImplementation(() => new Promise(() => {}));
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'Create test' }));
-    fireEvent.change(screen.getByLabelText('SAT exam name'), { target: { value: 'October Practice' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'October Practice' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Create test' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Create exam' })).toBeInTheDocument();
   });
 
   it('renders 04A row chrome without lift, gradient, or glass', () => {

@@ -299,7 +299,7 @@ describe("ExamPublishSheet", () => {
     it("returns to publishing and re-runs the checks against the revised draft", () => {
       openInline();
       fireEvent.click(screen.getByRole("button", { name: "Back to publish" }));
-      expect(screen.getByRole("dialog", { name: "Publish exam" })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Publish version" })).toBeInTheDocument();
       expect(state.refetchReadiness).toHaveBeenCalledOnce();
     });
 

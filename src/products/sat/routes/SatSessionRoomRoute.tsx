@@ -13,6 +13,7 @@ import { SatSessionControls } from '../ui/SatSessionControls';
 import { SatSessionContextBar, getSatRoomMode, roomStatusTone, runtimeLabel } from '../ui/SatSessionContextBar';
 import { SAT_SESSION_WARN_MESSAGE, SatSessionRoomConfirmDialog, type SatSessionRoomConfirmation } from '../ui/SatSessionRoomConfirmDialog';
 import { SatSessionRoomInspector } from '../ui/SatSessionRoomInspector';
+import { useSatRoomLayout } from '../ui/useSatRoomLayout';
 import { SatDeviceTransferRequests } from '../ui/SatDeviceTransferRequests';
 import { SatSessionRoomRoster, type SatRosterSort } from '../ui/SatSessionRoomRoster';
 import { SatSessionRoomTimeline } from '../ui/SatSessionRoomTimeline';
@@ -53,6 +54,7 @@ export function SatSessionRoomRoute() {
   const [presentOpen, setPresentOpen] = useState(false);
   const messageRef = useRef(message);
   const inspectorTriggerRef = useRef<HTMLElement | null>(null);
+  const { layout: roomLayout, ref: roomLayoutRef } = useSatRoomLayout();
   messageRef.current = message;
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -305,25 +307,29 @@ export function SatSessionRoomRoute() {
   };
 
   return (
-    <div className="sat-room sat-product" data-sat-room-mode={roomMode}>
+    <div ref={roomLayoutRef} className="sat-room sat-product" data-sat-room-mode={roomMode} data-room-layout={roomLayout}>
       <header className="sat-room__header">
         <div className="sat-room__header-inner">
-          <button type="button" onClick={goBack} className="flex min-h-11 shrink-0 items-center gap-1 rounded-[10px] px-2 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><ArrowLeft size={16} aria-hidden="true" />{deliveryReturn ? 'Rooms' : 'Rooms'}</button>
-          <div className="h-5 w-px bg-[var(--sat-staff-border-input,rgba(0,0,0,0.075))]" aria-hidden="true" />
-          <div className="sat-room__title"><div className="flex items-center gap-2"><h1>{schedule.examTitle}</h1><SatStatusPill tone={roomStatusTone(runtime.status)} pulse={runtime.status === 'live'}>{runtimeLabel(runtime.status)}</SatStatusPill></div><p className="sat-room__cohort">{schedule.cohortName} · {satPublishScopeCopy(schedule.publishScope ?? 'full')}{accessLink ? ` · Version ${accessLink.versionNumber}` : ''}</p><p className="sat-room__cohort" data-testid="sat-room-status-line">{statusLine}</p></div>
-          {controller.error ? <span className="inline-flex items-center gap-1 text-[14px] font-semibold tabular-nums text-[var(--sat-staff-warning-text,#92400e)]"><AlertTriangle size={11} aria-hidden="true" />Reconnecting</span> : null}
-          {roomMode !== 'review' ? <button type="button" onClick={() => setShareOpen(true)} className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><QrCode size={14} aria-hidden="true" />Student link</button> : null}
-          {isAdmin && !deliveryReturn ? <button type="button" onClick={() => navigate(testSessionsPath)} className="hidden min-h-11 shrink-0 items-center rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] sm:flex">Rooms</button> : null}
-          {roomMode === 'review' ? <button type="button" onClick={() => navigate(resultsPath)} className="flex min-h-11 shrink-0 items-center rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[14px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">View results</button> : null}
-          <SatSessionControls runtimeStatus={runtime.status} pendingActions={pendingActions} blocked={isStale} onPause={() => void run('pause', () => controller.handlePauseCohort(scheduleId), 'Exam paused.')} onResume={() => void run('resume', () => controller.handleResumeCohort(scheduleId), 'Exam resumed.')} onExtend={(minutes) => {
-            if (isStale) return;
-            const revision = runtime.revision;
-            if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0 || !runtime.activeSectionKey) {
-              setMessage({ kind: 'error', text: 'Refresh the room before adding time. Its current stage could not be confirmed.' });
-              return;
-            }
-            setConfirm({ kind: 'extend-session', minutes, stage: currentStage, sectionKey: runtime.activeSectionKey, runtimeRevision: revision, remainingLabel: formatRunSheetRemaining(cohortStageRemainingSeconds) });
-          }} onComplete={() => setConfirm({ kind: 'complete' })} />
+          <button type="button" onClick={goBack} className="sat-btn sat-btn--quiet sat-press shrink-0 px-2.5"><ArrowLeft size={16} aria-hidden="true" />Rooms</button>
+          <div className="sat-room__title">
+            <div className="flex min-w-0 items-center gap-2"><h1>{accessLink?.name ?? schedule.cohortName}</h1><SatStatusPill tone={roomStatusTone(runtime.status)} pulse={runtime.status === 'live'}>{runtimeLabel(runtime.status)}</SatStatusPill></div>
+            <p className="sat-room__cohort">{schedule.examTitle}{accessLink ? ` · Version ${accessLink.versionNumber}` : ''} · {satPublishScopeCopy(schedule.publishScope ?? 'full')}</p>
+            <p className="sat-room__cohort" data-testid="sat-room-status-line">{statusLine}</p>
+          </div>
+          <div className="sat-room__header-actions">
+            {controller.error ? <span role="status" className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[var(--sat-staff-warning-text,#92400e)]"><AlertTriangle size={16} aria-hidden="true" />Reconnecting</span> : null}
+            {roomMode !== 'review' ? <button type="button" onClick={() => setShareOpen(true)} className="sat-btn sat-btn--quiet sat-press px-3"><QrCode size={16} aria-hidden="true" />Student link</button> : null}
+            {isAdmin && !deliveryReturn ? <button type="button" onClick={() => navigate(testSessionsPath)} className="sat-btn sat-btn--quiet sat-press px-3">Room settings</button> : null}
+            <SatSessionControls runtimeStatus={runtime.status} pendingActions={pendingActions} blocked={isStale} onViewResponses={roomMode === 'review' ? () => navigate(resultsPath) : undefined} onPause={() => void run('pause', () => controller.handlePauseCohort(scheduleId), 'Exam paused.')} onResume={() => void run('resume', () => controller.handleResumeCohort(scheduleId), 'Exam resumed.')} onExtend={(minutes) => {
+              if (isStale) return;
+              const revision = runtime.revision;
+              if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0 || !runtime.activeSectionKey) {
+                setMessage({ kind: 'error', text: 'Refresh the room before adding time. Its current stage could not be confirmed.' });
+                return;
+              }
+              setConfirm({ kind: 'extend-session', minutes, stage: currentStage, sectionKey: runtime.activeSectionKey, runtimeRevision: revision, remainingLabel: formatRunSheetRemaining(cohortStageRemainingSeconds) });
+            }} onComplete={() => setConfirm({ kind: 'complete' })} />
+          </div>
         </div>
       </header>
 
@@ -388,6 +394,7 @@ export function SatSessionRoomRoute() {
 
         <SatSessionRoomInspector
           open={inspectorOpen}
+          docked={roomLayout === 'wide'}
           onOpenChange={setInspectorOpen}
           restoreFocusTarget={() => inspectorTriggerRef.current}
         >

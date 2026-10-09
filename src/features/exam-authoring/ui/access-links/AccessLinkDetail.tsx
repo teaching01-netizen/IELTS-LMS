@@ -156,11 +156,11 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
           <h2 className="mt-2 text-[20px] font-semibold tracking-[-0.03em] text-slate-950 sm:text-[22px]">
             {link.name}
           </h2>
-          <p className="mt-1 text-[12px] leading-5 text-slate-500">
+          <p className="mt-1 text-[14px] leading-5 text-slate-500">
             {accessLinkStatusDescription(link)}
           </p>
           {sectionBadge ? (
-            <span className="mt-2 inline-block rounded-full bg-au-fill px-2.5 py-1 text-[12px] font-semibold text-slate-600">
+            <span className="mt-2 inline-block rounded-full bg-au-fill px-2.5 py-1 text-[14px] font-semibold text-slate-600">
               {sectionBadge}
             </span>
           ) : null}
@@ -169,7 +169,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
           type="button"
           onClick={onEdit}
           aria-label={`Edit ${link.name}`}
-          className="sat-press sat-press-fill flex min-h-11 shrink-0 items-center gap-1.5 rounded-[12px] border border-black/[0.08] bg-white px-3 text-[12px] font-semibold text-slate-700"
+          className="sat-btn sat-btn--secondary sat-press shrink-0"
         >
           <Pencil size={13} aria-hidden="true" />
           Edit
@@ -198,7 +198,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               tabIndex={selected ? 0 : -1}
               onClick={() => setActiveTab(tab)}
               className={
-                "sat-press relative flex min-h-11 items-center px-3 text-[12px] font-semibold " +
+                "sat-press relative flex min-h-11 items-center px-3 text-[14px] font-semibold " +
                 (selected ? "text-slate-950" : "text-slate-500")
               }
             >
@@ -237,17 +237,17 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
           {isStaleRelease ? (
             <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-black/[0.06] bg-white p-4">
               <div className="min-w-0">
-                <p className="text-[12px] font-semibold text-slate-900">
+                <p className="text-[14px] font-semibold text-slate-900">
                   Uses Version {link.versionNumber}
                 </p>
-                <p className="mt-0.5 text-[12px] text-slate-500">
+                <p className="mt-0.5 text-[14px] text-slate-500">
                   Version {currentVersionNumber} is available. This link stays unchanged.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={onCreateForCurrent}
-                className="sat-press sat-press-fill-accent flex min-h-11 shrink-0 items-center rounded-[12px] bg-au-accent px-4 text-[12px] font-semibold text-white hover:bg-au-accent-hover"
+                className="sat-btn sat-btn--primary sat-press shrink-0"
               >
                 Use setup for Version {currentVersionNumber}
               </button>
@@ -255,17 +255,17 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
           ) : null}
 
           {!session ? <SatSectionCard labelledBy={shareLabelId} className="mt-4">
-            <p id={shareLabelId} className="text-[12px] font-semibold text-slate-900">
+            <p id={shareLabelId} className="text-[14px] font-semibold text-slate-900">
               Share this link
             </p>
-            <p className="mt-2 break-all font-mono text-[12px] leading-5 text-slate-600">
+            <p className="mt-2 break-all font-mono text-[14px] leading-5 text-slate-600">
               {url}
             </p>
             <div className="mt-3 grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={onShare}
-                className="sat-press sat-press-fill-accent flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] bg-au-accent px-2 text-[12px] font-semibold text-white hover:bg-au-accent-hover"
+                className="sat-btn sat-btn--primary sat-press px-2"
               >
                 <Share2 size={14} aria-hidden="true" />
                 Share
@@ -273,7 +273,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <button
                 type="button"
                 onClick={onCopy}
-                className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] border border-black/[0.08] bg-white px-2 text-[12px] font-semibold text-slate-700"
+                className="sat-btn sat-btn--secondary sat-press px-2"
               >
                 {copyConfirmed ? (
                   <Check size={14} className="text-emerald-600" aria-hidden="true" />
@@ -285,7 +285,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <button
                 type="button"
                 onClick={onPresent}
-                className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] px-2 text-[12px] font-semibold text-slate-600"
+                className="sat-btn sat-btn--quiet sat-press px-2"
               >
                 <Presentation size={14} aria-hidden="true" />
                 Present
@@ -295,7 +295,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               href={url}
               target="_blank"
               rel="noreferrer"
-              className="sat-press sat-press-fill mt-1 flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] text-[12px] font-semibold text-slate-500"
+              className="sat-btn sat-btn--quiet sat-press mt-1"
             >
               <ExternalLink size={13} aria-hidden="true" />
               Open student page
@@ -307,7 +307,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <p className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] text-slate-950">
                 {link.metrics.registered}
               </p>
-              <p className="mt-0.5 text-[12px] font-semibold uppercase tracking-wide text-slate-500">
+              <p className="mt-0.5 text-[14px] font-semibold uppercase tracking-wide text-slate-500">
                 Registered
               </p>
             </div>
@@ -315,7 +315,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <p className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] text-slate-950">
                 {link.metrics.started}
               </p>
-              <p className="mt-0.5 text-[12px] font-semibold uppercase tracking-wide text-slate-500">
+              <p className="mt-0.5 text-[14px] font-semibold uppercase tracking-wide text-slate-500">
                 Started
               </p>
             </div>
@@ -323,7 +323,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <p className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] text-slate-950">
                 {link.metrics.submitted}
               </p>
-              <p className="mt-0.5 text-[12px] font-semibold uppercase tracking-wide text-slate-500">
+              <p className="mt-0.5 text-[14px] font-semibold uppercase tracking-wide text-slate-500">
                 Submitted
               </p>
             </div>
@@ -335,7 +335,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
         <div role="tabpanel" id={panelId("activity")} aria-labelledby={tabId("activity")}>
           <section aria-label="Recent activity" className="mt-4">
             <div className="flex min-h-11 items-center justify-between">
-              <h3 className="text-[12px] font-semibold text-slate-900">Recent activity</h3>
+              <h3 className="text-[14px] font-semibold text-slate-900">Recent activity</h3>
               {activityLoading ? (
                 <span role="status" aria-label="Loading activity">
                   <LoaderCircle size={14} className="animate-spin text-slate-400" aria-hidden="true" />
@@ -347,12 +347,12 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
                 role="alert"
                 className="mt-2 rounded-2xl border border-black/[0.06] bg-white p-4"
               >
-                <p className="text-[12px] text-slate-600">{activityError}</p>
+                <p className="text-[14px] text-slate-600">{activityError}</p>
                 {onRetryActivity ? (
                   <button
                     type="button"
                     onClick={onRetryActivity}
-                    className="sat-press sat-press-fill mt-2 flex min-h-11 items-center gap-1.5 rounded-[12px] border border-black/[0.08] bg-white px-3 text-[12px] font-semibold text-slate-700"
+                    className="sat-btn sat-btn--secondary sat-press mt-2"
                   >
                     <RefreshCw size={13} aria-hidden="true" />
                     Retry
@@ -381,14 +381,14 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
                       <Check size={12} className="shrink-0 text-emerald-600" aria-hidden="true" />
                     ) : null}
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[12px] font-medium text-slate-900">
+                      <p className="truncate text-[14px] font-medium text-slate-900">
                         {item.studentName}
                       </p>
-                      <p className="mt-0.5 text-[12px] text-slate-500">{activityVerb(item.kind)}</p>
+                      <p className="mt-0.5 text-[14px] text-slate-500">{activityVerb(item.kind)}</p>
                     </div>
                     <time
                       dateTime={item.occurredAt}
-                      className="shrink-0 text-[12px] tabular-nums text-slate-500"
+                      className="shrink-0 text-[14px] tabular-nums text-slate-500"
                     >
                       {formatCompactDateTime(new Date(item.occurredAt))}
                     </time>
@@ -396,7 +396,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
                 ))}
               </ul>
             ) : (
-              <p className="mt-2 rounded-2xl border border-black/[0.06] bg-white px-4 py-6 text-center text-[12px] text-slate-500">
+              <p className="mt-2 rounded-2xl border border-black/[0.06] bg-white px-4 py-6 text-center text-[14px] text-slate-500">
                 No student activity yet.
               </p>
             )}
@@ -408,54 +408,54 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
         <div role="tabpanel" id={panelId("settings")} aria-labelledby={tabId("settings")}>
           <dl className="mt-4 divide-y divide-black/[0.06] rounded-2xl border border-black/[0.06] bg-white px-4">
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Exam</dt>
-              <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
+              <dt className="w-28 shrink-0 text-[14px] text-slate-500">Exam</dt>
+              <dd className="min-w-0 flex-1 break-words text-right text-[14px] font-semibold text-slate-900">
                 {`${link.examTitle} · Version ${link.versionNumber}`}
               </dd>
             </div>
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Audience</dt>
-              <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
+              <dt className="w-28 shrink-0 text-[14px] text-slate-500">Audience</dt>
+              <dd className="min-w-0 flex-1 break-words text-right text-[14px] font-semibold text-slate-900">
                 {audienceText(link)}
               </dd>
             </div>
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Identification</dt>
-              <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
+              <dt className="w-28 shrink-0 text-[14px] text-slate-500">Identification</dt>
+              <dd className="min-w-0 flex-1 break-words text-right text-[14px] font-semibold text-slate-900">
                 {link.accessMode === "student_code" ? "Student code required" : "Name + email"}
               </dd>
             </div>
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Sections</dt>
-              <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
+              <dt className="w-28 shrink-0 text-[14px] text-slate-500">Sections</dt>
+              <dd className="min-w-0 flex-1 break-words text-right text-[14px] font-semibold text-slate-900">
                 {sectionsText(link)}
               </dd>
             </div>
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Availability</dt>
-              <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
+              <dt className="w-28 shrink-0 text-[14px] text-slate-500">Availability</dt>
+              <dd className="min-w-0 flex-1 break-words text-right text-[14px] font-semibold text-slate-900">
                 {availabilityText(link)}
               </dd>
             </div>
             {link.audienceType === "selected_students" ? (
               <div className="flex min-h-11 items-center gap-3 py-2">
-                <dt className="w-28 shrink-0 text-[12px] text-slate-500">Allowed students</dt>
-                <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
+                <dt className="w-28 shrink-0 text-[14px] text-slate-500">Allowed students</dt>
+                <dd className="min-w-0 flex-1 break-words text-right text-[14px] font-semibold text-slate-900">
                   {link.selectedStudentCount}
                 </dd>
               </div>
             ) : null}
             <div className="flex min-h-11 items-center gap-3 py-2">
-              <dt className="w-28 shrink-0 text-[12px] text-slate-500">Link ID</dt>
+              <dt className="w-28 shrink-0 text-[14px] text-slate-500">Link ID</dt>
               <dd className="flex min-w-0 flex-1 items-center justify-end gap-2">
-                <span className="min-w-0 flex-1 truncate break-words text-right font-mono text-[12px] font-semibold text-slate-900">
+                <span className="min-w-0 flex-1 truncate break-words text-right font-mono text-[14px] font-semibold text-slate-900">
                   {link.id}
                 </span>
                 <button
                   type="button"
                   onClick={onCopy}
                   aria-label="Copy link ID"
-                  className="sat-press sat-press-fill flex min-h-11 shrink-0 items-center gap-1 rounded-[12px] px-2 text-[12px] font-semibold text-slate-600"
+                  className="sat-btn sat-btn--quiet sat-press shrink-0 px-2"
                 >
                   {copyConfirmed ? (
                     <Check size={13} className="text-emerald-600" aria-hidden="true" />

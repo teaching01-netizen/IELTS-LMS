@@ -13,8 +13,7 @@ export interface InspectedAttempt {
   studentName?: string | null;
 }
 
-const STEP_BUTTON =
-  'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)] disabled:cursor-not-allowed disabled:opacity-35';
+const STEP_BUTTON = 'sat-btn sat-btn--quiet sat-btn--icon sat-press';
 
 /**
  * Opens one student's response beside the attempts list instead of navigating
@@ -69,13 +68,15 @@ export function SatAttemptInspector({
     <Sheet open={attempt !== null} onOpenChange={(next) => !next && onClose()}>
       <SheetContent
         side="right"
-        className="sat-product flex w-[min(96vw,780px)] max-w-[780px] flex-col gap-0 p-0 sm:max-w-[780px]"
+        className="sat-product sat-staff-root flex w-[min(96vw,820px)] max-w-[820px] flex-col gap-0 p-0 sm:max-w-[820px]"
         onCloseAutoFocus={(event) => {
           const id = lastInspectedRef.current;
-          const row = id ? document.querySelector<HTMLElement>(`[data-sat-row-id="${CSS.escape(id)}"]`) : null;
-          if (!row) return;
+          // The record is a table row; its focusable target is the review button inside it.
+          const record = id ? document.querySelector<HTMLElement>(`[data-sat-row-id="${CSS.escape(id)}"]`) : null;
+          const target = record?.matches('button') ? record : record?.querySelector<HTMLElement>('button') ?? null;
+          if (!target) return;
           event.preventDefault();
-          row.focus({ preventScroll: true });
+          target.focus({ preventScroll: true });
         }}
         onKeyDown={(event) => {
           // Alt + ↑ / ↓ steps through students without leaving the sheet.
@@ -84,10 +85,10 @@ export function SatAttemptInspector({
           if (event.key === 'ArrowDown' && onNext) { event.preventDefault(); onNext(); }
         }}
       >
-        <SheetHeader className="flex-row items-center justify-between gap-3 border-b border-border px-5 py-3 pr-14 text-left">
+        <SheetHeader className="flex-row items-center justify-between gap-3 border-b border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-6 py-3 pr-14 text-left">
           <div className="min-w-0">
-            <SheetTitle className="text-base">Student response</SheetTitle>
-            <SheetDescription className="truncate text-sm">{subtitle || 'Review without leaving the attempts list.'}</SheetDescription>
+            <SheetTitle className="text-[16px] leading-6">Student response</SheetTitle>
+            <SheetDescription className="truncate text-[14px] leading-5">{subtitle || 'Review without leaving the attempts list.'}</SheetDescription>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {position ? (
@@ -104,7 +105,7 @@ export function SatAttemptInspector({
               <Link
                 to={fullPage}
                 state={{ from: returnPath }}
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]"
+                className="sat-btn sat-btn--quiet sat-press px-3"
               >
                 <ExternalLink size={14} aria-hidden="true" />
                 Open as page
@@ -112,7 +113,7 @@ export function SatAttemptInspector({
             ) : null}
           </div>
         </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-5">
           {attempt && hasResult && view === 'result' ? (
             <SatResultDetailContent
               embedded

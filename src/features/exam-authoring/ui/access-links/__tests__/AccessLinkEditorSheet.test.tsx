@@ -113,7 +113,7 @@ describe("AccessLinkEditorSheet", () => {
         onUpdate={vi.fn().mockResolvedValue(undefined)}
       />,
     );
-    for (const heading of ["Room name", "Who can join?", "Check-in"]) {
+    for (const heading of ["Room details", "Room name", "Who can join", "Audience", "Check-in settings", "Check-in window"]) {
       expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
     }
     const summary = screen.getByRole("region", { name: "Summary" });

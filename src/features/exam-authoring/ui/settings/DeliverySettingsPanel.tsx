@@ -3,6 +3,7 @@ import type { ExamEntity } from "../../../../types/domain";
 import { useAuthoringShellLifecycle } from "../../application/authoringShellLifecycle";
 import { RuntimePolicyPanel } from "../release/RuntimePolicyPanel";
 import { SectionDeliveryEditor } from "../release/SectionDeliveryEditor";
+import { SatInlineError } from "@/src/products/sat/ui/SatPage";
 
 export interface DeliverySettingsPanelProps {
   exam: ExamEntity;
@@ -54,7 +55,7 @@ export function DeliverySettingsPanel({
           : null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {state.kind === "ready" ? (
         state.shell.sections.map((section) => (
           <SectionDeliveryEditor
@@ -66,33 +67,24 @@ export function DeliverySettingsPanel({
           />
         ))
       ) : loadError ? (
-        <div role="alert" className="rounded-xl bg-destructive/10 p-4 text-sm text-destructive">
-          {loadError}{" "}
-          <button type="button" className="min-h-11 font-semibold underline" onClick={() => void lifecycle.refetch()}>
-            Try again
-          </button>
-        </div>
+        <SatInlineError title="Settings could not load" description={loadError} onRetry={() => void lifecycle.refetch()} />
       ) : state.kind === "no-draft" ? (
-        <div className="rounded-xl bg-muted p-4 text-sm leading-6 text-muted-foreground">
-          <p className="font-semibold text-foreground">This exam is published.</p>
+        <div className="rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-white p-5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">This exam is published.</p>
           <p className="mt-1">
             Timing and routing belong to the working draft. Editing opens a draft from the published version; students
             keep the published version until you publish again.
           </p>
           {exam.canEdit && onEditExam ? (
-            <button
-              type="button"
-              onClick={onEditExam}
-              className="mt-3 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
+            <button type="button" onClick={onEditExam} className="sat-btn sat-btn--primary sat-press mt-4">
               Edit this exam
             </button>
           ) : null}
         </div>
       ) : (
         <div role="status" aria-busy="true" aria-label="Loading delivery settings" className="space-y-3">
-          <div className="h-40 animate-pulse rounded-2xl bg-muted motion-reduce:animate-none" />
-          <div className="h-24 animate-pulse rounded-2xl bg-muted motion-reduce:animate-none" />
+          <div className="sat-skeleton-shimmer h-40 rounded-[var(--sat-staff-radius-card,14px)] bg-white" />
+          <div className="sat-skeleton-shimmer h-24 rounded-[var(--sat-staff-radius-card,14px)] bg-white" />
         </div>
       )}
       {showRuntimePolicy ? <RuntimePolicyPanel /> : null}

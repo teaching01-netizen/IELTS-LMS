@@ -28,16 +28,15 @@ export function isSatCreationDirty(fields: { title: string; cohort?: string; exa
   return fields.title.trim() !== "" || (fields.cohort ?? "").trim() !== "" || (fields.exam ?? "").trim() !== "" || (fields.start ?? "").trim() !== "" || (fields.end ?? "").trim() !== "";
 }
 
-const OVERLAY_CLASS = 'sat-dialog-overlay sat-product';
-const CONFIRM_CLASS = 'sat-dialog sat-dialog-center sat-product w-[calc(100vw-40px)] max-w-[390px] p-5';
-const FORM_CLASS = 'sat-dialog sat-dialog-center sat-product w-[calc(100vw-40px)] max-w-[480px] overflow-hidden';
+// `sat-staff-root` marks portaled overlays as staff surfaces: they render
+// outside SatRoot's DOM subtree but follow the same staff contract.
+const OVERLAY_CLASS = 'sat-dialog-overlay sat-product sat-staff-root';
+const CONFIRM_CLASS = 'sat-dialog sat-dialog-center sat-product sat-staff-root w-[calc(100vw-40px)] max-w-[420px] p-6';
+const FORM_CLASS = 'sat-dialog sat-dialog-center sat-product sat-staff-root w-[calc(100vw-40px)] max-w-[520px] overflow-hidden';
 
-const CANCEL_BUTTON_CLASS =
-  'sat-quiet-button min-h-11 rounded-[var(--sat-staff-radius-control,10px)] px-3.5 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
-const CONFIRM_BUTTON_CLASS =
-  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3.5 text-[14px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
-const DESTRUCTIVE_BUTTON_CLASS =
-  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-strong,#d70015)] px-3.5 text-[14px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-danger-hover,#c00d10)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-danger-strong,#d70015)]/40';
+const CANCEL_BUTTON_CLASS = 'sat-btn sat-btn--quiet sat-press';
+const CONFIRM_BUTTON_CLASS = 'sat-btn sat-btn--primary sat-press';
+const DESTRUCTIVE_BUTTON_CLASS = 'sat-btn sat-btn--danger sat-press';
 
 function StaticConfirmDialog({
   title,
@@ -152,8 +151,7 @@ type SatFormDialogProps = {
   children: ReactNode;
 };
 
-const CLOSE_BUTTON_CLASS =
-  'flex h-9 w-9 items-center justify-center rounded-full text-[var(--sat-staff-text-tertiary,#6e6e73)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
+const CLOSE_BUTTON_CLASS = 'sat-btn sat-btn--quiet sat-btn--icon sat-press -mr-2 -mt-2 rounded-full';
 
 function StaticFormDialog({ eyebrow, title, onClose, children }: Omit<SatFormDialogProps, 'open'>) {
   // useId-scoped title id: two stacked form sheets never collide.

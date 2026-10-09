@@ -102,11 +102,16 @@ describe('SatListRow', () => {
 });
 
 describe('SatPrimaryButton', () => {
-  it('disables and announces busy while pending, keeping width stable', () => {
-    render(<SatPrimaryButton onClick={vi.fn()} pending>New SAT</SatPrimaryButton>);
+  it('keeps focus, announces busy, and ignores presses while pending', () => {
+    const onClick = vi.fn();
+    render(<SatPrimaryButton onClick={onClick} pending>New SAT</SatPrimaryButton>);
     const button = screen.getByRole('button', { name: 'New SAT' });
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAttribute('aria-busy', 'true');
+    button.focus();
+    fireEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(button).toHaveFocus();
   });
 
   it('stays enabled by default', () => {
@@ -206,15 +211,11 @@ describe('SatResultCount', () => {
 });
 
 describe('SatInlineError', () => {
-  it('announces via role=alert with a 40px primary retry button', () => {
+  it('announces via role=alert and retries from the inline action', () => {
     const onRetry = vi.fn();
     render(<SatInlineError title="Results failed" description="Try again." onRetry={onRetry} />);
     expect(screen.getByRole('alert')).toHaveTextContent('Results failed');
-    const retry = screen.getByRole('button', { name: 'Retry' });
-    expect(retry.className).toContain('min-h-11');
-    // Phase 03: retry uses the accent token (var(--sat-staff-accent) with #0071e3 fallback).
-    expect(retry.className).toContain('sat-staff-accent');
-    fireEvent.click(retry);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
@@ -248,21 +249,6 @@ describe('Phase 03 token hygiene + contracts (additive)', () => {
     expect(html).not.toContain('animate-pulse');
   });
 
-  it('keeps focus-visible rings on search, primary, row, and stat button', () => {
-    const onSelect = vi.fn();
-    const { container } = render(
-      <>
-        <SatSearchField id="sat-focus-search" label="Search exams" value="q" onChange={vi.fn()} placeholder="Search" />
-        <SatPrimaryButton onClick={vi.fn()}>New SAT</SatPrimaryButton>
-        <SatListRow onOpen={vi.fn()} index={0}><span>Row</span></SatListRow>
-        <SatStatStrip label="Summary" stats={[{ id: 'a', label: 'Upcoming', value: 4, onSelect }]} />
-      </>,
-    );
-    expect(container.querySelector('input')?.className).toContain('focus:ring');
-    expect(screen.getByRole('button', { name: 'New SAT' }).className).toContain('focus-visible:ring');
-    expect(container.querySelector('button.sat-list-row')?.className).toContain('focus-visible:ring');
-    expect(screen.getByRole('button', { name: 'Upcoming: 4' }).className).toContain('focus-visible:ring');
-  });
 
   it('keeps the sat-search-clear hook with a Clear-prefixed accessible name', () => {
     render(

@@ -1,9 +1,8 @@
-import { AlertTriangle, MoreHorizontal } from 'lucide-react';
+import { AlertTriangle, MessageSquareWarning, Pause, Play, Timer } from 'lucide-react';
 import type { StudentSession } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import { useAuthoritativeDeadlineClock, type ServerClockSnapshot } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { SatEyebrow } from './SatPage';
-import { SatMenu } from './Menu';
 import { formatRunSheetRemaining, satModuleSlotLabel } from './sessionRunSheet';
 import { isSatAttemptLive, isSatBreakLive, isSatStageLive } from './satStage';
 
@@ -211,39 +210,19 @@ export function StudentDetail({
       data-sat-room-student-detail
       data-sat-room-student-variant={variant}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <SatEyebrow>Student</SatEyebrow>
-          <h2
-            id="sat-room-student-heading"
-            data-sat-room-student-heading
-            tabIndex={-1}
-            className="mt-1.5 truncate text-[19px] font-semibold tracking-[-0.02em]"
-          >
-            {student.name}
-          </h2>
-          <p className="mt-1 text-[14px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">
-            {student.studentId}{student.email ? ` · ${student.email}` : ''}
-          </p>
-        </div>
-        <SatMenu
-          label="Student actions"
-          compact
-          align="end"
-          width={176}
-          icon={MoreHorizontal}
-          items={[
-            { id: 'extend-5', label: 'Add 5 minutes…', disabled: actionDisabled, onSelect: () => onAddTime(5) },
-            { id: 'warn', label: 'Send warning…', disabled: actionDisabled, onSelect: onWarn },
-            {
-              id: 'toggle',
-              label: student.status === 'paused' ? 'Resume attempt' : 'Pause attempt',
-              disabled: actionDisabled,
-              onSelect: student.status === 'paused' ? onResume : onPause,
-            },
-            { id: 'terminate', label: 'End attempt…', destructive: true, disabled: actionDisabled, separatorBefore: true, onSelect: onTerminate },
-          ]}
-        />
+      <div className="min-w-0">
+        <SatEyebrow>Student</SatEyebrow>
+        <h2
+          id="sat-room-student-heading"
+          data-sat-room-student-heading
+          tabIndex={-1}
+          className="mt-1.5 truncate text-[20px] font-semibold leading-7 tracking-[-0.015em]"
+        >
+          {student.name}
+        </h2>
+        <p className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          {student.studentId}{student.email ? ` · ${student.email}` : ''}
+        </p>
       </div>
 
       {attentionFirst ? <StudentAttention student={student} count={attentionCount} /> : null}
@@ -278,6 +257,22 @@ export function StudentDetail({
             <dd className="capitalize">{student.status}</dd>
           </div>
         </dl>
+      </section>
+
+      {/* Actions here affect only this student; room-wide controls live in the
+          room header. Each label says what it does, and each consequential
+          action confirms with the student's name first. */}
+      <section className="sat-room__student-actions" aria-labelledby="sat-room-student-actions-heading">
+        <h3 id="sat-room-student-actions-heading" className="sat-room__eyebrow">Actions for this student</h3>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => onAddTime(5)} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press px-3"><Timer size={16} aria-hidden="true" />Add 5 minutes…</button>
+          <button type="button" onClick={onWarn} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press px-3"><MessageSquareWarning size={16} aria-hidden="true" />Send warning…</button>
+          <button type="button" onClick={student.status === 'paused' ? onResume : onPause} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press px-3">
+            {student.status === 'paused' ? <Play size={16} aria-hidden="true" /> : <Pause size={16} aria-hidden="true" />}
+            {student.status === 'paused' ? 'Resume attempt' : 'Pause attempt'}
+          </button>
+          <button type="button" onClick={onTerminate} disabled={actionDisabled} className="sat-btn sat-btn--danger-secondary sat-press px-3">End attempt…</button>
+        </div>
       </section>
 
       {!attentionFirst ? <StudentAttention student={student} count={attentionCount} /> : null}

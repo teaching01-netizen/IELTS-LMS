@@ -19,7 +19,6 @@ export function formatDate(value: string | null | undefined): string {
 // Below sm each record stacks; every cell stays self-describing.
 const EXAM_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_88px_76px_minmax(0,1.3fr)_16px]';
 const ACCESS_COLUMNS = 'sm:grid-cols-[168px_minmax(0,1.5fr)_64px_76px_minmax(0,1.3fr)_16px]';
-const ATTEMPT_COLUMNS = 'sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_72px_minmax(0,1fr)_16px]';
 
 const CELL_PRIMARY = 'block text-[14px] font-semibold leading-[1.45] tracking-[-0.012em] text-slate-900';
 const CELL_SECONDARY = 'block text-[14px] leading-[1.45] tabular-nums text-slate-500';
@@ -38,10 +37,6 @@ export function ExamColumnHeader() {
 
 export function AccessColumnHeader() {
   return <ColumnHeader columns={ACCESS_COLUMNS} labels={['Latest test', 'Room', 'Version', 'Attempts', 'Outcomes', '']} />;
-}
-
-export function AttemptColumnHeader() {
-  return <ColumnHeader columns={ATTEMPT_COLUMNS} labels={['Student', 'Room', 'Attempt status', 'Score', 'Submitted', '']} />;
 }
 
 /** Date over time; never substitutes another timestamp when the start is unknown. */
@@ -105,12 +100,17 @@ function attemptOutcome(attempt: SatAttemptRow): { label: string; tone: SatStatu
   }
 }
 
-/** A number only when a score exists; never a zero stand-in. Pending while one can still arrive. */
+/**
+ * A number only when a score exists; never a zero stand-in. Otherwise the
+ * reason there is none: still being taken, submitted and awaiting scoring, or
+ * ended without a score.
+ */
 function totalScoreLabel(attempt: SatAttemptRow): string {
   if (attempt.totalScore != null) return String(attempt.totalScore);
-  const invalidated = attempt.outcomeStatus.startsWith('invalidated_');
-  const awaiting = !invalidated && (attempt.outcomeStatus === 'pending' || ['running', 'paused', 'submitted'].includes(attempt.attemptStatus ?? ''));
-  return awaiting ? 'Pending' : 'Unavailable';
+  if (attempt.outcomeStatus.startsWith('invalidated_')) return 'Not scored';
+  if (attempt.attemptStatus === 'running' || attempt.attemptStatus === 'paused') return 'Not submitted';
+  if (attempt.outcomeStatus === 'pending' || attempt.attemptStatus === 'submitted') return 'Score pending';
+  return 'Not scored';
 }
 
 export function versionLineFor(versions: number[]): string | null {
@@ -192,46 +192,73 @@ export function SatAccessGroupRow({
   );
 }
 
-/** One row per attempt; the route owns navigation via onOpen. */
-export function SatExamAttemptRow({
-  attempt,
-  roomName,
-  attemptIndex,
-  current = false,
+/**
+ * The room's attempts as a comparison table: one row per attempt (a student
+ * with two attempts gets two rows, told apart by their start time). Room and
+ * version context sit above the table, not in every row. Each row's only
+ * control is the review button, so no interactive element is nested.
+ */
+export function SatAttemptTable({
+  attempts,
+  currentAttemptId,
   onOpen,
 }: {
-  attempt: SatAttemptRow;
-  roomName: string;
-  attemptIndex: number;
+  attempts: readonly SatAttemptRow[];
   /** The attempt open in the inspector. */
-  current?: boolean;
+  currentAttemptId: string | null;
   onOpen: (attempt: SatAttemptRow) => void;
 }) {
-  const outcome = attemptOutcome(attempt);
-  const submitted = formatTestTime(attempt.submittedAt);
-  const submittedLabel = submitted ? `${submitted.day} · ${submitted.time}` : 'Not submitted';
   return (
-    <SatListRow index={Math.min(attemptIndex, 5)} rowId={attempt.attemptId} current={current} onOpen={() => onOpen(attempt)}>
-      <RowGrid columns={ATTEMPT_COLUMNS}>
-        <span className="min-w-0">
-          <span className={`${CELL_PRIMARY} break-words`}>{attempt.studentName}</span>
-          <span className={CELL_SECONDARY}>{attempt.studentId}</span>
-        </span>
-        <span className="min-w-0">
-          <span className={`${CELL_SECONDARY} text-slate-700 break-words`}>{roomName}</span>
-          {attempt.cohortName ? <span className={`${CELL_SECONDARY} break-words`}>{attempt.cohortName}</span> : null}
-        </span>
-        <span className="flex min-w-0 flex-col items-start gap-0.5">
-          <SatStatusPill tone={outcome.tone}>{outcome.label}</SatStatusPill>
-          <span className={CELL_SECONDARY}>{attempt.outcomeStatus === 'scored' ? 'View answers' : 'View saved answers'}</span>
-        </span>
-        <span className={`${attempt.totalScore != null ? CELL_PRIMARY : CELL_SECONDARY} tabular-nums sm:text-right`}>
-          <span className="sm:hidden">Score </span>
-          {totalScoreLabel(attempt)}
-        </span>
-        <span className={`${CELL_SECONDARY} text-slate-700`}><span className="sm:hidden">Submitted </span>{submittedLabel}</span>
-        <Chevron />
-      </RowGrid>
-    </SatListRow>
+    <div className="sat-table-surface mt-3">
+      <table className="sat-table min-w-[640px]">
+        <caption className="sr-only">Student attempts</caption>
+        <thead>
+          <tr>
+            <th scope="col">Student</th>
+            <th scope="col">Test started</th>
+            <th scope="col">Status</th>
+            <th scope="col" className="sat-table__num">Score</th>
+            <th scope="col"><span className="sr-only">Review</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {attempts.map((attempt) => {
+            const outcome = attemptOutcome(attempt);
+            const started = formatTestTime(attempt.testStartedAt);
+            const scored = attempt.totalScore != null;
+            const reviewLabel = attempt.outcomeStatus === 'scored' ? 'View answers' : 'View saved answers';
+            return (
+              <tr key={attempt.attemptId} data-sat-row-id={attempt.attemptId} aria-current={attempt.attemptId === currentAttemptId ? 'true' : undefined}>
+                <th scope="row">
+                  <span className="block font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">{attempt.studentName}</span>
+                  <span className="block text-[var(--sat-staff-text-secondary,#515154)]">{attempt.studentId}{attempt.cohortName ? ` · ${attempt.cohortName}` : ''}</span>
+                </th>
+                <td className="whitespace-nowrap">
+                  {started ? (
+                    <>
+                      <span className="block">{started.day}</span>
+                      <span className="block text-[var(--sat-staff-text-secondary,#515154)]">{started.time}</span>
+                    </>
+                  ) : <span className="text-[var(--sat-staff-text-secondary,#515154)]">Not started</span>}
+                </td>
+                <td><SatStatusPill tone={outcome.tone}>{outcome.label}</SatStatusPill></td>
+                <td className={'sat-table__num whitespace-nowrap ' + (scored ? 'text-[16px] font-semibold' : 'text-[var(--sat-staff-text-secondary,#515154)]')}>{totalScoreLabel(attempt)}</td>
+                <td className="text-right">
+                  <button
+                    type="button"
+                    onClick={() => onOpen(attempt)}
+                    aria-label={`${reviewLabel} for ${attempt.studentName}, ${outcome.label}`}
+                    className="sat-btn sat-btn--quiet sat-press whitespace-nowrap px-3 text-[var(--sat-staff-accent,#0071e3)]"
+                  >
+                    {reviewLabel}
+                    <ArrowRight size={16} aria-hidden="true" />
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

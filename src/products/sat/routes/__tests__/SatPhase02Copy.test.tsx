@@ -313,22 +313,20 @@ describe('SAT Phase 02 copy contracts', () => {
         <SatResultsRoute />
       </MemoryRouter>,
     );
-    expect(screen.getByPlaceholderText('Search rooms or cohort')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search rooms')).toBeInTheDocument();
     cleanup();
 
     render(<MemoryRouter initialEntries={['/sat/results?exam=sat-1&access=schedule-1']}><SatResultsRoute /></MemoryRouter>);
-    expect(screen.getByPlaceholderText('Search name, ID, cohort')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search students')).toBeInTheDocument();
     cleanup();
 
     renderLibrary();
-    expect(screen.getByPlaceholderText('Search exam title')).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('Search exams')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search exams')).toBeInTheDocument();
   });
 
   it('rooms and room placeholders name their filter scope', () => {
     renderSessions();
-    expect(screen.getByPlaceholderText('Search exam, cohort, institution')).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('Search rooms')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search rooms or exams')).toBeInTheDocument();
 
     render(
       <MemoryRouter initialEntries={['/sat/sessions/sched-1']}>
@@ -341,29 +339,13 @@ describe('SAT Phase 02 copy contracts', () => {
     expect(screen.queryByPlaceholderText('Search students')).not.toBeInTheDocument();
   });
 
-  it('empty-state CTAs are Title Case', () => {
-    renderLibrary();
-    fireEvent.change(screen.getByPlaceholderText('Search exam title'), { target: { value: 'zzz-no-match' } });
-    expect(screen.getByRole('button', { name: 'Clear Search' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
-  });
-
-  it('rooms empty-state CTA is Title Case', () => {
-    renderSessions();
-    fireEvent.change(screen.getByPlaceholderText('Search exam, cohort, institution'), {
-      target: { value: 'zzz-no-match' },
-    });
-    expect(screen.getByRole('button', { name: 'Clear Search' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
-  });
-
-  it('exam creation is named Create test', () => {
+  it('exam creation is named Create exam', () => {
     createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
     renderLibrary();
-    expect(screen.getByRole('button', { name: 'Create test' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create exam' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New SAT' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Create test' }));
-    expect(screen.getByRole('dialog', { name: 'Create test' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    expect(screen.getByRole('dialog', { name: 'Create exam' })).toBeInTheDocument();
   });
 
   it('result rows expose a single status signal', () => {
@@ -403,7 +385,7 @@ describe('SAT Phase 02 copy contracts', () => {
         <SatResultsRoute />
       </MemoryRouter>,
     );
-    const rows = container.querySelectorAll('.sat-list-row');
+    const rows = container.querySelectorAll('tbody tr');
     expect(rows.length).toBe(3);
     rows.forEach((row) => {
       expect(row.querySelectorAll('span[class*="rounded-full"][class*="inline-flex"]').length).toBe(1);

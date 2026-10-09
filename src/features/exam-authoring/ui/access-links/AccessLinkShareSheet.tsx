@@ -73,30 +73,30 @@ export function StudentShareDialog({ open, url, roomName, examTitle, versionNumb
     >
       <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4">
         <div className="min-w-0 flex-1">
-          <p className="text-[12px] font-medium text-slate-500">Share with students</p>
+          <p className="text-[14px] font-medium text-slate-500">Share with students</p>
           <h2 className="truncate text-[16px] font-semibold text-slate-950">{roomName}</h2>
-          <p className="mt-0.5 truncate text-[12px] text-slate-500">{examTitle}{versionNumber ? ` · Version ${versionNumber}` : ""}{sectionCopy ? ` · ${sectionCopy}` : ""}</p>
+          <p className="mt-0.5 truncate text-[14px] text-slate-500">{examTitle}{versionNumber ? ` · Version ${versionNumber}` : ""}{sectionCopy ? ` · ${sectionCopy}` : ""}</p>
         </div>
         <button type="button" aria-label="Close share sheet" onClick={onClose} className="authoring-icon-button h-11 w-11"><X size={15} aria-hidden="true"/></button>
       </header>
       <div className="p-5">
         {audience || checkIn ? (
-          <dl className="mb-4 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5 text-[12px] leading-5">
+          <dl className="mb-4 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5 text-[14px] leading-5">
             {audience ? <><dt className="font-medium text-slate-500">Who can join</dt><dd className="text-slate-900">{audience}</dd></> : null}
             {checkIn ? <><dt className="font-medium text-slate-500">Check-in</dt><dd className="text-slate-900">{checkIn}</dd></> : null}
           </dl>
         ) : null}
-        {blockedMessage ? <p role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-[12px] leading-5 text-amber-900">{blockedMessage}</p> : <>
-          <p className="text-[13px] leading-5 text-slate-600">{checkInOpen ? "Students can check in now. They wait until you start the exam." : "Students can check in once check-in opens. They wait until you start the exam."}</p>
-          <div className="mx-auto mt-4 flex h-52 w-52 items-center justify-center rounded-[18px] bg-au-fill p-3">{dataUrl ? <img src={dataUrl} alt={`QR code for ${roomName}`} className="h-full w-full" /> : <span role="status" className="px-4 text-center text-[12px] text-slate-500">{qrError ?? "Generating QR code…"}</span>}</div>
-          <div className="mt-4 rounded-xl bg-au-fill px-3 py-2.5"><p className="break-all font-mono text-[12px] leading-5 text-slate-600 select-all">{url}</p></div>
-          <button type="button" onClick={() => void copy()} className="sat-press sat-press-fill-accent mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-au-accent px-3 text-[13px] font-semibold text-white hover:bg-au-accent-hover">{copied ? <Check size={15} aria-hidden="true"/> : <Copy size={15} aria-hidden="true"/>}<span aria-live="polite">{copied ? "Copied" : "Copy link"}</span></button>
+        {blockedMessage ? <p role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-[14px] leading-5 text-amber-900">{blockedMessage}</p> : <>
+          <p className="text-[14px] leading-5 text-slate-600">{checkInOpen ? "Students can check in now. They wait until you start the exam." : "Students can check in once check-in opens. They wait until you start the exam."}</p>
+          <div className="mx-auto mt-4 flex h-52 w-52 items-center justify-center rounded-[18px] bg-au-fill p-3">{dataUrl ? <img src={dataUrl} alt={`QR code for ${roomName}`} className="h-full w-full" /> : <span role="status" className="px-4 text-center text-[14px] text-slate-500">{qrError ?? "Generating QR code…"}</span>}</div>
+          <div className="mt-4 rounded-xl bg-au-fill px-3 py-2.5"><p className="break-all font-mono text-[14px] leading-5 text-slate-600 select-all">{url}</p></div>
+          <button type="button" onClick={() => void copy()} className="sat-btn sat-btn--primary sat-btn--block sat-press mt-4">{copied ? <Check size={15} aria-hidden="true"/> : <Copy size={15} aria-hidden="true"/>}<span aria-live="polite">{copied ? "Copied" : "Copy link"}</span></button>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <button type="button" onClick={onPresent} className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-fill text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong"><Presentation size={14} aria-hidden="true"/>Present QR</button>
-            {dataUrl ? <a href={dataUrl} download={fileName} className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-fill text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong"><Download size={14} aria-hidden="true"/>Download QR</a> : <span />}
+            <button type="button" onClick={onPresent} className="sat-btn sat-btn--secondary sat-press"><Presentation size={14} aria-hidden="true"/>Present QR</button>
+            {dataUrl ? <a href={dataUrl} download={fileName} className="sat-btn sat-btn--secondary sat-press"><Download size={14} aria-hidden="true"/>Download QR</a> : <span />}
           </div>
         </>}
-        {copyError ? <p role="alert" className="mt-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[12px] text-au-danger-text">{copyError}</p> : null}
+        {copyError ? <p role="alert" className="mt-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[14px] text-au-danger-text">{copyError}</p> : null}
       </div>
     </AuthoringDialog>
   );
@@ -141,7 +141,7 @@ export function AccessLinkPresentView({ open, link, onClose }: { open: boolean; 
     >
       <header className="flex items-center justify-between px-6 py-5">
         <div>
-          <p className="text-[12px] font-medium text-slate-400">{link.examTitle} · Version {link.versionNumber}</p>
+          <p className="text-[14px] font-medium text-slate-400">{link.examTitle} · Version {link.versionNumber}</p>
           <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{link.name}</h2>
           {sectionCopy ? <p className="mt-1 text-sm font-semibold text-slate-500">{sectionCopy}</p> : null}
         </div>
@@ -162,4 +162,4 @@ export function AccessLinkPresentView({ open, link, onClose }: { open: boolean; 
     </AuthoringDialog>
   );
 }
-function Metric({ value, label }: { value: number; label: string }) { return <div><p className="text-3xl font-semibold tabular-nums tracking-[-0.04em]">{value}</p><p className="mt-1 text-[12px] font-medium text-slate-400">{label}</p></div>; }
+function Metric({ value, label }: { value: number; label: string }) { return <div><p className="text-3xl font-semibold tabular-nums tracking-[-0.04em]">{value}</p><p className="mt-1 text-[14px] font-medium text-slate-400">{label}</p></div>; }

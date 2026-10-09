@@ -80,7 +80,7 @@ test("SAT results scan, filter, review saved answers, and return with list state
   }));
 
   await page.goto("/sat/results");
-  await expect(page.getByRole("heading", { name: "SAT results" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Responses", level: 1 })).toBeVisible();
   await expect(page.getByText("Latest test", { exact: true })).toBeVisible();
   await expect(page.getByText("Wed, 7 Oct 2026")).toBeVisible();
   await page.getByRole("button", { name: /SAT Practice 04/ }).click();
@@ -89,15 +89,17 @@ test("SAT results scan, filter, review saved answers, and return with list state
   await page.getByRole("button", { name: /Wednesday morning/ }).click();
 
   await expect(page.getByRole("heading", { name: "Wednesday morning" })).toBeVisible();
-  await expect(page.getByText("Test dates: Tue, 6 Oct 2026 – Wed, 7 Oct 2026")).toBeVisible();
-  await expect(page.getByText("Test started", { exact: true })).toBeVisible();
-  await expect(page.getByText("3 attempts")).toBeVisible();
+  await expect(page.getByText(/Test dates: Tue, 6 Oct 2026 – Wed, 7 Oct 2026/)).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Test started" })).toBeVisible();
+  await expect(page.getByText("3 attempts").first()).toBeVisible();
   await page.getByLabel("Search students").fill("Mina");
-  await page.getByLabel("Status").selectOption("running");
+  await page.getByRole("radio", { name: /^Running/ }).click();
   await page.getByLabel("Test date from").fill("2026-10-06");
   await page.getByLabel("Test date to").fill("2026-10-06");
 
-  await expect(page.getByRole("button", { name: /Mina Chen.*ST-1042.*In progress/ })).toBeVisible();
+  // A student with two attempts is two rows; the filters leave the running one.
+  await expect(page.getByRole("button", { name: /Mina Chen, In progress/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Arun Lee/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Arun Lee/ })).toHaveCount(0);
   await expect(page.getByText("1–1 of 1 matching attempts")).toBeVisible();
   await expect.poll(() => new URL(requestUrls.at(-1) ?? "http://localhost").searchParams.get("status")).toBe("running");
@@ -106,12 +108,14 @@ test("SAT results scan, filter, review saved answers, and return with list state
   expect(filteredUrl.searchParams.get("from")).toBeTruthy();
   expect(filteredUrl.searchParams.get("to")).toBeTruthy();
 
-  await page.getByRole("button", { name: /Mina Chen.*In progress/ }).click();
+  await page.getByRole("button", { name: /Mina Chen, In progress/ }).click();
   await expect(page.getByRole("heading", { name: "Mina Chen" })).toBeVisible();
-  await expect(page.getByText("Test started: Tue, 6 Oct 2026 · 09:01")).toBeVisible();
-  await expect(page.getByText("Submitted: Not submitted")).toBeVisible();
-  await expect(page.getByText("Only answers accepted by the server appear here.")).toBeVisible();
-  await page.getByRole("button", { name: "Back to SAT results" }).click();
+  await expect(page.getByText("Tue, 6 Oct 2026 · 09:01")).toBeVisible();
+  await expect(page.getByRole("dialog").getByText("Not submitted")).toBeVisible();
+  await expect(page.getByText(/Only answers accepted by the server appear here\./)).toBeVisible();
+  await page.getByRole("link", { name: "Open as page" }).click();
+  await expect(page.getByRole("heading", { name: "Mina Chen", level: 1 })).toBeVisible();
+  await page.getByRole("button", { name: "Back to Responses" }).click();
   await expect(page).toHaveURL(/\/sat\/results\?exam=exam-e2e&access=access-e2e&q=Mina&status=running&from=2026-10-06&to=2026-10-06/);
   await expect(page.getByText("1–1 of 1 matching attempts")).toBeVisible();
 });

@@ -3038,15 +3038,24 @@ button:not(:disabled):active > .sat-annotation-press {
   }
 }
 
-/* F-A6 search-clear fit: the in-field clear button stays vertically centered
- * at a compact 28px target, explicitly exempted from the coarse 44px floor
- * above (equal-specificity override placed after it) so it never overlaps
- * the search glyph or clips the input edge. */
+/* Search-clear: a full 44px target inside the field's own right padding (the
+ * input reserves pr-11), so it neither overlaps the glyph nor clips the edge. */
 .sat-product .sat-search-clear {
-  top: 50% !important;
-  transform: translateY(-50%);
-  min-block-size: 28px !important;
-  min-inline-size: 28px !important;
+  min-block-size: 44px;
+  min-inline-size: 44px;
+}
+
+/* Text entry shows one focus treatment: the field's own accent border + ring
+ * (from .sat-input / .sat-select), not the offset outline buttons use. */
+.sat-product :is(input, select, textarea).sat-input:focus-visible,
+.sat-product .sat-select select:is(:focus, :focus-visible),
+.sat-product .sat-input-shell input:is(:focus, :focus-visible) {
+  outline: none;
+}
+
+/* Rows sit inside a clipped grouped surface: draw their ring inside the row. */
+.sat-product button.sat-list-row:focus-visible {
+  outline-offset: -3px;
 }
 
 /* Hover belongs to pointer devices. Avoid sticky pseudo-hover feedback on touch. */
@@ -3358,8 +3367,8 @@ button:not(:disabled):active > .sat-annotation-press {
 }
 .sat-product .sat-dialog,
 .sat-dialog.sat-product {
-  border-radius: 22px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--sat-staff-radius-dialog, 18px);
+  border: 1px solid var(--sat-staff-border-strong, rgba(0, 0, 0, 0.09));
   background: #ffffff;
   box-shadow: var(--sat-dialog-elevation);
   font-family: inherit;
@@ -3402,7 +3411,7 @@ button:not(:disabled):active > .sat-annotation-press {
     max-width: none;
     max-height: calc(100dvh - 48px);
     overflow-y: auto;
-    border-radius: 22px 22px 0 0;
+    border-radius: var(--sat-staff-radius-dialog, 18px) var(--sat-staff-radius-dialog, 18px) 0 0;
     padding-bottom: max(env(safe-area-inset-bottom), 12px);
   }
 }
@@ -3423,7 +3432,8 @@ button:not(:disabled):active > .sat-annotation-press {
 .sat-product .sat-segmented-option {
   position: relative;
   flex: 1;
-  min-height: 32px;
+  min-height: 40px;
+  white-space: nowrap;
   border-radius: 8px;
   padding: 0 12px;
   font-size: 14px;
@@ -3622,6 +3632,322 @@ button:not(:disabled):active > .sat-annotation-press {
 }
 .sat-product .sat-press-fill-accent:active:not(:disabled):not([aria-disabled="true"]) {
   background-color: var(--sat-staff-accent-active, #0067c9);
+}
+
+/* ============================================================
+ * SAT staff contract (2026-10 redesign). One look per control on every staff
+ * surface: type scale, 44px controls, four button variants, labelled fields,
+ * comparison tables and breadcrumbs. Student delivery never carries these
+ * classes; SAT portals carry .sat-product so overlays get the same contract.
+ * Lives in @layer components so per-call Tailwind utilities (padding, width)
+ * still compose over the base look.
+ * ============================================================ */
+@layer components {
+.sat-product {
+  --sat-staff-type-title-size: 28px;
+  --sat-staff-type-title-line: 34px;
+  --sat-staff-type-section-size: 20px;
+  --sat-staff-type-section-line: 28px;
+  --sat-staff-type-body-size: 14px;
+  --sat-staff-type-body-line: 20px;
+  --sat-staff-type-input-size: 16px;
+  --sat-staff-type-input-line: 24px;
+  --sat-staff-control-height: 44px;
+  --sat-staff-measure-list: 1180px;
+  --sat-staff-measure-settings: 920px;
+  /* Text-entry boundary: >=3:1 against white (WCAG 1.4.11). Hairline tokens
+   * stay for surfaces, where the boundary is not the only identifier. */
+  --sat-staff-border-control: rgba(0, 0, 0, 0.42);
+}
+.sat-product .sat-btn__spinner {
+  animation: sat-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sat-product .sat-btn__spinner {
+    animation: none !important;
+    border-top-color: currentColor;
+    opacity: 0.5;
+  }
+}
+@media (forced-colors: active) {
+  .sat-product {
+    --sat-staff-border-control: CanvasText;
+  }
+  .sat-btn {
+    border-color: ButtonText;
+  }
+}
+
+.sat-btn {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--sat-staff-control-height, 44px);
+  min-width: var(--sat-staff-control-height, 44px);
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--sat-staff-radius-control, 10px);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+}
+.sat-btn:focus-visible {
+  outline: var(--sat-staff-focus-width, 3px) solid var(--sat-staff-focus-ring, #4d9cee);
+  outline-offset: var(--sat-staff-focus-offset, 2px);
+}
+.sat-btn--primary {
+  background: var(--sat-staff-accent, #0071e3);
+  color: var(--sat-staff-text-inverse, #fff);
+}
+.sat-btn--primary:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--sat-staff-accent-hover, #0077ed);
+}
+.sat-btn--primary:active:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--sat-staff-accent-active, #0067c9);
+}
+.sat-btn--secondary {
+  border-color: var(--sat-staff-border-strong, rgba(0, 0, 0, 0.09));
+  background: var(--sat-staff-surface-solid-fallback, #fff);
+  color: var(--sat-staff-text-primary, #1d1d1f);
+}
+.sat-btn--secondary:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--sat-staff-fill-faint, rgba(0, 0, 0, 0.035));
+}
+.sat-btn--secondary:active:not(:disabled):not([aria-disabled="true"]),
+.sat-btn--quiet:active:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--sat-staff-fill-active, rgba(0, 0, 0, 0.065));
+}
+.sat-btn--quiet {
+  background: transparent;
+  color: var(--sat-staff-text-secondary, #515154);
+}
+.sat-btn--quiet:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
+  color: var(--sat-staff-text-primary, #1d1d1f);
+}
+.sat-btn--danger {
+  background: var(--sat-staff-danger-strong, #d70015);
+  color: var(--sat-staff-text-inverse, #fff);
+}
+.sat-btn--danger:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--sat-staff-danger-hover, #c00d10);
+}
+/* A destructive action that is not the page's main act (End exam, Remove):
+ * secondary weight, danger text. Its confirmation uses the solid variant. */
+.sat-btn--danger-secondary {
+  border-color: var(--sat-staff-border-strong, rgba(0, 0, 0, 0.09));
+  background: var(--sat-staff-surface-solid-fallback, #fff);
+  color: var(--sat-staff-danger, #b42318);
+}
+.sat-btn--danger-secondary:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--sat-staff-danger-tint, rgba(217, 45, 32, 0.08));
+}
+.sat-btn--icon {
+  width: var(--sat-staff-control-height, 44px);
+  padding: 0;
+}
+.sat-btn--block {
+  width: 100%;
+}
+.sat-btn:disabled,
+.sat-btn[aria-disabled="true"]:not([aria-busy="true"]) {
+  border-color: transparent;
+  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
+  color: var(--sat-staff-text-disabled, #9b9a97);
+  cursor: not-allowed;
+}
+.sat-btn--quiet:disabled,
+.sat-btn--quiet[aria-disabled="true"]:not([aria-busy="true"]) {
+  background: transparent;
+}
+.sat-btn[aria-busy="true"] {
+  cursor: progress;
+}
+/* Pending keeps the button's box: the spinner takes the icon's slot, or sits
+ * over a label that stays in place (still the accessible name). */
+.sat-btn__label[data-pending-hidden] {
+  opacity: 0;
+}
+.sat-btn__spinner {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  opacity: 0.85;
+}
+.sat-btn__spinner--overlay {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+}
+
+.sat-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.sat-field__label {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--sat-staff-text-primary, #1d1d1f);
+}
+.sat-field__optional {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+.sat-field__help {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--sat-staff-text-secondary, #515154);
+}
+.sat-field__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--sat-staff-danger, #b42318);
+}
+/* Inputs carry a boundary that meets 3:1 against the white surface. */
+.sat-input {
+  width: 100%;
+  min-height: var(--sat-staff-control-height, 44px);
+  padding: 0 12px;
+  border: 1px solid var(--sat-staff-border-control, rgba(0, 0, 0, 0.42));
+  border-radius: var(--sat-staff-radius-control, 10px);
+  background: var(--sat-staff-surface-solid-fallback, #fff);
+  color: var(--sat-staff-text-primary, #1d1d1f);
+  font-family: inherit;
+  font-size: var(--sat-staff-type-input-size, 16px);
+  line-height: var(--sat-staff-type-input-line, 24px);
+}
+textarea.sat-input {
+  padding: 10px 12px;
+}
+.sat-input::placeholder {
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+.sat-input:hover:not(:disabled):not(:focus) {
+  border-color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+.sat-input:focus,
+.sat-input:focus-visible {
+  outline: none;
+  border-color: var(--sat-staff-accent, #0071e3);
+  box-shadow: 0 0 0 3px var(--sat-staff-accent-ring, rgba(0, 113, 227, 0.4)) !important;
+}
+.sat-input[aria-invalid="true"] {
+  border-color: var(--sat-staff-danger, #b42318);
+}
+.sat-input:disabled {
+  background: var(--sat-staff-fill-faint, rgba(0, 0, 0, 0.035));
+  color: var(--sat-staff-text-disabled, #9b9a97);
+  cursor: not-allowed;
+}
+
+/* Comparison tables: one grouped surface, sticky-free header, tabular
+ * numerals, hairline rows. Lists keep SatList; tables are for comparing. */
+.sat-table-surface {
+  overflow-x: auto;
+  border: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+  border-radius: var(--sat-staff-radius-card, 14px);
+  background: var(--sat-staff-surface-solid-fallback, #fff);
+}
+.sat-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  color: var(--sat-staff-text-primary, #1d1d1f);
+}
+.sat-table thead th {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+  background: var(--sat-staff-fill-faint, rgba(0, 0, 0, 0.035));
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--sat-staff-text-secondary, #515154);
+}
+.sat-table td,
+.sat-table tbody th {
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: inherit;
+  border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+  vertical-align: middle;
+}
+.sat-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.sat-table tbody tr {
+  transition: background-color var(--sat-staff-motion-hover, 120ms) var(--sat-staff-ease, ease);
+}
+.sat-table tbody tr:hover {
+  background: rgba(120, 120, 128, 0.045);
+}
+.sat-table tbody tr[aria-current="true"],
+.sat-table tbody tr[aria-current="true"]:hover {
+  background: var(--sat-staff-accent-tint, rgba(0, 113, 227, 0.08));
+}
+.sat-table :is(th, td).sat-table__num {
+  text-align: right;
+}
+
+.sat-breadcrumbs a {
+  border-radius: 6px;
+  color: var(--sat-staff-text-secondary, #515154);
+  text-decoration: none;
+}
+.sat-breadcrumbs a:hover {
+  color: var(--sat-staff-text-primary, #1d1d1f);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+}
+
+/* The shared question table (also used by IELTS results) follows the staff
+ * contract only inside SAT staff screens: sentence-case headers, the 14px
+ * floor, the 44px search field and the one control border. */
+.sat-staff-root .question-raw-table thead th {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sat-staff-text-secondary, #515154);
+}
+.sat-staff-root .question-raw-table .text-\[10px\] {
+  font-size: 14px;
+  line-height: 20px;
+}
+.sat-staff-root .question-raw-table input[type="search"] {
+  height: var(--sat-staff-control-height, 44px);
+  border-color: var(--sat-staff-border-control, rgba(0, 0, 0, 0.42));
+  border-radius: var(--sat-staff-radius-control, 10px);
+  font-size: 16px;
+}
+.sat-staff-root .question-raw-table label {
+  min-height: 44px;
+  padding-inline: 12px;
 }
 
 /* Detail tab panel: opacity-only fade so a tab change is legible without
@@ -4045,6 +4371,51 @@ button:not(:disabled):active > .sat-annotation-press {
 .authoring-button--quiet {
   background: transparent;
   color: var(--color-gray-600);
+}
+
+/* SAT staff: authoring chrome follows the staff button contract — 44px, 14px
+ * labels, flat single-accent primary, one disabled treatment. IELTS (outside
+ * .sat-staff-root) keeps the authoring family unchanged. */
+.sat-staff-root .authoring-button {
+  min-height: var(--sat-staff-control-height, 44px);
+  border-radius: var(--sat-staff-radius-control, 10px);
+  font-size: 14px;
+  line-height: 20px;
+}
+.sat-staff-root .authoring-button--primary,
+.sat-staff-root .authoring-button--primary:hover:not(:disabled) {
+  overflow: visible;
+  box-shadow: none;
+}
+.sat-staff-root .authoring-button--primary {
+  background: var(--sat-staff-accent, #0071e3);
+}
+.sat-staff-root .authoring-button--primary:hover:not(:disabled) {
+  background: var(--sat-staff-accent-hover, #0077ed);
+}
+.sat-staff-root .authoring-button--primary::before {
+  content: none;
+}
+.sat-staff-root .authoring-button--secondary {
+  border: 1px solid var(--sat-staff-border-strong, rgba(0, 0, 0, 0.09));
+  background: #fff;
+  color: var(--sat-staff-text-primary, #1d1d1f);
+}
+.sat-staff-root .authoring-button--quiet {
+  color: var(--sat-staff-text-secondary, #515154);
+}
+.sat-staff-root :is(.authoring-button--secondary, .authoring-button--quiet):hover:not(:disabled) {
+  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
+  color: var(--sat-staff-text-primary, #1d1d1f);
+}
+.sat-staff-root .authoring-button:disabled {
+  opacity: 1;
+  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
+  color: var(--sat-staff-text-disabled, #9b9a97);
+  box-shadow: none;
+}
+.sat-staff-root .authoring-button--quiet:disabled {
+  background: transparent;
 }
 
 .authoring-disclosure {

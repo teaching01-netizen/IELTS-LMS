@@ -5,7 +5,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthSession } from '../../features/auth/authSession';
 import { SatAuthoringCollaborationBoundary } from '../../features/exam-authoring/realtime/coedit';
 import { SatMenu, type SatMenuItem } from './ui/Menu';
-import { SatWorkspaceNavContext } from './ui/SatWorkspaceNav';
+import { SatWorkspaceMark, SatWorkspaceNavContext } from './ui/SatWorkspaceNav';
 import { useSatScrollMemory } from './ui/useSatListReturn';
 
 type SatNavItem = {
@@ -87,18 +87,18 @@ export function SatRoot() {
     <div className="sat-product sat-staff-root min-h-screen bg-[var(--sat-staff-canvas,var(--sat-canvas))] text-[var(--sat-staff-text-primary,var(--sat-label))] md:flex">
       <a href="#sat-main" className="skip-link">Skip to main content</a>
       {isDetailPage ? null : (
-      <aside className="hidden w-[244px] shrink-0 border-r border-[var(--sat-staff-border-nav,var(--sat-separator))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] md:flex md:min-h-screen md:flex-col md:[background:var(--sat-staff-glass-sidebar)] md:[backdrop-filter:var(--sat-staff-blur-nav)] md:[-webkit-backdrop-filter:var(--sat-staff-blur-nav)]">
-        <div className="px-3 pb-3 pt-3">
+      <aside className="hidden w-[244px] shrink-0 border-r border-[var(--sat-staff-border-nav,var(--sat-separator))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:[background:var(--sat-staff-glass-sidebar)] md:[backdrop-filter:var(--sat-staff-blur-nav)] md:[-webkit-backdrop-filter:var(--sat-staff-blur-nav)]">
+        <div className="px-3 pb-2 pt-3">
           <SatMenu
             label="Digital SAT"
             align="start"
-            width={212}
+            width={220}
             triggerContent={
               <>
-                <span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-[var(--sat-staff-text-primary,var(--sat-label))] text-[14px] font-semibold tracking-[-0.02em] text-[var(--sat-staff-text-inverse,#fff)]">SAT</span>
+                <SatWorkspaceMark size={32} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[14px] font-semibold tracking-[-0.01em]">Digital SAT</span>
-                  <span className="mt-0.5 block text-[14px] font-medium text-slate-500">Workspace</span>
+                  <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em]">Digital SAT</span>
+                  <span className="block text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">Staff workspace</span>
                 </span>
               </>
             }
@@ -109,7 +109,7 @@ export function SatRoot() {
           />
         </div>
 
-        <nav aria-label="Digital SAT" className="flex-1 px-3 py-4">
+        <nav aria-label="Digital SAT" className="flex-1 px-3 py-3">
           <div className="space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -117,7 +117,7 @@ export function SatRoot() {
                 <NavLink
                   key={item.path}
                   to={item.path}
-                  className={({ isActive }) => `relative flex min-h-11 items-center gap-3 rounded-xl px-3 text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'font-semibold text-[var(--sat-staff-text-primary,var(--sat-label))]' : 'font-medium text-[var(--sat-staff-text-secondary,var(--sat-secondary-label))] hover:text-[var(--sat-staff-text-primary,var(--sat-label))]'}`}
+                  className={({ isActive }) => `relative flex min-h-11 items-center gap-3 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'font-semibold text-[var(--sat-staff-text-primary,var(--sat-label))]' : 'font-medium text-[var(--sat-staff-text-secondary,var(--sat-secondary-label))] hover:text-[var(--sat-staff-text-primary,var(--sat-label))]'}`}
                 >
                   {({ isActive }) => (
                     <>
@@ -125,11 +125,11 @@ export function SatRoot() {
                         <motion.span
                           layoutId="sat-desktop-nav-pill"
                           aria-hidden="true"
-                          className="absolute inset-0 rounded-xl bg-[var(--sat-staff-fill-hover,var(--sat-fill-hover))]"
+                          className="absolute inset-0 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-hover,var(--sat-fill-hover))]"
                           transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
                         />
                       ) : (
-                        <span aria-hidden="true" className="absolute inset-0 rounded-xl transition-colors hover:bg-[var(--sat-staff-fill-faint,rgba(120,120,128,0.06))]" />
+                        <span aria-hidden="true" className="absolute inset-0 rounded-[var(--sat-staff-radius-control,10px)] transition-colors hover:bg-[var(--sat-staff-fill-faint,rgba(120,120,128,0.06))]" />
                       )}
                       <span className="relative flex items-center gap-3">
                         <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
@@ -144,13 +144,13 @@ export function SatRoot() {
         </nav>
 
         <div className="border-t border-[var(--sat-staff-border-hairline,var(--sat-separator))] p-3">
-          <div className="flex min-h-12 items-center gap-2.5 rounded-xl px-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--sat-staff-fill-avatar,rgba(120,120,128,0.12))] text-[14px] font-semibold text-[var(--sat-staff-text-secondary,var(--sat-secondary-label))]">{displayName.slice(0, 2).toUpperCase()}</div>
+          <div className="flex min-h-12 items-center gap-2.5 rounded-xl pl-2">
+            <div aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--sat-staff-fill-avatar,rgba(120,120,128,0.12))] text-[14px] font-semibold text-[var(--sat-staff-text-secondary,var(--sat-secondary-label))]">{displayName.slice(0, 2).toUpperCase()}</div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-semibold text-slate-800">{displayName}</p>
-              <p className="mt-0.5 text-[14px] capitalize text-slate-500">{session?.user.role ?? 'staff'}</p>
+              <p className="truncate text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">{displayName}</p>
+              <p className="text-[14px] capitalize leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{session?.user.role ?? 'staff'}</p>
             </div>
-            <button type="button" onClick={() => void logout()} className="flex h-11 w-11 items-center justify-center rounded-full text-slate-500 hover:bg-[var(--sat-staff-fill-chip,rgba(120,120,128,0.06))] hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]" aria-label="Sign Out">
+            <button type="button" onClick={() => void logout()} className="sat-btn sat-btn--quiet sat-btn--icon sat-press rounded-full" aria-label="Sign out" title="Sign out">
               <LogOut size={16} aria-hidden="true" />
             </button>
           </div>
@@ -160,14 +160,14 @@ export function SatRoot() {
 
       <div className="min-w-0 flex-1">
         {isDetailPage ? null : (
-        <header className="sticky top-0 z-40 flex min-h-14 items-center justify-between gap-2 border-b border-[var(--sat-staff-border-header,var(--sat-separator))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] px-4 [backdrop-filter:var(--sat-staff-blur-nav)] [-webkit-backdrop-filter:var(--sat-staff-blur-nav)] [background:var(--sat-staff-glass-header)] [padding-top:env(safe-area-inset-top)] md:hidden">
+        <header className="sticky top-0 z-40 flex min-h-14 items-center justify-between gap-2 border-b border-[var(--sat-staff-border-header,var(--sat-separator))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] px-3 [backdrop-filter:var(--sat-staff-blur-nav)] [-webkit-backdrop-filter:var(--sat-staff-blur-nav)] [background:var(--sat-staff-glass-header)] [padding-top:env(safe-area-inset-top)] md:hidden">
           <SatMenu
             label="Digital SAT"
             align="start"
             width={208}
             triggerContent={
               <>
-                <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[var(--sat-staff-text-primary,var(--sat-label))] text-[14px] text-[var(--sat-staff-text-inverse,#fff)]">SAT</span>
+                <SatWorkspaceMark />
                 <span className="text-[14px] font-semibold">Digital SAT</span>
               </>
             }
@@ -184,7 +184,7 @@ export function SatRoot() {
             width={208}
             items={[
               { id: 'identity', label: `${displayName} \u00B7 ${session?.user.role ?? 'staff'}`, disabled: true, onSelect: () => {} },
-              { id: 'signout', label: 'Sign Out', onSelect: () => void logout() },
+              { id: 'signout', label: 'Sign out', onSelect: () => void logout() },
             ]}
           />
         </header>
@@ -212,11 +212,11 @@ export function SatRoot() {
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
-                <NavLink key={item.path} to={item.path} className={({ isActive }) => `relative flex min-h-12 min-w-[72px] flex-col items-center justify-center gap-1 rounded-xl text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'text-[var(--sat-staff-accent,var(--sat-accent-core))]' : 'text-slate-500'}`}>
+                <NavLink key={item.path} to={item.path} className={({ isActive }) => `relative flex min-h-12 min-w-[72px] flex-col items-center justify-center gap-0.5 rounded-xl text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'text-[var(--sat-staff-accent,var(--sat-accent-core))]' : 'text-[var(--sat-staff-text-secondary,#515154)]'}`}>
                   {({ isActive }) => (
                     <>
                       {isActive ? <span aria-hidden="true" className="sat-route-enter absolute inset-x-6 top-0 h-0.5 rounded-full bg-[var(--sat-staff-accent,var(--sat-accent-core))]" /> : null}
-                      <Icon size={18} strokeWidth={1.9} />
+                      <Icon size={20} strokeWidth={1.9} aria-hidden="true" />
                       <span>{item.label}</span>
                     </>
                   )}

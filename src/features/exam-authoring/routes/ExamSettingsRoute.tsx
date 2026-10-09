@@ -20,7 +20,7 @@ export function ExamSettingsRoute() {
       <SatPageError
         title="Settings could not load"
         description="A valid SAT exam is required."
-        retryLabel="Back to Tests"
+        retryLabel="Back to Exams"
         onRetry={backToLibrary}
       />
     );
@@ -31,7 +31,7 @@ export function ExamSettingsRoute() {
       <SatPageError
         title="Settings could not load"
         description={examQuery.error instanceof Error ? examQuery.error.message : "The SAT exam is unavailable."}
-        retryLabel="Back to Tests"
+        retryLabel="Back to Exams"
         onRetry={backToLibrary}
       />
     );
@@ -42,7 +42,7 @@ export function ExamSettingsRoute() {
       <SatPageError
         title="This is not a SAT exam"
         description="Open this exam from its IELTS workspace instead."
-        retryLabel="Back to Tests"
+        retryLabel="Back to Exams"
         onRetry={backToLibrary}
       />
     );

@@ -62,9 +62,9 @@ export interface ExamWorkspaceHeaderProps {
   contextLine?: string | null;
 }
 
-const ACTION = "authoring-button min-h-11";
-const PRIMARY = "authoring-button authoring-button--primary min-h-11";
-const QUIET = "authoring-button authoring-button--quiet min-h-11";
+const ACTION = "sat-btn sat-btn--secondary sat-press";
+const PRIMARY = "sat-btn sat-btn--primary sat-press";
+const QUIET = "sat-btn sat-btn--quiet sat-press px-3";
 
 const TAB_LABEL: Record<ExamWorkspaceTab, string> = {
   questions: "Questions",
@@ -96,24 +96,34 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
     ...(onQuickSettings ? [{ id: "quick-settings", label: "Quick settings", icon: Settings2, separatorBefore: true, onSelect: onQuickSettings }] : []),
   ];
   return (
-    <header className="exam-workspace-header sticky top-0 z-40 shrink-0 border-b border-border bg-card" data-testid="exam-workspace-header">
+    <header className="exam-workspace-header sticky top-0 z-40 shrink-0 border-b border-[var(--sat-staff-border-header)] bg-[var(--sat-staff-surface-solid-fallback,#fff)]" data-testid="exam-workspace-header">
       <div className="mx-auto flex w-full max-w-[1240px] flex-wrap items-center gap-x-3 gap-y-2 px-4 pb-1 pt-2 sm:px-6">
-        <div className="flex min-w-0 flex-1 basis-48 items-center gap-1">
-          <nav aria-label="Breadcrumb" className="shrink-0">
-            <ol className="flex items-center gap-1">
-              <li><SatWorkspaceSwitcher /></li>
-              <li>
-                <button type="button" onClick={onBack} aria-label="Exams" className={`${QUIET} min-w-11 px-2 text-muted-foreground hover:text-foreground`}>
-                  <ArrowLeft size={17} aria-hidden="true" className="sm:hidden" />
+        <div className="flex min-w-0 flex-1 basis-56 items-center gap-1">
+          <nav aria-label="Breadcrumb" className="sat-breadcrumbs shrink-0">
+            <ol className="flex items-center gap-0.5">
+              <li className="flex items-center"><SatWorkspaceSwitcher /></li>
+              <li aria-hidden="true" className="hidden px-0.5 text-[var(--sat-staff-text-tertiary,#6e6e73)] sm:block">/</li>
+              <li className="flex items-center">
+                <a
+                  href="/sat/exams"
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    onBack();
+                  }}
+                  aria-label="Exams"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1 px-1.5 text-[14px] font-medium leading-5"
+                >
+                  <ArrowLeft size={18} aria-hidden="true" className="sm:hidden" />
                   <span className="hidden sm:inline">Exams</span>
-                </button>
+                </a>
               </li>
-              <li aria-hidden="true" className="hidden text-muted-foreground sm:block">/</li>
+              <li aria-hidden="true" className="hidden px-0.5 text-[var(--sat-staff-text-tertiary,#6e6e73)] sm:block">/</li>
             </ol>
           </nav>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-lg font-semibold tracking-[-0.01em] text-foreground">{examTitle}</h1>
-            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <div className="min-w-0 flex-1 pl-1">
+            <h1 className="truncate text-[18px] font-semibold leading-6 tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{examTitle}</h1>
+            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
               <span title={lifecycle.detail ?? undefined} data-testid="exam-lifecycle">
                 <SatStatusPill tone={lifecycle.tone}>{lifecycle.label}</SatStatusPill>
               </span>
@@ -154,20 +164,26 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
           {onPreview ? (
             <button type="button" onClick={onPreview} disabled={previewDisabled} aria-label="Preview exam" className={QUIET}>
               <Eye size={16} aria-hidden="true" />
-              <span className="hidden sm:inline">Preview exam</span>
+              <span className="hidden lg:inline">Preview</span>
             </button>
           ) : null}
           {onPublish ? (
-            <button
-              type="button"
-              onClick={onPublish}
-              disabled={Boolean(publishDisabledReason)}
-              title={publishDisabledReason ?? undefined}
-              className={onCreateSession && createIsPrimary ? ACTION : PRIMARY}
-            >
-              <Send size={16} aria-hidden="true" />
-              {publishLabel}
-            </button>
+            // A blocked publish stays focusable so its reason is reachable by
+            // keyboard and announced; the press is refused, not swallowed.
+            <>
+              <button
+                type="button"
+                onClick={() => { if (!publishDisabledReason) onPublish(); }}
+                aria-disabled={publishDisabledReason ? true : undefined}
+                aria-describedby={publishDisabledReason ? "exam-publish-blocked-reason" : undefined}
+                title={publishDisabledReason ?? undefined}
+                className={onCreateSession && createIsPrimary ? ACTION : PRIMARY}
+              >
+                <Send size={16} aria-hidden="true" />
+                {publishLabel}
+              </button>
+              {publishDisabledReason ? <span id="exam-publish-blocked-reason" className="sr-only">{publishDisabledReason}</span> : null}
+            </>
           ) : null}
           {onCreateSession ? (
             <button type="button" onClick={onCreateSession} className={createIsPrimary ? PRIMARY : ACTION}>
@@ -180,7 +196,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
           ) : null}
         </div>
       </div>
-      <nav aria-label="Exam sections" className="mx-auto w-full max-w-[1240px] px-2 sm:px-5">
+      <nav aria-label="Exam sections" className="mx-auto w-full max-w-[1240px] px-2 sm:px-4">
         <ul className="flex items-end gap-1 overflow-x-auto">
           {tabs.map((tab) => {
             const current = activeTab === tab;
@@ -190,7 +206,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
                   type="button"
                   onClick={() => onSelectTab(tab)}
                   aria-current={current ? "page" : undefined}
-                  className={`exam-workspace-tab relative inline-flex min-h-11 items-center px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${current ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`exam-workspace-tab relative inline-flex min-h-11 items-center rounded-t-[var(--sat-staff-radius-control-sm,8px)] px-3 text-[14px] font-semibold leading-5 transition-colors focus-visible:outline-none sm:px-4 ${current ? "text-[var(--sat-staff-text-primary,#1d1d1f)]" : "text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)] hover:text-[var(--sat-staff-text-primary,#1d1d1f)]"}`}
                 >
                   {TAB_LABEL[tab]}
                   {current ? (

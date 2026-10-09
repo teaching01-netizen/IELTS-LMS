@@ -91,7 +91,7 @@ describe('SatRoot', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));
     expect(screen.getByRole('menuitem', { name: /Alex Staff/ })).toBeDisabled();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Sign Out' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }));
     expect(logout).toHaveBeenCalledTimes(1);
   });
 
@@ -113,7 +113,7 @@ describe('SatRoot', () => {
           </MemoryRouter>,
         ),
       );
-      expect(screen.getAllByRole('button', { name: 'Sign Out' }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: 'Sign out' }).length).toBeGreaterThan(0);
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
       unmount();
     }
@@ -137,7 +137,7 @@ describe('SatRoot', () => {
     );
     expect(screen.getByText('Builder content')).toBeInTheDocument();
     // Desktop sidebar (workspace switcher + sign-out region) is gone on authoring pages.
-    expect(screen.queryByRole('button', { name: 'Sign Out' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
   });
 
   it('gives proctors rooms and results without exposing exam authoring', () => {
@@ -208,10 +208,10 @@ describe('SatRoot shell polish', () => {
     const { unmount } = renderAt(entry);
     if (chrome) {
       expect(screen.getAllByRole('button', { name: /digital sat/i }).length).toBeGreaterThan(0);
-      expect(screen.getAllByRole('button', { name: 'Sign Out' }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: 'Sign out' }).length).toBeGreaterThan(0);
     } else {
       expect(screen.queryByRole('button', { name: /digital sat/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Sign Out' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
     }
     unmount();
   });
@@ -238,7 +238,7 @@ describe('SatRoot shell polish', () => {
         </Routes>
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Sign Out' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(logout).toHaveBeenCalledTimes(1);
   });
 

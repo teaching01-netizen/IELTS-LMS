@@ -1,13 +1,17 @@
-# Sessions (access-links)
+# Rooms (access-links)
 
 Staff UI for preparing, sharing and running sittings of a published SAT exam. A
-**session** is the object staff work with: it owns the audience, the student link,
-the check-in window, the waiting room and the results. Storage is unchanged — a
-session is one `assessment_access_links` row plus its backing schedule, created
+**room** is the object staff work with: it owns the audience, the student link,
+the check-in window, the waiting room and the responses. Storage is unchanged — a
+room is one `assessment_access_links` row plus its backing schedule, created
 atomically. Route: `SatAccessRoute` (kept at `/sat/exams/:id/access`; the tab is
-labelled **Sessions**) → `StudentLinksDashboard`. The global Sessions page
-(`SatSessionsRoute` → `SatNewSessionFlow`) opens the same `AccessLinkEditorSheet`,
-so both entry points create the same thing.
+labelled **Rooms**) → `StudentLinksDashboard`. The global Rooms page
+(`SatSessionsRoute` → `SatNewSessionFlow`) asks which exam, then opens the same
+`AccessLinkEditorSheet`, so both entry points create the same thing.
+
+The setup sheet is grouped as **Room details** (name, class or group, sections,
+pinned version) · **Who can join** (audience, roster, identification) ·
+**Check-in settings** (window).
 
 ## Vocabulary
 
@@ -18,9 +22,11 @@ so both entry points create the same thing.
   label": it reads back as *Anyone with the link* (`accessLinkAudienceChoice`), and
   a label saves as `cohort` only so older readers keep working.
 - **Check-in** (link status: open / opens later / paused / closed) is separate from
-  the **exam run state** (not started / running / paused / finished).
-  `sessionStatusLine` renders both: "Check-in open · Exam not started". Opening
-  check-in never starts the exam; pausing it never stops attempts in progress.
+  the **exam run state** (not started / running / paused / finished). The room
+  panel shows them as two labelled values ("Check-in · Open", "Exam · Not
+  started"); `sessionStatusLine` renders the one-line form used in the live-room
+  header ("Check-in open · Exam not started"). Opening check-in never starts the
+  exam; pausing it never stops attempts in progress.
 
 ## Invariants (do not change without a backend migration)
 

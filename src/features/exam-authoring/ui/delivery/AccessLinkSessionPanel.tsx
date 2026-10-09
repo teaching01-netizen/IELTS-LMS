@@ -1,9 +1,10 @@
-import { ArrowRight, BarChart3, Copy, ExternalLink, LoaderCircle, Presentation, QrCode, RefreshCw, RotateCcw, Radio } from "lucide-react";
-import type { AssessmentAccessLink } from "../../contracts/accessLinks";
+import { ArrowRight, BarChart3, Check, Copy, ExternalLink, Presentation, QrCode, RefreshCw, RotateCcw, Radio } from "lucide-react";
+import type { AccessLinkStatus, AssessmentAccessLink } from "../../contracts/accessLinks";
 import { SatStatusPill, type SatStatusTone } from "../../../../products/sat/ui/SatPage";
 import {
+  ENTRY_STATE,
+  SESSION_PHASE_LABEL,
   sessionActionPlan,
-  sessionStatusLine,
   type AccessSessionBindings,
   type SessionActionKind,
   type SessionPhase,
@@ -18,10 +19,16 @@ const PHASE_TONE: Record<SessionPhase, SatStatusTone> = {
   unknown: "neutral",
 };
 
-const ACTION_BUTTON =
-  "sat-press flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 disabled:cursor-not-allowed disabled:opacity-60";
-const PRIMARY = `${ACTION_BUTTON} bg-au-accent text-white hover:bg-au-accent-hover`;
-const SECONDARY = `${ACTION_BUTTON} border border-black/[0.08] bg-white text-slate-700 hover:bg-black/[0.03]`;
+const ENTRY_TONE: Record<AccessLinkStatus, SatStatusTone> = {
+  live: "live",
+  upcoming: "info",
+  paused: "paused",
+  ended: "finished",
+  revoked: "cancelled",
+};
+
+const PRIMARY = "sat-btn sat-btn--primary sat-press";
+const SECONDARY = "sat-btn sat-btn--secondary sat-press";
 
 const ICON: Record<SessionActionKind, typeof Radio> = {
   "open-live": Radio,
@@ -87,68 +94,78 @@ export function AccessLinkSessionPanel({
   const actions = [...(plan.primary ? [{ ...plan.primary, primary: true }] : []), ...plan.supporting.map((a) => ({ ...a, primary: false }))];
 
   return (
-    <section aria-label="Room" className="mt-4 rounded-2xl border border-black/[0.06] bg-white p-4">
-      <h3 className="mb-3 text-[13px] font-semibold text-slate-950">Share and run</h3>
+    <section aria-label="Room" className="mt-4 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-white p-5">
+      <h3 className="mb-3 text-[16px] font-semibold leading-6 text-[var(--sat-staff-text-primary,#1d1d1f)]">Share and run</h3>
       {justCreated ? (
-        <div role="status" className="sat-banner-enter mb-4 rounded-xl bg-au-accent/10 p-3">
-          <p className="text-[13px] font-semibold text-slate-950">Room created</p>
-          <p className="mt-0.5 text-[12px] leading-5 text-slate-600">
+        <div role="status" className="sat-banner-enter mb-4 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent-tint)] p-3">
+          <p className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">Room created</p>
+          <p className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
             Next: share the student link. Students wait in check-in until the proctor starts the exam. Copying is optional.
           </p>
           {onDismissNextSteps ? (
-            <button type="button" onClick={onDismissNextSteps} className="mt-1 min-h-11 text-[12px] font-semibold text-slate-600 underline">
+            <button type="button" onClick={onDismissNextSteps} className="sat-btn sat-btn--quiet sat-press -ml-3 mt-1 px-3">
               Dismiss
             </button>
           ) : null}
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <p className="text-[12px] font-semibold text-slate-900">Status</p>
-        <SatStatusPill tone={PHASE_TONE[phase]} pulse={phase === "live"}>
-          {sessionStatusLine(link.status, phase)}
-        </SatStatusPill>
-      </div>
-      <p className="mt-2 text-[12px] tabular-nums text-slate-600">
+      {/* Check-in (can students enter?) and the exam run state are separate
+          facts with separate controls; they are never merged into one pill. */}
+      <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-[14px] leading-5">
+        <dt className="text-[var(--sat-staff-text-secondary,#515154)]">Check-in</dt>
+        <dd><SatStatusPill tone={ENTRY_TONE[link.status]}>{ENTRY_STATE[link.status]}</SatStatusPill></dd>
+        <dt className="text-[var(--sat-staff-text-secondary,#515154)]">Exam</dt>
+        <dd><SatStatusPill tone={PHASE_TONE[phase]} pulse={phase === "live"}>{SESSION_PHASE_LABEL[phase]}</SatStatusPill></dd>
+      </dl>
+      <p className="mt-3 text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">
         {joined} registered{info?.ready != null ? ` · ${info.ready} ready` : ""} · {link.metrics.started} started · {link.metrics.submitted} submitted
       </p>
-      <p className="mt-3 break-all font-mono text-[12px] leading-5 text-slate-600">{url}</p>
 
+      <div className="mt-4 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-faint)] px-3 py-2.5">
+        <p className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">Student link</p>
+        <p className="mt-0.5 break-all font-mono text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{url}</p>
+      </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" onClick={onCopy} className={SECONDARY}>
-          <Copy size={14} aria-hidden="true" />
-          {copyConfirmed ? "Copied" : "Copy student link"}
+          {copyConfirmed ? <Check size={16} aria-hidden="true" className="text-[var(--sat-staff-success-dot,#059669)]" /> : <Copy size={16} aria-hidden="true" />}
+          <span aria-live="polite">{copyConfirmed ? "Copied" : "Copy student link"}</span>
         </button>
         <button type="button" onClick={onShowQr} className={SECONDARY}>
-          <QrCode size={14} aria-hidden="true" />
+          <QrCode size={16} aria-hidden="true" />
           Show QR
         </button>
-        <button type="button" onClick={onPresent} className={SECONDARY}><Presentation size={14} aria-hidden="true" />Present</button>
-        {actions.map((action) => {
-          const Icon = ICON[action.kind];
-          const busy = action.kind === "refresh" && session.refreshing;
-          return (
-            <button
-              key={action.kind}
-              type="button"
-              onClick={() => run(action.kind)}
-              disabled={busy}
-              aria-busy={busy || undefined}
-              className={action.primary ? PRIMARY : SECONDARY}
-            >
-              {busy ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Icon size={14} aria-hidden="true" />}
-              {busy ? "Refreshing…" : action.label}
-            </button>
-          );
-        })}
+        <button type="button" onClick={onPresent} className={SECONDARY}><Presentation size={16} aria-hidden="true" />Present</button>
+        <a href={url} target="_blank" rel="noreferrer" className="sat-btn sat-btn--quiet sat-press px-3"><ExternalLink size={16} aria-hidden="true" />Open student page</a>
       </div>
-      <a href={url} target="_blank" rel="noreferrer" className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-[12px] font-semibold text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40"><ExternalLink size={14} aria-hidden="true" />Open student page</a>
+
+      {actions.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--sat-staff-border-hairline)] pt-4">
+          {actions.map((action) => {
+            const Icon = ICON[action.kind];
+            const busy = action.kind === "refresh" && session.refreshing;
+            return (
+              <button
+                key={action.kind}
+                type="button"
+                onClick={() => run(action.kind)}
+                disabled={busy}
+                aria-busy={busy || undefined}
+                className={action.primary ? PRIMARY : SECONDARY}
+              >
+                {busy ? <span aria-hidden="true" className="sat-btn__spinner" /> : <Icon size={16} aria-hidden="true" />}
+                {busy ? "Refreshing…" : action.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {!session.canRun ? (
-        <p className="mt-3 text-[12px] leading-5 text-slate-500">Running rooms is available to administrators.</p>
+        <p className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Running rooms is available to administrators.</p>
       ) : session.stale ? (
-        <p role="status" className="mt-3 text-[12px] leading-5 text-amber-800">
-          Session status could not be refreshed. Displayed details may be out of date.
+        <p role="status" className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
+          Room status could not be refreshed. Displayed details may be out of date.
         </p>
       ) : null}
     </section>

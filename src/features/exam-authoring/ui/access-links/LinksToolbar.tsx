@@ -1,7 +1,7 @@
 import { motion } from "motion/react";
 import type { AccessLinkStatus } from "../../contracts/accessLinks";
 import { SatSearchField } from "../../../../products/sat/ui/SatPage";
-import { formatAccessLinkStatus } from "./accessLinkUi";
+import { ENTRY_STATE } from "../delivery/sessionState";
 
 export type StatusFilter = "all" | AccessLinkStatus;
 
@@ -38,24 +38,25 @@ export function LinksToolbar({
   searchId = "student-links-search",
 }: LinksToolbarProps) {
   return (
-    <div className="border-b border-black/[0.06] bg-white p-3">
+    <div className="border-b border-[var(--sat-staff-border-hairline)] bg-white p-3">
       <div className="flex flex-wrap items-center gap-2">
         <SatSearchField
           id={searchId}
-          label="Search Student Links"
+          label="Search rooms"
           value={search}
           onChange={onSearchChange}
-          placeholder="Search by name, audience, or version"
+          placeholder="Search rooms"
           widthClassName="sm:max-w-xs"
         />
-        <p role="status" aria-live="polite" className="ml-auto shrink-0 text-[12px] tabular-nums text-slate-500">
-          {resultCount} of {total} links
+        <p role="status" aria-live="polite" className="ml-auto shrink-0 text-[14px] tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">
+          {resultCount} of {total} {total === 1 ? "room" : "rooms"}
         </p>
       </div>
-      <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5" role="group" aria-label="Filter by status">
+      <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5" role="group" aria-label="Filter by check-in">
         {FILTERS.map((status) => {
           const active = statusFilter === status;
-          const label = status === "all" ? `All ${total}` : `${formatAccessLinkStatus(status)} ${counts[status]}`;
+          // The group is labelled "Filter by check-in", so each pill names only the state.
+          const label = status === "all" ? `All ${total}` : `${ENTRY_STATE[status]} ${counts[status]}`;
           return (
             <button
               key={status}
@@ -63,7 +64,7 @@ export function LinksToolbar({
               aria-pressed={active}
               onClick={() => onStatusFilterChange(status)}
               className={
-                "sat-press relative flex min-h-11 shrink-0 items-center rounded-full px-3.5 text-[12px] font-semibold capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 " +
+                "sat-press relative flex min-h-11 shrink-0 items-center rounded-full px-3.5 text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 " +
                 (active
                   ? "sat-press-fill-accent text-white"
                   : "sat-press-fill border border-black/[0.08] bg-white text-slate-500 hover:text-slate-900")

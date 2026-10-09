@@ -437,8 +437,8 @@ async function startSatAttempt(
   await expect(page.getByText("Digital SAT").first()).toBeVisible();
   await expect(page.getByText("IELTS", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Create test", exact: true }).first().click();
-  await page.getByLabel("SAT exam name").fill(examTitle);
+  await page.getByRole("button", { name: "Create exam", exact: true }).first().click();
+  await page.getByLabel("Exam name").fill(examTitle);
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i, { timeout: 30_000 });
   const examId = page.url().match(/\/sat\/exams\/([^/?#]+)/)?.[1];

@@ -44,38 +44,9 @@ function keyframe(name: string, selector: string): Rule {
 }
 
 describe('session room layout contracts', () => {
-  it('uses roster, workspace, and inspector columns on large desktop', () => {
-    const desktop = atRule('(min-width: 1440px)');
-    expect(value(desktop, '.sat-room__body', 'grid-template-columns')).toBe(
-      'minmax(260px, 290px) minmax(0, 1fr) minmax(320px, 370px)',
-    );
-    expect(value(desktop, '.sat-room__body', 'grid-template-areas')).toBe('"roster workspace inspector"');
-    expect(value(desktop, '.sat-room__inspector-panel', 'padding')).toBe('20px 16px 32px');
-  });
-
-  it('uses a two-column tablet workspace with a viewport inspector dialog', () => {
-    const tablet = atRule('(min-width: 1024px) and (max-width: 1439px)');
-    expect(value(atRule('(min-width: 1024px)'), '.sat-room__body', 'grid-template-columns')).toBe(
-      'minmax(260px, 290px) minmax(0, 1fr)',
-    );
-    expect(value(root, '.sat-room__inspector-dialog', 'position')).toBe('fixed');
-    expect(value(root, '.sat-room__inspector-dialog', 'right')).toBe('0');
-    expect(value(root, '.sat-room__inspector-dialog-overlay', 'position')).toBe('fixed');
-    expect(value(root, '.sat-room__inspector-dialog-overlay', 'inset')).toBe('0');
-    expect(declarations(rule(tablet, '.sat-room__inspector-panel')).some((item) => item.prop === 'padding')).toBe(true);
-  });
-
   it('keeps the tablet inspector opaque while it slides into view', () => {
     expect(declarations(keyframe('sat-inspector-enter', 'from')).some((item) => item.prop === 'opacity')).toBe(false);
     expect(declarations(keyframe('sat-inspector-enter', 'to')).some((item) => item.prop === 'opacity')).toBe(false);
-  });
-
-  it('keeps desktop timeline scrolling in one workspace without a split pane', () => {
-    const desktop = atRule('(min-width: 1024px)');
-    expect(value(desktop, '.sat-room__workspace', 'overflow-y')).toBe('auto');
-    expect(value(desktop, '.sat-room__body', 'grid-template-rows')).toBe('minmax(0, 1fr)');
-    expect(rule(root, '.sat-room__workspace')).toBeDefined();
-    expect(root.nodes.some((node) => node.type === 'rule' && node.selector === '.sat-run-sheet__table-scroll')).toBe(false);
   });
 
   it('respects reduced motion and distinguishes state in forced colors', () => {

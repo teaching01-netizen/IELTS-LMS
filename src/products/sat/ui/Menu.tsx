@@ -76,7 +76,7 @@ const MENU_ELEVATION =
 // not move under the pointer reads as a dead control, especially the compact
 // icon-only form used by every list row.
 const COMPACT_TRIGGER_CLASS =
-  'sat-press sat-press-fill flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
+  'sat-press sat-press-fill flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
 
 const WORKSPACE_TRIGGER_CLASS =
   'sat-press sat-press-fill flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]';
@@ -248,7 +248,7 @@ export function SatMenu(props: SatMenuProps) {
           aria-label={label}
           data-sat-menu-animate=""
           style={{ minWidth: width ?? 176, boxShadow: MENU_ELEVATION, ['--sat-menu-origin' as string]: align === 'end' ? 'top right' : 'top left' }}
-          className="sat-menu sat-product z-[110]"
+          className="sat-menu sat-product sat-staff-root z-[110]"
         >
           {items.map((item, index) => (
             <div key={item.id}>

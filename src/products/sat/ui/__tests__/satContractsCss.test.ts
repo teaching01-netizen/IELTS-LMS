@@ -5,13 +5,11 @@ import { describe, expect, it } from 'vitest';
 describe('SAT system-contracts CSS (sat-* rules only)', () => {
   const css = readFileSync(resolve(__dirname, '../../../../index.css'), 'utf8');
 
-  it('F-A6: search-clear stays centered at a 28px target, exempt from the coarse 44px floor', () => {
+  it('F-A6: search-clear keeps a full 44px target inside the field', () => {
     const rule = css.match(/\.sat-product\s+\.sat-search-clear\s*\{([^}]*)\}/)?.[1];
     expect(rule).toBeDefined();
-    expect(rule).toMatch(/top:\s*50%\s*!important/);
-    expect(rule).toMatch(/transform:\s*translateY\(-50%\)/);
-    expect(rule).toMatch(/min-block-size:\s*28px\s*!important/);
-    expect(rule).toMatch(/min-inline-size:\s*28px\s*!important/);
+    expect(rule).toMatch(/min-block-size:\s*44px/);
+    expect(rule).toMatch(/min-inline-size:\s*44px/);
   });
 
   it('F-A12: route fade gate opts out with a reduced-motion guard', () => {

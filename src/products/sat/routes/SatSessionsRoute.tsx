@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowRight, CalendarPlus } from 'lucide-react';
+import { ArrowRight, CalendarPlus, Radio, SearchX } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthSession } from '../../../features/auth/authSession';
@@ -11,15 +11,17 @@ import { SatSegmentedControl } from '../ui/SegmentedControl';
 import { useSatListParams, type SatListBucket } from '../ui/useSatListParams';
 import { useSatListReturn } from '../ui/useSatListReturn';
 import {
+  SAT_ROW_STACK,
+  SatButton,
   SatContainer,
   SatEmptyState,
+  SatInlineError,
   SatList,
+  SatListColumns,
   SatListRow,
   SatListSkeleton,
   SatListToolbar,
-  SatPageError,
   SatPageHeader,
-  SatPrimaryButton,
   SatResultCount,
   SatSearchField,
   SatStatusPill,
@@ -53,10 +55,15 @@ const STATUS_TONE: Record<SessionStatus, { tone: SatStatusTone; pulse: boolean }
 };
 
 const EMPTY_HINT: Record<SatListBucket, string> = {
-  upcoming: 'Scheduled SAT rooms wait here until a proctor starts the exam.',
+  upcoming: 'Prepared rooms wait here until a proctor starts the exam.',
   live: 'Rooms appear here as soon as a proctor starts the exam.',
-  finished: 'Finished SAT rooms move here automatically.',
+  finished: 'Finished rooms move here automatically.',
 };
+
+const BUCKET_LABEL: Record<SatListBucket, string> = { upcoming: 'Upcoming', live: 'Live', finished: 'Finished' };
+
+/** Shared by the column labels and every row: Room / Starts / Students / Exam status. */
+const ROW_GRID = 'grid-cols-[minmax(0,1fr)_16px] gap-x-4 md:grid-cols-[minmax(0,1fr)_184px_112px_136px_16px]';
 
 export function SatSessionsRoute() {
   const navigate = useNavigate();
@@ -87,16 +94,15 @@ export function SatSessionsRoute() {
       .sort((left, right) => direction * (new Date(left.schedule.startTime).getTime() - new Date(right.schedule.startTime).getTime()));
   }, [bucket, search, sort, summaries]);
 
-  if (summariesQuery.error) return <SatPageError title="SAT rooms could not load" description={summariesQuery.error instanceof Error ? summariesQuery.error.message : 'Rooms are unavailable.'} retryLabel="Retry" onRetry={() => void summariesQuery.refetch()} />;
+  const loadError = summariesQuery.error ? (summariesQuery.error instanceof Error ? summariesQuery.error.message : 'Rooms are unavailable.') : null;
 
   return (
     <SatContainer>
       <SatPageHeader
-        eyebrow="Digital SAT"
         title="Rooms"
-        description="Every SAT room across tests. Open a room to share, start and run it."
+        description="Every room across exams. Open a room to share its student link, start the exam, and monitor it."
         actions={session?.user.role === 'admin' ? (
-          <SatPrimaryButton onClick={() => setCreateOpen(true)} icon={<CalendarPlus size={15} aria-hidden="true" />}>Create room</SatPrimaryButton>
+          <SatButton variant="primary" onClick={() => setCreateOpen(true)} icon={<CalendarPlus size={16} aria-hidden="true" />}>Create room</SatButton>
         ) : undefined}
       />
 
@@ -119,10 +125,10 @@ export function SatSessionsRoute() {
       >
         <SatSearchField
           id="sat-session-search"
-          label="Search SAT rooms"
+          label="Search rooms"
           value={search}
           onChange={(value) => setParams({ q: value })}
-          placeholder="Search exam, cohort, institution"
+          placeholder="Search rooms or exams"
           widthClassName="w-full sm:w-72 sm:flex-none"
         />
         <SatToolbarSelect<SessionSort>
@@ -130,19 +136,22 @@ export function SatSessionsRoute() {
           label="Sort"
           value={sort}
           options={[
-            { value: 'soonest', label: 'Start time: earliest first' },
-            { value: 'latest', label: 'Start time: latest first' },
+            { value: 'soonest', label: 'Earliest start' },
+            { value: 'latest', label: 'Latest start' },
           ]}
           onChange={(next) => setParams({ sort: next })}
         />
       </SatListToolbar>
 
-      {summariesQuery.isLoading ? (
-        <SatListSkeleton rows={5} label="Loading SAT rooms" />
+      {loadError ? (
+        <SatInlineError title="Rooms could not load" description={loadError} onRetry={() => void summariesQuery.refetch()} />
+      ) : summariesQuery.isLoading ? (
+        <SatListSkeleton rows={5} label="Loading rooms" />
       ) : visible.length ? (
         <>
         <SatResultCount total={counts[bucket]} visible={visible.length} itemLabel={visible.length === 1 ? 'room' : 'rooms'} />
         <SatList>
+          <SatListColumns gridClassName={ROW_GRID} columns={[{ label: 'Room' }, { label: 'Starts' }, { label: 'Students', align: 'end' }, { label: 'Exam status' }, { label: '' }]} />
           {visible.map((summary, rowIndex) => {
             const state = bucketFor(summary.schedule.status, summary.runtime.status);
             const status: SessionStatus = summary.runtime.status === 'paused'
@@ -150,6 +159,8 @@ export function SatSessionsRoute() {
               : state === 'live' ? 'Running' : state === 'finished' ? summary.schedule.status === 'cancelled' ? 'Cancelled' : 'Finished' : 'Not started';
             const pill = STATUS_TONE[status];
             const target = '/sat/sessions/' + summary.schedule.id;
+            const joined = summary.studentCount ?? 0;
+            const active = summary.activeCount ?? 0;
             return (
               <SatListRow
                 key={summary.schedule.id}
@@ -158,17 +169,19 @@ export function SatSessionsRoute() {
                 current={summary.schedule.id === lastOpenedId}
                 onOpen={() => openRecord(summary.schedule.id, target)}
               >
-                <span className="grid w-full items-center gap-x-4 gap-y-1 py-2.5 sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_120px_16px]">
+                <span className={'grid w-full items-center py-3 ' + ROW_GRID}>
                   <span className="min-w-0">
-                    <span className="block truncate text-[14px] font-semibold tracking-[-0.012em] text-slate-900">{summary.schedule.examTitle}</span>
-                    <span className="mt-0.5 block truncate text-[14px] text-slate-500">{summary.schedule.cohortName}{summary.schedule.institution ? ' · ' + summary.schedule.institution : ''} · {satPublishScopeCopy(summary.schedule.publishScope ?? 'full')}</span>
+                    <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{summary.schedule.cohortName}</span>
+                    <span className="block truncate text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{summary.schedule.examTitle} · {satPublishScopeCopy(summary.schedule.publishScope ?? 'full')}{summary.schedule.institution ? ' · ' + summary.schedule.institution : ''}</span>
+                    <span className="block truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:hidden">{formatSessionTime(summary.schedule.startTime)} · {joined} joined</span>
                   </span>
-                  <span className="min-w-0 text-[14px] tabular-nums text-slate-600">
-                    <span className="block truncate">{formatSessionTime(summary.schedule.startTime)}</span>
-                    <span className="block truncate text-slate-500">{summary.studentCount ?? 0} joined · {summary.activeCount ?? 0} active</span>
+                  <span className="hidden truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:block">{formatSessionTime(summary.schedule.startTime)}</span>
+                  <span className="hidden text-right text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:block">
+                    <span className="block text-[var(--sat-staff-text-primary,#1d1d1f)]">{joined} joined</span>
+                    {state === 'live' ? <span className="block">{active} active</span> : null}
                   </span>
-                  <span><SatStatusPill tone={pill.tone} pulse={pill.pulse}>{status}</SatStatusPill></span>
-                  <ArrowRight size={15} className="sat-row-chevron hidden shrink-0 text-slate-400 group-hover:text-slate-500 sm:block" aria-hidden="true" />
+                  <span className={SAT_ROW_STACK.status}><SatStatusPill tone={pill.tone} pulse={pill.pulse}>{status}</SatStatusPill></span>
+                  <ArrowRight size={16} className={'sat-row-chevron shrink-0 text-slate-400 group-hover:text-slate-500 ' + SAT_ROW_STACK.chevron} aria-hidden="true" />
                 </span>
               </SatListRow>
             );
@@ -179,10 +192,10 @@ export function SatSessionsRoute() {
         <>
         <SatResultCount total={counts[bucket]} visible={0} itemLabel="rooms" />
         <SatEmptyState
-          icon={<span aria-hidden="true" className="h-2 w-2 rounded-full bg-slate-300" />}
+          icon={search.trim() ? <SearchX size={20} aria-hidden="true" /> : <Radio size={20} aria-hidden="true" />}
           title={search.trim() ? 'No matching rooms' : 'No ' + bucket + ' rooms'}
-          hint={search.trim() ? `No rooms match “${search.trim()}” in ${bucket === 'live' ? 'Live' : bucket === 'finished' ? 'Finished' : 'Upcoming'}.` : EMPTY_HINT[bucket]}
-          action={search.trim() ? <SatPrimaryButton onClick={() => setParams({ q: '' })}>Clear Search</SatPrimaryButton> : undefined}
+          hint={search.trim() ? `No rooms match “${search.trim()}” in ${BUCKET_LABEL[bucket]}.` : EMPTY_HINT[bucket]}
+          action={search.trim() ? <SatButton variant="secondary" onClick={() => setParams({ q: '' })}>Clear search</SatButton> : undefined}
         />
         </>
       )}

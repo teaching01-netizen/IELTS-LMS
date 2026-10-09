@@ -54,8 +54,8 @@ describe("ExamWorkspaceHeader", () => {
     const onPublish = vi.fn();
     render(<ExamWorkspaceHeader {...props({ onPublish, publishDisabledReason: "Save your timing changes first" })} />);
     const publish = screen.getByRole("button", { name: /^publish version$/i });
-    expect(publish).toBeDisabled();
-    expect(publish).toHaveAttribute("title", "Save your timing changes first");
+    expect(publish).toHaveAttribute("aria-disabled", "true");
+    expect(publish).toHaveAccessibleDescription("Save your timing changes first");
     fireEvent.click(publish);
     expect(onPublish).not.toHaveBeenCalled();
   });

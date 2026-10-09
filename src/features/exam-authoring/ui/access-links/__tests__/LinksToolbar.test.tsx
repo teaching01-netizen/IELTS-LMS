@@ -18,8 +18,8 @@ describe("LinksToolbar", () => {
         resultCount={2}
       />,
     );
-    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 links");
-    fireEvent.click(screen.getByRole("button", { name: /Check-in open 1/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 rooms");
+    fireEvent.click(screen.getByRole("button", { name: /^Open 1$/ }));
     expect(onStatusFilterChange).toHaveBeenCalledWith("live");
   });
 
@@ -36,7 +36,7 @@ describe("LinksToolbar", () => {
         resultCount={1}
       />,
     );
-    fireEvent.keyDown(screen.getByLabelText("Search Student Links"), { key: "Escape" });
+    fireEvent.keyDown(screen.getByLabelText("Search rooms"), { key: "Escape" });
     expect(onSearchChange).toHaveBeenCalledWith("");
   });
 });

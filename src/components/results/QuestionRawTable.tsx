@@ -63,7 +63,7 @@ export function QuestionRawTable({ rows, caption, showVerdictFilters = true }: {
   }
 
   return (
-    <div>
+    <div className="question-raw-table">
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           type="search"

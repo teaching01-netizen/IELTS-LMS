@@ -243,9 +243,8 @@ describe('StudentDetail inspector priority', () => {
     renderDetail({ student: { ...student, status: 'terminated' }, blocked: true });
     expect(screen.getByText('10:00')).toBeInTheDocument();
     expect(screen.getByText('15:00')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Student actions' }));
-    expect(screen.getByRole('menuitem', { name: 'Add 5 minutes…' })).toBeDisabled();
-    expect(screen.getByRole('menuitem', { name: 'End attempt…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add 5 minutes…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'End attempt…' })).toBeDisabled();
   });
 });
 

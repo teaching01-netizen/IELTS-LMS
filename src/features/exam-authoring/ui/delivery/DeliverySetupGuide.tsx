@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 
 export interface DeliverySetupGuideProps {
   versionNumber: number;
@@ -46,17 +46,17 @@ export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0
             aria-current={current ? "step" : undefined}
             className={`rounded-xl border p-3 ${current ? "border-au-accent/40 bg-au-accent/5" : "border-black/[0.06] bg-white"}`}
           >
-            <p className="flex items-center gap-2 text-[13px] font-semibold text-slate-900">
+            <p className="flex items-center gap-2 text-[14px] font-semibold text-slate-900">
               <span
                 aria-hidden="true"
-                className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] ${step.done ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600"}`}
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-[14px] ${step.done ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600"}`}
               >
                 {step.done ? <Check size={12} /> : index + 1}
               </span>
               {step.label}
               {step.done ? <span className="sr-only"> (done)</span> : null}
             </p>
-            <p className="mt-1 text-[12px] leading-5 text-slate-600">{step.detail}</p>
+            <p className="mt-1 text-[14px] leading-5 text-slate-600">{step.detail}</p>
           </li>
         );
       })}
@@ -65,11 +65,13 @@ export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0
 
   if (configured) {
     return (
-      <details className="mt-4 rounded-2xl border border-black/[0.06] bg-white p-3">
-        <summary className="flex min-h-11 cursor-pointer list-none items-center text-[12px] font-semibold text-slate-700">
-          Setup guide
+      <details className="group mt-4 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-white px-4 py-1">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
+          <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)] transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+          How rooms work
+          <span className="ml-auto font-normal text-[var(--sat-staff-text-secondary,#515154)]">{steps.filter((step) => step.done).length} of {steps.length} steps done</span>
         </summary>
-        <div className="pt-2">{list}</div>
+        <div className="pb-3 pt-1">{list}</div>
       </details>
     );
   }
@@ -80,7 +82,7 @@ export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0
       <button
         type="button"
         onClick={onCreate}
-        className="sat-press mt-4 flex min-h-11 items-center rounded-[12px] bg-au-accent px-4 text-[13px] font-semibold text-white hover:bg-au-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40"
+        className="sat-btn sat-btn--primary sat-press mt-4"
       >
         Create room
       </button>

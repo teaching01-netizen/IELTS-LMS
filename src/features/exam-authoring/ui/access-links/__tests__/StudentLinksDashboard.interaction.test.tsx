@@ -256,7 +256,7 @@ describe("StudentLinksDashboard interaction contract", () => {
     render(<DashboardHarness onRefresh={vi.fn()} />);
     expect(screen.getAllByText("Monday Class").length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByLabelText("Search Student Links"), { target: { value: "Monday" } });
+    fireEvent.change(screen.getByLabelText("Search rooms"), { target: { value: "Monday" } });
 
     // No waitFor: the row set moved with the keystroke, not behind a timer.
     expect(screen.queryByText("Saturday Class")).not.toBeInTheDocument();

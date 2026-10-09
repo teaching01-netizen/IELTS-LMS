@@ -28,15 +28,15 @@ export function SatExamResponsesRoute() {
   };
 
   if (!examId) {
-    return <SatPageError title="Responses could not load" description="A valid SAT exam is required." retryLabel="Back to Tests" onRetry={backToLibrary} />;
+    return <SatPageError title="Responses could not load" description="A valid SAT exam is required." retryLabel="Back to Exams" onRetry={backToLibrary} />;
   }
   if (examQuery.isLoading) return <SatPageLoading label="Opening exam responses…" />;
   if (examQuery.error || !examQuery.data) {
-    return <SatPageError title="Responses could not load" description={examQuery.error instanceof Error ? examQuery.error.message : 'The SAT exam is unavailable.'} retryLabel="Back to Tests" onRetry={backToLibrary} />;
+    return <SatPageError title="Responses could not load" description={examQuery.error instanceof Error ? examQuery.error.message : 'The SAT exam is unavailable.'} retryLabel="Back to Exams" onRetry={backToLibrary} />;
   }
   const exam = examQuery.data;
   if (exam.providerKey !== 'sat') {
-    return <SatPageError title="This is not a SAT exam" description="Open this exam from its IELTS workspace instead." retryLabel="Back to Tests" onRetry={backToLibrary} />;
+    return <SatPageError title="This is not a SAT exam" description="Open this exam from its IELTS workspace instead." retryLabel="Back to Exams" onRetry={backToLibrary} />;
   }
   const accessPath = `/sat/exams/${encodeURIComponent(exam.id)}/access`;
   return (
@@ -59,9 +59,9 @@ export function SatExamResponsesRoute() {
         basePath={examWorkspacePath(exam.id, 'responses')}
         emptyState={
           <SatEmptyState
-            icon={<BarChart3 size={18} aria-hidden="true" />}
-            title="No results yet"
-            hint="Results appear here once students check in to a room for this exam."
+            icon={<BarChart3 size={20} aria-hidden="true" />}
+            title="No responses yet"
+            hint="Responses appear here once students check in to a room for this exam."
             action={<SatPrimaryButton onClick={() => navigate(chrome.canCreateSession ? deliveryDestination(exam.id) : accessPath)}>{chrome.canCreateSession ? 'Create room' : 'Open rooms'}</SatPrimaryButton>}
           />
         }

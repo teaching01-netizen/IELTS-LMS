@@ -4,7 +4,7 @@ import type { AccessLinkMemberInput, AssessmentAccessLink, CreateAssessmentAcces
 import { AccessLinkEditorSheet } from '../../../features/exam-authoring/ui/access-links/AccessLinkEditorSheet';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { SatFormDialog } from '../ui/ConfirmDialog';
-import { SatPageError } from '../ui/SatPage';
+import { SatButton, SatField, SatInlineError } from '../ui/SatPage';
 
 export interface SatNewSessionExam {
   id: string;
@@ -16,10 +16,10 @@ export interface SatNewSessionExam {
 const EMPTY_MEMBERS: AccessLinkMemberInput[] = [];
 
 /**
- * The one way to prepare a sitting from the global Sessions page. It asks which
- * exam, then opens the SAME session setup the exam's own Sessions tab uses, so a
- * session always gets its version pin, audience, sections, check-in window and
- * student link atomically from one request.
+ * Global room creation from the Rooms page. It asks which exam, then opens the
+ * SAME room setup the exam's own Rooms tab uses, so a room always gets its
+ * version pin, audience, sections, check-in window and student link
+ * atomically from one request. Exam-level creation skips straight to setup.
  */
 export function SatNewSessionFlow({
   exams,
@@ -57,52 +57,38 @@ export function SatNewSessionFlow({
           if (selectedExam) setExamId(selectedExam.id);
         }}
       >
-        <div className="space-y-4 px-5 py-4">
+        <div className="space-y-4 px-6 py-5">
           {examsLoading && !exams.length ? (
-            <p role="status" className="rounded-[12px] bg-black/[0.035] px-4 py-4 text-[14px] leading-5 text-slate-500">Loading published SAT tests…</p>
+            <p role="status" className="rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))] px-4 py-4 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Loading published exams…</p>
           ) : exams.length ? (
-            <>
-              <label htmlFor="sat-session-exam" className="block text-[14px] font-semibold text-slate-600">
-                Test
+            <SatField
+              id="sat-session-exam"
+              label="Exam"
+              help={selectedExam ? `Students receive ${satPublishScopeCopy(selectedExam.currentPublishedScope ?? 'full')} from the exam's current published version. The room stays on that version.` : undefined}
+            >
+              {(control) => (
                 <select
                   ref={firstFieldRef}
-                  id="sat-session-exam"
-                  aria-label="SAT test"
+                  {...control}
                   value={selection}
                   onChange={(event) => setDraftChoice(event.target.value)}
-                  className="mt-1.5 h-11 w-full rounded-[11px] border border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] bg-white px-3 text-[16px] outline-none focus:border-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] focus:ring-4 focus:ring-[var(--sat-staff-accent-ring-soft,rgba(0,113,227,0.1))]"
+                  className="sat-input"
                 >
                   {exams.map((exam) => <option key={exam.id} value={exam.id}>{exam.title}</option>)}
                 </select>
-              </label>
-              {selectedExam ? (
-                <p className="-mt-2 text-[14px] leading-4 text-slate-400">
-                  Students will receive {satPublishScopeCopy(selectedExam.currentPublishedScope ?? 'full')} in this session.
-                </p>
-              ) : null}
-            </>
+              )}
+            </SatField>
           ) : (
-            <div className="rounded-[12px] bg-black/[0.035] px-4 py-4">
-              <p className="text-[14px] font-semibold text-slate-900">Publish a SAT test before creating a session.</p>
-              <button
-                type="button"
-                onClick={onGoToExamLibrary}
-                className="mt-3 min-h-11 rounded-[10px] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white"
-              >
-                Go to Tests
-              </button>
+            <div className="rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))] px-4 py-4">
+              <p className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">No published exams yet</p>
+              <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">A room delivers one published version. Publish an exam first.</p>
+              <SatButton variant="secondary" onClick={onGoToExamLibrary} className="mt-3">Go to Exams</SatButton>
             </div>
           )}
         </div>
-        <div className="flex justify-end gap-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-5 py-3">
-          <button type="button" onClick={onClose} className="min-h-11 rounded-[10px] px-3 text-[14px] font-semibold text-slate-500 hover:bg-black/[0.04]">Cancel</button>
-          <button
-            type="submit"
-            disabled={!selectedExam}
-            className="min-h-11 rounded-[10px] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white disabled:bg-slate-200 disabled:text-slate-400"
-          >
-            Continue
-          </button>
+        <div className="flex justify-end gap-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-6 py-4">
+          <SatButton variant="quiet" onClick={onClose}>Cancel</SatButton>
+          <SatButton variant="primary" type="submit" disabled={!selectedExam}>Continue</SatButton>
         </div>
       </form>
     </SatFormDialog>
@@ -119,11 +105,10 @@ function NewSessionSetup({ exam, onClose, onCreated }: { exam: SatNewSessionExam
   if (overview.error && !overview.data) {
     return (
       <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
-        <div className="px-5 py-4">
-          <SatPageError
-            title="Room settings could not load"
-            description={overview.error instanceof Error ? overview.error.message : 'The test’s published version is unavailable.'}
-            retryLabel="Retry"
+        <div className="px-6 py-5">
+          <SatInlineError
+            title="Room setup could not load"
+            description={overview.error instanceof Error ? overview.error.message : 'The exam’s published version is unavailable.'}
             onRetry={() => void overview.refetch()}
           />
         </div>
@@ -133,8 +118,8 @@ function NewSessionSetup({ exam, onClose, onCreated }: { exam: SatNewSessionExam
   if (!version) {
     return (
       <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
-        <p role="status" className="px-5 py-6 text-[14px] leading-5 text-slate-500">
-          {overview.isLoading ? `Loading ${exam.title}…` : `${exam.title} has no published version. Publish it before creating a session.`}
+        <p role="status" className="px-6 py-6 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          {overview.isLoading ? `Loading ${exam.title}…` : `${exam.title} has no published version. Publish it before creating a room.`}
         </p>
       </SatFormDialog>
     );

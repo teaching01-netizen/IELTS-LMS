@@ -100,7 +100,6 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const [sectionsError, setSectionsError] = useState<string | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const initialSnapshotRef = useRef("");
   const hydratingRef = useRef(false);
@@ -469,65 +468,17 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
           restoreFocusRef.current = null;
           restoreAuthoringFocus(opener);
         }}
-        className="sat-product authoring-mobile-sheet au-elevation-sheet flex h-full w-full max-w-[520px] flex-col gap-0 border-l border-au-separator bg-au-fill p-0 sm:max-w-[520px]"
+        className="sat-product sat-staff-root authoring-mobile-sheet au-elevation-sheet flex h-full w-full max-w-[560px] flex-col gap-0 border-l border-[var(--sat-staff-border-hairline)] bg-white p-0 sm:max-w-[560px]"
       >
-            <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4 authoring-glass">
-              <div className="min-w-0 flex-1"><p className="text-[12px] font-medium text-slate-400">Digital SAT · Version {props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}</p><SheetTitle className="mt-0.5 text-lg font-semibold tracking-[-0.02em] text-slate-950">{props.link ? "Room settings" : props.prefill ? "Duplicate room" : "Create room"}</SheetTitle>
+            <header className="flex items-center gap-3 border-b border-[var(--sat-staff-border-hairline)] bg-white px-6 py-4">
+              <div className="min-w-0 flex-1"><p className="text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">Version {props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}</p><SheetTitle className="mt-0.5 text-[20px] font-semibold leading-7 tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{props.link ? "Room settings" : props.prefill ? "Duplicate room" : "Create room"}</SheetTitle>
                 <SheetDescription className="sr-only">Set up who can join this room, how they identify themselves, and when check-in is open.</SheetDescription></div>
-              <button type="button" onClick={requestClose} disabled={props.isSaving} aria-label="Close room settings" className="authoring-icon-button"><X size={16} aria-hidden="true"/></button>
+              <button type="button" onClick={requestClose} disabled={props.isSaving} aria-label="Close room settings" className="sat-btn sat-btn--quiet sat-btn--icon sat-press -mr-2 rounded-full"><X size={18} aria-hidden="true"/></button>
             </header>
             {props.membersLoading ? <p role="status" className="px-5 py-3 text-sm text-slate-600">Loading student roster…</p> : null}
-            {props.membersError ? <div role="alert" className="px-5 py-3 text-sm text-red-700">{props.membersError}<button type="button" onClick={props.onRetryMembers} className="min-h-11 px-3 font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry roster</button></div> : null}
-            <fieldset disabled={props.isSaving || readOnly || props.membersLoading || Boolean(props.membersError)} data-coedit-read-only={readOnly ? "true" : undefined} className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+            {props.membersError ? <div role="alert" className="px-5 py-3 text-sm text-[var(--sat-staff-danger,#b42318)]">{props.membersError}<button type="button" onClick={props.onRetryMembers} className="min-h-11 px-3 font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry roster</button></div> : null}
+            <fieldset disabled={props.isSaving || readOnly || props.membersLoading || Boolean(props.membersError)} data-coedit-read-only={readOnly ? "true" : undefined} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
               <div className="space-y-5">
-                {!props.link && props.prefill ? (
-                  <p role="note" className="rounded-xl bg-au-accent/10 p-3 text-[12px] leading-5 text-slate-700">
-                    Creates a new room on <strong>Version {props.targetVersionNumber ?? "—"}</strong> with the audience, identification and sections of “{props.prefill.name}”. Choose its check-in window below.
-                  </p>
-                ) : null}
-                <Field label="Room name" description="Use the name staff will recognize when sharing or monitoring this room." error={nameError} errorId="access-link-name-error"><input value={name} onChange={(event) => { setName(event.target.value); updateShared({ name: event.target.value }); if (nameError) setNameError(validateName(event.target.value)); }} onBlur={() => setNameError(validateName(name))} maxLength={160} aria-label="Room name" aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? "access-link-name-error" : undefined} className={inputClass} placeholder="Saturday morning mock" /></Field>
-                <Field label="Who can join?" description={audienceChoice === "listed" ? "Only students on the list below are admitted. Anyone else is turned away at check-in." : "Anyone who has the room link can check in. A student code identifies a student; it is not checked against a roster."}>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Choice active={audienceChoice === "anyone"} onClick={() => { const nextType = accessLinkAudienceTypeFor("anyone", audienceLabel); setAudienceType(nextType); updateShared({ audienceType: nextType }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Anyone with the link" subtitle="No roster check" />
-                    <Choice active={audienceChoice === "listed"} onClick={() => { setAudienceType("selected_students"); setAccessMode("student_code"); updateShared({ audienceType: "selected_students", accessMode: "student_code" }); }} icon={<LockKeyhole size={15} aria-hidden="true"/>} title="Listed students only" subtitle="Checked at check-in" />
-                  </div>
-                </Field>
-                {audienceType === "selected_students" ? (
-                  <Field label="Listed students" description="Student code is required. Name and email are optional." error={rosterError} errorId="access-link-roster-error">
-                    <RosterRows
-                      source={membersSource}
-                      errors={rosterResult.errors}
-                      onChange={(next) => {
-                        setMembersSource(next);
-                        updateShared({ membersSource: next });
-                        if (rosterError) setRosterError(validateRoster(next));
-                      }}
-                      onBlur={() => setRosterError(validateRoster(membersSource))}
-                    />
-                    <p role="status" aria-live="polite" className="mt-2 text-[12px] font-medium text-slate-500">{rosterSummary}</p>
-                  </Field>
-                ) : null}
-                <Field label="Student identification" description={audienceChoice === "listed" ? "Listed students must enter their listed student code. It is checked at check-in." : "Choose how students identify themselves. This identifies a student; it does not verify them."}>
-                  <div className="authoring-segmented flex w-full rounded-xl p-1">
-                    <Segment active={accessMode === "student_code"} onClick={() => { setAccessMode("student_code"); updateShared({ accessMode: "student_code" }); }}>Require student code</Segment>
-                    <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
-                  </div>
-                </Field>
-                <Field label="Check-in" description="Students can join during this window. The proctor starts the exam.">
-                  <div className="grid grid-cols-2 gap-2">
-                    <Choice active={availabilityType === "anytime"} onClick={() => { setAvailabilityType("anytime"); updateShared({ availabilityType: "anytime", opensAt: null, closesAt: null }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Open now" subtitle="Until paused or revoked" />
-                    <Choice active={availabilityType === "scheduled"} onClick={() => { setAvailabilityType("scheduled"); updateShared({ availabilityType: "scheduled" }); }} icon={<Clock3 size={15} aria-hidden="true"/>} title="Scheduled" subtitle="Choose when it opens" />
-                  </div>
-                  {availabilityType === "scheduled" ? <><div className="mt-2 grid grid-cols-2 gap-2"><label htmlFor="access-link-opens-at" className="text-[12px] font-medium text-slate-500">Opens<input id="access-link-opens-at" aria-label="Opens" type="datetime-local" value={opensAt} onChange={(event) => { setOpensAt(event.target.value); updateShared({ opensAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, event.target.value, closesAt)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label><label htmlFor="access-link-closes-at" className="text-[12px] font-medium text-slate-500">Closes<input id="access-link-closes-at" aria-label="Closes" type="datetime-local" value={closesAt} onChange={(event) => { setClosesAt(event.target.value); updateShared({ closesAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, opensAt, event.target.value)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label></div>{windowError ? <p id="access-link-window-error" role="alert" className="mt-1.5 text-[12px] font-medium text-au-danger-text">{windowError}</p> : null}</> : <div className="mt-2 rounded-xl bg-au-surface px-3 py-3 text-[12px] leading-5 text-slate-500">Students can check in until you pause or revoke this room’s link. Pausing check-in does not stop students who are already taking the exam.</div>}
-                  <p className="mt-2 text-[12px] leading-4 text-slate-500">{availabilityType === "scheduled" ? `Times use your local timezone (${localTimeZone()}). ` : ""}Opening check-in never starts the exam.</p>
-                </Field>
-                <details
-                  open={moreOpen || Boolean(sectionsError)}
-                  onToggle={(event) => setMoreOpen(event.currentTarget.open)}
-                  className="rounded-xl border border-au-separator bg-au-surface"
-                >
-                  <summary className="flex min-h-11 cursor-pointer items-center px-4 text-sm font-semibold text-slate-800">More options</summary>
-                  <div className="space-y-5 px-4 pb-4 pt-1">
                 {!props.link && !props.prefill && !isDirty && props.onReuseSetup && props.reuseOptions && props.reuseOptions.length > 0 ? (
                   <Field label="Start from an earlier room (optional)" description="Copies its audience, identification and sections. You still choose the check-in window.">
                     <select
@@ -544,6 +495,13 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     </select>
                   </Field>
                 ) : null}
+                {!props.link && props.prefill ? (
+                  <p role="note" className="rounded-xl bg-au-accent/10 p-3 text-[14px] leading-5 text-slate-700">
+                    Creates a new room on <strong>Version {props.targetVersionNumber ?? "—"}</strong> with the audience, identification and sections of “{props.prefill.name}”. Choose its check-in window below.
+                  </p>
+                ) : null}
+                {isSat ? <GroupHeading id="access-link-group-details" title="Room details" detail={`Pinned to Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}${summaryTest ? ` of ${summaryTest}` : ""}. Publishing a newer version never changes this room.`} /> : null}
+                <Field label="Room name" description="Use the name staff will recognize when sharing or monitoring this room." error={nameError} errorId="access-link-name-error"><input value={name} onChange={(event) => { setName(event.target.value); updateShared({ name: event.target.value }); if (nameError) setNameError(validateName(event.target.value)); }} onBlur={() => setNameError(validateName(name))} maxLength={160} aria-label="Room name" aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? "access-link-name-error" : undefined} className={inputClass} placeholder="Saturday morning mock" /></Field>
                 <Field label="Class or group (optional)" description="A label for your own organization. It does not limit who can join.">
                   <input
                     aria-label="Class or group label"
@@ -564,13 +522,48 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     placeholder="SAT September · Saturday"
                   />
                 </Field>
-                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this room. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[12px] leading-4 text-amber-800">{sectionsLocked ? "This room has no available sections and is fixed because a student has joined. Create a new room with an available section." : "This room’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[12px] leading-4 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
+                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this room. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[14px] leading-5 text-amber-800">{sectionsLocked ? "This room has no available sections and is fixed because a student has joined. Create a new room with an available section." : "This room’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[14px] leading-5 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
+                {isSat ? <GroupHeading id="access-link-group-audience" title="Who can join" /> : null}
+                <Field label={isSat ? "Audience" : "Who can join?"} description={audienceChoice === "listed" ? "Only students on the list below are admitted. Anyone else is turned away at check-in." : "Anyone who has the room link can check in. A student code identifies a student; it is not checked against a roster."}>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Choice active={audienceChoice === "anyone"} onClick={() => { const nextType = accessLinkAudienceTypeFor("anyone", audienceLabel); setAudienceType(nextType); updateShared({ audienceType: nextType }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Anyone with the link" subtitle="No roster check" />
+                    <Choice active={audienceChoice === "listed"} onClick={() => { setAudienceType("selected_students"); setAccessMode("student_code"); updateShared({ audienceType: "selected_students", accessMode: "student_code" }); }} icon={<LockKeyhole size={15} aria-hidden="true"/>} title="Listed students only" subtitle="Checked at check-in" />
                   </div>
-                </details>
+                </Field>
+                {audienceType === "selected_students" ? (
+                  <Field label="Listed students" description="Student code is required. Name and email are optional." error={rosterError} errorId="access-link-roster-error">
+                    <RosterRows
+                      source={membersSource}
+                      errors={rosterResult.errors}
+                      onChange={(next) => {
+                        setMembersSource(next);
+                        updateShared({ membersSource: next });
+                        if (rosterError) setRosterError(validateRoster(next));
+                      }}
+                      onBlur={() => setRosterError(validateRoster(membersSource))}
+                    />
+                    <p role="status" aria-live="polite" className="mt-2 text-[14px] font-medium text-slate-500">{rosterSummary}</p>
+                  </Field>
+                ) : null}
+                <Field label="Student identification" description={audienceChoice === "listed" ? "Listed students must enter their listed student code. It is checked at check-in." : "Choose how students identify themselves. This identifies a student; it does not verify them."}>
+                  <div className="authoring-segmented flex w-full rounded-xl p-1">
+                    <Segment active={accessMode === "student_code"} onClick={() => { setAccessMode("student_code"); updateShared({ accessMode: "student_code" }); }}>Require student code</Segment>
+                    <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
+                  </div>
+                </Field>
+                {isSat ? <GroupHeading id="access-link-group-checkin" title="Check-in settings" detail="Check-in decides whether students can enter. It never starts or pauses the exam." /> : null}
+                <Field label={isSat ? "Check-in window" : "Check-in"} description="Students can enter during this window. The proctor starts the exam.">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Choice active={availabilityType === "anytime"} onClick={() => { setAvailabilityType("anytime"); updateShared({ availabilityType: "anytime", opensAt: null, closesAt: null }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Open now" subtitle="Until paused or revoked" />
+                    <Choice active={availabilityType === "scheduled"} onClick={() => { setAvailabilityType("scheduled"); updateShared({ availabilityType: "scheduled" }); }} icon={<Clock3 size={15} aria-hidden="true"/>} title="Scheduled" subtitle="Choose when it opens" />
+                  </div>
+                  {availabilityType === "scheduled" ? <><div className="mt-2 grid grid-cols-2 gap-2"><label htmlFor="access-link-opens-at" className="text-[14px] font-medium text-slate-500">Opens<input id="access-link-opens-at" aria-label="Opens" type="datetime-local" value={opensAt} onChange={(event) => { setOpensAt(event.target.value); updateShared({ opensAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, event.target.value, closesAt)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label><label htmlFor="access-link-closes-at" className="text-[14px] font-medium text-slate-500">Closes<input id="access-link-closes-at" aria-label="Closes" type="datetime-local" value={closesAt} onChange={(event) => { setClosesAt(event.target.value); updateShared({ closesAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, opensAt, event.target.value)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label></div>{windowError ? <p id="access-link-window-error" role="alert" className="mt-1.5 text-[14px] font-medium text-au-danger-text">{windowError}</p> : null}</> : <div className="mt-2 rounded-xl bg-au-surface px-3 py-3 text-[14px] leading-5 text-slate-500">Students can check in until you pause or revoke this room’s link. Pausing check-in does not stop students who are already taking the exam.</div>}
+                  <p className="mt-2 text-[14px] leading-5 text-slate-500">{availabilityType === "scheduled" ? `Times use your local timezone (${localTimeZone()}). ` : ""}Opening check-in never starts the exam.</p>
+                </Field>
                 {isSat ? (
-                  <section aria-labelledby="access-link-summary-heading" className="rounded-xl bg-au-surface px-4 py-3">
+                  <section aria-labelledby="access-link-summary-heading" className="rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-faint)] px-4 py-3">
                     <h2 id="access-link-summary-heading" className="mb-2 text-sm font-semibold text-slate-950">Summary</h2>
-                    <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 text-[12px] leading-5">
+                    <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 text-[14px] leading-5">
                       <dt className="font-medium text-slate-500">Test</dt>
                       <dd className="text-slate-900">{summaryTest} · Version {summaryVersion}</dd>
                       <dt className="font-medium text-slate-500">Who can join</dt>
@@ -580,16 +573,16 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                       <dt className="font-medium text-slate-500">Check-in</dt>
                       <dd className="text-slate-900">{checkInSummary}</dd>
                     </dl>
-                    <p className="mt-3 text-[12px] leading-4 text-slate-600">The proctor starts the exam.</p>
+                    <p className="mt-3 text-[14px] leading-5 text-slate-600">The proctor starts the exam.</p>
                   </section>
                 ) : null}
               </div>
             </fieldset>
-            <footer className="border-t border-au-separator px-5 py-4 authoring-glass">
-              {error ? <p role="alert" className="mb-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[12px] font-medium text-au-danger-text">{error}</p> : null}
-              <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-press sat-press-fill min-h-11 rounded-xl px-4 text-sm font-semibold text-slate-600 hover:bg-au-fill">Cancel</button>{/* The primary action keeps its own box while pending (min-w covers the
+            <footer className="border-t border-[var(--sat-staff-border-hairline)] bg-white px-6 py-4">
+              {error ? <p role="alert" className="mb-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-tint)] px-3 py-2 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
+              <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-btn sat-btn--quiet sat-press">Cancel</button>{/* The primary action keeps its own box while pending (min-w covers the
                   longest label and the spinner) and stays enabled so the press is never
-                  cancelled by focus loss; the handler and aria-disabled own the guard. */}<button type="button" onClick={() => { if (props.isSaving) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError)} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-press sat-press-fill-accent flex min-h-11 min-w-[8.5rem] items-center justify-center gap-2 rounded-xl bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover disabled:opacity-45">{props.isSaving ? <span aria-hidden="true" className="sat-spinner block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white/40 border-t-white" /> : null}{props.isSaving ? "Saving…" : readOnly ? "View only" : props.link ? "Save changes" : "Create room"}</button></div>
+                  cancelled by focus loss; the handler and aria-disabled own the guard. */}<button type="button" onClick={() => { if (props.isSaving) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError)} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? "Saving…" : readOnly ? "View only" : props.link ? "Save changes" : "Create room"}</button></div>
             </footer>
       </SheetContent>
       <AuthoringConfirmDialog
@@ -649,15 +642,24 @@ function editorSnapshot(
   ]);
 }
 
-const inputClass = "h-11 w-full rounded-xl border border-au-separator bg-au-surface px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10";
-function Field({ label, description, error, errorId, children }: { label: string; description?: string; error?: string | null; errorId?: string; children: React.ReactNode }) { return <section><div className="mb-2"><h3 className="text-[12px] font-semibold text-slate-800">{label}</h3>{description ? <p className="mt-0.5 text-[12px] leading-4 text-slate-500">{description}</p> : null}</div>{children}{error ? <p id={errorId} role="alert" className="mt-1.5 text-[12px] font-medium text-au-danger-text">{error}</p> : null}</section>; }
-function Choice({ active, onClick, icon, title, subtitle }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string }) { return <button type="button" aria-pressed={active} onClick={onClick} className={`sat-press sat-press-fill min-h-[68px] rounded-xl border p-2.5 text-left ${active ? "border-au-accent/35 bg-au-accent-tint text-au-accent" : "border-au-separator bg-au-surface text-slate-600 hover:bg-au-fill"}`}><span className="flex items-center gap-1.5 text-[12px] font-semibold"><span aria-hidden="true">{icon}</span>{title}</span><span className="mt-1 block text-[12px] font-medium text-slate-500">{subtitle}</span></button>; }
+const inputClass = "sat-input";
+/** One of the three setup groups (Room details · Who can join · Check-in settings). */
+function GroupHeading({ id, title, detail }: { id: string; title: string; detail?: string }) {
+  return (
+    <div className="border-t border-[var(--sat-staff-border-hairline)] pt-5 first:border-t-0 first:pt-0">
+      <h2 id={id} className="text-[16px] font-semibold leading-6 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
+      {detail ? <p className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{detail}</p> : null}
+    </div>
+  );
+}
+function Field({ label, description, error, errorId, children }: { label: string; description?: string; error?: string | null; errorId?: string; children: React.ReactNode }) { return <section><div className="mb-2"><h3 className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">{label}</h3>{description ? <p className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p> : null}</div>{children}{error ? <p id={errorId} role="alert" className="mt-1.5 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}</section>; }
+function Choice({ active, onClick, icon, title, subtitle }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string }) { return <button type="button" aria-pressed={active} onClick={onClick} className={`sat-press sat-press-fill min-h-[72px] rounded-[var(--sat-staff-radius-control,10px)] border p-3 text-left ${active ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)] text-[var(--sat-staff-text-primary,#1d1d1f)]" : "border-[var(--sat-staff-border-strong)] bg-white text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-faint)]"}`}><span className="flex items-center gap-1.5 text-[14px] font-semibold leading-5"><span aria-hidden="true" className={active ? "text-[var(--sat-staff-accent,#0071e3)]" : "text-[var(--sat-staff-text-tertiary,#6e6e73)]"}>{icon}</span>{title}</span><span className="mt-1 block text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{subtitle}</span></button>; }
 /**
  * One section toggle. A locked toggle stays visible (so the scope is legible)
  * but disabled, mirroring how a revoked link's editor is presented.
  */
 function SectionToggle({ label, active, locked, onToggle }: { label: string; active: boolean; locked: boolean; onToggle: () => void }) {
-  return <button type="button" aria-pressed={active} disabled={locked} onClick={onToggle} className={`sat-press sat-press-fill flex min-h-11 items-center justify-between rounded-xl border px-3 text-left text-[12px] font-semibold ${active ? "border-au-accent/35 bg-au-accent-tint text-au-accent" : "border-au-separator bg-au-surface text-slate-600 hover:bg-au-fill"} disabled:opacity-45`}><span>{label}</span><span aria-hidden="true">{active ? "On" : "Off"}</span></button>;
+  return <button type="button" aria-pressed={active} disabled={locked} onClick={onToggle} className={`sat-press sat-press-fill flex min-h-11 items-center justify-between rounded-[var(--sat-staff-radius-control,10px)] border px-3 text-left text-[14px] font-semibold ${active ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)] text-[var(--sat-staff-text-primary,#1d1d1f)]" : "border-[var(--sat-staff-border-strong)] bg-white text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)]"} disabled:opacity-45`}><span>{label}</span><span aria-hidden="true" className={active ? "text-[var(--sat-staff-accent,#0071e3)]" : undefined}>{active ? "On" : "Off"}</span></button>;
 }
 
 /** The one-line consequence of the current selection, including the score rule. */
@@ -674,7 +676,7 @@ function sectionLabels(selection: readonly AccessLinkSectionKey[]): string {
   return ACCESS_LINK_SECTION_KEYS.filter((key) => selection.includes(key)).map((key) => ACCESS_LINK_SECTION_LABELS[key]).join(" and ");
 }
 
-function Segment({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" disabled={disabled} aria-pressed={active} onClick={onClick} className={`sat-press sat-press-fill flex min-h-11 flex-1 items-center justify-center rounded-lg px-2 text-[12px] font-semibold ${active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"} disabled:opacity-35`}>{children}</button>; }
+function Segment({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" disabled={disabled} aria-pressed={active} onClick={onClick} className={`sat-press sat-press-fill flex min-h-11 flex-1 items-center justify-center rounded-lg px-2 text-[14px] font-semibold ${active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"} disabled:opacity-35`}>{children}</button>; }
 
 const ROSTER_COLUMNS = ["Student code", "Name", "Email"] as const;
 
@@ -709,7 +711,7 @@ function RosterRows({ source, errors, onChange, onBlur }: { source: string; erro
   };
   return (
     <div>
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.4fr)_2.75rem] gap-x-1.5 px-0.5 pb-1 text-[11px] font-semibold text-slate-500" aria-hidden="true">
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.4fr)_2.75rem] gap-x-1.5 px-0.5 pb-1 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]" aria-hidden="true">
         {ROSTER_COLUMNS.map((label) => <span key={label}>{label}</span>)}
         <span />
       </div>
@@ -738,19 +740,19 @@ function RosterRows({ source, errors, onChange, onBlur }: { source: string; erro
                       event.preventDefault();
                       appendLines(rosterLinesFromPaste(text), lines[rowIndex]?.trim() ? rowIndex + 1 : rowIndex);
                     }}
-                    className={`${inputClass} px-2 text-[13px] ${error ? "border-au-danger-text/60" : ""}`}
+                    className={`${inputClass} px-2`}
                   />
                 ))}
                 <button
                   type="button"
                   aria-label={`Remove row ${rowIndex + 1}`}
                   onClick={() => write(lines.length === 1 ? [""] : lines.filter((_, index) => index !== rowIndex))}
-                  className="authoring-icon-button flex h-11 w-11 items-center justify-center"
+                  className="sat-btn sat-btn--quiet sat-btn--icon sat-press"
                 >
                   <X size={15} aria-hidden="true" />
                 </button>
               </div>
-              {error ? <p id={errorId} className="mt-1 text-[12px] font-medium text-au-danger-text">Row {rowIndex + 1}: {error}</p> : null}
+              {error ? <p id={errorId} className="mt-1 text-[14px] font-medium text-[var(--sat-staff-danger,#b42318)]">Row {rowIndex + 1}: {error}</p> : null}
             </li>
           );
         })}
@@ -762,7 +764,7 @@ function RosterRows({ source, errors, onChange, onBlur }: { source: string; erro
             write(lines[lines.length - 1]?.trim() ? [...lines, ""] : lines);
             focusRow(lines[lines.length - 1]?.trim() ? lines.length : lines.length - 1);
           }}
-          className="sat-press sat-press-fill flex min-h-11 items-center rounded-lg bg-au-fill px-3 text-[12px] font-semibold text-slate-600 hover:bg-au-fill-strong"
+          className="sat-btn sat-btn--secondary sat-press"
         >
           Add student
         </button>
@@ -770,7 +772,7 @@ function RosterRows({ source, errors, onChange, onBlur }: { source: string; erro
           type="button"
           aria-expanded={pasteOpen}
           onClick={() => setPasteOpen((open) => !open)}
-          className="sat-press sat-press-fill flex min-h-11 items-center rounded-lg px-3 text-[12px] font-semibold text-slate-500 hover:bg-au-fill"
+          className="sat-btn sat-btn--quiet sat-press"
         >
           Paste a list
         </button>
@@ -782,7 +784,7 @@ function RosterRows({ source, errors, onChange, onBlur }: { source: string; erro
             value={pasteText}
             onChange={(event) => setPasteText(event.target.value)}
             spellCheck={false}
-            className="min-h-24 w-full resize-y rounded-xl border border-au-separator bg-au-surface px-3 py-2.5 font-mono text-[12px] leading-5 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
+            className="sat-input min-h-24 resize-y font-mono"
             placeholder={"W123456, Jane Doe, jane@example.com\nor paste columns from a spreadsheet"}
           />
           <button
@@ -793,7 +795,7 @@ function RosterRows({ source, errors, onChange, onBlur }: { source: string; erro
               setPasteText("");
               setPasteOpen(false);
             }}
-            className="sat-press sat-press-fill mt-1 flex min-h-11 items-center rounded-lg bg-au-fill px-3 text-[12px] font-semibold text-slate-600 hover:bg-au-fill-strong disabled:opacity-45"
+            className="sat-btn sat-btn--secondary sat-press mt-1"
           >
             Add these students
           </button>

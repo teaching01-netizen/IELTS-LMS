@@ -6,9 +6,7 @@ import type { AssessmentValidationIssue } from "../../contracts/assessment";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
 import { CollaborationHeaderCluster } from "../collaboration/CollaborationHeaderCluster";
 import { ExamPublishSheet } from "../publish/ExamPublishSheet";
-import { SectionHeading } from "../release/releaseChrome";
 import { parseIssueLink } from "../release/releaseSelectors";
-import { releaseSurfaceClass } from "../release/releaseUi";
 import { ExamWorkspaceHeader } from "../shell/ExamWorkspaceHeader";
 import { deliveryDestination, examWorkspacePath, type ExamWorkspaceTab } from "../shell/examLifecycle";
 import { useExamWorkspaceChrome } from "../shell/useExamWorkspaceChrome";
@@ -55,7 +53,7 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
   };
 
   return (
-    <div className="sat-product min-h-screen bg-background text-foreground">
+    <div className="sat-product min-h-screen bg-[var(--sat-staff-canvas,#f7f7f8)] text-foreground">
       <ExamWorkspaceHeader
         examTitle={exam.title}
         lifecycle={chrome.lifecycle}
@@ -69,24 +67,23 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
         {...(chrome.canCreateSession ? { onCreateSession: () => go(deliveryDestination(exam.id)) } : {})}
         publishDisabledReason={dirtyCount > 0 ? "Save your timing changes before publishing" : null}
       />
-      <main className="mx-auto w-full max-w-[920px] space-y-6 px-4 pb-20 pt-8 sm:px-6">
-        <section className={`${releaseSurfaceClass} p-5 sm:p-6`} aria-labelledby="exam-settings-delivery">
-          <SectionHeading
-            eyebrow="Delivery plan"
-            title="Timing & adaptive routing"
-            description="Set how long each module runs, the break between sections, and how many correct answers in the base module send a candidate to the higher branch. Each section saves on its own, and “Saved” appears only after the server confirms it."
-          />
-          <div className="mt-6">
-            <DeliverySettingsPanel
-              exam={exam}
-              showRuntimePolicy
-              onDirtyCountChange={setDirtyCount}
-              onEditExam={() => {
-                requestAuthoringDraftOnEntry(exam.id);
-                go(examWorkspacePath(exam.id, "questions"));
-              }}
-            />
+      <main className="mx-auto w-full max-w-[920px] px-4 pb-20 pt-8 sm:px-6">
+        <section aria-labelledby="exam-settings-delivery">
+          <div className="mb-6">
+            <h2 id="exam-settings-delivery" className="text-[length:var(--sat-staff-type-title-size,28px)] font-semibold leading-[var(--sat-staff-type-title-line,34px)] tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">Settings</h2>
+            <p className="mt-2 max-w-2xl text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+              Module timing, the break between sections, and the adaptive routing threshold. Each section saves on its own; “Saved” appears only after the server confirms it.
+            </p>
           </div>
+          <DeliverySettingsPanel
+            exam={exam}
+            showRuntimePolicy
+            onDirtyCountChange={setDirtyCount}
+            onEditExam={() => {
+              requestAuthoringDraftOnEntry(exam.id);
+              go(examWorkspacePath(exam.id, "questions"));
+            }}
+          />
         </section>
       </main>
 

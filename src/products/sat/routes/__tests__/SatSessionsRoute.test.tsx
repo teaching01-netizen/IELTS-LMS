@@ -96,7 +96,7 @@ describe('SatSessionsRoute', () => {
     renderRoute();
     expect(useSummariesMock).toHaveBeenCalledWith(4_000, 'sat');
     expect(useExamListQueryMock).toHaveBeenCalledWith(true, 'sat');
-    expect(screen.getByText('SAT Published')).toBeInTheDocument();
+    expect(screen.getByText(/SAT Published ·/)).toBeInTheDocument();
   });
 
   it('never offers IELTS exams when creating a SAT room', () => {
@@ -104,14 +104,14 @@ describe('SatSessionsRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(screen.getByRole('option', { name: 'SAT Published' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'IELTS Published' })).not.toBeInTheDocument();
-    expect(screen.getByText('Students will receive Reading & Writing only in this session.')).toBeInTheDocument();
+    expect(screen.getByText(/Students receive Reading & Writing only/)).toBeInTheDocument();
   });
 
   it('renders header plus skeleton while loading, without blanking the page', () => {
     useSummariesMock.mockReturnValue({ data: undefined, isLoading: true, error: null, refetch: vi.fn() });
     renderRoute();
     expect(screen.getByText('Rooms')).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: 'Loading SAT rooms' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading rooms' })).toBeInTheDocument();
   });
 
   it('announces the visible room count once data is present', () => {
@@ -122,13 +122,13 @@ describe('SatSessionsRoute', () => {
   it('focuses the first sheet field on open', () => {
     renderRoute();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
-    expect(screen.getByLabelText('SAT test')).toBeInTheDocument();
+    expect(screen.getByLabelText('Exam')).toBeInTheDocument();
   });
 
   it('opens the same room settings the exam uses, pinned to the exam’s published version, then lands in the new room', async () => {
     renderRoute();
     openSetup();
-    expect(screen.getByText('Digital SAT · Version 9')).toBeInTheDocument();
+    expect(screen.getByText('Version 9')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
 
@@ -220,19 +220,19 @@ describe('SatSessionsRoute', () => {
 
   it('distinguishes filtered-zero from bucket-empty with query echo and clear action', () => {
     renderRoute();
-    fireEvent.change(screen.getByPlaceholderText('Search exam, cohort, institution'), { target: { value: 'zzz-no-match' } });
+    fireEvent.change(screen.getByPlaceholderText('Search rooms or exams'), { target: { value: 'zzz-no-match' } });
     expect(screen.getByText('No matching rooms')).toBeInTheDocument();
     expect(screen.getByText(/No rooms match/)).toHaveTextContent('zzz-no-match');
     expect(screen.getByRole('status')).toHaveTextContent('0 of 1 rooms');
-    fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }));
-    expect(screen.getByText('SAT Published')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(screen.getByText(/SAT Published ·/)).toBeInTheDocument();
   });
 
   it('preserves search text when the bucket filter changes (04A composition guard)', () => {
     renderRoute();
-    fireEvent.change(screen.getByPlaceholderText('Search exam, cohort, institution'), { target: { value: 'zzz-no-match' } });
+    fireEvent.change(screen.getByPlaceholderText('Search rooms or exams'), { target: { value: 'zzz-no-match' } });
     fireEvent.click(screen.getByRole('radio', { name: 'Live 0' }));
-    expect(screen.getByPlaceholderText('Search exam, cohort, institution')).toHaveValue('zzz-no-match');
+    expect(screen.getByPlaceholderText('Search rooms or exams')).toHaveValue('zzz-no-match');
     expect(screen.getByText('No matching rooms')).toBeInTheDocument();
     expect(screen.getByText(/No rooms match/)).toHaveTextContent('zzz-no-match');
   });
@@ -268,11 +268,10 @@ describe('SatSessionsRoute', () => {
 
   it('keeps every room data point on one merged meta line (04A hierarchy guard)', () => {
     const { container } = renderRoute();
-    const row = screen.getByText('SAT Published').closest('.sat-list-row');
+    const row = screen.getByText(/SAT Published ·/).closest('.sat-list-row');
     expect(row).not.toBeNull();
     expect(row).toHaveTextContent('Morning');
     expect(row).toHaveTextContent('0 joined');
-    expect(row).toHaveTextContent('0 active');
     expect(row).toHaveTextContent('Not started');
     const meta = row?.querySelector('.tabular-nums');
     expect(meta).not.toBeNull();

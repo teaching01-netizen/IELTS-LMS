@@ -157,6 +157,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
         tab === "questions" ? openBuilder(exam.id) : navigate(examWorkspacePath(exam.id, tab))
       }
       onBackToExams={() => navigate(inSatWorkspace ? satListReturnTarget("/sat/exams").to : "/admin/exams")}
+      onRetryLoad={() => { void releaseQuery.refetch(); }}
       onRefreshReadiness={() => readinessQuery.refetch()}
       onPublish={handlePublish}
       onIssueClick={handleIssue}

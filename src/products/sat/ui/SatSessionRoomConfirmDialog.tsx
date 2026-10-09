@@ -21,10 +21,12 @@ export function SatSessionRoomConfirmDialog({
 }) {
   if (!confirm) return null;
 
+  // Every confirmation names who is affected (the whole room or one student)
+  // and what actually happens, so room and student actions cannot be confused.
   const title = confirm.kind === 'start'
     ? 'Start the exam for this room?'
     : confirm.kind === 'complete'
-    ? 'End this SAT room?'
+    ? 'End the exam for everyone in this room?'
     : confirm.kind === 'terminate'
       ? `End ${confirm.studentName}’s attempt?`
       : confirm.kind === 'warn'
@@ -35,14 +37,14 @@ export function SatSessionRoomConfirmDialog({
   const description = confirm.kind === 'start'
     ? `${confirm.joinedCount} joined${confirm.readyCount === null ? '' : ` · ${confirm.readyCount} ready`}. ${confirm.sectionsLabel} begins for students who have joined. ${confirm.perCandidateTiming === null ? 'Timing is shown in the run sheet once the exam starts.' : confirm.perCandidateTiming ? 'Each student receives the full configured time; late arrivals start their own clock.' : 'Students share the room clock; late arrivals receive the time left in the current window.'} Starting cannot be undone.`
     : confirm.kind === 'complete'
-    ? 'The room will be completed for the cohort. This should only be used when testing is finished.'
+    ? 'Affects every student in this room. The exam is completed for the whole room. Use this only when testing is finished; it cannot be undone.'
     : confirm.kind === 'terminate'
-      ? 'This ends the student’s current attempt. Their recorded answers remain available.'
+      ? `Affects only ${confirm.studentName}. Their current attempt ends now and their recorded answers remain available. Other students are not affected.`
       : confirm.kind === 'warn'
-        ? `The student will see exactly: “${SAT_SESSION_WARN_MESSAGE}”`
+        ? `Only ${confirm.studentName} sees this message: “${SAT_SESSION_WARN_MESSAGE}”`
         : confirm.kind === 'extend-session'
-          ? `Current stage remaining: ${confirm.remainingLabel}. The extension applies to the current stage immediately.`
-          : `Current remaining: ${confirm.remainingLabel}. The extension applies to this attempt immediately.`;
+          ? `Affects every student in this room. Current stage remaining: ${confirm.remainingLabel}. The extension applies to the current stage immediately.`
+          : `Affects only ${confirm.studentName}. Their remaining time: ${confirm.remainingLabel}. The extension applies to this attempt immediately.`;
 
   return (
     <SatConfirmDialog
@@ -52,7 +54,7 @@ export function SatSessionRoomConfirmDialog({
       confirmLabel={confirm.kind === 'start'
         ? 'Start exam'
         : confirm.kind === 'complete'
-        ? 'End room'
+        ? 'End exam'
         : confirm.kind === 'terminate'
           ? 'End attempt'
           : confirm.kind === 'warn'

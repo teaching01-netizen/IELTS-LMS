@@ -49,9 +49,9 @@ export function NumericField({
   };
 
   return (
-    <label htmlFor={id} className="block text-xs font-medium text-muted-foreground">
-      <span className="mb-1.5 block">{label}</span>
-      <span className="mt-1.5 flex min-h-11 items-center rounded-xl border border-border bg-card px-3 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/15">
+    <label htmlFor={id} className="block text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">
+      <span className="block">{label}</span>
+      <span className="sat-input-shell mt-1.5 flex min-h-11 items-center rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-control)] bg-white px-3 focus-within:border-[var(--sat-staff-accent,#0071e3)] focus-within:ring-[3px] focus-within:ring-[var(--sat-staff-accent-ring)] has-[:disabled]:bg-[var(--sat-staff-fill-faint)]">
         <input
           id={id}
           type="number"
@@ -71,9 +71,9 @@ export function NumericField({
             onChange(Math.min(max, Math.max(floor, Math.floor(parsed))));
           }}
           onBlur={(event) => commit(event.target.value)}
-          className="min-w-0 flex-1 bg-transparent py-2 text-sm font-semibold text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-w-0 flex-1 bg-transparent py-2 text-[16px] font-semibold leading-6 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)] outline-none disabled:cursor-not-allowed disabled:text-[var(--sat-staff-text-secondary,#515154)]"
         />
-        <span id={hintId} className="shrink-0 text-xs tabular-nums text-muted-foreground">
+        <span id={hintId} className="shrink-0 text-[14px] font-normal tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">
           {floor}–{max} {suffix}
         </span>
       </span>

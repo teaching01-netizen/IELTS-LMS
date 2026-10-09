@@ -173,7 +173,7 @@ describe("ExamSettingsPage", () => {
 
   it("explains read-only delivery settings and disables saving", () => {
     renderPage({ ...exam, canEdit: false });
-    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save section" })).toBeDisabled();
     expect(
       screen.getAllByText(/do not have permission to edit delivery settings/).length,
     ).toBeGreaterThanOrEqual(1);
@@ -182,7 +182,7 @@ describe("ExamSettingsPage", () => {
   it("protects unsaved timing when changing tabs, and leaves on confirmation", () => {
     renderPage();
     fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
-    expect(screen.getByRole("button", { name: "Publish version" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish version" })).toHaveAttribute("aria-disabled", "true");
 
     fireEvent.click(within(screen.getByRole("navigation", { name: "Exam sections" })).getByRole("button", { name: "Questions" }));
     expect(screen.getByRole("alertdialog", { name: "Leave with unsaved changes?" })).toBeInTheDocument();
@@ -226,7 +226,7 @@ describe("ExamSettingsPage", () => {
     mocks.lifecycleState = { kind: "error", error: new Error("Server unavailable") } satisfies AuthoringShellState;
     renderPage();
     expect(screen.getByRole("alert")).toHaveTextContent("Server unavailable");
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mocks.refetch).toHaveBeenCalledOnce();
   });
 });

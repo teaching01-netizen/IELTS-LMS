@@ -14,13 +14,6 @@ describe('SAT contrast tokens (Phase 01)', () => {
     expect(CSS).toMatch(/--sat-staff-neutral-dot:\s*#6e6e73/);
   });
 
-  it('keeps the search-clear target at 28px on both axes', () => {
-    const rule = CSS.match(/\.sat-product\s+\.sat-search-clear\s*\{([^}]*)\}/)?.[1];
-    expect(rule).toBeDefined();
-    expect(rule).toMatch(/min-block-size:\s*28px\s*!important/);
-    expect(rule).toMatch(/min-inline-size:\s*28px\s*!important/);
-  });
-
   it('uses text-slate-400 (tertiary remap) on every chevron slot', () => {
     // SatResultsRoute.tsx renders rows via SatExamGroupSection.tsx (group-by-exam
     // drill-down): the route owns composition, chevrons live in the section file.

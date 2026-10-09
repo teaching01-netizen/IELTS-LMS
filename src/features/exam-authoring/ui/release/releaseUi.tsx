@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
 
 /**
- * Single card surface for the release page — same geometry as the SAT staff
- * cards (`SatPage` rows/cards) and the spine `spine-card`: 16px radius,
- * hairline border, one ambient shadow. No rounded-[18px]/[24px] one-offs.
- * The release page renders under `.sat-product`, so `border-black/[0.06]`
- * resolves to the same hairline as the list pages.
+ * Single card surface for the release and settings pages — the staff grouped
+ * surface: 14px radius, one hairline, flat (elevation is for overlays only).
  */
 export const releaseSurfaceClass =
-  "rounded-2xl border border-black/[0.06] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]";
+  "rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-surface-solid-fallback,#fff)]";
 
 /** Single disabled-button treatment (replaces slate-200/muted mix). */
 export const releaseDisabledButtonClass =

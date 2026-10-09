@@ -1464,7 +1464,7 @@
 }
 
 .sat-staff-root .sat-spine__tab.is-selected {
-  background: #ecf5ff;
+  background: var(--sat-staff-accent-tint, rgba(0, 113, 227, 0.08));
 }
 
 .sat-staff-root .sat-spine__save-footer {

@@ -71,27 +71,12 @@ const student = {
  */
 const resolvedRoomClock = { serverNow: runtime.serverNow, receivedAt: 0 };
 
-function useTabletMediaQuery() {
-  const previous = Object.getOwnPropertyDescriptor(window, 'matchMedia');
-  const mediaQuery = {
-    matches: true,
-    media: '(min-width: 1024px) and (max-width: 1439px)',
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(() => true),
-  };
-  Object.defineProperty(window, 'matchMedia', {
-    configurable: true,
-    value: vi.fn(() => mediaQuery),
+/** The room measures its own width (sidebar and zoom already applied); 1000px is below the 1280px needed to dock the inspector. */
+function mockMeasuredRoomWidth(width: number) {
+  const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    width, height: 800, top: 0, left: 0, right: width, bottom: 800, x: 0, y: 0, toJSON: () => ({}),
   });
-
-  return () => {
-    if (previous) Object.defineProperty(window, 'matchMedia', previous);
-    else Reflect.deleteProperty(window, 'matchMedia');
-  };
+  return () => spy.mockRestore();
 }
 
 function TestSessionsProbe() {
@@ -142,7 +127,8 @@ describe('SatSessionRoomRoute', () => {
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     expect(controllerMock).toHaveBeenCalledWith({ providerKey: 'sat', initialScheduleId: 'sched-1' });
     expect(document.querySelector('.sat-room')).toHaveAttribute('data-sat-room-mode', 'live');
-    expect(screen.getByText('Morning · Reading & Writing only')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Morning' })).toBeInTheDocument();
+    expect(screen.getByText('Practice Test 06 · Reading & Writing only')).toBeInTheDocument();
     // The runtime section label is what the room shows as the current stage.
     expect(screen.getAllByText('Reading & Writing')).toHaveLength(1);
     expect(screen.getByText('Section remaining')).toBeInTheDocument();
@@ -294,13 +280,13 @@ describe('SatSessionRoomRoute', () => {
       prestartController({ runtimeSnapshots: [finished] });
       roleMock.role = 'admin';
       const { unmount } = renderRoom();
-      expect(screen.getByRole('button', { name: 'View results' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'View responses' })).toBeInTheDocument();
       unmount();
 
       // Proctors cannot open the test's Results tab, so they get the global, filtered Results page.
       roleMock.role = 'proctor';
       renderRoom();
-      expect(screen.getByRole('button', { name: 'View results' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'View responses' })).toBeInTheDocument();
     });
   });
 
@@ -372,8 +358,7 @@ describe('SatSessionRoomRoute', () => {
       () => new Promise((resolve) => { releaseExtend = resolve; }),
     );
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Student actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add 5 minutes…' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes for Ananda S.?');
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Add 5 minutes' }));
     expect(screen.getByRole('button', { name: 'Pause exam' })).toBeEnabled();
@@ -411,8 +396,8 @@ describe('SatSessionRoomRoute', () => {
     expect(screen.getByRole('heading', { name: 'Budi T.' })).toBeInTheDocument();
   });
 
-  it('opens the tablet inspector as a modal and restores focus to its roster trigger', async () => {
-    const restoreMediaQuery = useTabletMediaQuery();
+  it('opens the inspector as a modal when the room is too narrow to dock it, and restores focus to its roster trigger', async () => {
+    const restoreMediaQuery = mockMeasuredRoomWidth(1000);
     const view = render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     try {
       const row = screen.getByRole('option', { name: 'Open Ananda S.' });
@@ -449,8 +434,7 @@ describe('SatSessionRoomRoute', () => {
     const { examDeliveryService } = await import('../../../../features/proctor/infrastructure/proctorGateway');
     (examDeliveryService.warnStudent as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Student actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Send warning…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send warning…' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Send warning to Ananda S.?');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Please return your attention to the exam.');
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Send warning' }));
@@ -462,8 +446,7 @@ describe('SatSessionRoomRoute', () => {
     const { examDeliveryService } = await import('../../../../features/proctor/infrastructure/proctorGateway');
     (examDeliveryService.extendStudentAttempt as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Student actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add 5 minutes…' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes for Ananda S.?');
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Add 5 minutes' }));
     expect(await screen.findByText(/Added 5 minutes for Ananda S/)).toBeInTheDocument();
@@ -591,8 +574,7 @@ describe('SatSessionRoomRoute', () => {
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Student actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'End attempt…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'End attempt…' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('End Ananda S.’s attempt?');
     fireEvent.click(screen.getByRole('option', { name: 'Open Budi T.' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('End Ananda S.’s attempt?');
@@ -613,8 +595,7 @@ describe('SatSessionRoomRoute', () => {
     controllerMock.mockReset();
     controllerMock.mockReturnValue(base);
     const { rerender } = render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Student actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'End attempt…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'End attempt…' }));
     controllerMock.mockReturnValue({ ...base, sessions: [second] });
     rerender(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'End attempt' }));
@@ -689,9 +670,8 @@ describe('SatSessionRoomRoute', () => {
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Student actions' }));
-    expect(screen.getByRole('menuitem', { name: 'Add 5 minutes…' })).toBeDisabled();
-    expect(screen.getByRole('menuitem', { name: 'End attempt…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add 5 minutes…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'End attempt…' })).toBeDisabled();
   });
 
   it('keeps banners on the entrance hook and confirms extend-room success copy', async () => {
@@ -704,7 +684,7 @@ describe('SatSessionRoomRoute', () => {
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Add time' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes for the room' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes to Reading & Writing?');
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Add 5 minutes' }));
     expect(await screen.findByText('Added 5 minutes to Reading & Writing.')).toBeInTheDocument();
@@ -718,7 +698,7 @@ describe('SatSessionRoomRoute', () => {
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Add time' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes for the room' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Refresh the room before adding time.');
     expect(examDeliveryService.extendCurrentSection).not.toHaveBeenCalled();

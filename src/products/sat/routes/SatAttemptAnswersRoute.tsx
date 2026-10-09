@@ -1,10 +1,10 @@
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useSatAttemptAnswersQuery } from '../../../features/results/api/satResultsQueries';
 import { QuestionRawTable } from '../../../components/results/QuestionRawTable';
-import { SatPageError, SatPageLoading, SatSectionCard } from '../ui/SatPage';
+import { SatButton, SatPageError, SatPageLoading, SatSectionCard, type SatStatusTone } from '../ui/SatPage';
+import { SatAttemptDetailHeader } from '../ui/SatAttemptDetailHeader';
 import { isExamResponsesPath } from './satReturnPath';
-import { formatTestTimeLine, viewerTimeZoneLabel } from './satTestTime';
 
 function formatSavedAt(value: string | null): string {
   if (!value) return 'No server save yet';
@@ -12,15 +12,16 @@ function formatSavedAt(value: string | null): string {
   return Number.isNaN(date.getTime()) ? 'Save time unavailable' : date.toLocaleString();
 }
 
-function statusLabel(status: string): string {
+function statusFor(status: string): { label: string; tone: SatStatusTone } {
   switch (status) {
-    case 'running': return 'In progress';
+    case 'running': return { label: 'In progress', tone: 'live' };
+    case 'paused': return { label: 'Paused', tone: 'paused' };
     case 'submitted':
-    case 'pending': return 'Completed';
+    case 'pending': return { label: 'Completed', tone: 'ready' };
     case 'terminated':
-    case 'invalidated_proctor': return 'Ended by proctor · not scored';
-    case 'invalidated_timeout': return 'Time expired · not scored';
-    default: return status.replaceAll('_', ' ') || 'Status unavailable';
+    case 'invalidated_proctor': return { label: 'Ended by proctor · not scored', tone: 'invalidated' };
+    case 'invalidated_timeout': return { label: 'Time expired · not scored', tone: 'invalidated' };
+    default: return { label: status.replaceAll('_', ' ') || 'Status unavailable', tone: 'neutral' };
   }
 }
 
@@ -51,7 +52,7 @@ export interface SatAttemptAnswersContentProps {
 export function SatAttemptAnswersContent({ attemptId, onBack, embedded = false }: SatAttemptAnswersContentProps) {
   const query = useSatAttemptAnswersQuery(attemptId);
 
-  if (query.isLoading) return <SatPageLoading label="Opening saved SAT answers…" />;
+  if (query.isLoading) return <SatPageLoading label="Opening saved answers…" />;
   if (!query.data) {
     return <SatPageError title="Saved answers could not load" description="The server could not load this attempt. Retry to check its saved answers." retryLabel="Retry" onRetry={() => void query.refetch()} />;
   }
@@ -62,31 +63,37 @@ export function SatAttemptAnswersContent({ attemptId, onBack, embedded = false }
     section.push(question);
     questionsBySection.set(question.sectionKey, section);
   }
-  const Title = embedded ? 'h2' : 'h1';
+  const saveEvidence = (
+    <div className="rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-white px-5 py-4">
+      <p className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Saved on the server</p>
+      <p className="mt-1 text-[24px] font-semibold leading-8 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]">{detail.savedAnswerCount} {detail.savedAnswerCount === 1 ? 'answer' : 'answers'}</p>
+      <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Last save: {formatSavedAt(detail.lastSavedAt)}{detail.responseRevision !== null ? ` · Revision ${detail.responseRevision}` : ' · Legacy attempt'}</p>
+      <p className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Only answers accepted by the server appear here. A score is not available for this attempt.</p>
+      <p role="status" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{query.isFetching ? 'Checking for newer answers…' : `Checks every 15 seconds while visible${query.dataUpdatedAt ? ` · Last checked ${new Date(query.dataUpdatedAt).toLocaleTimeString()}` : ''}`}</p>
+      {query.error ? <p className="mt-2 text-[14px] font-medium leading-5 text-[var(--sat-staff-warning-text,#92400e)]" role="alert">Could not check for newer answers. Showing the last successful check; try again or wait for the next check.</p> : null}
+      <SatButton variant="secondary" onClick={() => void query.refetch()} pending={query.isFetching} icon={<RefreshCw size={16} aria-hidden="true" />} className="mt-3">{query.isFetching ? 'Checking…' : 'Check now'}</SatButton>
+    </div>
+  );
   return (
-    <div className={embedded ? 'w-full pb-8' : 'mx-auto w-full max-w-[900px] px-4 pb-16 pt-6 sm:px-6 md:pt-9 lg:px-10'}>
-      {embedded ? (onBack ? <button type="button" onClick={onBack} className="-ml-2 flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[14px] font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"><ArrowLeft size={15} aria-hidden="true" />Back to result</button> : null) : <button type="button" onClick={onBack} aria-label="Back to SAT results" className="-ml-2 flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[14px] font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"><ArrowLeft size={15} aria-hidden="true" />Results</button>}
-      <header className={(embedded ? '' : 'mt-5 ') + 'border-b border-slate-200 pb-6'}>
-        <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{detail.examTitle} · Version {detail.versionNumber}</p>
-        <Title className="mt-2 text-[30px] font-semibold tracking-tight text-slate-950">{detail.studentName}</Title>
-        <p className="mt-1 text-[14px] text-slate-600">{detail.studentId} · {detail.cohortName} · {statusLabel(detail.status)}</p>
-        <p className="mt-3 text-[15px] font-semibold tabular-nums text-slate-900">Test started: {formatTestTimeLine(detail.testStartedAt)}</p>
-        <p className="mt-1 text-[14px] tabular-nums text-slate-600">Submitted: {detail.submittedAt ? formatTestTimeLine(detail.submittedAt) : 'Not submitted'} · Times shown in {viewerTimeZoneLabel()}</p>
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
-          <div>
-            <p className="text-[14px] font-semibold text-slate-900">{detail.savedAnswerCount} server-saved answers</p>
-            <p className="mt-1 text-[14px] text-slate-600">Last save: {formatSavedAt(detail.lastSavedAt)}{detail.responseRevision !== null ? ` · Revision ${detail.responseRevision}` : ' · Legacy attempt'}</p>
-            <p className="mt-1 text-sm text-slate-500">Only answers accepted by the server appear here. A score is not available for this attempt.</p>
-            <p className="mt-1 text-sm text-slate-500" role="status">{query.isFetching ? 'Checking for newer answers…' : `Checks automatically every 15 seconds while visible${query.dataUpdatedAt ? ` · Last checked ${new Date(query.dataUpdatedAt).toLocaleTimeString()}` : ''}`}</p>
-            {query.error ? <p className="mt-2 text-[14px] font-medium text-amber-700" role="alert">Could not check for newer answers. Showing the last successful check; try again or wait for the next check.</p> : null}
-          </div>
-          <button type="button" onClick={() => void query.refetch()} disabled={query.isFetching} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 text-[14px] font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-50"><RefreshCw size={14} aria-hidden="true" />{query.isFetching ? 'Checking…' : 'Check now'}</button>
-        </div>
-      </header>
-      <section aria-labelledby="saved-answers-heading" className="border-t border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] py-7">
-        <h2 id="saved-answers-heading" className="text-[18px] font-semibold tracking-[-0.025em]">Question-level responses ({detail.questions.length})</h2>
-        {detail.questions.length === 0 ? <p className="mt-3 text-[14px] text-slate-500">No administered questions are available for this attempt.</p> : (
-          <div className="mt-4 space-y-8">
+    <div className={embedded ? 'w-full pb-8' : 'mx-auto w-full max-w-[920px] px-4 pb-16 pt-6 sm:px-6 md:pt-8'}>
+      <SatAttemptDetailHeader
+        embedded={embedded}
+        backLabel={embedded ? (onBack ? 'Back to result' : undefined) : 'Back to Responses'}
+        onBack={onBack}
+        examTitle={detail.examTitle}
+        versionNumber={detail.versionNumber}
+        studentName={detail.studentName}
+        studentId={detail.studentId}
+        cohortName={detail.cohortName}
+        status={statusFor(detail.status)}
+        testStartedAt={detail.testStartedAt}
+        submittedAt={detail.submittedAt}
+        summary={saveEvidence}
+      />
+      <section aria-labelledby="saved-answers-heading" className="py-7">
+        <h2 id="saved-answers-heading" className="text-[20px] font-semibold leading-7 tracking-[-0.015em]">Question-level responses ({detail.questions.length})</h2>
+        {detail.questions.length === 0 ? <p className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">No administered questions are available for this attempt.</p> : (
+          <div className="mt-4 space-y-6">
             {Array.from(questionsBySection, ([sectionKey, questions]) => {
               const title = sectionTitle(sectionKey);
               const rows = questions.map((question, index) => ({
@@ -104,7 +111,7 @@ export function SatAttemptAnswersContent({ attemptId, onBack, embedded = false }
               }));
               return (
                 <SatSectionCard key={sectionKey}>
-                  <h3 className="mb-3 text-[14px] font-semibold text-slate-800">{title}</h3>
+                  <h3 className="mb-3 text-[16px] font-semibold leading-6 text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h3>
                   <QuestionRawTable rows={rows} caption={`${title} question responses`} showVerdictFilters={false} />
                 </SatSectionCard>
               );

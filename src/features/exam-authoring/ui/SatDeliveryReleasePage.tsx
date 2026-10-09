@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Settings2 } from "lucide-react";
+import { SatInlineError } from "@/src/products/sat/ui/SatPage";
 import type { ExamEntity } from "../../../types/domain";
 import type {
   AssessmentAuthoringShell,
@@ -54,6 +55,8 @@ export interface SatDeliveryReleasePageProps {
   draftBusy?: boolean;
   publishError: string | null;
   onBackToExams: () => void;
+  /** Re-reads the release state after a load failure. */
+  onRetryLoad?: () => void;
   onRefreshReadiness: () => Promise<unknown>;
   onPublishScopeChange: (scope: SatPublishScope) => void;
   onPublish: (scope: SatPublishScope, publishNotes?: string) => Promise<void>;
@@ -67,36 +70,42 @@ export interface SatDeliveryReleasePageProps {
 }
 
 export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
-  const { shell, releaseState, isLoading, loadError, onBackToExams } = props;
+  const { exam, shell, releaseState, isLoading, loadError, onBackToExams, onRetryLoad, onSelectTab, saveSlot, collaborationSlot, presenceSlot } = props;
   const online = useReleaseOnline();
+  const role = useOptionalAuthSession()?.session?.user.role ?? null;
 
   if (isLoading) {
     return <ReleaseLoadingSurface />;
   }
 
   if (loadError || !shell || !releaseState) {
+    // The failure keeps the exam's location: same header, same tabs, and a
+    // retry beside the message instead of a page that only leads away.
     return (
-      <div className="sat-product min-h-screen bg-background px-6 py-12">
-        <div className="authoring-surface mx-auto max-w-2xl p-6">
-          <p className="text-base font-semibold text-foreground">
-            Delivery &amp; Release could not load
-          </p>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {loadError ?? "The current SAT release state is unavailable."}
-          </p>
-          <button
-            type="button"
-            onClick={onBackToExams}
-            className="mt-5 min-h-11 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            Tests
-          </button>
-        </div>
+      <div className="sat-product min-h-screen bg-[var(--sat-staff-canvas,#f7f7f8)] text-foreground">
+        <ExamWorkspaceHeader
+          examTitle={exam.title}
+          lifecycle={describeExamLifecycle(releaseState)}
+          activeTab={null}
+          showResponses={canViewExamResponses(role)}
+          onSelectTab={onSelectTab}
+          onBack={onBackToExams}
+          contextLine="Publish review"
+          saveSlot={saveSlot}
+          collaborationSlot={collaborationSlot ?? presenceSlot}
+        />
+        <main className="mx-auto w-full max-w-[920px] px-4 pb-20 pt-8 sm:px-6">
+          <SatInlineError
+            title="Publish review could not load"
+            description={loadError ?? "The current release state is unavailable."}
+            {...(onRetryLoad ? { onRetry: onRetryLoad } : {})}
+          />
+        </main>
       </div>
     );
   }
 
-  return <ReleasePageBody {...props} shell={shell} releaseState={releaseState} online={online} />;
+  return <ReleasePageBody {...props} shell={shell} releaseState={releaseState} online={online} role={role} />;
 }
 
 function ReleasePageBody(
@@ -104,6 +113,7 @@ function ReleasePageBody(
     shell: AssessmentAuthoringShell;
     releaseState: AssessmentReleaseState;
     online: boolean;
+    role: string | null;
   }
 ) {
   const {
@@ -118,6 +128,7 @@ function ReleasePageBody(
     draftBusy = false,
     publishError,
     online,
+    role,
     onBackToExams,
     onRefreshReadiness,
     onPublishScopeChange,
@@ -130,7 +141,6 @@ function ReleasePageBody(
     collaborationSlot,
   } = props;
   const [showPublishDialog, setShowPublishDialog] = useState(false);
-  const role = useOptionalAuthSession()?.session?.user.role ?? null;
 
   const readinessFresh = isReadinessFresh(readiness, shell, publishScope);
   const blockers = getSATPublishBlockers(readiness, readinessFresh);
@@ -172,7 +182,7 @@ function ReleasePageBody(
   );
 
   return (
-    <div className="sat-product min-h-screen bg-background text-foreground">
+    <div className="sat-product min-h-screen bg-[var(--sat-staff-canvas,#f7f7f8)] text-foreground">
       <ExamWorkspaceHeader
         examTitle={exam.title}
         lifecycle={describeExamLifecycle(releaseState)}
@@ -197,9 +207,9 @@ function ReleasePageBody(
           <div className="space-y-6">
             <section className={`${releaseSurfaceClass} p-5 sm:p-6`}>
               <SectionHeading
-                eyebrow="Content to publish"
-                title="Choose release scope"
-                description="The selected scope controls publish checks and the sections students can receive."
+                eyebrow="Scope"
+                title="What this version includes"
+                description="The scope decides which sections students receive and which checks must pass."
               />
               <fieldset className="mt-4">
                 <legend className="sr-only">Content to publish</legend>
@@ -208,61 +218,32 @@ function ReleasePageBody(
                     { value: "full", label: "Full SAT" },
                     { value: "reading-writing", label: "Reading & Writing" },
                     { value: "math", label: "Math" },
-                  ].map((option) => (
-                    <label
-                      key={option.value}
-                      className={`flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-semibold transition-colors ${publishScope === option.value ? "border-primary bg-primary/5 text-foreground" : "border-border text-muted-foreground hover:bg-muted/70"}`}
-                    >
-                      <input
-                        type="radio"
-                        name="sat-publish-scope"
-                        value={option.value}
-                        checked={publishScope === option.value}
-                        onChange={() => onPublishScopeChange(option.value as SatPublishScope)}
-                        className="accent-primary"
-                      />
-                      {option.label}
-                    </label>
-                  ))}
+                  ].map((option) => {
+                    const selected = publishScope === option.value;
+                    return (
+                      <label
+                        key={option.value}
+                        className={`flex min-h-12 cursor-pointer items-center gap-2.5 rounded-[var(--sat-staff-radius-control,10px)] border px-3 text-[14px] font-semibold leading-5 transition-colors focus-within:ring-[3px] focus-within:ring-[var(--sat-staff-accent-ring)] ${selected ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)] text-[var(--sat-staff-text-primary,#1d1d1f)]" : "border-[var(--sat-staff-border-strong)] bg-white text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)]"}`}
+                      >
+                        <input
+                          type="radio"
+                          name="sat-publish-scope"
+                          value={option.value}
+                          checked={selected}
+                          onChange={() => onPublishScopeChange(option.value as SatPublishScope)}
+                          className="h-4 w-4 accent-[var(--sat-staff-accent,#0071e3)]"
+                        />
+                        {option.label}
+                      </label>
+                    );
+                  })}
                 </div>
               </fieldset>
               {publishScope !== "full" ? (
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                <p className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
                   Only {publishScope === "math" ? "Math" : "Reading & Writing"} will be included. The other section and its publish issues will be ignored for this release.
                 </p>
               ) : null}
-            </section>
-
-            <section className={`${releaseSurfaceClass} p-5 sm:p-6`} aria-label="Delivery plan summary">
-              <SectionHeading
-                eyebrow="Delivery plan"
-                title="Timing & adaptive routing"
-                description="Timing, breaks and adaptive routing are configured in Settings. This is what the selected scope will deliver."
-              />
-              <ul className="mt-4 divide-y divide-border rounded-xl border border-border">
-                {includedSections.map((section, index) => (
-                  <li key={section.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                    <span className="font-semibold text-foreground">{section.title}</span>
-                    <span className="tabular-nums text-muted-foreground">
-                      {formatDuration(
-                        candidateSecondsForSection({
-                          ...section,
-                          breakAfterSeconds:
-                            index === includedSections.length - 1 ? 0 : section.breakAfterSeconds,
-                        })
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <button
-                type="button"
-                onClick={() => onSelectTab("settings")}
-                className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl bg-muted px-4 text-sm font-semibold text-foreground hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <Settings2 size={16} aria-hidden="true" />
-                Edit timing and routing in Settings
-              </button>
             </section>
 
             {isPublishedCurrentView ? (
@@ -287,6 +268,38 @@ function ReleasePageBody(
                 onIssueClick={onIssueClick}
               />
             )}
+
+            <section className={`${releaseSurfaceClass} p-5 sm:p-6`} aria-label="Delivery plan summary">
+              <SectionHeading
+                eyebrow="Delivery plan"
+                title="Timing & adaptive routing"
+                description="Configured in Settings. This is what the selected scope will deliver."
+              />
+              <ul className="mt-4 divide-y divide-[var(--sat-staff-border-hairline)] rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)]">
+                {includedSections.map((section, index) => (
+                  <li key={section.id} className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5 text-[14px] leading-5">
+                    <span className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">{section.title}</span>
+                    <span className="tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">
+                      {formatDuration(
+                        candidateSecondsForSection({
+                          ...section,
+                          breakAfterSeconds:
+                            index === includedSections.length - 1 ? 0 : section.breakAfterSeconds,
+                        })
+                      )}
+                    </span>
+                  </li>
+                ))}
+                <li className="flex min-h-11 items-center justify-between gap-3 bg-[var(--sat-staff-fill-faint)] px-4 py-2.5 text-[14px] leading-5">
+                  <span className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Longest sitting</span>
+                  <span className="font-semibold tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]">{formatDuration(totalCandidateSeconds)}</span>
+                </li>
+              </ul>
+              <button type="button" onClick={() => onSelectTab("settings")} className="sat-btn sat-btn--secondary sat-press mt-4">
+                <Settings2 size={16} aria-hidden="true" />
+                Edit timing in Settings
+              </button>
+            </section>
 
             <RuntimePolicyPanel />
           </div>

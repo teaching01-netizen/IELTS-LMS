@@ -172,7 +172,7 @@ describe("SatDeliveryReleasePage", () => {
   it("enables publishing only for a checked, current, clean draft", () => {
     render(<SatDeliveryReleasePage {...pageProps()} />);
 
-    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish version" })).toBeEnabled();
     expect(screen.getByText("Ready to publish")).toBeInTheDocument();
   });
 
@@ -189,7 +189,7 @@ describe("SatDeliveryReleasePage", () => {
 
     expect(screen.queryByLabelText(/Module 1/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save section" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Edit timing and routing in Settings/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Edit timing in Settings/ }));
     expect(onSelectTab).toHaveBeenCalledWith("settings");
   });
 
@@ -216,7 +216,7 @@ describe("SatDeliveryReleasePage", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish version" })).toBeEnabled();
     expect(screen.queryByText("1 recommendation")).not.toBeInTheDocument();
     expect(screen.getByText("Ready to publish.")).toBeInTheDocument();
   });
@@ -236,7 +236,7 @@ describe("SatDeliveryReleasePage", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish version" })).toBeEnabled();
     expect(screen.queryByText(legacyIssue.message)).not.toBeInTheDocument();
   });
   it("surfaces blockers and forwards question issue navigation", () => {
@@ -254,7 +254,7 @@ describe("SatDeliveryReleasePage", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish version" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /Question text is required/ }));
     expect(onIssueClick).toHaveBeenCalledWith(blockingIssue);
   });
@@ -263,7 +263,7 @@ describe("SatDeliveryReleasePage", () => {
     const onPublish = vi.fn().mockResolvedValue(undefined);
     render(<SatDeliveryReleasePage {...pageProps({ onPublish })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
     const dialog = screen.getByRole("dialog");
     expect(dialog).toBeInTheDocument();
 
@@ -288,9 +288,9 @@ describe("SatDeliveryReleasePage", () => {
 
     expect(screen.getByRole("heading", { name: "Published" })).toBeInTheDocument();
     expect(screen.getByText("Version 4 is what students receive.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Publish" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Publish Update" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "Student Access" }).at(-1)!);
+    expect(screen.queryByRole("button", { name: "Publish version" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish new version" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Open rooms" }).at(-1)!);
     expect(onOpenStudentAccess).toHaveBeenCalledTimes(1);
   });
 
@@ -305,7 +305,7 @@ describe("SatDeliveryReleasePage", () => {
     expect(screen.getAllByText("Unpublished changes")).toHaveLength(2);
     expect(screen.getByTestId("exam-lifecycle")).toHaveTextContent("Unpublished changes");
     expect(screen.getByText("Students still receive Version 4.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish Update" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish new version" })).toBeEnabled();
   });
 
   it("blocks publishing with an explicit stale-checks banner and reason", () => {
@@ -317,9 +317,9 @@ describe("SatDeliveryReleasePage", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish version" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent(/Checks are for revision/);
-    expect(screen.getByRole("button", { name: "Publish" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Publish version" })).toHaveAttribute(
       "aria-describedby",
       "release-publish-reasons",
     );
@@ -347,7 +347,7 @@ describe("SatDeliveryReleasePage", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish version" })).toBeDisabled();
     expect(screen.getByText(/do not have permission to publish/)).toBeInTheDocument();
   });
 
@@ -355,7 +355,7 @@ describe("SatDeliveryReleasePage", () => {
     const onPublish = vi.fn().mockImplementation(() => new Promise(() => {}));
     render(<SatDeliveryReleasePage {...pageProps({ onPublish })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
     const dialogButton = screen.getByRole("button", { name: "Publish Full SAT" });
     fireEvent.click(dialogButton);
     fireEvent.click(dialogButton);
@@ -369,7 +369,7 @@ describe("SatDeliveryReleasePage", () => {
       .mockRejectedValueOnce(new Error("publish 500 <html>internal stack</html>"));
     render(<SatDeliveryReleasePage {...pageProps({ onPublish })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
     fireEvent.click(screen.getByRole("button", { name: "Publish Full SAT" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -407,14 +407,14 @@ describe("SatDeliveryReleasePage", () => {
     // offering it: the release would be the earlier revision.
     render(<SatDeliveryReleasePage {...pageProps({ draftBusy: true })} />);
 
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish version" })).toBeDisabled();
     expect(screen.getByText(/latest changes are still being saved/)).toBeInTheDocument();
   });
 
   it("keeps publish reachable by keyboard tab order", () => {
     render(<SatDeliveryReleasePage {...pageProps()} />);
 
-    const publish = screen.getByRole("button", { name: "Publish" });
+    const publish = screen.getByRole("button", { name: "Publish version" });
     publish.focus();
     expect(document.activeElement).toBe(publish);
     expect(publish).toBeEnabled();
@@ -425,7 +425,7 @@ describe("SatDeliveryReleasePage", () => {
     try {
       render(<SatDeliveryReleasePage {...pageProps()} />);
 
-      expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Publish version" })).toBeDisabled();
       expect(screen.getAllByText(/you are offline/i).length).toBeGreaterThanOrEqual(1);
     } finally {
       onlineSpy.mockRestore();

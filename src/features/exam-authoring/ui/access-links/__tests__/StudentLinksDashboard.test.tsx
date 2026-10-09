@@ -105,7 +105,7 @@ describe('StudentLinksDashboard', () => {
 
   it('reconciles detail selection with the visible search result', async () => {
     render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
-    fireEvent.change(screen.getByLabelText('Search Student Links'), { target: { value: 'Monday' } });
+    fireEvent.change(screen.getByLabelText('Search rooms'), { target: { value: 'Monday' } });
 
     // Search is debounced (150ms) to avoid re-sorting on every keystroke.
     await waitFor(() => expect(screen.queryByText('Old Scholarship')).not.toBeInTheDocument());

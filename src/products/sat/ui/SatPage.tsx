@@ -1,18 +1,79 @@
-import type { CSSProperties, ReactNode } from 'react';
-import { ArrowLeft, Search, X } from 'lucide-react';
+import { forwardRef, useId, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react';
+import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 
 /**
- * Shared Calm Ops Bento primitives for the Digital SAT staff list pages
- * (Tests, Sessions, Results). Operate mode: the tool disappears into
- * the task - one sans, one accent (var(--sat-staff-accent)), soft 16-20px card rows,
- * dot+label status (color never carries state alone), 150-200ms transitions.
+ * Shared primitives for the Digital SAT staff workspace (Exams, Rooms,
+ * Responses, exam workspace). One sans, one accent (var(--sat-staff-accent)),
+ * 44px controls, grouped hairline surfaces, dot+label status (color never
+ * carries state alone). Visual rules live in index.css (`.sat-btn`,
+ * `.sat-field`, `.sat-input`, `.sat-table`); these components apply them.
  */
 
-export function SatContainer({ children, className }: { children: ReactNode; className?: string }) {
+const MEASURE_CLASS = {
+  list: 'max-w-[var(--sat-staff-measure-list,1180px)]',
+  settings: 'max-w-[var(--sat-staff-measure-settings,920px)]',
+  full: 'max-w-none',
+} as const;
+
+export type SatMeasure = keyof typeof MEASURE_CLASS;
+
+/** Page column: 16px gutters on small screens, 24px above; header and content share it. */
+export function SatContainer({ children, className, measure = 'list' }: { children: ReactNode; className?: string; measure?: SatMeasure }) {
   return (
-    <div className={'mx-auto w-full max-w-[1180px] px-4 pb-14 pt-7 sm:px-6 md:pt-10 lg:px-10' + (className ? ' ' + className : '')}>
+    <div className={'mx-auto w-full px-4 pb-14 pt-6 sm:px-6 md:pt-8 ' + MEASURE_CLASS[measure] + (className ? ' ' + className : '')}>
       {children}
     </div>
+  );
+}
+
+export type SatCrumb = {
+  label: string;
+  /** Real URL so the crumb is a link (middle-click, copy). */
+  href?: string;
+  /** Guard-aware navigation; a plain click calls this instead of following href. */
+  onSelect?: () => void;
+};
+
+/**
+ * Location trail. Every crumb but the last navigates; the last is the current
+ * page (aria-current). Collapses to the parent crumb on narrow screens so the
+ * way back never wraps under the title.
+ */
+export function SatBreadcrumbs({ items, className }: { items: SatCrumb[]; className?: string }) {
+  if (items.length === 0) return null;
+  return (
+    <nav aria-label="Breadcrumb" className={'sat-breadcrumbs min-w-0' + (className ? ' ' + className : '')}>
+      <ol className="flex min-w-0 flex-wrap items-center gap-x-1 text-[14px] leading-5">
+        {items.map((item, index) => {
+          const last = index === items.length - 1;
+          const parent = index === items.length - 2;
+          return (
+            <li key={`${index}-${item.label}`} className={'min-w-0 items-center gap-1 ' + (last || parent ? 'flex' : 'hidden sm:flex')}>
+              {last ? (
+                <span aria-current="page" className="truncate font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">{item.label}</span>
+              ) : (
+                <>
+                  <a
+                    href={item.href ?? '#'}
+                    onClick={(event) => {
+                      if (!item.onSelect) return;
+                      const plainLeftClick = event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+                      if (!plainLeftClick && item.href) return;
+                      event.preventDefault();
+                      item.onSelect();
+                    }}
+                    className="inline-flex min-h-11 items-center truncate px-0.5 font-medium"
+                  >
+                    {item.label}
+                  </a>
+                  <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)]" />
+                </>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -23,31 +84,69 @@ export function SatPageHeader({
   actions,
   backLabel,
   onBack,
+  breadcrumbs,
+  meta,
+  titleId,
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
-  description?: string;
+  description?: ReactNode;
   actions?: ReactNode;
   /** Optional location/back link rendered above the eyebrow (both props required to render). */
   backLabel?: string;
   onBack?: () => void;
+  /** Location trail above the title; replaces the back link when present. */
+  breadcrumbs?: SatCrumb[] | undefined;
+  /** Status pills / version line beside the description. */
+  meta?: ReactNode;
+  titleId?: string;
 }) {
   return (
-    <div className="flex flex-col gap-4 border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pb-6 sm:flex-row sm:items-end sm:justify-between">
+    <header className="flex flex-col gap-4 border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pb-6 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
-        {backLabel && onBack ? (
-          <button type="button" onClick={onBack} className="-ml-2 mb-1 inline-flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-2 text-[14px] font-medium text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] hover:text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">
+        {breadcrumbs && breadcrumbs.length > 0 ? (
+          <SatBreadcrumbs items={breadcrumbs} className="-mt-2 mb-1" />
+        ) : backLabel && onBack ? (
+          <button type="button" onClick={onBack} className="sat-btn sat-btn--quiet sat-press -ml-3 mb-1 px-3">
             <ArrowLeft size={16} aria-hidden="true" />
             {backLabel}
           </button>
         ) : null}
-        <p className="text-[14px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
-        <h1 className="mt-1 text-balance text-[26px] font-semibold tracking-[-0.03em] sm:text-[28px] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
-        {description ? (
-          <p className="mt-2 max-w-xl text-pretty text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
+        {eyebrow ? <SatEyebrow>{eyebrow}</SatEyebrow> : null}
+        <h1 id={titleId} className={'text-balance text-[length:var(--sat-staff-type-title-size,28px)] font-semibold leading-[var(--sat-staff-type-title-line,34px)] tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]' + (eyebrow ? ' mt-1' : '')}>{title}</h1>
+        {description || meta ? (
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+            {meta}
+            {description ? <p className="max-w-2xl text-pretty text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p> : null}
+          </div>
         ) : null}
       </div>
-      {actions ? <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">{actions}</div> : null}
+      {actions ? <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">{actions}</div> : null}
+    </header>
+  );
+}
+
+/** Section title (20/28) with optional description and trailing actions. */
+export function SatSectionHeader({
+  id,
+  title,
+  description,
+  actions,
+  as: Heading = 'h2',
+}: {
+  id?: string;
+  title: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  as?: 'h2' | 'h3';
+}) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="min-w-0">
+        <Heading id={id} className="text-[length:var(--sat-staff-type-section-size,20px)] font-semibold leading-[var(--sat-staff-type-section-line,28px)] tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</Heading>
+        {description ? <p className="mt-1 max-w-2xl text-pretty text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p> : null}
+      </div>
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }
@@ -69,8 +168,8 @@ export function SatSearchField({
 }) {
   const clearLabel = 'Clear ' + label;
   return (
-    <div className={'relative min-w-0 flex-1' + (widthClassName ? ' ' + widthClassName : '')}>
-      <Search size={15} className="pointer-events-none absolute left-3 top-3.5 text-[var(--sat-staff-text-tertiary,#6e6e73)]" aria-hidden="true" />
+    <div className={'relative min-w-0 flex-1 basis-full sm:basis-auto' + (widthClassName ? ' ' + widthClassName : '')}>
+      <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--sat-staff-text-tertiary,#6e6e73)]" aria-hidden="true" />
       <input
         id={id}
         type="search"
@@ -84,22 +183,88 @@ export function SatSearchField({
           }
         }}
         placeholder={placeholder}
-        className="h-11 w-full rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] pl-9 pr-8 text-[16px] text-[var(--sat-staff-text-primary,#1d1d1f)] outline-none transition placeholder:text-[var(--sat-staff-text-tertiary,#6e6e73)] focus:border-[var(--sat-staff-accent,#0071e3)] focus:ring-2 focus:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] [&::-webkit-search-cancel-button]:hidden"
+        className="sat-input pl-9 pr-11 [&::-webkit-search-cancel-button]:hidden"
       />
       {value ? (
         <button
           type="button"
           onClick={() => onChange('')}
           aria-label={clearLabel}
-          className="sat-search-clear sat-press sat-press-fill absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-[var(--sat-staff-text-tertiary,#6e6e73)] hover:bg-[var(--sat-staff-skeleton-bar-soft,rgba(0,0,0,0.05))] hover:text-[var(--sat-staff-text-secondary,#515154)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+          className="sat-search-clear group absolute right-0 top-0 flex h-11 w-11 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-tertiary,#6e6e73)]"
         >
-          <X size={13} aria-hidden="true" />
+          <span aria-hidden="true" className="flex h-7 w-7 items-center justify-center rounded-full transition-colors group-hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] group-hover:text-[var(--sat-staff-text-secondary,#515154)] group-active:bg-[var(--sat-staff-fill-active,rgba(0,0,0,0.065))]">
+            <X size={14} />
+          </span>
         </button>
       ) : null}
     </div>
   );
 }
 
+export type SatButtonVariant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'danger-secondary';
+
+export type SatButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
+  variant?: SatButtonVariant;
+  /** 16px Lucide icon; the pending spinner takes its slot. */
+  icon?: ReactNode;
+  /** In flight: keeps focus and size, announces busy, ignores further presses. */
+  pending?: boolean;
+  /** Icon-only square (44×44). Requires aria-label. */
+  iconOnly?: boolean;
+  block?: boolean;
+  children?: ReactNode;
+};
+
+/**
+ * The one staff button. Variants: primary (at most one dominant per header or
+ * dialog), secondary, quiet, danger (confirmations), danger-secondary
+ * (destructive entry points). Pending never changes the box and never drops
+ * focus: the control stays focusable with aria-disabled + aria-busy.
+ */
+export const SatButton = forwardRef<HTMLButtonElement, SatButtonProps>(function SatButton(
+  { variant = 'secondary', icon, pending = false, iconOnly = false, block = false, disabled = false, className, children, onClick, type = 'button', ...rest },
+  ref,
+) {
+  const spinner = <span aria-hidden="true" className={'sat-btn__spinner' + (icon || iconOnly ? '' : ' sat-btn__spinner--overlay')} />;
+  return (
+    <button
+      ref={ref}
+      type={type}
+      {...rest}
+      disabled={disabled}
+      aria-busy={pending || undefined}
+      aria-disabled={pending || rest['aria-disabled'] ? true : undefined}
+      onClick={(event) => {
+        if (pending) {
+          event.preventDefault();
+          return;
+        }
+        onClick?.(event);
+      }}
+      className={
+        'sat-btn sat-press sat-btn--' + variant +
+        (iconOnly ? ' sat-btn--icon' : '') +
+        (block ? ' sat-btn--block' : '') +
+        (className ? ' ' + className : '')
+      }
+    >
+      {pending && (icon || iconOnly) ? spinner : icon}
+      {iconOnly ? null : (
+        <span className="sat-btn__label" data-pending-hidden={pending && !icon ? '' : undefined}>{children}</span>
+      )}
+      {pending && !icon && !iconOnly ? spinner : null}
+    </button>
+  );
+});
+
+/** Icon-only 44×44 control; the label is both its accessible name and its tooltip. */
+export const SatIconButton = forwardRef<HTMLButtonElement, Omit<SatButtonProps, 'iconOnly' | 'children' | 'aria-label'> & { label: string; icon: ReactNode }>(
+  function SatIconButton({ label, variant = 'quiet', title, ...rest }, ref) {
+    return <SatButton ref={ref} {...rest} variant={variant} iconOnly aria-label={label} title={title ?? label} />;
+  },
+);
+
+/** Compatible wrapper: existing callers keep their props; renders the primary SatButton. */
 export function SatPrimaryButton({
   onClick,
   icon,
@@ -115,23 +280,60 @@ export function SatPrimaryButton({
   pending?: boolean;
   disabled?: boolean;
 }) {
-  const isDisabled = disabled || pending;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      aria-busy={pending || undefined}
-      disabled={isDisabled}
-      className="sat-press sat-press-fill-accent flex h-11 min-h-11 shrink-0 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sat-staff-canvas,#f5f5f7)] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
-    >
-      {pending ? (
-        <span aria-hidden="true" className="sat-spinner block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white/40 border-t-white" />
-      ) : (
-        icon
-      )}
-      <span>{children}</span>
-    </button>
+    <SatButton variant="primary" onClick={onClick} icon={icon} aria-label={ariaLabel} pending={pending} disabled={disabled}>
+      {children}
+    </SatButton>
+  );
+}
+
+export type SatFieldControlProps = {
+  id: string;
+  'aria-describedby': string | undefined;
+  'aria-invalid': true | undefined;
+};
+
+/**
+ * Label / help / error wrapper for one control. Children receive the ids the
+ * control must carry, so help and errors are announced with it.
+ */
+export function SatField({
+  id,
+  label,
+  help,
+  error,
+  optional = false,
+  className,
+  children,
+}: {
+  id?: string;
+  label: ReactNode;
+  help?: ReactNode;
+  error?: string | null;
+  optional?: boolean;
+  className?: string;
+  children: (control: SatFieldControlProps) => ReactNode;
+}) {
+  const generatedId = useId();
+  const controlId = id ?? generatedId;
+  const helpId = help ? controlId + '-help' : undefined;
+  const errorId = error ? controlId + '-error' : undefined;
+  const describedBy = [errorId, helpId].filter(Boolean).join(' ') || undefined;
+  return (
+    <div className={'sat-field' + (className ? ' ' + className : '')}>
+      <label htmlFor={controlId} className="sat-field__label">
+        {label}
+        {optional ? <span className="sat-field__optional">Optional</span> : null}
+      </label>
+      {children({ id: controlId, 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined })}
+      {error ? (
+        <p id={errorId} role="alert" className="sat-field__error">
+          <AlertCircle size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </p>
+      ) : null}
+      {help ? <p id={helpId} className="sat-field__help">{help}</p> : null}
+    </div>
   );
 }
 
@@ -228,20 +430,24 @@ export function SatList({ children, variant = 'grouped' }: { children: ReactNode
 }
 
 /**
- * One toolbar grammar for every staff list, under the page header:
- * status tabs (with counts) → search / filters / sort. Render it in every
- * state (loading, empty, error-free) so filters never disappear.
+ * One toolbar grammar for every staff list, under the page header: status
+ * tabs (with counts) on the left, search / filters / sort on the right; they
+ * stack on narrow widths. Render it in every state (loading, empty, error)
+ * so filters never disappear.
  */
 export function SatListToolbar({ tabs, children, label = 'List controls' }: { tabs?: ReactNode; children?: ReactNode; label?: string }) {
   return (
-    <div className="mt-5 flex flex-col gap-3" role="group" aria-label={label}>
-      {tabs ? <div className="max-w-full overflow-x-auto">{tabs}</div> : null}
-      {children ? <div className="flex flex-wrap items-end gap-2">{children}</div> : null}
+    <div className="mt-6 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between" role="group" aria-label={label}>
+      {tabs ? <div className="max-w-full overflow-x-auto xl:shrink-0">{tabs}</div> : null}
+      {children ? <div className="flex min-w-0 flex-wrap items-center gap-2 xl:flex-nowrap xl:justify-end">{children}</div> : null}
     </div>
   );
 }
 
-/** Labelled native select sized like every other toolbar control. */
+/**
+ * Native select sized like every other toolbar control, with its label shown
+ * inside the control ("Sort  Last updated") so the toolbar stays one row.
+ */
 export function SatToolbarSelect<T extends string>({
   id,
   label,
@@ -256,17 +462,18 @@ export function SatToolbarSelect<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <label htmlFor={id} className="flex flex-col gap-1 text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">
-      {label}
+    <div className="sat-select relative flex min-h-11 shrink-0 items-center rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-control,rgba(0,0,0,0.42))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] pl-3 focus-within:border-[var(--sat-staff-accent,#0071e3)] focus-within:ring-[3px] focus-within:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">
+      <label htmlFor={id} className="whitespace-nowrap text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{label}</label>
       <select
         id={id}
         value={value}
         onChange={(event) => onChange(event.target.value as T)}
-        className="h-11 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] px-3 text-[16px] font-normal text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+        className="min-h-11 cursor-pointer appearance-none rounded-[var(--sat-staff-radius-control,10px)] bg-transparent py-0 pl-2 pr-9 text-[16px] font-semibold leading-6 text-[var(--sat-staff-text-primary,#1d1d1f)] outline-none focus-visible:outline-none sm:text-[14px]"
       >
         {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
-    </label>
+      <ChevronDown size={16} aria-hidden="true" className="pointer-events-none absolute right-3 text-[var(--sat-staff-text-tertiary,#6e6e73)]" />
+    </div>
   );
 }
 
@@ -316,6 +523,32 @@ export function SatListRow({
     </button>
   );
 }
+
+/**
+ * Column labels for a grouped list whose rows lay out on the same grid
+ * (`gridClassName` is shared with the rows). Visual only: each row's button
+ * already reads its full content, so the header stays out of the a11y tree.
+ * Hidden below md, where rows collapse to title + meta.
+ */
+export function SatListColumns({ gridClassName, columns }: { gridClassName: string; columns: ReadonlyArray<{ label: string; align?: 'start' | 'end' }> }) {
+  return (
+    <div aria-hidden="true" className={'hidden min-h-10 items-center bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))] px-4 text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-secondary,#515154)] md:grid ' + gridClassName}>
+      {columns.map((column, index) => (
+        <span key={index} className={column.align === 'end' ? 'text-right' : undefined}>{column.label}</span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Narrow-width placement for list rows laid out on a 2-column mobile grid
+ * (`minmax(0,1fr) 16px`): the status drops under the title and the chevron
+ * spans both lines; from md the row's own column grid takes over.
+ */
+export const SAT_ROW_STACK = {
+  status: 'col-start-1 row-start-2 mt-2 flex md:col-start-auto md:row-start-auto md:mt-0',
+  chevron: 'col-start-2 row-span-2 row-start-1 md:col-start-auto md:row-span-1 md:row-start-auto',
+} as const;
 
 export type SatStat = {
   id: string;
@@ -461,18 +694,13 @@ export function SatInlineError({
   retryLabel?: string;
 }) {
   return (
-    <div role="alert" className="mt-4 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-5 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]">
-      <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
-      <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
-      {onRetry ? (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
-        >
-          {retryLabel}
-        </button>
-      ) : null}
+    <div role="alert" className="mt-4 flex gap-3 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-5">
+      <AlertCircle size={20} aria-hidden="true" className="mt-0.5 shrink-0 text-[var(--sat-staff-danger,#b42318)]" />
+      <div className="min-w-0">
+        <h2 className="text-[16px] font-semibold leading-6 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
+        <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
+        {onRetry ? <SatButton variant="secondary" onClick={onRetry} className="mt-4">{retryLabel}</SatButton> : null}
+      </div>
     </div>
   );
 }
@@ -557,19 +785,11 @@ export function SatPageError({
       <div className="flex min-h-[60vh] flex-col items-center justify-center px-6 text-center">
         <div
           role="alert"
-          className="w-full max-w-md rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-6 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]"
+          className="w-full max-w-md rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-6"
         >
-          <h1 className="text-[18px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
+          <h1 className="text-[length:var(--sat-staff-type-section-size,20px)] font-semibold leading-[var(--sat-staff-type-section-line,28px)] tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
           <p className="mt-1.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
-          {onRetry ? (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[14px] font-semibold text-white transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:bg-[var(--sat-staff-accent-active,#0067c9)]"
-            >
-              {retryLabel}
-            </button>
-          ) : null}
+          {onRetry ? <SatButton variant="primary" onClick={onRetry} className="mt-5">{retryLabel}</SatButton> : null}
         </div>
       </div>
     </SatContainer>

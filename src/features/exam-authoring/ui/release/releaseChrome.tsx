@@ -9,11 +9,11 @@ export function SectionHeading({
 }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+      <p className="text-[14px] font-semibold uppercase leading-5 tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">
         {eyebrow}
       </p>
-      <h2 className="mt-1 text-[19px] font-semibold tracking-[-0.02em] text-foreground">{title}</h2>
-      <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
+      <h2 className="mt-1 text-[20px] font-semibold leading-7 tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
+      <p className="mt-1 max-w-2xl text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p>
     </div>
   );
 }

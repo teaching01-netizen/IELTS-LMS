@@ -1,44 +1,26 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { Dialog } from 'radix-ui';
 
-const TABLET_INSPECTOR_QUERY = '(min-width: 1024px) and (max-width: 1439px)';
-
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() =>
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia(query).matches
-      : false,
-  );
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return;
-    const mediaQuery = window.matchMedia(query);
-    const update = (event: MediaQueryListEvent) => setMatches(event.matches);
-    setMatches(mediaQuery.matches);
-    mediaQuery.addEventListener?.('change', update);
-    if (!mediaQuery.addEventListener) mediaQuery.addListener?.(update);
-    return () => {
-      mediaQuery.removeEventListener?.('change', update);
-      if (!mediaQuery.removeEventListener) mediaQuery.removeListener?.(update);
-    };
-  }, [query]);
-
-  return matches;
-}
-
+/**
+ * The selected-student inspector. Docked beside the run sheet when the room is
+ * wide enough for three readable panes; otherwise an accessible side sheet
+ * opened from the roster, which returns focus to the row that opened it.
+ * Selection lives in the route, so a layout change never loses the student.
+ */
 export function SatSessionRoomInspector({
   open,
+  docked,
   onOpenChange,
   restoreFocusTarget,
   children,
 }: {
   open: boolean;
+  docked: boolean;
   onOpenChange: (open: boolean) => void;
   restoreFocusTarget: () => HTMLElement | null;
   children: ReactNode;
 }) {
-  const tablet = useMediaQuery(TABLET_INSPECTOR_QUERY);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const content = (
     <>
@@ -55,13 +37,13 @@ export function SatSessionRoomInspector({
     </>
   );
 
-  if (tablet) {
+  if (!docked) {
     return (
       <Dialog.Root open={open} onOpenChange={onOpenChange}>
         <Dialog.Portal>
           <Dialog.Overlay className="sat-room__inspector-dialog-overlay" />
           <Dialog.Content
-            className="sat-room__inspector-dialog sat-product"
+            className="sat-room__inspector-dialog sat-product sat-staff-root"
             aria-label="Selected student inspector"
             aria-modal="true"
             data-inspector-open="true"

@@ -1,6 +1,14 @@
-import { Pause, Play, Timer } from 'lucide-react';
+import { BarChart3, Pause, Play, Timer } from 'lucide-react';
 import { SatMenu, type SatMenuItem } from './Menu';
 
+/**
+ * Room-wide controls, grouped and labelled "Room controls" so they never read
+ * as actions on the selected student. One primary per state: Resume exam while
+ * paused, View responses once the room is finished (Start exam lives in the
+ * waiting room beside the readiness it depends on). While running, Pause and
+ * Add time stay secondary; End exam is a destructive entry point whose
+ * confirmation states the room-wide consequence.
+ */
 export function SatSessionControls({
   runtimeStatus,
   pendingActions,
@@ -9,6 +17,7 @@ export function SatSessionControls({
   onResume,
   onExtend,
   onComplete,
+  onViewResponses,
 }: {
   runtimeStatus: string;
   pendingActions: ReadonlySet<string>;
@@ -17,49 +26,65 @@ export function SatSessionControls({
   onResume: () => void;
   onExtend: (minutes: number) => void;
   onComplete: () => void;
+  /** Present once the room is finished or cancelled. */
+  onViewResponses?: (() => void) | undefined;
 }) {
-  // Starting the exam is not a header control: it lives in the waiting room next
-  // to the readiness facts it depends on. Once started, the header runs the session.
-  const primary = runtimeStatus === 'live'
-    ? { label: 'Pause exam', icon: Pause, key: 'pause', action: onPause }
-    : runtimeStatus === 'paused'
-      ? { label: 'Resume exam', icon: Play, key: 'resume', action: onResume }
-      : null;
-  const Icon = primary?.icon;
-  const primaryBusy = primary ? pendingActions.has(primary.key) : false;
   const active = runtimeStatus === 'live' || runtimeStatus === 'paused';
+  const pauseBusy = pendingActions.has('pause');
+  const resumeBusy = pendingActions.has('resume');
   const extendItems: SatMenuItem[] = [
-    { id: 'extend-5', label: 'Add 5 minutes', disabled: blocked || pendingActions.has('extend-5'), onSelect: () => onExtend(5) },
-    { id: 'extend-10', label: 'Add 10 minutes', disabled: blocked || pendingActions.has('extend-10'), onSelect: () => onExtend(10) },
+    { id: 'extend-5', label: 'Add 5 minutes for the room', disabled: blocked || pendingActions.has('extend-5'), onSelect: () => onExtend(5) },
+    { id: 'extend-10', label: 'Add 10 minutes for the room', disabled: blocked || pendingActions.has('extend-10'), onSelect: () => onExtend(10) },
   ];
 
+  if (!active && !onViewResponses) return null;
+
   return (
-    <div role="group" aria-label="Cohort controls" className="flex shrink-0 items-center gap-1.5">
-      {primary && Icon ? (
+    <div role="group" aria-label="Room controls" className="sat-room__controls flex shrink-0 flex-wrap items-center gap-2">
+      {onViewResponses ? (
+        <button type="button" onClick={onViewResponses} className="sat-btn sat-btn--primary sat-press">
+          <BarChart3 size={16} aria-hidden="true" />
+          View responses
+        </button>
+      ) : null}
+      {runtimeStatus === 'paused' ? (
         <button
           type="button"
-          onClick={primary.action}
-          disabled={primaryBusy || blocked}
-          aria-busy={primaryBusy || undefined}
-          className="flex min-h-11 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3 text-[14px] font-semibold text-white transition-colors hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() => { if (!resumeBusy) onResume(); }}
+          disabled={blocked}
+          aria-busy={resumeBusy || undefined}
+          aria-disabled={resumeBusy || undefined}
+          className="sat-btn sat-btn--primary sat-press"
         >
-          {primaryBusy ? (
-            <span aria-hidden="true" className="sat-spinner block h-3 w-3 shrink-0 rounded-full border-2 border-white/40 border-t-white" />
-          ) : <Icon size={13} />}
-          {primaryBusy ? 'Working…' : primary.label}
+          {resumeBusy ? <span aria-hidden="true" className="sat-btn__spinner" /> : <Play size={16} aria-hidden="true" />}
+          {resumeBusy ? 'Resuming…' : 'Resume exam'}
+        </button>
+      ) : null}
+      {runtimeStatus === 'live' ? (
+        <button
+          type="button"
+          onClick={() => { if (!pauseBusy) onPause(); }}
+          disabled={blocked}
+          aria-busy={pauseBusy || undefined}
+          aria-disabled={pauseBusy || undefined}
+          className="sat-btn sat-btn--secondary sat-press"
+        >
+          {pauseBusy ? <span aria-hidden="true" className="sat-btn__spinner" /> : <Pause size={16} aria-hidden="true" />}
+          {pauseBusy ? 'Pausing…' : 'Pause exam'}
         </button>
       ) : null}
       {active ? (
         <>
-          <SatMenu label="Add time" align="end" width={176} icon={Timer} items={extendItems} />
-          <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-[var(--sat-staff-separator-strong,#c7c7cc)]" />
-          <button
-            type="button"
-            onClick={onComplete}
-            disabled={blocked}
-            className="flex min-h-11 items-center rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-danger,#b42318)]/30 px-3 text-[14px] font-semibold text-[var(--sat-staff-danger,#b42318)] transition-colors hover:bg-[var(--sat-staff-danger-tint,rgba(217,45,32,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-danger,#b42318)] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            End room
+          <SatMenu
+            label="Add time"
+            align="end"
+            width={232}
+            items={extendItems}
+            triggerClassName="sat-btn sat-btn--secondary sat-press group"
+            triggerContent={<><Timer size={16} aria-hidden="true" /><span>Add time</span></>}
+          />
+          <button type="button" onClick={onComplete} disabled={blocked} className="sat-btn sat-btn--danger-secondary sat-press">
+            End exam
           </button>
         </>
       ) : null}

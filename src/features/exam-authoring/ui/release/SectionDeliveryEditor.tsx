@@ -1,9 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clock3, GitBranch, LoaderCircle, Save } from "lucide-react";
+import { AlertTriangle, Check, Clock3, GitBranch, Save } from "lucide-react";
 import { useUpdateSectionDeliverySettings } from "../../api/assessmentQueries";
 import type { AssessmentSectionShell } from "../../contracts/assessment";
 import { operationalCountForSection, secondsToMinutes, toUserFacingReleaseError } from "./releaseSelectors";
-import { releaseDisabledButtonClass } from "./releaseUi";
 import { NumericField } from "./NumericField";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
 
@@ -223,10 +222,13 @@ function SectionDeliveryEditorInner({
     return (
       <div
         role="alert"
-        className="rounded-2xl border border-destructive/20 bg-destructive/10 p-4 text-sm leading-6 text-destructive"
+        className="flex gap-3 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-surface-solid-fallback,#fff)] p-5 text-[14px] leading-5"
       >
-        <p className="font-semibold">{section.title} has an incomplete adaptive structure.</p>
-        <p className="mt-1">A base module plus lower and higher branches are required before publishing.</p>
+        <AlertTriangle size={18} aria-hidden="true" className="mt-0.5 shrink-0 text-[var(--sat-staff-danger,#b42318)]" />
+        <div>
+          <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">{section.title} has an incomplete adaptive structure.</p>
+          <p className="mt-1 text-[var(--sat-staff-text-secondary,#515154)]">A base module plus lower and higher branches are required before timing can be set or the exam published.</p>
+        </div>
       </div>
     );
   }
@@ -251,20 +253,19 @@ function SectionDeliveryEditorInner({
     : null;
 
   return (
-    <article aria-label={section.title} className="rounded-2xl border border-border bg-muted p-4 sm:p-5">
+    <article aria-label={section.title} className="rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-surface-solid-fallback,#fff)] p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold tracking-[-0.015em] text-foreground">
+          <h3 className="text-[18px] font-semibold leading-6 tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)]">
             {section.title}
           </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">
             Candidate path · {candidateMinutes} min
             {breakMinutes > 0 ? ` + ${breakMinutes} min break` : ""}
-            {dirty ? " · Unsaved changes" : ""}
           </p>
         </div>
-        <div className="flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground ring-1 ring-ring/10">
-          <Clock3 size={12} aria-hidden="true" /> Server timed
+        <div className="flex items-center gap-1.5 rounded-full border border-[var(--sat-staff-border-strong)] px-2.5 py-1 text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          <Clock3 size={14} aria-hidden="true" /> Server-timed
         </div>
       </div>
 
@@ -274,12 +275,12 @@ function SectionDeliveryEditorInner({
         <NumericField label="Module 2 · Higher" value={higherMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit} onChange={changeHigherMinutes} />
       </div>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-            <GitBranch size={14} className="text-muted-foreground" aria-hidden="true" /> Adaptive routing
+      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_200px]">
+        <div className="rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4">
+          <div className="flex items-center gap-2 text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">
+            <GitBranch size={16} className="text-[var(--sat-staff-text-tertiary,#6e6e73)]" aria-hidden="true" /> Adaptive routing
           </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-[150px_minmax(0,1fr)] sm:items-center">
+          <div className="mt-3 grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)] sm:items-end">
             <NumericField
               label="Higher route at"
               value={threshold}
@@ -289,20 +290,20 @@ function SectionDeliveryEditorInner({
               disabled={!effectiveCanEdit}
               onChange={changeThreshold}
             />
-            <div className="rounded-xl bg-muted px-3 py-2.5 text-xs leading-5 text-muted-foreground">
-              <span className="font-semibold text-foreground">0–{Math.max(0, threshold - 1)}</span> → Lower
+            <div className="rounded-[var(--sat-staff-radius-control,10px)] bg-white px-3 py-2.5 text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">
+              <span className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">0–{Math.max(0, threshold - 1)}</span> → Lower
               <span className="mx-2" aria-hidden="true">·</span>
-              <span className="font-semibold text-foreground">
+              <span className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
                 {threshold}–{operationalCount}
               </span>{" "}
               → Higher
-              <div className="mt-0.5 text-xs text-muted-foreground">
+              <div className="mt-0.5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
                 {operationalCount} operational questions · provider-defined
               </div>
             </div>
           </div>
         </div>
-        <div className="rounded-2xl border border-border bg-card p-4">
+        <div className="rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4">
           <NumericField
             label="Break after section"
             value={breakMinutes}
@@ -313,36 +314,37 @@ function SectionDeliveryEditorInner({
             disabled={!effectiveCanEdit}
             onChange={changeBreakMinutes}
           />
-          <p className="mt-2 text-xs leading-4 text-muted-foreground">
-            Applied after the section completes.
+          <p className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+            Starts when the section ends.
           </p>
         </div>
       </div>
 
       {localError ? (
-        <p role="alert" className="mt-3 text-xs font-medium text-destructive">
+        <p role="alert" className="mt-3 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">
           {localError}
         </p>
       ) : null}
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-border pt-4">
-        <p className="text-xs text-muted-foreground">Section revision {section.revision}</p>
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--sat-staff-border-hairline)] pt-4">
+        <p role="status" className="flex items-center gap-1.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          {update.isPending ? "Saving…" : dirty ? (collaboration ? "Saving automatically…" : "Unsaved changes") : (
+            <><Check size={16} aria-hidden="true" className="text-[var(--sat-staff-success-dot,#059669)]" />Saved · revision {section.revision}</>
+          )}
+        </p>
         <button
           type="button"
           onClick={() => void save()}
           disabled={saveDisabled}
+          aria-busy={update.isPending || undefined}
           aria-describedby={saveReason ? saveReasonId : undefined}
-          className={`flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${saveDisabled ? "cursor-not-allowed bg-muted text-muted-foreground" : "bg-primary text-primary-foreground hover:bg-primary/90"} ${releaseDisabledButtonClass}`}
+          className="sat-btn sat-btn--primary sat-press"
         >
-          {update.isPending ? (
-            <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-          ) : (
-            <Save size={15} aria-hidden="true" />
-          )}
-          {update.isPending ? "Saving…" : collaboration && dirty ? "Saving automatically…" : dirty ? "Save section" : "Saved"}
+          {update.isPending ? <span aria-hidden="true" className="sat-btn__spinner" /> : <Save size={16} aria-hidden="true" />}
+          Save section
         </button>
       </div>
       {saveReason ? (
-        <p id={saveReasonId} className="mt-2 text-xs text-muted-foreground">
+        <p id={saveReasonId} className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
           {saveReason}
         </p>
       ) : null}

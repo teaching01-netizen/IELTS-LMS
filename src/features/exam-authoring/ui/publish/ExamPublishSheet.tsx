@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { AlertTriangle, ArrowLeft, CheckCircle2, LoaderCircle, RefreshCw, Rocket, Settings2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, RefreshCw, Rocket, Settings2 } from "lucide-react";
+import { SatInlineError } from "@/src/products/sat/ui/SatPage";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/src/components/ui/sheet";
 import type { ExamEntity } from "../../../../types/domain";
 import { useExamQuery } from "../../api/examQueries";
@@ -22,7 +23,7 @@ import {
   satPublishScopeLabel,
   toUserFacingPublishError,
 } from "../release/releaseSelectors";
-import { releaseDisabledButtonClass, useReleaseOnline } from "../release/releaseUi";
+import { useReleaseOnline } from "../release/releaseUi";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
 import { DeliverySettingsPanel } from "../settings/DeliverySettingsPanel";
 import type { DeliveryTarget } from "../shell/examLifecycle";
@@ -40,8 +41,7 @@ export interface ExamPublishSheetProps {
   onOpenSettings?: (() => void) | undefined;
 }
 
-const BUTTON =
-  "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const BUTTON = "sat-btn sat-press";
 
 /**
  * One focused publish surface that opens over ANY exam surface. It owns no
@@ -61,9 +61,9 @@ export function ExamPublishSheet(props: ExamPublishSheetProps) {
   return (
     <>
       <Sheet open={props.open} onOpenChange={(next) => !next && requestClose()}>
-        <SheetContent side="right" className={`sat-product flex flex-col gap-0 p-0 ${view === "settings" ? "w-[min(96vw,720px)] max-w-[720px] sm:max-w-[720px]" : "w-[min(96vw,560px)] max-w-[560px] sm:max-w-[560px]"}`}>
-          <SheetHeader className="border-b border-border px-6 py-4 text-left">
-            <SheetTitle>{view === "settings" ? "Exam settings" : "Publish exam"}</SheetTitle>
+        <SheetContent side="right" className={`sat-product sat-staff-root flex flex-col gap-0 p-0 ${view === "settings" ? "w-[min(96vw,720px)] max-w-[720px] sm:max-w-[720px]" : "w-[min(96vw,560px)] max-w-[560px] sm:max-w-[560px]"}`}>
+          <SheetHeader className="border-b border-[var(--sat-staff-border-hairline)] px-6 py-5 text-left">
+            <SheetTitle className="text-[20px] leading-7 tracking-[-0.015em]">{view === "settings" ? "Exam settings" : "Publish version"}</SheetTitle>
             <SheetDescription>
               {view === "settings"
                 ? "Change timing, breaks and routing without leaving publishing. Saved changes re-run the checks."
@@ -81,11 +81,8 @@ export function ExamPublishSheet(props: ExamPublishSheetProps) {
               setDirtyCount={setDirtyCount}
             />
           ) : examQuery.error ? (
-            <div role="alert" className="p-6 text-sm text-destructive">
-              The exam could not be loaded, so publishing is unavailable.{" "}
-              <button type="button" className="font-semibold underline" onClick={() => void examQuery.refetch()}>
-                Try again
-              </button>
+            <div className="p-6">
+              <SatInlineError title="Publishing is unavailable" description="The exam could not be loaded." onRetry={() => void examQuery.refetch()} />
             </div>
           ) : (
             <p role="status" className="p-6 text-sm text-muted-foreground">
@@ -145,7 +142,7 @@ function PublishSheetBody({
     const version = publishedTarget?.versionNumber ?? releaseState?.currentPublishedVersion?.versionNumber ?? null;
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-6">
-        <div role="status" className="flex items-start gap-3 rounded-2xl bg-muted p-4">
+        <div role="status" className="flex items-start gap-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-success-tint)] p-4">
           <CheckCircle2 size={20} className="sat-pop mt-0.5 shrink-0 text-green-700" aria-hidden="true" />
           <div>
             <p className="text-base font-semibold text-foreground">
@@ -159,7 +156,7 @@ function PublishSheetBody({
         <div className="flex flex-col gap-2">
           <button
             type="button"
-            className={`${BUTTON} bg-primary text-primary-foreground hover:bg-primary/90`}
+            className={`${BUTTON} sat-btn--primary`}
             onClick={() => {
               onClose();
               onOpenStudentAccess(publishedTarget ?? undefined);
@@ -167,7 +164,7 @@ function PublishSheetBody({
           >
             Create room
           </button>
-          <button type="button" className={`${BUTTON} text-muted-foreground hover:bg-muted`} onClick={onClose}>
+          <button type="button" className={`${BUTTON} sat-btn--quiet`} onClick={onClose}>
             Done
           </button>
         </div>
@@ -185,7 +182,7 @@ function PublishSheetBody({
             // Timing changes revise the draft: re-run the checks against it.
             void readinessQuery.refetch();
           }}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="sat-btn sat-btn--quiet sat-press -ml-3 px-3"
         >
           <ArrowLeft size={16} aria-hidden="true" />
           Back to publish
@@ -275,7 +272,7 @@ function PublishSheetBody({
             {SAT_PUBLISH_SCOPE_OPTIONS.map((option) => (
               <label
                 key={option.value}
-                className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border px-3 text-sm font-semibold ${publishScope === option.value ? "border-primary bg-primary/5 text-foreground" : "border-border text-muted-foreground hover:bg-muted/70"}`}
+                className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-[var(--sat-staff-radius-control,10px)] border px-3 text-[14px] font-semibold focus-within:ring-[3px] focus-within:ring-[var(--sat-staff-accent-ring)] ${publishScope === option.value ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)] text-[var(--sat-staff-text-primary,#1d1d1f)]" : "border-[var(--sat-staff-border-strong)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)]"}`}
               >
                 <input
                   type="radio"
@@ -284,7 +281,7 @@ function PublishSheetBody({
                   checked={publishScope === option.value}
                   disabled={isPublishing}
                   onChange={() => setPublishScope(option.value as SatPublishScope)}
-                  className="accent-primary"
+                  className="h-4 w-4 accent-[var(--sat-staff-accent,#0071e3)]"
                 />
                 {option.label}
               </label>
@@ -299,10 +296,10 @@ function PublishSheetBody({
               type="button"
               onClick={() => void readinessQuery.refetch()}
               disabled={checking}
-              className={`${BUTTON} min-h-11 bg-muted text-foreground hover:bg-muted/70 ${releaseDisabledButtonClass}`}
+              className={`${BUTTON} sat-btn--secondary`}
             >
               {checking ? (
-                <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                <span aria-hidden="true" className="sat-btn__spinner" />
               ) : (
                 <RefreshCw size={15} aria-hidden="true" />
               )}
@@ -310,7 +307,7 @@ function PublishSheetBody({
             </button>
           </div>
           {readinessQuery.error ? (
-            <p role="alert" className="mt-3 rounded-xl bg-destructive/10 p-3 text-sm text-destructive">
+            <p role="alert" className="mt-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-tint)] p-3 text-[14px] text-[var(--sat-staff-danger,#b42318)] text-destructive">
               {readinessQuery.error instanceof Error ? readinessQuery.error.message : "Checks could not run."}
             </p>
           ) : checking && !fresh ? (
@@ -318,7 +315,7 @@ function PublishSheetBody({
               Running checks on your latest saved draft…
             </p>
           ) : !fresh ? (
-            <p className="mt-3 rounded-xl bg-amber-100 p-3 text-sm text-amber-900">
+            <p className="mt-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-warning-tint)] p-3 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
               These checks are out of date. Run checks to review the latest draft.
             </p>
           ) : blockers.length === 0 ? (
@@ -337,11 +334,11 @@ function PublishSheetBody({
               </p>
               <ul className="mt-2 space-y-2">
                 {blockers.map((issue, index) => (
-                  <li key={`${issue.path}-${index}`} className="flex items-start justify-between gap-3 rounded-xl border border-border p-3 text-sm">
+                  <li key={`${issue.path}-${index}`} className="flex items-start justify-between gap-3 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] p-3 text-[14px]">
                     <span className="min-w-0 leading-6 text-foreground">{issue.message}</span>
                     <button
                       type="button"
-                      className={`${BUTTON} shrink-0 bg-muted text-foreground hover:bg-muted/70`}
+                      className={`${BUTTON} sat-btn--secondary shrink-0`}
                       onClick={() => {
                         onClose();
                         onOpenIssue(issue);
@@ -356,7 +353,7 @@ function PublishSheetBody({
           )}
         </section>
 
-        <section aria-label="Included content" className="rounded-2xl bg-muted p-4">
+        <section aria-label="Included content" className="rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-faint)] p-4">
           <div className="flex items-center justify-between gap-3 text-sm">
             <span className="text-muted-foreground">Candidate time</span>
             <span className="font-semibold text-foreground">
@@ -388,7 +385,7 @@ function PublishSheetBody({
                 setView("settings");
               }
             }}
-            className="mt-3 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-foreground underline underline-offset-2"
+            className="sat-btn sat-btn--secondary sat-press mt-3"
           >
             <Settings2 size={15} aria-hidden="true" />
             {onOpenSettings ? "Edit timing and routing in Settings" : "Edit timing and routing"}
@@ -411,12 +408,12 @@ function PublishSheetBody({
             rows={3}
             maxLength={MAX_PUBLISH_NOTES_LENGTH}
             placeholder="What changed in this release?"
-            className="mt-2 w-full resize-y rounded-xl border border-border px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/15"
+            className="sat-input mt-2 resize-y"
           />
         </div>
 
         {localError || publishError ? (
-          <div role="alert" className="rounded-xl bg-destructive/10 p-3 text-sm leading-6 text-destructive">
+          <div role="alert" className="rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-tint)] p-3 text-[14px] text-[var(--sat-staff-danger,#b42318)] leading-6 text-destructive">
             <p data-publish-error>{localError ?? publishError}</p>
             {issueTarget ? (
               <button
@@ -445,7 +442,7 @@ function PublishSheetBody({
             type="button"
             onClick={onClose}
             disabled={isPublishing}
-            className={`${BUTTON} bg-muted text-foreground hover:bg-muted/70 ${releaseDisabledButtonClass}`}
+            className={`${BUTTON} sat-btn--quiet`}
           >
             Cancel
           </button>
@@ -454,10 +451,10 @@ function PublishSheetBody({
             onClick={() => void submit()}
             disabled={!canPublish}
             aria-busy={isPublishing}
-            className={`${BUTTON} bg-primary text-primary-foreground hover:bg-primary/90 ${releaseDisabledButtonClass}`}
+            className={`${BUTTON} sat-btn--primary`}
           >
             {isPublishing ? (
-              <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              <span aria-hidden="true" className="sat-btn__spinner" />
             ) : (
               <Rocket size={15} aria-hidden="true" />
             )}

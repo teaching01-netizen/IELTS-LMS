@@ -1,7 +1,7 @@
-import { AlertTriangle, Link2, LoaderCircle, Rocket } from "lucide-react";
+import { AlertTriangle, Link2, Rocket } from "lucide-react";
 import type { AssessmentReleaseState } from "../../contracts/release";
 import { formatDuration, formatPublishedDate, satPublishScopeCopy } from "./releaseSelectors";
-import { releaseDisabledButtonClass, releaseSurfaceClass } from "./releaseUi";
+import { releaseSurfaceClass } from "./releaseUi";
 
 interface ReleaseSummaryProps {
   examTitle: string;
@@ -86,25 +86,21 @@ export function ReleaseSummary({
         </dl>
         <div className="p-5">
           {!online ? (
-            <div role="status" className="mb-4 flex items-start gap-2 rounded-xl bg-muted p-3 text-xs leading-5 text-muted-foreground">
-              <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <div role="status" className="mb-4 flex items-start gap-2 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-faint)] p-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
               You are offline. Saving and publishing are paused until you reconnect.
             </div>
           ) : null}
           {dirtyCount > 0 ? (
-            <div role="status" className="mb-4 flex items-start gap-2 rounded-xl bg-amber-100 p-3 text-xs leading-5 text-amber-800">
-              <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <div role="status" className="mb-4 flex items-start gap-2 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-warning-tint)] p-3 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
               Save all delivery changes before publishing.
             </div>
           ) : null}
           {publishedCurrent ? (
-            <button
-              type="button"
-              onClick={onOpenStudentAccess}
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            >
+            <button type="button" onClick={onOpenStudentAccess} className="sat-btn sat-btn--primary sat-btn--block sat-press">
               <Link2 size={16} aria-hidden="true" />
-              Student Access
+              Open rooms
             </button>
           ) : (
             <>
@@ -112,14 +108,15 @@ export function ReleaseSummary({
                 type="button"
                 onClick={onPublish}
                 disabled={!canPublish || isPublishing}
+                aria-busy={isPublishing || undefined}
                 aria-describedby={publishBlockers.length > 0 ? "release-publish-reasons" : undefined}
-                className={`flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${releaseDisabledButtonClass}`}
+                className="sat-btn sat-btn--primary sat-btn--block sat-press"
               >
-                {isPublishing ? <LoaderCircle size={16} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Rocket size={16} aria-hidden="true" />}
-                {isPublishing ? "Publishing\u2026" : isUpdate ? "Publish Update" : "Publish"}
+                {isPublishing ? <span aria-hidden="true" className="sat-btn__spinner" /> : <Rocket size={16} aria-hidden="true" />}
+                {isPublishing ? "Publishing\u2026" : isUpdate ? "Publish new version" : "Publish version"}
               </button>
               {publishBlockers.length > 0 ? (
-                <ul id="release-publish-reasons" aria-label="Why publishing is unavailable" className="mt-3 list-disc space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
+                <ul id="release-publish-reasons" aria-label="Why publishing is unavailable" className="mt-3 list-disc space-y-1 pl-5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
                   {publishBlockers.map((reason) => (
                     <li key={reason}>{reason}</li>
                   ))}
@@ -128,13 +125,13 @@ export function ReleaseSummary({
             </>
           )}
           {published && !publishedCurrent ? (
-            <button type="button" onClick={onOpenStudentAccess} className="mt-2 min-h-11 w-full rounded-xl text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              Student Access
+            <button type="button" onClick={onOpenStudentAccess} className="sat-btn sat-btn--quiet sat-btn--block sat-press mt-2">
+              Open rooms
             </button>
           ) : null}
-          {publishError ? <p role="alert" className="mt-3 text-xs leading-5 text-destructive">{publishError}</p> : null}
-          <p className="mt-3 text-center text-xs leading-5 text-muted-foreground">
-            {publishedCurrent ? "Existing links remain on the release they were created for." : "Publishing creates an immutable release. Existing links never change automatically."}
+          {publishError ? <p role="alert" className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">{publishError}</p> : null}
+          <p className="mt-3 text-center text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+            {publishedCurrent ? "Existing rooms stay on the version they were created for." : "Publishing creates a new immutable version. Existing rooms never change automatically."}
           </p>
         </div>
       </div>
