@@ -646,6 +646,10 @@ func v2BatchHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Attempt service is unavailable."))
 			return
 		}
+		if err := startCodeGateForBearer(r, app, bearer, chi.URLParam(r, "attemptID")); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		// B2: locker routes via RUNTIME_SNAPSHOT (snapshot pre-gate when on,
 		// today's FOR UPDATE path when off). Rollback = off.
 		res, err := app.Attempts.SaveResponses(r.Context(), bearer, attempts.SaveResponsesCommand{AttemptID: chi.URLParam(r, "attemptID"), LeaseEpoch: body.LeaseEpoch, ControlEpoch: body.ControlEpoch, Commands: body.Commands}, v2Resolver{}, app.RuntimeLockerFor())
@@ -681,6 +685,10 @@ func v2SubmitHandler(app *App) http.HandlerFunc {
 		attemptID := chi.URLParam(r, "attemptID")
 		if app.Attempts == nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Attempt service is unavailable."))
+			return
+		}
+		if err := startCodeGateForBearer(r, app, bearer, attemptID); err != nil {
+			httpx.WriteError(w, r, err)
 			return
 		}
 		cmd := attempts.SubmitCommand{AttemptID: attemptID, LeaseEpoch: body.LeaseEpoch, ExpectedControlEpoch: body.ControlEpoch, SubmissionID: body.SubmissionID, FinalCommands: body.FinalCommands, ActorKind: "student"}

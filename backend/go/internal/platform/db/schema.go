@@ -23,6 +23,13 @@ type RequiredColumn struct {
 // never replay: table presence is load-bearing, not advisory.
 var RequiredTables = []string{
 	"authoring_operation_keys",
+	// SAT access-code start (0080): code storage and the verification guard
+	// are read on every first start; a missing table must refuse to boot.
+	"sat_session_start_codes",
+	"sat_start_code_guards",
+	"sat_start_code_reservations",
+	// 0081 replaces the generation-wide claim lock with fixed independently claimable capacity.
+	"sat_start_code_reservation_slots",
 }
 
 // RequiredColumns: 19 durability-critical columns from the Rust
@@ -57,6 +64,11 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "assessment_route_decisions", Column: "route_basis"},
 	{Table: "assessment_route_decisions", Column: "late_answer_count"},
 	{Table: "assessment_late_answer_evidence", Column: "response"},
+	// SAT access-code start (0080): every delivery write gate reads these.
+	{Table: "exam_schedules", Column: "sat_start_mode"},
+	{Table: "student_attempts", Column: "sat_start_code_required"},
+	{Table: "student_attempts", Column: "sat_start_code_accepted_at"},
+	{Table: "student_attempts", Column: "sat_start_code_generation"},
 }
 
 // RequiredIndex is one (table, index) pair the runtime depends on.
@@ -83,6 +95,11 @@ var RequiredIndexes = []RequiredIndex{
 	// live-update bus. Draft-scoped replay is the Phase 03 hot path; the
 	// kind-scoped index serves the bus forwarder's poll.
 	{Table: "live_update_events", Index: "idx_live_update_events_kind_target_seq"},
+	// 0081: the active-attempt unique key enforces the one-live-reservation
+	// invariant; the budget and lease indexes bound claim and expiry queries.
+	{Table: "sat_start_code_reservation_slots", Index: "uq_sat_start_code_slots_active_attempt"},
+	{Table: "sat_start_code_reservation_slots", Index: "idx_sat_start_code_slots_budget"},
+	{Table: "sat_start_code_reservation_slots", Index: "idx_sat_start_code_slots_lease"},
 }
 
 // SchemaVerifier queries information_schema for the required lists.

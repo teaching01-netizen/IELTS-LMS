@@ -67,8 +67,8 @@ func deliveryReconcileDrainedStranded(mock sqlmock.Sqlmock) {
 func deliveryModuleWorkableTx(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase"}).
-			AddRow("active", "running", nil, "exam"))
+		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at"}).
+			AddRow("active", "running", nil, "exam", false, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
@@ -172,8 +172,8 @@ func deliveryBootstrapLoadsForModel(mock sqlmock.Sqlmock, at time.Time, model an
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response", "server_revision", "module_attempt_id", "exam_question_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"candidate_name", "proctor_status", "proctor_note", "delivery_status", "submitted_at", "phase"}).
-			AddRow("Jane", "active", nil, "running", nil, "exam"))
+		WillReturnRows(sqlmock.NewRows([]string{"candidate_name", "proctor_status", "proctor_note", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at"}).
+			AddRow("Jane", "active", nil, "running", nil, "exam", false, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE attempt_id")).
 		WithArgs("att-1").
 		WillReturnError(sql.ErrNoRows)

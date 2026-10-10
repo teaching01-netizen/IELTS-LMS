@@ -62,6 +62,25 @@ const validPreview: SatWorkbookPreview = {
 describe("SAT workbook import sheet", () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it("describes the authoring guidance included in the template", () => {
+    render(
+      <SatWorkbookImportSheet
+        open
+        examId="exam-1"
+        shell={shell}
+        existingQuestionCount={0}
+        onClose={vi.fn()}
+        onCommitted={vi.fn()}
+      />
+    );
+
+    const download = screen.getByRole("button", { name: "Download SAT Excel template" });
+    expect(download).toHaveAttribute("aria-describedby", "sat-workbook-template-hint");
+    expect(
+      screen.getByText("Includes a copyable AI prompt, authoring guide, and import checklist.")
+    ).toBeInTheDocument();
+  });
+
   it("rejects a non-xlsx file before previewing it", async () => {
     const preview = vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook");
     render(

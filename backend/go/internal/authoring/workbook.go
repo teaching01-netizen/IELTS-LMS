@@ -516,6 +516,7 @@ func resolveWorkbookDomain(section, raw string) (string, bool) {
 			"advanced math":                     "advanced-math",
 			"advanced-math":                     "advanced-math",
 			"problem solving and data analysis": "problem-solving-and-data-analysis",
+			"problem-solving and data analysis": "problem-solving-and-data-analysis",
 			"problem-solving-and-data-analysis": "problem-solving-and-data-analysis",
 			"geometry and trigonometry":         "geometry-and-trigonometry",
 			"geometry-and-trigonometry":         "geometry-and-trigonometry",

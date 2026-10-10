@@ -55,31 +55,42 @@ type Service struct {
 	// liveSinkBus + liveSinkMode select the optional async debug sink
 	// (plan C1): sample = ~1:1000 hub events also Append a bus row
 	// post-commit (outside any business tx); off = zero bus writes.
-	liveSinkBus  *liveupdates.Bus
-	liveSinkMode config.LiveBusSinkMode
-	// liveSinkCount counts hub events for deterministic 1:1000 sampling
-	// (atomic: publishHubEvents runs concurrently per request).
-	liveSinkCount atomic.Uint64
-	// completer is the ACT/compatibility completion hook after reconciliation.
-	// Production SAT uses satTerminalizerInTx instead.
-	completer AssessmentCompleter
-	// SAT seals on the same transaction that finalizes the last module.
+	liveSinkBus         *liveupdates.Bus
+	liveSinkMode        config.LiveBusSinkMode
+	mediaIndexMu        sync.RWMutex
+	completer           AssessmentCompleter
 	satTerminalizerInTx func(context.Context, tx.Tx, string, string) (bool, error)
+	mediaIndex          map[mediaIndexKey]map[string]map[string]struct{}
+	liveSinkCount       atomic.Uint64
 	timeoutCursorMu     sync.Mutex
 	timeoutCursorID     string
-	// mediaIndex memoizes which assets each module references, per published
-	// revision (see mediaIndexFor).
-	mediaIndexMu sync.Mutex
-	mediaIndex   map[mediaIndexKey]map[string]map[string]struct{}
 	// reconcileConcurrency bounds how many attempts one timeout sweep
 	// reconciles at once (<= 1 is sequential). Each attempt reconciles in its
 	// own lock-ordered transaction, exactly as concurrent request paths do.
 	reconcileConcurrency int
+	// codeStartRuntime/codeStartPlanner open the personal runtime inside the
+	// first SAT code-start transaction (runtime owns creation, schedules owns
+	// plan derivation; both injected at the composition root).
+	codeStartRuntime *examruntime.Service
+	codeStartPlanner examruntime.StartPlanner
+	// satStartAdmission is process-local backpressure only; SQL remains the
+	// authority for reservation budgets and runtime uniqueness.
+	satStartAdmissionOnce sync.Once
+	satStartAdmission     *satStartAdmission
+	dbStats               interface{ Stats() sql.DBStats }
+}
+
+// SetCodeStart wires the runtime opener and pinned-plan derivation the SAT
+// code-start first entry needs when no runtime exists yet.
+func (s *Service) SetCodeStart(rt *examruntime.Service, planner examruntime.StartPlanner) *Service {
+	s.codeStartRuntime = rt
+	s.codeStartPlanner = planner
+	return s
 }
 
 // NewService wires dependencies explicitly.
 func NewService(db *sql.DB, runner *tx.Runner) *Service {
-	return &Service{db: db, runner: runner}
+	return &Service{db: db, runner: runner, dbStats: db}
 }
 
 // SetReconcileConcurrency bounds parallel attempts per timeout sweep. A
@@ -327,6 +338,10 @@ type Bootstrap struct {
 	Sections              []DeliverySection `json:"sections"`
 	Attempt               AttemptSnapshot   `json:"attempt"`
 	Result                any               `json:"result"`
+	// SatStartPolicy is the server-derived SAT entry object (proctor vs
+	// access-code start, and for code start the code_required / started /
+	// closed state). Absent for non-SAT providers.
+	SatStartPolicy *SatStartPolicy `json:"satStartPolicy,omitempty"`
 }
 
 // Bootstrap assembles the delivery payload for one SAT or ACT attempt. The bearer
@@ -461,6 +476,10 @@ func (s *Service) bootstrapSnapshot(ctx context.Context, scheduleID, examID, pro
 	// the same room clock the write path clamps to. Non-SAT/legacy payloads and
 	// modules with no running section window keep their authored length.
 	publishEntryWindows(moduleAttempts, sections, timing, roomSections, now)
+	startPolicy, sections, err := s.applySatStartPolicy(ctx, providerKey, scheduleID, control, now, sections)
+	if err != nil {
+		return nil, err
+	}
 	return &Bootstrap{
 		ScheduleID:            scheduleID,
 		ExamID:                examID,
@@ -482,8 +501,26 @@ func (s *Service) bootstrapSnapshot(ctx context.Context, scheduleID, examID, pro
 			PersonalBreaks:       personalBreaks,
 			ProvisionalSubmitted: control.deliveryStatus == "submitted" && control.submittedAt == nil,
 		},
-		Result: result,
+		Result:         result,
+		SatStartPolicy: startPolicy,
 	}, nil
+}
+
+// applySatStartPolicy derives the SAT entry object and, while the candidate
+// has not redeemed the code, withholds every module's content. One owner for
+// both bootstrap assemblies (cold read and post-write ACK).
+func (s *Service) applySatStartPolicy(ctx context.Context, providerKey, scheduleID string, control attemptControl, now time.Time, sections []DeliverySection) (*SatStartPolicy, []DeliverySection, error) {
+	if providerKey != "sat" {
+		return nil, sections, nil
+	}
+	policy, gated, err := s.satStartPolicy(ctx, scheduleID, control, now)
+	if err != nil {
+		return nil, nil, err
+	}
+	if gated {
+		sections = withholdAllModuleContent(sections)
+	}
+	return policy, sections, nil
 }
 
 // loadBootstrapResult reads a result only after the attempt crossed its
@@ -695,6 +732,19 @@ func (s *Service) loadQuestions(ctx context.Context, moduleID string) ([]Deliver
 // id, so it resolves the pinned version + sections itself, then reuses
 // the same idempotent seeder the SAT Bootstrap path uses.
 func (s *Service) EnsureBaseModuleAttemptForSchedule(ctx context.Context, attemptID, scheduleID string) error {
+	// Student bootstrap normally creates this row before the start-code POST.
+	// Keep the idempotent repair path for older/incomplete attempts, but avoid
+	// reloading immutable release content and scope on the common existing-row
+	// path.
+	var existing string
+	err := s.db.QueryRowContext(ctx,
+		"SELECT id FROM assessment_module_attempts WHERE attempt_id = ?", attemptID).Scan(&existing)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
 	var versionID string
 	if err := s.db.QueryRowContext(ctx,
 		"SELECT published_version_id FROM exam_schedules WHERE id = ?", scheduleID).Scan(&versionID); err != nil {
@@ -1191,6 +1241,9 @@ type attemptControl struct {
 	deliveryStatus        string
 	submittedAt           *time.Time
 	phase                 string
+	// SAT access-code start, frozen on the attempt at admission.
+	codeRequired   bool
+	codeAcceptedAt *time.Time
 }
 
 // loadAttemptControl loads candidate/proctor/device/lifecycle fields.
@@ -1202,15 +1255,16 @@ func (s *Service) loadAttemptControl(ctx context.Context, attemptID string, boun
 	c := bound
 	if c.candidateName == "" && c.deliveryStatus == "" {
 		var proctorNote sql.NullString
-		var submittedAt sql.NullTime
+		var submittedAt, codeAcceptedAt sql.NullTime
 		if err := s.db.QueryRowContext(ctx,
-			"SELECT candidate_name, COALESCE(proctor_status, 'active'), proctor_note, COALESCE(delivery_status, 'running'), submitted_at, COALESCE(phase, '') FROM student_attempts WHERE id = ?",
+			"SELECT candidate_name, COALESCE(proctor_status, 'active'), proctor_note, COALESCE(delivery_status, 'running'), submitted_at, COALESCE(phase, ''), sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ?",
 			attemptID).Scan(&c.candidateName, &c.proctorStatus, &proctorNote,
-			&c.deliveryStatus, &submittedAt, &c.phase); err != nil {
+			&c.deliveryStatus, &submittedAt, &c.phase, &c.codeRequired, &codeAcceptedAt); err != nil {
 			return c, err
 		}
 		c.proctorNote = nullStringToPtr(proctorNote)
 		c.submittedAt = nullTime(submittedAt)
+		c.codeAcceptedAt = nullTime(codeAcceptedAt)
 	}
 	var fingerprint sql.NullString
 	err := s.db.QueryRowContext(ctx,
@@ -1799,11 +1853,12 @@ func (s *Service) saveAttemptBinding(ctx context.Context, scheduleID, attemptID,
 // post-exam => Conflict.
 func (s *Service) ensureAttemptCanWorkTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string) error {
 	var proctorStatus, deliveryStatus string
-	var submittedAt sql.NullTime
+	var submittedAt, codeAcceptedAt sql.NullTime
 	var phase sql.NullString
+	var codeRequired bool
 	if err := t.QueryRowContext(ctx,
-		"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
-		attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase); err != nil {
+		"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+		attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
 		}
@@ -1820,6 +1875,12 @@ func (s *Service) ensureAttemptCanWorkTx(ctx context.Context, t tx.Tx, scheduleI
 	}
 	if submittedAt.Valid || deliveryStatus == "submitted" || deliveryStatus == "terminated" || deliveryStatus == "locked" || deliveryStatus == "cancelled" || (phase.Valid && phase.String == "post-exam") {
 		return assessmentConflict("ATTEMPT_TERMINAL", "The SAT attempt is already terminal and cannot accept this command.")
+	}
+	// SAT access-code start: every mutating delivery path (module start/entry,
+	// breaks, saves, close, submit) is closed until this candidate's own code
+	// redemption committed. Another candidate opening the room is irrelevant.
+	if codeRequired && !codeAcceptedAt.Valid {
+		return startCodeRequired()
 	}
 	var runtimeStatus sql.NullString
 	if err := t.QueryRowContext(ctx,

@@ -50,6 +50,7 @@ import { SatPresenceSurface } from "../ui/motion/SatPresenceSurface";
 import { SatStudentStageHost } from "../ui/stage/SatStudentStageHost";
 import { SatCompleteScreen, SatTerminatedScreen } from "../ui/transitions/SatCompleteScreen";
 import { SatPreStartScreen } from "../ui/transitions/SatPreStartScreen";
+import { SatStartCodeScreen } from "../ui/transitions/SatStartCodeScreen";
 import { SatWriterTransferControl } from "../ui/entry/SatWriterTransferControl";
 import { useStudentExamPageLock } from "@components/student/layout/useStudentExamPageLock";
 import { useStudentExamViewport } from "@components/student/layout/useStudentExamViewport";
@@ -468,9 +469,13 @@ export function SatStudentSessionRoute({
       stage,
       <SatTerminatedScreen
         note={
-          stage.byProctor
-            ? data.proctorNote
-            : "The proctor has ended this exam session."
+          // A code-start candidate who never began: no exam was taken and no
+          // score exists, whoever closed the window.
+          data.satStartPolicy?.mode === "access_code" && data.satStartPolicy.state === "closed"
+            ? "The start window closed before this exam was started. No exam was taken."
+            : stage.byProctor
+              ? data.proctorNote
+              : "The proctor has ended this exam session."
         }
         onExit={onExit}
       />,
@@ -580,6 +585,22 @@ export function SatStudentSessionRoute({
   }
 
   if (stage.kind === "pre-start") {
+    // SAT access-code start: this candidate's own code redemption, not the
+    // room's runtime, opens their first module.
+    const startPolicy = data.satStartPolicy;
+    if (startPolicy?.mode === "access_code" && startPolicy.state !== "started") {
+      return stageHost(
+        stage,
+        <SatStartCodeScreen
+          key={identityKey}
+          policy={startPolicy}
+          submitting={exam.isStarting}
+          onSubmit={commands.startWithCode}
+          onExit={() => void onExit()}
+          footer={<SatWriterTransferControl scheduleId={scheduleId} attemptId={attemptId} />}
+        />,
+      );
+    }
     return stageHost(
       stage,
       withCalculatorHost(

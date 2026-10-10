@@ -23,6 +23,7 @@ var openAttemptProbe = regexp.QuoteMeta("COALESCE(delivery_status, 'running') NO
 // expectPersonalSweepScan programmes the out-of-band candidate transaction with a
 // cohort schedule (so the section path gets nothing) plus one personal candidate.
 func expectPersonalSweepScan(mock sqlmock.Sqlmock, asOf time.Time, scheduleID string, limit int64) {
+	expectCodeStartSweepsEmpty(mock, asOf, limit)
 	mock.ExpectBegin()
 	mock.ExpectExec(setTimeZone).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(candidateQuery).
@@ -41,8 +42,8 @@ func expectPersonalSweepTxPrologue(mock sqlmock.Sqlmock, scheduleID, runtimeID, 
 	mock.ExpectExec(setTimeZone).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id = ? FOR UPDATE")).
 		WithArgs(scheduleID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "published_version_id", "status", "revision", "planned_duration_minutes"}).
-			AddRow(scheduleID, "exam-1", "sat", timingModel, "ver-1", "live", 3, 134))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
+			AddRow(scheduleID, "exam-1", "sat", timingModel, "proctor", "ver-1", "live", 3, 134))
 	mock.ExpectQuery(attemptsLock).
 		WithArgs(scheduleID).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))

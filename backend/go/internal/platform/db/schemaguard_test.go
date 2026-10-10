@@ -20,6 +20,9 @@ func TestVerifyFailsClosedOnMissingTable(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectQuery("information_schema.tables").WillReturnRows(sqlmock.NewRows([]string{"COUNT"}).AddRow(0))
+	for range RequiredTables[1:] {
+		mock.ExpectQuery("information_schema.tables").WillReturnRows(sqlmock.NewRows([]string{"COUNT"}).AddRow(1))
+	}
 	v := &SchemaVerifier{DB: db}
 	missing, err := v.MissingTables(context.Background())
 	if err != nil {
@@ -34,11 +37,11 @@ func TestVerifyFailsClosedOnMissingTable(t *testing.T) {
 }
 
 func TestSchemaGuardListSizes(t *testing.T) {
-	if len(RequiredTables) != 1 {
-		t.Fatalf("RequiredTables must hold 1 entry (0058), got %d", len(RequiredTables))
+	if len(RequiredTables) != 5 {
+		t.Fatalf("RequiredTables must include the authoring table, 3 existing SAT start-code tables, and the 0081 slot table; got %d", len(RequiredTables))
 	}
-	if len(RequiredIndexes) != 10 {
-		t.Fatalf("RequiredIndexes must hold 10 entries (I6 + the 0060 authoring replay index), got %d", len(RequiredIndexes))
+	if len(RequiredIndexes) != 13 {
+		t.Fatalf("RequiredIndexes must include the 10 existing guards and 3 SAT slot indexes, got %d", len(RequiredIndexes))
 	}
 	seen := map[string]bool{}
 	for _, c := range RequiredColumns {

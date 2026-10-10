@@ -44,8 +44,17 @@ export function isEquivalentBootstrap(
     return false;
   }
   if (prev.attempt.id !== next.attempt.id) return false;
+  if (startPolicyKey(prev) !== startPolicyKey(next)) return false;
   if (!sameAttempts(prev, next) || !sameBreaks(prev, next) || !sameResponseRevisions(prev, next)) return false;
   return true;
+}
+
+/** The start-policy facts a poll can change (state, block, window). */
+function startPolicyKey(payload: AssessmentDeliveryBootstrap): string {
+  const policy = payload.satStartPolicy;
+  if (!policy) return "";
+  if (policy.mode !== "access_code") return policy.mode;
+  return [policy.mode, policy.state, policy.blockedReason ?? "", policy.opensAt ?? "", policy.closesAt ?? ""].join("|");
 }
 
 /**

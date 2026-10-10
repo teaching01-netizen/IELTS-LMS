@@ -3,7 +3,7 @@ import { check, fail as k6Fail, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
 
 // Preprovision 2,000 unique {attemptId, token, expectedBranch?} credentials.
-// Modes: initial, adaptive, lost-start, lost-enter. For adaptive, expire the
+// Modes: initial, adaptive, lost-start, lost-enter, code. For adaptive, expire the
 // preceding personal module at K6_WAVE_AT_MS and supply expectedBranch per
 // credential ("higher"/"lower"). This measures the complete HTTP entry
 // protocol. The browser runner separately measures the real first answerable
@@ -25,8 +25,12 @@ const vus = Number(__ENV.K6_VUS || '2000');
 const saveLoop = __ENV.K6_SAVE_LOOP === '1';
 const savePollMs = Number(__ENV.K6_SAVE_POLL_MS || '250');
 const closeWaitSeconds = Number(__ENV.K6_CLOSE_WAIT_SECONDS || '120');
-if (!baseUrl || !scheduleId || !['initial', 'adaptive', 'lost-start', 'lost-enter'].includes(mode)) {
+if (!baseUrl || !scheduleId || !['initial', 'adaptive', 'lost-start', 'lost-enter', 'code'].includes(mode)) {
   throw new Error('Provide K6_BASE_URL, K6_SCHEDULE_ID and a valid K6_MODE');
+}
+const startCode = __ENV.K6_START_CODE;
+if (mode === 'code' && !/^[0-9]{6}$/.test(startCode || '')) {
+  throw new Error('Code mode requires K6_START_CODE with exactly six ASCII digits');
 }
 const creds = JSON.parse(open(__ENV.K6_ATTEMPT_TOKENS_PATH || './attempt-creds.json'));
 if (!Array.isArray(creds) || creds.length < vus || creds.slice(0, vus).some((c) => !c.attemptId || !c.token)) {
@@ -104,6 +108,12 @@ if (mode === 'adaptive') {
     thresholds.sat_timeout_close_ms = ['p(95)<15000', 'max<60000'];
     thresholds.sat_route_drift = ['count==0'];
   }
+}
+if (mode === 'code') {
+  thresholds.sat_module_start_ms = ['p(95)<2000'];
+  delete thresholds.sat_module_enter_ms;
+  delete thresholds.sat_module_entry_state_ms;
+  delete thresholds.sat_module_visible_ms;
 }
 
 export const options = {
@@ -387,6 +397,33 @@ export function studentFlow(data) {
   const cold = bootstrap(cred.token);
   while (Date.now() < data.waveAt) sleep(Math.min(0.1, (data.waveAt - Date.now()) / 1000));
   const authorizedAt = data.waveAt;
+  if (mode === 'code') {
+    if (cold.satStartPolicy?.mode !== 'access_code' || cold.satStartPolicy.state !== 'code_required') {
+      fail('Expected an unstarted code-required candidate');
+    }
+    if ((cold.sections || []).some(s => (s.modules || []).some(m => (m.questions || []).length > 0))) {
+      fail('Questions were exposed before code acceptance');
+    }
+    const response = post(cred.token, '/start-with-code', {
+      code: startCode, controlEpoch: cold.attempt.controlEpoch,
+    }, startMs);
+    const started = json(response);
+    if (response.status !== 200 || started?.kind !== 'started' || !started.entry?.startedAt ||
+        !started.entry?.selectedSection?.modules?.some(m => (m.questions || []).length > 0)) {
+      fail(`Code entry did not deliver an interactive module: status=${response.status}`);
+    }
+    protocolMs.add(Date.now() - authorizedAt);
+    // Natural replay must resume without resetting the committed module clock.
+    const replayResponse = post(cred.token, '/start-with-code', {
+      code: startCode, controlEpoch: started.entry.controlEpoch,
+    }, stateMs);
+    const replay = json(replayResponse);
+    const module = replay?.bootstrap?.attempt?.moduleAttempts?.find(m => m.moduleId === started.entry.moduleId);
+    if (replayResponse.status !== 200 || replay?.kind !== 'resume' || module?.startedAt !== started.entry.startedAt) {
+      fail('Code replay failed to preserve the original module start');
+    }
+    return;
+  }
   const moduleId = mode === 'adaptive' ? chooseAdaptive(cred.token, cred, data.waveAt) : chooseInitial(cold);
   const ack = armOrRecover(cred.token, moduleId);
   if (ack.entryState !== 'entered') {

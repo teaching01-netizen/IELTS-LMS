@@ -1,12 +1,17 @@
-import { useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useMemo, type ReactNode } from 'react';
 import { MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { BarChart3, BookOpen, LogOut, Radio, UserRound } from 'lucide-react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthSession } from '../../features/auth/authSession';
-import { SatAuthoringCollaborationBoundary } from '../../features/exam-authoring/realtime/coedit';
 import { SatMenu, type SatMenuItem } from './ui/Menu';
 import { SatWorkspaceMark, SatWorkspaceNavContext } from './ui/SatWorkspaceNav';
 import { useSatScrollMemory } from './ui/useSatListReturn';
+
+const SatAuthoringCollaborationBoundary = lazy(() =>
+  import('../../features/exam-authoring/realtime/coedit').then((module) => ({
+    default: module.SatAuthoringCollaborationBoundary,
+  })),
+);
 
 type SatNavItem = {
   label: string;
@@ -193,11 +198,19 @@ export function SatRoot() {
         <SatWorkspaceNavContext.Provider value={workspaceItems}>
         <main id="sat-main" tabIndex={-1} className={`min-h-screen focus:outline-none ${isDetailPage ? '' : 'pb-20 md:pb-0'}`}>
           {collaborationExamId ? (
-            <SatAuthoringCollaborationBoundary examId={collaborationExamId}>
-              <SatRouteFade routeKey={location.pathname}>
-                <Outlet />
-              </SatRouteFade>
-            </SatAuthoringCollaborationBoundary>
+            <Suspense
+              fallback={
+                <div role="status" className="mx-auto w-full max-w-[1180px] px-4 py-6 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">
+                  Preparing exam workspace…
+                </div>
+              }
+            >
+              <SatAuthoringCollaborationBoundary examId={collaborationExamId}>
+                <SatRouteFade routeKey={location.pathname}>
+                  <Outlet />
+                </SatRouteFade>
+              </SatAuthoringCollaborationBoundary>
+            </Suspense>
           ) : (
             <SatRouteFade routeKey={location.pathname}>
               <Outlet />

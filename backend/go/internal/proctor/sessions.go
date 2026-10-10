@@ -99,6 +99,7 @@ type SessionSchedule struct {
 	CreatedBy              string                     `json:"createdBy"`
 	UpdatedAt              time.Time                  `json:"updatedAt"`
 	Revision               int64                      `json:"revision"`
+	SatStartMode           string                     `json:"satStartMode"`
 }
 
 // SessionPlanEntry mirrors Rust ScheduleSectionPlanEntry (camelCase).
@@ -268,6 +269,11 @@ type StudentSessionSummary struct {
 	LastActivity                 time.Time       `json:"lastActivity"`
 	ExamID                       string          `json:"examId"`
 	ExamName                     string          `json:"examName"`
+	// SatStartState is the SAT access-code start disposition for code-start
+	// sessions: "waiting_for_code" (admitted, not started), "started", or
+	// "never_started" (closed without a start; no result). Null for proctor
+	// start. The code itself never appears in roster payloads.
+	SatStartState *string `json:"satStartState"`
 }
 
 // ProctorAlert mirrors Rust ProctorAlert (camelCase; "type" is the JSON key).
@@ -391,7 +397,7 @@ func requireSessionReader(actor Actor) error {
 
 // sessionScheduleColumns is the explicit exam_schedules projection (never
 // SELECT *), mirroring the Rust ExamSchedule field set.
-const sessionScheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, status, created_at, created_by, updated_at, revision, (SELECT sat_publish_scope FROM exam_versions WHERE id = exam_schedules.published_version_id), sat_timing_model"
+const sessionScheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, status, created_at, created_by, updated_at, revision, (SELECT sat_publish_scope FROM exam_versions WHERE id = exam_schedules.published_version_id), sat_timing_model, COALESCE(sat_start_mode, 'proctor')"
 
 func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSchedule, error) {
 	var s SessionSchedule
@@ -406,7 +412,7 @@ func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSched
 		&s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName,
 		&institution, &s.StartTime, &s.EndTime, &planned, &s.DeliveryMode,
 		&s.RecurrenceType, &recInterval, &recEnd, &bufBefore, &bufAfter,
-		&autoStart, &autoStop, &s.Status, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &revision, &publishScope, &satTimingModel,
+		&autoStart, &autoStop, &s.Status, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &revision, &publishScope, &satTimingModel, &s.SatStartMode,
 	); err != nil {
 		return SessionSchedule{}, err
 	}
@@ -1091,6 +1097,8 @@ type studentSessionRow struct {
 	satEntryGeneration                                         sql.NullInt64
 	satEntryStartsAt, satEntryProctorRearmAt                   sql.NullTime
 	satEntryAutoStartAt                                        sql.NullTime
+	satStartCodeRequired                                       bool
+	satStartCodeAcceptedAt                                     sql.NullTime
 }
 
 // studentSessionColumns mirrors Rust load_student_sessions (explicit list).
@@ -1107,7 +1115,8 @@ const studentSessionColumns = "sa.id, sa.candidate_id, sa.candidate_name, sa.can
 	"sat_break.id, sat_break.state, sat_break.duration_seconds, sat_break.accumulated_paused_seconds, " +
 	"sat_break.starts_at, sat_break.paused_at, sat_break.entry_starts_at, sat_break.deadline_at, " +
 	"sat_entry.id, sat_entry.module_id, sat_entry_module.title, sat_entry.entry_generation, " +
-	"sat_entry.entry_starts_at, sat_entry.entry_proctor_rearm_at, sat_entry.auto_start_at"
+	"sat_entry.entry_starts_at, sat_entry.entry_proctor_rearm_at, sat_entry.auto_start_at, " +
+	"sa.sat_start_code_required, sa.sat_start_code_accepted_at"
 
 const studentSessionFrom = "FROM student_attempts sa " +
 	"JOIN exam_entities e ON e.id = sa.exam_id " +
@@ -1154,6 +1163,7 @@ func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSes
 		&r.satBreakStartsAt, &r.satBreakPausedAt, &r.satBreakEntryStartsAt, &r.satBreakDeadlineAt,
 		&r.satEntryModuleAttemptID, &r.satEntryModuleID, &r.satEntryTitle, &r.satEntryGeneration,
 		&r.satEntryStartsAt, &r.satEntryProctorRearmAt, &r.satEntryAutoStartAt,
+		&r.satStartCodeRequired, &r.satStartCodeAcceptedAt,
 	); err != nil {
 		return studentSessionRow{}, err
 	}
@@ -1520,7 +1530,19 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 	}
 	serverNow := runtime.ServerNow
 	attemptRevision := row.attemptRevision
+	var satStartState *string
+	if row.satStartCodeRequired {
+		state := "waiting_for_code"
+		switch {
+		case row.satStartCodeAcceptedAt.Valid:
+			state = "started"
+		case row.proctorStatus == "terminated" || row.phase == "post-exam":
+			state = "never_started"
+		}
+		satStartState = &state
+	}
 	return StudentSessionSummary{
+		SatStartState:                 satStartState,
 		AttemptID:                     row.id,
 		StudentID:                     row.candidateID,
 		StudentName:                   row.candidateName,

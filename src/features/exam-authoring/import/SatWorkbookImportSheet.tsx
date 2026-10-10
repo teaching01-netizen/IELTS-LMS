@@ -294,11 +294,18 @@ export function SatWorkbookImportSheet({
                 <button
                   type="button"
                   onClick={() => void downloadTemplate()}
+                  aria-describedby="sat-workbook-template-hint"
                   className="authoring-interactive mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-[11px] text-xs font-semibold text-au-accent hover:bg-au-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
                 >
                   <Download size={14} aria-hidden="true" />
                   Download SAT Excel template
                 </button>
+                <p
+                  id="sat-workbook-template-hint"
+                  className="mt-1 px-2 text-center text-xs leading-4 text-slate-600"
+                >
+                  Includes a copyable AI prompt, authoring guide, and import checklist.
+                </p>
 
                 {error ? (
                   <div

@@ -33,10 +33,14 @@ func TestMediaDownloadEmitsImmutableCacheControl(t *testing.T) {
 	}
 	defer db.Close()
 	svc := media.NewService(db, tx.NewRunner(db), stubStore{body: []byte("audio-bytes")})
+	// The SAT-protection probe runs first: an IELTS exam asset is public.
+	mock.ExpectQuery("FROM media_assets m").
+		WithArgs("asset-1").
+		WillReturnRows(sqlmock.NewRows([]string{"protected"}).AddRow(false))
 	mock.ExpectQuery("FROM media_assets WHERE id").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_kind", "owner_id", "content_type", "file_name", "upload_status", "object_key", "size_bytes", "checksum_sha256", "upload_url", "download_url"}).
 			AddRow("asset-1", "assessment_exam", "exam-1", "audio/mpeg", "part1.mp3", "finalized", "media/asset-1/part1.mp3", 11, "abc", "http://u", "http://d"))
-	app := &App{Media: svc}
+	app := &App{Media: svc, DB: db}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/media/assets/asset-1", nil)
 	req = req.WithContext(context.WithValue(req.Context(), sessionCtxKey, &auth.Session{UserID: "u1", Role: auth.RoleStudent}))
 	rec := httptest.NewRecorder()

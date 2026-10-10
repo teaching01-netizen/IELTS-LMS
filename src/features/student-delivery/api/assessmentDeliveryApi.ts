@@ -28,6 +28,8 @@ import type {
   AssessmentResult,
   AssessmentStageVisibleAck,
   AssessmentSubmitRequest,
+  SatStartWithCodeRequest,
+  SatStartWithCodeResponse,
 } from '../contracts/assessmentDelivery';
 
 const ATTEMPT_REFRESH_WINDOW_MS = 5 * 60 * 1_000;
@@ -332,6 +334,23 @@ export const assessmentDeliveryApi = {
       `/v1/assessment-delivery/schedules/${scheduleId}/modules/start`,
       request,
       config,
+    ));
+  },
+
+  /**
+   * SAT access-code start: redeems the session code for THIS attempt only.
+   * Never retried automatically — a lost response is recovered by reading
+   * state first (a replay after commit resumes, it never restarts).
+   */
+  startWithCode(
+    scheduleId: string,
+    attemptId: string,
+    request: SatStartWithCodeRequest,
+  ): Promise<SatStartWithCodeResponse> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendPost<SatStartWithCodeResponse>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/start-with-code`,
+      request,
+      { ...config, retries: 0 },
     ));
   },
 

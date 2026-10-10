@@ -19,7 +19,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 )
 
-const selectedModuleScopeQuery = "SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ?"
+const selectedModuleScopeQuery = "SELECT v.revision, v.sat_publish_scope, l.enabled_sections FROM assessment_module_attempts m JOIN student_attempts a ON a.id = m.attempt_id JOIN exam_schedules s ON s.id = ? JOIN exam_versions v ON v.id = ? LEFT JOIN assessment_access_links l ON l.schedule_id = s.id WHERE m.attempt_id = ? AND m.module_id = ? AND a.schedule_id = s.id AND a.published_version_id = v.id"
 
 func TestSelectedModuleSectionHidesAnUnassignedModule(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -28,10 +28,11 @@ func TestSelectedModuleSectionHidesAnUnassignedModule(t *testing.T) {
 	}
 	defer db.Close()
 
-	// The unassigned branch has no row at all: the read must stop here rather
-	// than fall through to the version tree.
+	// An unassigned branch has no joined attempt/module/version/schedule row;
+	// the combined ownership and current-scope read must stop before loading
+	// the cached version tree.
 	mock.ExpectQuery(regexp.QuoteMeta(selectedModuleScopeQuery)).
-		WithArgs("att-1", "mod-lower").
+		WithArgs("sched-1", "ver-1", "att-1", "mod-lower").
 		WillReturnError(sql.ErrNoRows)
 
 	_, err = deliverySvc(db).selectedModuleSection(context.Background(), "att-1", "sched-1", "ver-1", "mod-lower")

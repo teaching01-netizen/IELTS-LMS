@@ -20,9 +20,9 @@ func expectAttemptMediaRows(mock sqlmock.Sqlmock, linkScope string, opened ...st
 // expectAttemptMediaQueries skips the section tree reads when loadTree is
 // false, as on a version-cache hit.
 func expectAttemptMediaQueries(mock sqlmock.Sqlmock, loadTree bool, linkScope string, opened ...string) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT schedule_id, published_version_id FROM student_attempts WHERE id = ?")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT schedule_id, published_version_id, sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ?")).
 		WithArgs("attempt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "published_version_id"}).AddRow("schedule-1", "version-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "published_version_id", "sat_start_code_required", "sat_start_code_accepted_at"}).AddRow("schedule-1", "version-1", false, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT revision FROM exam_versions WHERE id = ?")).
 		WithArgs("version-1").
 		WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(1))

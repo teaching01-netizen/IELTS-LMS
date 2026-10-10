@@ -89,6 +89,9 @@ const (
 	ReasonProctorForceSub  = "proctor_force_submit"
 	ReasonProctorTerminate = "proctor_terminate"
 	ReasonLegacyUnknown    = "legacy_unknown"
+	// ReasonStartWindowClosed seals a SAT code-start candidate who never
+	// redeemed the code before the start window closed. Never scored.
+	ReasonStartWindowClosed = "start_window_closed"
 )
 
 // Actor vocabulary.
@@ -277,7 +280,7 @@ func validReason(r string) bool {
 	switch r {
 	case ReasonStudentSubmit, ReasonSATComplete, ReasonTimeExpired, ReasonAutoStop,
 		ReasonProctorComplete, ReasonProctorEnd, ReasonProctorForceSub,
-		ReasonProctorTerminate, ReasonLegacyUnknown:
+		ReasonProctorTerminate, ReasonLegacyUnknown, ReasonStartWindowClosed:
 		return true
 	}
 	return false
@@ -833,6 +836,30 @@ func buildServerSnapshot(ctx context.Context, q tx.Tx, a attemptRow, providerKey
 			return nil, scanErr
 		}
 		snap["assessment"] = map[string]any{"moduleAttempts": mods, "responses": resps}
+		// The receipt retains start mode, acceptance and whether any module
+		// ever started, so result exclusion stays provable from the receipt.
+		var codeRequired bool
+		var acceptedAny any
+		if err := q.QueryRowContext(ctx, "SELECT sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ?", a.ID).Scan(&codeRequired, &acceptedAny); err != nil {
+			return nil, err
+		}
+		anyStarted := false
+		for _, m := range mods {
+			if _, ok := m.(map[string]any)["startedAt"]; ok {
+				anyStarted = true
+				break
+			}
+		}
+		start := map[string]any{"mode": "proctor", "anyModuleStarted": anyStarted}
+		if codeRequired {
+			start["mode"] = "access_code"
+			if t, ok := asTime(acceptedAny); ok {
+				start["acceptedAt"] = t
+			} else {
+				start["acceptedAt"] = nil
+			}
+		}
+		snap["satStart"] = start
 	}
 	return json.Marshal(snap)
 }
@@ -938,10 +965,20 @@ func (s *Service) materializeSATResult(ctx context.Context, q tx.Tx, attemptID, 
 	if providerKey != "sat" {
 		return nil
 	}
+	// A SAT code-start candidate who never redeemed the code never started:
+	// no result row, no zero score, whichever reason/actor sealed them
+	// (window expiry, staff completion or termination, or a replay).
+	neverStarted, err := satAttemptNeverStartedTx(ctx, q, attemptID)
+	if err != nil {
+		return err
+	}
+	if neverStarted {
+		return nil
+	}
 	want := SATOutcomeStatus(outcome, actorKind)
 	const sel = "SELECT id, outcome_status FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE"
 	var resultID, existingStatus string
-	err := q.QueryRowContext(ctx, sel, attemptID).Scan(&resultID, &existingStatus)
+	err = q.QueryRowContext(ctx, sel, attemptID).Scan(&resultID, &existingStatus)
 	switch {
 	case err == nil:
 		if outcome == OutcomeTerminated && existingStatus != want {
@@ -1332,7 +1369,21 @@ func RepairMissingReceipts(ctx context.Context, db tx.DB, batchSize int) (int64,
 
 // satGapSweepSQL is the SAT gap repair predicate: phase post-exam AND provider
 // sat AND receipt exists AND result missing.
-const satGapSweepSQL = "SELECT a.id FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id JOIN attempt_terminalizations t ON t.attempt_id = a.id LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat' WHERE a.phase = 'post-exam' AND e.provider_key = 'sat' AND ar.id IS NULL ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE"
+const satGapSweepSQL = "SELECT a.id FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id JOIN attempt_terminalizations t ON t.attempt_id = a.id LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat' WHERE a.phase = 'post-exam' AND e.provider_key = 'sat' AND ar.id IS NULL AND NOT (a.sat_start_code_required = 1 AND a.sat_start_code_accepted_at IS NULL) ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE"
+
+// satAttemptNeverStartedTx is the shared never-started predicate: a code-start
+// attempt without acceptance. Acceptance and first-module activation commit
+// together, so no module of such an attempt ever started.
+func satAttemptNeverStartedTx(ctx context.Context, q tx.Tx, attemptID string) (bool, error) {
+	var neverStarted bool
+	err := q.QueryRowContext(ctx,
+		"SELECT sat_start_code_required = 1 AND sat_start_code_accepted_at IS NULL FROM student_attempts WHERE id = ?",
+		attemptID).Scan(&neverStarted)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return neverStarted, err
+}
 
 // RepairSATResults materializes missing SAT invalidated/pending results for
 // terminalized SAT attempts that lost the step-11 write.

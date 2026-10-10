@@ -29,6 +29,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
+	"example.com/ielts-proctoring/internal/satstartcode"
 )
 
 // Schedule statuses.
@@ -117,6 +118,7 @@ type Schedule struct {
 	ExamID                 string     `json:"examId"`
 	ProviderKey            string     `json:"providerKey"`
 	SatTimingModel         *string    `json:"satTimingModel,omitempty"`
+	SatStartMode           string     `json:"satStartMode"` // "proctor" | "access_code" (SAT code start)
 	OrganizationID         *string    `json:"organizationId,omitempty"`
 	ExamTitle              string     `json:"examTitle"`
 	ProctorDisplayName     string     `json:"proctorDisplayName"`
@@ -155,6 +157,9 @@ type CreateRequest struct {
 	AutoStart          bool
 	AutoStop           bool
 	CreatedBy          string
+	// SatStartMode optionally selects "proctor" or "access_code"; empty uses
+	// the rollout default (code start for normal SAT when enabled).
+	SatStartMode string
 }
 
 // UpdateRequest mirrors UpdateScheduleRequest with revision fencing.
@@ -169,7 +174,9 @@ type UpdateRequest struct {
 	AutoStart          *bool
 	AutoStop           *bool
 	Status             *string
-	Revision           int
+	// SatStartMode switches the start mode; legal only before participation.
+	SatStartMode *string
+	Revision     int
 }
 
 // RuntimeCommand mirrors RuntimeCommandRequest + revision fencing.
@@ -233,14 +240,14 @@ func conflictError(msg string) *apperrors.Error {
 	return apperrors.New(apperrors.CodeConflict, msg)
 }
 
-const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, created_at, created_by, updated_at, sat_timing_model"
+const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, created_at, created_by, updated_at, sat_timing_model, sat_start_mode"
 
 func scanSchedule(row interface {
 	Scan(dest ...any) error
 }) (Schedule, error) {
 	var s Schedule
 	var orgID, institution, timingModel sql.NullString
-	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision, &s.RecurrenceType, &s.RecurrenceInterval, &s.RecurrenceEndDate, &s.BufferBeforeMinutes, &s.BufferAfterMinutes, &s.AutoStart, &s.AutoStop, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &timingModel); err != nil {
+	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision, &s.RecurrenceType, &s.RecurrenceInterval, &s.RecurrenceEndDate, &s.BufferBeforeMinutes, &s.BufferAfterMinutes, &s.AutoStart, &s.AutoStop, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &timingModel, &s.SatStartMode); err != nil {
 		return Schedule{}, err
 	}
 	if orgID.Valid {
@@ -394,6 +401,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Schedule, erro
 		if err := PersistSatTimingChoice(ctx, q, id, providerKey); err != nil {
 			return err
 		}
+		// Start mode is resolved and persisted with the schedule: code mode
+		// creates its encrypted generation-1 code in this same transaction.
+		startMode, err := satstartcode.ResolveCreateMode(providerKey, req.CohortName, req.SatStartMode)
+		if err != nil {
+			return err
+		}
+		if err := satstartcode.ApplyCreateModeTx(ctx, q, id, startMode, req.CreatedBy); err != nil {
+			return err
+		}
 		// scanSchedule is the single projection reader, so the timing choice just
 		// persisted rides along on the created row without a second read.
 		sch, err := scanSchedule(q.QueryRowContext(ctx, "SELECT "+scheduleColumns+" FROM exam_schedules WHERE id = ?", id))
@@ -499,6 +515,33 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 			}
 			if versionExamID != existing.ExamID {
 				return validationError("Published version does not belong to the schedule exam.")
+			}
+		}
+		startMode := existing.SatStartMode
+		if req.SatStartMode != nil && *req.SatStartMode != existing.SatStartMode {
+			if err := satstartcode.SwitchModeTx(ctx, q, id, existing.ProviderKey, existing.CohortName, strings.TrimSpace(*req.SatStartMode), "system"); err != nil {
+				return err
+			}
+			startMode = strings.TrimSpace(*req.SatStartMode)
+		}
+		if startMode == satstartcode.ModeAccessCode {
+			// Code start owns runtime initialization: a room-wide auto start
+			// would start no one, so the flag stays off whatever an edit form
+			// sends (it carries the generic schedule defaults).
+			off := false
+			req.AutoStart = &off
+			// Admitted candidates are pinned to the release they joined; never
+			// silently rebind them to another version.
+			if req.PublishedVersionID != nil && *req.PublishedVersionID != existing.PublishedVersionID {
+				var admitted bool
+				if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM student_attempts WHERE schedule_id = ?)", id).Scan(&admitted); err != nil {
+					return err
+				}
+				if admitted {
+					err := apperrors.New(apperrors.CodeConflict, "The release cannot change after candidates have joined this code-start session.")
+					err.Details = map[string]any{"reason": "START_CODE_RELEASE_FROZEN"}
+					return err
+				}
 			}
 		}
 		nextStart := existing.StartTime
@@ -617,6 +660,13 @@ func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cm
 		}
 	}
 	return s.GetRuntime(ctx, scheduleID)
+}
+
+// RuntimeStartPlanner exposes the in-transaction plan derivation to the
+// individual code-start path (delivery), which opens the runtime inside its
+// own first-start transaction. Plan ownership stays here.
+func (s *Service) RuntimeStartPlanner() examruntime.StartPlanner {
+	return s.startPlanner()
 }
 
 // startPlanner derives the cohort clock plan INSIDE runtime.Start's
@@ -1203,6 +1253,16 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 				return conflictError("Schedule references a missing exam or version; republish the schedule.")
 			}
 			return err
+		}
+		// Code-start sessions freeze the start mode on the attempt at admission.
+		// The candidate stays pre-exam (lobby, no clock, no content) until their
+		// own code redemption; joining a room another candidate already opened
+		// must not project its section state onto them.
+		if sch.SatStartMode == satstartcode.ModeAccessCode {
+			if _, err := q.ExecContext(ctx, "UPDATE student_attempts SET sat_start_code_required = 1 WHERE id = ?", attemptID); err != nil {
+				return err
+			}
+			return nil
 		}
 		// A runtime may have started before this candidate checked in. Project
 		// the active section's deadline onto the new V2 attempt immediately so

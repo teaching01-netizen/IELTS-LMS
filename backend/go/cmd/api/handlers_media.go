@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"io"
 	"net/http"
 	"strings"
@@ -50,7 +52,8 @@ func mediaUploadBytesHandler(app *App) http.HandlerFunc {
 // content type, mirroring Rust download_asset (raw bytes + content-type).
 func mediaDownloadHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleBuilder, auth.RoleProctor, auth.RoleGrader, auth.RoleStudent) == nil {
+		sess := requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleBuilder, auth.RoleProctor, auth.RoleGrader, auth.RoleStudent)
+		if sess == nil {
 			return
 		}
 		if app.Media == nil {
@@ -58,6 +61,10 @@ func mediaDownloadHandler(app *App) http.HandlerFunc {
 			return
 		}
 		assetID := strings.TrimSpace(chi.URLParam(r, "assetID"))
+		protected, ok := denyProtectedSATMediaForStudent(w, r, app, sess, assetID)
+		if !ok {
+			return
+		}
 		content, err := app.Media.OpenFinalized(r.Context(), assetID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -66,10 +73,54 @@ func mediaDownloadHandler(app *App) http.HandlerFunc {
 		// Step 7: finalized assets are immutable (status flips pending ->
 		// finalized exactly once and never back), so long-lived caching is
 		// safe: browsers/CDNs may reuse bytes for a year. Uploads stay
-		// uncacheable via the finalized-only guard above.
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		// uncacheable via the finalized-only guard above. Protected SAT
+		// question media is never publicly cacheable, even for staff reads:
+		// a shared cache would hand it to anyone holding the URL.
+		if protected {
+			w.Header().Set("Cache-Control", "private, no-store")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		serveMediaContent(w, r, content)
 	}
+}
+
+// protectedSATMediaAsset reports whether an asset belongs to SAT assessment
+// content (question/import media, or exam media of a SAT exam). Students read
+// those only through an attempt bearer scoped by delivery policy.
+func protectedSATMediaAsset(ctx context.Context, db *sql.DB, assetID string) (bool, error) {
+	var protected bool
+	err := db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+		  SELECT 1 FROM media_assets m
+		  LEFT JOIN exam_entities e ON m.owner_kind = 'assessment_exam' AND e.id = m.owner_id
+		  LEFT JOIN assessment_questions q ON m.owner_kind = 'assessment_question' AND q.id = m.owner_id
+		  WHERE m.id = ?
+		    AND (m.owner_kind = 'assessment_import'
+		         OR (m.owner_kind = 'assessment_exam' AND e.provider_key = 'sat')
+		         OR (m.owner_kind = 'assessment_question' AND q.provider_key = 'sat')))`, assetID).Scan(&protected)
+	return protected, err
+}
+
+// denyProtectedSATMediaForStudent refuses (404) a cookie-session student read
+// of protected SAT media: a student role alone proves no owned attempt, so it
+// cannot satisfy the start-code content gate. It reports whether the asset is
+// protected (for cache headers) and false after rendering a refusal.
+func denyProtectedSATMediaForStudent(w http.ResponseWriter, r *http.Request, app *App, sess *auth.Session, assetID string) (bool, bool) {
+	if app.DB == nil {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Media service is unavailable."))
+		return false, false
+	}
+	protected, err := protectedSATMediaAsset(r.Context(), app.DB, assetID)
+	if err != nil {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Media is unavailable."))
+		return false, false
+	}
+	if protected && sess.Role == auth.RoleStudent {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Media asset not found."))
+		return true, false
+	}
+	return protected, true
 }
 
 // serveMediaContent streams from storage (Content-Length, Range) instead of
@@ -144,7 +195,8 @@ func mediaDownloadContentHandler(app *App) http.HandlerFunc {
 // get_asset (metadata route, reader roles).
 func mediaGetHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleBuilder, auth.RoleProctor, auth.RoleGrader, auth.RoleStudent) == nil {
+		sess := requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleBuilder, auth.RoleProctor, auth.RoleGrader, auth.RoleStudent)
+		if sess == nil {
 			return
 		}
 		if app.Media == nil {
@@ -152,6 +204,9 @@ func mediaGetHandler(app *App) http.HandlerFunc {
 			return
 		}
 		assetID := strings.TrimSpace(chi.URLParam(r, "assetID"))
+		if _, ok := denyProtectedSATMediaForStudent(w, r, app, sess, assetID); !ok {
+			return
+		}
 		out, err := app.Media.GetAsset(r.Context(), assetID)
 		if err != nil {
 			httpx.WriteError(w, r, err)

@@ -51,6 +51,11 @@ import {
 import { createSatFinalizationGate } from "../application/satFinalizationGate";
 import { applyCloseAck, applyEntryAck, isEntryAck } from "../application/satEntryAck";
 import { adoptEntryControlEpochFromAck } from "../application/satEntryControlEpoch";
+import {
+  classifyStartCodeError,
+  normalizeStartCodeInput,
+  type SatStartCodeRefusal,
+} from "../application/satStartCode";
 // Clock + cadence policy (pure): display allotment vs expiry authority, stage
 // readiness, break/wait countdowns, and the recovery-poll cadence.
 import {
@@ -153,6 +158,12 @@ export interface UseSatExamControllerOptions {
   initialIsLoading?: boolean;
 }
 
+/** The code form's answer: started, or the one refusal to show (null = no change). */
+export interface SatStartCodeOutcome {
+  ok: boolean;
+  refusal: SatStartCodeRefusal | null;
+}
+
 export function useSatExamController({
   scheduleId,
   attemptId,
@@ -180,6 +191,7 @@ export function useSatExamController({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const entryAuthorizedAtRef = useRef<{ moduleId: string; at: number } | null>(null);
+  const uncertainCodeStartGenerationRef = useRef<number | null>(null);
   const reportedAnswerableModulesRef = useRef(new Set<string>());
   const now = Date.now();
   const [, wakeAtTemporalBoundary] = useState(0);
@@ -1119,6 +1131,75 @@ export function useSatExamController({
     withEntryControlEpoch,
   ]);
 
+  /**
+   * SAT access-code start: one explicit submission redeems the session code
+   * for THIS attempt and opens its first module at server time. Never retried
+   * blindly — a refusal that does not prove "not started" is followed by an
+   * authoritative read, and only that read decides what the form shows next.
+   */
+  const startWithCode = useCallback(async (rawCode: string): Promise<SatStartCodeOutcome> => {
+    const code = normalizeStartCodeInput(rawCode);
+    if (!code) {
+      return { ok: false, refusal: classifyStartCodeError({ details: { reason: "START_CODE_FORMAT_INVALID" } }) };
+    }
+    if (!data || isStarting) return { ok: false, refusal: null };
+    const generation = identityGenerationRef.current;
+    setIsStarting(true);
+    setError(null);
+    try {
+      // A failed recovery read is not proof that the previous POST rolled
+      // back. Before another explicit submission, recover state successfully.
+      if (uncertainCodeStartGenerationRef.current === generation) {
+        let recovered = false;
+        const latest = await refresh(false, (ok) => { recovered = ok; });
+        if (identityGenerationRef.current !== generation) return { ok: false, refusal: null };
+        if (!recovered) return { ok: false, refusal: classifyStartCodeError(null) };
+        uncertainCodeStartGenerationRef.current = null;
+        const policy = (latest ?? dataRef.current)?.satStartPolicy;
+        if (policy?.mode === "access_code" && policy.state === "started") return { ok: true, refusal: null };
+        if (policy?.mode !== "access_code" || policy.state !== "code_required") {
+          return { ok: false, refusal: classifyStartCodeError({ details: { reason: "START_WINDOW_CLOSED" } }) };
+        }
+      }
+      const response = await withEntryControlEpoch((epoch) =>
+        satDeliveryGateway.startWithCode(scheduleId, attemptId, { code, controlEpoch: epoch ?? 0 }));
+      if (identityGenerationRef.current !== generation) return { ok: false, refusal: null };
+      if (response.kind === "resume") {
+        // Already started (another tab, or a lost response): resume the
+        // authoritative current module/break, never the first module.
+        acceptPayloadAndRoute(response.bootstrap, { kind: "poll" });
+        return { ok: true, refusal: null };
+      }
+      const merged = await resolveEntryPayload(data, response.entry, "code_start");
+      if (identityGenerationRef.current !== generation) return { ok: false, refusal: null };
+      const startedPolicy = merged.satStartPolicy?.mode === "access_code"
+        ? { ...merged.satStartPolicy, state: "started" as const }
+        : merged.satStartPolicy ?? null;
+      entryAuthorizedAtRef.current = { moduleId: response.entry.moduleId, at: Date.now() };
+      acceptPayloadAndRoute({ ...merged, satStartPolicy: startedPolicy }, { kind: "startModule", moduleId: response.entry.moduleId });
+      emitStudentObservabilityMetric("sat_code_start", { outcome: "started" });
+      return { ok: true, refusal: null };
+    } catch (startError) {
+      if (identityGenerationRef.current !== generation) return { ok: false, refusal: null };
+      const refusal = classifyStartCodeError(startError);
+      emitStudentObservabilityMetric("sat_code_start", { outcome: refusal.kind });
+      if (refusal.readStateFirst) {
+        // The start may have committed: the authoritative read decides.
+        let recovered = false;
+        const latest = await refresh(false, (ok) => { recovered = ok; });
+        if (identityGenerationRef.current !== generation) return { ok: false, refusal: null };
+        uncertainCodeStartGenerationRef.current = recovered ? null : generation;
+        const policy = (latest ?? dataRef.current)?.satStartPolicy;
+        if (policy?.mode === "access_code" && policy.state === "started") {
+          return { ok: true, refusal: null };
+        }
+      }
+      return { ok: false, refusal };
+    } finally {
+      if (identityGenerationRef.current === generation) setIsStarting(false);
+    }
+  }, [acceptPayloadAndRoute, attemptId, data, isStarting, refresh, resolveEntryPayload, scheduleId, withEntryControlEpoch]);
+
   // Server-driven break lifecycle: the server starts the scheduled break at
   // section finalization and activates the next-section Module 1 at break
   // expiry. The client renders authoritative state only (zero mutations).
@@ -1735,6 +1816,8 @@ export function useSatExamController({
     pendingStageReady,
     entryReason: entryDecision.reason,
     entryAutoStartPending: entryDecision.autoStartPending,
+    /** SAT access-code start entry object (null for non-SAT / older servers). */
+    startPolicy: data?.satStartPolicy ?? null,
     effectiveTiming,
     temporalModel,
     onTemporalBoundary,
@@ -1758,6 +1841,7 @@ export function useSatExamController({
     commitForTest,
     commands: {
       startPendingModule,
+      startWithCode,
       retryFinalization,
       takeOverDurabilityLease: persistence.takeOverLease,
       setAnswer,

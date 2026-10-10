@@ -151,6 +151,44 @@ func effectiveStudentContextProvider(providerKey, examType string) string {
 	return providerKey
 }
 
+// fenceStudentVersionForStartCode withholds the V1 content snapshot of a SAT
+// code-start session until the candidate's own code redemption (an unresolved
+// attempt fails closed). Only top-level scalars survive (identity, title,
+// provider); every nested structure — sections, modules, questions, stimulus,
+// media references — is dropped from a fresh map, never the cached tree.
+func fenceStudentVersionForStartCode(ctx context.Context, app *App, scheduleID, attemptID string, version map[string]any) error {
+	gated, err := studentStartCodeGated(ctx, app, scheduleID, attemptID)
+	if err != nil || !gated {
+		return err
+	}
+	withholdStudentVersionContent(version)
+	return nil
+}
+
+func studentStartCodeGated(ctx context.Context, app *App, scheduleID, attemptID string) (bool, error) {
+	if app == nil || app.Delivery == nil {
+		return false, nil
+	}
+	return app.Delivery.StudentContentGated(ctx, scheduleID, attemptID)
+}
+
+func withholdStudentVersionContent(version map[string]any) {
+	if version == nil {
+		return
+	}
+	content, _ := version["contentSnapshot"].(map[string]any)
+	stub := map[string]any{"contentWithheld": true}
+	for key, value := range content {
+		switch value.(type) {
+		case map[string]any, []any:
+			continue
+		default:
+			stub[key] = value
+		}
+	}
+	version["contentSnapshot"] = stub
+}
+
 // fenceStudentSnapshotBranches walks a decoded V1 content snapshot in place and
 // removes every adaptive branch module the attempt has no module attempt row
 // for. Branch modules are identified by their authored role (`lower_branch` /
@@ -483,6 +521,9 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 	}
 	schedule, version, _, err := loadStudentScheduleVersion(ctx, app.DB, scheduleID, openedModules)
 	if err != nil {
+		return nil, err
+	}
+	if err := fenceStudentVersionForStartCode(ctx, app, scheduleID, attemptID, version); err != nil {
 		return nil, err
 	}
 	runtime, err := loadStudentRuntimeContext(ctx, app.DB, scheduleID)

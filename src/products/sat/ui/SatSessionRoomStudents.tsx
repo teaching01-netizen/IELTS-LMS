@@ -85,7 +85,10 @@ export function SatRoomStudentRow({
     onBreak ? 'On break' : null,
     sectionLabelFor(runtime, student.runtimeCurrentSection ?? student.currentSection),
     onBreak ? null : satModuleSlotLabel(moduleRoleFor(student)),
-    student.status,
+    student.satStartState === 'waiting_for_code' ? 'Waiting for code'
+      : student.satStartState === 'never_started' ? 'Never started'
+      : student.satStartState === 'started' ? student.status === 'idle' || student.status === 'terminated' ? 'Finished' : 'In progress'
+      : student.status,
   ].filter(Boolean).join(' · ');
 
   return (
@@ -115,7 +118,7 @@ export function SatRoomStudentRow({
       </span>
       <span className="text-right">
         <span className="sat-room__row-time">
-          {formatRunSheetRemaining(onBreak ? breakRemaining : moduleKnown ? moduleRemaining : remaining)}
+          {student.satStartState === 'waiting_for_code' || student.satStartState === 'never_started' ? '—' : formatRunSheetRemaining(onBreak ? breakRemaining : moduleKnown ? moduleRemaining : remaining)}
         </span>
         {onBreak ? (
           <span className="sat-room__row-sub">

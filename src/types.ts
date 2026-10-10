@@ -799,6 +799,7 @@ export interface StudentSession {
   email: string;
   scheduleId: string;
   status: StudentStatus;
+  satStartState?: "waiting_for_code" | "started" | "never_started" | null | undefined;
   currentSection: ModuleType;
   timeRemaining: number;
   runtimeStatus?: RuntimeStatus | undefined;

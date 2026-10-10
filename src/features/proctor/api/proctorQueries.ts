@@ -13,6 +13,8 @@ export const liveQueryPolicy = {
   gcTime: 2 * 60_000,
 } as const;
 
+const PROCTOR_SUMMARY_POLL_FLOOR_MS = 10_000;
+
 export const proctorKeys = {
   all: ['proctoring'] as const,
   sessions: (providerKey?: 'sat' | 'ielts' | 'act') => [...proctorKeys.all, 'sessions', providerKey ?? 'all'] as const,
@@ -41,6 +43,7 @@ export type ProctorSessionDetailPayload = {
     studentEmail: string;
     scheduleId: string;
     status: StudentSession['status'];
+    satStartState?: StudentSession['satStartState'];
     currentSection: StudentSession['currentSection'];
     timeRemaining: number;
     runtimeStatus: StudentSession['runtimeStatus'];
@@ -146,11 +149,16 @@ export function useProctorSessionSummaries(
   /** Pages that only sometimes need session state (Delivery, for roles that can run sessions). */
   enabled = true,
 ) {
+  // Summary reads share the backend's rate-limit budget. Keep each observer at
+  // the documented live-room floor; 0 remains the explicit polling-off value.
+  const boundedRefetchInterval = refetchInterval > 0
+    ? Math.max(refetchInterval, PROCTOR_SUMMARY_POLL_FLOOR_MS)
+    : refetchInterval;
   return useQuery({
     queryKey: proctorKeys.sessions(providerKey),
     queryFn: () => fetchProctorSessionSummaries(providerKey),
     ...liveQueryPolicy,
-    refetchInterval,
+    refetchInterval: boundedRefetchInterval,
     enabled,
   });
 }

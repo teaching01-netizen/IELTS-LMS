@@ -42,6 +42,9 @@ func TestDeadlineDoubleSubmitReplaysWinner(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "started_at", "submitted_at", "locked_at", "completion_reason", "revision"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_question_responses WHERE module_attempt_id")).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_attempt_id", "exam_question_id", "response", "marked_for_review", "eliminated_options", "annotations", "revision"}))
+	// The receipt records the attempt's start disposition (proctor mode here).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ?")).
+		WillReturnRows(sqlmock.NewRows([]string{"sat_start_code_required", "sat_start_code_accepted_at"}).AddRow(false, nil))
 	dupErr := errors.New("Error 1062 (23000): Duplicate entry 'att-1' for key 'attempt_terminalizations.PRIMARY'")
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO attempt_terminalizations")).
 		WillReturnError(dupErr)
@@ -49,6 +52,9 @@ func TestDeadlineDoubleSubmitReplaysWinner(t *testing.T) {
 	// (incl. the SAT materialize read for the *existing* outcome).
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_terminalizations WHERE attempt_id")).
 		WillReturnRows(sealReceiptRow(OutcomeSubmitted, ReasonStudentSubmit))
+	// Never-started code-start candidates are excluded from results.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_start_code_required = 1 AND sat_start_code_accepted_at IS NULL FROM student_attempts")).
+		WillReturnRows(sqlmock.NewRows([]string{"never_started"}).AddRow(false))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_results WHERE attempt_id")).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_results")).

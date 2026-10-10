@@ -112,6 +112,10 @@ var metricHelpText = map[string]string{
 	MOutboxClaimed:                     "Total outbox events claimed by the worker.",
 	MOutboxAcked:                       "Total outbox events acknowledged by the worker.",
 	MCoeditGoFreezeRecovery:            "Total co-edit freezing rows recovered after their lifecycle lease expired.",
+	MSATStartCodeTxRetry:               "SAT access-code start transaction path retries by direction.",
+	MSATStartCodeStageSeconds:          "SAT access-code start processing duration by bounded stage.",
+	MSATStartCodeHTTPSeconds:           "Full SAT access-code start HTTP handler duration, including response assembly.",
+	MSATStartCodeAdmissionWaitTotal:    "SAT access-code start admission waiters by fixed stage and outcome.",
 }
 
 // Metric name constants (plan 69).
@@ -229,6 +233,26 @@ const (
 	// diverges again is visible as a metric instead of only in logs. Label is
 	// the reason vocabulary only — never ids, never messages.
 	MAssessmentConflict = "assessment_conflict_total"
+	// SAT access-code start. Labels are the low-cardinality outcome/reason
+	// vocabulary only — never schedule/attempt ids, codes or generations.
+	// MSATStartCodeVerification outcome: accepted | replay | invalid |
+	// malformed | blocked | rate_limited | busy | unavailable.
+	MSATStartCodeVerification = "sat_start_code_verification_total"
+	// MSATStartCodeStartSeconds is server time from request to committed
+	// first start (path: existing_runtime | first_runtime).
+	MSATStartCodeStartSeconds = "sat_start_code_start_seconds"
+	// MSATStartCodeExpired counts never-started candidates sealed at window close.
+	MSATStartCodeExpired = "sat_start_code_expired_total"
+	// MSATStartCodeTxRetry counts transactions retried after a runtime-path
+	// recheck. Direction is shared_to_exclusive or exclusive_to_shared.
+	MSATStartCodeTxRetry = "sat_start_code_path_escalation_total"
+	// MSATStartCodeStageSeconds uses the fixed stage vocabulary emitted by the
+	// delivery path; it never labels schedule, attempt, code, or generation.
+	MSATStartCodeStageSeconds = "sat_start_code_stage_seconds"
+	// MSATStartCodeHTTPSeconds measures the full handler through response write.
+	MSATStartCodeHTTPSeconds = "sat_start_code_http_seconds"
+	// MSATStartCodeAdmissionWaitTotal counts bounded local admission wait entry.
+	MSATStartCodeAdmissionWaitTotal = "sat_start_code_admission_waiter_total"
 
 	MSessionCacheMiss  = "session_cache_miss_total"
 	MSnapshotCacheHit  = "runtime_snapshot_hit_total"

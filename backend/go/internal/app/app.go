@@ -34,6 +34,7 @@ import (
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/satstartcode"
 	"example.com/ielts-proctoring/internal/schedules"
 	"example.com/ielts-proctoring/internal/student"
 	"example.com/ielts-proctoring/internal/terminalization"
@@ -67,6 +68,9 @@ type Services struct {
 	// events flag was enabled without a configured live bus. Entrypoints must
 	// refuse to boot rather than silently serve flag-off authoring.
 	AuthoringConfigErr error
+	// SATStartCodeConfigErr is the fail-closed SAT start-code keyring check:
+	// code start enabled without keys, or malformed keys, refuses to boot.
+	SATStartCodeConfigErr error
 }
 
 // Deps are the process-edge hooks Build takes so domain wiring stays
@@ -125,6 +129,11 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	s.Release = release.NewService(pool)
 	s.Runtime = runtime.NewService(s.Tx, nil).SetOutboxExecOnly(cfg.OutboxExecOnly).SetSnapshotCache(deps.RuntimeSnapshots).SetSATHandoffMode(cfg.SATHandoffMode)
 	s.Schedules.SetRuntime(s.Runtime)
+	// SAT access-code start: the dedicated keyring and rollout switch are
+	// process-wide and identical for API and worker.
+	ring, ringErr := satstartcode.ValidateConfig(cfg.SATAccessCodeStart, cfg.SATStartCodeKeys)
+	s.SATStartCodeConfigErr = ringErr
+	satstartcode.Configure(cfg.SATAccessCodeStart && ringErr == nil, ring)
 	// One owner for the SAT handoff policy: the V2 write gate, the legacy save
 	// gate, the reconciler and the close endpoint all read it from attempts.
 	attempts.ConfigureSATHandoff(attempts.SATHandoffConfig{
@@ -145,7 +154,8 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	if cfg.VersionCacheEnabled {
 		deliverySvc.SetVersionCache(deps.Versions)
 	}
-	s.Delivery = deliverySvc.SetCompleter(Completer(pool, s)).SetSATTerminalizerInTx(s.SAT.ReconcileInTxAdapter())
+	s.Delivery = deliverySvc.SetCompleter(Completer(pool, s)).SetSATTerminalizerInTx(s.SAT.ReconcileInTxAdapter()).
+		SetCodeStart(s.Runtime, s.Schedules.RuntimeStartPlanner())
 	// Authoring Preview reuses the SAME delivery service + revision-keyed
 	// cache (single-build, no bare per-request service). Cache off
 	// (VERSION_CACHE unset or nil Versions) leaves a nil cache: Preview

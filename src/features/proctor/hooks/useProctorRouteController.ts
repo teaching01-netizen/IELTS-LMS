@@ -37,6 +37,7 @@ function mapBackendSessionSummary(payload: {
   studentEmail: string;
   scheduleId: string;
   status: StudentSession["status"];
+  satStartState?: StudentSession["satStartState"];
   currentSection: StudentSession["currentSection"];
   timeRemaining: number;
   runtimeStatus: StudentSession["runtimeStatus"];
@@ -69,6 +70,7 @@ function mapBackendSessionSummary(payload: {
     email: payload.studentEmail,
     scheduleId: payload.scheduleId,
     status: payload.status,
+    satStartState: payload.satStartState,
     currentSection: payload.currentSection,
     timeRemaining: payload.timeRemaining,
     runtimeStatus: payload.runtimeStatus ?? "not_started",

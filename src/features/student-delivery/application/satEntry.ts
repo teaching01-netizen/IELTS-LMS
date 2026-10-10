@@ -42,7 +42,19 @@ export type SatEntryReason =
   | "initial-entry"
   | "next-section-entry"
   | "next-module-entry"
-  | "handoff-entry";
+  | "handoff-entry"
+  | "start-code-required";
+
+/**
+ * SAT access-code start: true while this candidate has not redeemed the
+ * session code (or the start window closed without a start). Another
+ * candidate opening the room makes the runtime live, so runtime status alone
+ * must never trigger this candidate's first module.
+ */
+export function isSatStartCodePending(data: AssessmentDeliveryBootstrap | null | undefined): boolean {
+  const policy = data?.satStartPolicy;
+  return policy?.mode === "access_code" && policy.state !== "started";
+}
 
 export interface SatEntryDecision {
   shouldStart: boolean;
@@ -221,6 +233,7 @@ export function deriveSatEntryDecision({
     return waiting("phase-not-entering");
   }
   if (!data) return waiting("no-data");
+  if (isSatStartCodePending(data)) return waiting("start-code-required");
 
   const blocked = satEntryBlockedReason({
     module,

@@ -204,27 +204,11 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 					m2StartLag = &lag
 				}
 			}
-			res, err := t.ExecContext(ctx,
-				"UPDATE assessment_module_attempts SET state = 'active', allocated_seconds = ?, available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'",
-				module.allocatedSeconds, gateNow, gateNow, module.id)
+			events, err := s.activatePersonalModuleTx(ctx, t, scheduleID, bearerAttemptID, module, gateNow)
 			if err != nil {
 				return err
 			}
-			n, err := res.RowsAffected()
-			if err != nil {
-				return err
-			}
-			if n != 1 {
-				return apperrors.New(apperrors.CodeAssessmentConflict, "The SAT module was started by another request. Refresh and continue.")
-			}
-			if err := markProviderAttemptExamPhaseInTx(ctx, t, bearerAttemptID); err != nil {
-				return err
-			}
-			rev, err := s.appendModuleEventsTx(ctx, t, scheduleID, bearerAttemptID, liveEventModuleStarted)
-			if err != nil {
-				return err
-			}
-			hubEvents = dualModuleEvents(scheduleID, bearerAttemptID, rev, liveEventModuleStarted)
+			hubEvents = events
 			return nil
 		}
 		if module.state == "active" && module.startedAt != nil {
@@ -299,6 +283,37 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 	}
 	s.publishHubEvents(hubEvents)
 	return out, nil, nil
+}
+
+// activatePersonalModuleTx is the single personal-model activation write: a
+// not_started module becomes active with its full authored allocation and
+// started_at at the authoritative in-transaction DB instant, the attempt moves
+// to the exam phase (bumping its control epoch), and the dual live events are
+// appended. Both the per-module StartModule and the SAT code-start first entry
+// call it while holding the attempt and module row locks; a concurrent
+// activation loses the CAS and is reported as a refresh conflict.
+func (s *Service) activatePersonalModuleTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, module saveActiveModule, now time.Time) ([]liveupdates.Event, error) {
+	res, err := t.ExecContext(ctx,
+		"UPDATE assessment_module_attempts SET state = 'active', allocated_seconds = ?, available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'",
+		module.allocatedSeconds, now, now, module.id)
+	if err != nil {
+		return nil, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n != 1 {
+		return nil, apperrors.New(apperrors.CodeAssessmentConflict, "The SAT module was started by another request. Refresh and continue.")
+	}
+	if err := markProviderAttemptExamPhaseInTx(ctx, t, attemptID); err != nil {
+		return nil, err
+	}
+	rev, err := s.appendModuleEventsTx(ctx, t, scheduleID, attemptID, liveEventModuleStarted)
+	if err != nil {
+		return nil, err
+	}
+	return dualModuleEvents(scheduleID, attemptID, rev, liveEventModuleStarted), nil
 }
 
 // armPersonalModuleOfferTx is deprecated: the normal path now activates
@@ -886,6 +901,10 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	// entry windows it publishes already reflect it (a module that just started
 	// carries its own window, and nothing else is promised).
 	publishEntryWindows(moduleAttempts, sections, timing, roomSections, now)
+	startPolicy, sections, err := s.applySatStartPolicy(ctx, providerKey, scheduleID, control, now, sections)
+	if err != nil {
+		return nil, err
+	}
 	return &Bootstrap{
 		ScheduleID:            scheduleID,
 		ExamID:                examID,
@@ -906,7 +925,8 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 			PersonalBreaks:       personalBreaks,
 			ProvisionalSubmitted: control.deliveryStatus == "submitted" && control.submittedAt == nil,
 		},
-		Result: result,
+		Result:         result,
+		SatStartPolicy: startPolicy,
 	}, nil
 }
 

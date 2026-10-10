@@ -137,13 +137,23 @@ func (s *Service) EntryState(ctx context.Context, bearerScheduleID, bearerAttemp
 	return s.entryStateBound(ctx, scheduleID, bearerAttemptID, moduleID)
 }
 
+type satEntryStateQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 // entryStateBound is the one indexed post-commit read used by transition ACKs.
 // The public recovery read performs its bearer/schedule binding first.
 func (s *Service) entryStateBound(ctx context.Context, scheduleID, bearerAttemptID, moduleID string) (*SatModuleEntryAck, error) {
+	return s.entryStateBoundWithQueryer(ctx, s.db, scheduleID, bearerAttemptID, moduleID)
+}
+
+// entryStateBoundWithQueryer shares the compact projection with transition
+// transactions so their acknowledgements can be serialized before commit.
+func (s *Service) entryStateBoundWithQueryer(ctx context.Context, queryer satEntryStateQueryer, scheduleID, bearerAttemptID, moduleID string) (*SatModuleEntryAck, error) {
 	var ack SatModuleEntryAck
 	var startsAt, confirmedAt, enteredAt, startedAt, pausedAt, availableAt sql.NullTime
 	var generation, allocatedSeconds, accumulatedPausedSeconds, extensionSeconds int
-	err := s.db.QueryRowContext(ctx, satEntryStateQuery,
+	err := queryer.QueryRowContext(ctx, satEntryStateQuery,
 		scheduleID, scheduleID, bearerAttemptID, moduleID).
 		Scan(&ack.ModuleAttemptID, &ack.ModuleID, &ack.State, &ack.ModuleRevision, &allocatedSeconds,
 			&availableAt, &startedAt, &pausedAt,
@@ -194,28 +204,37 @@ func (s *Service) entryStateBound(ctx context.Context, scheduleID, bearerAttempt
 // already locked that row by the time this runs, so this is defense in depth
 // rather than a new restriction on the entry path.
 func (s *Service) selectedModuleSection(ctx context.Context, attemptID, scheduleID, versionID, moduleID string) (*DeliverySection, error) {
-	var attemptedModuleID string
-	err := s.db.QueryRowContext(ctx,
-		"SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ?",
-		attemptID, moduleID).Scan(&attemptedModuleID)
+	section, _, err := s.selectedModuleSectionWithRevision(ctx, attemptID, scheduleID, versionID, moduleID)
+	return section, err
+}
+
+func (s *Service) selectedModuleSectionWithRevision(ctx context.Context, attemptID, scheduleID, versionID, moduleID string) (*DeliverySection, int64, error) {
+	var revision int64
+	var publishScope, linkScope sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT v.revision, v.sat_publish_scope, l.enabled_sections
+		FROM assessment_module_attempts m
+		JOIN student_attempts a ON a.id = m.attempt_id
+		JOIN exam_schedules s ON s.id = ?
+		JOIN exam_versions v ON v.id = ?
+		LEFT JOIN assessment_access_links l ON l.schedule_id = s.id
+		WHERE m.attempt_id = ? AND m.module_id = ?
+			AND a.schedule_id = s.id AND a.published_version_id = v.id`,
+		scheduleID, versionID, attemptID, moduleID).Scan(&revision, &publishScope, &linkScope)
 	if err == sql.ErrNoRows {
-		return nil, apperrors.New(apperrors.CodeNotFound, "Selected module content not found.")
+		return nil, 0, apperrors.New(apperrors.CodeNotFound, "Selected module content not found.")
 	}
 	if err != nil {
-		return nil, err
-	}
-	revision, err := s.versionRevision(ctx, versionID)
-	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	sections, err := s.cachedSections(ctx, versionID, revision)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	scope, err := s.effectiveSectionScope(ctx, scheduleID, versionID)
-	if err != nil {
-		return nil, err
-	}
+	scope := examdomain.IntersectSectionScopes(
+		examdomain.ParseSATPublishScope(publishScope.String),
+		examdomain.ParseStoredSectionScope(linkScope),
+	)
 	for _, section := range sections {
 		if !examdomain.AllowsSection(scope, section.SectionKey) {
 			continue
@@ -223,9 +242,9 @@ func (s *Service) selectedModuleSection(ctx context.Context, attemptID, schedule
 		for _, module := range section.Modules {
 			if module.ID == moduleID {
 				section.Modules = []DeliveryModule{module}
-				return &section, nil
+				return &section, revision, nil
 			}
 		}
 	}
-	return nil, apperrors.New(apperrors.CodeNotFound, "Selected module content not found.")
+	return nil, 0, apperrors.New(apperrors.CodeNotFound, "Selected module content not found.")
 }

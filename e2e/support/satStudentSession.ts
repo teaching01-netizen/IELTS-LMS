@@ -39,7 +39,7 @@ export async function createRunningSatSession(
   await adminPage.getByRole("button", { name: "Create" }).click();
   await expect(adminPage).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i, { timeout: 30_000 });
 
-  await adminPage.getByRole("button", { name: "More authoring actions" }).click();
+  await adminPage.getByRole("button", { name: "More exam actions" }).click();
   await adminPage.getByRole("menuitem", { name: /Load sample exam/ }).click();
   await expect(adminPage.getByRole("dialog", { name: "Load sample SAT" })).toBeVisible();
   await adminPage.getByRole("button", { name: "Load 147 questions" }).click();
@@ -56,7 +56,7 @@ export async function createRunningSatSession(
     timeout: 90_000,
   });
 
-  await adminPage.getByRole("button", { name: "Release" }).click();
+  await adminPage.getByRole("button", { name: "Publish version", exact: true }).click();
   try {
     await expect(adminPage).toHaveURL(/\/release$/, { timeout: 15_000 });
   } catch (error) {

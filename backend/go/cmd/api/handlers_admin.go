@@ -457,6 +457,7 @@ func schedulesCreateHandler(app *App) http.HandlerFunc {
 			EndTime            time.Time `json:"endTime"`
 			AutoStart          *bool     `json:"autoStart"`
 			AutoStop           *bool     `json:"autoStop"`
+			SatStartMode       string    `json:"satStartMode"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -510,6 +511,7 @@ func schedulesCreateHandler(app *App) http.HandlerFunc {
 			AutoStart:          autoStart,
 			AutoStop:           autoStop,
 			CreatedBy:          sess.UserID,
+			SatStartMode:       req.SatStartMode,
 		})
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -557,6 +559,7 @@ func schedulesUpdateHandler(app *App) http.HandlerFunc {
 			AutoStart          *bool      `json:"autoStart"`
 			AutoStop           *bool      `json:"autoStop"`
 			Status             *string    `json:"status"`
+			SatStartMode       *string    `json:"satStartMode"`
 			Revision           int        `json:"revision"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
@@ -582,6 +585,7 @@ func schedulesUpdateHandler(app *App) http.HandlerFunc {
 			AutoStart:          req.AutoStart,
 			AutoStop:           req.AutoStop,
 			Status:             req.Status,
+			SatStartMode:       req.SatStartMode,
 			Revision:           req.Revision,
 		})
 		if err != nil {

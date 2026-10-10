@@ -72,6 +72,7 @@ func init() {
 		"GET /schedules/{scheduleID}/state":                          {Bearer: true, Scope: ScopeAttemptOwner},
 		"PATCH /schedules/{scheduleID}/responses/{examQuestionID}":   {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/start":                 {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /schedules/{scheduleID}/start-with-code":               {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/enter":                 {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/visible":               {Bearer: true, Scope: ScopeAttemptOwner},
 		"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state": {Bearer: true, Scope: ScopeAttemptOwner},
@@ -156,6 +157,11 @@ func init() {
 		"POST /sessions/{scheduleID}/device-transfers/{requestID}/decision": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /alerts/{alertID}/ack":                                        {MinRoles: proctorRW},
 		"GET /live-mode":                                                    {MinRoles: proctorRead},
+		// SAT access-code start: admin or assigned proctor (handler second
+		// layer: org check + requireProctorAttemptScope, 404-collapse).
+		"GET /sessions/{scheduleID}/start-code":         {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/start-code/rotate": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+
 		// library passages/questions.
 		"GET /passages":                         {MinRoles: readStaff},
 		"POST /passages":                        {MinRoles: writeStaff},

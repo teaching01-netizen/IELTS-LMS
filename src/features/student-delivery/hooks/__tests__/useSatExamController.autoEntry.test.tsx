@@ -27,6 +27,7 @@ const gatewayMocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
   configureSatDeliveryAttempt: vi.fn(),
   startModule: vi.fn(),
+  startWithCode: vi.fn(),
   submitModule: vi.fn(),
   submitAssessment: vi.fn(),
 }));
@@ -52,6 +53,7 @@ vi.mock("../../infrastructure/satDeliveryGateway", () => ({
   satDeliveryGateway: {
     bootstrap: gatewayMocks.bootstrap,
     startModule: gatewayMocks.startModule,
+    startWithCode: gatewayMocks.startWithCode,
     submitModule: gatewayMocks.submitModule,
     submitAssessment: gatewayMocks.submitAssessment,
   },
@@ -495,11 +497,44 @@ describe("useSatExamController auto-entry", () => {
     vi.clearAllMocks();
     gatewayMocks.bootstrap.mockReset();
     gatewayMocks.startModule.mockReset();
+    gatewayMocks.startWithCode.mockReset();
     gatewayMocks.submitModule.mockReset();
     gatewayMocks.submitAssessment.mockReset();
     gatewayMocks.configureSatDeliveryAttempt.mockReset();
     persistenceMock.flush.mockResolvedValue(undefined);
     persistenceMock.submit.mockResolvedValue({} as never);
+  });
+
+  it("recovers a lost code-start commit before permitting another submission", async () => {
+    const pending = notStartedCohortBootstrap();
+    pending.satStartPolicy = {
+      mode: "access_code", state: "code_required", opensAt: SERVER_NOW,
+      closesAt: "2026-09-10T12:00:00.000Z", serverNow: SERVER_NOW, blockedReason: null,
+    };
+    gatewayMocks.bootstrap.mockResolvedValue(pending);
+    const hook = renderController(0, { liveSocketConnected: true });
+    await waitFor(() => expect(hook.result.current.data?.satStartPolicy?.state).toBe("code_required"));
+    gatewayMocks.startWithCode.mockRejectedValue(new Error("start response lost"));
+    gatewayMocks.bootstrap.mockRejectedValue(new Error("recovery offline"));
+    await act(async () => {
+      const outcome = await hook.result.current.commands.startWithCode("012345");
+      expect(outcome.refusal?.kind).toBe("uncertain");
+    });
+    await act(async () => {
+      const outcome = await hook.result.current.commands.startWithCode("012345");
+      expect(outcome.refusal?.kind).toBe("uncertain");
+    });
+    expect(gatewayMocks.startWithCode).toHaveBeenCalledTimes(1);
+    const started = openedModule(pending, MODULE_RW, 2);
+    started.satStartPolicy = { ...pending.satStartPolicy, state: "started" };
+    gatewayMocks.bootstrap.mockResolvedValue(started);
+    await act(async () => {
+      const outcome = await hook.result.current.commands.startWithCode("012345");
+      expect(outcome.ok).toBe(true);
+    });
+    expect(gatewayMocks.startWithCode).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.data?.satStartPolicy?.state).toBe("started");
+    hook.unmount();
   });
 
   it("refuses Math annotations: Bluebook Math has no highlights or notes", async () => {

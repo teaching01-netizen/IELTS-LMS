@@ -91,6 +91,17 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 		origin = "runtime-reconciler"
 	}
 
+	// SAT access-code start: seal never-started candidates whose start window
+	// closed BEFORE selecting drained personal runtimes (they would otherwise
+	// keep the room open forever), then close code sessions that never opened
+	// a runtime at all.
+	if _, err := s.expireUnstartedCodeAttempts(ctx, asOf, limit); err != nil {
+		return nil, err
+	}
+	if err := s.closeExpiredCodeSchedulesWithoutRuntime(ctx, asOf, limit); err != nil {
+		return nil, err
+	}
+
 	candidates := make([]sectionReconcileCandidate, 0)
 	personalCandidates := make([]string, 0)
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {

@@ -390,6 +390,45 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /assessment-delivery/schedules/{scheduleId}/start-with-code:
+    post:
+      security:
+        - attemptBearer: []
+      tags: [delivery]
+      summary: SAT access-code start (individual first entry)
+      description: >-
+        Redeems the six-digit session start code for the bearer's own attempt
+        and starts only that candidate's first delivered module at DB time.
+        The attempt comes from the verified credential and the module from the
+        delivered order; identity/module selectors are rejected. A started
+        attempt replays as `resume` at its current module without re-checking
+        the code.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SatStartWithCodeRequest" }
+      responses:
+        "200":
+          description: Started (entry ACK with first-module content) or resume (bootstrap)
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatStartWithCodeResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Error" }
   /assessment-delivery/schedules/{scheduleId}/modules/submit:
     post:
       security:
@@ -873,6 +912,59 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/start-code:
+    get:
+      tags: [proctor]
+      summary: Reveal a SAT session's exam start code (audited, no-store)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Current code, generation and effective start window
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatStartCode" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/start-code/rotate:
+    post:
+      tags: [proctor]
+      summary: Rotate a SAT session's exam start code
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedGeneration]
+              properties:
+                expectedGeneration: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Replacement code and its generation
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatStartCode" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /proctor/sessions/{scheduleId}/device-transfers:
     get:
       tags: [proctor]
@@ -4427,6 +4519,46 @@ components:
       required: [moduleId]
       properties:
         moduleId: { type: string }
+    SatStartWithCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code, controlEpoch]
+      properties:
+        code: { type: string, pattern: "^[0-9]{6}$", description: "Six ASCII digits as a string (leading zeros preserved)" }
+        controlEpoch: { type: integer, minimum: 0 }
+    SatStartWithCodeResponse:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [started, resume] }
+        entry: { type: object, description: "AssessmentModuleEntryStateAck with selectedSection (kind=started)" }
+        bootstrap: { type: object, description: "Assessment delivery bootstrap (kind=resume)" }
+    SatStartPolicy:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [proctor, access_code] }
+        state: { type: string, enum: [code_required, started, closed] }
+        opensAt: { type: string, format: date-time }
+        closesAt: { type: string, format: date-time }
+        serverNow: { type: string, format: date-time }
+        blockedReason: { type: string, enum: [not_open, paused, revoked, rate_limited] }
+        retryAfterSeconds: { type: integer }
+    SatStartCode:
+      type: object
+      required: [scheduleId, code, generation, opensAt, closesAt, status, acceptingNewStarts, serverNow]
+      properties:
+        scheduleId: { type: string }
+        cohortName: { type: string }
+        examTitle: { type: string }
+        code: { type: string, pattern: "^[0-9]{6}$" }
+        generation: { type: integer, minimum: 1 }
+        opensAt: { type: string, format: date-time }
+        closesAt: { type: string, format: date-time }
+        status: { type: string }
+        acceptingNewStarts: { type: boolean }
+        serverNow: { type: string, format: date-time }
+        rotatedAt: { type: string, format: date-time }
     DeliveryModuleSubmitRequest:
       type: object
       required: [moduleId]

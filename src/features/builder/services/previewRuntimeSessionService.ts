@@ -185,7 +185,7 @@ async function createPreviewSchedule(
     autoStop: false,
   });
 
-  const created = await backendPost<any>('/v1/schedules', payload);
+  const created = await backendPost<any>('/v1/schedules', { ...payload, satStartMode: 'proctor' });
   return mapBackendSchedule(created);
 }
 

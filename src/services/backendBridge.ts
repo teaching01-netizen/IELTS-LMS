@@ -125,6 +125,7 @@ type BackendExamSchedule = {
   gradingDisplayName?: string | null | undefined;
   publishedVersionId: string;
   publishScope?: SatPublishScope | undefined;
+  satStartMode?: ExamSchedule["satStartMode"];
   cohortName: string;
   institution?: string | null | undefined;
   startTime: string;
@@ -443,6 +444,7 @@ export function buildCreateSchedulePayload(
     | "endTime"
     | "autoStart"
     | "autoStop"
+    | "satStartMode"
   >
 ) {
   return {
@@ -456,6 +458,7 @@ export function buildCreateSchedulePayload(
     endTime: schedule.endTime,
     autoStart: schedule.autoStart,
     autoStop: schedule.autoStop,
+    satStartMode: schedule.satStartMode,
   };
 }
 
@@ -470,6 +473,7 @@ export function buildUpdateSchedulePayload(schedule: ExamSchedule, revision: num
     endTime: schedule.endTime,
     autoStart: schedule.autoStart,
     autoStop: schedule.autoStop,
+    satStartMode: schedule.satStartMode,
     status: schedule.status,
     revision,
   });
@@ -587,6 +591,7 @@ export function mapBackendSchedule(payload: BackendExamSchedule): ExamSchedule {
     gradingDisplayName: payload.gradingDisplayName ?? payload.examTitle,
     publishedVersionId: payload.publishedVersionId,
     publishScope: payload.publishScope,
+    satStartMode: payload.satStartMode ?? "proctor",
     cohortName: payload.cohortName,
     institution: payload.institution ?? undefined,
     startTime: payload.startTime,

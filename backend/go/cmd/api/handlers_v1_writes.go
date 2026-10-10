@@ -82,6 +82,11 @@ func v1MutationHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
+		// Acceptance is monotonic, so a pre-transaction refusal is sound.
+		if err := startCodeGateForStudentWrite(r.Context(), app, scheduleID, wire.AttemptID); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		result, err := app.Student.ApplyMutationBatch(r.Context(), student.V1MutationBatchRequest{
 			AttemptID:       wire.AttemptID,
 			ScheduleID:      scheduleID,
@@ -122,6 +127,10 @@ func v1SubmitHandler(app *App) http.HandlerFunc {
 		scheduleID := chi.URLParam(r, "scheduleID")
 		identity, err := requireV1StudentIdentity(app, r, wire.AttemptID, scheduleID, wire.ClientSessionID)
 		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if err := startCodeGateForStudentWrite(r.Context(), app, scheduleID, wire.AttemptID); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}

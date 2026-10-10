@@ -25,9 +25,11 @@ func (s *Service) CanAttemptReadMedia(ctx context.Context, scheduleID, attemptID
 
 	var storedSchedule string
 	var publishedVersionID sql.NullString
+	var codeRequired bool
+	var codeAcceptedAt sql.NullTime
 	err := s.db.QueryRowContext(ctx,
-		"SELECT schedule_id, published_version_id FROM student_attempts WHERE id = ?", attemptID,
-	).Scan(&storedSchedule, &publishedVersionID)
+		"SELECT schedule_id, published_version_id, sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ?", attemptID,
+	).Scan(&storedSchedule, &publishedVersionID, &codeRequired, &codeAcceptedAt)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -37,7 +39,11 @@ func (s *Service) CanAttemptReadMedia(ctx context.Context, scheduleID, attemptID
 	if storedSchedule != scheduleID || !publishedVersionID.Valid {
 		return false, nil
 	}
-
+	// SAT access-code start: no protected asset before this candidate's own
+	// code redemption, even one referenced by the seeded first module.
+	if codeRequired && !codeAcceptedAt.Valid {
+		return false, nil
+	}
 	versionID := publishedVersionID.String
 	revision, err := s.versionRevision(ctx, versionID)
 	if err != nil {

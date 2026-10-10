@@ -203,7 +203,9 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 					  AND paused_at IS NULL
 					  AND NOT EXISTS (
 					    SELECT 1 FROM student_attempts sa
-					    WHERE sa.id = assessment_module_attempts.attempt_id AND sa.proctor_status = 'paused')
+					    WHERE sa.id = assessment_module_attempts.attempt_id
+					      AND (sa.proctor_status = 'paused'
+					           OR (sa.sat_start_code_required = 1 AND sa.sat_start_code_accepted_at IS NULL)))
 					ORDER BY created_at, id LIMIT 1`, attemptID)
 				if err != nil {
 					return err
@@ -679,6 +681,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			  AND a.submitted_at IS NULL
 			  AND COALESCE(a.proctor_status, 'active') <> 'paused'
 			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			  AND (a.sat_start_code_required = 0 OR a.sat_start_code_accepted_at IS NOT NULL)
 			ORDER BY m.state, m.auto_start_at, m.id LIMIT 250`, asOf.UTC())
 		if aerr != nil {
 			return 0, 0, aerr

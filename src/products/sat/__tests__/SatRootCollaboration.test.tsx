@@ -86,9 +86,9 @@ describe('SatRoot collaboration boundary', () => {
     boundary.examIds = [];
   });
 
-  it('opens the exam room for the authoring surface', () => {
+  it('opens the exam room for the authoring surface', async () => {
     renderSat('/sat/exams/ex-1');
-    expect(screen.getByTestId('coedit-boundary')).toHaveAttribute('data-exam-id', 'ex-1');
+    expect(await screen.findByTestId('coedit-boundary')).toHaveAttribute('data-exam-id', 'ex-1');
     expect(boundary.mounts).toBe(1);
   });
 
@@ -97,28 +97,29 @@ describe('SatRoot collaboration boundary', () => {
     ['/sat/exams/ex-1/release', 'Release content'],
     ['/sat/exams/ex-1/access', 'Access content'],
     ['/sat/exams/ex-1/preview/', 'Preview content'],
-  ])('keeps the room open on %s', (entry, content) => {
+  ])('keeps the room open on %s', async (entry, content) => {
     renderSat(entry);
-    expect(screen.getByText(content)).toBeInTheDocument();
+    expect(await screen.findByText(content)).toBeInTheDocument();
     expect(screen.getByTestId('coedit-boundary')).toHaveAttribute('data-exam-id', 'ex-1');
     expect(boundary.mounts).toBe(1);
   });
 
-  it('carries one room across builder -> preview -> release instead of reopening it', () => {
+  it('carries one room across builder -> preview -> release instead of reopening it', async () => {
     renderSat('/sat/exams/ex-1');
+    await screen.findByTestId('coedit-boundary');
     expect(boundary.mounts).toBe(1);
 
     fireEvent.click(screen.getByRole('link', { name: 'Preview exam' }));
-    expect(screen.getByText('Preview content')).toBeInTheDocument();
+    expect(await screen.findByText('Preview content')).toBeInTheDocument();
     expect(boundary.mounts).toBe(1);
     expect(boundary.unmounts).toBe(0);
 
     fireEvent.click(screen.getByRole('link', { name: 'Back to exam' }));
-    expect(screen.getByText('Authoring content')).toBeInTheDocument();
+    expect(await screen.findByText('Authoring content')).toBeInTheDocument();
     expect(boundary.mounts).toBe(1);
 
     fireEvent.click(screen.getByRole('link', { name: 'Release exam' }));
-    expect(screen.getByText('Release content')).toBeInTheDocument();
+    expect(await screen.findByText('Release content')).toBeInTheDocument();
     expect(boundary.mounts).toBe(1);
     expect(boundary.unmounts).toBe(0);
     expect(boundary.examIds).toEqual(['ex-1']);

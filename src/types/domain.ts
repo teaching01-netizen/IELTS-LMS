@@ -225,6 +225,7 @@ export interface ExamSchedule {
   gradingDisplayName: string;
   publishedVersionId: string; // Always points to immutable version
   publishScope?: SatPublishScope | undefined;
+  satStartMode?: "proctor" | "access_code" | undefined;
 
   // Schedule details
   cohortName: string;

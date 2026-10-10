@@ -64,11 +64,11 @@ func legacyScheduleRow(providerKey string) *sqlmock.Rows {
 		"planned_duration_minutes", "delivery_mode", "status", "revision",
 		"recurrence_type", "recurrence_interval", "recurrence_end_date",
 		"buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop",
-		"created_at", "created_by", "updated_at", "sat_timing_model",
+		"created_at", "created_by", "updated_at", "sat_timing_model", "sat_start_mode",
 	}).AddRow(
 		"schedule-act-legacy", "exam-act", providerKey, nil, "ACT Science",
 		"ACT Science", "ACT Science", "version-act-1", "cohort", nil,
 		start, end, 60, "proctor_start", "scheduled", 0,
-		"none", 1, nil, nil, nil, false, false, start, "admin", start, nil,
+		"none", 1, nil, nil, nil, false, false, start, "admin", start, nil, "proctor",
 	)
 }

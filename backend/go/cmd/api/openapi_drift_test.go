@@ -144,6 +144,7 @@ func TestOpenAPIRateLimitedResponseContract(t *testing.T) {
 		"/grading/export",
 		"/results/export",
 		"/results/export-profile",
+		"/assessment-delivery/schedules/{scheduleId}/start-with-code",
 	}
 	for _, path := range rateLimitedPaths {
 		start := strings.Index(body, "  "+path+":")

@@ -104,7 +104,7 @@ func TestScanScheduleProjectsTheStoredTimingChoice(t *testing.T) {
 	svc := NewService(db, tx.NewRunner(db))
 
 	now := time.Date(2026, 9, 24, 9, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta("sat_timing_model FROM exam_schedules WHERE id = ?")).
+	mock.ExpectQuery(regexp.QuoteMeta("sat_timing_model, sat_start_mode FROM exam_schedules WHERE id = ?")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "exam_id", "provider_key", "organization_id", "exam_title",
@@ -113,7 +113,7 @@ func TestScanScheduleProjectsTheStoredTimingChoice(t *testing.T) {
 			"planned_duration_minutes", "delivery_mode", "status", "revision",
 			"recurrence_type", "recurrence_interval", "recurrence_end_date",
 			"buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop",
-			"created_at", "created_by", "updated_at", "sat_timing_model",
+			"created_at", "created_by", "updated_at", "sat_timing_model", "sat_start_mode",
 		}).AddRow(
 			"sched-1", "exam-1", "sat", nil, "SAT Practice",
 			"SAT Practice", "SAT Practice", "pv-1",
@@ -121,7 +121,7 @@ func TestScanScheduleProjectsTheStoredTimingChoice(t *testing.T) {
 			134, "online", "scheduled", 3,
 			"none", 1, nil,
 			0, 0, true, false,
-			now, "admin-1", now, examruntime.TimingModelPersonal,
+			now, "admin-1", now, examruntime.TimingModelPersonal, "proctor",
 		))
 
 	sch, err := svc.Get(context.Background(), "sched-1")
@@ -147,7 +147,7 @@ func TestScanScheduleLeavesALegacyChoiceUnset(t *testing.T) {
 	svc := NewService(db, tx.NewRunner(db))
 
 	now := time.Date(2026, 9, 24, 9, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta("sat_timing_model FROM exam_schedules WHERE id = ?")).
+	mock.ExpectQuery(regexp.QuoteMeta("sat_timing_model, sat_start_mode FROM exam_schedules WHERE id = ?")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "exam_id", "provider_key", "organization_id", "exam_title",
@@ -156,7 +156,7 @@ func TestScanScheduleLeavesALegacyChoiceUnset(t *testing.T) {
 			"planned_duration_minutes", "delivery_mode", "status", "revision",
 			"recurrence_type", "recurrence_interval", "recurrence_end_date",
 			"buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop",
-			"created_at", "created_by", "updated_at", "sat_timing_model",
+			"created_at", "created_by", "updated_at", "sat_timing_model", "sat_start_mode",
 		}).AddRow(
 			"sched-1", "exam-1", "sat", nil, "SAT Practice",
 			"SAT Practice", "SAT Practice", "pv-1",
@@ -164,7 +164,7 @@ func TestScanScheduleLeavesALegacyChoiceUnset(t *testing.T) {
 			134, "online", "scheduled", 3,
 			"none", 1, nil,
 			0, 0, true, false,
-			now, "admin-1", now, nil,
+			now, "admin-1", now, nil, "proctor",
 		))
 
 	sch, err := svc.Get(context.Background(), "sched-1")

@@ -150,7 +150,43 @@ export interface AssessmentDeliveryBootstrap {
   sections: AssessmentDeliverySection[];
   attempt: AssessmentAttemptSnapshot;
   result: AssessmentResult | null;
+  /**
+   * The server-derived SAT entry object. `access_code` sessions require this
+   * candidate's own six-digit code redemption before any module starts;
+   * absent for non-SAT providers.
+   */
+  satStartPolicy?: SatStartPolicy | null;
 }
+
+export type SatStartState = "code_required" | "started" | "closed";
+export type SatStartBlockedReason = "not_open" | "paused" | "revoked" | "rate_limited";
+
+/**
+ * Never carries the code, its ciphertext or guess counts. A code-mode
+ * session with a missing or unknown policy fails closed (no automatic entry).
+ */
+export type SatStartPolicy =
+  | { mode: "proctor" }
+  | {
+      mode: "access_code";
+      state: SatStartState;
+      opensAt?: string | null;
+      closesAt?: string | null;
+      serverNow?: string | null;
+      blockedReason?: SatStartBlockedReason | null;
+      retryAfterSeconds?: number | null;
+    };
+
+export interface SatStartWithCodeRequest {
+  /** Exactly six ASCII digits, as a string (leading zeros preserved). */
+  code: string;
+  /** The attempt control epoch the client holds; required. */
+  controlEpoch: number;
+}
+
+export type SatStartWithCodeResponse =
+  | { kind: "started"; entry: AssessmentModuleEntryStateAck }
+  | { kind: "resume"; bootstrap: AssessmentDeliveryBootstrap };
 
 export type AssessmentDeliveryState = Omit<AssessmentDeliveryBootstrap, "sections">;
 

@@ -116,6 +116,9 @@ func New(cfg config.Config, pool *sql.DB, deps shared.Deps) *Runner {
 		deps.LiveHub = liveupdates.NewHub()
 	}
 	svc := shared.Build(cfg, pool, deps)
+	if svc.SATStartCodeConfigErr != nil {
+		log.Fatalf("worker: SAT start code misconfigured: %v", svc.SATStartCodeConfigErr)
+	}
 	claimMode := outbox.ClaimUpdate
 	if cfg.OutboxClaimMode == config.OutboxClaimSkipLocked {
 		claimMode = outbox.ClaimSkipLocked
@@ -356,6 +359,17 @@ func (w *Runner) runHotCycle(ctx context.Context, at time.Time) (cycleErr error)
 			telemetry.IncCounter(telemetry.MJobFailures, "job", "reconcile_expired_sections")
 		} else if len(outcomes) > 0 {
 			log.Printf("worker: ReconcileExpiredSections advanced=%d", len(outcomes))
+		}
+	}
+	// SAT access-code start: an expired, unsettled comparison reservation
+	// is conservatively counted as a failed guess (it may have compared).
+	if sweeper, ok := w.delivery.(interface {
+		SweepStartCodeReservations(context.Context, int64) (int64, error)
+	}); ok {
+		if _, err := sweeper.SweepStartCodeReservations(ctx, maintenance.SATRepairBatch); err != nil {
+			cycleErr = errors.Join(cycleErr, err)
+			log.Printf("worker: SweepStartCodeReservations error: %v", err)
+			telemetry.IncCounter(telemetry.MJobFailures, "job", "sat_start_code_reservations")
 		}
 	}
 	limit := w.cfg.OutboxBatchSize

@@ -225,11 +225,16 @@ type StartSchedule struct {
 	ExamID                 string
 	ProviderKey            string
 	SatTimingModel         string
+	SatStartMode           string
 	PublishedVersionID     string
 	Status                 string
 	Revision               int64
 	PlannedDurationMinutes int
 }
+
+// SatStartModeAccessCode mirrors satstartcode.ModeAccessCode; runtime sits
+// below that package in the dependency order.
+const SatStartModeAccessCode = "access_code"
 
 // StartPlanner derives the cohort clock plan and timing model from the locked
 // schedule row, reading through the SAME transaction handle Start writes with.
@@ -251,9 +256,19 @@ type StartPlanner func(ctx context.Context, q tx.Tx, sch StartSchedule) (plan []
 // breaks that by failing one of the two user actions, most likely exactly when
 // a cohort is checking in and the proctor presses Start.
 func LockScheduleRow(ctx context.Context, q tx.Tx, scheduleID string) (*StartSchedule, error) {
-	const sel = "SELECT id, exam_id, provider_key, COALESCE(sat_timing_model, ''), published_version_id, status, revision, planned_duration_minutes FROM exam_schedules WHERE id = ? FOR UPDATE"
+	return lockScheduleRow(ctx, q, scheduleID, " FOR UPDATE")
+}
+
+// ShareScheduleRow reads the same projection under a shared lock: code-start
+// redemptions against an existing runtime only need the policy to stay put.
+func ShareScheduleRow(ctx context.Context, q tx.Tx, scheduleID string) (*StartSchedule, error) {
+	return lockScheduleRow(ctx, q, scheduleID, " FOR SHARE")
+}
+
+func lockScheduleRow(ctx context.Context, q tx.Tx, scheduleID, lockClause string) (*StartSchedule, error) {
+	sel := "SELECT id, exam_id, provider_key, COALESCE(sat_timing_model, ''), COALESCE(sat_start_mode, 'proctor'), published_version_id, status, revision, planned_duration_minutes FROM exam_schedules WHERE id = ?" + lockClause
 	var sch StartSchedule
-	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&sch.ID, &sch.ExamID, &sch.ProviderKey, &sch.SatTimingModel, &sch.PublishedVersionID, &sch.Status, &sch.Revision, &sch.PlannedDurationMinutes); err != nil {
+	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&sch.ID, &sch.ExamID, &sch.ProviderKey, &sch.SatTimingModel, &sch.SatStartMode, &sch.PublishedVersionID, &sch.Status, &sch.Revision, &sch.PlannedDurationMinutes); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Schedule not found.", HTTPStatus: 404}
 		}
@@ -322,6 +337,11 @@ func (s *Service) Start(ctx context.Context, scheduleID, actorID string, planner
 		if err != nil {
 			return err
 		}
+		// Code-start sessions have no room-wide Start: each candidate's code
+		// redemption opens the runtime for that candidate only.
+		if sch.SatStartMode == SatStartModeAccessCode {
+			return startModeConflict()
+		}
 		if err := LockScheduleAttemptsInTx(ctx, q, scheduleID); err != nil {
 			return err
 		}
@@ -337,74 +357,9 @@ func (s *Service) Start(ctx context.Context, scheduleID, actorID string, planner
 		case err != sql.ErrNoRows:
 			return err
 		}
-		// No runtime yet: only a scheduled session may open one. Without this
-		// gate a completed or cancelled schedule that reached here was quietly
-		// resurrected as live.
-		if sch.Status != scheduleStatusScheduled {
-			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Schedule is not scheduled; refresh before starting.", HTTPStatus: 409}
-		}
-		plan, timingModel, err := planner(ctx, q, *sch)
+		plan, err := s.insertLiveRuntimeTx(ctx, q, sch, runtimeID, planner)
 		if err != nil {
 			return err
-		}
-		if timingModel == "" {
-			timingModel = TimingModelLegacy
-		}
-		var firstKey *string
-		var firstSecs int64
-		if len(plan) > 0 {
-			firstKey = &plan[0].SectionKey
-			firstSecs = int64(plan[0].DurationMinutes) * 60
-		}
-		var providerKey string
-		if err := q.QueryRowContext(ctx, "SELECT provider_key FROM exam_entities WHERE id = ? FOR UPDATE", sch.ExamID).Scan(&providerKey); err != nil {
-			if err == sql.ErrNoRows {
-				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Exam not found.", HTTPStatus: 404}
-			}
-			return err
-		}
-		handoffMode := "server_start"
-		if IsSatPersonal(timingModel) && s.satHandoffMode == "client_start" {
-			handoffMode = "client_start"
-		}
-		planJSON, _ := json.Marshal(plan)
-		const ins = "INSERT INTO exam_session_runtimes (id, schedule_id, exam_id, provider_key, status, plan_snapshot, timing_model, sat_handoff_mode, actual_start_at, actual_end_at, active_section_key, current_section_key, current_section_remaining_seconds, waiting_for_next_section, is_overrun, total_paused_seconds, created_at, updated_at, revision) VALUES (?, ?, ?, ?, 'live', ?, ?, ?, UTC_TIMESTAMP(6), NULL, ?, ?, ?, false, false, 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 1)"
-		if _, err := q.ExecContext(ctx, ins, runtimeID, scheduleID, sch.ExamID, providerKey, string(planJSON), timingModel, handoffMode, firstKey, firstKey, firstSecs); err != nil {
-			if isDupKey(err) {
-				return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Runtime already exists for this schedule.", HTTPStatus: 409}
-			}
-			return err
-		}
-		for i, entry := range plan {
-			status := SectionLocked
-			var availExpr, startExpr string
-			if i == 0 {
-				status = SectionLive
-				availExpr = "UTC_TIMESTAMP(6)"
-				startExpr = "UTC_TIMESTAMP(6)"
-			} else {
-				availExpr = "NULL"
-				startExpr = "NULL"
-			}
-			stmt := "INSERT INTO exam_session_runtime_sections (id, runtime_id, section_key, label, section_order, planned_duration_minutes, gap_after_minutes, status, available_at, actual_start_at, actual_end_at, paused_at, accumulated_paused_seconds, extension_minutes, completion_reason, projected_start_at, projected_end_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, " + availExpr + ", " + startExpr + ", NULL, NULL, 0, 0, NULL, NULL, NULL)"
-			if _, err := q.ExecContext(ctx, stmt, uuid.NewString(), runtimeID, entry.SectionKey, entry.Label, entry.Order, entry.DurationMinutes, entry.GapAfterMinutes, status); err != nil {
-				return err
-			}
-		}
-		// The version/revision fence: the schedule goes live only as the exact
-		// row the plan was derived from. Zero rows means something changed it
-		// underneath us, and the whole Start (runtime, sections, event) rolls
-		// back rather than binding a runtime to a version the schedule no longer
-		// names.
-		const schedLive = "UPDATE exam_schedules SET status = 'live', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND status = '" + scheduleStatusScheduled + "' AND published_version_id = ? AND revision = ?"
-		res, err := q.ExecContext(ctx, schedLive, scheduleID, sch.PublishedVersionID, sch.Revision)
-		if err != nil {
-			return err
-		}
-		if n, err := res.RowsAffected(); err != nil {
-			return err
-		} else if n != 1 {
-			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Schedule changed while starting; refresh before retrying.", HTTPStatus: 409}
 		}
 		if len(plan) > 0 {
 			if err := SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, plan[0].SectionKey, strptr("running")); err != nil {
@@ -425,6 +380,130 @@ func (s *Service) Start(ctx context.Context, scheduleID, actorID string, planner
 		return existingID, nil
 	}
 	return runtimeID, nil
+}
+
+func startModeConflict() error {
+	return &apperrors.Error{
+		Code: apperrors.CodeConflict, HTTPStatus: 409,
+		Message: "This SAT session starts with the exam start code; there is no room-wide Start.",
+		Details: map[string]any{"reason": "START_MODE_CONFLICT"},
+	}
+}
+
+// insertLiveRuntimeTx creates the live runtime, its section rows and the
+// schedule's live transition from the locked schedule row. The plan is derived
+// inside the caller's transaction by the injected planner, and the schedule
+// goes live only as the exact (status, version, revision) the plan was built
+// from. It does not touch attempts: the room Start synchronizes every attempt
+// afterwards, while a code start activates only its own candidate.
+func (s *Service) insertLiveRuntimeTx(ctx context.Context, q tx.Tx, sch *StartSchedule, runtimeID string, planner StartPlanner) ([]PlanEntry, error) {
+	// No runtime yet: only a scheduled session may open one. Without this
+	// gate a completed or cancelled schedule that reached here was quietly
+	// resurrected as live.
+	if sch.Status != scheduleStatusScheduled {
+		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "Schedule is not scheduled; refresh before starting.", HTTPStatus: 409}
+	}
+	plan, timingModel, err := planner(ctx, q, *sch)
+	if err != nil {
+		return nil, err
+	}
+	if timingModel == "" {
+		timingModel = TimingModelLegacy
+	}
+	var firstKey *string
+	var firstSecs int64
+	if len(plan) > 0 {
+		firstKey = &plan[0].SectionKey
+		firstSecs = int64(plan[0].DurationMinutes) * 60
+	}
+	var providerKey string
+	if err := q.QueryRowContext(ctx, "SELECT provider_key FROM exam_entities WHERE id = ? FOR UPDATE", sch.ExamID).Scan(&providerKey); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Exam not found.", HTTPStatus: 404}
+		}
+		return nil, err
+	}
+	handoffMode := "server_start"
+	if IsSatPersonal(timingModel) && s.satHandoffMode == "client_start" {
+		handoffMode = "client_start"
+	}
+	planJSON, _ := json.Marshal(plan)
+	const ins = "INSERT INTO exam_session_runtimes (id, schedule_id, exam_id, provider_key, status, plan_snapshot, timing_model, sat_handoff_mode, actual_start_at, actual_end_at, active_section_key, current_section_key, current_section_remaining_seconds, waiting_for_next_section, is_overrun, total_paused_seconds, created_at, updated_at, revision) VALUES (?, ?, ?, ?, 'live', ?, ?, ?, UTC_TIMESTAMP(6), NULL, ?, ?, ?, false, false, 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 1)"
+	if _, err := q.ExecContext(ctx, ins, runtimeID, sch.ID, sch.ExamID, providerKey, string(planJSON), timingModel, handoffMode, firstKey, firstKey, firstSecs); err != nil {
+		if isDupKey(err) {
+			return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "Runtime already exists for this schedule.", HTTPStatus: 409}
+		}
+		return nil, err
+	}
+	for i, entry := range plan {
+		status := SectionLocked
+		var availExpr, startExpr string
+		if i == 0 {
+			status = SectionLive
+			availExpr = "UTC_TIMESTAMP(6)"
+			startExpr = "UTC_TIMESTAMP(6)"
+		} else {
+			availExpr = "NULL"
+			startExpr = "NULL"
+		}
+		stmt := "INSERT INTO exam_session_runtime_sections (id, runtime_id, section_key, label, section_order, planned_duration_minutes, gap_after_minutes, status, available_at, actual_start_at, actual_end_at, paused_at, accumulated_paused_seconds, extension_minutes, completion_reason, projected_start_at, projected_end_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, " + availExpr + ", " + startExpr + ", NULL, NULL, 0, 0, NULL, NULL, NULL)"
+		if _, err := q.ExecContext(ctx, stmt, uuid.NewString(), runtimeID, entry.SectionKey, entry.Label, entry.Order, entry.DurationMinutes, entry.GapAfterMinutes, status); err != nil {
+			return nil, err
+		}
+	}
+	// The version/revision fence: the schedule goes live only as the exact
+	// row the plan was derived from. Zero rows means something changed it
+	// underneath us, and the whole Start (runtime, sections, event) rolls
+	// back rather than binding a runtime to a version the schedule no longer
+	// names.
+	const schedLive = "UPDATE exam_schedules SET status = 'live', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND status = '" + scheduleStatusScheduled + "' AND published_version_id = ? AND revision = ?"
+	res, err := q.ExecContext(ctx, schedLive, sch.ID, sch.PublishedVersionID, sch.Revision)
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n != 1 {
+		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "Schedule changed while starting; refresh before retrying.", HTTPStatus: 409}
+	}
+	return plan, nil
+}
+
+// OpenForCodeStartInTx opens the personal runtime for the FIRST code-start
+// redemption of a schedule, inside the caller's first-start transaction. The
+// caller holds the schedule row FOR UPDATE (sch) and has re-checked that no
+// runtime exists. Unlike the room Start it neither locks nor synchronizes
+// other attempts: only the redeeming candidate's clock starts, and the rest
+// stay pre-exam until they redeem the code themselves. The caller runs
+// InvalidateSnapshot after commit.
+func (s *Service) OpenForCodeStartInTx(ctx context.Context, q tx.Tx, sch *StartSchedule, planner StartPlanner) (string, error) {
+	if planner == nil {
+		return "", fmt.Errorf("runtime.OpenForCodeStartInTx: a StartPlanner is required")
+	}
+	if sch.SatStartMode != SatStartModeAccessCode {
+		return "", fmt.Errorf("runtime.OpenForCodeStartInTx: schedule %s is not a code-start session", sch.ID)
+	}
+	runtimeID := uuid.NewString()
+	plan, err := s.insertLiveRuntimeTx(ctx, q, sch, runtimeID, planner)
+	if err != nil {
+		return "", err
+	}
+	if len(plan) == 0 {
+		return "", &apperrors.Error{Code: apperrors.CodeConflict, Message: "The SAT release has no deliverable sections.", HTTPStatus: 409}
+	}
+	if err := insertControlEvent(ctx, q, runtimeID, sch.ID, "system:code_start", controlStartAction, nil, nil, strptr("first_code_start")); err != nil {
+		return "", err
+	}
+	if err := s.emitRuntimeChanged(ctx, q, sch.ID, 1, "start_runtime"); err != nil {
+		return "", err
+	}
+	return runtimeID, nil
+}
+
+// InvalidateSnapshot is the post-commit snapshot hook for callers that open
+// the runtime inside their own transaction.
+func (s *Service) InvalidateSnapshot(scheduleID string) {
+	s.invalidated(scheduleID)
 }
 
 func isDupKey(err error) bool {
@@ -671,12 +750,16 @@ func SyncV2TimingForAttemptInTx(ctx context.Context, q tx.Tx, scheduleID, runtim
 // syncV2TimingInTx is the shared statement; an empty attemptID means the
 // whole schedule.
 func syncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey, attemptID string, lifecycle *string) error {
+	// A code-start candidate who has not redeemed the code is pre-exam: room
+	// pause/resume may flip their paused/running status, but never marks
+	// their exam started.
+	const keepPhase = "sa.phase IN ('pre-check', 'post-exam') OR (sa.sat_start_code_required = 1 AND sa.sat_start_code_accepted_at IS NULL)"
 	lifecycleAssign := ""
 	switch s := strval(lifecycle); s {
 	case "paused":
-		lifecycleAssign = "delivery_status = CASE WHEN COALESCE(sa.delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN sa.delivery_status ELSE 'paused' END, phase = CASE WHEN sa.phase IN ('pre-check', 'post-exam') THEN sa.phase ELSE 'exam' END,"
+		lifecycleAssign = "delivery_status = CASE WHEN COALESCE(sa.delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN sa.delivery_status ELSE 'paused' END, phase = CASE WHEN " + keepPhase + " THEN sa.phase ELSE 'exam' END,"
 	case "running":
-		lifecycleAssign = "delivery_status = CASE WHEN COALESCE(sa.proctor_status, 'active') = 'paused' OR COALESCE(sa.delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN sa.delivery_status ELSE 'running' END, phase = CASE WHEN sa.phase IN ('pre-check', 'post-exam') THEN sa.phase ELSE 'exam' END,"
+		lifecycleAssign = "delivery_status = CASE WHEN COALESCE(sa.proctor_status, 'active') = 'paused' OR COALESCE(sa.delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN sa.delivery_status ELSE 'running' END, phase = CASE WHEN " + keepPhase + " THEN sa.phase ELSE 'exam' END,"
 	case "":
 		lifecycleAssign = ""
 	default:

@@ -68,6 +68,12 @@ const (
 	CodeTransferApprovalRequired Code = "TRANSFER_APPROVAL_REQUIRED"
 	CodeTransferExpired          Code = "TRANSFER_EXPIRED"
 	CodeTransferConflict         Code = "TRANSFER_CONFLICT"
+	// SAT access-code start. START_CODE_FORMAT_INVALID: the submission is not
+	// exactly six ASCII digits as a JSON string (no comparison ran).
+	// START_CODE_INVALID: a well-formed code did not match (counted against
+	// the session's failure budget).
+	CodeStartCodeFormatInvalid Code = "START_CODE_FORMAT_INVALID"
+	CodeStartCodeInvalid       Code = "START_CODE_INVALID"
 )
 
 // Authoring lifecycle codes. These are separate from the block above because
@@ -112,7 +118,7 @@ func statusFor(c Code) int {
 	switch c {
 	case CodeUnauthorized, CodeAttemptTokenInvalid, CodeAttemptTokenExpired, CodeSessionExpired:
 		return http.StatusUnauthorized
-	case CodeForbidden, CodeCSRF, CodeLeaseFenced, CodeAttemptProctorBlocked:
+	case CodeForbidden, CodeCSRF, CodeLeaseFenced, CodeAttemptProctorBlocked, CodeStartCodeInvalid:
 		return http.StatusForbidden
 	case CodeNotFound, CodeExamNotFound:
 		return http.StatusNotFound
@@ -136,7 +142,7 @@ func statusFor(c Code) int {
 		return http.StatusServiceUnavailable
 	case CodeStudentWSRetired:
 		return http.StatusGone
-	case CodeBadRequest:
+	case CodeBadRequest, CodeStartCodeFormatInvalid:
 		return http.StatusBadRequest
 	case CodeValidation, CodeUnsupportedProvider, CodeInvalidAssessment:
 		return http.StatusUnprocessableEntity

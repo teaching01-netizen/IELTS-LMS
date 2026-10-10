@@ -285,6 +285,9 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.LiveHub = hub
 		app.Leases = liveupdates.NewLeaseRepository(pool)
 		app.AuthoringConfigErr = svc.AuthoringConfigErr
+		if svc.SATStartCodeConfigErr != nil {
+			log.Fatalf("api: SAT start code misconfigured: %v", svc.SATStartCodeConfigErr)
+		}
 		if app.Authoring != nil {
 			app.Authoring.SetCoeditEnabled(cfg.AuthoringRealtimeCoediting)
 		}
@@ -621,6 +624,7 @@ func BuildRouter(app *App) http.Handler {
 				authzRoute(r, "GET", "/schedules/{scheduleID}/modules/{moduleID}/entry-state", deliveryModuleEntryStateHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Group(func(r chi.Router) {
+				authzRoute(r, "POST", "/schedules/{scheduleID}/start-with-code", deliveryStartWithCodeHandler(app))
 				authzRoute(r, "POST", "/schedules/{scheduleID}/bootstrap", deliveryBootstrapHandler(app))
 				authzRoute(r, "PATCH", "/schedules/{scheduleID}/responses/{examQuestionID}", deliverySaveResponseHandler(app))
 				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/start", deliveryStartModuleHandler(app))
@@ -721,6 +725,10 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/late-evidence/review", proctorReviewLateEvidenceHandler(app))
 			authzRoute(r, "GET", "/sessions/{scheduleID}/device-transfers", proctorDeviceTransfersHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/device-transfers/{requestID}/decision", proctorDeviceTransferDecisionHandler(app))
+			// SAT access-code start: reveal/rotate the session code. Admin in
+			// org or assigned proctor; never polled, never in roster payloads.
+			authzRoute(r, "GET", "/sessions/{scheduleID}/start-code", proctorStartCodeRevealHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/start-code/rotate", proctorStartCodeRotateHandler(app))
 			authzRoute(r, "POST", "/alerts/{alertID}/ack", proctorAckAlertHandler(app))
 			authzRoute(r, "GET", "/live-mode", proctorLiveModeHandler(app))
 		})

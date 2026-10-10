@@ -14,6 +14,8 @@ import type {
   AssessmentResult,
   AssessmentStageVisibleAck,
   AssessmentSubmitRequest,
+  SatStartWithCodeRequest,
+  SatStartWithCodeResponse,
 } from '../../contracts/assessmentDelivery';
 
 export interface SatDeliveryGateway {
@@ -36,6 +38,12 @@ export interface SatDeliveryGateway {
     attemptId: string,
     request: AssessmentModuleStartRequest,
   ): Promise<AssessmentDeliveryBootstrap | AssessmentModuleEntryStateAck>;
+  /** SAT access-code start for the bearer's own attempt (never auto-retried). */
+  startWithCode(
+    scheduleId: string,
+    attemptId: string,
+    request: SatStartWithCodeRequest,
+  ): Promise<SatStartWithCodeResponse>;
   /**
    * Legacy personal-timing offer confirmation. The SAT client uses the
    * single-operation `startModule` path instead. If this endpoint is wired

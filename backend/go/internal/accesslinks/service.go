@@ -28,6 +28,7 @@ import (
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satstartcode"
 	"example.com/ielts-proctoring/internal/schedules"
 )
 
@@ -857,7 +858,16 @@ func insertBackingScheduleTx(ctx context.Context, q tx.Tx, scheduleID, examID st
 	if err != nil {
 		return err
 	}
-	return schedules.PersistSatTimingChoice(ctx, q, scheduleID, pin.providerKey)
+	if err := schedules.PersistSatTimingChoice(ctx, q, scheduleID, pin.providerKey); err != nil {
+		return err
+	}
+	// Link-backed SAT sessions follow the same start-mode rollout as normal
+	// sessions; the code is created atomically with the backing schedule.
+	mode, err := satstartcode.ResolveCreateMode(pin.providerKey, cohort, "")
+	if err != nil {
+		return err
+	}
+	return satstartcode.ApplyCreateModeTx(ctx, q, scheduleID, mode, createdBy)
 }
 
 func insertLinkTx(ctx context.Context, q tx.Tx, linkID, examID, versionID, scheduleID, name string, enabledSections []string, audience AudienceType, label *string, mode Mode, availability AvailabilityType, opensAt, closesAt *time.Time, createdBy string) error {

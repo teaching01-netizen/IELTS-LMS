@@ -224,10 +224,20 @@ func v1StaticInner(app *App, w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
+		gated, err := studentStartCodeGated(r.Context(), app, chi.URLParam(r, "scheduleID"), attemptID)
+		if err != nil {
+			httpx.WriteError(w, r, MapDBError(err))
+			return
+		}
 		var staticETag string
 		if app.Delivery != nil {
 			if _, _, etag, terr := app.Delivery.VersionTag(r.Context(), chi.URLParam(r, "scheduleID")); terr == nil {
 				staticETag = staticETagForOpenedModules(etag, openedModules)
+				// The withheld (pre-code) projection is a different body and
+				// must never satisfy a conditional read for the full one.
+				if gated {
+					staticETag = strings.TrimSuffix(staticETag, `"`) + `-start-code-withheld"`
+				}
 				if writeETagOrNotModified(w, r, staticETag) {
 					return
 				}
@@ -245,6 +255,9 @@ func v1StaticInner(app *App, w http.ResponseWriter, r *http.Request) {
 			}
 			httpx.WriteError(w, r, MapDBError(err))
 			return
+		}
+		if gated {
+			withholdStudentVersionContent(version)
 		}
 		if staticETag != "" {
 			w.Header().Set("ETag", staticETag)

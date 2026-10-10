@@ -180,7 +180,7 @@ export default defineConfig({
     {
       command: "bun run coedit:service",
       env: backendRuntimeEnv,
-      url: "http://localhost:1235/healthz",
+      url: `http://localhost:${process.env["AUTHORING_COEDIT_PORT"] ?? "1235"}/healthz`,
       timeout: 120_000,
       reuseExistingServer: !process.env["CI"],
     },

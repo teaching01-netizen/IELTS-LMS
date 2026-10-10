@@ -69,12 +69,15 @@ func migDir(t *testing.T) string {
 // bumped 72->73. SAT module handoff and late-answer evidence landed 0074/0075
 // — count/max bumped 73->75. SAT session ownership + device transfer landed
 // 0076 (student_attempts.writer_policy, attempt_device_transfers) — count/max
-// bumped 75->76. SAT lifecycle receipts (0077), immutable late evidence
-// (0078) and credential authentication proof (0079) — count/max bumped
-// 76->79. Any other count/max/gap change fails loudly.
+// bumped 75->76. SAT lifecycle receipts (0077), immutable late evidence (0078),
+// and credential authentication proof (0079) bumped 76->79. SAT access-code
+// start (0080: mode, encrypted session codes, first-start acceptance,
+// verification guard, start_window_closed reason) bumped 79->80.
+// Independent reservation slots (0081) bump count/max 80->81. Any other
+// count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 79
-	pinnedMigrationMax   = 79
+	pinnedMigrationFiles = 81
+	pinnedMigrationMax   = 81
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

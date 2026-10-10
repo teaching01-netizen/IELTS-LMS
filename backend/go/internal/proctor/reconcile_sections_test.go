@@ -73,6 +73,7 @@ func expectCandidateScan(mock sqlmock.Sqlmock, asOf time.Time, scheduleID string
 	if len(providerKey) > 0 {
 		provider = providerKey[0]
 	}
+	expectCodeStartSweepsEmpty(mock, asOf, limit)
 	mock.ExpectBegin()
 	mock.ExpectExec(setTimeZone).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(candidateQuery).
@@ -84,6 +85,22 @@ func expectCandidateScan(mock sqlmock.Sqlmock, asOf time.Time, scheduleID string
 	mock.ExpectCommit()
 }
 
+// expectCodeStartSweepsEmpty programmes the SAT access-code start sweeps that
+// run before the candidate scan (never-started expiry, then never-opened
+// code schedules), each a read-only scan that finds nothing here.
+func expectCodeStartSweepsEmpty(mock sqlmock.Sqlmock, asOf time.Time, limit int64) {
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE a.sat_start_code_required = 1")).
+		WithArgs(asOf, asOf, limit).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id"}))
+	mock.ExpectRollback()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE sch.sat_start_mode = 'access_code'")).
+		WithArgs(asOf, limit).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "x"}))
+	mock.ExpectRollback()
+}
+
 // expectScheduleTxOpen programmes the per-schedule opening: the attempt lock
 // sweep, the runtime row lock, and the section row lock.
 func expectScheduleTxOpen(mock sqlmock.Sqlmock, scheduleID, runtimeID, status, activeKey string, waiting, overrun bool, revision int64, seeds []sectionSeed) {
@@ -92,8 +109,8 @@ func expectScheduleTxOpen(mock sqlmock.Sqlmock, scheduleID, runtimeID, status, a
 	// Schedule row first (global lock order: schedule -> attempts -> runtime).
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id = ? FOR UPDATE")).
 		WithArgs(scheduleID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "published_version_id", "status", "revision", "planned_duration_minutes"}).
-			AddRow(scheduleID, "exam-1", "sat", "", "ver-1", "live", 3, 64))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
+			AddRow(scheduleID, "exam-1", "sat", "", "proctor", "ver-1", "live", 3, 64))
 	mock.ExpectQuery(attemptsLock).
 		WithArgs(scheduleID).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
