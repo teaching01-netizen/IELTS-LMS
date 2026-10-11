@@ -51,9 +51,9 @@ export function SpineLayout({
         {queue && railWidth && onRailWidthChange ? (
           <RailResizer width={railWidth} onWidthChange={onRailWidthChange} />
         ) : null}
-        <main id="sat-spine-main" className="sat-spine__main" tabIndex={-1}>
+        <div id="sat-spine-main" className="sat-spine__main" tabIndex={-1}>
           <div className="sat-spine__column">{children}</div>
-        </main>
+        </div>
         {inspector}
       </div>
       {footer}

@@ -8,7 +8,10 @@ function result(overrides: Partial<AssessmentResult> = {}): AssessmentResult {
   return {
     id: "result-1",
     submissionId: "attempt-1",
+    attemptId: "attempt-1",
     providerKey: "sat",
+    outcomeStatus: "completed",
+    releaseStatus: "released",
     totalScore: 1180,
     scorePayload: {},
     scoreKind: "practice",

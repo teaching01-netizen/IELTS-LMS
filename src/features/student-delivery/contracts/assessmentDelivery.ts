@@ -348,11 +348,16 @@ export interface AssessmentSectionResult {
 export interface AssessmentResult {
   id: string;
   submissionId: string;
+  attemptId: string;
   providerKey: AssessmentDeliveryProviderKey;
+  outcomeStatus: string;
+  releaseStatus: string;
   totalScore: number | null;
-  scorePayload: Record<string, unknown>;
-  scoreKind: "practice";
-  sections: AssessmentSectionResult[];
+  scorePayload: Record<string, unknown> | null;
+  /** Empty while the server returns a score-free completion receipt. */
+  scoreKind: string;
+  /** Null while the server withholds scored section details. */
+  sections: AssessmentSectionResult[] | null;
 }
 
 export type AssessmentDeliveryQuestion = DeliveredQuestion & {

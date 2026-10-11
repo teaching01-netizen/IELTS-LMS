@@ -222,7 +222,7 @@ export function PublishAssessmentDialog({
             type="button"
             onClick={() => void submit()}
             disabled={blockerCount > 0 || isPublishing || draftBusy}
-            className={`flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${releaseDisabledButtonClass}`}
+            className={`flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[var(--sat-staff-accent,#0071e3)] px-5 text-sm font-semibold text-[var(--sat-staff-text-inverse,#fff)] hover:bg-[var(--sat-staff-accent-hover,#006edb)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${releaseDisabledButtonClass}`}
           >
             {isPublishing ? (
               <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />

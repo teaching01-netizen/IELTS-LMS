@@ -101,7 +101,10 @@ export async function requestCoeditToken(examQuestionId: string): Promise<Coedit
   try {
     const response = await backendPost<CoeditTokenResponse>(
       `/v1/assessment-authoring/exam-questions/${encodeURIComponent(examQuestionId)}/coedit-token`,
-      {}
+      {},
+      // A disabled/unavailable realtime service is a supported posture: the
+      // hook falls back to the HTTP-backed editor, so this status is expected.
+      { expectedStatuses: [503] },
     );
     return assertUsable(response);
   } catch (error) {

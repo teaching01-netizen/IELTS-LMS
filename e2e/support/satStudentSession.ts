@@ -44,11 +44,9 @@ export async function createRunningSatSession(
   await expect(adminPage.getByRole("dialog", { name: "Load sample SAT" })).toBeVisible();
   await adminPage.getByRole("button", { name: "Load 147 questions" }).click();
   await expect(
-    adminPage
-      .getByText(/147 of 147 (questions )?authored/)
-      .filter({ visible: true })
-      .first()
+    adminPage.getByRole("tab", { name: /^Reading & Writing, 81 of 81 authored/ })
   ).toBeVisible({ timeout: 90_000 });
+  await expect(adminPage.getByRole("tab", { name: /^Math, 66 of 66 authored/ })).toBeVisible();
   // The count is optimistic room state. Release reads the committed exam
   // projection, so wait for this writer's co-edit acknowledgement before
   // crossing the route durability barrier.

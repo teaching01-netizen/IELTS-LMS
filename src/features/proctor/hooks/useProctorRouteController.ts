@@ -348,7 +348,12 @@ export function useProctorRouteController(
     [acceptedRoomClock, runtimeSnapshots, selectedScheduleId],
   );
 
-  const summariesQuery = useProctorSessionSummaries(summaryPollIntervalMs, options.providerKey);
+  const summariesQuery = useProctorSessionSummaries(
+    summaryPollIntervalMs,
+    options.providerKey,
+    true,
+    options.initialScheduleId ? 'always' : undefined,
+  );
   const summaries = useMemo(() => summariesQuery.data ?? [], [summariesQuery.data]);
   useEffect(() => {
     if (options.initialScheduleId) {
@@ -365,6 +370,16 @@ export function useProctorRouteController(
       return;
     }
 
+    // A room route can arrive with a summary cached before the room was
+    // created. Keep the route's schedule selected until its forced fresh read
+    // completes, otherwise the stale list can clear it before detail loads.
+    if (
+      options.initialScheduleId === selectedScheduleId &&
+      !summariesQuery.isFetchedAfterMount
+    ) {
+      return;
+    }
+
     const scheduleStillExists = summaries.some(
       (summary) => summary.schedule.id === selectedScheduleId
     );
@@ -372,7 +387,7 @@ export function useProctorRouteController(
       setSelectedScheduleId(null);
       return;
     }
-  }, [selectedScheduleId, summaries, summariesQuery.data]);
+  }, [options.initialScheduleId, selectedScheduleId, summaries, summariesQuery.data, summariesQuery.isFetchedAfterMount]);
 
   const detailScheduleIds = useMemo(() => {
     if (!selectedScheduleId) {

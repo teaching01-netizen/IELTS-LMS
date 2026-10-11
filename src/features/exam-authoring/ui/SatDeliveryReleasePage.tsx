@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Settings2 } from "lucide-react";
 import { SatInlineError } from "@/src/products/sat/ui/SatPage";
 import type { ExamEntity } from "../../../types/domain";
@@ -94,13 +94,13 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
           saveSlot={saveSlot}
           collaborationSlot={collaborationSlot ?? presenceSlot}
         />
-        <main className="mx-auto w-full max-w-[920px] px-4 pb-20 pt-8 sm:px-6">
+        <div className="mx-auto w-full max-w-[920px] px-4 pb-20 pt-8 sm:px-6">
           <SatInlineError
             title="Publish review could not load"
             description={loadError ?? "The current release state is unavailable."}
             {...(onRetryLoad ? { onRetry: onRetryLoad } : {})}
           />
-        </main>
+        </div>
       </div>
     );
   }
@@ -140,6 +140,7 @@ function ReleasePageBody(
     saveSlot,
     collaborationSlot,
   } = props;
+  const publishScopeId = useId();
   const [showPublishDialog, setShowPublishDialog] = useState(false);
 
   const readinessFresh = isReadinessFresh(readiness, shell, publishScope);
@@ -194,7 +195,7 @@ function ReleasePageBody(
         saveSlot={saveSlot}
         collaborationSlot={collaborationSlot ?? presenceSlot}
       />
-      <main className="mx-auto w-full max-w-[1240px] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-[1240px] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
         <ReleaseStatusHero
           releaseState={releaseState}
           readiness={readinessFresh ? readiness : null}
@@ -220,14 +221,18 @@ function ReleasePageBody(
                     { value: "math", label: "Math" },
                   ].map((option) => {
                     const selected = publishScope === option.value;
+                    const inputId = `${publishScopeId}-${option.value}`;
                     return (
                       <label
                         key={option.value}
+                        htmlFor={inputId}
                         className={`flex min-h-12 cursor-pointer items-center gap-2.5 rounded-[var(--sat-staff-radius-control,10px)] border px-3 text-[14px] font-semibold leading-5 transition-colors focus-within:ring-[3px] focus-within:ring-[var(--sat-staff-accent-ring)] ${selected ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)] text-[var(--sat-staff-text-primary,#1d1d1f)]" : "border-[var(--sat-staff-border-strong)] bg-white text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)]"}`}
                       >
                         <input
+                          id={inputId}
                           type="radio"
                           name="sat-publish-scope"
+                          aria-label={option.label}
                           value={option.value}
                           checked={selected}
                           onChange={() => onPublishScopeChange(option.value as SatPublishScope)}
@@ -319,7 +324,7 @@ function ReleasePageBody(
             onOpenStudentAccess={onOpenStudentAccess}
           />
         </div>
-      </main>
+      </div>
 
       <PublishAssessmentDialog
         open={showPublishDialog}

@@ -442,6 +442,7 @@ describe("token api", () => {
     expect(backendPost).toHaveBeenCalledWith(
       "/v1/assessment-authoring/exam-questions/eq-1/coedit-token",
       {},
+      { expectedStatuses: [503] },
     );
   });
 

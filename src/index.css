@@ -48,7 +48,7 @@
    * arbitrary alphas, and AA-checked status pairs (dot/icon variant vs.
    * small-text variant). The `au-` namespace keeps IELTS surfaces untouched. */
   --color-au-accent: #0071e3;
-  --color-au-accent-hover: #0077ed;
+  --color-au-accent-hover: #006edb;
   --color-au-accent-active: #0067c9;
   --color-au-section-rw: #0071e3;
   --color-au-section-rw-strong: #0067c9;
@@ -2890,6 +2890,7 @@ button:not(:disabled):active > .sat-annotation-press {
 /* Digital SAT product surface — semantic Apple-platform-inspired tokens.
  * Scoped to the SAT workspace so IELTS keeps its established visual system. */
 .sat-product {
+  --color-muted-foreground: var(--color-muted-foreground-text);
   --sat-label: #1d1d1f;
   --sat-secondary-label: #515154;
   --sat-tertiary-label: #6e6e73;
@@ -4222,7 +4223,7 @@ textarea.sat-input {
 }
 
 .authoring-dialog-description {
-  color: var(--color-gray-500);
+  color: var(--color-gray-500-text);
   font-size: var(--text-au-12);
   line-height: 1.55;
 }

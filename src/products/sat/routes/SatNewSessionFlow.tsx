@@ -5,6 +5,7 @@ import { AccessLinkEditorSheet } from '../../../features/exam-authoring/ui/acces
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { SatFormDialog } from '../ui/ConfirmDialog';
 import { SatButton, SatField, SatInlineError } from '../ui/SatPage';
+import { SatRoomSetupProgress } from '../../../features/exam-authoring/ui/access-links/SatRoomSetupProgress';
 
 export interface SatNewSessionExam {
   id: string;
@@ -45,12 +46,13 @@ export function SatNewSessionFlow({
     return () => window.cancelAnimationFrame(frame);
   }, [chosen]);
 
-  if (chosen) return <NewSessionSetup exam={chosen} onClose={onClose} onCreated={onCreated} />;
+  if (chosen) return <NewSessionSetup exam={chosen} onClose={onClose} onCreated={onCreated} onBackToExamChoice={() => setExamId(null)} />;
 
   const selection = draftChoice || exams[0]?.id || '';
   const selectedExam = exams.find((exam) => exam.id === selection) ?? null;
   return (
     <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
+      <SatRoomSetupProgress current={1} total={5} label="Choose an exam" description="Pick the published SAT exam this room will use." />
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -86,7 +88,7 @@ export function SatNewSessionFlow({
             </div>
           )}
         </div>
-        <div className="flex justify-end gap-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-6 py-4">
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-6 py-4">
           <SatButton variant="quiet" onClick={onClose}>Cancel</SatButton>
           <SatButton variant="primary" type="submit" disabled={!selectedExam}>Continue</SatButton>
         </div>
@@ -95,7 +97,7 @@ export function SatNewSessionFlow({
   );
 }
 
-function NewSessionSetup({ exam, onClose, onCreated }: { exam: SatNewSessionExam; onClose: () => void; onCreated: (scheduleId: string) => void }) {
+function NewSessionSetup({ exam, onClose, onCreated, onBackToExamChoice }: { exam: SatNewSessionExam; onClose: () => void; onCreated: (scheduleId: string) => void; onBackToExamChoice: () => void }) {
   const overview = useAccessDistributionOverview(exam.id);
   const createMutation = useCreateAccessLink(exam.id);
   const [prefill, setPrefill] = useState<AssessmentAccessLink | null>(null);
@@ -105,6 +107,7 @@ function NewSessionSetup({ exam, onClose, onCreated }: { exam: SatNewSessionExam
   if (overview.error && !overview.data) {
     return (
       <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
+        <SatRoomSetupProgress current={2} total={5} label="Room details" description="Name the room and choose which SAT sections it will deliver." />
         <div className="px-6 py-5">
           <SatInlineError
             title="Room setup could not load"
@@ -112,15 +115,24 @@ function NewSessionSetup({ exam, onClose, onCreated }: { exam: SatNewSessionExam
             onRetry={() => void overview.refetch()}
           />
         </div>
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-6 py-4">
+          <SatButton variant="quiet" onClick={onClose}>Cancel</SatButton>
+          <SatButton variant="secondary" onClick={onBackToExamChoice}>Back</SatButton>
+        </div>
       </SatFormDialog>
     );
   }
   if (!version) {
     return (
       <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
+        <SatRoomSetupProgress current={2} total={5} label="Room details" description="Name the room and choose which SAT sections it will deliver." />
         <p role="status" className="px-6 py-6 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
           {overview.isLoading ? `Loading ${exam.title}…` : `${exam.title} has no published version. Publish it before creating a room.`}
         </p>
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-6 py-4">
+          <SatButton variant="quiet" onClick={onClose}>Cancel</SatButton>
+          <SatButton variant="secondary" onClick={onBackToExamChoice}>Back</SatButton>
+        </div>
       </SatFormDialog>
     );
   }
@@ -135,6 +147,10 @@ function NewSessionSetup({ exam, onClose, onCreated }: { exam: SatNewSessionExam
     <AccessLinkEditorSheet
       open
       link={null}
+      guidedCreation
+      stepOffset={1}
+      totalSteps={5}
+      onBackToPreviousStep={onBackToExamChoice}
       prefill={prefill}
       providerKey="sat"
       examTitle={exam.title}

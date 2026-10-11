@@ -37,7 +37,7 @@
    * tertiary is metadata only (labels, hints, counts). Content copy sits a
    * step darker than pure chrome so prose always outranks its controls. */
   --spine-text-content: #25282d;
-  --spine-text-tertiary: #8b929d;
+  --spine-text-tertiary: #59616c;
   --spine-text-display: 1.75rem;
   --spine-text-title: 1.25rem;
   --spine-text-heading: 1.0625rem;

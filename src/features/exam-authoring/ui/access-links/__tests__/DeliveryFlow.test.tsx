@@ -7,6 +7,7 @@ import type { AccessSessionBindings, AccessSessionInfo } from "../../delivery/se
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   editorProps: null as null | {
+    guidedCreation?: boolean;
     prefill?: { name: string } | null;
     targetVersionNumber?: number | null;
     publishScope?: string;

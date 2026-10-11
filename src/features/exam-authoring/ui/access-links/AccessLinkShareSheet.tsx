@@ -149,7 +149,7 @@ export function AccessLinkPresentView({ open, link, onClose }: { open: boolean; 
           <X size={18} aria-hidden="true"/>
         </button>
       </header>
-      <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10 text-center">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10 text-center">
         {!hasAvailableSections ? <p role="alert" className="max-w-xl rounded-2xl bg-amber-50 px-6 py-5 text-base leading-7 text-amber-900">{sectionCopy} Update this room’s sections before presenting it.</p> : <>
         <p className="text-lg font-semibold text-slate-700">Scan to join</p>
         <div className="mt-5 flex h-[min(52vh,500px)] w-[min(52vh,500px)] items-center justify-center rounded-[32px] bg-au-fill p-7">
@@ -158,7 +158,7 @@ export function AccessLinkPresentView({ open, link, onClose }: { open: boolean; 
         <p className="mt-5 max-w-full break-all px-2 font-mono text-[clamp(14px,2vw,22px)] font-medium text-slate-700 select-all">{url}</p>
         <div className="mt-7 flex items-center gap-8 text-left"><Metric value={link.metrics.registered} label="Joined"/><Metric value={link.metrics.started} label="Started"/><Metric value={link.metrics.submitted} label="Submitted"/></div>
         </>}
-      </main>
+      </div>
     </AuthoringDialog>
   );
 }

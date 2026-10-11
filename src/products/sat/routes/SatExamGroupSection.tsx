@@ -248,7 +248,7 @@ export function SatAttemptTable({
                     type="button"
                     onClick={() => onOpen(attempt)}
                     aria-label={`${reviewLabel} for ${attempt.studentName}, ${outcome.label}`}
-                    className="sat-btn sat-btn--quiet sat-press whitespace-nowrap px-3 text-[var(--sat-staff-accent,#0071e3)]"
+                    className="sat-btn sat-btn--quiet sat-press whitespace-nowrap px-3 text-[var(--sat-staff-accent-text-on-tint,#0067c9)]"
                   >
                     {reviewLabel}
                     <ArrowRight size={16} aria-hidden="true" />

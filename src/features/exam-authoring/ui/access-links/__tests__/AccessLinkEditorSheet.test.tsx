@@ -139,6 +139,93 @@ describe("AccessLinkEditorSheet", () => {
     expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
   });
 
+  it("guides SAT room creation through validated steps and preserves values when moving back", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AccessLinkEditorSheet
+        open
+        link={null}
+        guidedCreation
+        providerKey="sat"
+        examTitle="Digital SAT"
+        targetVersionNumber={5}
+        members={[]}
+        isSaving={false}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onUpdate={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const progress = screen.getByRole("progressbar", { name: "Room setup progress" });
+    expect(progress).toHaveAttribute("aria-valuenow", "1");
+    expect(progress).toHaveAttribute("aria-valuemax", "4");
+    expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create room" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("Give this room a name people will recognize.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Room name")).toHaveFocus();
+    expect(onCreate).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday mock" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "2"));
+    expect(screen.getByRole("group", { name: "Audience" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "3"));
+    expect(screen.getByRole("group", { name: "Check-in window" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Scheduled/ }));
+    fireEvent.change(screen.getByLabelText("Opens"), { target: { value: "2099-09-01T10:00" } });
+    fireEvent.change(screen.getByLabelText("Closes"), { target: { value: "2099-09-01T13:00" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "4"));
+    const summary = screen.getByRole("region", { name: "Summary" });
+    expect(within(summary).getByText("Digital SAT · Version 5")).toBeInTheDocument();
+    expect(within(summary).getByText("Saturday mock")).toBeInTheDocument();
+    expect(within(summary).getByText("Anyone with the link")).toBeInTheDocument();
+    expect(within(summary).getByText("Student code")).toBeInTheDocument();
+    expect(within(summary).getByText("Both sections, with a total score")).toBeInTheDocument();
+    const timeZone = new Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
+    expect(within(summary).getByText((text) => text.includes(timeZone) && text.includes(" to "))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create room" })).toBeInTheDocument();
+    expect(onCreate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "3"));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "2"));
+    expect(screen.getByLabelText("Room name")).toHaveValue("Saturday mock");
+    expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
+  });
+
+  it("confirms before leaving a dirty first setup step for exam selection", () => {
+    const onBackToPreviousStep = vi.fn();
+    render(
+      <AccessLinkEditorSheet
+        open
+        link={null}
+        guidedCreation
+        providerKey="sat"
+        members={[]}
+        isSaving={false}
+        onClose={vi.fn()}
+        onCreate={vi.fn().mockResolvedValue(undefined)}
+        onBackToPreviousStep={onBackToPreviousStep}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday class" } });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(screen.getByRole("alertdialog", { name: "Discard room settings changes?" })).toBeInTheDocument();
+    expect(onBackToPreviousStep).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(onBackToPreviousStep).toHaveBeenCalledOnce();
+  });
+
   it("limits a new link to the sections in its pinned release", async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(

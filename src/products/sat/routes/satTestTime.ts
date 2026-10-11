@@ -33,12 +33,9 @@ export function testDayKey(value: string | null | undefined): string | null {
   return date ? new Intl.DateTimeFormat('en-CA').format(date) : null;
 }
 
-/** e.g. "Asia/Bangkok (UTC+07:00)" */
+/** IANA zone identifier, e.g. "Asia/Bangkok"; the offset can vary by date. */
 export function viewerTimeZoneLabel(): string {
-  const zone = new Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
-  const offset = new Intl.DateTimeFormat('en-US', { timeZoneName: 'longOffset' }).formatToParts(new Date()).find((part) => part.type === 'timeZoneName')?.value;
-  const clean = offset && offset !== 'GMT' ? offset.replace('GMT', 'UTC') : 'UTC+00:00';
-  return `${zone} (${clean})`;
+  return new Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
 }
 
 /** Start of the viewer's calendar day for a yyyy-mm-dd input, as an RFC 3339 instant. */

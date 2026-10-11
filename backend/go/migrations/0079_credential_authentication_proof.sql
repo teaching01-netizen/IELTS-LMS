@@ -1,4 +1,4 @@
-/md-- Authentication origin was not recorded by legacy public-email check-in.
+-- Authentication origin was not recorded by legacy public-email check-in.
 -- Preserve all rows and leave unknown origin NULL: deployment requires fresh
 -- account authentication or a previously established opaque practice capability.
 -- Never infer authentication from an email, current role, or token timestamp.

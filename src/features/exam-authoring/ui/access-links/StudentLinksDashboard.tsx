@@ -660,6 +660,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       <AccessLinkEditorSheet
         open={editorOpen}
         link={editingLink}
+        guidedCreation={!editingLink}
         prefill={prefillLink}
         targetVersionNumber={createTarget?.versionNumber ?? version.versionNumber}
         providerKey={exam.providerKey ?? null}

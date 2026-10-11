@@ -82,6 +82,16 @@ function openSetup() {
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 }
 
+function continueToCheckIn() {
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+}
+
+function continueToReview() {
+  continueToCheckIn();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+}
+
 describe('SatSessionsRoute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -102,9 +112,17 @@ describe('SatSessionsRoute', () => {
   it('never offers IELTS exams when creating a SAT room', () => {
     renderRoute();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    const progress = screen.getByRole('progressbar', { name: 'Room setup progress' });
+    expect(progress).toHaveAttribute('aria-valuenow', '1');
+    expect(progress).toHaveAttribute('aria-valuemax', '5');
     expect(screen.getByRole('option', { name: 'SAT Published' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'IELTS Published' })).not.toBeInTheDocument();
     expect(screen.getByText(/Students receive Reading & Writing only/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    const setupProgress = screen.getByRole('progressbar', { name: 'Room setup progress' });
+    expect(setupProgress).toHaveAttribute('aria-valuenow', '2');
+    expect(setupProgress).toHaveAttribute('aria-valuemax', '5');
+    expect(screen.getByText('Version 9')).toBeInTheDocument();
   });
 
   it('renders header plus skeleton while loading, without blanking the page', () => {
@@ -119,6 +137,11 @@ describe('SatSessionsRoute', () => {
     expect(screen.getByRole('status')).toHaveTextContent('1 room');
   });
 
+  it('labels room-list times and distinguishes the live run-sheet timezone', () => {
+    renderRoute();
+    expect(screen.getByText(/Room start times use your local timezone \(.+\)\. The live run sheet uses Thailand time · ICT \(UTC\+7\)\./)).toBeInTheDocument();
+  });
+
   it('focuses the first sheet field on open', () => {
     renderRoute();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
@@ -130,6 +153,7 @@ describe('SatSessionsRoute', () => {
     openSetup();
     expect(screen.getByText('Version 9')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
+    continueToReview();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
 
     await waitFor(() => expect(createMutateMock).toHaveBeenCalledOnce());
@@ -144,6 +168,7 @@ describe('SatSessionsRoute', () => {
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
+    continueToReview();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('The room could not be created.');
     expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
@@ -155,10 +180,11 @@ describe('SatSessionsRoute', () => {
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
+    continueToCheckIn();
     fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2099-09-01T13:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2099-09-01T10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(await screen.findByText('Closing time must be after opening time.')).toBeInTheDocument();
     expect(screen.getByLabelText('Opens')).toHaveValue('2099-09-01T13:00');
     expect(createMutateMock).not.toHaveBeenCalled();
@@ -168,10 +194,11 @@ describe('SatSessionsRoute', () => {
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
+    continueToCheckIn();
     fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2000-09-01T10:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2000-09-01T13:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(await screen.findByText('Start time is in the past.')).toBeInTheDocument();
     expect(createMutateMock).not.toHaveBeenCalled();
   });
@@ -180,10 +207,11 @@ describe('SatSessionsRoute', () => {
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
+    continueToCheckIn();
     fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2099-09-01T10:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2099-09-01T10:10' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(await screen.findByText('Rooms must be at least 15 minutes long.')).toBeInTheDocument();
     expect(createMutateMock).not.toHaveBeenCalled();
   });

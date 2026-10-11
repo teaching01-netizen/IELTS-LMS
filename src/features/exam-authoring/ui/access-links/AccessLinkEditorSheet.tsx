@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, Link2, LockKeyhole, X } from "lucide-react";
 import {
   ACCESS_LINK_SECTION_KEYS,
@@ -27,10 +27,17 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "../../../../c
 import { AuthoringConfirmDialog, restoreAuthoringFocus } from "../authoringPrimitives";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
 import { validateSatScheduleTimes } from "../../../../products/sat/routes/scheduleValidation";
+import { SatRoomSetupProgress } from "./SatRoomSetupProgress";
 
 interface AccessLinkEditorSheetProps {
   open: boolean;
   link: AssessmentAccessLink | null;
+  /** Shows the SAT create flow as short, validated steps at staff entry points. */
+  guidedCreation?: boolean;
+  /** Completed steps before this sheet, used when the host has an earlier chooser. */
+  stepOffset?: number;
+  totalSteps?: number;
+  onBackToPreviousStep?: () => void;
   /**
    * The exam's provider, for a NEW link (an existing link carries its own
    * providerKey). The section toggles are SAT-only.
@@ -69,6 +76,13 @@ interface AccessLinkEditorSheetProps {
   ) => Promise<void>;
 }
 
+const SAT_ROOM_CREATION_STEPS = [
+  { id: "details", label: "Room details", description: "Name the room and choose which SAT sections it will deliver." },
+  { id: "audience", label: "Students", description: "Choose who may check in and how students identify themselves." },
+  { id: "check-in", label: "Check-in", description: "Set when students may enter. A proctor starts the exam." },
+  { id: "review", label: "Review", description: "Check the room setup before creating it." },
+] as const;
+
 function defaultScheduledWindow(): { opensAt: string; closesAt: string } {
   const start = new Date();
   start.setMinutes(0, 0, 0);
@@ -101,9 +115,15 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  const [discardAction, setDiscardAction] = useState<"close" | "previous">("close");
+  const [creationStep, setCreationStep] = useState(0);
   const initialSnapshotRef = useRef("");
   const hydratingRef = useRef(false);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const editorBodyRef = useRef<HTMLFieldSetElement | null>(null);
+  const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const pendingStepFocusRef = useRef(false);
   const submittingRef = useRef(false);
   const sharedLink = props.link
     ? collaboration?.workspaceSnapshot.values[`access/${props.link.id}`]
@@ -122,9 +142,13 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   // sections are built at proctor start, so a later edit either does nothing to
   // that run or silently changes the sitting a registered student expected.
   const isSat = (props.link?.providerKey ?? props.providerKey) === "sat";
+  const isSteppedCreation = isSat && !props.link && props.guidedCreation === true;
+  const activeCreationStep = SAT_ROOM_CREATION_STEPS[Math.min(creationStep, SAT_ROOM_CREATION_STEPS.length - 1)]!;
+  const progressStep = creationStep + (props.stepOffset ?? 0) + 1;
+  const progressTotal = props.totalSteps ?? SAT_ROOM_CREATION_STEPS.length;
   const audienceChoice = accessLinkAudienceChoice(audienceType);
   const pinnedPublishScope = props.link?.publishScope ?? props.publishScope ?? "full";
-  const releaseSections = availableAccessLinkSections(pinnedPublishScope);
+  const releaseSections = useMemo(() => availableAccessLinkSections(pinnedPublishScope), [pinnedPublishScope]);
   const sectionsLocked = Boolean(props.link?.hasParticipation);
   const summaryTest = props.link?.examTitle ?? props.examTitle ?? "Selected test";
   const summaryVersion = props.link?.versionNumber ?? props.targetVersionNumber ?? "being published";
@@ -165,7 +189,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       setSections(sharedScope.length > 0 ? sharedScope : releaseSections);
     }
     if (typeof value["membersSource"] === "string") setMembersSource(value["membersSource"]);
-  }, [defaults.closesAt, defaults.opensAt, props.link, props.open, selfId, sharedLink, sharedLinkSignature, pinnedPublishScope]);
+  }, [defaults.closesAt, defaults.opensAt, props.link, props.open, selfId, sharedLink, sharedLinkSignature, releaseSections]);
 
   useEffect(() => {
     if (!props.open) {
@@ -198,6 +222,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     setWindowError(null);
     setSectionsError(null);
     setRosterError(null);
+    setCreationStep(0);
     initialSnapshotRef.current = editorSnapshot(
       nextName,
       nextAudienceType,
@@ -249,7 +274,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     if (!value.trim()) return "Give this room a name people will recognize.";
     return null;
   };
-  const validateWindow = (kind: AccessLinkAvailabilityType, opens: string, closes: string): string | null => {
+  const validateWindow = useCallback((kind: AccessLinkAvailabilityType, opens: string, closes: string): string | null => {
     if (kind !== "scheduled") return null;
     const scheduledOpensAt = localDateTimeToIso(opens);
     const scheduledClosesAt = localDateTimeToIso(closes);
@@ -262,12 +287,12 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       return policy.start ?? policy.end ?? null;
     }
     return null;
-  };
-  const validateSections = (selection: readonly AccessLinkSectionKey[]): string | null => {
+  }, [isSat, props.link]);
+  const validateSections = useCallback((selection: readonly AccessLinkSectionKey[]): string | null => {
     if (!isSat) return null;
     if (selection.length === 0) return "A room needs at least one section.";
     return null;
-  };
+  }, [isSat]);
   const toggleSection = (key: AccessLinkSectionKey) => {
     if (sectionsLocked || !releaseSections.includes(key)) return;
     const next = sections.includes(key)
@@ -279,15 +304,15 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   };
   const rosterResult = validateRosterSource(membersSource);
   const rosterSummary = audienceType === "selected_students" ? describeRosterResult(rosterResult) : "";
-  const validateRoster = (source: string): string | null => {
+  const validateRoster = useCallback((source: string): string | null => {
     const result = validateRosterSource(source);
     if (result.totalRows === 0) return "Add at least one selected student.";
     const first = result.errors[0];
     if (first) return first.message;
     return null;
-  };
+  }, []);
 
-  const buildUpdateRequest = (): UpdateAssessmentAccessLinkRequest | null => {
+  const buildUpdateRequest = useCallback((): UpdateAssessmentAccessLinkRequest | null => {
     if (!props.link) return null;
     const selectedStudents = audienceType === "selected_students"
       ? parseAccessLinkMembers(membersSource)
@@ -310,7 +335,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
         : { opensAt: null, closesAt: null }),
       ...(selectedStudents ? { selectedStudents } : {}),
     };
-  };
+  }, [accessMode, audienceLabel, audienceType, availabilityType, closesAt, membersSource, name, opensAt, props.link, sections]);
 
   // Existing-link settings are content edits rather than structural actions:
   // the local author writes the room immediately, then the tab that owns the
@@ -369,12 +394,16 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     membersSource,
     name,
     opensAt,
-    props,
+    props.isSaving,
+    props.link,
+    props.onUpdate,
+    props.open,
     readOnly,
     sections,
     selfId,
     validateRoster,
     validateSections,
+    validateWindow,
   ]);
 
   const submit = async () => {
@@ -438,13 +467,70 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     }
   };
 
+  const validateCreationStep = (): boolean => {
+    if (creationStep === 0) {
+      const nextNameError = validateName(name);
+      const nextSectionsError = validateSections(sections);
+      setNameError(nextNameError);
+      setSectionsError(nextSectionsError);
+      if (nextNameError || nextSectionsError) {
+        if (nextNameError) nameInputRef.current?.focus();
+        else document.querySelector<HTMLElement>("#access-link-sections button")?.focus();
+        return false;
+      }
+    }
+    if (creationStep === 1 && audienceType === "selected_students") {
+      const nextRosterError = validateRoster(membersSource);
+      setRosterError(nextRosterError);
+      if (nextRosterError) {
+        document.getElementById("roster-cell-0-0")?.focus();
+        return false;
+      }
+    }
+    if (creationStep === 2) {
+      const nextWindowError = validateWindow(availabilityType, opensAt, closesAt);
+      setWindowError(nextWindowError);
+      if (nextWindowError) {
+        document.getElementById("access-link-opens-at")?.focus();
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const moveCreationStep = (nextStep: number) => {
+    pendingStepFocusRef.current = true;
+    setCreationStep(nextStep);
+    if (editorBodyRef.current) editorBodyRef.current.scrollTop = 0;
+  };
+
+  useEffect(() => {
+    if (!props.open || !isSteppedCreation || !pendingStepFocusRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      pendingStepFocusRef.current = false;
+      stepHeadingRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [creationStep, isSteppedCreation, props.open]);
+
   const requestClose = () => {
     if (props.isSaving) return;
     if (isDirty) {
+      setDiscardAction("close");
       setShowDiscardDialog(true);
       return;
     }
     props.onClose();
+  };
+
+  const requestPreviousStep = () => {
+    if (props.isSaving || !props.onBackToPreviousStep) return;
+    if (isDirty) {
+      setDiscardAction("previous");
+      setShowDiscardDialog(true);
+      return;
+    }
+    props.onBackToPreviousStep();
   };
 
   return (
@@ -475,10 +561,16 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                 <SheetDescription className="sr-only">Set up who can join this room, how they identify themselves, and when check-in is open.</SheetDescription></div>
               <button type="button" onClick={requestClose} disabled={props.isSaving} aria-label="Close room settings" className="sat-btn sat-btn--quiet sat-btn--icon sat-press -mr-2 rounded-full"><X size={18} aria-hidden="true"/></button>
             </header>
+            {isSteppedCreation ? (
+              <div data-sat-room-creation-step={activeCreationStep.id}>
+                <SatRoomSetupProgress current={progressStep} total={progressTotal} label={activeCreationStep.label} description={activeCreationStep.description} headingRef={stepHeadingRef} />
+              </div>
+            ) : null}
             {props.membersLoading ? <p role="status" className="px-5 py-3 text-sm text-slate-600">Loading student roster…</p> : null}
             {props.membersError ? <div role="alert" className="px-5 py-3 text-sm text-[var(--sat-staff-danger,#b42318)]">{props.membersError}<button type="button" onClick={props.onRetryMembers} className="min-h-11 px-3 font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry roster</button></div> : null}
-            <fieldset disabled={props.isSaving || readOnly || props.membersLoading || Boolean(props.membersError)} data-coedit-read-only={readOnly ? "true" : undefined} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            <fieldset ref={editorBodyRef} disabled={props.isSaving || readOnly || props.membersLoading || Boolean(props.membersError)} data-coedit-read-only={readOnly ? "true" : undefined} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
               <div className="space-y-5">
+                <div hidden={isSteppedCreation && creationStep !== 0} className="space-y-5">
                 {!props.link && !props.prefill && !isDirty && props.onReuseSetup && props.reuseOptions && props.reuseOptions.length > 0 ? (
                   <Field label="Start from an earlier room (optional)" description="Copies its audience, identification and sections. You still choose the check-in window.">
                     <select
@@ -500,8 +592,9 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     Creates a new room on <strong>Version {props.targetVersionNumber ?? "—"}</strong> with the audience, identification and sections of “{props.prefill.name}”. Choose its check-in window below.
                   </p>
                 ) : null}
-                {isSat ? <GroupHeading id="access-link-group-details" title="Room details" detail={`Pinned to Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}${summaryTest ? ` of ${summaryTest}` : ""}. Publishing a newer version never changes this room.`} /> : null}
-                <Field label="Room name" description="Use the name staff will recognize when sharing or monitoring this room." error={nameError} errorId="access-link-name-error"><input value={name} onChange={(event) => { setName(event.target.value); updateShared({ name: event.target.value }); if (nameError) setNameError(validateName(event.target.value)); }} onBlur={() => setNameError(validateName(name))} maxLength={160} aria-label="Room name" aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? "access-link-name-error" : undefined} className={inputClass} placeholder="Saturday morning mock" /></Field>
+                {isSat && !isSteppedCreation ? <GroupHeading id="access-link-group-details" title="Room details" detail={`Pinned to Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}${summaryTest ? ` of ${summaryTest}` : ""}. Publishing a newer version never changes this room.`} /> : null}
+                {isSat && isSteppedCreation ? <p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">This room uses Version {props.targetVersionNumber ?? "being published"}{summaryTest ? ` of ${summaryTest}` : ""}. Publishing a newer version will not change it.</p> : null}
+                <Field label="Room name" description="Use the name staff will recognize when sharing or monitoring this room." error={nameError} errorId="access-link-name-error"><input ref={nameInputRef} value={name} onChange={(event) => { setName(event.target.value); updateShared({ name: event.target.value }); if (nameError) setNameError(validateName(event.target.value)); }} onBlur={() => setNameError(validateName(name))} maxLength={160} aria-label="Room name" aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? "access-link-name-error" : undefined} className={inputClass} placeholder="Saturday morning mock" /></Field>
                 <Field label="Class or group (optional)" description="A label for your own organization. It does not limit who can join.">
                   <input
                     aria-label="Class or group label"
@@ -522,10 +615,12 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     placeholder="SAT September · Saturday"
                   />
                 </Field>
-                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this room. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[14px] leading-5 text-amber-800">{sectionsLocked ? "This room has no available sections and is fixed because a student has joined. Create a new room with an available section." : "This room’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[14px] leading-5 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
-                {isSat ? <GroupHeading id="access-link-group-audience" title="Who can join" /> : null}
+                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this room. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div id="access-link-sections" className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[14px] leading-5 text-amber-800">{sectionsLocked ? "This room has no available sections and is fixed because a student has joined. Create a new room with an available section." : "This room’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[14px] leading-5 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
+                </div>
+                <div hidden={isSteppedCreation && creationStep !== 1} className="space-y-5">
+                {isSat && !isSteppedCreation ? <GroupHeading id="access-link-group-audience" title="Who can join" /> : null}
                 <Field label={isSat ? "Audience" : "Who can join?"} description={audienceChoice === "listed" ? "Only students on the list below are admitted. Anyone else is turned away at check-in." : "Anyone who has the room link can check in. A student code identifies a student; it is not checked against a roster."}>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div role="group" aria-label={isSat ? "Audience" : "Who can join"} className="grid grid-cols-2 gap-2">
                     <Choice active={audienceChoice === "anyone"} onClick={() => { const nextType = accessLinkAudienceTypeFor("anyone", audienceLabel); setAudienceType(nextType); updateShared({ audienceType: nextType }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Anyone with the link" subtitle="No roster check" />
                     <Choice active={audienceChoice === "listed"} onClick={() => { setAudienceType("selected_students"); setAccessMode("student_code"); updateShared({ audienceType: "selected_students", accessMode: "student_code" }); }} icon={<LockKeyhole size={15} aria-hidden="true"/>} title="Listed students only" subtitle="Checked at check-in" />
                   </div>
@@ -551,23 +646,34 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
                   </div>
                 </Field>
-                {isSat ? <GroupHeading id="access-link-group-checkin" title="Check-in settings" detail="Check-in decides whether students can enter. It never starts or pauses the exam." /> : null}
+                </div>
+                <div hidden={isSteppedCreation && creationStep !== 2} className="space-y-5">
+                {isSat && !isSteppedCreation ? <GroupHeading id="access-link-group-checkin" title="Check-in settings" detail="Check-in decides whether students can enter. It never starts or pauses the exam." /> : null}
                 <Field label={isSat ? "Check-in window" : "Check-in"} description="Students can enter during this window. The proctor starts the exam.">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div role="group" aria-label={isSat ? "Check-in window" : "Check-in"} className="grid grid-cols-2 gap-2">
                     <Choice active={availabilityType === "anytime"} onClick={() => { setAvailabilityType("anytime"); updateShared({ availabilityType: "anytime", opensAt: null, closesAt: null }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Open now" subtitle="Until paused or revoked" />
                     <Choice active={availabilityType === "scheduled"} onClick={() => { setAvailabilityType("scheduled"); updateShared({ availabilityType: "scheduled" }); }} icon={<Clock3 size={15} aria-hidden="true"/>} title="Scheduled" subtitle="Choose when it opens" />
                   </div>
                   {availabilityType === "scheduled" ? <><div className="mt-2 grid grid-cols-2 gap-2"><label htmlFor="access-link-opens-at" className="text-[14px] font-medium text-slate-500">Opens<input id="access-link-opens-at" aria-label="Opens" type="datetime-local" value={opensAt} onChange={(event) => { setOpensAt(event.target.value); updateShared({ opensAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, event.target.value, closesAt)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label><label htmlFor="access-link-closes-at" className="text-[14px] font-medium text-slate-500">Closes<input id="access-link-closes-at" aria-label="Closes" type="datetime-local" value={closesAt} onChange={(event) => { setClosesAt(event.target.value); updateShared({ closesAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, opensAt, event.target.value)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label></div>{windowError ? <p id="access-link-window-error" role="alert" className="mt-1.5 text-[14px] font-medium text-au-danger-text">{windowError}</p> : null}</> : <div className="mt-2 rounded-xl bg-au-surface px-3 py-3 text-[14px] leading-5 text-slate-500">Students can check in until you pause or revoke this room’s link. Pausing check-in does not stop students who are already taking the exam.</div>}
                   <p className="mt-2 text-[14px] leading-5 text-slate-500">{availabilityType === "scheduled" ? `Times use your local timezone (${localTimeZone()}). ` : ""}Opening check-in never starts the exam.</p>
                 </Field>
+                </div>
+                <div hidden={isSteppedCreation && creationStep !== 3} className="space-y-5">
                 {isSat ? (
                   <section aria-labelledby="access-link-summary-heading" className="rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-faint)] px-4 py-3">
                     <h2 id="access-link-summary-heading" className="mb-2 text-sm font-semibold text-slate-950">Summary</h2>
                     <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 text-[14px] leading-5">
                       <dt className="font-medium text-slate-500">Test</dt>
                       <dd className="text-slate-900">{summaryTest} · Version {summaryVersion}</dd>
+                      <dt className="font-medium text-slate-500">Room name</dt>
+                      <dd className="break-words text-slate-900">{name.trim() || "Not set"}</dd>
+                      <dt className="font-medium text-slate-500">Class or group</dt>
+                      <dd className="break-words text-slate-900">{audienceLabel.trim() || "None"}</dd>
                       <dt className="font-medium text-slate-500">Who can join</dt>
                       <dd className="text-slate-900">{audienceChoice === "listed" ? "Listed students only" : "Anyone with the link"}</dd>
+                      {audienceChoice === "listed" ? <><dt className="font-medium text-slate-500">Students</dt><dd className="text-slate-900">{rosterResult.totalRows}</dd></> : null}
+                      <dt className="font-medium text-slate-500">Identify with</dt>
+                      <dd className="text-slate-900">{audienceChoice === "listed" || accessMode === "student_code" ? "Student code" : "Name and email"}</dd>
                       <dt className="font-medium text-slate-500">Sections</dt>
                       <dd className="text-slate-900">{sectionsPlainText(sections)}</dd>
                       <dt className="font-medium text-slate-500">Check-in</dt>
@@ -576,13 +682,35 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     <p className="mt-3 text-[14px] leading-5 text-slate-600">The proctor starts the exam.</p>
                   </section>
                 ) : null}
+                </div>
               </div>
             </fieldset>
             <footer className="border-t border-[var(--sat-staff-border-hairline)] bg-white px-6 py-4">
               {error ? <p role="alert" className="mb-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-tint)] px-3 py-2 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
-              <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-btn sat-btn--quiet sat-press">Cancel</button>{/* The primary action keeps its own box while pending (min-w covers the
-                  longest label and the spinner) and stays enabled so the press is never
-                  cancelled by focus loss; the handler and aria-disabled own the guard. */}<button type="button" onClick={() => { if (props.isSaving) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError)} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? "Saving…" : readOnly ? "View only" : props.link ? "Save changes" : "Create room"}</button></div>
+              {isSteppedCreation ? (
+                <div className="flex items-center justify-between gap-3">
+                  <button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-btn sat-btn--quiet sat-press">Cancel</button>
+                  <div className="flex items-center gap-2">
+                    {creationStep > 0 ? <button type="button" onClick={() => moveCreationStep(creationStep - 1)} disabled={props.isSaving} className="sat-btn sat-btn--secondary sat-press">Back</button> : null}
+                    {creationStep === 0 && props.onBackToPreviousStep ? <button type="button" onClick={requestPreviousStep} disabled={props.isSaving} className="sat-btn sat-btn--secondary sat-press">Back</button> : null}
+                    {creationStep < SAT_ROOM_CREATION_STEPS.length - 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => { if (!props.isSaving && validateCreationStep()) moveCreationStep(creationStep + 1); }}
+                        disabled={readOnly || props.isSaving || props.membersLoading || Boolean(props.membersError)}
+                        className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]"
+                      >Continue</button>
+                    ) : (
+                      /* Keep the primary action's dimensions stable while it saves. */
+                      <button type="button" onClick={() => { if (!props.isSaving) void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError)} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? "Creating…" : "Create room"}</button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-btn sat-btn--quiet sat-press">Cancel</button>{/* The primary action keeps its own box while pending (min-w covers the
+                    longest label and the spinner) and stays enabled so the press is never
+                    cancelled by focus loss; the handler and aria-disabled own the guard. */}<button type="button" onClick={() => { if (props.isSaving) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError)} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? "Saving…" : readOnly ? "View only" : props.link ? "Save changes" : "Create room"}</button></div>
+              )}
             </footer>
       </SheetContent>
       <AuthoringConfirmDialog
@@ -595,7 +723,8 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
         onConfirm={() => {
           setShowDiscardDialog(false);
           setIsDirty(false);
-          props.onClose();
+          if (discardAction === "previous") props.onBackToPreviousStep?.();
+          else props.onClose();
         }}
       />
     </Sheet>

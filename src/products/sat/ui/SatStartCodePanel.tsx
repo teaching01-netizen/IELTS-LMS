@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dialog } from 'radix-ui';
-import { backendGet, backendPost } from '../../../services/backendBridge';
+import { proctorGateway } from '../../../features/proctor/infrastructure/proctorGateway';
 import { copyText } from '../../../features/exam-authoring/ui/access-links/accessLinkUi';
 
 interface StartCodeView {
@@ -30,7 +30,7 @@ export function SatStartCodePanel({ scheduleId, blocked }: { scheduleId: string;
     setBusy(true);
     setError(null);
     try {
-      const next = await backendGet<StartCodeView>(endpoint);
+      const next = await proctorGateway.backendGet<StartCodeView>(endpoint);
       if (identity.current === scheduleId) { setView(next); setCopied(false); }
     } catch (cause) {
       if (identity.current === scheduleId) { setView(null); setError(cause instanceof Error ? cause.message : 'Code could not be revealed.'); }
@@ -52,7 +52,7 @@ export function SatStartCodePanel({ scheduleId, blocked }: { scheduleId: string;
     setError(null);
     setRotateConfirm(false);
     try {
-      const next = await backendPost<StartCodeView>(`${endpoint}/rotate`, { expectedGeneration: view.generation }, { retries: 0 });
+      const next = await proctorGateway.backendPost<StartCodeView>(`${endpoint}/rotate`, { expectedGeneration: view.generation }, { retries: 0 });
       if (identity.current === scheduleId) { setView(next); setCopied(false); }
     } catch (cause) {
       if (identity.current === scheduleId) { setView(null); setPresent(false); setError(cause instanceof Error ? cause.message : 'Rotation could not be confirmed. Reveal the current code before retrying.'); }

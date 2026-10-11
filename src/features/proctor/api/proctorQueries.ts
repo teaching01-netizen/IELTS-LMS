@@ -148,6 +148,7 @@ export function useProctorSessionSummaries(
   providerKey?: 'sat' | 'ielts' | 'act',
   /** Pages that only sometimes need session state (Delivery, for roles that can run sessions). */
   enabled = true,
+  refetchOnMount?: boolean | 'always',
 ) {
   // Summary reads share the backend's rate-limit budget. Keep each observer at
   // the documented live-room floor; 0 remains the explicit polling-off value.
@@ -159,6 +160,7 @@ export function useProctorSessionSummaries(
     queryFn: () => fetchProctorSessionSummaries(providerKey),
     ...liveQueryPolicy,
     refetchInterval: boundedRefetchInterval,
+    ...(refetchOnMount === undefined ? {} : { refetchOnMount }),
     enabled,
   });
 }

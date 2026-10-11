@@ -388,7 +388,10 @@ describe("useSatExamController attempt identity", () => {
     const result: AssessmentResult = {
       id: "result-1",
       submissionId: "attempt-a",
+      attemptId: "attempt-a",
       providerKey: "sat",
+      outcomeStatus: "completed",
+      releaseStatus: "released",
       totalScore: 800,
       scorePayload: {},
       scoreKind: "practice",

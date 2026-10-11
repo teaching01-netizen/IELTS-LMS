@@ -26,7 +26,7 @@ export function ReleaseLoadingSurface() {
           <div className="h-4 w-48 animate-pulse rounded-full bg-muted motion-reduce:animate-none" />
         </div>
       </div>
-      <main className="mx-auto max-w-[1240px] px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1240px] px-4 py-8 sm:px-6 lg:px-8">
         <div className="h-32 animate-pulse rounded-2xl bg-card motion-reduce:animate-none" />
         <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-6">
@@ -35,7 +35,7 @@ export function ReleaseLoadingSurface() {
           </div>
           <div className="h-96 animate-pulse rounded-2xl bg-card motion-reduce:animate-none" />
         </div>
-      </main>
+      </div>
     </div>
   );
 }

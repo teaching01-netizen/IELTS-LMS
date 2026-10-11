@@ -74,7 +74,7 @@ export function SatStudentLinkPresent({
               </button>
             </Dialog.Close>
           </header>
-          <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10 text-center">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10 text-center">
             <p className="text-xl font-semibold text-[var(--sat-staff-text-secondary,#515154)]">Scan to join</p>
             <div className="mt-5 flex h-[min(55vh,520px)] w-[min(55vh,520px)] items-center justify-center rounded-[32px] bg-white p-6 ring-1 ring-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))]">
               <QrImage dataUrl={dataUrl} error={error} label={`QR code for ${cohortName}`} />
@@ -84,7 +84,7 @@ export function SatStudentLinkPresent({
               <PresentMetric value={joinedCount} label="Joined" />
               <PresentMetric value={activeCount} label="Active" />
             </div>
-          </main>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

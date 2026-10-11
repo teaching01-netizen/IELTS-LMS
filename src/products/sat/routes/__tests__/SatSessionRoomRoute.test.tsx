@@ -227,6 +227,33 @@ describe('SatSessionRoomRoute', () => {
     expect(startSession).toHaveBeenCalledWith('sched-1');
   });
 
+  it('does not submit an already-open room confirmation after the room becomes stale', async () => {
+    const completeSession = vi.fn().mockResolvedValue(undefined);
+    const renderApp = () => <MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>;
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [student], alerts: [], error: null, isLoading: false,
+      roomClock: resolvedRoomClock,
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: completeSession,
+    });
+    const view = render(renderApp());
+
+    fireEvent.click(screen.getByRole('button', { name: 'End exam' }));
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [student], alerts: [], error: 'Network unavailable', isLoading: false,
+      roomClock: resolvedRoomClock,
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: completeSession,
+    });
+    view.rerender(renderApp());
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'End exam' }));
+
+    expect(completeSession).not.toHaveBeenCalled();
+    expect(await screen.findByText(/This action was not completed because room data is out of date/)).toBeInTheDocument();
+  });
+
   describe('waiting room and status line', () => {
     const prestartRuntime = { ...runtime, status: 'not_started', actualStartAt: null, currentSectionKey: null, sections: [] };
     const accessLink = { id: 'link-1', scheduleId: 'sched-1', status: 'live', versionNumber: 3, enabledSections: null, publishScope: 'reading-writing' };

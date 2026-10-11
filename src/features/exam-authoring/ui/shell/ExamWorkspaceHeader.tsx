@@ -133,7 +133,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
         </div>
         {collaborationSlot ? <div className="shrink-0">{collaborationSlot}</div> : null}
         {saveSlot ? <div className="shrink-0" data-testid="exam-save-status">{saveSlot}</div> : null}
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0">
           {onOpenIssues && issueCount > 0 ? (
             <button
               type="button"

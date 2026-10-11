@@ -31,7 +31,7 @@ describe("QuestionRawTable", () => {
     expect(screen.getByText("Incorrect")).toBeInTheDocument();
     expect(screen.getByText("Not scored")).toBeInTheDocument();
     expect(screen.getByText("Unanswered")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Only incorrect"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only incorrect" }));
     expect(screen.getByText("Q2")).toBeInTheDocument();
     expect(screen.queryByText("Q1")).not.toBeInTheDocument();
     expect(screen.queryByText("Q3")).not.toBeInTheDocument();

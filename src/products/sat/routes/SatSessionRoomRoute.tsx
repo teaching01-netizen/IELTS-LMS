@@ -174,6 +174,10 @@ export function SatSessionRoomRoute() {
   }, []);
 
   const run = useCallback(async (key: string, action: () => Promise<void>, success: string) => {
+    if (isStale) {
+      setMessage({ kind: 'error', text: 'This action was not completed because room data is out of date. Retry to confirm the current room state.' });
+      return;
+    }
     if (pendingActions.has(key)) return;
     setActionPending(key, true);
     setMessage(null);
@@ -198,7 +202,7 @@ export function SatSessionRoomRoute() {
     } finally {
       if (mountedRef.current) setActionPending(key, false);
     }
-  }, [controller, pendingActions, scheduleId, setActionPending]);
+  }, [controller, isStale, pendingActions, scheduleId, setActionPending]);
 
   const runStudentAction = async (key: string, action: () => Promise<{ success: boolean; error?: string }>, success: string) => run(key, async () => {
     const result = await action();
@@ -350,7 +354,7 @@ export function SatSessionRoomRoute() {
       {message ? <div role={message.kind === 'error' ? 'alert' : 'status'} className="sat-banner-enter mx-auto max-w-[1500px] px-4 pt-3"><div className={message.kind === 'error' ? 'rounded-2xl border border-red-700/20 bg-[var(--sat-staff-danger-tint,rgba(217,45,32,0.08))] px-3.5 py-2.5 text-[14px] font-medium text-[var(--sat-staff-danger,#b42318)]' : 'rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3.5 py-2.5 text-[14px] font-medium text-[var(--sat-staff-text-secondary,#515154)]'}>{message.text}</div></div> : null}
       {roomMode !== 'review' ? <SatDeviceTransferRequests scheduleId={scheduleId} blocked={isStale} onPendingChange={setPendingTransfers} /> : null}
 
-      <main className="sat-room__body">
+      <div className="sat-room__body">
         <SatSessionRoomRoster
           students={students}
           visibleStudents={visibleStudents}
@@ -404,7 +408,7 @@ export function SatSessionRoomRoute() {
         >
           {inspectorContent}
         </SatSessionRoomInspector>
-      </main>
+      </div>
 
       <SatSessionRoomConfirmDialog
         confirm={confirm}

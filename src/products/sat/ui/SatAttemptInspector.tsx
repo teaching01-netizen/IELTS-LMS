@@ -88,7 +88,7 @@ export function SatAttemptInspector({
         <SheetHeader className="flex-row items-center justify-between gap-3 border-b border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-6 py-3 pr-14 text-left">
           <div className="min-w-0">
             <SheetTitle className="text-[16px] leading-6">Student response</SheetTitle>
-            <SheetDescription className="truncate text-[14px] leading-5">{subtitle || 'Review without leaving the attempts list.'}</SheetDescription>
+            <SheetDescription className="truncate text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{subtitle || 'Review without leaving the attempts list.'}</SheetDescription>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {position ? (

@@ -627,6 +627,7 @@ export function StudentAccessLinkEntryRoute() {
     const locked = submitting || Boolean(queued);
     return (
       <SatEntryLayout
+        eyebrow={`${link.examTitle} · Version ${link.versionNumber}`}
         title="Exam Check-in"
         description="Check your details, then continue to the exam."
         helpText="Need help? Ask your teacher."

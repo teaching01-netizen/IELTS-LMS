@@ -67,7 +67,7 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
         {...(chrome.canCreateSession ? { onCreateSession: () => go(deliveryDestination(exam.id)) } : {})}
         publishDisabledReason={dirtyCount > 0 ? "Save your timing changes before publishing" : null}
       />
-      <main className="mx-auto w-full max-w-[920px] px-4 pb-20 pt-8 sm:px-6">
+      <div className="mx-auto w-full max-w-[920px] px-4 pb-20 pt-8 sm:px-6">
         <section aria-labelledby="exam-settings-delivery">
           <div className="mb-6">
             <h2 id="exam-settings-delivery" className="text-[length:var(--sat-staff-type-title-size,28px)] font-semibold leading-[var(--sat-staff-type-title-line,34px)] tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">Settings</h2>
@@ -85,7 +85,7 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
             }}
           />
         </section>
-      </main>
+      </div>
 
       {publishOpen ? (
         <ExamPublishSheet

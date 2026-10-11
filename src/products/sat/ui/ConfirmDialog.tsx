@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useRef } from 'react';
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { AlertDialog, Dialog } from 'radix-ui';
 
@@ -49,17 +49,27 @@ function StaticConfirmDialog({
   // Focus the safe choice (Cancel), never the destructive confirm action.
   // useId-scoped ids: two stacked alerts never share one labelledby target.
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
   const titleId = useId();
   const descriptionId = useId();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    restoreFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
     cancelRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel();
+      if (event.key === 'Escape') onCancelRef.current();
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onCancel]);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      const target = restoreFocusRef.current;
+      restoreFocusRef.current = null;
+      if (target?.isConnected) target.focus({ preventScroll: true });
+    };
+  }, []);
 
   return (
     <div className={OVERLAY_CLASS} style={{ zIndex: 110 }}>
@@ -98,6 +108,7 @@ export function SatConfirmDialog({
   onCancel,
   onConfirm,
 }: SatConfirmDialogProps) {
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   if (!open) return null;
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return (
@@ -115,7 +126,21 @@ export function SatConfirmDialog({
     <AlertDialog.Root open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>
       <AlertDialog.Portal>
         <AlertDialog.Overlay className={OVERLAY_CLASS} />
-        <AlertDialog.Content className={CONFIRM_CLASS}>
+        <AlertDialog.Content
+          className={CONFIRM_CLASS}
+          onOpenAutoFocus={() => {
+            const active = document.activeElement;
+            restoreFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            const target = restoreFocusRef.current;
+            restoreFocusRef.current = null;
+            if (target?.isConnected) {
+              event.preventDefault();
+              target.focus({ preventScroll: true });
+            }
+          }}
+        >
           <AlertDialog.Title className="text-[18px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</AlertDialog.Title>
           <AlertDialog.Description className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</AlertDialog.Description>
           <div className="mt-5 flex justify-end gap-2">

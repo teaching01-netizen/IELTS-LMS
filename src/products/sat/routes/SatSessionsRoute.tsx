@@ -10,6 +10,7 @@ import { proctorFacade } from '../../../features/proctor/application/proctorFaca
 import { SatSegmentedControl } from '../ui/SegmentedControl';
 import { useSatListParams, type SatListBucket } from '../ui/useSatListParams';
 import { useSatListReturn } from '../ui/useSatListReturn';
+import { viewerTimeZoneLabel } from './satTestTime';
 import {
   SAT_ROW_STACK,
   SatButton,
@@ -142,6 +143,10 @@ export function SatSessionsRoute() {
           onChange={(next) => setParams({ sort: next })}
         />
       </SatListToolbar>
+
+      <p className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+        Room start times use your local timezone ({viewerTimeZoneLabel()}). The live run sheet uses Thailand time · ICT (UTC+7).
+      </p>
 
       {loadError ? (
         <SatInlineError title="Rooms could not load" description={loadError} onRetry={() => void summariesQuery.refetch()} />

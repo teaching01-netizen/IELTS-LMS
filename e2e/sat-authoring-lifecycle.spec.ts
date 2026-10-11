@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { expectNoSeriousAxeViolations } from "./support/axeAudit";
 
 /**
  * The authoring shell lifecycle, proven in a browser.
@@ -41,6 +42,34 @@ const STAFF_SESSION = {
 };
 
 const NO_DRAFT = { state: "NO_DRAFT", shell: null };
+const EXAM_METADATA = {
+  id: EXAM_ID,
+  slug: EXAM_ID,
+  title: "Digital SAT",
+  providerKey: "sat",
+  examType: "Academic",
+  status: "draft",
+  visibility: "organization",
+  ownerId: "user-builder-1",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+  currentDraftVersionId: null,
+  currentPublishedVersionId: null,
+  canEdit: true,
+  canPublish: true,
+  canDelete: true,
+  schemaVersion: 4,
+  revision: 1,
+};
+const RELEASE_METADATA = {
+  examId: EXAM_ID,
+  providerKey: "sat",
+  state: "never_published",
+  currentPublishedVersion: null,
+  workingDraft: null,
+  summary: { candidateDurationSeconds: 0, authoredQuestionCount: 0, deliveredQuestionCount: 0 },
+  access: { totalLinks: 0, liveLinks: 0, upcomingLinks: 0, linksOnCurrentRelease: 0, liveLinksOnPreviousReleases: 0 },
+};
 
 const READY_SHELL = {
   examId: EXAM_ID,
@@ -95,9 +124,45 @@ const READY_SHELL = {
   ],
 };
 
+const QUESTION_DETAIL = {
+  examQuestionId: "eq-1",
+  moduleId: "mod-1",
+  moduleKey: "rw-1",
+  sectionKey: "rw",
+  displayOrder: 1,
+  isPretest: false,
+  question: {
+    id: "rev-1",
+    questionId: "q-1",
+    semanticRevision: 1,
+    revision: 1,
+    state: "draft",
+    questionType: "single_choice",
+    stimulus: { version: 1, nodes: [] },
+    prompt: {
+      version: 1,
+      nodes: [{ type: "paragraph", id: "prompt-1", text: "Which choice best states the main idea of the text?" }],
+    },
+    answer: {
+      kind: "single_choice",
+      options: ["A", "B", "C", "D"].map((option) => ({
+        id: option,
+        content: { version: 1, nodes: [{ type: "paragraph", id: `option-${option}`, text: `Choice ${option}` }] },
+      })),
+      correctOptionId: "A",
+    },
+    rationale: { version: 1, nodes: [] },
+    metadata: { sectionKey: "reading-writing", domain: null, skill: null, difficulty: "medium", tags: [] },
+    accessibility: { longDescription: null },
+  },
+};
+
 interface Recording {
   getShell: number;
   postShell: number;
+  getQuestion: number;
+  readinessScopes: string[];
+  publishRequests: unknown[];
   /** Requests the app made that this suite does not model, for diagnosis. */
   other: string[];
   consoleErrors: string[];
@@ -113,19 +178,27 @@ interface Recording {
  */
 async function installTransport(
   page: Page,
-  options: { missingExam?: boolean } = {}
+  options: { missingExam?: boolean; readyDraft?: boolean; releaseWorkflow?: boolean } = {}
 ): Promise<Recording> {
   const recording: Recording = {
     getShell: 0,
     postShell: 0,
+    getQuestion: 0,
+    readinessScopes: [],
+    publishRequests: [],
     other: [],
     consoleErrors: [],
     pageErrors: [],
   };
-  let draftOpened = false;
+  let draftOpened = options.readyDraft ?? false;
 
   page.on("console", (message) => {
     if (message.type() === "error") {
+      // Chromium reports the intentionally mocked co-edit 503 as a generic
+      // resource error with no request URL; application errors stay fatal.
+      if (message.text() === "Failed to load resource: the server responded with a status of 503 (Service Unavailable)") {
+        return;
+      }
       recording.consoleErrors.push(message.text());
     }
   });
@@ -153,6 +226,26 @@ async function installTransport(
       contentType: "application/json",
       headers: { "x-csrf-token": "csrf-e2e-token" },
       body: JSON.stringify(STAFF_SESSION),
+    })
+  );
+
+  // The real route also reads header metadata outside the authoring transport.
+  // Keep the browser harness self-contained after those shared-header queries
+  // were added to SatAuthoringRoute.
+  await page.route(`**/api/v1/exams/${EXAM_ID}`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "x-csrf-token": "csrf-e2e-token" },
+      body: JSON.stringify(EXAM_METADATA),
+    })
+  );
+  await page.route(`**/api/v1/assessment-release/exams/${EXAM_ID}`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "x-csrf-token": "csrf-e2e-token" },
+      body: JSON.stringify(RELEASE_METADATA),
     })
   );
 
@@ -187,6 +280,86 @@ async function installTransport(
     });
   });
 
+  // The standalone authoring E2E runs without the realtime service. Exercise
+  // the product's typed unavailable path so the HTTP-backed prompt editor can
+  // still render and stay usable while co-editing is offline.
+  await page.route("**/api/v1/assessment-authoring/exam-questions/eq-1/coedit-token", async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ code: "COEDIT_UNAVAILABLE", message: "Co-editing is unavailable." }),
+    });
+  });
+
+  await page.route("**/api/v1/assessment-authoring/exam-questions/eq-1", async (route) => {
+    recording.getQuestion += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "x-csrf-token": "csrf-e2e-token" },
+      body: JSON.stringify(QUESTION_DETAIL),
+    });
+  });
+
+  if (options.releaseWorkflow) {
+    await page.route(`**/api/v1/assessment-authoring/exams/${EXAM_ID}/validate`, async (route) => {
+      const request = route.request().postDataJSON() as { publishScope?: string };
+      const publishScope = request.publishScope ?? "full";
+      recording.readinessScopes.push(publishScope);
+      const blocked = publishScope === "full";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "x-csrf-token": "csrf-e2e-token" },
+        body: JSON.stringify({
+          examId: EXAM_ID,
+          versionId: "draft-1",
+          versionRevision: 1,
+          publishScope,
+          valid: !blocked,
+          errors: blocked
+            ? [{
+                code: "sat.module.incomplete",
+                path: "section:math",
+                message: "Add the required Math module before publishing the full SAT.",
+                blocking: true,
+                field: "structure",
+              }]
+            : [],
+          warnings: [],
+        }),
+      });
+    });
+
+    await page.route(`**/api/v1/exams/${EXAM_ID}/publish`, async (route) => {
+      recording.publishRequests.push(route.request().postDataJSON());
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "x-csrf-token": "csrf-e2e-token" },
+        body: JSON.stringify({
+          id: "published-v2",
+          examId: EXAM_ID,
+          versionNumber: 2,
+          revision: 1,
+          isDraft: false,
+          isPublished: true,
+          publishScope: "reading-writing",
+          publishedAt: "2026-10-11T04:00:00.000Z",
+        }),
+      });
+    });
+
+    await page.route(`**/api/v1/assessment-access/exams/${EXAM_ID}/overview`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "x-csrf-token": "csrf-e2e-token" },
+        body: JSON.stringify({ examId: EXAM_ID, links: [], total: 0 }),
+      })
+    );
+  }
+
   return recording;
 }
 
@@ -200,6 +373,7 @@ test.describe("SAT authoring shell lifecycle", () => {
 
     await expect(page.getByRole("heading", { name: "No editable draft" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Open draft" })).toBeVisible();
+    await expectNoSeriousAxeViolations(page, "SAT authoring pre-draft state");
 
     // The read happened, and reading is all that happened: the CTA is the only
     // thing in the product allowed to open a draft.
@@ -221,11 +395,15 @@ test.describe("SAT authoring shell lifecycle", () => {
 
     await page.getByRole("button", { name: "Open draft" }).click();
 
-    // The workspace itself is the proof the shell was installed: the section
-    // header and the queue row only exist for a real shell.
+    // Prove the shell and the selected question detail both reached the editor.
     await expect(page.getByRole("heading", { name: "Reading & Writing" })).toBeVisible();
+    await expect(page.getByLabel("Question prompt")).toBeVisible();
+    await expect(page.getByText("Which choice best states the main idea of the text?", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Question could not be loaded" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "No editable draft" })).toHaveCount(0);
+    await expectNoSeriousAxeViolations(page, "SAT authoring workspace");
     expect(recording.postShell).toBe(1);
+    expect(recording.getQuestion).toBeGreaterThanOrEqual(1);
     expect(recording.consoleErrors).toEqual([]);
     expect(recording.pageErrors).toEqual([]);
   });
@@ -236,6 +414,7 @@ test.describe("SAT authoring shell lifecycle", () => {
     await page.goto("/__dev/sat-authoring");
     await page.getByRole("button", { name: "Open draft" }).click();
     await expect(page.getByRole("heading", { name: "Reading & Writing" })).toBeVisible();
+    await expect(page.getByLabel("Question prompt")).toBeVisible();
     expect(recording.postShell).toBe(1);
 
     const readsBeforeReload = recording.getShell;
@@ -244,6 +423,7 @@ test.describe("SAT authoring shell lifecycle", () => {
     // The refresh is a READ of the same draft: no new POST, and no "Open draft"
     // CTA in place of a draft that already exists.
     await expect(page.getByRole("heading", { name: "Reading & Writing" })).toBeVisible();
+    await expect(page.getByLabel("Question prompt")).toBeVisible();
     expect(recording.postShell).toBe(1);
     expect(recording.getShell).toBeGreaterThan(readsBeforeReload);
     expect(recording.consoleErrors).toEqual([]);
@@ -256,9 +436,53 @@ test.describe("SAT authoring shell lifecycle", () => {
     await page.goto("/__dev/sat-authoring");
 
     await expect(page.getByText("Exam not found", { exact: false })).toBeVisible();
+    await expectNoSeriousAxeViolations(page, "SAT authoring not-found state");
     // Offering the CTA for an exam that does not exist would invite the author
     // to retry a command that cannot succeed.
     await expect(page.getByRole("button", { name: "Open draft" })).toHaveCount(0);
     expect(recording.postShell).toBe(0);
+  });
+
+  test("release review blocks an incomplete full SAT, then confirms the selected version scope", async ({ page }) => {
+    const recording = await installTransport(page, { readyDraft: true, releaseWorkflow: true });
+
+    await page.goto(`/sat/exams/${EXAM_ID}/release`);
+
+    await expect(page.getByRole("heading", { name: "Release checks" })).toBeVisible();
+    expect(recording.readinessScopes).toEqual(["full"]);
+    await expect(page.getByText("Add the required Math module before publishing the full SAT.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Publish version" })).toBeDisabled();
+    await expectNoSeriousAxeViolations(page, "SAT release review with a blocking issue");
+
+    await page.getByRole("radio", { name: "Reading & Writing" }).check();
+    await expect(page.getByText("Ready to publish.")).toBeVisible();
+    const publishButton = page.getByRole("button", { name: "Publish version" });
+    await expect(publishButton).toBeEnabled();
+    // Let the 180ms workspace transition finish before inspecting text contrast.
+    await expect(publishButton).toHaveCSS("color", "rgb(255, 255, 255)");
+    await expectNoSeriousAxeViolations(page, "SAT release review ready for selected scope");
+
+    await page.getByRole("button", { name: "Publish version" }).click();
+    const confirmationDialog = page.getByRole("dialog", { name: "Publish Reading & Writing only?" });
+    await expect(confirmationDialog).toBeVisible();
+    await expect(confirmationDialog).toHaveCSS("opacity", "1");
+    await expect(page.getByText("Release checks passed")).toBeVisible();
+    await expect(page.getByText("Not included")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Publish Reading & Writing", exact: true })).toHaveCSS("color", "rgb(255, 255, 255)");
+    await expectNoSeriousAxeViolations(page, "SAT publish version confirmation");
+
+    await page.getByRole("button", { name: "Publish Reading & Writing", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access`));
+    expect(recording.readinessScopes.slice(0, 2)).toEqual(["full", "reading-writing"]);
+    expect(recording.readinessScopes.every((scope) => ["full", "reading-writing"].includes(scope))).toBe(true);
+    expect(recording.publishRequests).toHaveLength(1);
+    expect(recording.publishRequests[0]).toMatchObject({
+      expectedDraftVersionId: "draft-1",
+      expectedDraftRevision: 1,
+      publishScope: "reading-writing",
+      revision: 1,
+    });
+    expect(recording.consoleErrors).toEqual([]);
+    expect(recording.pageErrors).toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { examDeliveryService } from "@services/examDeliveryService";
+import { proctorKeys } from "../../api/proctorQueries";
 import { useProctorRouteController } from "../useProctorRouteController";
 
 const originalFetch = global.fetch;
@@ -28,6 +29,12 @@ function createWrapper() {
     },
   });
 
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  };
+}
+
+function createWrapperWithQueryClient(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   };
@@ -245,6 +252,67 @@ describe("useProctorRouteController backend mode", () => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     global.fetch = originalFetch;
+  });
+
+  it("refreshes a cached room summary before resolving a newly created room route", async () => {
+    vi.stubEnv("VITE_FEATURE_USE_BACKEND_PROCTORING", "true");
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(proctorKeys.sessions("sat"), [
+      {
+        schedule: buildSchedule(),
+        runtime: buildRuntime(),
+        studentCount: 0,
+        activeCount: 0,
+        alertCount: 0,
+        violationCount: 0,
+        degradedLiveMode: false,
+      },
+    ]);
+
+    const newSchedule = { ...buildSchedule(), id: "sched-new", examId: "exam-new", cohortName: "New Room" };
+    const newRuntime = { ...buildRuntime(), id: "runtime-new", scheduleId: "sched-new", examId: "exam-new", status: "not_started" };
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/proctor/sessions?providerKey=sat") {
+        return jsonResponse([
+          {
+            schedule: newSchedule,
+            runtime: newRuntime,
+            studentCount: 0,
+            activeCount: 0,
+            alertCount: 0,
+            violationCount: 0,
+            degradedLiveMode: false,
+          },
+        ]);
+      }
+      if (url === "/api/v1/proctor/sessions/sched-new?mode=dashboard&auditLimit=200&alertLimit=100") {
+        return jsonResponse({
+          ...buildDetail(),
+          schedule: newSchedule,
+          runtime: newRuntime,
+          sessions: [],
+          alerts: [],
+          auditLogs: [],
+          notes: [],
+          violationRules: [],
+        });
+      }
+      return jsonFailure(`Unhandled ${url}`);
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(
+      () => useProctorRouteController({ providerKey: "sat", initialScheduleId: "sched-new" }),
+      { wrapper: createWrapperWithQueryClient(queryClient) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.selectedScheduleId).toBe("sched-new");
+      expect(result.current.schedules.some((schedule) => schedule.id === "sched-new")).toBe(true);
+      expect(result.current.runtimeSnapshots.some((runtime) => runtime.scheduleId === "sched-new")).toBe(true);
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/proctor/sessions?providerKey=sat", expect.anything());
   });
 
   it("sends the rendered runtime revision with cohort timing mutations", async () => {

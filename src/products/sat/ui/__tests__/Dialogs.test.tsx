@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { SatConfirmDialog, SatFormDialog, isSatCreationDirty } from '../ConfirmDialog';
 
@@ -198,6 +199,33 @@ describe('SatConfirmDialog dismissal + focus (additive)', () => {
       />,
     );
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+  });
+
+  it('returns focus to the opening control after the static confirmation closes', () => {
+    function TriggeredConfirmation() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open end exam confirmation</button>
+          <SatConfirmDialog
+            open={open}
+            title="End this room?"
+            description="Affects everyone in the room."
+            confirmLabel="End exam"
+            onCancel={() => setOpen(false)}
+            onConfirm={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+
+    render(<TriggeredConfirmation />);
+    const trigger = screen.getByRole('button', { name: 'Open end exam confirmation' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
   });
 });
 

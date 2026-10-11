@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 export interface QuestionRawRow {
   key: string;
@@ -40,6 +40,7 @@ function verdictLabel(row: QuestionRawRow): { text: string; className: string } 
 }
 
 export function QuestionRawTable({ rows, caption, showVerdictFilters = true }: { rows: QuestionRawRow[]; caption?: string | undefined; showVerdictFilters?: boolean | undefined }) {
+  const filterId = useId();
   const [search, setSearch] = useState("");
   const [onlyIncorrect, setOnlyIncorrect] = useState(false);
   const [onlyOverrides, setOnlyOverrides] = useState(false);
@@ -74,16 +75,16 @@ export function QuestionRawTable({ rows, caption, showVerdictFilters = true }: {
           className="h-9 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:max-w-xs"
         />
         {showVerdictFilters ? <div className="flex flex-wrap gap-2 text-xs">
-          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-gray-300 px-2.5 py-1 font-medium text-gray-600 has-[:checked]:border-blue-400 has-[:checked]:bg-blue-50 has-[:checked]:text-blue-700">
-            <input type="checkbox" checked={onlyIncorrect} onChange={(event) => setOnlyIncorrect(event.target.checked)} className="sr-only" />
+          <label htmlFor={`${filterId}-incorrect`} className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-gray-300 px-2.5 py-1 font-medium text-gray-600 has-[:checked]:border-blue-400 has-[:checked]:bg-blue-50 has-[:checked]:text-blue-700 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-blue-600">
+            <input id={`${filterId}-incorrect`} type="checkbox" aria-label="Only incorrect" checked={onlyIncorrect} onChange={(event) => setOnlyIncorrect(event.target.checked)} className="sr-only" />
             Only incorrect
           </label>
-          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-gray-300 px-2.5 py-1 font-medium text-gray-600 has-[:checked]:border-blue-400 has-[:checked]:bg-blue-50 has-[:checked]:text-blue-700">
-            <input type="checkbox" checked={onlyOverrides} onChange={(event) => setOnlyOverrides(event.target.checked)} className="sr-only" />
+          <label htmlFor={`${filterId}-overrides`} className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-gray-300 px-2.5 py-1 font-medium text-gray-600 has-[:checked]:border-blue-400 has-[:checked]:bg-blue-50 has-[:checked]:text-blue-700 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-blue-600">
+            <input id={`${filterId}-overrides`} type="checkbox" aria-label="Only overrides" checked={onlyOverrides} onChange={(event) => setOnlyOverrides(event.target.checked)} className="sr-only" />
             Only overrides
           </label>
         </div> : null}
-        <p className="text-xs text-gray-400 sm:ml-auto" role="status">
+        <p className="text-xs text-gray-600 sm:ml-auto" role="status">
           {filtered.length} of {rows.length} shown
         </p>
       </div>
@@ -108,10 +109,10 @@ export function QuestionRawTable({ rows, caption, showVerdictFilters = true }: {
               const long = studentText.length > 120 || keyText.length > 120;
               return (
                 <tr key={row.key} className="align-top hover:bg-gray-50/60">
-                  <td className="px-4 py-2.5 tabular-nums text-gray-400">{row.index}</td>
+                  <td className="px-4 py-2.5 tabular-nums text-gray-600">{row.index}</td>
                   <td className="max-w-[180px] px-4 py-2.5">
                     <p className="font-medium text-gray-900">{row.question}</p>
-                    {row.section ? <p className="mt-0.5 text-xs capitalize text-gray-400">{row.section}</p> : null}
+                    {row.section ? <p className="mt-0.5 text-xs capitalize text-gray-600">{row.section}</p> : null}
                     {row.badges?.length ? (
                       <p className="mt-1 flex flex-wrap gap-1">
                         {row.badges.map((badge) => (

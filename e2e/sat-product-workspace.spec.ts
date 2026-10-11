@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { ADMIN_STORAGE_STATE_PATH } from "./support/backendE2e";
-import { executeTransaction, executeUpdate, queryDb } from "./support/db";
+import { executeUpdate, queryDb } from "./support/db";
 
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
@@ -130,17 +130,22 @@ async function finishCurrentSatSection(
       delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
       const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
       const stageKey = snapshot.timing.stageKey;
-      const section =
-        snapshot.sections.find((item) => item.sectionKey === stageKey) ??
-        snapshot.sections.find((item) =>
-          item.modules.some((module) =>
-            snapshot.attempt.moduleAttempts.some(
-              (attempt) =>
-                attempt.moduleId === module.id &&
-                ["not_started", "active", "review"].includes(attempt.state)
-            )
+      const openStates = new Set(["not_started", "active", "review"]);
+      const currentSection = snapshot.sections.find((item) =>
+        item.modules.some((module) =>
+          snapshot.attempt.moduleAttempts.some(
+            (attempt) => attempt.moduleId === module.id && ["active", "review"].includes(attempt.state)
           )
-        );
+        )
+      );
+      const pendingSection = snapshot.sections.find((item) =>
+        item.modules.some((module) =>
+          snapshot.attempt.moduleAttempts.some(
+            (attempt) => attempt.moduleId === module.id && openStates.has(attempt.state)
+          )
+        )
+      );
+      const section = currentSection ?? pendingSection ?? snapshot.sections.find((item) => item.sectionKey === stageKey);
       if (!section) throw new Error(`No active SAT section for stage ${stageKey ?? "unknown"}`);
       const base = section.modules.find((module) => module.adaptiveRole === "base");
       if (!base) throw new Error(`No base module for ${section.sectionKey}`);
@@ -329,38 +334,25 @@ async function readSatDeliveryFrame(
   }, { scheduleId, attemptId, candidateId });
 }
 
-// Pause leg — freeze the live cohort stage mid-module, ASSERT the
-// freeze is observable while paused (status + frozen countdown), then
-// resume. Answers saved across the pause must survive and routing must
-// still reflect them (personal clock freezes with the cohort stage, so no
-// spurious timeout reconciliation fires mid-pause).
+// Exercise the staff room pause/resume controls and confirm the server's
+// room clock freezes while paused.
 async function pauseAndResumeCurrentSatSection(page: Page, scheduleId: string) {
-  const paused = await executeUpdate(
-    "UPDATE exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id " +
-    "SET rs.status = 'paused', rs.accumulated_paused_seconds = rs.accumulated_paused_seconds + 60 " +
-    "WHERE r.schedule_id = ? AND rs.section_key = r.active_section_key AND rs.status = 'live'",
-    [scheduleId],
-  );
-  if (paused !== 1) throw new Error("Expected one live SAT section to pause, changed " + paused + " rows");
-  // Mid-pause assertions: the runtime must report paused AND the
-  // countdown must be frozen (two reads agree — no ticking mid-pause).
+  await expect(page.getByRole("button", { name: "Pause exam" })).toBeVisible();
+  await page.getByRole("button", { name: "Pause exam" }).click();
+  // Confirm through the staff control; the page refreshes from the server.
+  await expect.poll(async () => (await readSatRuntime(page, scheduleId)).status, { timeout: 15_000 }).toBe("paused");
   const midPause = await readSatRuntime(page, scheduleId);
   if (midPause.sections.find((s) => s.sectionKey === midPause.currentSectionKey)?.status !== "paused") {
     throw new Error("Expected current SAT section to report paused mid-pause");
   }
-  const firstRemaining = midPause.currentSectionRemainingSeconds;
+  const frozen = await readSatRuntime(page, scheduleId);
+  const firstRemaining = frozen.currentSectionRemainingSeconds;
   await new Promise((resolve) => setTimeout(resolve, 1500));
   const secondPause = await readSatRuntime(page, scheduleId);
   if (secondPause.currentSectionRemainingSeconds !== firstRemaining) {
     throw new Error(`Countdown ticked mid-pause: ${firstRemaining} -> ${secondPause.currentSectionRemainingSeconds}`);
   }
-  await executeUpdate(
-    "UPDATE exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id " +
-    "SET rs.status = 'live' " +
-    "WHERE r.schedule_id = ? AND rs.section_key = r.active_section_key AND rs.status = 'paused'",
-    [scheduleId],
-  );
-  // Post-resume: the stage must report live again.
+  await page.getByRole("button", { name: "Resume exam" }).click();
   await expect
     .poll(async () => (await readSatRuntime(page, scheduleId)).sections.find((s) => s.sectionKey === midPause.currentSectionKey)?.status, {
       timeout: 15_000,
@@ -368,45 +360,36 @@ async function pauseAndResumeCurrentSatSection(page: Page, scheduleId: string) {
     .toBe("live");
 }
 
-async function expireCurrentSatSection(scheduleId: string, attemptId: string) {
-  const affected = await executeTransaction(async (connection) => {
-    const [attemptRows] = await connection.execute(
-      "SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? AND protocol_version = 2 FOR UPDATE",
-      [attemptId, scheduleId],
-    );
-    if ((attemptRows as Array<Record<string, unknown>>).length === 0) return 0;
-    const [runtimeRows] = await connection.execute(
-      "SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
-      [scheduleId],
-    );
-    const runtime = (runtimeRows as Array<{ id: string; active_section_key: string | null }>)[0];
-    if (!runtime?.active_section_key) return 0;
-    const [sectionRows] = await connection.execute(
-      "SELECT section_key FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? AND status = 'live' FOR UPDATE",
-      [runtime.id, runtime.active_section_key],
-    );
-    if ((sectionRows as Array<Record<string, unknown>>).length === 0) return 0;
-    await connection.execute(
-      `UPDATE exam_session_runtime_sections
-          SET actual_start_at = DATE_SUB(NOW(6), INTERVAL 2 MINUTE),
-              planned_duration_minutes = 1,
-              extension_minutes = 0,
-              accumulated_paused_seconds = 0
-        WHERE runtime_id = ? AND section_key = ? AND status = 'live'`,
-      [runtime.id, runtime.active_section_key],
-    );
-    const [attemptUpdate] = await connection.execute(
-      `UPDATE student_attempts
-          SET deadline_at = DATE_SUB(NOW(6), INTERVAL 1 MINUTE),
-              closing_grace_until = DATE_SUB(NOW(6), INTERVAL 30 SECOND)
-        WHERE id = ? AND schedule_id = ? AND protocol_version = 2`,
-      [attemptId, scheduleId],
-    );
-    return Number((attemptUpdate as { affectedRows?: number }).affectedRows ?? 0);
-  });
-  if (affected < 1) {
-    throw new Error(`Expected one live SAT section to expire, changed ${affected} rows`);
-  }
+async function expireSatBreak(attemptId: string) {
+  const changed = await executeUpdate(
+    `UPDATE assessment_attempt_breaks b
+       JOIN assessment_sections finished ON finished.id = b.after_section_id
+       JOIN assessment_sections next_section
+         ON next_section.exam_version_id = finished.exam_version_id
+        AND next_section.display_order = finished.display_order + 1
+       JOIN assessment_modules next_base
+         ON next_base.section_id = next_section.id AND next_base.adaptive_role = 'base'
+       JOIN assessment_module_attempts next_attempt
+         ON next_attempt.attempt_id = b.attempt_id
+        AND next_attempt.module_id = next_base.id
+        AND next_attempt.state = 'not_started'
+        SET b.deadline_at = DATE_SUB(NOW(6), INTERVAL 1 MINUTE),
+            next_attempt.available_at = DATE_SUB(NOW(6), INTERVAL 1 MINUTE)
+      WHERE b.attempt_id = ? AND b.state = 'active' AND b.paused_at IS NULL`,
+    [attemptId],
+  );
+  if (changed < 1) throw new Error("Expected the candidate's active SAT break to expire");
+}
+
+async function readStudentActiveSection(page: Page, scheduleId: string, attemptId: string, candidateId: string): Promise<string | null> {
+  return page.evaluate(async ({ scheduleId, attemptId, candidateId }) => {
+    const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+    delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
+    const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
+    const activeAttempt = snapshot.attempt.moduleAttempts.find((item) => item.state === "active" || item.state === "review");
+    if (!activeAttempt) return null;
+    return snapshot.sections.find((section) => section.modules.some((module) => module.id === activeAttempt.moduleId))?.sectionKey ?? null;
+  }, { scheduleId, attemptId, candidateId });
 }
 
 async function readSatRuntime(page: Page, scheduleId: string): Promise<SatRuntime> {
@@ -431,8 +414,8 @@ type SatAttemptHarness = {
 };
 
 /**
- * Shared journey setup: author, publish, link, join, and proctor-start a real
- * SAT so the exam is live with the first module auto-opened. Extracted so the
+ * Shared journey setup: author, publish, configure a version-pinned room, join,
+ * and proctor-start a real SAT so the exam is live with the first module auto-opened. Extracted so the
  * answered journey and the audit-finding-1 unanswered journey run against
  * identical conditions instead of two drifting fixtures.
  */
@@ -448,7 +431,7 @@ async function startSatAttempt(
   const studentEmail = `sat-smoke-${stamp}@example.com`;
 
   await page.goto("/sat/exams");
-  await expect(page.getByRole("heading", { name: "Exams" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Exams", exact: true })).toBeVisible();
   await expect(page.getByText("Digital SAT").first()).toBeVisible();
   await expect(page.getByText("IELTS", { exact: true })).toHaveCount(0);
 
@@ -460,11 +443,14 @@ async function startSatAttempt(
   if (!examId) throw new Error("SAT exam id was not present after creation");
 
   await expect(page.getByRole("heading", { name: examTitle })).toBeVisible();
-  await page.getByRole("button", { name: "More authoring actions" }).click();
+  await page.getByRole("button", { name: "More exam actions" }).click();
   await page.getByRole("menuitem", { name: /Load sample exam/ }).click();
   await expect(page.getByRole("dialog", { name: "Load sample SAT" })).toBeVisible();
   await page.getByRole("button", { name: "Load 147 questions" }).click();
-  await expect(page.getByText("147 of 147 questions authored")).toBeVisible({ timeout: 90_000 });
+  await expect(
+    page.getByRole("tab", { name: /^Reading & Writing, 81 of 81 authored/ })
+  ).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByRole("tab", { name: /^Math, 66 of 66 authored/ })).toBeVisible();
 
   if (options.leaveMathIncomplete) {
     await leaveMathBaseModuleIncomplete(examId);
@@ -472,7 +458,14 @@ async function startSatAttempt(
     await expect(page.getByRole("heading", { name: examTitle })).toBeVisible({ timeout: 30_000 });
   }
 
-  await page.getByRole("button", { name: "Release" }).click();
+  // The shortcut intentionally yields when focus is on a button, tab, or
+  // editor field. Put focus on the page first so this exercises its global
+  // command path deterministically.
+  await page.getByRole("heading", { name: examTitle }).click();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
+  const commandPalette = page.getByRole("dialog", { name: "Jump to question" });
+  await expect(commandPalette).toBeVisible();
+  await commandPalette.getByText("Release exam", { exact: true }).click();
   await expect(page).toHaveURL(`/sat/exams/${examId}/release`);
   if (options.leaveMathIncomplete) {
     const releaseChecks = page.getByRole("region", { name: "Release checks" });
@@ -509,20 +502,39 @@ async function startSatAttempt(
   await publishDialog.getByRole("button", { name: publishAction, exact: true }).click();
 
   await expect(page).toHaveURL(`/sat/exams/${examId}/access`, { timeout: 30_000 });
-  await expect(page.getByRole("heading", { name: "Student Access", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "New Student Link", exact: true }).first().click();
-  await page.getByLabel("Student Link name").fill(linkName);
-  await page.getByRole("button", { name: /Name \+ email only/i }).click();
-  await page.getByRole("button", { name: /Anytime/i }).click();
-  await page.getByRole("button", { name: "Create Link" }).click();
-  await expect(page.getByText(linkName).first()).toBeVisible({ timeout: 20_000 });
-  const joinHref = await page.getByRole("link", { name: "Open student page" }).getAttribute("href");
+  const roomSetup = page.getByRole("dialog", { name: "Create room" });
+  const setupProgress = roomSetup.getByRole("progressbar", { name: "Room setup progress" });
+  await expect(roomSetup).toBeVisible();
+  await expect(setupProgress).toHaveAttribute("aria-valuenow", "1");
+  await expect(roomSetup).toContainText(`This room uses Version 1 of ${examTitle}.`);
+  await roomSetup.getByLabel("Room name").fill(linkName);
+  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(setupProgress).toHaveAttribute("aria-valuenow", "2");
+  await roomSetup.getByRole("button", { name: /Name \+ email only/i }).click();
+  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(setupProgress).toHaveAttribute("aria-valuenow", "3");
+  await roomSetup.getByRole("button", { name: /^Open now/ }).click();
+  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(setupProgress).toHaveAttribute("aria-valuenow", "4");
+  await expect(roomSetup.getByRole("heading", { name: "Summary" })).toBeVisible();
+  await expect(roomSetup.getByText(linkName, { exact: true })).toBeVisible();
+  await expect(roomSetup.getByText("The proctor starts the exam.", { exact: true })).toBeVisible();
+  await roomSetup.getByRole("button", { name: "Create room", exact: true }).click();
+
+  await expect(page).toHaveURL(/\/sat\/sessions\/[0-9a-f-]+$/i, { timeout: 30_000 });
+  const scheduleId = new URL(page.url()).pathname.split("/").filter(Boolean)[2];
+  if (!scheduleId) throw new Error("SAT room id was not present after creation");
+  await expect(page.getByRole("heading", { level: 1, name: linkName })).toBeVisible();
+  await page.getByRole("button", { name: "Student link", exact: true }).click();
+  const shareDialog = page.getByRole("dialog", { name: `Share ${linkName} with students` });
+  await expect(shareDialog).toBeVisible();
+  const joinHref = await shareDialog.getByText(/\/join\//).textContent();
   if (!joinHref) throw new Error("Student join URL was not created");
 
   const studentContext = await browser.newContext();
   const studentPage = await studentContext.newPage();
   await studentPage.goto(joinHref);
-  await expect(studentPage.getByRole("heading", { name: linkName })).toBeVisible();
+  await expect(studentPage.getByRole("heading", { name: "Exam Check-in", exact: true })).toBeVisible();
   await expect(studentPage.getByText(`${examTitle} · Version 1`)).toBeVisible();
   if (options.publishScope === "reading-writing") {
     await expect(studentPage.getByText(/You'll take Reading & Writing only/)).toBeVisible();
@@ -532,10 +544,11 @@ async function startSatAttempt(
   await studentPage.getByRole("button", { name: /Continue/i }).click();
   await expect(studentPage).toHaveURL(/\/student\/[0-9a-f-]+\/[^/]+$/i, { timeout: 30_000 });
   const studentPath = new URL(studentPage.url()).pathname.split("/").filter(Boolean);
-  const scheduleId = studentPath[1];
+  const joinedScheduleId = studentPath[1];
   const candidateId = decodeURIComponent(studentPath[2] ?? "");
-  if (!scheduleId || !candidateId)
+  if (!joinedScheduleId || !candidateId)
     throw new Error("Student handoff did not include schedule and candidate ids");
+  expect(joinedScheduleId).toBe(scheduleId);
 
   await page.goto("/sat/sessions");
   await expect(page.getByRole("heading", { name: "Rooms" })).toBeVisible({ timeout: 30_000 });
@@ -555,7 +568,9 @@ async function startSatAttempt(
   }
   await page.getByRole("button", { name: "Review and start exam" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Start exam" }).click();
-  await expect(page.getByText("Exam started.")).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(async () => (await readSatRuntime(page, scheduleId)).status, { timeout: 20_000 })
+    .toBe("live");
 
   // Phase 5 entry assertion: the proctor's Start is the ONLY action taken
   // against the exam. The student page is refreshed (never clicked) and the
@@ -638,7 +653,9 @@ test.describe("Digital SAT product workspace", () => {
         await expect(page.getByRole("heading", { name: "Waiting to begin" })).toHaveCount(0);
         const studentOption = page.getByRole("option", { name: `Open ${studentName}` });
         await expect(studentOption).toBeVisible({ timeout: 30_000 });
-        if (viewport.width >= 1440) {
+        const roomLayout = await page.locator(".sat-room").getAttribute("data-room-layout");
+        expect(["wide", "split", "stack"]).toContain(roomLayout);
+        if (roomLayout === "wide") {
           await expect(page.getByRole("heading", { name: studentName })).toBeVisible();
         }
         await expect(page.getByText("Run sheet", { exact: true })).toBeVisible();
@@ -682,7 +699,7 @@ test.describe("Digital SAT product workspace", () => {
           expect(metrics.documentHeight).toBeLessThanOrEqual(viewport.height + 1);
           expect(metrics.workspaceOverflowY).toBe("auto");
           expect(metrics.rosterOverflowY).toBe("auto");
-          if (viewport.width >= 1440) {
+          if (roomLayout === "wide") {
             await expect(page.locator(".sat-room__inspector")).toBeVisible();
             expect(metrics.inspectorLeft ?? 0).toBeGreaterThanOrEqual(metrics.workspaceRight - 1);
             await expect(page.locator(".sat-room__inspector-dialog")).toHaveCount(0);
@@ -719,8 +736,8 @@ test.describe("Digital SAT product workspace", () => {
           await expect(page.locator(".sat-room__sticky-context")).toHaveClass(/is-visible/);
           await expect(page.locator(".sat-room__header")).toBeVisible();
           await expect(page.locator(".sat-room__roster-head")).toBeVisible();
-          if (viewport.width >= 1440) {
-            await expect(page.locator(".sat-room__context-health")).toContainText("Online");
+          await expect(page.locator(".sat-room__context-health")).toContainText("Live data");
+          if (roomLayout === "wide") {
             const detail = page.locator(".sat-room__inspector [data-sat-room-student-detail]");
             await expect(detail).toBeVisible();
             const studentBounds = await detail.evaluate((element) => {
@@ -741,11 +758,15 @@ test.describe("Digital SAT product workspace", () => {
             return {
               rosterTop: rect(".sat-room__roster").top,
               workspaceTop: rect(".sat-room__workspace").top,
-              inspectorTop: rect(".sat-room__inspector").top,
             };
           });
           expect(landmarks.rosterTop).toBeLessThan(landmarks.workspaceTop);
-          expect(landmarks.workspaceTop).toBeLessThan(landmarks.inspectorTop);
+          const studentOption = page.getByRole("option", { name: `Open ${studentName}` });
+          await studentOption.click();
+          const dialog = page.getByRole("dialog", { name: "Selected student inspector" });
+          await expect(dialog).toBeVisible();
+          await expect(dialog).toHaveAttribute("aria-modal", "true");
+          await expect(dialog.locator("[data-sat-room-student-detail]")).toBeVisible();
           await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
           await expect(page.locator("[data-sat-room-student-detail]")).toBeVisible();
           if (viewport.width === 390) {
@@ -754,6 +775,9 @@ test.describe("Digital SAT product workspace", () => {
               contentType: "image/png",
             });
           }
+          await page.keyboard.press("Escape");
+          await expect(dialog).toHaveCount(0);
+          await expect(studentOption).toBeFocused();
         }
       }
     } finally {
@@ -775,6 +799,7 @@ test.describe("Digital SAT product workspace", () => {
       attemptId,
       studentName,
       examTitle,
+      linkName,
     } = harness;
     try {
       const reading = await finishCurrentSatSection(
@@ -785,13 +810,12 @@ test.describe("Digital SAT product workspace", () => {
       );
       expect(reading.sectionKey).toBe("reading-writing");
 
-      // Pause leg: freeze + resume the live stage after reading times out.
-      // The math section must still open and route on V2-saved answers.
+      // Pause/resume through staff controls, then let the candidate-owned
+      // break deadline drive entry into Math.
       await pauseAndResumeCurrentSatSection(page, scheduleId);
-
-      await expireCurrentSatSection(scheduleId, attemptId);
+      await expireSatBreak(attemptId);
       await expect
-        .poll(async () => (await readSatRuntime(page, scheduleId)).currentSectionKey, {
+        .poll(async () => readStudentActiveSection(studentPage, scheduleId, attemptId, candidateId), {
           timeout: 30_000,
         })
         .toBe("math");
@@ -811,22 +835,6 @@ test.describe("Digital SAT product workspace", () => {
         .poll(async () => studentPage.evaluate(() => window.navigator.onLine), { timeout: 15_000 })
         .toBe(true);
 
-      // Takeover leg: rotate the writer lease, ASSERT the epoch increments,
-      // and adopt the new session after automatic completion.
-      const takeoverEpoch = await studentPage.evaluate(
-        async ({ scheduleId, attemptId }) => {
-          const durable = await import("/src/features/student/infrastructure/responseDurabilityTransport.ts");
-          const attempt = { id: attemptId, scheduleId } as never;
-          const result = await durable.takeOverResponseDurabilityLease(scheduleId, attemptId, {
-            clientSessionId: "e2e-takeover-" + attemptId.slice(0, 8),
-            reason: "e2e_takeover_leg",
-          }, attempt);
-          return result.leaseEpoch as number;
-        },
-        { scheduleId, attemptId },
-      );
-      expect(takeoverEpoch).toBeGreaterThan(1);
-
       // Completion is server-owned. Replaying the stable finalization id after
       // the automatic result exists must return the identical result.
       const submitStable = () => studentPage.evaluate(
@@ -843,44 +851,55 @@ test.describe("Digital SAT product workspace", () => {
       const result = await submitStable();
       const replay = await submitStable();
       expect(result.providerKey).toBe("sat");
+      expect(result.releaseStatus).toBe("pending");
       expect(result.scoreKind).toBe("practice");
+      expect(result.totalScore).toBeNull();
+      expect(result.sections).toBeNull();
       expect(replay.submissionId).toBe(result.submissionId);
-      expect(replay.submissionId).toBe(attemptId);
+      expect(result.submissionId).toBe("");
+      expect(result.attemptId).toBe(attemptId);
+      expect(replay.id).toBe(result.id);
+      expect(replay.attemptId).toBe(attemptId);
       // Idempotent replay must return the IDENTICAL result (not just the
       // same id): a re-score with a stable id would pass an id-only
       // check while double-scoring. Timestamps excluded.
       const { submittedAt: _a, ...resultCore } = result as unknown as Record<string, unknown>;
       const { submittedAt: _b, ...replayCore } = replay as unknown as Record<string, unknown>;
       expect(replayCore).toEqual(resultCore);
-      // Exam-day P0 assertions: V2-saved correct answers must score, route
-      // the adaptive branch, and appear in the released review.
+      // The student's submit response is a score-free receipt until results
+      // are released. Verify scoring from the persisted staff result instead.
       expect(reading.answeredCount).toBeGreaterThan(0);
       expect(reading.branchRole).toBe("higher_branch");
       expect(math.answeredCount).toBeGreaterThan(0);
       expect(math.branchRole).toBe("higher_branch");
-      const readingSection = result.sections.find((section) => section.sectionKey === "reading-writing");
-      expect(readingSection?.rawCorrect).toBeGreaterThanOrEqual(reading.answeredCount);
-      expect(readingSection?.route).toBe("higher");
-      const mathSection = result.sections.find((section) => section.sectionKey === "math");
-      expect(mathSection?.rawCorrect).toBeGreaterThanOrEqual(math.answeredCount);
-      expect(mathSection?.route).toBe("higher");
+      const pendingResults = await queryDb<{ outcome_status: string; release_status: string; total_score: number | null }>(
+        `SELECT outcome_status, release_status, total_score
+           FROM assessment_results
+          WHERE attempt_id = ?`,
+        [attemptId],
+      );
+      expect(pendingResults).toEqual([{ outcome_status: "pending", release_status: "pending", total_score: null }]);
 
       await page.goto("/sat/results");
       await expect(page.getByRole("heading", { name: "Responses" })).toBeVisible();
-      await page.getByLabel("Search SAT results").fill(studentName);
-      const resultRow = page
-        .locator("button")
-        .filter({ hasText: studentName })
-        .filter({ hasText: examTitle })
-        .first();
+      await page.getByLabel("Search exams").fill(examTitle);
+      const examRow = page.locator("button").filter({ hasText: examTitle }).first();
+      await expect(examRow).toBeVisible({ timeout: 30_000 });
+      await examRow.click();
+      await expect(page.getByRole("heading", { name: examTitle })).toBeVisible();
+      const roomRow = page.getByRole("button", { name: new RegExp(linkName) });
+      await expect(roomRow).toBeVisible({ timeout: 30_000 });
+      await roomRow.click();
+      await expect(page.getByRole("heading", { name: linkName })).toBeVisible();
+      await page.getByLabel("Search students").fill(studentName);
+      const resultRow = page.locator("tbody tr").filter({ hasText: studentName }).first();
       await expect(resultRow).toBeVisible({ timeout: 30_000 });
+      await expect(resultRow).toContainText("Score pending");
       await expect(resultRow).not.toContainText("Overall Band");
-      await resultRow.click();
-      await expect(
-        page.getByText("Practice score").or(page.getByText("Practice · raw score")).first()
-      ).toBeVisible();
-      await expect(page.getByText("Reading & Writing")).toBeVisible();
-      await expect(page.getByText("Math")).toBeVisible();
+      await resultRow.getByRole("button", { name: new RegExp(`View saved answers for ${studentName}`) }).click();
+      await expect(page.getByRole("heading", { name: /Question-level responses/ })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Reading & Writing", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Math", exact: true })).toBeVisible();
 
       await page.goto("/admin/exams");
       await expect(page.getByText(examTitle)).toHaveCount(0);
@@ -917,7 +936,7 @@ test.describe("Digital SAT product workspace", () => {
         if (!module || moduleAttempt?.state !== "active") {
           throw new Error("The base module must be active before testing disconnected answer durability.");
         }
-        return { id: module.id, key: module.moduleKey };
+        return { id: module.id, key: module.moduleKey, attemptId: moduleAttempt.id };
       }, { scheduleId, attemptId, candidateId });
       const answer = (await correctAnswerPlan(base.id)).find((candidate) => candidate.kind === "single_choice");
       if (!answer) throw new Error("No keyed operational question was available for the disconnected save.");
@@ -966,9 +985,11 @@ test.describe("Digital SAT product workspace", () => {
       expect(persisted).toHaveLength(1);
       expect(JSON.parse(persisted[0]!.response).answer).toBe(answer.correctAnswer);
 
-      const responseBatchRequest = studentPage.waitForRequest((request) =>
-        request.url().includes(`/v2/student/attempts/${attemptId}/responses:batch`),
-      );
+      const isResponseBatchRequest = (request: import("@playwright/test").Request) =>
+        request.method() === "POST" &&
+        request.url().includes(`/v2/student/attempts/${attemptId}/responses:batch`);
+      const responseBatchRequest = studentPage.waitForRequest(isResponseBatchRequest);
+      const responseBatchResponse = responseBatchRequest.then((request) => request.response());
       const racingWrite = studentPage.evaluate(async ({ scheduleId, attemptId, candidateId, baseModuleId, answer }) => {
         const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
         delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
@@ -1013,12 +1034,23 @@ test.describe("Digital SAT product workspace", () => {
       // Begin the expiry update only after the answer batch has left the
       // browser, so the V2 transaction and timeout boundary genuinely race.
       await responseBatchRequest;
-      await expireCurrentSatSection(scheduleId, attemptId);
-      const raced = await racingWrite;
-      if (!raced.acknowledged && !/deadline|expired|not writable/i.test(raced.error ?? "")) {
-        throw new Error(`The racing response was neither acknowledged nor rejected by the timeout gate: ${raced.error ?? "no server error"}`);
+      await expireSatModuleAttempt(base.attemptId);
+      const [raced, batchResponse] = await Promise.all([racingWrite, responseBatchResponse]);
+      if (!batchResponse) throw new Error("The racing response ended without an HTTP result.");
+      const wasAccepted = batchResponse.ok();
+      if (wasAccepted) {
+        expect(raced.acknowledged).toBe(true);
+      } else {
+        expect(batchResponse.status()).toBe(422);
+        const rejection = await batchResponse.json() as {
+          code?: string;
+          details?: { reason?: string };
+        };
+        expect(`${rejection.code ?? ""} ${rejection.details?.reason ?? ""}`).toMatch(
+          /DEADLINE_EXPIRED|ATTEMPT_NOT_WRITABLE/i,
+        );
       }
-      const expectedAnswer = raced.acknowledged ? raced.alternativeAnswer : answer.correctAnswer;
+      const expectedAnswer = wasAccepted ? raced.alternativeAnswer : answer.correctAnswer;
       const afterRace = await queryDb<{ response: string }>(
         "SELECT CAST(response AS CHAR) AS response FROM attempt_responses_v2 WHERE attempt_id = ? AND module_id = ? AND question_id = ?",
         [attemptId, base.id, answer.examQuestionId],
@@ -1027,6 +1059,28 @@ test.describe("Digital SAT product workspace", () => {
       expect(JSON.parse(afterRace[0]!.response).answer).toBe(expectedAnswer);
 
       await studentContext.close();
+      // The timeout closes the current adaptive module and opens the selected
+      // branch. Expire that branch too so the test proves the ACK survives the
+      // complete terminal result after the only browser has gone away.
+      let branchAttemptId: string | null = null;
+      await expect.poll(async () => {
+        const rows = await queryDb<{ id: string }>(
+          `SELECT ma.id
+             FROM assessment_module_attempts ma
+             JOIN assessment_modules m ON m.id = ma.module_id
+            WHERE ma.attempt_id = ?
+              AND m.adaptive_role IN ('lower_branch', 'higher_branch')
+              AND ma.state IN ('active', 'review')
+            ORDER BY ma.created_at
+            LIMIT 1`,
+          [attemptId],
+        );
+        branchAttemptId = rows[0]?.id ?? null;
+        return branchAttemptId;
+      }, { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }).not.toBeNull();
+      if (!branchAttemptId) throw new Error("The timed-out base module did not open its adaptive branch.");
+      await expireSatModuleAttempt(branchAttemptId);
+
       let resultId: string | null = null;
       await expect.poll(async () => {
         const rows = await queryDb<{ id: string }>(
@@ -1038,21 +1092,26 @@ test.describe("Digital SAT product workspace", () => {
       }, { timeout: 90_000, intervals: [500, 1_000, 2_000, 5_000] }).not.toBeNull();
 
       if (!resultId) throw new Error("The timeout worker did not produce a SAT result.");
-      const detailResponse = await page.request.get(`/api/v1/results/sat/${resultId}`);
-      expect(detailResponse.ok(), `SAT result detail returned ${detailResponse.status()}`).toBe(true);
+      const resultResponse = await page.request.get(`/api/v1/results/sat/${resultId}`);
+      expect(resultResponse.ok(), `SAT result detail returned ${resultResponse.status()}`).toBe(true);
       type ResultQuestion = {
         questionId?: string;
         moduleKey?: string;
         response?: unknown;
-        isCorrect?: boolean;
       };
-      const payload = await detailResponse.json() as { data?: { questions?: ResultQuestion[] }; questions?: ResultQuestion[] };
+      const answersResponse = await page.request.get(`/api/v1/results/sat/attempts/${attemptId}/answers`);
+      expect(answersResponse.ok(), `SAT saved answers returned ${answersResponse.status()}`).toBe(true);
+      const payload = await answersResponse.json() as {
+        data?: { savedAnswerCount?: number; questions?: ResultQuestion[] };
+        savedAnswerCount?: number;
+        questions?: ResultQuestion[];
+      };
       const detail = payload.data ?? payload;
+      expect(detail.savedAnswerCount).toBeGreaterThan(0);
       const question = detail.questions?.find((item) =>
         item.questionId === answer.questionId && item.moduleKey === base.key,
       );
       expect(question?.response).toBe(expectedAnswer);
-      expect(question?.isCorrect).toBe(expectedAnswer === answer.correctAnswer);
     } finally {
       await studentContext.close();
     }
@@ -1105,7 +1164,9 @@ test.describe("Digital SAT product workspace", () => {
         },
         { scheduleId, attemptId, candidateId },
       );
-      expect(result.sections.map((section) => section.sectionKey)).toEqual(["reading-writing"]);
+      expect(result.releaseStatus).toBe("pending");
+      expect(result.totalScore).toBeNull();
+      expect(result.sections).toBeNull();
 
       const runtimePlan = await queryDb<{ section_key: string; gap_after_minutes: number }>(
         `SELECT section_key, gap_after_minutes
@@ -1131,7 +1192,7 @@ test.describe("Digital SAT product workspace", () => {
       linkPrefix: "SAT Unanswered Link",
       studentPrefix: "SAT Unanswered Student",
     });
-    const { studentPage, studentContext, scheduleId, candidateId, attemptId, studentName, examTitle } =
+    const { studentPage, studentContext, scheduleId, candidateId, attemptId, studentName, examTitle, linkName } =
       harness;
     try {
       for (const [index, sectionKey] of (["reading-writing", "math"] as const).entries()) {
@@ -1146,40 +1207,48 @@ test.describe("Digital SAT product workspace", () => {
         // The journey is only meaningful if the student truly answered nothing.
         expect(finished.answeredCount).toBe(0);
         if (index === 0) {
-          await expireCurrentSatSection(scheduleId, attemptId);
-          await expect.poll(async () => (await readSatRuntime(page, scheduleId)).currentSectionKey, {
+          await expireSatBreak(attemptId);
+          await expect.poll(async () => readStudentActiveSection(studentPage, scheduleId, attemptId, candidateId), {
             timeout: 30_000,
           }).toBe("math");
         }
       }
 
-      // Zero raw is a legitimate score: the practice table's floor is 200 per
-      // section, so both sections at zero = 400.
+      // Terminalization creates a score-free receipt; scoring remains pending
+      // until the staff result pipeline publishes a score.
       await expect
         .poll(
           async () => {
-            const rows = await queryDb<{ total_score: number | null }>(
-              "SELECT total_score FROM assessment_results WHERE attempt_id = ?",
+            return queryDb<{ outcome_status: string; release_status: string; total_score: number | null }>(
+              `SELECT outcome_status, release_status, total_score
+                 FROM assessment_results
+                WHERE attempt_id = ?`,
               [attemptId]
             );
-            return rows[0]?.total_score ?? null;
           },
           {
             timeout: 90_000,
-            message: "an unanswered SAT attempt must still reach a scored result",
+            message: "an unanswered SAT attempt must still reach a pending result",
           }
         )
-        .toBe(400);
+        .toEqual([{ outcome_status: "pending", release_status: "pending", total_score: null }]);
 
-      // The provisional terminal claim committed with the EMPTY-set digest —
-      // proof the V2 submit accepted zero responses instead of refusing them.
-      const receipts = await queryDb<{ final_response_digest: string }>(
-        "SELECT final_response_digest FROM attempt_submissions_v2 WHERE attempt_id = ?",
+      // Automatic finalization commits the EMPTY-set digest on the attempt
+      // record; explicit-submit receipt rows are not created by this worker.
+      const terminalAttempt = await queryDb<{
+        phase: string;
+        delivery_status: string;
+        final_response_digest: string | null;
+      }>(
+        "SELECT phase, delivery_status, final_response_digest FROM student_attempts WHERE id = ?",
         [attemptId]
       );
-      expect(receipts.length).toBe(1);
       const emptySetDigest = createHash("sha256").update("[]").digest("hex");
-      expect(receipts[0]?.final_response_digest).toBe(emptySetDigest);
+      expect(terminalAttempt).toEqual([{
+        phase: "post-exam",
+        delivery_status: "submitted",
+        final_response_digest: emptySetDigest,
+      }]);
 
       // And the student sees the completed exam, with no finalization-error
       // copy and no retry affordance left behind.
@@ -1187,25 +1256,33 @@ test.describe("Digital SAT product workspace", () => {
       await expect(studentPage.getByRole("heading", { name: "SAT Complete" })).toBeVisible({
         timeout: 45_000,
       });
-      await expect(studentPage.getByText("400", { exact: true })).toBeVisible();
+      await expect(studentPage.getByText("400", { exact: true })).toHaveCount(0);
       await expect(studentPage.getByText(/finalizing|could not be finalized/i)).toHaveCount(0);
       await expect(studentPage.getByRole("button", { name: /Retry|Try again/i })).toHaveCount(0);
 
       // The result is complete downstream too: the answered journey's product
-      // assertions apply verbatim, so a zero-answer attempt is a first-class
-      // result rather than a shell that merely stopped erroring.
+      // assertions apply here too, so a zero-answer attempt is a first-class
+      // reviewable result rather than a shell that merely stopped erroring.
       await page.goto("/sat/results");
       await expect(page.getByRole("heading", { name: "Responses" })).toBeVisible();
-      await page.getByLabel("Search SAT results").fill(studentName);
-      const resultRow = page
-        .locator("button")
-        .filter({ hasText: studentName })
-        .filter({ hasText: examTitle })
-        .first();
+      await page.getByLabel("Search exams").fill(examTitle);
+      const examRow = page.locator("button").filter({ hasText: examTitle }).first();
+      await expect(examRow).toBeVisible({ timeout: 30_000 });
+      await examRow.click();
+      await expect(page.getByRole("heading", { name: examTitle })).toBeVisible();
+      const roomRow = page.getByRole("button", { name: new RegExp(linkName) });
+      await expect(roomRow).toBeVisible({ timeout: 30_000 });
+      await roomRow.click();
+      await expect(page.getByRole("heading", { name: linkName })).toBeVisible();
+      await page.getByLabel("Search students").fill(studentName);
+      const resultRow = page.locator("tbody tr").filter({ hasText: studentName }).first();
       await expect(resultRow).toBeVisible({ timeout: 30_000 });
-      await resultRow.click();
-      await expect(page.getByText("Reading & Writing")).toBeVisible();
-      await expect(page.getByText("Math")).toBeVisible();
+      await expect(resultRow).toContainText("Score pending");
+      await expect(resultRow).not.toContainText("Overall Band");
+      await resultRow.getByRole("button", { name: new RegExp(`View saved answers for ${studentName}`) }).click();
+      await expect(page.getByRole("heading", { name: /Question-level responses/ })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Reading & Writing", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Math", exact: true })).toBeVisible();
     } finally {
       await studentContext.close();
     }

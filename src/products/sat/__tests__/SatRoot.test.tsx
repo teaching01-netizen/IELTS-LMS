@@ -119,7 +119,7 @@ describe('SatRoot', () => {
     }
   });
 
-  it('hides all shell chrome on exam authoring pages', () => {
+  it('hides all shell chrome on exam authoring pages', async () => {
     authMock.mockReturnValue({
       session: { user: { role: 'admin', displayName: 'Alex Staff', email: 'alex@example.com' } },
       logout: vi.fn(),
@@ -135,7 +135,7 @@ describe('SatRoot', () => {
         </MemoryRouter>,
       ),
     );
-    expect(screen.getByText('Builder content')).toBeInTheDocument();
+    expect(await screen.findByText('Builder content')).toBeInTheDocument();
     // Desktop sidebar (workspace switcher + sign-out region) is gone on authoring pages.
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
   });

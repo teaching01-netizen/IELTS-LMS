@@ -33,7 +33,7 @@ export function SatActiveFilters({ chips, onClear }: { chips: ActiveFilterChip[]
         <button
           type="button"
           onClick={onClear}
-          className="inline-flex min-h-9 items-center rounded-full px-2 text-[14px] font-semibold text-[var(--sat-staff-accent,#0071e3)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+          className="inline-flex min-h-9 items-center rounded-full px-2 text-[14px] font-semibold text-[var(--sat-staff-accent-text-on-tint,#0067c9)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
         >
           Clear all
         </button>
