@@ -1,0 +1,228 @@
+{
+  "command": "lake env lean AxiomAudit.lean",
+  "exit_status": 0,
+  "theorem_count": 59,
+  "allowed_axioms": [
+    "Classical.choice",
+    "Quot.sound",
+    "propext"
+  ],
+  "used_axioms": [
+    "Classical.choice",
+    "Quot.sound",
+    "propext"
+  ],
+  "theorems": {
+    "singleton_filter": [
+      "Quot.sound",
+      "propext"
+    ],
+    "pair_count": [
+      "Quot.sound",
+      "propext"
+    ],
+    "imported_exactly_two": [
+      "Classical.choice",
+      "Quot.sound",
+      "propext"
+    ],
+    "initiation": [
+      "Quot.sound",
+      "propext"
+    ],
+    "commit_preserves": [
+      "Quot.sound",
+      "propext"
+    ],
+    "consecution": [
+      "Quot.sound",
+      "propext"
+    ],
+    "reachable_invariant": [
+      "Quot.sound",
+      "propext"
+    ],
+    "at_most_once": [
+      "Quot.sound",
+      "propext"
+    ],
+    "effect_has_receipt": [
+      "Quot.sound",
+      "propext"
+    ],
+    "non_target_preserved": [
+      "Quot.sound",
+      "propext"
+    ],
+    "policies_preserved": [
+      "Quot.sound",
+      "propext"
+    ],
+    "imported_count": [
+      "Quot.sound",
+      "propext"
+    ],
+    "preview_content_bound": [],
+    "unknown_pretests_blocked": [],
+    "stale_revision_blocked": [],
+    "replay_no_mutation": [
+      "Quot.sound",
+      "propext"
+    ],
+    "replay_preserves_durable_result": [
+      "Quot.sound",
+      "propext"
+    ],
+    "disabled_blocks_fresh_commit": [
+      "Quot.sound",
+      "propext"
+    ],
+    "cached_key_blocks_fresh_commit": [
+      "Quot.sound",
+      "propext"
+    ],
+    "durable_receipt_survives_operation_key_cleanup": [
+      "Quot.sound",
+      "propext"
+    ],
+    "retry_after_operation_key_cleanup": [
+      "Quot.sound",
+      "propext"
+    ],
+    "consumed_preview": [
+      "Quot.sound",
+      "propext"
+    ],
+    "publish_pretests": [],
+    "rw_requires_three": [],
+    "undo_restores": [
+      "Quot.sound",
+      "propext"
+    ],
+    "crash_durable": [
+      "Quot.sound",
+      "propext"
+    ],
+    "substantive_other_row_blocked": [
+      "propext"
+    ],
+    "untouched_other_row_ignored": [
+      "propext"
+    ],
+    "changed_scaffold_blocked": [
+      "propext"
+    ],
+    "used_key_cannot_commit": [
+      "Quot.sound",
+      "propext"
+    ],
+    "altered_replay_blocked": [
+      "Quot.sound",
+      "propext"
+    ],
+    "stale_after_commit": [
+      "Quot.sound",
+      "propext"
+    ],
+    "stale_undo_blocked": [
+      "Quot.sound",
+      "propext"
+    ],
+    "fixture_ready": [
+      "Quot.sound",
+      "propext"
+    ],
+    "meaningful_commit": [
+      "Quot.sound",
+      "propext"
+    ],
+    "committed_reachable": [
+      "Quot.sound",
+      "propext"
+    ],
+    "fixture_pretest_flags": [
+      "Quot.sound",
+      "propext"
+    ],
+    "no_resolution": [
+      "Quot.sound",
+      "propext"
+    ],
+    "one_pretest": [
+      "Quot.sound",
+      "propext"
+    ],
+    "three_pretests": [
+      "Quot.sound",
+      "propext"
+    ],
+    "duplicate_pretests": [
+      "Quot.sound",
+      "propext"
+    ],
+    "zero_order": [
+      "Quot.sound",
+      "propext"
+    ],
+    "overflow_order": [
+      "Quot.sound",
+      "propext"
+    ],
+    "unconfirmed": [
+      "Quot.sound",
+      "propext"
+    ],
+    "wrong_count": [
+      "propext"
+    ],
+    "duplicate_order": [
+      "propext"
+    ],
+    "tampered_content": [
+      "propext"
+    ],
+    "wrong_actor": [
+      "propext"
+    ],
+    "wrong_module": [
+      "propext"
+    ],
+    "expired_at_boundary": [
+      "Quot.sound",
+      "propext"
+    ],
+    "stale_fixture": [
+      "Quot.sound",
+      "propext"
+    ],
+    "single_rw_not_publishable": [
+      "Quot.sound",
+      "propext"
+    ],
+    "competing_stale_commit": [
+      "Quot.sound",
+      "propext"
+    ],
+    "naive_two_read_two_write": [],
+    "deleting_other_modules_loses_content": [
+      "Quot.sound",
+      "propext"
+    ],
+    "concrete_step_refines_abstract": [
+      "Quot.sound",
+      "propext"
+    ],
+    "crash_discards_uncommitted_write_set": [
+      "Quot.sound",
+      "propext"
+    ],
+    "abort_discards_uncommitted_write_set": [
+      "Quot.sound",
+      "propext"
+    ],
+    "database_commit_publishes_one_abstract_commit": [
+      "Quot.sound",
+      "propext"
+    ]
+  }
+}

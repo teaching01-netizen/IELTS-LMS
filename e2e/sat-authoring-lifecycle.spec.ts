@@ -191,6 +191,12 @@ async function installTransport(
     pageErrors: [],
   };
   let draftOpened = options.readyDraft ?? false;
+  let publishedVersion: {
+    id: string;
+    versionNumber: number;
+    publishScope: string;
+    publishedAt: string;
+  } | null = null;
 
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -237,7 +243,14 @@ async function installTransport(
       status: 200,
       contentType: "application/json",
       headers: { "x-csrf-token": "csrf-e2e-token" },
-      body: JSON.stringify(EXAM_METADATA),
+      body: JSON.stringify(publishedVersion
+        ? {
+            ...EXAM_METADATA,
+            status: "published",
+            currentDraftVersionId: null,
+            currentPublishedVersionId: publishedVersion.id,
+          }
+        : EXAM_METADATA),
     })
   );
   await page.route(`**/api/v1/assessment-release/exams/${EXAM_ID}`, (route) =>
@@ -245,7 +258,20 @@ async function installTransport(
       status: 200,
       contentType: "application/json",
       headers: { "x-csrf-token": "csrf-e2e-token" },
-      body: JSON.stringify(RELEASE_METADATA),
+      body: JSON.stringify(publishedVersion
+        ? {
+            ...RELEASE_METADATA,
+            state: "published_current",
+            currentPublishedVersion: {
+              id: publishedVersion.id,
+              versionNumber: publishedVersion.versionNumber,
+              revision: 1,
+              publishNotes: null,
+              publishScope: publishedVersion.publishScope,
+              publishedAt: publishedVersion.publishedAt,
+            },
+          }
+        : RELEASE_METADATA),
     })
   );
 
@@ -333,19 +359,26 @@ async function installTransport(
 
     await page.route(`**/api/v1/exams/${EXAM_ID}/publish`, async (route) => {
       recording.publishRequests.push(route.request().postDataJSON());
+      publishedVersion = {
+        id: "published-v2",
+        versionNumber: 2,
+        publishScope: "reading-writing",
+        publishedAt: "2026-10-11T04:00:00.000Z",
+      };
+      draftOpened = false;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         headers: { "x-csrf-token": "csrf-e2e-token" },
         body: JSON.stringify({
-          id: "published-v2",
+          id: publishedVersion.id,
           examId: EXAM_ID,
           versionNumber: 2,
           revision: 1,
           isDraft: false,
           isPublished: true,
-          publishScope: "reading-writing",
-          publishedAt: "2026-10-11T04:00:00.000Z",
+          publishScope: publishedVersion.publishScope,
+          createdAt: publishedVersion.publishedAt,
         }),
       });
     });
@@ -482,6 +515,45 @@ test.describe("SAT authoring shell lifecycle", () => {
       publishScope: "reading-writing",
       revision: 1,
     });
+    expect(recording.consoleErrors).toEqual([]);
+    expect(recording.pageErrors).toEqual([]);
+  });
+
+  test("publish success survives shell removal, Done, reload, and keeps the exact room target", async ({ page }) => {
+    const recording = await installTransport(page, { readyDraft: true, releaseWorkflow: true });
+    await page.goto(`/sat/exams/${EXAM_ID}`);
+
+    await page.getByRole("button", { name: "Publish version" }).click();
+    await expect(page.getByRole("dialog", { name: "Publish version" })).toBeVisible();
+    await page.getByRole("radio", { name: "Reading & Writing" }).check();
+    await expect(page.getByRole("button", { name: "Publish Reading & Writing" })).toBeEnabled();
+    await page.getByRole("button", { name: "Publish Reading & Writing" }).click();
+
+    await expect(page.getByText("Version 2 published. Create a room to give students access.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No editable draft" })).toHaveCount(0);
+    await expectNoSeriousAxeViolations(page, "SAT publish success sheet after draft sealing");
+    expect(recording.publishRequests).toHaveLength(1);
+    expect(recording.postShell).toBe(0);
+
+    await page.getByRole("button", { name: "Done" }).click();
+    await expect(page.getByText("Version 2 is published.")).toBeVisible();
+    const createRoom = page.getByRole("button", { name: "Create room" });
+    await expect(createRoom).toBeFocused();
+
+    // A reload drops the in-memory receipt. The published release read must
+    // still render the usable view without converting a read into a draft POST.
+    await page.reload();
+    await expect(page.getByText("Version 2 is published.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit exam" })).toBeVisible();
+    expect(recording.postShell).toBe(0);
+    await expectNoSeriousAxeViolations(page, "SAT published workspace after reload");
+
+    await page.getByRole("button", { name: "Create room" }).click();
+    await expect(page).toHaveURL(
+      `/sat/exams/${EXAM_ID}/access?new=1&version=published-v2&versionNumber=2&scope=reading-writing`
+    );
+    expect(recording.publishRequests).toHaveLength(1);
+    expect(recording.postShell).toBe(0);
     expect(recording.consoleErrors).toEqual([]);
     expect(recording.pageErrors).toEqual([]);
   });

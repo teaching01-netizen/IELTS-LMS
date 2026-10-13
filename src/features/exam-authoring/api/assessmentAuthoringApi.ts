@@ -3,6 +3,7 @@ import {
   backendGet,
   backendPatch,
   backendPost,
+  backendPut,
 } from "../infrastructure/examAuthoringBackendGateway";
 import type { ApiRequestConfig } from "../infrastructure/examAuthoringBackendGateway";
 import type {
@@ -22,9 +23,12 @@ import type {
   SatWorkbookCommitRequest,
   SatWorkbookCommitResult,
   SatWorkbookPreview,
+  SatWorkbookImportOptions,
   SatWorkbookUndoState,
   PublishedAssessmentVersion,
   PublishAssessmentRequest,
+  SatClassroomPlan,
+  SatScoreConverter,
   SatPublishScope,
   QuestionRevision,
   SaveQuestionRevisionFieldsRequest,
@@ -92,9 +96,13 @@ export const assessmentAuthoringApi = {
     return response.blob();
   },
 
-  previewSatWorkbook(examId: string, file: File): Promise<SatWorkbookPreview> {
+  previewSatWorkbook(examId: string, file: File, options?: SatWorkbookImportOptions): Promise<SatWorkbookPreview> {
     const form = new FormData();
     form.append("file", file, file.name);
+    if (options) {
+      form.append("mode", options.mode);
+      if (options.targetModuleKey) form.append("targetModuleKey", options.targetModuleKey);
+    }
     return backendPost<SatWorkbookPreview, FormData>(
       `/v1/assessment-authoring/exams/${examId}/sat-workbook-preview`,
       form,
@@ -221,6 +229,30 @@ export const assessmentAuthoringApi = {
     return backendPatch<AssessmentAuthoringShell>(
       `/v1/assessment-authoring/exams/${examId}/sections/${sectionId}/delivery-settings`,
       request
+    );
+  },
+
+  getClassroomPlan(examId: string): Promise<{ plan: SatClassroomPlan | null }> {
+    return backendGet<{ plan: SatClassroomPlan | null }>(`/v1/assessment-authoring/exams/${examId}/sat-classroom-plan`);
+  },
+
+  /** Replaces the whole plan; an empty one restores the standard adaptive structure. */
+  setClassroomPlan(examId: string, plan: SatClassroomPlan): Promise<{ plan: SatClassroomPlan | null }> {
+    return backendPut<{ plan: SatClassroomPlan | null }, { plan: SatClassroomPlan }>(
+      `/v1/assessment-authoring/exams/${examId}/sat-classroom-plan`,
+      { plan }
+    );
+  },
+
+  getScoreConverter(examId: string): Promise<{ converter: SatScoreConverter | null }> {
+    return backendGet<{ converter: SatScoreConverter | null }>(`/v1/assessment-authoring/exams/${examId}/sat-score-converter`);
+  },
+
+  /** Replaces the draft's converter; null reports raw scores only. */
+  setScoreConverter(examId: string, converter: unknown): Promise<{ converter: SatScoreConverter | null }> {
+    return backendPut<{ converter: SatScoreConverter | null }, { converter: unknown }>(
+      `/v1/assessment-authoring/exams/${examId}/sat-score-converter`,
+      { converter }
     );
   },
 

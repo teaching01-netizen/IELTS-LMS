@@ -71,6 +71,10 @@ func boundaryRoutePolicy(mock sqlmock.Sqlmock) {
 		WithArgs("sec-1").
 		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
 			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "threshold", `{"minimumCorrectForHigher":13}`, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_route_policy, 'adaptive') FROM student_attempts sa")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"policy"}).AddRow("adaptive"))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("pv-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 }
 
 func boundaryBranchExpectations(mock sqlmock.Sqlmock, moduleID, route, moduleKey, role string, rawCorrect int) {

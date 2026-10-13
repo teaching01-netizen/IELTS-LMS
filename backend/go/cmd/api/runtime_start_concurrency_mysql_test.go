@@ -130,7 +130,7 @@ func newStartRaceHarness(t *testing.T) *startRaceHarness {
 		t.Fatal(err)
 	}
 	reopenedModule := reopened.Sections[0].Modules[0].ID
-	if _, err := db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 2 WHERE id = ?", reopenedModule); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 3 WHERE id = ?", reopenedModule); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := authors.CreateQuestion(ctx, reopenedModule, actor, validSATPublishQuestion()); err != nil {

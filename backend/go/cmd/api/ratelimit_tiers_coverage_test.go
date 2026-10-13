@@ -114,19 +114,20 @@ func TestTierCoverageBuildRouterWiring(t *testing.T) {
 	// Spot-check: routes known to belong to special tiers must sit inside a
 	// limitTier group textually near their registration.
 	checks := map[string]string{
-		`"/session"`:                      "TierAuthCritical",
-		`"/logout"`:                       "TierAuthCritical",
-		`"/{scheduleID}/live"`:            "TierPolling",
-		`"/{scheduleID}/heartbeat"`:       "TierHeartbeat",
-		`"/{scheduleID}/mutations:batch"`: "TierWrites",
-		`"/{attemptID}/responses:batch"`:  "TierWrites",
-		`"/ws/live"`:                      "TierAuthedReads",
-		`"/login"`:                        "TierAnonAuth",
-		`"/student/entry"`:                "TierStudentCheckin",
-		`"/student/schedules/{id}"`:       "TierStudentCheckin",
-		`"/public/access-links/{linkID}"`: "TierStudentCheckin",
-		`"/activate"`:                     "TierAnonAuth",
-		`"/schedules/{scheduleID}/state"`: "TierAuthedReads",
+		`"/session"`:                              "TierAuthCritical",
+		`"/logout"`:                               "TierAuthCritical",
+		`"/{scheduleID}/live"`:                    "TierPolling",
+		`"/{scheduleID}/heartbeat"`:               "TierHeartbeat",
+		`"/{scheduleID}/mutations:batch"`:         "TierWrites",
+		`"/{attemptID}/responses:batch"`:          "TierWrites",
+		`"/ws/live"`:                              "TierAuthedReads",
+		`"/login"`:                                "TierAnonAuth",
+		`"/student/entry"`:                        "TierStudentCheckin",
+		`"/student/schedules/{id}"`:               "TierStudentCheckin",
+		`"/public/access-links/{linkID}"`:         "TierStudentCheckin",
+		`"/activate"`:                             "TierAnonAuth",
+		`"/schedules/{scheduleID}/state"`:         "TierAuthedReads",
+		`"/schedules/{scheduleID}/answered-exam"`: "TierAuthedReads",
 		`"/schedules/{scheduleID}/responses/{examQuestionID}"`: "TierWrites",
 	}
 	for pattern, tier := range checks {

@@ -10,6 +10,9 @@ import type {
 import type { AssessmentReleaseState } from "../../contracts/release";
 import { SatDeliveryReleasePage } from "../SatDeliveryReleasePage";
 
+// The converter panel owns its own queries; ScoreConverterPanel.test covers it.
+vi.mock("../release/ScoreConverterPanel", () => ({ ScoreConverterPanel: () => null }));
+
 const exam: ExamEntity = {
   id: "exam-sat-1",
   slug: "sat-release-test",

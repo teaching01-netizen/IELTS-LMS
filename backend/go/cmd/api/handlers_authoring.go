@@ -412,7 +412,7 @@ func authorPreviewImportHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodePayloadTooLarge, "SAT workbooks must be 12 MB or smaller."))
 			return
 		}
-		preview, err := authoring.ParseSATWorkbook(data)
+		preview, err := authoring.ParseSATWorkbook(data, authoring.SatWorkbookImportOptions{Mode: r.FormValue("mode"), TargetModuleKey: r.FormValue("targetModuleKey")})
 		if err != nil {
 			var workbookErr *authoring.WorkbookError
 			if errors.As(err, &workbookErr) && workbookErr.TooLarge {
@@ -970,6 +970,89 @@ func authorDeliverySettingsHandler(app *App) http.HandlerFunc {
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+// authorClassroomPlanHandler reads (GET) or replaces (PUT) the draft's SAT
+// Classroom module plan: {"plan": {"math": "m2_hard"}}; an empty plan clears it.
+func authorClassroomPlanHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		write := r.Method != http.MethodGet
+		examID := chi.URLParam(r, "examID")
+		var ok bool
+		if write {
+			ok = requireAuthoringExamWrite(app, w, r, examID) != nil
+		} else {
+			ok = requireAuthoringExamRead(app, w, r, examID) != nil
+		}
+		if !ok {
+			return
+		}
+		if app.Authoring == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring service is unavailable."))
+			return
+		}
+		var plan satpublish.Plan
+		var err error
+		if write {
+			var req struct {
+				Plan satpublish.Plan `json:"plan"`
+			}
+			if err = httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
+				httpx.WriteError(w, r, err)
+				return
+			}
+			plan, err = app.Authoring.SetClassroomPlan(r.Context(), examID, req.Plan)
+		} else {
+			plan, err = app.Authoring.GetClassroomPlan(r.Context(), examID)
+		}
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"plan": plan})
+	}
+}
+
+// authorScoreConverterHandler reads (GET) or replaces (PUT) the draft's
+// versioned SAT score converter: {"converter": {...}}; null clears it so the
+// draft reports raw scores only.
+func authorScoreConverterHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		write := r.Method != http.MethodGet
+		examID := chi.URLParam(r, "examID")
+		var ok bool
+		if write {
+			ok = requireAuthoringExamWrite(app, w, r, examID) != nil
+		} else {
+			ok = requireAuthoringExamRead(app, w, r, examID) != nil
+		}
+		if !ok {
+			return
+		}
+		if app.Authoring == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring service is unavailable."))
+			return
+		}
+		var converter json.RawMessage
+		var err error
+		if write {
+			var req struct {
+				Converter json.RawMessage `json:"converter"`
+			}
+			if err = httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
+				httpx.WriteError(w, r, err)
+				return
+			}
+			converter, err = app.Authoring.SetScoreConverter(r.Context(), examID, req.Converter)
+		} else {
+			converter, err = app.Authoring.GetScoreConverter(r.Context(), examID)
+		}
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"converter": converter})
 	}
 }
 

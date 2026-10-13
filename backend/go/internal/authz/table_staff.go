@@ -70,6 +70,7 @@ func init() {
 		// assessment-delivery: attempt bearer credential (handler).
 		"POST /schedules/{scheduleID}/bootstrap":                     {Bearer: true, Scope: ScopeAttemptOwner},
 		"GET /schedules/{scheduleID}/state":                          {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /schedules/{scheduleID}/answered-exam":                  {Bearer: true, Scope: ScopeAttemptOwner},
 		"PATCH /schedules/{scheduleID}/responses/{examQuestionID}":   {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/start":                 {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/start-with-code":               {Bearer: true, Scope: ScopeAttemptOwner},
@@ -143,12 +144,12 @@ func init() {
 		"POST /sessions/{scheduleID}/control/complete-exam":   {MinRoles: proctorRW},
 		// Per-attempt commands: handler second layer checks
 		// proctorHasLiveAssignment for RoleProctor (404-collapse).
-		"POST /sessions/{scheduleID}/attempts/{attemptID}/warn":      {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
-		"POST /sessions/{scheduleID}/attempts/{attemptID}/pause":     {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
-		"POST /sessions/{scheduleID}/attempts/{attemptID}/resume":    {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
-		"POST /sessions/{scheduleID}/attempts/{attemptID}/extend":    {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
-		"POST /sessions/{scheduleID}/attempts/{attemptID}/rearm":     {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
-		"POST /sessions/{scheduleID}/attempts/{attemptID}/terminate": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/warn":                 {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/pause":                {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/resume":               {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/extend":               {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/rearm":                {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/terminate":            {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"GET /sessions/{scheduleID}/attempts/{attemptID}/late-evidence":         {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/late-evidence/review": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		// Device-transfer review: assigned proctors only (handler second
@@ -161,6 +162,10 @@ func init() {
 		// layer: org check + requireProctorAttemptScope, 404-collapse).
 		"GET /sessions/{scheduleID}/start-code":         {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /sessions/{scheduleID}/start-code/rotate": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		// SAT Practice Classroom staff-selected Module 2 (handler: org +
+		// live proctor assignment, 404-collapse).
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/route": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"GET /sessions/{scheduleID}/route-queue":                 {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 
 		// library passages/questions.
 		"GET /passages":                         {MinRoles: readStaff},
@@ -219,18 +224,19 @@ func init() {
 		// full-path keys in table_fullpath.go.
 		"POST /exams/{examID}/sat-workbook-preview": {MinRoles: writeStaff},
 		"POST /exams/{examID}/sat-workbook-commit":  {MinRoles: writeStaff},
-		"GET /dashboard":                        {MinRoles: resultsRead},
-		"GET /analytics":                        {MinRoles: resultsRead},
-		"POST /export":                          {MinRoles: resultsRW},
-		"GET /sat":                              {MinRoles: resultsRead},
-		"GET /sat/access-groups":                {MinRoles: resultsRead},
-		"GET /sat/attempts":                     {MinRoles: resultsRead},
-		"GET /sat/attempts/{attemptID}/answers": {MinRoles: resultsRead},
-		"GET /sat/export/rawdata":               {MinRoles: resultsRead},
-		"GET /sat/{resultID}":                   {MinRoles: resultsRead},
-		"GET /act-science":                      {MinRoles: resultsRW},
-		"GET /act-science/{attemptID}":          {MinRoles: resultsRW},
-		"GET /{resultID}/events":                {MinRoles: resultsRW},
+		"GET /dashboard":                              {MinRoles: resultsRead},
+		"GET /analytics":                              {MinRoles: resultsRead},
+		"POST /export":                                {MinRoles: resultsRW},
+		"GET /sat":                                    {MinRoles: resultsRead},
+		"GET /sat/access-groups":                      {MinRoles: resultsRead},
+		"GET /sat/attempts":                           {MinRoles: resultsRead},
+		"GET /sat/attempts/{attemptID}/answers":       {MinRoles: resultsRead},
+		"GET /sat/attempts/{attemptID}/answered-exam": {MinRoles: resultsRead},
+		"GET /sat/export/rawdata":                     {MinRoles: resultsRead},
+		"GET /sat/{resultID}":                         {MinRoles: resultsRead},
+		"GET /act-science":                            {MinRoles: resultsRW},
+		"GET /act-science/{attemptID}":                {MinRoles: resultsRW},
+		"GET /{resultID}/events":                      {MinRoles: resultsRW},
 		// resultsGetHandler: any authenticated session may call;
 		// students see only their own result (handler SelfOnly-ish
 		// switch denies observer/builder there).

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -80,9 +81,9 @@ func newSATPublishFixture(t *testing.T, customTarget bool) *satPublishFixture {
 		t.Fatal("SAT draft has no Math module")
 	}
 	for index := range modules {
-		target := 1
+		target := 2
 		if customTarget && index == numericModuleIndex {
-			target = 2
+			target = 3
 		}
 		if _, err := h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = ? WHERE id = ?", target, modules[index].id); err != nil {
 			t.Fatal(err)
@@ -93,6 +94,7 @@ func newSATPublishFixture(t *testing.T, customTarget bool) *satPublishFixture {
 			if customTarget && index == numericModuleIndex && questionIndex == 1 {
 				draft = validSATPublishSPR()
 			}
+			draft.IsPretest = questionIndex < 2
 			created, err := h.authors.CreateQuestion(ctx, modules[index].id, h.actor, draft)
 			if err != nil {
 				t.Fatalf("create valid SAT question in %s.%s: %v", modules[index].sectionKey, modules[index].moduleKey, err)
@@ -199,14 +201,18 @@ func makeSATDraftPublishable(t *testing.T, ctx context.Context, db *sql.DB, auth
 		t.Fatal("SAT draft has no normalized modules")
 	}
 	for index := range modules {
-		if _, err := db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 1 WHERE id = ?", modules[index].id); err != nil {
+		if _, err := db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 2 WHERE id = ?", modules[index].id); err != nil {
 			t.Fatalf("lower %s.%s target: %v", modules[index].sectionKey, modules[index].moduleKey, err)
 		}
-		created, err := authors.CreateQuestion(ctx, modules[index].id, actorID, validSATPublishQuestion())
-		if err != nil {
-			t.Fatalf("create valid SAT question in %s.%s: %v", modules[index].sectionKey, modules[index].moduleKey, err)
+		for questionIndex := 0; questionIndex < 2; questionIndex++ {
+			draft := validSATPublishQuestion()
+			draft.IsPretest = true // every module needs exactly two designated pretests
+			created, err := authors.CreateQuestion(ctx, modules[index].id, actorID, draft)
+			if err != nil {
+				t.Fatalf("create valid SAT question in %s.%s: %v", modules[index].sectionKey, modules[index].moduleKey, err)
+			}
+			modules[index].questions = append(modules[index].questions, created.ExamQuestionID)
 		}
-		modules[index].questions = append(modules[index].questions, created.ExamQuestionID)
 	}
 	return modules
 }
@@ -429,7 +435,7 @@ func TestSATPublishScopeIgnoresExcludedIssuesAndPersistsScopeMySQL(t *testing.T)
 	if brokenMath == nil {
 		t.Fatal("fixture must include a Math module")
 	}
-	if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 2 WHERE id = ?", brokenMath.id); err != nil {
+	if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 3 WHERE id = ?", brokenMath.id); err != nil {
 		t.Fatal(err)
 	}
 	assertSATPublishRejected(t, f, "sat.module.incomplete", brokenMath.sectionKey+"."+brokenMath.moduleKey)
@@ -464,6 +470,22 @@ func TestSATPublishScopeIgnoresExcludedIssuesAndPersistsScopeMySQL(t *testing.T)
 	}
 }
 
+func TestSATPublishRejectsInvalidPretestCountsMySQL(t *testing.T) {
+	for _, count := range []int{0, 1} {
+		t.Run(fmt.Sprintf("%d designated", count), func(t *testing.T) {
+			f := newSATPublishFixture(t, false)
+			module := f.modules[0]
+			for index, questionID := range module.questions {
+				isPretest := index < count
+				if _, err := f.h.db.ExecContext(context.Background(), "UPDATE assessment_exam_questions SET is_pretest = ? WHERE id = ?", isPretest, questionID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertSATPublishRejected(t, f, "sat.module.pretest_count", module.sectionKey+"."+module.moduleKey)
+		})
+	}
+}
+
 func TestSATPublishMathScopeIgnoresExcludedIssuesAndPersistsScopeMySQL(t *testing.T) {
 	f := newSATPublishFixture(t, false)
 	ctx := context.Background()
@@ -477,7 +499,7 @@ func TestSATPublishMathScopeIgnoresExcludedIssuesAndPersistsScopeMySQL(t *testin
 	if brokenRW == nil {
 		t.Fatal("fixture must include a Reading & Writing module")
 	}
-	if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 2 WHERE id = ?", brokenRW.id); err != nil {
+	if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 3 WHERE id = ?", brokenRW.id); err != nil {
 		t.Fatal(err)
 	}
 	assertSATPublishRejected(t, f, "sat.module.incomplete", brokenRW.sectionKey+"."+brokenRW.moduleKey, exams.SATPublishScopeReadingWriting)
@@ -560,6 +582,16 @@ func TestSATPublishRejectsEachContentViolationMySQL(t *testing.T) {
 			},
 		},
 		{
+			name: "duplicate choice id",
+			code: "sat.choice.id.duplicate",
+			mutate: func(t *testing.T, f *satPublishFixture) string {
+				eqID := f.modules[0].questions[0]
+				answer := `{"options":[{"id":"A","content":"A"},{"id":"B","content":"B"},{"id":"B","content":"C"},{"id":"D","content":"D"}],"correctOptionId":"A"}`
+				f.setQuestion(t, eqID, "single_choice", string(validSATPublishQuestion().Prompt), answer)
+				return "examQuestion:" + eqID + ":answer.options[2].id"
+			},
+		},
+		{
 			name: "missing correct answer",
 			code: "sat.correct_answer.required",
 			mutate: func(t *testing.T, f *satPublishFixture) string {
@@ -593,7 +625,7 @@ func TestSATPublishRejectsEachContentViolationMySQL(t *testing.T) {
 			code: "sat.module.incomplete",
 			mutate: func(t *testing.T, f *satPublishFixture) string {
 				module := f.modules[0]
-				if _, err := f.h.db.Exec("UPDATE assessment_modules SET target_question_count = 2 WHERE id = ?", module.id); err != nil {
+				if _, err := f.h.db.Exec("UPDATE assessment_modules SET target_question_count = 3 WHERE id = ?", module.id); err != nil {
 					t.Fatal(err)
 				}
 				return module.sectionKey + "." + module.moduleKey
@@ -662,19 +694,15 @@ func TestSATPublishIgnoresLegacyReadinessFieldsMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_exam_questions SET is_pretest = TRUE WHERE id = ?", module.questions[0]); err != nil {
-			t.Fatal(err)
+		for _, examQuestionID := range module.questions[:2] {
+			if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_exam_questions SET is_pretest = TRUE WHERE id = ?", examQuestionID); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	if _, err := f.h.db.ExecContext(ctx, `
 		UPDATE assessment_sections
 		SET duration_seconds = 0, break_after_seconds = -1, instructions = '[]', tool_policy = '["unsupported-tool"]'
-		WHERE exam_version_id = ?`, f.draftID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.h.db.ExecContext(ctx, `
-		UPDATE assessment_sections
-		SET section_key = CONCAT(section_key, '-legacy')
 		WHERE exam_version_id = ?`, f.draftID); err != nil {
 		t.Fatal(err)
 	}
@@ -880,6 +908,7 @@ func TestSATPublishAfterLegacyImageReplacementMySQL(t *testing.T) {
 		QuestionType: "single_choice",
 		Prompt:       json.RawMessage(legacyImagePrompt(replacementAssetID, "Supply demand graph")),
 		Answer:       validSATPublishQuestion().Answer,
+		IsPretest:    true,
 	}); err != nil {
 		t.Fatalf("commit the replacement author save: %v", err)
 	}
@@ -945,5 +974,89 @@ func TestSATPublishConflictsWhenDraftChangesDuringMediaCheckMySQL(t *testing.T) 
 	}
 	if after.draftRevision != before.draftRevision+1 {
 		t.Fatalf("simulated author save did not advance draft revision: before=%+v after=%+v", before, after)
+	}
+}
+
+// SC-04 at publish: a configured converter must cover every topology the plan
+// delivers with the exact operational count, or the release is refused; the
+// published version keeps the converter it was validated with.
+func TestSATPublishRequiresCompleteConverterMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	ctx := context.Background()
+	// One operational question per module beside the two pretests.
+	for _, module := range f.modules {
+		if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 3 WHERE id = ?", module.id); err != nil {
+			t.Fatal(err)
+		}
+		draft := validSATPublishQuestion()
+		if _, err := f.h.authors.CreateQuestion(ctx, module.id, f.h.actor, draft); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refresh := func() {
+		t.Helper()
+		shell, err := f.h.authors.Shell(ctx, f.h.examID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.draftRevision = shell.VersionRevision
+		if err := f.h.db.QueryRowContext(ctx, "SELECT revision FROM exam_entities WHERE id = ?", f.h.examID).Scan(&f.examRevision); err != nil {
+			t.Fatal(err)
+		}
+	}
+	table := func(ops int) map[string]any {
+		scores := map[string]any{}
+		for r := 0; r <= ops; r++ {
+			scores[fmt.Sprint(r)] = 200 + 100*r
+		}
+		return map[string]any{"operationalQuestions": ops, "scores": scores}
+	}
+	converter := func(mathTopologies ...string) json.RawMessage {
+		math := map[string]string{}
+		for _, topology := range mathTopologies {
+			math[topology] = "full"
+		}
+		raw, err := json.Marshal(map[string]any{
+			"converterVersion": "classroom-v1", "scoreType": "estimated_sat", "calibrationSource": "staff_approved",
+			"sections": map[string]any{"reading-writing": map[string]string{"full_lower": "full", "full_higher": "full"}, "math": math},
+			"tables":   map[string]any{"full": table(2)},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+
+	// A malformed converter is refused at the API and stores nothing.
+	if _, err := f.h.authors.SetScoreConverter(ctx, f.h.examID, json.RawMessage(`{"converterVersion":"v","scoreType":"official"}`)); err == nil {
+		t.Fatal("invalid converter accepted")
+	} else if e, ok := apperrors.As(err); !ok || e.Code != apperrors.CodeValidation {
+		t.Fatalf("invalid converter error = %v", err)
+	}
+	if got, err := f.h.authors.GetScoreConverter(ctx, f.h.examID); err != nil || got != nil {
+		t.Fatalf("rejected converter was stored: %s %v", got, err)
+	}
+
+	// Math has no higher-route table: the full adaptive plan can deliver it.
+	if _, err := f.h.authors.SetScoreConverter(ctx, f.h.examID, converter("full_lower")); err != nil {
+		t.Fatal(err)
+	}
+	refresh()
+	assertSATPublishRejected(t, f, "sat.converter.missing", "scoringPolicy")
+
+	if _, err := f.h.authors.SetScoreConverter(ctx, f.h.examID, converter("full_lower", "full_higher")); err != nil {
+		t.Fatal(err)
+	}
+	refresh()
+	published, err := f.h.exams.Publish(ctx, f.h.examID, f.h.actor, f.publishRequest())
+	if err != nil {
+		t.Fatalf("publish with a complete converter: %v", err)
+	}
+	var stored string
+	if err := f.h.db.QueryRowContext(ctx, "SELECT CAST(policy_config AS CHAR) FROM assessment_scoring_policies WHERE exam_version_id = ?", published.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored, `"converterVersion": "classroom-v1"`) && !strings.Contains(stored, `"converterVersion":"classroom-v1"`) {
+		t.Fatalf("published version lost its converter: %s", stored)
 	}
 }

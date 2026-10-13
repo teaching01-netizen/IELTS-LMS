@@ -25,7 +25,7 @@ func TestParseSATWorkbookCompleteContract(t *testing.T) {
 	for _, module := range preview.Modules {
 		pretests := 0
 		for _, question := range module.Questions {
-			if question.IsPretest {
+			if question.IsPretest != nil && *question.IsPretest {
 				pretests++
 			}
 		}

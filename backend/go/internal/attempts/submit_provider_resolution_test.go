@@ -117,6 +117,7 @@ func TestSubmitSATResolverSealsAfterTerminalTopology(t *testing.T) {
 	satScopeUnscoped(mock)
 	mock.ExpectQuery("FROM assessment_module_attempts").
 		WillReturnRows(satModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleSubmitted)))
+	mock.ExpectQuery("sat_route_policy = 'staff_selects'").WillReturnRows(sqlmock.NewRows([]string{"awaiting"}).AddRow(false))
 	mock.ExpectQuery("FROM attempt_responses_v2").
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
 	mock.ExpectExec("UPDATE student_attempts SET response_revision=").WillReturnResult(sqlmock.NewResult(0, 1))

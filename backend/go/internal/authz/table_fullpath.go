@@ -37,6 +37,10 @@ func init() {
 		"PATCH /api/v1/assessment-authoring/question-revisions/{revisionID}":                       {MinRoles: writeStaff},
 		"PATCH /api/v1/assessment-authoring/exams/{examID}/sections/{sectionID}/delivery-settings": {MinRoles: writeStaff},
 		"POST /api/v1/assessment-authoring/exams/{examID}/validate":                                {MinRoles: readStaff},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":                       {MinRoles: readStaff},
+		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":                       {MinRoles: writeStaff},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":                      {MinRoles: readStaff},
+		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":                      {MinRoles: writeStaff},
 		// Prompt co-editing (2026-09-13 design). Token issuance is a
 		// write-capable authoring read (admin/builder/observer may request;
 		// the handler mints a read-mode token for observers). The partial

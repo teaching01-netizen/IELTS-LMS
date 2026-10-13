@@ -13,6 +13,7 @@ import {
   type BackendAttemptCredential,
 } from '../infrastructure/assessmentDeliveryBackendGateway';
 import type {
+  AssessmentAnsweredExam,
   AssessmentDeliveryBootstrap,
   AssessmentDeliveryState,
   AssessmentBreakEntryRequest,
@@ -308,6 +309,14 @@ export const assessmentDeliveryApi = {
   state(scheduleId: string, attemptId: string): Promise<AssessmentDeliveryState> {
     return attemptRequest(scheduleId, attemptId, (config) => backendGet<AssessmentDeliveryState>(
       `/v1/assessment-delivery/schedules/${scheduleId}/state`,
+      config,
+    ));
+  },
+
+  /** The sealed attempt's print projection; served only while its score report is open. */
+  answeredExam(scheduleId: string, attemptId: string): Promise<AssessmentAnsweredExam> {
+    return attemptRequest(scheduleId, attemptId, (config) => backendGet<AssessmentAnsweredExam>(
+      `/v1/assessment-delivery/schedules/${scheduleId}/answered-exam`,
       config,
     ));
   },

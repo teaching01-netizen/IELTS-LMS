@@ -1,0 +1,662 @@
+Verification command: go test ./internal/authoring ./internal/satpublish ./internal/platform/config -count=1 -v
+Exit status: 0
+---
+=== RUN   TestIsEmptyQuestionDraftAcceptsEmptyBody
+--- PASS: TestIsEmptyQuestionDraftAcceptsEmptyBody (0.00s)
+=== RUN   TestDefaultSATQuestionDraftIsSectionAware
+--- PASS: TestDefaultSATQuestionDraftIsSectionAware (0.00s)
+=== RUN   TestQuestionDetailSerializesNestedFrontendShape
+--- PASS: TestQuestionDetailSerializesNestedFrontendShape (0.00s)
+=== RUN   TestSaveRevisionAppendsExactlyOneEvent
+--- PASS: TestSaveRevisionAppendsExactlyOneEvent (0.00s)
+=== RUN   TestAppendThenLaterFailureRollsBackTheEvent
+--- PASS: TestAppendThenLaterFailureRollsBackTheEvent (0.00s)
+=== RUN   TestCommitFailureLeavesNoEvent
+--- PASS: TestCommitFailureLeavesNoEvent (0.00s)
+=== RUN   TestFencedSaveAppendsNoEvent
+--- PASS: TestFencedSaveAppendsNoEvent (0.00s)
+=== RUN   TestPublishFailureRollsBackTheMutation
+--- PASS: TestPublishFailureRollsBackTheMutation (0.00s)
+=== RUN   TestFlagOffIsByteIdenticalLegacyBehavior
+--- PASS: TestFlagOffIsByteIdenticalLegacyBehavior (0.00s)
+=== RUN   TestFlagOnWithoutBusFailsStartup
+--- PASS: TestFlagOnWithoutBusFailsStartup (0.00s)
+=== RUN   TestPayloadCarriesNoContent
+--- PASS: TestPayloadCarriesNoContent (0.00s)
+=== RUN   TestTwoRevisionsStaySeparate
+--- PASS: TestTwoRevisionsStaySeparate (0.00s)
+=== RUN   TestPlatformScopeIsNullNotEmpty
+--- PASS: TestPlatformScopeIsNullNotEmpty (0.00s)
+=== RUN   TestProducerRejectsUnknownKindWhileReaderToleratesIt
+--- PASS: TestProducerRejectsUnknownKindWhileReaderToleratesIt (0.00s)
+=== RUN   TestChangedFieldsAreNamesOnly
+--- PASS: TestChangedFieldsAreNamesOnly (0.00s)
+=== RUN   TestDraftRevisionIsNotMonotonicAcrossUndo
+--- PASS: TestDraftRevisionIsNotMonotonicAcrossUndo (0.00s)
+=== RUN   TestAssembleShellTreeHeader
+--- PASS: TestAssembleShellTreeHeader (0.00s)
+=== RUN   TestAssembleShellTreeOrdering
+--- PASS: TestAssembleShellTreeOrdering (0.00s)
+=== RUN   TestAssembleShellTreeGrouping
+--- PASS: TestAssembleShellTreeGrouping (0.00s)
+=== RUN   TestAssembleShellTreeEmptyArraysNotNil
+--- PASS: TestAssembleShellTreeEmptyArraysNotNil (0.00s)
+=== RUN   TestAssembleShellTreeMissingRoutingIsNil
+--- PASS: TestAssembleShellTreeMissingRoutingIsNil (0.00s)
+=== RUN   TestAssembleShellTreePolicyConfigParsing
+=== RUN   TestAssembleShellTreePolicyConfigParsing/threshold_only_(real_shape)
+=== RUN   TestAssembleShellTreePolicyConfigParsing/stale_stored_count_ignored
+=== RUN   TestAssembleShellTreePolicyConfigParsing/no_keys
+=== RUN   TestAssembleShellTreePolicyConfigParsing/invalid_json
+=== RUN   TestAssembleShellTreePolicyConfigParsing/null_column
+=== RUN   TestAssembleShellTreePolicyConfigParsing/fractional_truncates
+--- PASS: TestAssembleShellTreePolicyConfigParsing (0.00s)
+    --- PASS: TestAssembleShellTreePolicyConfigParsing/threshold_only_(real_shape) (0.00s)
+    --- PASS: TestAssembleShellTreePolicyConfigParsing/stale_stored_count_ignored (0.00s)
+    --- PASS: TestAssembleShellTreePolicyConfigParsing/no_keys (0.00s)
+    --- PASS: TestAssembleShellTreePolicyConfigParsing/invalid_json (0.00s)
+    --- PASS: TestAssembleShellTreePolicyConfigParsing/null_column (0.00s)
+    --- PASS: TestAssembleShellTreePolicyConfigParsing/fractional_truncates (0.00s)
+=== RUN   TestAssembleShellTreeOperationalDerivation
+--- PASS: TestAssembleShellTreeOperationalDerivation (0.00s)
+=== RUN   TestAssembleShellTreeToolPolicyDefault
+=== RUN   TestAssembleShellTreeToolPolicyDefault/null_column
+=== RUN   TestAssembleShellTreeToolPolicyDefault/blank_string
+=== RUN   TestAssembleShellTreeToolPolicyDefault/empty_string
+=== RUN   TestAssembleShellTreeToolPolicyDefault/object
+=== RUN   TestAssembleShellTreeToolPolicyDefault/array
+--- PASS: TestAssembleShellTreeToolPolicyDefault (0.00s)
+    --- PASS: TestAssembleShellTreeToolPolicyDefault/null_column (0.00s)
+    --- PASS: TestAssembleShellTreeToolPolicyDefault/blank_string (0.00s)
+    --- PASS: TestAssembleShellTreeToolPolicyDefault/empty_string (0.00s)
+    --- PASS: TestAssembleShellTreeToolPolicyDefault/object (0.00s)
+    --- PASS: TestAssembleShellTreeToolPolicyDefault/array (0.00s)
+=== RUN   TestAssembleShellTreeRoutingFirstRowWins
+--- PASS: TestAssembleShellTreeRoutingFirstRowWins (0.00s)
+=== RUN   TestAssembleShellTreeOrphanRowsAreDropped
+--- PASS: TestAssembleShellTreeOrphanRowsAreDropped (0.00s)
+=== RUN   TestAssembleShellTreeSectionScalars
+--- PASS: TestAssembleShellTreeSectionScalars (0.00s)
+=== RUN   TestCoeditFinalStoreRequiresOwnedFreezingRowAndLeavesFence
+--- PASS: TestCoeditFinalStoreRequiresOwnedFreezingRowAndLeavesFence (0.00s)
+=== RUN   TestCoeditFinalStoreRejectsDifferentOwner
+--- PASS: TestCoeditFinalStoreRejectsDifferentOwner (0.00s)
+=== RUN   TestCoeditFinalStoreRejectsExpiredLease
+--- PASS: TestCoeditFinalStoreRejectsExpiredLease (0.00s)
+=== RUN   TestCoeditAbortFreezePreservesClosedRows
+--- PASS: TestCoeditAbortFreezePreservesClosedRows (0.00s)
+=== RUN   TestCoeditWorkspaceInitializeRejectsFrozenRoomBeforeDuplicateCheck
+--- PASS: TestCoeditWorkspaceInitializeRejectsFrozenRoomBeforeDuplicateCheck (0.00s)
+=== RUN   TestCoeditInitializeRejectsFrozenRoomBeforeBindingCheck
+--- PASS: TestCoeditInitializeRejectsFrozenRoomBeforeBindingCheck (0.00s)
+=== RUN   TestCoeditWorkspaceUIOnlyStoreKeepsMaterializedRevisionAndAdvancesSequence
+--- PASS: TestCoeditWorkspaceUIOnlyStoreKeepsMaterializedRevisionAndAdvancesSequence (0.00s)
+=== RUN   TestCoeditWorkspaceFinalStoreRequiresOwnedFreezingRowAndLeavesFence
+--- PASS: TestCoeditWorkspaceFinalStoreRequiresOwnedFreezingRowAndLeavesFence (0.00s)
+=== RUN   TestCoeditRebaseAdvancesEpochAndSequenceWithoutProjectionRevision
+--- PASS: TestCoeditRebaseAdvancesEpochAndSequenceWithoutProjectionRevision (0.00s)
+=== RUN   TestCoeditRebaseRejectsStaleEpochBeforeWrite
+--- PASS: TestCoeditRebaseRejectsStaleEpochBeforeWrite (0.00s)
+=== RUN   TestCoeditWorkspaceRebasePreservesWorkspaceRevision
+--- PASS: TestCoeditWorkspaceRebasePreservesWorkspaceRevision (0.00s)
+=== RUN   TestCoeditRecoverExpiredFreezesExcludesFrozenRows
+--- PASS: TestCoeditRecoverExpiredFreezesExcludesFrozenRows (0.00s)
+=== RUN   TestCoeditMarkFreezingMissingRowIsNotSilentlyIgnored
+--- PASS: TestCoeditMarkFreezingMissingRowIsNotSilentlyIgnored (0.00s)
+=== RUN   TestCoeditMarkFreezingDoesNotReopenOrReassertAnAmbiguousFrozenRow
+--- PASS: TestCoeditMarkFreezingDoesNotReopenOrReassertAnAmbiguousFrozenRow (0.00s)
+=== RUN   TestCoeditEnsureDocumentCreatesRowForEditableDraft
+--- PASS: TestCoeditEnsureDocumentCreatesRowForEditableDraft (0.00s)
+=== RUN   TestCoeditEnsureDocumentReturnsExistingDocumentWithoutRekey
+--- PASS: TestCoeditEnsureDocumentReturnsExistingDocumentWithoutRekey (0.00s)
+=== RUN   TestCoeditEnsureDocumentRefusesQuestionOutsideEditableDraft
+--- PASS: TestCoeditEnsureDocumentRefusesQuestionOutsideEditableDraft (0.00s)
+=== RUN   TestCoeditEnsureDocumentResolvesInsertRace
+--- PASS: TestCoeditEnsureDocumentResolvesInsertRace (0.00s)
+=== RUN   TestCoeditEnsureDocumentRefusesClosedDocument
+--- PASS: TestCoeditEnsureDocumentRefusesClosedDocument (0.00s)
+=== RUN   TestCoeditIdentityCarriesClosedReason
+--- PASS: TestCoeditIdentityCarriesClosedReason (0.00s)
+=== RUN   TestCoeditLoadReturnsSeedWhenNoBinaryStateExists
+--- PASS: TestCoeditLoadReturnsSeedWhenNoBinaryStateExists (0.00s)
+=== RUN   TestCoeditLoadReturnsCommittedStateWithoutSeeding
+--- PASS: TestCoeditLoadReturnsCommittedStateWithoutSeeding (0.00s)
+=== RUN   TestCoeditLoadRefusesClosedDocument
+--- PASS: TestCoeditLoadRefusesClosedDocument (0.00s)
+=== RUN   TestCoeditLoadRejectsClientInventedDocumentName
+--- PASS: TestCoeditLoadRejectsClientInventedDocumentName (0.00s)
+=== RUN   TestCoeditInitializeStoresSeedWithoutRevisionBump
+--- PASS: TestCoeditInitializeStoresSeedWithoutRevisionBump (0.00s)
+=== RUN   TestCoeditInitializeOnExistingStateIsIdempotent
+--- PASS: TestCoeditInitializeOnExistingStateIsIdempotent (0.00s)
+=== RUN   TestCoeditInitializeRefusesSeedWhenRevisionMoved
+--- PASS: TestCoeditInitializeRefusesSeedWhenRevisionMoved (0.00s)
+=== RUN   TestCoeditInitializeRefusesUnknownDocument
+--- PASS: TestCoeditInitializeRefusesUnknownDocument (0.00s)
+=== RUN   TestCoeditStoreCommitsStatePromptRevisionAndEventTogether
+--- PASS: TestCoeditStoreCommitsStatePromptRevisionAndEventTogether (0.00s)
+=== RUN   TestCoeditStoreSameHashIsIdempotentWithoutRevisionBump
+--- PASS: TestCoeditStoreSameHashIsIdempotentWithoutRevisionBump (0.00s)
+=== RUN   TestCoeditStoreWithoutActorAttributesToLastResolvedActor
+--- PASS: TestCoeditStoreWithoutActorAttributesToLastResolvedActor (0.00s)
+=== RUN   TestCoeditStoreWithoutAnyKnownActorCommitsWithoutAnEvent
+--- PASS: TestCoeditStoreWithoutAnyKnownActorCommitsWithoutAnEvent (0.00s)
+=== RUN   TestCoeditStorePreviousHashMismatchIsRefused
+--- PASS: TestCoeditStorePreviousHashMismatchIsRefused (0.00s)
+=== RUN   TestCoeditStoreRefusesFrozenAndClosedDocuments
+--- PASS: TestCoeditStoreRefusesFrozenAndClosedDocuments (0.00s)
+=== RUN   TestCoeditStoreRefusesReplacedDraft
+--- PASS: TestCoeditStoreRefusesReplacedDraft (0.00s)
+=== RUN   TestCoeditStoreRefusesChangedRevisionMapping
+--- PASS: TestCoeditStoreRefusesChangedRevisionMapping (0.00s)
+=== RUN   TestCoeditStoreRejectsOversizedPayloadsBeforeAnyQuery
+--- PASS: TestCoeditStoreRejectsOversizedPayloadsBeforeAnyQuery (0.00s)
+=== RUN   TestCoeditSizesRejectStateVectorBeyondColumn
+--- PASS: TestCoeditSizesRejectStateVectorBeyondColumn (0.00s)
+=== RUN   TestCoeditStoreRejectsMalformedStateHash
+--- PASS: TestCoeditStoreRejectsMalformedStateHash (0.00s)
+=== RUN   TestCoeditStoreRejectsClientInventedDocumentName
+--- PASS: TestCoeditStoreRejectsClientInventedDocumentName (0.00s)
+=== RUN   TestCoeditCausationIDIsBoundedAndContentFree
+--- PASS: TestCoeditCausationIDIsBoundedAndContentFree (0.00s)
+=== RUN   TestCoeditVerifyManifestAcceptsMatchingHashes
+--- PASS: TestCoeditVerifyManifestAcceptsMatchingHashes (0.00s)
+=== RUN   TestCoeditVerifyManifestRejectsMismatchedHash
+--- PASS: TestCoeditVerifyManifestRejectsMismatchedHash (0.00s)
+=== RUN   TestCoeditVerifyManifestRejectsStaleMaterializedRevision
+--- PASS: TestCoeditVerifyManifestRejectsStaleMaterializedRevision (0.00s)
+=== RUN   TestCoeditVerifyManifestRejectsUnknownDocumentName
+--- PASS: TestCoeditVerifyManifestRejectsUnknownDocumentName (0.00s)
+=== RUN   TestCoeditMarkFreezingAndAbortFreezeAreIdempotent
+--- PASS: TestCoeditMarkFreezingAndAbortFreezeAreIdempotent (0.00s)
+=== RUN   TestCoeditCloseDocumentsRequiresClosedVocabulary
+--- PASS: TestCoeditCloseDocumentsRequiresClosedVocabulary (0.00s)
+=== RUN   TestCoeditCloseDocumentsWritesReasonAndTimestamp
+--- PASS: TestCoeditCloseDocumentsWritesReasonAndTimestamp (0.00s)
+=== RUN   TestCoeditActiveForQuestionIgnoresClosedRows
+--- PASS: TestCoeditActiveForQuestionIgnoresClosedRows (0.00s)
+=== RUN   TestCoeditActiveDocumentsListsUnclosedRowsForDraft
+--- PASS: TestCoeditActiveDocumentsListsUnclosedRowsForDraft (0.00s)
+=== RUN   TestCoeditCloseByScopeClosesEveryUnclosedDocument
+--- PASS: TestCoeditCloseByScopeClosesEveryUnclosedDocument (0.00s)
+=== RUN   TestPatchRevisionFieldsWritesOnlyAllowListedFields
+--- PASS: TestPatchRevisionFieldsWritesOnlyAllowListedFields (0.00s)
+=== RUN   TestPatchRevisionFieldsRejectsStaleRevision
+--- PASS: TestPatchRevisionFieldsRejectsStaleRevision (0.00s)
+=== RUN   TestPatchRevisionFieldsRequiresAtLeastOneField
+--- PASS: TestPatchRevisionFieldsRequiresAtLeastOneField (0.00s)
+=== RUN   TestCoeditFieldPatchPresenceIsAllowListDriven
+--- PASS: TestCoeditFieldPatchPresenceIsAllowListDriven (0.00s)
+=== RUN   TestLegacyPromptWriteGuardRefusesWhileCoeditIsActive
+--- PASS: TestLegacyPromptWriteGuardRefusesWhileCoeditIsActive (0.00s)
+=== RUN   TestLegacyPromptWriteGuardRefusesWhileWorkspaceRoomIsActive
+--- PASS: TestLegacyPromptWriteGuardRefusesWhileWorkspaceRoomIsActive (0.00s)
+=== RUN   TestLegacyPromptWriteGuardAcceptsWhenEveryRoomIsClosed
+--- PASS: TestLegacyPromptWriteGuardAcceptsWhenEveryRoomIsClosed (0.00s)
+=== RUN   TestLegacyPromptWriteGuardIsSkippedWhenGatedOff
+--- PASS: TestLegacyPromptWriteGuardIsSkippedWhenGatedOff (0.00s)
+=== RUN   TestLegacyPromptWriteGuardAllowsNonPromptDraft
+--- PASS: TestLegacyPromptWriteGuardAllowsNonPromptDraft (0.00s)
+=== RUN   TestCoeditActiveForQuestionAcceptsWhenNoRoomExists
+--- PASS: TestCoeditActiveForQuestionAcceptsWhenNoRoomExists (0.00s)
+=== RUN   TestCoeditErrorCodesMapToStableHTTPStatuses
+--- PASS: TestCoeditErrorCodesMapToStableHTTPStatuses (0.00s)
+=== RUN   TestSaveRevisionReturnsEditorContractAndAdvancesRevision
+--- PASS: TestSaveRevisionReturnsEditorContractAndAdvancesRevision (0.00s)
+=== RUN   TestSaveRevisionRejectsStaleEditor
+--- PASS: TestSaveRevisionRejectsStaleEditor (0.00s)
+=== RUN   TestCreateQuestionCannotMutatePublishedVersion
+--- PASS: TestCreateQuestionCannotMutatePublishedVersion (0.00s)
+=== RUN   TestReorderSwapsPositionsWithoutUniqueKeyCollision
+--- PASS: TestReorderSwapsPositionsWithoutUniqueKeyCollision (0.00s)
+=== RUN   TestReorderRejectsStaleOrderWithUnchangedMembership
+--- PASS: TestReorderRejectsStaleOrderWithUnchangedMembership (0.00s)
+=== RUN   TestBulkRejectsStaleRevisionBeforeAnyContentWrite
+--- PASS: TestBulkRejectsStaleRevisionBeforeAnyContentWrite (0.00s)
+=== RUN   TestBulkRejectsIncompleteFencingAndDuplicateIDs
+--- PASS: TestBulkRejectsIncompleteFencingAndDuplicateIDs (0.00s)
+=== RUN   TestCreateQuestionRejectsOverCapacityInsideTransaction
+--- PASS: TestCreateQuestionRejectsOverCapacityInsideTransaction (0.00s)
+=== RUN   TestDuplicateRejectsOverCapacityBeforeCopy
+--- PASS: TestDuplicateRejectsOverCapacityBeforeCopy (0.00s)
+=== RUN   TestBatchCreateReplaysSameKeyWithoutSecondInsert
+--- PASS: TestBatchCreateReplaysSameKeyWithoutSecondInsert (0.00s)
+=== RUN   TestBulkRejectsReusedKeyWithDifferentPayload
+--- PASS: TestBulkRejectsReusedKeyWithDifferentPayload (0.00s)
+=== RUN   TestCreateQuestionReplaysSameKeyWithoutSecondInsert
+--- PASS: TestCreateQuestionReplaysSameKeyWithoutSecondInsert (0.00s)
+=== RUN   TestDuplicateHonorsInsertionAnchorAndCopiesContent
+--- PASS: TestDuplicateHonorsInsertionAnchorAndCopiesContent (0.00s)
+=== RUN   TestOpenShellClonePreservesPublishedQuestionContent
+    openshell_clone_test.go:132: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestOpenShellClonePreservesPublishedQuestionContent (0.00s)
+=== RUN   TestOpenShellConcurrentExistingDraft
+    openshell_concurrency_test.go:66: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestOpenShellConcurrentExistingDraft (0.00s)
+=== RUN   TestOpenShellConcurrentNoDraftClonesFromPublished
+    openshell_concurrency_test.go:140: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestOpenShellConcurrentNoDraftClonesFromPublished (0.00s)
+=== RUN   TestOpenShellConcurrentNoDraftSingleClone
+    openshell_concurrency_test.go:272: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestOpenShellConcurrentNoDraftSingleClone (0.00s)
+=== RUN   TestPreviewCacheHitSkipsTreeReads
+    preview_cache_test.go:49: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestPreviewCacheHitSkipsTreeReads (0.00s)
+=== RUN   TestPreviewCacheStaleRevisionReloads
+    preview_cache_test.go:84: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestPreviewCacheStaleRevisionReloads (0.00s)
+=== RUN   TestPreviewCacheCrossExamIsolation
+    preview_cache_test.go:190: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestPreviewCacheCrossExamIsolation (0.00s)
+=== RUN   TestPreviewCacheNilDisablesCaching
+    preview_cache_test.go:256: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestPreviewCacheNilDisablesCaching (0.00s)
+=== RUN   TestValidateSATQuestionReturnsReadyForCompleteQuestion
+--- PASS: TestValidateSATQuestionReturnsReadyForCompleteQuestion (0.00s)
+=== RUN   TestValidateSATQuestionFlagsIncompleteAndInvalidSeparately
+--- PASS: TestValidateSATQuestionFlagsIncompleteAndInvalidSeparately (0.00s)
+=== RUN   TestValidateSATQuestionSPRKeysFollowThePublishRule
+--- PASS: TestValidateSATQuestionSPRKeysFollowThePublishRule (0.00s)
+=== RUN   TestValidateSATQuestionAcceptsEditorFormattingButNotLinks
+--- PASS: TestValidateSATQuestionAcceptsEditorFormattingButNotLinks (0.00s)
+=== RUN   TestQuestionSummaryIncludesProviderReadinessAndPreview
+--- PASS: TestQuestionSummaryIncludesProviderReadinessAndPreview (0.00s)
+=== RUN   TestReadPerfBenchmark
+    readperf_bench_test.go:503: READPERF_BENCH not set; run with READPERF_BENCH=1 to measure the read path
+--- SKIP: TestReadPerfBenchmark (0.00s)
+=== RUN   TestReadPerfStatementBudget
+    readperf_bench_test.go:553: READPERF_BENCH not set; run with READPERF_BENCH=1 to measure the read path
+--- SKIP: TestReadPerfStatementBudget (0.00s)
+=== RUN   TestReadPerfSummaryCPU
+    readperf_bench_test.go:624: READPERF_BENCH not set; run with READPERF_BENCH=1 to measure the read path
+--- SKIP: TestReadPerfSummaryCPU (0.00s)
+=== RUN   TestReadPerfBulkBenchmark
+    readperf_bulk_bench_test.go:69: READPERF_BENCH not set; run with READPERF_BENCH=1 to measure the read path
+--- SKIP: TestReadPerfBulkBenchmark (0.00s)
+=== RUN   TestGoldenShellBulkProjection
+--- PASS: TestGoldenShellBulkProjection (0.00s)
+=== RUN   TestGoldenShellEmptyDraftBulk
+--- PASS: TestGoldenShellEmptyDraftBulk (0.00s)
+=== RUN   TestGoldenShellBulkLifecycleParity
+=== RUN   TestGoldenShellBulkLifecycleParity/exam_row_absent_->_EXAM_NOT_FOUND
+=== RUN   TestGoldenShellBulkLifecycleParity/draft_pointer_null_->_NO_DRAFT
+=== RUN   TestGoldenShellBulkLifecycleParity/draft_pointer_blank_->_NO_DRAFT
+=== RUN   TestGoldenShellBulkLifecycleParity/draft_pointer_dangling_->_DRAFT_INTEGRITY_VIOLATION
+--- PASS: TestGoldenShellBulkLifecycleParity (0.00s)
+    --- PASS: TestGoldenShellBulkLifecycleParity/exam_row_absent_->_EXAM_NOT_FOUND (0.00s)
+    --- PASS: TestGoldenShellBulkLifecycleParity/draft_pointer_null_->_NO_DRAFT (0.00s)
+    --- PASS: TestGoldenShellBulkLifecycleParity/draft_pointer_blank_->_NO_DRAFT (0.00s)
+    --- PASS: TestGoldenShellBulkLifecycleParity/draft_pointer_dangling_->_DRAFT_INTEGRITY_VIOLATION (0.00s)
+=== RUN   TestGoldenShellBulkStatementBudget
+--- PASS: TestGoldenShellBulkStatementBudget (0.00s)
+=== RUN   TestGoldenPreviewBulkDelivery
+--- PASS: TestGoldenPreviewBulkDelivery (0.00s)
+=== RUN   TestGoldenShellBulkPolicyConfigParsingGolden
+--- PASS: TestGoldenShellBulkPolicyConfigParsingGolden (0.00s)
+=== RUN   TestGoldenShellBulkModuleToolPolicyGolden
+--- PASS: TestGoldenShellBulkModuleToolPolicyGolden (0.00s)
+=== RUN   TestReadPerfBulkStatementBudgetLive
+    readperf_bulk_golden_test.go:503: READPERF_BENCH not set; run with READPERF_BENCH=1 to measure the read path
+--- SKIP: TestReadPerfBulkStatementBudgetLive (0.00s)
+=== RUN   TestReadPerfBulkDeliveryStatementBudgetLive
+    readperf_bulk_golden_test.go:525: READPERF_BENCH not set; run with READPERF_BENCH=1 to measure the read path
+--- SKIP: TestReadPerfBulkDeliveryStatementBudgetLive (0.00s)
+=== RUN   TestReadPerfBulkPreviewProjectionBudgetLive
+    readperf_bulk_golden_test.go:562: READPERF_BENCH not set; run with READPERF_BENCH=1 to measure the read path
+--- SKIP: TestReadPerfBulkPreviewProjectionBudgetLive (0.00s)
+=== RUN   TestEquivalenceFullSATFixture
+    readperf_equivalence_test.go:525: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestEquivalenceFullSATFixture (0.00s)
+=== RUN   TestEquivalenceEmptyVersion
+    readperf_equivalence_test.go:573: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestEquivalenceEmptyVersion (0.00s)
+=== RUN   TestEquivalenceSingleSectionModule
+    readperf_equivalence_test.go:596: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestEquivalenceSingleSectionModule (0.00s)
+=== RUN   TestEquivalenceRoutingConfigParsing
+    readperf_equivalence_test.go:654: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestEquivalenceRoutingConfigParsing (0.00s)
+=== RUN   TestEquivalenceNotFoundParity
+    readperf_equivalence_test.go:692: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestEquivalenceNotFoundParity (0.00s)
+=== RUN   TestReadPerfFixtureSeedsFullSATShape
+    readperf_fixture_test.go:751: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestReadPerfFixtureSeedsFullSATShape (0.00s)
+=== RUN   TestReadPerfFixtureIsolatesConcurrentInstances
+    readperf_fixture_test.go:826: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestReadPerfFixtureIsolatesConcurrentInstances (0.00s)
+=== RUN   TestGoldenShellProjection
+--- PASS: TestGoldenShellProjection (0.00s)
+=== RUN   TestGoldenPreviewRedaction
+--- PASS: TestGoldenPreviewRedaction (0.00s)
+=== RUN   TestGoldenShellEmptyDraft
+--- PASS: TestGoldenShellEmptyDraft (0.00s)
+=== RUN   TestGoldenShellMissingDraftPointer
+--- PASS: TestGoldenShellMissingDraftPointer (0.00s)
+=== RUN   TestGoldenPreviewRejectsNonSAT
+--- PASS: TestGoldenPreviewRejectsNonSAT (0.00s)
+=== RUN   TestSectionCandidateSecondsCountsOneBranch
+--- PASS: TestSectionCandidateSecondsCountsOneBranch (0.00s)
+=== RUN   TestSectionCandidateSecondsPicksTheLongerBranch
+--- PASS: TestSectionCandidateSecondsPicksTheLongerBranch (0.00s)
+=== RUN   TestSectionCandidateSecondsToleratesMissingIDs
+--- PASS: TestSectionCandidateSecondsToleratesMissingIDs (0.00s)
+=== RUN   TestListQuestionsModuleNotFound
+--- PASS: TestListQuestionsModuleNotFound (0.00s)
+=== RUN   TestOpenShellDraftShortcut
+--- PASS: TestOpenShellDraftShortcut (0.00s)
+=== RUN   TestShellResultWireShape
+--- PASS: TestShellResultWireShape (0.00s)
+=== RUN   TestShellLifecycleErrorCodes
+--- PASS: TestShellLifecycleErrorCodes (0.00s)
+=== RUN   TestShellStatesAreDistinct
+--- PASS: TestShellStatesAreDistinct (0.00s)
+=== RUN   TestSingleModuleResolutionRequiresExplicitDistinctInRangePair
+--- PASS: TestSingleModuleResolutionRequiresExplicitDistinctInRangePair (0.00s)
+=== RUN   TestSingleModuleResolutionMaterializesExactlyTwoWithoutMutatingCaller
+--- PASS: TestSingleModuleResolutionMaterializesExactlyTwoWithoutMutatingCaller (0.00s)
+=== RUN   TestSingleModuleContentDigestCanonicalJSONAndPretestSeparation
+--- PASS: TestSingleModuleContentDigestCanonicalJSONAndPretestSeparation (0.00s)
+=== RUN   TestWorkbookCommitReplaysSameKeyWithoutSecondReplace
+--- PASS: TestWorkbookCommitReplaysSameKeyWithoutSecondReplace (0.02s)
+=== RUN   TestWorkbookCommitRejectsReusedKeyWithDifferentPayload
+--- PASS: TestWorkbookCommitRejectsReusedKeyWithDifferentPayload (0.00s)
+=== RUN   TestWorkbookCommitInFlightKeyAsksForRetry
+--- PASS: TestWorkbookCommitInFlightKeyAsksForRetry (0.00s)
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/rw-m1/scaffolds=false
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/rw-m1/scaffolds=true
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/rw-m2-lower/scaffolds=false
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/rw-m2-lower/scaffolds=true
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/rw-m2-higher/scaffolds=false
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/rw-m2-higher/scaffolds=true
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/math-m1/scaffolds=false
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/math-m1/scaffolds=true
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/math-m2-lower/scaffolds=false
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/math-m2-lower/scaffolds=true
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/math-m2-higher/scaffolds=false
+=== RUN   TestParseSATWorkbookSingleModuleUnknownPretests/math-m2-higher/scaffolds=true
+--- PASS: TestParseSATWorkbookSingleModuleUnknownPretests (0.40s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/rw-m1/scaffolds=false (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/rw-m1/scaffolds=true (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/rw-m2-lower/scaffolds=false (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/rw-m2-lower/scaffolds=true (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/rw-m2-higher/scaffolds=false (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/rw-m2-higher/scaffolds=true (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/math-m1/scaffolds=false (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/math-m1/scaffolds=true (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/math-m2-lower/scaffolds=false (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/math-m2-lower/scaffolds=true (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/math-m2-higher/scaffolds=false (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleUnknownPretests/math-m2-higher/scaffolds=true (0.05s)
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/C
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/D
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/E
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/F
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/G
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/H
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/I
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/J
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/K
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/L
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/M
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/N
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/O
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/P
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/Q
+=== RUN   TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/R
+--- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds (0.65s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/C (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/D (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/E (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/F (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/G (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/H (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/I (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/J (0.03s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/K (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/L (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/M (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/N (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/O (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/P (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/Q (0.04s)
+    --- PASS: TestParseSATWorkbookSingleModuleBlocksModifiedScaffolds/R (0.04s)
+=== RUN   TestParseSATWorkbookSingleModuleStillChecksIgnoredRowFormulas
+--- PASS: TestParseSATWorkbookSingleModuleStillChecksIgnoredRowFormulas (0.04s)
+=== RUN   TestParseSATWorkbookSingleModuleRejectsInvalidScope
+--- PASS: TestParseSATWorkbookSingleModuleRejectsInvalidScope (0.07s)
+=== RUN   TestParseSATWorkbookCompleteContract
+--- PASS: TestParseSATWorkbookCompleteContract (0.03s)
+=== RUN   TestParseSATWorkbookRejectsFormulas
+--- PASS: TestParseSATWorkbookRejectsFormulas (0.00s)
+=== RUN   TestParseSATWorkbookRejectsInvalidContainer
+--- PASS: TestParseSATWorkbookRejectsInvalidContainer (0.00s)
+=== RUN   TestParseWorkspaceQuestionProjectionSupportsRichAndScalarRoots
+--- PASS: TestParseWorkspaceQuestionProjectionSupportsRichAndScalarRoots (0.00s)
+=== RUN   TestMergeWorkspaceAnswerPreservesChoiceContentAndAppliesRichChoice
+--- PASS: TestMergeWorkspaceAnswerPreservesChoiceContentAndAppliesRichChoice (0.00s)
+=== RUN   TestMergeWorkspaceAnswerPreservesStudentResponseWithStaleChoices
+=== RUN   TestMergeWorkspaceAnswerPreservesStudentResponseWithStaleChoices/switch_from_multiple_choice
+=== RUN   TestMergeWorkspaceAnswerPreservesStudentResponseWithStaleChoices/update_student_response
+=== RUN   TestMergeWorkspaceAnswerPreservesStudentResponseWithStaleChoices/choice-only_update
+--- PASS: TestMergeWorkspaceAnswerPreservesStudentResponseWithStaleChoices (0.00s)
+    --- PASS: TestMergeWorkspaceAnswerPreservesStudentResponseWithStaleChoices/switch_from_multiple_choice (0.00s)
+    --- PASS: TestMergeWorkspaceAnswerPreservesStudentResponseWithStaleChoices/update_student_response (0.00s)
+    --- PASS: TestMergeWorkspaceAnswerPreservesStudentResponseWithStaleChoices/choice-only_update (0.00s)
+=== RUN   TestWorkspaceStudentResponseProjectionRecognizesAnswerKey
+--- PASS: TestWorkspaceStudentResponseProjectionRecognizesAnswerKey (0.00s)
+=== RUN   TestMergeWorkspaceAnswerSwitchesStudentResponseBackToMultipleChoice
+--- PASS: TestMergeWorkspaceAnswerSwitchesStudentResponseBackToMultipleChoice (0.00s)
+=== RUN   TestParseWorkspaceQuestionProjectionRejectsMalformedScalar
+--- PASS: TestParseWorkspaceQuestionProjectionRejectsMalformedScalar (0.00s)
+PASS
+ok  	example.com/ielts-proctoring/internal/authoring	1.852s
+=== RUN   TestCollectRichContentAssetReferencesWalksLegacyAndRichDocuments
+--- PASS: TestCollectRichContentAssetReferencesWalksLegacyAndRichDocuments (0.00s)
+=== RUN   TestCollectRichContentAssetReferencesIgnoresExternalImages
+--- PASS: TestCollectRichContentAssetReferencesIgnoresExternalImages (0.00s)
+=== RUN   TestParsePlan
+--- PASS: TestParsePlan (0.00s)
+=== RUN   TestPlanUsesAndEntryRole
+--- PASS: TestPlanUsesAndEntryRole (0.00s)
+=== RUN   TestValidateDraftPlanOnlyRequiresDeliveredModules
+--- PASS: TestValidateDraftPlanOnlyRequiresDeliveredModules (0.00s)
+=== RUN   TestValidateQuestionUsesOnlySATPublishRules
+--- PASS: TestValidateQuestionUsesOnlySATPublishRules (0.00s)
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/empty_prompt
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/choice_count
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/choice_content
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/missing_correct_answer
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/invalid_correct_answer
+--- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/empty_prompt (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/choice_count (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/choice_content (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/missing_correct_answer (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/invalid_correct_answer (0.00s)
+=== RUN   TestValidateQuestionSPRRequiresNumericAcceptedResponses
+--- PASS: TestValidateQuestionSPRRequiresNumericAcceptedResponses (0.00s)
+=== RUN   TestValidateModuleUsesConfiguredTarget
+--- PASS: TestValidateModuleUsesConfiguredTarget (0.00s)
+=== RUN   TestValidateModuleRestrictsStudentProducedResponseToMath
+--- PASS: TestValidateModuleRestrictsStudentProducedResponseToMath (0.00s)
+=== RUN   TestValidateModuleRequiresExactlyTwoPretests
+--- PASS: TestValidateModuleRequiresExactlyTwoPretests (0.00s)
+=== RUN   TestValidateDraftRequiresAllThreeModulesInSelectedSection
+--- PASS: TestValidateDraftRequiresAllThreeModulesInSelectedSection (0.00s)
+PASS
+ok  	example.com/ielts-proctoring/internal/satpublish	0.952s
+=== RUN   TestAttemptVerifyDefaultsStrict
+--- PASS: TestAttemptVerifyDefaultsStrict (0.00s)
+=== RUN   TestAttemptVerifyStatelessParses
+--- PASS: TestAttemptVerifyStatelessParses (0.00s)
+=== RUN   TestAttemptVerifyUnknownRejected
+--- PASS: TestAttemptVerifyUnknownRejected (0.00s)
+=== RUN   TestAttemptVerifyStrictValidates
+--- PASS: TestAttemptVerifyStrictValidates (0.00s)
+=== RUN   TestLoadDefaults
+--- PASS: TestLoadDefaults (0.00s)
+=== RUN   TestSingleModuleImportFeatureFlag
+--- PASS: TestSingleModuleImportFeatureFlag (0.00s)
+=== RUN   TestTrustedProxyConfig
+--- PASS: TestTrustedProxyConfig (0.00s)
+=== RUN   TestPromptCoeditingIsAlwaysOn
+--- PASS: TestPromptCoeditingIsAlwaysOn (0.00s)
+=== RUN   TestLoadLowResourceDefaults
+--- PASS: TestLoadLowResourceDefaults (0.00s)
+=== RUN   TestLoadPrefersPlatformPort
+--- PASS: TestLoadPrefersPlatformPort (0.00s)
+=== RUN   TestValidateForRuntime
+--- PASS: TestValidateForRuntime (0.00s)
+=== RUN   TestCookieTransportDefaultsInsecureOutsideProduction
+--- PASS: TestCookieTransportDefaultsInsecureOutsideProduction (0.00s)
+=== RUN   TestEffectiveCookieNameKeepsHostPrefixWhenSecure
+--- PASS: TestEffectiveCookieNameKeepsHostPrefixWhenSecure (0.00s)
+=== RUN   TestEntryGateDefaultsOff
+--- PASS: TestEntryGateDefaultsOff (0.00s)
+=== RUN   TestEntryGateOnParses
+--- PASS: TestEntryGateOnParses (0.00s)
+=== RUN   TestEntryGateRates
+2026/10/13 16:10:02 config: ENTRY_PER_SEC_PER_SCHEDULE="0" invalid (must be a positive number); using default 500
+2026/10/13 16:10:02 config: ENTRY_BURST="-5" invalid (must be a positive number); using default 2000
+--- PASS: TestEntryGateRates (0.00s)
+=== RUN   TestLiveBusDefaultsDB
+--- PASS: TestLiveBusDefaultsDB (0.00s)
+=== RUN   TestLiveBusDirectParses
+--- PASS: TestLiveBusDirectParses (0.00s)
+=== RUN   TestLiveBusUnknownFailsClosed
+--- PASS: TestLiveBusUnknownFailsClosed (0.00s)
+=== RUN   TestLiveBusSinkDefaultsOff
+--- PASS: TestLiveBusSinkDefaultsOff (0.00s)
+=== RUN   TestLiveBusSinkSampleParses
+--- PASS: TestLiveBusSinkSampleParses (0.00s)
+=== RUN   TestLiveBusDirectRequiresExecOnly
+--- PASS: TestLiveBusDirectRequiresExecOnly (0.00s)
+=== RUN   TestLiveBusSinkUnknownFailsClosed
+--- PASS: TestLiveBusSinkUnknownFailsClosed (0.00s)
+=== RUN   TestMalformedEnvKeepsDefault
+2026/10/13 16:10:02 config: DB_POOL_MAX_CONNECTIONS="not-a-number" invalid (must be a base-10 integer); using default 20
+2026/10/13 16:10:02 config: DB_POOL_MAX_CONNECTIONS="10x" invalid (must be a base-10 integer); using default 20
+2026/10/13 16:10:02 config: SOME_BOOL_KEY_FOR_TEST="maybe" invalid (must be a boolean); using default true
+2026/10/13 16:10:02 config: SOME_RATE_KEY_FOR_TEST="fast" invalid (must be a positive number); using default 1.5
+--- PASS: TestMalformedEnvKeepsDefault (0.00s)
+=== RUN   TestOutboxExecOnlyDefaultsOff
+--- PASS: TestOutboxExecOnlyDefaultsOff (0.00s)
+=== RUN   TestOutboxExecOnlyOnParses
+--- PASS: TestOutboxExecOnlyOnParses (0.00s)
+=== RUN   TestWorkerPoolDefaultsFollowShared
+--- PASS: TestWorkerPoolDefaultsFollowShared (0.00s)
+=== RUN   TestWorkerPoolExplicitSplit
+--- PASS: TestWorkerPoolExplicitSplit (0.00s)
+=== RUN   TestClaimPartitionsDefaults
+--- PASS: TestClaimPartitionsDefaults (0.00s)
+=== RUN   TestClaimModeSkipLockedParses
+--- PASS: TestClaimModeSkipLockedParses (0.00s)
+=== RUN   TestClaimModeUnknownFailsClosed
+--- PASS: TestClaimModeUnknownFailsClosed (0.00s)
+=== RUN   TestPresenceModeDefaultsInline
+--- PASS: TestPresenceModeDefaultsInline (0.00s)
+=== RUN   TestPresenceModeMemoryParses
+--- PASS: TestPresenceModeMemoryParses (0.00s)
+=== RUN   TestPresenceModeUnknownFailsClosed
+--- PASS: TestPresenceModeUnknownFailsClosed (0.00s)
+=== RUN   TestRateLimitModeDefaultsDual
+--- PASS: TestRateLimitModeDefaultsDual (0.00s)
+=== RUN   TestRateLimitModeLocalParses
+--- PASS: TestRateLimitModeLocalParses (0.00s)
+=== RUN   TestRateLimitModeParsingForgiving
+--- PASS: TestRateLimitModeParsingForgiving (0.00s)
+=== RUN   TestRateLimitModeUnknownRejected
+--- PASS: TestRateLimitModeUnknownRejected (0.00s)
+=== RUN   TestRateLimitModeDualValidates
+--- PASS: TestRateLimitModeDualValidates (0.00s)
+=== RUN   TestTierLimitsDeriveFromLegacyDefaults
+2026/10/13 16:10:02 config: RATE_LIMIT_GLOBAL is deprecated and ignored; use per-tier RATE_LIMIT_*_PER_MIN values
+--- PASS: TestTierLimitsDeriveFromLegacyDefaults (0.00s)
+=== RUN   TestTierLimitsExplicitEnvWins
+--- PASS: TestTierLimitsExplicitEnvWins (0.00s)
+=== RUN   TestRateLimitConfigUsesCanonicalKeyAndBurstSettings
+2026/10/13 16:10:02 config: RATE_LIMIT_BUCKET_CAP is deprecated; use RATE_LIMIT_MAX_KEYS
+2026/10/13 16:10:02 config: RATE_LIMIT_GLOBAL is deprecated and ignored; use per-tier RATE_LIMIT_*_PER_MIN values
+--- PASS: TestRateLimitConfigUsesCanonicalKeyAndBurstSettings (0.00s)
+=== RUN   TestRateLimitConfigUsesBucketCapAsDeprecatedMaxKeyAlias
+2026/10/13 16:10:02 config: RATE_LIMIT_BUCKET_CAP is deprecated; use RATE_LIMIT_MAX_KEYS
+--- PASS: TestRateLimitConfigUsesBucketCapAsDeprecatedMaxKeyAlias (0.00s)
+=== RUN   TestRateLimitConfigRejectsInvalidValues
+=== RUN   TestRateLimitConfigRejectsInvalidValues/max_keys
+=== RUN   TestRateLimitConfigRejectsInvalidValues/negative_burst
+=== RUN   TestRateLimitConfigRejectsInvalidValues/tier_budget
+=== RUN   TestRateLimitConfigRejectsInvalidValues/student-checkin_budget
+=== RUN   TestRateLimitConfigRejectsInvalidValues/export_count
+=== RUN   TestRateLimitConfigRejectsInvalidValues/export_window
+--- PASS: TestRateLimitConfigRejectsInvalidValues (0.00s)
+    --- PASS: TestRateLimitConfigRejectsInvalidValues/max_keys (0.00s)
+    --- PASS: TestRateLimitConfigRejectsInvalidValues/negative_burst (0.00s)
+    --- PASS: TestRateLimitConfigRejectsInvalidValues/tier_budget (0.00s)
+    --- PASS: TestRateLimitConfigRejectsInvalidValues/student-checkin_budget (0.00s)
+    --- PASS: TestRateLimitConfigRejectsInvalidValues/export_count (0.00s)
+    --- PASS: TestRateLimitConfigRejectsInvalidValues/export_window (0.00s)
+=== RUN   TestRollupDefaultsOff
+--- PASS: TestRollupDefaultsOff (0.00s)
+=== RUN   TestRollupOnParses
+--- PASS: TestRollupOnParses (0.00s)
+=== RUN   TestRowFirstDefaultsOff
+--- PASS: TestRowFirstDefaultsOff (0.00s)
+=== RUN   TestRowFirstOnParses
+--- PASS: TestRowFirstOnParses (0.00s)
+=== RUN   TestRowFirstOffStaysOff
+--- PASS: TestRowFirstOffStaysOff (0.00s)
+=== RUN   TestRunbookFlagsMatrixParity
+--- PASS: TestRunbookFlagsMatrixParity (0.00s)
+=== RUN   TestRuntimeSnapshotDefaultsOff
+--- PASS: TestRuntimeSnapshotDefaultsOff (0.00s)
+=== RUN   TestRuntimeSnapshotOnParses
+--- PASS: TestRuntimeSnapshotOnParses (0.00s)
+=== RUN   TestRuntimeSnapshotOffStaysOff
+--- PASS: TestRuntimeSnapshotOffStaysOff (0.00s)
+=== RUN   TestSessionCacheDefaultsOff
+--- PASS: TestSessionCacheDefaultsOff (0.00s)
+=== RUN   TestSessionCacheExplicitParses
+--- PASS: TestSessionCacheExplicitParses (0.00s)
+=== RUN   TestSessionCacheBoundsFallBack
+--- PASS: TestSessionCacheBoundsFallBack (0.00s)
+=== RUN   TestShedModeDefaultsOff
+--- PASS: TestShedModeDefaultsOff (0.00s)
+=== RUN   TestShedModeExamParses
+--- PASS: TestShedModeExamParses (0.00s)
+=== RUN   TestShedModeUnknownFailsClosed
+--- PASS: TestShedModeUnknownFailsClosed (0.00s)
+=== RUN   TestShedExamBudgetsProtectSubmits
+--- PASS: TestShedExamBudgetsProtectSubmits (0.00s)
+=== RUN   TestShedExamRunbookFigures
+--- PASS: TestShedExamRunbookFigures (0.00s)
+=== RUN   TestShedOffIsIdentity
+--- PASS: TestShedOffIsIdentity (0.00s)
+=== RUN   TestStudentWSDefaultsAllow
+--- PASS: TestStudentWSDefaultsAllow (0.00s)
+=== RUN   TestStudentWSGoneParses
+--- PASS: TestStudentWSGoneParses (0.00s)
+=== RUN   TestStudentWSUnknownFailsClosed
+--- PASS: TestStudentWSUnknownFailsClosed (0.00s)
+=== RUN   TestVersionCacheDefaultsOff
+--- PASS: TestVersionCacheDefaultsOff (0.00s)
+=== RUN   TestVersionCacheOnParses
+--- PASS: TestVersionCacheOnParses (0.00s)
+=== RUN   TestWSAdmissionDefaultsDB
+--- PASS: TestWSAdmissionDefaultsDB (0.00s)
+=== RUN   TestWSAdmissionMemoryParses
+--- PASS: TestWSAdmissionMemoryParses (0.00s)
+=== RUN   TestWSAdmissionUnknownFailsClosed
+--- PASS: TestWSAdmissionUnknownFailsClosed (0.00s)
+=== RUN   TestWSAdmissionCapsDefaults
+--- PASS: TestWSAdmissionCapsDefaults (0.00s)
+=== RUN   TestWSAdmissionCapsClamp
+2026/10/13 16:10:02 config: WS_CAP_SCHEDULE="notanint" invalid (must be a base-10 integer); using default 20000
+--- PASS: TestWSAdmissionCapsClamp (0.00s)
+=== RUN   TestWSAdmissionCapsExplicit
+--- PASS: TestWSAdmissionCapsExplicit (0.00s)
+PASS
+ok  	example.com/ielts-proctoring/internal/platform/config	0.776s

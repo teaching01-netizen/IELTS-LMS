@@ -36,6 +36,34 @@ The Go runner applies `backend/go/migrations/*.sql` in filename order. This is t
   for create/duplicate/batch/bulk/workbook-commit/publish. 7-day TTL swept by
   `maintenance.RunRetention` (authoringOpKeyRows). Re-runnable.
 
+## Single-module SAT workbook import rollout
+
+`0082_sat_single_module_import.sql` adds the checked-content sidecar and
+exam-lifetime replay receipt for single-module SAT imports. Apply the migration
+before deploying code that can enable `SAT_SINGLE_MODULE_IMPORT_ENABLED`. Keep
+that flag false while API instances are mixed-version; enable it only after all
+instances understand the sidecar. The existing full-workbook path does not use
+the new table. Deleting an exam cascades its import receipts with the exam's
+authoring data.
+
+## SAT Classroom route-policy fence
+
+`0084_sat_route_policy_fence.sql` adds a `BEFORE INSERT` trigger on
+`assessment_route_decisions`: under `staff_selects` the decision must carry
+`route_basis = 'staff_selected'`, and under `force_lower`/`force_higher` the
+selected route must match. A binary that predates 0083 therefore cannot route a
+classroom attempt on a mixed-version fleet; its Module 1 close rolls back and a
+current binary finalizes it. Apply 0084 before creating any classroom session.
+MySQL only (TiDB skips triggers).
+
+`0086_sat_classroom_plan_fence.sql` adds write-boundary guards for the
+immutable per-section module plan. It rejects route decisions that select a
+branch excluded by `m1_easy`/`m1_hard` and module-attempt inserts that use a
+module outside the plan, including a legacy M1 seed for standalone M2. Apply
+0086 before creating classroom sessions; the existing creation gate still
+needs to remain closed while serving binaries are mixed-version. MySQL only
+(TiDB skips triggers).
+
 ## Ledger truth
 
 `schema_migrations(filename PK)` is the canonical applied-migration ledger:
@@ -64,7 +92,7 @@ Run these against a migrated database to verify the union:
 ```sql
 -- Union completeness: files applied in order (canonical ledger).
 SELECT COUNT(*), MIN(filename), MAX(filename) FROM schema_migrations;
--- Expect: COUNT 58, MIN '0001_roles.sql', MAX '0058_authoring_operation_keys.sql'.
+-- Expect: COUNT 86, MIN '0001_roles.sql', MAX '0086_sat_classroom_plan_fence.sql'.
 
 -- Verbatim lineage: every file recorded exactly once.
 SELECT filename FROM schema_migrations ORDER BY filename;

@@ -18,6 +18,18 @@ async function waitForSatSaved(page: Page) {
   });
 }
 
+async function copyPracticeEntryRecovery(fromPage: Page, toPage: Page) {
+  const entries = await fromPage.evaluate(() =>
+    Object.entries(window.localStorage).filter(([key]) => key.startsWith("practice-entry:v1:")),
+  );
+  expect(entries).toHaveLength(1);
+  const [key, value] = entries[0]!;
+  await toPage.evaluate(
+    ({ storageKey, recoveryCapability }) => window.localStorage.setItem(storageKey, recoveryCapability),
+    { storageKey: key, recoveryCapability: value },
+  );
+}
+
 test.describe("SAT device transfer", () => {
   test.describe.configure({ timeout: 300_000 });
 
@@ -50,6 +62,9 @@ test.describe("SAT device transfer", () => {
       await otherPage.goto(joinHref);
       await otherPage.getByLabel("Full name").fill(studentName);
       await otherPage.getByLabel("Email").fill(studentEmail);
+      // Entry recovery is browser-owned. Copy the same capability to model
+      // one student's device move instead of creating a second practice user.
+      await copyPracticeEntryRecovery(studentPage, otherPage);
       await otherPage.getByRole("button", { name: /Continue/i }).click();
       await expect(
         otherPage.getByRole("heading", { name: "This exam is open on another device" })
@@ -106,6 +121,7 @@ test.describe("SAT device transfer", () => {
       await otherPage.goto(joinHref);
       await otherPage.getByLabel("Full name").fill(studentName);
       await otherPage.getByLabel("Email").fill(studentEmail);
+      await copyPracticeEntryRecovery(studentPage, otherPage);
       await otherPage.getByRole("button", { name: /Continue/i }).click();
       await expect(
         otherPage.getByRole("heading", { name: "This exam is open on another device" })

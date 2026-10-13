@@ -4,6 +4,7 @@ export {
   backendGet,
   backendPatch,
   backendPost,
+  backendPut,
   buildCreateSchedulePayload,
   hasBackendStatusCode,
   isBackendNotFound,

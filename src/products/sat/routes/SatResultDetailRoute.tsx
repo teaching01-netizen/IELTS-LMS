@@ -7,6 +7,7 @@ import type { SatQuestionResult, SatSectionResult } from '../../../features/resu
 import { useSatResultQuery } from '../../../features/results/api/satResultsQueries';
 import { SatSectionCard } from '../ui/SatPage';
 import { SatAttemptDetailHeader } from '../ui/SatAttemptDetailHeader';
+import { SatAnsweredExamDownload } from '../ui/SatAnsweredExamDownload';
 import { isExamResponsesPath } from './satReturnPath';
 
 function sectionTitle(key: string): string {
@@ -55,6 +56,34 @@ export function SatResultDetailRoute() {
   return <SatResultDetailContent resultId={resultId} backTarget={backTarget} onBack={() => navigate(backTarget)} />;
 }
 
+interface Scaled { low: number; high: number }
+interface EstimatedScores {
+  converterVersion: string;
+  total: Scaled | null;
+  sections: Map<string, Scaled | null>;
+}
+
+const isScaled = (value: unknown): value is Scaled =>
+  typeof (value as Scaled | null)?.low === 'number' && typeof (value as Scaled).high === 'number';
+const formatScaled = (score: Scaled) => (score.low === score.high ? String(score.low) : `${score.low}–${score.high}`);
+
+/**
+ * The estimated scores pinned in classroomRaw at release (docs/sat-result.md
+ * §1–3): null without a converter; a section maps to null when its
+ * conversion was unavailable, so nothing is invented.
+ */
+function estimatedScores(payload: Record<string, unknown> | undefined): EstimatedScores | null {
+  const raw = payload?.['classroomRaw'] as { conversion?: { converterVersion?: unknown }; totalScaled?: unknown; sections?: unknown } | undefined;
+  const version = raw?.conversion?.converterVersion;
+  if (typeof version !== 'string') return null;
+  const sections = new Map<string, Scaled | null>();
+  for (const section of Array.isArray(raw?.sections) ? (raw.sections as { sectionKey?: unknown; conversionStatus?: unknown; scaled?: unknown }[]) : []) {
+    if (typeof section.sectionKey !== 'string') continue;
+    sections.set(section.sectionKey, section.conversionStatus === 'converted' && isScaled(section.scaled) ? section.scaled : null);
+  }
+  return { converterVersion: version, total: isScaled(raw?.totalScaled) ? raw.totalScaled : null, sections };
+}
+
 export interface SatResultDetailContentProps {
   resultId: string | undefined;
   /** Where "View saved answers" returns to (page mode only). */
@@ -97,12 +126,13 @@ export function SatResultDetailContent({ resultId, backTarget = '/sat/results', 
   }
 
   const { summary } = query.data;
+  const estimated = estimatedScores(query.data.scorePayload);
   const isScored = summary.outcomeStatus === 'scored';
   const isInvalidated = summary.outcomeStatus === 'invalidated_proctor' || summary.outcomeStatus === 'invalidated_timeout';
   const status = outcomeStatusFor(summary.outcomeStatus);
-  // The detail reports the outcome and raw section results; the scaled score
-  // is deliberately not shown here (this completion flow does not produce one
-  // a reviewer should rely on).
+  // The detail reports the outcome and raw section results, plus the
+  // estimated scores only when a versioned converter produced them; the
+  // legacy summary.totalScore is never shown.
   const outcomeSummary = (
     <div className="rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-white px-5 py-4 sm:text-right">
       <p className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Outcome</p>
@@ -110,6 +140,13 @@ export function SatResultDetailContent({ resultId, backTarget = '/sat/results', 
       <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
         {isInvalidated ? 'The attempt ended without a score.' : isScored ? 'Section raw scores and question responses are below.' : 'Saved answers are available for review.'}
       </p>
+      {isScored && estimated ? (
+        <p className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">
+          Estimated total <span className="font-semibold tabular-nums">{estimated.total ? formatScaled(estimated.total) : 'unavailable'}</span>
+          <span className="block text-[var(--sat-staff-text-secondary,#515154)]">Converter {estimated.converterVersion} · not an official SAT score</span>
+        </p>
+      ) : null}
+      <SatAnsweredExamDownload attemptId={summary.attemptId} />
       {query.isFetching && !query.isLoading ? <p role="status" className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">Updating…</p> : null}
     </div>
   );
@@ -140,7 +177,7 @@ export function SatResultDetailContent({ resultId, backTarget = '/sat/results', 
             <div key={section.sectionKey} style={{ '--sat-row-index': Math.min(sectionIndex, 5) } as CSSProperties} className="sat-row-enter rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-white p-5">
               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-5">
                 <div><p className="text-[16px] font-semibold leading-6 text-[var(--sat-staff-text-primary,#1d1d1f)]">{sectionTitle(section.sectionKey)}</p>{section.route ? <p className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Adaptive route · {section.route === 'higher' ? 'Higher' : 'Lower'}</p> : null}</div>
-                <div className="text-right"><p className="text-[20px] font-semibold leading-7 tabular-nums">{section.rawCorrect} / {section.operationalQuestionCount}</p><p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Raw correct</p></div>
+                <div className="text-right"><p className="text-[20px] font-semibold leading-7 tabular-nums">{section.rawCorrect} / {section.operationalQuestionCount}</p><p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Raw correct</p>{estimated?.sections.has(section.sectionKey) ? <p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{(() => { const scaled = estimated.sections.get(section.sectionKey); return scaled ? <>Estimated <span className="font-semibold tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]">{formatScaled(scaled)}</span></> : 'Estimated score unavailable'; })()}</p> : null}</div>
               </div>
               {modules.length > 0 ? (
                 <dl className="mt-3 space-y-1.5 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))] p-3" aria-label={`${sectionTitle(section.sectionKey)} module raw scores`}>

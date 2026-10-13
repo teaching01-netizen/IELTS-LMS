@@ -29,6 +29,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
+	"example.com/ielts-proctoring/internal/satpublish"
 	"example.com/ielts-proctoring/internal/satstartcode"
 )
 
@@ -118,7 +119,9 @@ type Schedule struct {
 	ExamID                 string     `json:"examId"`
 	ProviderKey            string     `json:"providerKey"`
 	SatTimingModel         *string    `json:"satTimingModel,omitempty"`
-	SatStartMode           string     `json:"satStartMode"` // "proctor" | "access_code" (SAT code start)
+	SatStartMode           string     `json:"satStartMode"`             // "proctor" | "access_code" (SAT code start)
+	SatSessionMode         string     `json:"satSessionMode"`           // "practice" | "classroom"
+	SatRoutePolicy         *string    `json:"satRoutePolicy,omitempty"` // classroom Module 2 policy; nil = adaptive
 	OrganizationID         *string    `json:"organizationId,omitempty"`
 	ExamTitle              string     `json:"examTitle"`
 	ProctorDisplayName     string     `json:"proctorDisplayName"`
@@ -160,6 +163,12 @@ type CreateRequest struct {
 	// SatStartMode optionally selects "proctor" or "access_code"; empty uses
 	// the rollout default (code start for normal SAT when enabled).
 	SatStartMode string
+	// SatRoutePolicy is the SAT Practice Classroom Module 2 policy:
+	// "adaptive" (default), "force_lower", "force_higher" or "staff_selects".
+	SatRoutePolicy string
+	// SatSessionMode is "practice" (default) or "classroom". A forced route
+	// policy implies classroom.
+	SatSessionMode string
 }
 
 // UpdateRequest mirrors UpdateScheduleRequest with revision fencing.
@@ -240,14 +249,14 @@ func conflictError(msg string) *apperrors.Error {
 	return apperrors.New(apperrors.CodeConflict, msg)
 }
 
-const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, created_at, created_by, updated_at, sat_timing_model, sat_start_mode"
+const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, created_at, created_by, updated_at, sat_timing_model, sat_start_mode, COALESCE(sat_session_mode, 'practice'), sat_route_policy"
 
 func scanSchedule(row interface {
 	Scan(dest ...any) error
 }) (Schedule, error) {
 	var s Schedule
 	var orgID, institution, timingModel sql.NullString
-	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision, &s.RecurrenceType, &s.RecurrenceInterval, &s.RecurrenceEndDate, &s.BufferBeforeMinutes, &s.BufferAfterMinutes, &s.AutoStart, &s.AutoStop, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &timingModel, &s.SatStartMode); err != nil {
+	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision, &s.RecurrenceType, &s.RecurrenceInterval, &s.RecurrenceEndDate, &s.BufferBeforeMinutes, &s.BufferAfterMinutes, &s.AutoStart, &s.AutoStop, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &timingModel, &s.SatStartMode, &s.SatSessionMode, &s.SatRoutePolicy); err != nil {
 		return Schedule{}, err
 	}
 	if orgID.Valid {
@@ -358,9 +367,13 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Schedule, erro
 	if err := ValidateCreateRequest(req); err != nil {
 		return Schedule{}, err
 	}
+	satSession, err := examdomain.ParseSATSession(req.SatSessionMode, req.SatRoutePolicy)
+	if err != nil {
+		return Schedule{}, err
+	}
 	id := uuid.NewString()
 	var created Schedule
-	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err = s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		// SELECT ... FOR UPDATE on exam_entities locks the exam owner first.
 		var title, providerKey string
 		var orgID sql.NullString
@@ -409,6 +422,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Schedule, erro
 		}
 		if err := satstartcode.ApplyCreateModeTx(ctx, q, id, startMode, req.CreatedBy); err != nil {
 			return err
+		}
+		if satSession.Classroom {
+			var rawScope sql.NullString
+			if err := q.QueryRowContext(ctx, "SELECT sat_publish_scope FROM exam_versions WHERE id = ?", req.PublishedVersionID).Scan(&rawScope); err != nil {
+				return err
+			}
+			if err := examdomain.PersistSATSession(ctx, q, id, providerKey, req.PublishedVersionID, satSession, examdomain.ParseSATPublishScope(rawScope.String)); err != nil {
+				return err
+			}
 		}
 		// scanSchedule is the single projection reader, so the timing choice just
 		// persisted rides along on the created row without a second read.
@@ -502,6 +524,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 		if existing.Revision != req.Revision {
 			return conflictError("Schedule has been modified by another user.")
 		}
+		// Status only moves forward: a reset to scheduled would reopen the
+		// version rebind and the delete path for a session students sat.
+		if req.Status != nil && *req.Status != existing.Status && !statusAdvances(existing.Status, *req.Status) {
+			return validationError("Schedule status cannot change from " + existing.Status + " to " + *req.Status + ".")
+		}
 		if req.PublishedVersionID != nil && *req.PublishedVersionID != existing.PublishedVersionID && existing.Status != StatusScheduled {
 			return validationError("Cannot change published version for a non-scheduled session.")
 		}
@@ -515,6 +542,20 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 			}
 			if versionExamID != existing.ExamID {
 				return validationError("Published version does not belong to the schedule exam.")
+			}
+			// Admitted candidates are pinned to the release they joined
+			// (student_attempts.published_version_id) while delivery reads the
+			// schedule's version, so a rebind would show them another version's
+			// questions. CreateScheduleAttempt locks this row too, so the check
+			// cannot race a join.
+			var admitted bool
+			if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM student_attempts WHERE schedule_id = ?)", id).Scan(&admitted); err != nil {
+				return err
+			}
+			if admitted {
+				err := apperrors.New(apperrors.CodeConflict, "The release cannot change after candidates have joined this session.")
+				err.Details = map[string]any{"reason": "START_CODE_RELEASE_FROZEN"}
+				return err
 			}
 		}
 		startMode := existing.SatStartMode
@@ -530,19 +571,6 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 			// sends (it carries the generic schedule defaults).
 			off := false
 			req.AutoStart = &off
-			// Admitted candidates are pinned to the release they joined; never
-			// silently rebind them to another version.
-			if req.PublishedVersionID != nil && *req.PublishedVersionID != existing.PublishedVersionID {
-				var admitted bool
-				if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM student_attempts WHERE schedule_id = ?)", id).Scan(&admitted); err != nil {
-					return err
-				}
-				if admitted {
-					err := apperrors.New(apperrors.CodeConflict, "The release cannot change after candidates have joined this code-start session.")
-					err.Details = map[string]any{"reason": "START_CODE_RELEASE_FROZEN"}
-					return err
-				}
-			}
 		}
 		nextStart := existing.StartTime
 		if req.StartTime != nil {
@@ -572,7 +600,19 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	return updated, err
 }
 
-// Delete removes a scheduled session (only pre-live sessions).
+// statusAdvances reports whether a schedule may move from one status to
+// another: scheduled → live → completed, and cancel from either open state.
+func statusAdvances(from, to string) bool {
+	switch from {
+	case StatusScheduled:
+		return to == StatusLive || to == StatusCompleted || to == StatusCancelled
+	case StatusLive:
+		return to == StatusCompleted || to == StatusCancelled
+	}
+	return false
+}
+
+// Delete removes a scheduled session (only pre-live sessions nobody joined).
 func (s *Service) Delete(ctx context.Context, id string) error {
 	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		// SELECT ... FOR UPDATE serializes delete vs start.
@@ -585,6 +625,15 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		}
 		if status != StatusScheduled {
 			return conflictError("Only scheduled sessions can be deleted.")
+		}
+		// Attempts cascade on schedule delete (0006). CreateScheduleAttempt
+		// locks this row too, so a join cannot slip in after this check.
+		var joined bool
+		if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM student_attempts WHERE schedule_id = ?)", id).Scan(&joined); err != nil {
+			return err
+		}
+		if joined {
+			return conflictError("Candidates have joined this session, so it cannot be deleted.")
 		}
 		res, err := q.ExecContext(ctx, "DELETE FROM exam_schedules WHERE id = ?", id)
 		if err != nil {
@@ -740,6 +789,21 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 	if err != nil {
 		return nil, "", err
 	}
+	// A classroom plan narrows what a student sits, so its clock is the sum of
+	// the planned modules (M2-only is the branch alone), not base + longer branch.
+	if sch.SatSessionMode == "classroom" && effectiveProvider == examdomain.ProviderSAT {
+		plan, err := satpublish.LoadPlan(ctx, q, sch.PublishedVersionID)
+		if err != nil {
+			return nil, "", err
+		}
+		planned, err := plannedSectionSecondsByKey(ctx, q, sch.PublishedVersionID, plan)
+		if err != nil {
+			return nil, "", err
+		}
+		for key, seconds := range planned {
+			candidateSeconds[key] = seconds
+		}
+	}
 	rows, err := q.QueryContext(ctx, "SELECT section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id", sch.PublishedVersionID)
 	if err != nil {
 		return nil, "", err
@@ -855,6 +919,59 @@ func candidateSectionSecondsByKey(ctx context.Context, q planQuerier, versionID 
 	for key, clock := range clocks {
 		if seconds, ok := clock.CandidateSeconds(); ok {
 			out[key] = seconds
+		}
+	}
+	return out, nil
+}
+
+// plannedSectionSecondsByKey is the classroom counterpart of
+// candidateSectionSecondsByKey: for sections whose plan fixes a shape, the
+// candidate length is the sum of the modules the shape lets a student receive.
+// A section whose planned modules are missing or zero-length is absent and keeps
+// the generic length (publish validation rejects such a plan).
+func plannedSectionSecondsByKey(ctx context.Context, q planQuerier, versionID string, plan satpublish.Plan) (map[string]int, error) {
+	out := map[string]int{}
+	if len(plan) == 0 {
+		return out, nil
+	}
+	rows, err := q.QueryContext(ctx, `
+		SELECT s.section_key, m.adaptive_role, m.duration_seconds
+		FROM assessment_modules m
+		JOIN assessment_sections s ON s.id = m.section_id
+		WHERE s.exam_version_id = ?`, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seconds := map[string]map[string]int{}
+	for rows.Next() {
+		var key, role string
+		var n int
+		if err := rows.Scan(&key, &role, &n); err != nil {
+			return nil, err
+		}
+		if seconds[key] == nil {
+			seconds[key] = map[string]int{}
+		}
+		if n > seconds[key][role] {
+			seconds[key][role] = n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for key, shape := range plan {
+		total := 0
+		for _, role := range shape.Roles() {
+			n := seconds[key][role]
+			if n <= 0 {
+				total = 0
+				break
+			}
+			total += n
+		}
+		if total > 0 {
+			out[key] = total
 		}
 	}
 	return out, nil

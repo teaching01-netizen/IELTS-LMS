@@ -32,8 +32,10 @@ import (
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
+	"example.com/ielts-proctoring/internal/results"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // Service wires delivery reads explicitly.
@@ -57,13 +59,13 @@ type Service struct {
 	// post-commit (outside any business tx); off = zero bus writes.
 	liveSinkBus         *liveupdates.Bus
 	liveSinkMode        config.LiveBusSinkMode
-	mediaIndexMu        sync.RWMutex
 	completer           AssessmentCompleter
 	satTerminalizerInTx func(context.Context, tx.Tx, string, string) (bool, error)
-	mediaIndex          map[mediaIndexKey]map[string]map[string]struct{}
-	liveSinkCount       atomic.Uint64
-	timeoutCursorMu     sync.Mutex
-	timeoutCursorID     string
+	// Shared by pointer: per-tx Service snapshots (`*s` copies) must use the same lock.
+	mediaIndex      *mediaIndexCache
+	liveSinkCount   *atomic.Uint64 // pointer: shared with per-tx `*s` snapshots
+	timeoutCursorMu sync.Mutex
+	timeoutCursorID string
 	// reconcileConcurrency bounds how many attempts one timeout sweep
 	// reconciles at once (<= 1 is sequential). Each attempt reconciles in its
 	// own lock-ordered transaction, exactly as concurrent request paths do.
@@ -77,7 +79,10 @@ type Service struct {
 	// authority for reservation budgets and runtime uniqueness.
 	satStartAdmissionOnce sync.Once
 	satStartAdmission     *satStartAdmission
-	dbStats               interface{ Stats() sql.DBStats }
+	// answered bounds concurrent answered-exam builds (answered_exam.go).
+	answeredOnce sync.Once
+	answered     chan struct{}
+	dbStats      interface{ Stats() sql.DBStats }
 }
 
 // SetCodeStart wires the runtime opener and pinned-plan derivation the SAT
@@ -90,7 +95,7 @@ func (s *Service) SetCodeStart(rt *examruntime.Service, planner examruntime.Star
 
 // NewService wires dependencies explicitly.
 func NewService(db *sql.DB, runner *tx.Runner) *Service {
-	return &Service{db: db, runner: runner, dbStats: db}
+	return &Service{db: db, runner: runner, dbStats: db, mediaIndex: &mediaIndexCache{}, liveSinkCount: new(atomic.Uint64)}
 }
 
 // SetReconcileConcurrency bounds parallel attempts per timeout sweep. A
@@ -342,6 +347,24 @@ type Bootstrap struct {
 	// access-code start, and for code start the code_required / started /
 	// closed state). Absent for non-SAT providers.
 	SatStartPolicy *SatStartPolicy `json:"satStartPolicy,omitempty"`
+	// AwaitingStaffRoute is true while a staff_selects classroom attempt has
+	// closed Module 1 and staff have not yet chosen Easy/Hard. Derived, never
+	// stored; the student holds on an "awaiting teacher" screen.
+	AwaitingStaffRoute bool `json:"awaitingStaffRoute,omitempty"`
+}
+
+// awaitingStaffRoute answers the derived waiting state for an open SAT attempt.
+// It can only hold once a module attempt is terminal, so earlier payloads skip the query.
+func (s *Service) awaitingStaffRoute(ctx context.Context, providerKey, attemptID string, result any, mods []ModuleAttempt) (bool, error) {
+	if providerKey != "sat" || result != nil {
+		return false, nil
+	}
+	for _, m := range mods {
+		if m.State == "submitted" || m.State == "locked" {
+			return attempts.AwaitingStaffRouteTx(ctx, s.db, attemptID)
+		}
+	}
+	return false, nil
 }
 
 // Bootstrap assembles the delivery payload for one SAT or ACT attempt. The bearer
@@ -410,7 +433,7 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
-	if err := s.ensureBaseModuleAttempt(ctx, attemptID, deliverySectionsForScope(sections, scope)); err != nil {
+	if err := s.ensureBaseModuleAttempt(ctx, attemptID, versionID, deliverySectionsForScope(sections, scope)); err != nil {
 		return nil, err
 	}
 	var bootstrap *Bootstrap
@@ -480,7 +503,12 @@ func (s *Service) bootstrapSnapshot(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
+	awaiting, err := s.awaitingStaffRoute(ctx, providerKey, attemptID, result, moduleAttempts)
+	if err != nil {
+		return nil, err
+	}
 	return &Bootstrap{
+		AwaitingStaffRoute:    awaiting,
 		ScheduleID:            scheduleID,
 		ExamID:                examID,
 		ProviderKey:           providerKey,
@@ -531,7 +559,7 @@ func (s *Service) applySatStartPolicy(ctx context.Context, providerKey, schedule
 // (studentSafeBootstrapResult): a terminal attempt always gets its receipt, but
 // score fields appear only under an approved release status.
 func (s *Service) loadBootstrapResult(ctx context.Context, providerKey, attemptID string, control attemptControl) (any, error) {
-	if control.submittedAt == nil && control.deliveryStatus != "terminated" && control.deliveryStatus != "locked" && control.deliveryStatus != "cancelled" {
+	if !attemptTerminal(control) {
 		return nil, nil
 	}
 	var (
@@ -548,6 +576,17 @@ func (s *Service) loadBootstrapResult(ctx context.Context, providerKey, attemptI
 	}
 	if err != nil {
 		return nil, err
+	}
+	if typed, ok := result.(*sat.AssessmentResult); ok && typed != nil && typed.ScorePayload != nil {
+		// The exam's score report switch is read live: turning it off hides an
+		// already-released report and leaves only the completion receipt.
+		var enabled bool
+		if err := s.db.QueryRowContext(ctx, results.SATScoreReportOpenSQL, attemptID).Scan(&enabled); err != nil && err != sql.ErrNoRows {
+			return nil, err
+		}
+		if !enabled {
+			return satReceiptProjection(typed), nil
+		}
 	}
 	return studentSafeBootstrapResult(providerKey, result), nil
 }
@@ -765,7 +804,7 @@ func (s *Service) EnsureBaseModuleAttemptForSchedule(ctx context.Context, attemp
 	if err != nil {
 		return err
 	}
-	return s.ensureBaseModuleAttempt(ctx, attemptID, deliverySectionsForScope(sections, scope))
+	return s.ensureBaseModuleAttempt(ctx, attemptID, versionID, deliverySectionsForScope(sections, scope))
 }
 
 // linkSectionScope resolves the Student Access link's section scope for a
@@ -946,7 +985,7 @@ func sqlPlaceholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
-func (s *Service) ensureBaseModuleAttempt(ctx context.Context, attemptID string, sections []DeliverySection) error {
+func (s *Service) ensureBaseModuleAttempt(ctx context.Context, attemptID, versionID string, sections []DeliverySection) error {
 	var existing string
 	err := s.db.QueryRowContext(ctx,
 		"SELECT id FROM assessment_module_attempts WHERE attempt_id = ?", attemptID).Scan(&existing)
@@ -956,9 +995,15 @@ func (s *Service) ensureBaseModuleAttempt(ctx context.Context, attemptID string,
 	if err != sql.ErrNoRows {
 		return err
 	}
+	// A Classroom plan can make a section start at Module 2 (m2_easy/m2_hard).
+	plan, err := satpublish.LoadPlan(ctx, s.db, versionID)
+	if err != nil {
+		return err
+	}
 	for _, sec := range sections {
+		entry := plan.ShapeFor(sec.SectionKey).EntryRole()
 		for _, mod := range sec.Modules {
-			if mod.AdaptiveRole != "base" {
+			if mod.AdaptiveRole != entry {
 				continue
 			}
 			_, err := s.db.ExecContext(ctx,

@@ -9,6 +9,7 @@ package attempts
 // has one Go implementation and one vocabulary.
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -115,36 +116,159 @@ func ensureSATModuleTopologyTx(ctx context.Context, q tx.Tx, attemptID string) e
 		return err
 	}
 	rows, err := q.QueryContext(ctx, `
-		SELECT COALESCE(s.section_key, ''), ma.state
+		SELECT COALESCE(sch.sat_session_mode, 'practice') = 'classroom', COALESCE(s.section_key, ''), ma.state, COALESCE(m.adaptive_role, ''), COALESCE(m.id, ''),
+			COALESCE(d.selected_module_id, ''), COALESCE(CAST(v.sat_classroom_plan AS CHAR), '')
 		FROM assessment_module_attempts ma
+		LEFT JOIN student_attempts a ON a.id = ma.attempt_id
+		LEFT JOIN exam_schedules sch ON sch.id = a.schedule_id
 		LEFT JOIN assessment_modules m ON m.id = ma.module_id
 		LEFT JOIN assessment_sections s ON s.id = m.section_id
+		LEFT JOIN exam_versions v ON v.id = s.exam_version_id
+		LEFT JOIN assessment_route_decisions d ON d.attempt_id = ma.attempt_id AND d.section_id = m.section_id
 		WHERE ma.attempt_id = ?`, attemptID)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	topology := SATModuleTopology{Sections: map[string]int{}}
+	var modules []satModuleRow
 	for rows.Next() {
-		var sectionKey, state string
-		if err := rows.Scan(&sectionKey, &state); err != nil {
+		var row satModuleRow
+		var state string
+		if err := rows.Scan(&row.classroom, &row.section, &state, &row.role, &row.moduleID, &row.selected, &row.plan); err != nil {
 			return err
 		}
-		if sectionKey == "" {
+		if row.section == "" {
 			topology.Unresolved++
 			continue
 		}
+		modules = append(modules, row)
 		if !SATModuleTerminal(state) {
 			topology.Unfinished++
 			continue
 		}
 		topology.Terminal++
-		topology.Sections[sectionKey]++
+		topology.Sections[row.section]++
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	return topology.Validate(required...)
+	if err := topology.Validate(required...); err != nil {
+		return err
+	}
+	awaiting, err := AwaitingStaffRouteTx(ctx, q, attemptID)
+	if err != nil {
+		return err
+	}
+	if awaiting {
+		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "The SAT attempt is waiting for staff to assign Module 2.", HTTPStatus: 409}
+	}
+	if err := satExpectedSequence(modules, required); err != nil {
+		return err
+	}
+	return nil
+}
+
+type satModuleRow struct {
+	classroom                               bool
+	section, role, moduleID, selected, plan string
+}
+
+// satExpectedSequence enforces docs/sat_newmode.md 5.5: every module row is one
+// the section's shape admits. A base-entry section holds its Module 1 and, once
+// a route decision exists, exactly the decided Module 2 (a branch the plan
+// uses). A standalone Module 2 section holds only its configured branch.
+func satExpectedSequence(modules []satModuleRow, required []string) error {
+	unexpected := &apperrors.Error{Code: apperrors.CodeConflict, Message: "The SAT attempt holds modules outside its expected sequence.", HTTPStatus: 409}
+	if len(modules) == 0 {
+		return nil // SATModuleTopology.Validate reports the empty attempt first.
+	}
+	classroom := modules[0].classroom
+	for _, row := range modules {
+		if row.classroom != classroom {
+			return unexpected
+		}
+	}
+	// Standard Practice keeps its historical completion gate. Classroom
+	// sessions enforce the immutable module plan and the committed route.
+	if !classroom {
+		return nil
+	}
+	if len(required) == 0 {
+		required = SATModuleRequiredSections
+	}
+	inScope := map[string]bool{}
+	for _, key := range required {
+		inScope[key] = true
+	}
+	bySection := map[string][]satModuleRow{}
+	for _, row := range modules {
+		bySection[row.section] = append(bySection[row.section], row)
+	}
+	for section, sectionRows := range bySection {
+		if !inScope[section] {
+			return unexpected
+		}
+		plan, err := satpublish.ParsePlan(sectionRows[0].plan)
+		if err != nil {
+			return err
+		}
+		entry := plan.ShapeFor(section).EntryRole()
+		if entry != satpublish.RoleBase {
+			// Standalone M2 has exactly its configured entry module and no route
+			// decision, because there is no M1 attempt to route from.
+			if len(sectionRows) != 1 || sectionRows[0].role != entry || sectionRows[0].selected != "" {
+				return unexpected
+			}
+			continue
+		}
+		// Every M1-based classroom plan requires M1 plus exactly one selected
+		// branch. A terminal M1 with no route is incomplete, even when the
+		// session policy is adaptive or forced.
+		if len(sectionRows) != 2 {
+			return unexpected
+		}
+		var base, branch *satModuleRow
+		for i := range sectionRows {
+			row := &sectionRows[i]
+			if row.role == satpublish.RoleBase {
+				if base != nil {
+					return unexpected
+				}
+				base = row
+			} else if row.role == satpublish.RoleLower || row.role == satpublish.RoleHigher {
+				if branch != nil {
+					return unexpected
+				}
+				branch = row
+			} else {
+				return unexpected
+			}
+		}
+		if base == nil || branch == nil || base.selected == "" || base.selected != branch.moduleID || branch.selected != base.selected || !plan.Uses(section, branch.role) {
+			return unexpected
+		}
+	}
+	return nil
+}
+
+// AwaitingStaffRouteTx reports a staff_selects attempt whose Module 1 is
+// terminal but has no route decision yet: it holds no Module 2 and is not
+// complete. The waiting state is derived, not stored (docs/sat_newmode.md 5.3).
+func AwaitingStaffRouteTx(ctx context.Context, q interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}, attemptID string) (bool, error) {
+	var awaiting bool
+	err := q.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM assessment_module_attempts ma
+			JOIN assessment_modules m ON m.id = ma.module_id AND m.adaptive_role = 'base'
+			JOIN student_attempts sa ON sa.id = ma.attempt_id
+			JOIN exam_schedules sch ON sch.id = sa.schedule_id AND sch.sat_route_policy = 'staff_selects'
+			WHERE ma.attempt_id = ? AND ma.state IN ('submitted', 'locked')
+			AND NOT EXISTS (SELECT 1 FROM assessment_route_decisions d WHERE d.attempt_id = ma.attempt_id AND d.section_id = m.section_id))`,
+		attemptID).Scan(&awaiting)
+	return awaiting, err
 }
 
 // EnsureSATModuleTopologyTx exposes the shared SAT terminal gate to the

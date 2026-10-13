@@ -1,0 +1,9 @@
+$ lake env lean --run Replay.lean Model Safety Counterexamples   (Lean leanprover/lean4:v4.19.0; own checker on core Lean.Environment.replay, see Replay.lean)
+self-test: forged proof of False rejected ((kernel) declaration type mismatch, 'forged' has type
+  True
+but it is expected to have type
+  False)
+Model: kernel re-checked 683/1338 constants, including all 125 theorems; skipped 655 unsafe/partial compiler auxiliaries; safe axioms declared: []
+Safety: kernel re-checked 318/380 constants, including all 289 theorems; skipped 62 unsafe/partial compiler auxiliaries; safe axioms declared: []
+Counterexamples: kernel re-checked 76/198 constants, including all 48 theorems; skipped 122 unsafe/partial compiler auxiliaries; safe axioms declared: []
+exit=0

@@ -489,24 +489,28 @@ test.describe("SAT student accessibility and layout", () => {
     // rests) is covered by the owned-touch suite with real touch events.
     if (isMobile) return;
 
-    // A drag that ends on an existing mark is a student selecting NEW text: the
-    // toolbar must survive and the edit dock must not steal the gesture.
+    // A real tap opens the editor when nothing rests on the text: the editor
+    // takes the caret, and the mark itself reads as the one being edited.
     const mark = page.locator('[data-sat-highlight="true"]').first();
     const markBox = (await mark.boundingBox())!;
-    await page.mouse.move(markBox.x + markBox.width - 3, markBox.y + markBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(markBox.x + 2, markBox.y + markBox.height / 2, { steps: 10 });
-    await page.mouse.up();
-    await expect(toolbar).toBeVisible();
+    await page.keyboard.press("Escape");
     await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toHaveCount(0);
-
-    // A real tap still opens the editor, the editor takes the caret, and the
-    // mark itself reads as the one being edited.
     await mark.click();
     const editDock = page.getByRole("toolbar", { name: "Edit annotation" });
     await expect(editDock).toBeVisible();
     await expect(editDock.getByRole("button", { name: "Highlight Yellow" })).toBeFocused();
     await expect(mark).toHaveAttribute("data-sat-annotation-active", "true");
+
+    // A drag that ends on an existing mark is a student selecting NEW text: the
+    // toolbar must survive and the edit dock must not steal the gesture.
+    // Start in the plain text after the mark (selecting exactly the mark's own
+    // range is a re-open of that mark, not new text).
+    await page.mouse.move(markBox.x + markBox.width + 40, markBox.y + markBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(markBox.x + 2, markBox.y + markBox.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await expect(toolbar).toBeVisible();
+    await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toHaveCount(0);
   });
 
   test("axe: the selection toolbar, the edit dock, and the notes column report no critical or serious violations", async ({
@@ -537,7 +541,10 @@ test.describe("SAT student accessibility and layout", () => {
     await expectNoSeriousAxeViolations(page, "notes column while writing a note");
 
     // The question's own note is one quiet button under the list; with it open the
-    // pane holds one field per note, and no field is a preview of another.
+    // pane holds one field per note, and no field is a preview of another. A
+    // note with no words is not listed once the student moves on, so this one
+    // gets some.
+    await page.getByRole("textbox", { name: "Note on \u201CSeveral\u201D" }).fill("Intro");
     await column.getByRole("button", { name: "Add question note" }).click();
     await expect(page.getByRole("textbox", { name: "This question" })).toBeFocused();
     await expect(column.getByRole("textbox")).toHaveCount(2);
@@ -951,7 +958,7 @@ test.describe("SAT student accessibility and layout", () => {
     expect(box).not.toBeNull();
     expect(box!.x + box!.width).toBeLessThanOrEqual(1194 - 15);
     expect(box!.y + box!.height).toBeLessThanOrEqual(834 - 15);
-    await expect(page.getByText("If 3x + 5 = 20, what is the value of x?")).toBeVisible();
+    await expect(page.getByText("has its minimum at which point?")).toBeVisible();
   });
 
   test("floating tools open beside the question; corner grip resizes without moving geometry", async ({
@@ -979,7 +986,7 @@ test.describe("SAT student accessibility and layout", () => {
     const reference = page.getByRole("dialog", { name: "Reference Sheet" });
     // Reference is floating but not resizable (Calculator-only affordance).
     await expect(reference.locator("[data-sat-resize-handle]")).toHaveCount(0);
-    await expect(page.getByText("If 3x + 5 = 20, what is the value of x?")).toBeVisible();
+    await expect(page.getByText("has its minimum at which point?")).toBeVisible();
     await page.getByRole("button", { name: "Close Reference Sheet" }).click();
   });
 
@@ -1013,14 +1020,15 @@ test.describe("SAT student accessibility and layout", () => {
 
     await page.getByRole("button", { name: "Reference" }).click();
     const reference = page.getByRole("dialog", { name: "Reference Sheet" });
-    await expect(reference).toHaveAttribute("data-sat-tool-presentation", "compact-sheet");
+    // Reference is the docked sidebar panel at every width.
+    await expect(reference).toHaveAttribute("data-sat-tool-presentation", "sidebar");
     // Wave A R-02 option (ii): compact tool sheets are explicitly non-modal.
     await expect(reference).not.toHaveAttribute("aria-modal", "true");
     await expect(reference).not.toHaveAttribute("data-sat-tool-detent");
     await expect(reference).not.toHaveAttribute("data-sat-tool-resizable");
     await page.getByRole("button", { name: "Close Reference Sheet" }).click();
 
-    const questionPrompt = page.getByText("If 3x + 5 = 20, what is the value of x?");
+    const questionPrompt = page.getByText("has its minimum at which point?");
     const promptBeforeNavigator = await questionPrompt.boundingBox();
     expect(promptBeforeNavigator).not.toBeNull();
 
@@ -1098,7 +1106,8 @@ test.describe("SAT student accessibility and layout", () => {
     await page.getByRole("button", { name: "Calculator" }).click();
     const box = await page.locator("[data-sat-tool-window]").boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(40);
+    // 24px device safe area + the 8px tool inset.
+    expect(box!.x).toBeGreaterThanOrEqual(32);
     expect(box!.x + box!.width).toBeLessThanOrEqual(1194 - 18 - 15);
   });
 
@@ -1269,10 +1278,9 @@ test.describe("SAT student accessibility and layout", () => {
     await page.setViewportSize({ width: 1194, height: 834 });
     await openSatHarness(page, { mode: "math", tool: "reference" });
 
-    const controls = page.locator(
-      '[data-sat-tool-window="Reference Sheet"] button[data-sat-tool-collapse], ' +
-        '[data-sat-tool-window="Reference Sheet"] button[data-sat-tool-close]'
-    );
+    const controls = page
+      .locator('[data-sat-tool-window="Reference Sheet"] [data-sat-tool-header]')
+      .getByRole("button");
     await expect(controls).toHaveCount(2);
     for (let index = 0; index < 2; index += 1) {
       const control = controls.nth(index);
@@ -1430,7 +1438,7 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(reading).toContainText("200%");
     await reading.getByRole("button", { name: "Close display settings" }).click();
 
-    const prompt = page.getByText("If 3x + 5 = 20, what is the value of x?");
+    const prompt = page.getByText("has its minimum at which point?");
     const typography = await prompt.evaluate((element) => {
       const style = getComputedStyle(element.closest(".sat-type-body") ?? element);
       return {
@@ -1597,7 +1605,9 @@ test.describe("SAT student accessibility and layout", () => {
       testInfo.project.name !== "touch-chromium",
       "raw touch input is asserted in the touch-enabled Chromium project"
     );
-    await page.setViewportSize({ width: 768, height: 1024 });
+    // Landscape width: at a portrait 768px the question pane falls below the
+    // readable budget once the passage grows, and the layout correctly stacks.
+    await page.setViewportSize({ width: 1180, height: 820 });
     await openSatHarness(page);
     const divider = page.getByRole("slider", { name: "Passage and question width" });
     const dividerBox = await divider.boundingBox();
@@ -1720,7 +1730,7 @@ test.describe("SAT student accessibility and layout", () => {
     );
     await expect(frameElement).toHaveAttribute(
       "src",
-      "https://www.desmos.com/testing/collegeboard/graphing?embed"
+      "https://www.desmos.com/testing/collegeboard/graphing?embed&lang=en"
     );
     await expect
       .poll(
@@ -1872,9 +1882,8 @@ test.describe("SAT student accessibility and layout", () => {
     await expectNoSeriousAxeViolations(page, "question navigator");
     await page.keyboard.press("Escape");
 
-    await page.getByRole("button", { name: "More tools" }).click();
-    await expectNoSeriousAxeViolations(page, "More menu");
-    await page.keyboard.press("Escape");
+    // The top bar deliberately omits More for now (SatExamShell.test.tsx).
+    await expect(page.getByRole("button", { name: "More tools" })).toHaveCount(0);
 
     // Reference Sheet is a Math-only floating tool. It is closed through its
     // own toolbar trigger: idle Escape is a deliberate no-op on this surface

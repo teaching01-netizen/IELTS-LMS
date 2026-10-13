@@ -188,6 +188,9 @@ type Exam struct {
 	CanEdit                       bool             `json:"canEdit"`
 	CanPublish                    bool             `json:"canPublish"`
 	CanDelete                     bool             `json:"canDelete"`
+	// SatScoreReportEnabled releases the SAT score report and answered-exam
+	// download on completion; off, the student only sees "SAT complete".
+	SatScoreReportEnabled bool `json:"satScoreReportEnabled"`
 }
 
 // Version is the exam_versions row projection used by ListVersions.
@@ -256,7 +259,9 @@ type UpdateRequest struct {
 	Status         *string
 	Visibility     *string
 	OrganizationID *string
-	Revision       int
+	// SatScoreReportEnabled toggles the SAT completion score report (SAT only).
+	SatScoreReportEnabled *bool
+	Revision              int
 }
 
 // SaveDraftRequest mirrors SaveDraftRequest with revision fencing.
@@ -312,7 +317,7 @@ func claimPublishOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, f
 	return storedResult, false, nil
 }
 
-const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), (SELECT v.version_number FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id)"
+const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), (SELECT v.version_number FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), sat_score_report_enabled"
 
 func scanExam(row interface {
 	Scan(dest ...any) error
@@ -320,7 +325,7 @@ func scanExam(row interface {
 	var e Exam
 	var providerExamType, orgID, draftID, pubID, publishedScope sql.NullString
 	var publishedVersionNumber sql.NullInt64
-	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope, &publishedVersionNumber); err != nil {
+	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope, &publishedVersionNumber, &e.SatScoreReportEnabled); err != nil {
 		return Exam{}, err
 	}
 	if providerExamType.Valid {
@@ -726,7 +731,14 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Exa
 		if existing.Revision != req.Revision {
 			return conflictError("Exam changed while you were editing; refresh before retrying.")
 		}
-		res, err := q.ExecContext(ctx, "UPDATE exam_entities SET title = COALESCE(?, title), status = COALESCE(?, status), visibility = COALESCE(?, visibility), organization_id = COALESCE(?, organization_id), updated_at = NOW(), revision = revision + 1 WHERE id = ? AND revision = ?", nullableStrPtr(req.Title), nullableStrPtr(req.Status), nullableStrPtr(req.Visibility), nullableStrPtr(req.OrganizationID), id, req.Revision)
+		if req.SatScoreReportEnabled != nil && existing.ProviderKey != ProviderSAT {
+			return validationError("The score report setting applies to SAT exams only.")
+		}
+		var scoreReport any
+		if req.SatScoreReportEnabled != nil {
+			scoreReport = *req.SatScoreReportEnabled
+		}
+		res, err := q.ExecContext(ctx, "UPDATE exam_entities SET title = COALESCE(?, title), status = COALESCE(?, status), visibility = COALESCE(?, visibility), organization_id = COALESCE(?, organization_id), sat_score_report_enabled = COALESCE(?, sat_score_report_enabled), updated_at = NOW(), revision = revision + 1 WHERE id = ? AND revision = ?", nullableStrPtr(req.Title), nullableStrPtr(req.Status), nullableStrPtr(req.Visibility), nullableStrPtr(req.OrganizationID), scoreReport, id, req.Revision)
 		if err != nil {
 			return err
 		}

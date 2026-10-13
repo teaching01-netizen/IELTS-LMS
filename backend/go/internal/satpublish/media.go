@@ -21,6 +21,10 @@ func CollectDraftAssetReferences(ctx context.Context, q Queryer, versionID strin
 	if err != nil {
 		return nil, err
 	}
+	plan, err := LoadPlan(ctx, q, versionID)
+	if err != nil {
+		return nil, err
+	}
 	query := `SELECT eq.id, CAST(r.stimulus AS CHAR), CAST(r.prompt AS CHAR), CAST(r.answer_definition AS CHAR)
 		FROM assessment_exam_questions eq
 		JOIN assessment_modules m ON m.id = eq.module_id
@@ -36,6 +40,18 @@ func CollectDraftAssetReferences(ctx context.Context, q Queryer, versionID strin
 		query += " AND s.section_key IN (" + strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",") + ")"
 		for _, key := range keys {
 			args = append(args, key)
+		}
+	}
+	for _, section := range []string{SectionReadingWriting, SectionMath} {
+		roles := plan.ShapeFor(section).Roles()
+		if len(roles) == len(allRoles) {
+			continue
+		}
+		// Modules outside the plan are never delivered, so their images are not published.
+		query += " AND NOT (s.section_key = ? AND m.adaptive_role NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(roles)), ",") + "))"
+		args = append(args, section)
+		for _, role := range roles {
+			args = append(args, role)
 		}
 	}
 	query += " ORDER BY s.display_order, m.display_order, eq.display_order, eq.id"

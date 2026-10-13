@@ -1,0 +1,92 @@
+ℹ [6/7] Replayed AxiomAudit
+info: ././././AxiomAudit.lean:13:0: frame_decomposition : ∀ (b : Block), frameSlots b = [Slot.instruction] ++ imagesSlots b ++ contentSlots b
+info: ././././AxiomAudit.lean:14:0: legacy_decomposition : ∀ (b : Block), legacySlots b = [Slot.instruction] ++ contentSlots b
+info: ././././AxiomAudit.lean:15:0: images_slots_present : ∀ (b : Block),
+  supportsInsertedImages b = true → loadableRows b ≠ [] → imagesSlots b = [Slot.images]
+info: ././././AxiomAudit.lean:16:0: instruction_is_head : ∀ (b : Block), (frameSlots b)[0]? = some Slot.instruction
+info: ././././AxiomAudit.lean:17:0: images_at_index_one : ∀ (b : Block),
+  supportsInsertedImages b = true → loadableRows b ≠ [] → (frameSlots b)[1]? = some Slot.images
+info: ././././AxiomAudit.lean:18:0: content_after_images : ∀ (b : Block),
+  supportsInsertedImages b = true → loadableRows b ≠ [] → List.drop 2 (frameSlots b) = contentSlots b
+info: ././././AxiomAudit.lean:19:0: legacy_content_at_index_one : ∀ (b : Block), List.drop 1 (legacySlots b) = contentSlots b
+info: ././././AxiomAudit.lean:20:0: frame_content_slots : ∀ (b : Block) (s : Slot),
+  s ∈ List.drop (1 + (imagesSlots b).length) (frameSlots b) → s = Slot.content
+info: ././././AxiomAudit.lean:24:0: frameSlotsNoInstruction : Block → List Slot
+info: ././././AxiomAudit.lean:25:0: blank_instruction_images_are_first : ∀ (b : Block),
+  supportsInsertedImages b = true → loadableRows b ≠ [] → (frameSlotsNoInstruction b)[0]? = some Slot.images
+info: ././././AxiomAudit.lean:26:0: blank_instruction_content_after_images : ∀ (b : Block),
+  List.drop (imagesSlots b).length (frameSlotsNoInstruction b) = contentSlots b
+info: ././././AxiomAudit.lean:30:0: empty_rows_render_legacy_frame : ∀ (b : Block), loadableRows b = [] → frameSlots b = legacySlots b
+info: ././././AxiomAudit.lean:31:0: legacy_frame_has_no_images_slot : ∀ (b : Block) (s : Slot), s ∈ legacySlots b → s ≠ Slot.images
+info: ././././AxiomAudit.lean:35:0: map_and_diagram_render_no_images : ∀ (b : Block),
+  b.blockType = BlockType.map ∨ b.blockType = BlockType.diagramLabeling → imagesSlots b = []
+info: ././././AxiomAudit.lean:39:0: hasSources_true_iff : ∀ (r : Row), hasSources r = true ↔ candidatesOf r.url ≠ []
+info: ././././AxiomAudit.lean:40:0: loadable_row_mem_and_loadable : ∀ (b : Block) (r : Row), r ∈ loadableRows b → r ∈ b.rows ∧ candidatesOf r.url ≠ []
+info: ././././AxiomAudit.lean:41:0: payload_row_with_sources_is_loadable : ∀ (b : Block) (r : Row),
+  r ∈ b.rows → candidatesOf r.url ≠ [] → r ∈ loadableRows b
+info: ././././AxiomAudit.lean:42:0: loadable_rows_are_the_filter : ∀ (b : Block), loadableRows b = List.filter hasSources b.rows
+info: ././././AxiomAudit.lean:43:0: loadable_row_ids_preserve_payload_order : ∀ (b : Block),
+  List.map Row.id (loadableRows b) = List.map Row.id (List.filter hasSources b.rows)
+info: ././././AxiomAudit.lean:47:0: rendered_source_came_from_a_loadable_row : ∀ (b : Block) (src : Source),
+  src ∈ renderedSources b → ∃ r, r ∈ loadableRows b ∧ src.origin = r.id ∧ src.text ∈ candidatesOf r.url
+info: ././././AxiomAudit.lean:48:0: rejected_row_renders_nothing : ∀ (b : Block) (r : Row),
+  r ∈ b.rows → candidatesOf r.url = [] → r ∈ b.rows ∧ renderedSourcesFor r = [] ∧ ¬r ∈ loadableRows b
+info: ././././AxiomAudit.lean:49:0: drive_row_renders_four_candidates : ∀ (fileId : String), (candidatesOf (UrlKind.drive fileId)).length = 4
+info: ././././AxiomAudit.lean:53:0: image_key_positions : ∀ (b : Block), List.map Prod.fst (imageKeys b) = List.range (loadableRows b).length
+info: ././././AxiomAudit.lean:54:0: image_keys_have_distinct_positions : ∀ (b : Block), (List.map Prod.fst (imageKeys b)).Nodup
+info: ././././AxiomAudit.lean:55:0: image_keys_length : ∀ (b : Block), (imageKeys b).length = (loadableRows b).length
+info: ././././AxiomAudit.lean:59:0: drop_length_append_self : ∀ (m c : List Slot), List.drop m.length (m ++ c) = c
+info: ././././AxiomAudit.lean:60:0: drop_instruction_and_images : ∀ (m c : List Slot), List.drop (1 + m.length) ([Slot.instruction] ++ (m ++ c)) = c
+info: ././././AxiomAudit.lean:61:0: map_fst_zip_range : ∀ (n : Nat) (f : Nat → String),
+  List.map Prod.fst (List.map (fun i => (i, f i)) (List.range n)) = List.range n
+info: ././././AxiomAudit.lean:65:0: Counterexamples.reported_block_has_loadable_rows : loadableRows Counterexamples.reportedBlock ≠ []
+info: ././././AxiomAudit.lean:66:0: Counterexamples.reported_block_legacy_frame_lacks_images : ∀ (s : Slot),
+  s ∈ legacySlots Counterexamples.reportedBlock → s ≠ Slot.images
+info: ././././AxiomAudit.lean:67:0: Counterexamples.reported_block_fixed_frame_has_image : (frameSlots Counterexamples.reportedBlock)[1]? = some Slot.images
+info: ././././AxiomAudit.lean:68:0: Counterexamples.reported_block_content_after_image : List.drop 2 (frameSlots Counterexamples.reportedBlock) =
+  contentSlots Counterexamples.reportedBlock
+info: ././././AxiomAudit.lean:69:0: Counterexamples.map_block_with_loadable_rows_renders_no_images : imagesSlots Counterexamples.mapBlockWithRows = []
+info: ././././AxiomAudit.lean:70:0: Counterexamples.mixed_block_selects_only_the_safe_row : List.map Row.id (loadableRows Counterexamples.mixedBlock) =
+  ["img-ok"]
+info: ././././AxiomAudit.lean:71:0: Counterexamples.mixed_block_renders_one_source : (renderedSources Counterexamples.mixedBlock).length = 1
+info: ././././AxiomAudit.lean:72:0: Counterexamples.id_only_keys_collide_on_duplicate_authoring_ids : ¬(Counterexamples.legacyImageKeys
+      Counterexamples.duplicateIdBlock).Nodup
+info: ././././AxiomAudit.lean:73:0: Counterexamples.position_suffixed_keys_do_not_collide : (List.map Prod.fst
+    (imageKeys Counterexamples.duplicateIdBlock)).Nodup
+info: ././././AxiomAudit.lean:74:0: Counterexamples.duplicate_id_block_positions : List.map Prod.fst (imageKeys Counterexamples.duplicateIdBlock) = [0, 1]
+info: ././././AxiomAudit.lean:78:0: 'InsertedImages.frame_decomposition' does not depend on any axioms
+info: ././././AxiomAudit.lean:79:0: 'InsertedImages.images_at_index_one' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:80:0: 'InsertedImages.content_after_images' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:81:0: 'InsertedImages.frame_content_slots' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:82:0: 'InsertedImages.blank_instruction_images_are_first' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:83:0: 'InsertedImages.blank_instruction_content_after_images' does not depend on any axioms
+info: ././././AxiomAudit.lean:84:0: 'InsertedImages.empty_rows_render_legacy_frame' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:85:0: 'InsertedImages.legacy_frame_has_no_images_slot' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:86:0: 'InsertedImages.map_and_diagram_render_no_images' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:87:0: 'InsertedImages.hasSources_true_iff' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:88:0: 'InsertedImages.loadable_row_mem_and_loadable' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:89:0: 'InsertedImages.payload_row_with_sources_is_loadable' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:90:0: 'InsertedImages.loadable_row_ids_preserve_payload_order' does not depend on any axioms
+info: ././././AxiomAudit.lean:91:0: 'InsertedImages.rendered_source_came_from_a_loadable_row' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:92:0: 'InsertedImages.rejected_row_renders_nothing' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:93:0: 'InsertedImages.drive_row_renders_four_candidates' does not depend on any axioms
+info: ././././AxiomAudit.lean:94:0: 'InsertedImages.image_key_positions' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:95:0: 'InsertedImages.image_keys_have_distinct_positions' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:96:0: 'InsertedImages.image_keys_length' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:97:0: 'InsertedImages.drop_length_append_self' does not depend on any axioms
+info: ././././AxiomAudit.lean:98:0: 'InsertedImages.drop_instruction_and_images' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:99:0: 'InsertedImages.map_fst_zip_range' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:100:0: 'InsertedImages.Counterexamples.reported_block_has_loadable_rows' does not depend on any axioms
+info: ././././AxiomAudit.lean:101:0: 'InsertedImages.Counterexamples.reported_block_legacy_frame_lacks_images' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:102:0: 'InsertedImages.Counterexamples.reported_block_fixed_frame_has_image' does not depend on any axioms
+info: ././././AxiomAudit.lean:103:0: 'InsertedImages.Counterexamples.reported_block_content_after_image' does not depend on any axioms
+info: ././././AxiomAudit.lean:104:0: 'InsertedImages.Counterexamples.map_block_with_loadable_rows_renders_no_images' does not depend on any axioms
+info: ././././AxiomAudit.lean:105:0: 'InsertedImages.Counterexamples.mixed_block_selects_only_the_safe_row' does not depend on any axioms
+info: ././././AxiomAudit.lean:106:0: 'InsertedImages.Counterexamples.mixed_block_renders_one_source' does not depend on any axioms
+info: ././././AxiomAudit.lean:107:0: 'InsertedImages.Counterexamples.id_only_keys_collide_on_duplicate_authoring_ids' does not depend on any axioms
+info: ././././AxiomAudit.lean:108:0: 'InsertedImages.Counterexamples.position_suffixed_keys_do_not_collide' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: ././././AxiomAudit.lean:109:0: 'InsertedImages.Counterexamples.duplicate_id_block_positions' does not depend on any axioms
+Build completed successfully.
+exit=0

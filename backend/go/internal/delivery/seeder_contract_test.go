@@ -25,6 +25,7 @@ func TestEnsureBaseModuleAttemptSeedsFirstBase(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_module_attempts WHERE attempt_id = ?")).
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("ver-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "attempt-1", "mod-base-1", 3600).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -32,7 +33,7 @@ func TestEnsureBaseModuleAttemptSeedsFirstBase(t *testing.T) {
 		{ID: "mod-base-1", AdaptiveRole: "base", DurationSeconds: 3600},
 		{ID: "mod-branch-1", AdaptiveRole: "lower_branch", DurationSeconds: 3600},
 	}}}
-	if err := svc.ensureBaseModuleAttempt(context.Background(), "attempt-1", sections); err != nil {
+	if err := svc.ensureBaseModuleAttempt(context.Background(), "attempt-1", "ver-1", sections); err != nil {
 		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -50,10 +51,38 @@ func TestEnsureBaseModuleAttemptNoBaseIsNoop(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_module_attempts WHERE attempt_id = ?")).
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("ver-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 	sections := []DeliverySection{{Modules: []DeliveryModule{
 		{ID: "mod-branch-1", AdaptiveRole: "lower_branch", DurationSeconds: 3600},
 	}}}
-	if err := svc.ensureBaseModuleAttempt(context.Background(), "attempt-1", sections); err != nil {
+	if err := svc.ensureBaseModuleAttempt(context.Background(), "attempt-1", "ver-1", sections); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureBaseModuleAttemptSeedsPlanEntryModule(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := &Service{db: db}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_module_attempts WHERE attempt_id = ?")).
+		WithArgs("attempt-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("ver-1").
+		WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(`{"math":"m2_hard"}`))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
+		WithArgs(sqlmock.AnyArg(), "attempt-1", "mod-hard", 1800).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	sections := []DeliverySection{{SectionKey: "math", Modules: []DeliveryModule{
+		{ID: "mod-base", AdaptiveRole: "base", DurationSeconds: 1800},
+		{ID: "mod-hard", AdaptiveRole: "higher_branch", DurationSeconds: 1800},
+	}}}
+	if err := svc.ensureBaseModuleAttempt(context.Background(), "attempt-1", "ver-1", sections); err != nil {
 		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

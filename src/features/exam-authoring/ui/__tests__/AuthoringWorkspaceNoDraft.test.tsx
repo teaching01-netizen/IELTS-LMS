@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../../shared/api-client/errors";
+import type { DeliveryTarget } from "../shell/examLifecycle";
 import {
   consumeAuthoringDraftOnEntry,
   requestAuthoringDraftOnEntry,
@@ -104,11 +105,21 @@ function setupLifecycle(
   (harness.useEnsureDraft as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => harness.ensureState);
 }
 
-function workspaceTree(client: QueryClient) {
+function workspaceTree(client: QueryClient, publishedTarget: DeliveryTarget | null = null) {
   return (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
-        <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
+        <AuthoringWorkspace
+          examId="exam-1"
+          examTitle="SAT Practice 1"
+          chrome={{
+            lifecycle: { label: "Published · Version 4", detail: null, tone: "published" },
+            showResponses: false,
+            canPublish: false,
+            canCreateSession: Boolean(publishedTarget),
+            publishedTarget,
+          }}
+        />
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -161,6 +172,30 @@ describe("AuthoringWorkspace shell lifecycle surfaces", () => {
     expect(screen.queryByRole("button", { name: /open draft/i })).not.toBeInTheDocument();
     expect(harness.ensureState.mutate).not.toHaveBeenCalled();
     expect(harness.ensureState.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("shows the current published version after direct entry without opening a draft", async () => {
+    const target: DeliveryTarget = { versionId: "published-4", versionNumber: 4, publishScope: "full" };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(workspaceTree(client, target));
+
+    expect(await screen.findByRole("heading", { name: "Create a room or continue editing" })).toBeInTheDocument();
+    expect(screen.getByText("Version 4 is published.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create room" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit exam" })).toBeInTheDocument();
+    expect(harness.ensureState.mutate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Edit exam" }));
+    expect(harness.ensureState.mutate).toHaveBeenCalledOnce();
+  });
+
+  it("does not hide a failed shell read behind cached published-version metadata", async () => {
+    setupLifecycle(undefined, "builder", new Error("Shell read unavailable"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(workspaceTree(client, { versionId: "published-4", versionNumber: 4, publishScope: "full" }));
+
+    expect(await screen.findByRole("heading", { name: "Unable to load the SAT authoring workspace" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit exam" })).not.toBeInTheDocument();
+    expect(harness.ensureState.mutate).not.toHaveBeenCalled();
   });
 
   it("hides the CTA for signed-out sessions", async () => {

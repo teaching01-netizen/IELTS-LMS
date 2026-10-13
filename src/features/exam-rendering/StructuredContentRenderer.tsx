@@ -11,10 +11,10 @@ export interface StructuredContentRendererProps extends StructuredContentMediaPr
   enlarge?: StaticStructuredImageEnlargeApi | undefined;
 }
 
-export function StructuredContentRenderer({ content, className, renderText, enlarge, loadMediaUrl, onMediaFailure, questionId }: StructuredContentRendererProps) {
+export function StructuredContentRenderer({ content, className, renderText, enlarge, loadMediaUrl, onMediaFailure, questionId, eagerMedia }: StructuredContentRendererProps) {
   return (
     <div className={className}>
-      <RichStructuredContentRenderer content={content} renderText={renderText} enlarge={enlarge} loadMediaUrl={loadMediaUrl} onMediaFailure={onMediaFailure} questionId={questionId} />
+      <RichStructuredContentRenderer content={content} renderText={renderText} enlarge={enlarge} loadMediaUrl={loadMediaUrl} onMediaFailure={onMediaFailure} questionId={questionId} eagerMedia={eagerMedia} />
     </div>
   );
 }

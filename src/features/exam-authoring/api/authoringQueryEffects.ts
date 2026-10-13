@@ -57,7 +57,6 @@ import type {
   QuestionRevision,
   SatPublishScope,
 } from "../contracts/assessment";
-import type { AssessmentReleaseState } from "../contracts/release";
 import type { AccessDistributionOverview } from "../contracts/accessLinks";
 import type { SatWorkspaceCommand } from "../realtime/coedit/workspaceCommands";
 
@@ -435,17 +434,14 @@ export const authoringEffects = {
 
   /**
    * A release was published. The working draft is sealed into a version, so the
-   * draft shell key is DROPPED (not refetched): the next read must come from the
-   * server, and every list/overview that counts releases is stale.
+   * draft shell key is DROPPED (not refetched). The POST receipt belongs to the
+   * publish operation; current release pointers remain server-owned projections
+   * and are invalidated for a best-effort authoritative refresh.
    */
-  async published(
-    queryClient: QueryClient,
-    examId: string,
-    releaseState: AssessmentReleaseState
-  ): Promise<void> {
-    queryClient.setQueryData(assessmentKeys.release(examId), releaseState);
+  async published(queryClient: QueryClient, examId: string): Promise<void> {
     queryClient.removeQueries({ queryKey: assessmentKeys.shell(examId) });
     await Promise.allSettled([
+      queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) }),
       // Two exam-list families: the legacy `exams` keys still drive the exam
       // library, and examKeys owns the authoring routes' own list.
       queryClient.invalidateQueries({ queryKey: queryKeys.exams.all }),

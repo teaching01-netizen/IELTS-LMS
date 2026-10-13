@@ -1,0 +1,156 @@
+# lake build && lake env lean AxiomAudit.lean   (Lean leanprover/lean4:v4.19.0)
+Build completed successfully.
+'Convert.convert_sound' does not depend on any axioms
+'Convert.convert_complete' depends on axioms: [propext]
+'Convert.convert_fails_closed' does not depend on any axioms
+'Convert.convert_refines_old' depends on axioms: [propext]
+'Convert.convert_local' depends on axioms: [propext]
+'Convert.normalizedRaw_bounds' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Convert.tdiv_eq_ediv_nonneg' depends on axioms: [propext]
+'Convert.normalizedRaw_mono' depends on axioms: [propext, Quot.sound]
+'Convert.normalizedRaw_full' depends on axioms: [propext, Quot.sound]
+'Convert.total_requires_both' does not depend on any axioms
+'Convert.total_in_range' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Convert.total_absent_single_section' does not depend on any axioms
+'Scoring.score_fold' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Scoring.score_raw' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Scoring.score_op' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Scoring.score_le' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Scoring.score_pretest_irrelevant' depends on axioms: [propext]
+'Report.sumBy_append' depends on axioms: [propext, Quot.sound]
+'Report.nodup_concat' depends on axioms: [propext]
+'Report.addRow_key' does not depend on any axioms
+'Report.secOf_key' does not depend on any axioms
+'Report.firstKeys_snoc' depends on axioms: [propext, Quot.sound]
+'Report.fk_mem' depends on axioms: [propext, Quot.sound]
+'Report.firstKeys_mem' depends on axioms: [propext, Quot.sound]
+'Report.fk_nodup' depends on axioms: [propext]
+'Report.firstKeys_nodup' depends on axioms: [propext]
+'Report.secOf_snoc' depends on axioms: [propext, Quot.sound]
+'Report.secOf_absent' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.upsert_map' depends on axioms: [propext, Quot.sound]
+'Report.upsert_step' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.group_fold' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.group_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.group_keys_unique' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.group_keys_cover' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.group_section_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.sumBy_upsert_raw' depends on axioms: [propext, Quot.sound]
+'Report.sumBy_upsert_total' depends on axioms: [propext, Quot.sound]
+'Report.group_totals' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.scoreAll_spec' depends on axioms: [propext]
+'Report.scored_spec' depends on axioms: [propext, Quot.sound]
+'Report.scoreAll_mem' depends on axioms: [propext, Quot.sound]
+'Report.scoreAll_complete' depends on axioms: [propext, Quot.sound]
+'Report.reportOf_spec' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.report_requires_all_scored' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.report_complete' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.sumBy_zero' depends on axioms: [propext]
+'Report.sumBy_le' depends on axioms: [propext, Quot.sound]
+'Report.sumBy_pos' depends on axioms: [propext, Quot.sound]
+'Report.report_bounds' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Report.classroomRaw_disabled' does not depend on any axioms
+'Attach.attach_exact' depends on axioms: [propext, Quot.sound]
+'Attach.attach_sound' depends on axioms: [propext, Quot.sound]
+'Attach.attach_complete' depends on axioms: [propext, Quot.sound]
+'Release.visible_only_released' depends on axioms: [propext]
+'Release.studentSafe_release' does not depend on any axioms
+'Release.studentSafe_payload' depends on axioms: [propext]
+'Release.studentSafe_withheld' depends on axioms: [propext]
+'Release.client_gate' does not depend on any axioms
+'Release.student_sees_only_released_raw' depends on axioms: [propext]
+'Release.student_view_gate' depends on axioms: [propext]
+'ResultMachine.classroomRaw_some' depends on axioms: [propext]
+'ResultMachine.wantTerminated_invalid' depends on axioms: [propext]
+'ResultMachine.mem_of_get?' depends on axioms: [propext]
+'ResultMachine.released_rows_scored' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.submit_cases' depends on axioms: [propext, Quot.sound]
+'ResultMachine.terminate_cases' depends on axioms: [propext]
+'ResultMachine.repair_cases' depends on axioms: [Quot.sound]
+'ResultMachine.inv_init' does not depend on any axioms
+'ResultMachine.inv_step' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.inv_reachable' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.released_report_faithful' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.released_only_when_enabled' depends on axioms: [propext, Quot.sound]
+'ResultMachine.step_classroom' depends on axioms: [propext, Quot.sound]
+'ResultMachine.practice_never_released' depends on axioms: [propext, Quot.sound]
+'ResultMachine.never_started_no_result' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.submit_idempotent' depends on axioms: [propext, Quot.sound]
+'ResultMachine.terminate_idempotent' depends on axioms: [propext, Quot.sound]
+'ResultMachine.released_immutable' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.submit_releases' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.repair_releases' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.report_blocked' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.zero_op_never_released' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Paper.circle_iff' depends on axioms: [propext]
+'Paper.circle_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Paper.unanswered_none' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Paper.unmatched_no_circle' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Paper.exactly_one_indication' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Paper.fold_untouched' depends on axioms: [propext]
+'Paper.answer_unique' depends on axioms: [propext, Quot.sound]
+'Paper.answer_absent' depends on axioms: [propext]
+'Paper.complete_iff' depends on axioms: [propext, Quot.sound]
+'PrintGate.inv_init' depends on axioms: [propext, Quot.sound]
+'PrintGate.inv_step' depends on axioms: [propext, Quot.sound]
+'PrintGate.inv_reachable' depends on axioms: [propext, Quot.sound]
+'PrintGate.print_gate_sound' depends on axioms: [propext, Quot.sound]
+'PrintGate.single_flight' depends on axioms: [propext, Quot.sound]
+'PrintGate.poll_can_end' does not depend on any axioms
+'CloseAck.reload_faithful' does not depend on any axioms
+'CloseAck.closed_server_frozen' depends on axioms: [propext]
+'CloseAck.sealed_reload_faithful' depends on axioms: [propext]
+'Convert.old_fabricates_from_null' does not depend on any axioms
+'Convert.old_accepts_out_of_range' does not depend on any axioms
+'Report.adjacent_duplicates' does not depend on any axioms
+'Report.report_exists' does not depend on any axioms
+'Report.report_withheld' does not depend on any axioms
+'Attach.old_misattaches' does not depend on any axioms
+'Release.flag_off_hides_released' does not depend on any axioms
+'Paper.unmatched_was_silent' depends on axioms: [propext]
+'Paper.duplicate_ids_double_circle' does not depend on any axioms
+'ResultMachine.good_init' does not depend on any axioms
+'ResultMachine.zeroOp_init' does not depend on any axioms
+'ResultMachine.release_reachable' does not depend on any axioms
+'ResultMachine.old_gate_releases_practice' does not depend on any axioms
+'ResultMachine.practice_withheld' depends on axioms: [propext, Quot.sound]
+'ResultMachine.zero_op_stuck' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ResultMachine.released_then_invalidated' does not depend on any axioms
+'ResultMachine.flag_late_release' does not depend on any axioms
+'PrintGate.print_reachable' depends on axioms: [propext]
+'PrintGate.old_prints_unready' depends on axioms: [propext, Quot.sound]
+'CloseAck.close_ack_stale' does not depend on any axioms
+'ConvertTopo.convert_spec' depends on axioms: [propext]
+'ConvertTopo.convert_sound' depends on axioms: [propext, Quot.sound]
+'ConvertTopo.convert_fails_closed' depends on axioms: [propext, Quot.sound]
+'ConvertTopo.convert_local' depends on axioms: [propext]
+'ConvertTopo.standalone_ignores_full' depends on axioms: [propext]
+'ConvertTopo.topologyOf_counts' depends on axioms: [propext]
+'ConvertTopo.topologyOf_rejects' does not depend on any axioms
+'ConvertTopo.topologyOf_order' does not depend on any axioms
+'ConvertTopo.sectionScore_spec' depends on axioms: [propext]
+'ConvertTopo.raw_only_never_scales' does not depend on any axioms
+'ConvertTopo.total_requires_full' depends on axioms: [propext]
+'ConvertTopo.total_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ConvertTopo.administered_in_plan' depends on axioms: [propext]
+'ConvertTopo.gate_complete' depends on axioms: [propext]
+'ConvertTopo.fullOnly_valid' depends on axioms: [propext]
+'ConvertTopo.old_reuses_full_for_standalone' does not depend on any axioms
+'ConvertTopo.old_ignores_operational_count' does not depend on any axioms
+'ConvertTopo.total_witness' does not depend on any axioms
+'ConvertTopo.standalone_witness' does not depend on any axioms
+'ConvertTopo.gate_witness' depends on axioms: [propext]
+'RepairQueue.scoreAll_isSome' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RepairQueue.scoreAll_nil_iff' depends on axioms: [propext]
+'RepairQueue.upsert_ne_nil' depends on axioms: [propext]
+'RepairQueue.foldl_upsert_ne_nil' depends on axioms: [propext]
+'RepairQueue.groupNew_isEmpty' depends on axioms: [propext]
+'RepairQueue.sqlReady_iff' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RepairQueue.sweep_keeps_withheld' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RepairQueue.sweep_ready' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RepairQueue.runs_ready' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RepairQueue.every_ready_released' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RepairQueue.old_sweep_stuck' depends on axioms: [propext, Quot.sound]
+'RepairQueue.old_runs_stuck' depends on axioms: [propext, Quot.sound]
+'RepairQueue.old_starves_ready' depends on axioms: [propext, Quot.sound]
+'RepairQueue.sqlReady_witness' does not depend on any axioms

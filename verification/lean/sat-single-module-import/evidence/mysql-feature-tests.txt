@@ -1,0 +1,85 @@
+Verification command: TEST_MYSQL_DSN=<isolated local schema sat_single_import_verify> go test ./cmd/api -run 'TestSAT(SingleModule|FullWorkbook|Publish)' -count=1 -v
+Exit status: 0
+---
+=== RUN   TestSATPublishUsesConfiguredQuestionCountsMySQL
+--- PASS: TestSATPublishUsesConfiguredQuestionCountsMySQL (0.23s)
+=== RUN   TestSATPublishScopeIgnoresExcludedIssuesAndPersistsScopeMySQL
+--- PASS: TestSATPublishScopeIgnoresExcludedIssuesAndPersistsScopeMySQL (0.08s)
+=== RUN   TestSATPublishRejectsInvalidPretestCountsMySQL
+=== RUN   TestSATPublishRejectsInvalidPretestCountsMySQL/0_designated
+=== RUN   TestSATPublishRejectsInvalidPretestCountsMySQL/1_designated
+--- PASS: TestSATPublishRejectsInvalidPretestCountsMySQL (0.16s)
+    --- PASS: TestSATPublishRejectsInvalidPretestCountsMySQL/0_designated (0.08s)
+    --- PASS: TestSATPublishRejectsInvalidPretestCountsMySQL/1_designated (0.08s)
+=== RUN   TestSATPublishMathScopeIgnoresExcludedIssuesAndPersistsScopeMySQL
+--- PASS: TestSATPublishMathScopeIgnoresExcludedIssuesAndPersistsScopeMySQL (0.09s)
+=== RUN   TestSATPublishRejectsUnknownScopeMySQL
+--- PASS: TestSATPublishRejectsUnknownScopeMySQL (0.07s)
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/empty_prompt
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/choice_count
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/choice_content
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/missing_correct_answer
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/invalid_correct_answer
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/SPR_without_accepted_response
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/module_count_differs_from_configured_target
+--- PASS: TestSATPublishRejectsEachContentViolationMySQL (0.40s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/empty_prompt (0.06s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/choice_count (0.07s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/choice_content (0.07s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/missing_correct_answer (0.08s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/invalid_correct_answer (0.05s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/SPR_without_accepted_response (0.04s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/module_count_differs_from_configured_target (0.04s)
+=== RUN   TestSATPublishStrictSPRValidationMySQL
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["twelve"]}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12","bad"]}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["1/0"]}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["123456"]}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"numericTolerance":"0.1"}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeFraction":false}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeDecimal":false}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/long_canonical_numeric_key
+--- PASS: TestSATPublishStrictSPRValidationMySQL (0.56s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["twelve"]} (0.05s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12","bad"]} (0.04s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["1/0"]} (0.04s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["123456"]} (0.20s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"numericTolerance":"0.1"} (0.09s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeFraction":false} (0.05s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeDecimal":false} (0.04s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/long_canonical_numeric_key (0.05s)
+=== RUN   TestSATPublishIgnoresLegacyReadinessFieldsMySQL
+--- PASS: TestSATPublishIgnoresLegacyReadinessFieldsMySQL (0.06s)
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL/expected_draft_id
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL/expected_draft_revision
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL/exam_revision
+--- PASS: TestSATPublishPreservesRevisionFencesMySQL (0.11s)
+    --- PASS: TestSATPublishPreservesRevisionFencesMySQL/expected_draft_id (0.03s)
+    --- PASS: TestSATPublishPreservesRevisionFencesMySQL/expected_draft_revision (0.04s)
+    --- PASS: TestSATPublishPreservesRevisionFencesMySQL/exam_revision (0.04s)
+=== RUN   TestSATPublishOperationKeyReplaysOneReleaseMySQL
+--- PASS: TestSATPublishOperationKeyReplaysOneReleaseMySQL (0.05s)
+=== RUN   TestSATPublishBlocksUnavailableMediaMySQL
+2026/10/13 16:10:04 {"event":"sat_publish_media_blocked","request_id":"","version_id":"f371675e-3bfe-493a-9bbe-dc1bde960e43","question_id":"75397b79-daf3-4baa-a39c-c4b683842216","asset_id":"missing-media","storage_error_class":"missing"}
+--- PASS: TestSATPublishBlocksUnavailableMediaMySQL (0.03s)
+=== RUN   TestSATPublishAfterLegacyImageReplacementMySQL
+2026/10/13 16:10:04 {"event":"sat_publish_media_blocked","request_id":"","version_id":"8d910970-d115-4513-9c5c-bb0c3e668ffa","question_id":"42134312-7681-4efc-9f0c-f98075c44625","asset_id":"legacy-lost-image","storage_error_class":""}
+--- PASS: TestSATPublishAfterLegacyImageReplacementMySQL (0.07s)
+=== RUN   TestSATPublishConflictsWhenDraftChangesDuringMediaCheckMySQL
+--- PASS: TestSATPublishConflictsWhenDraftChangesDuringMediaCheckMySQL (0.03s)
+=== RUN   TestSATSingleModulePreviewAndCommitHTTPMySQL
+--- PASS: TestSATSingleModulePreviewAndCommitHTTPMySQL (0.06s)
+=== RUN   TestSATSingleModulePreservesOtherModulesAndUndoMySQL
+--- PASS: TestSATSingleModulePreservesOtherModulesAndUndoMySQL (0.12s)
+=== RUN   TestSATSingleModuleTwoInstanceRaceMySQL
+--- PASS: TestSATSingleModuleTwoInstanceRaceMySQL (0.10s)
+=== RUN   TestSATSingleModuleRejectsDisabledAndTamperedRequestsMySQL
+--- PASS: TestSATSingleModuleRejectsDisabledAndTamperedRequestsMySQL (0.03s)
+=== RUN   TestSATSingleModuleTransactionRollsBackLateReceiptFailureMySQL
+--- PASS: TestSATSingleModuleTransactionRollsBackLateReceiptFailureMySQL (0.10s)
+=== RUN   TestSATFullWorkbookImportCompatibilityMySQL
+--- PASS: TestSATFullWorkbookImportCompatibilityMySQL (0.19s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/api	3.388s

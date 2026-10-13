@@ -39,6 +39,9 @@ var metricHelpText = map[string]string{
 	MSATTransferTotal:               "Total SAT device-transfer workflow transitions by action and outcome.",
 	MSATAdaptiveIntegrityViolation:  "Total SAT adaptive-routing integrity violations where the recorded route decision and the administered module disagreed.",
 	MSATAdaptiveRouteTotal:          "Total SAT adaptive-routing decisions by section and selected route (higher vs lower).",
+	MSATClassroomPlanMissingTotal:   "Total SAT classroom plans referencing a module missing from the published tree.",
+	MSATClassroomUnreleased:         "Completed SAT classroom attempts still without a released raw score after the last repair pass.",
+	MSATClassroomResultTotal:        "Total SAT classroom result materializations by outcome (released, pending, repaired, failed).",
 	MSATAdaptiveModuleOpenTotal:     "Total SAT adaptive follow-up modules opened by adaptive role (higher_branch vs lower_branch).",
 	MSATModuleRouteBasisTotal:       "Total SAT module finalizations by what closed the module (client_confirmed, window_closed, room_completed, proctor_end, proctor_terminate).",
 	MSATModuleCloseRequestTotal:     "Total SAT module close requests by outcome (closed, already_closed, not_expired, writes_pending).",
@@ -158,6 +161,16 @@ const (
 	// MSATAdaptiveRouteTotal counts every recorded adaptive-routing decision.
 	// Labels are the closed section/route vocabulary only (section, route).
 	MSATAdaptiveRouteTotal = "sat_adaptive_route_total"
+	// MSATClassroomPlanMissingTotal counts classroom plans that name a module the
+	// published tree does not contain. Expected production value: 0.
+	MSATClassroomPlanMissingTotal = "sat_classroom_plan_missing_total"
+	// MSATClassroomResultTotal counts classroom result outcomes (released,
+	// pending, repaired, failed). A growing pending-minus-repaired gap means
+	// completed attempts are not reaching a released score.
+	MSATClassroomResultTotal = "sat_classroom_result_total"
+	// MSATClassroomUnreleased gauges completed classroom attempts whose raw score
+	// is still withheld after the latest repair pass (sampled per batch).
+	MSATClassroomUnreleased = "sat_classroom_unreleased"
 	// MSATAdaptiveModuleOpenTotal counts every adaptive follow-up module the
 	// router opens. Label is the authored adaptive role only (role).
 	MSATAdaptiveModuleOpenTotal = "sat_adaptive_module_open_total"
@@ -425,6 +438,8 @@ func Names() []string {
 		MSATResponseReplayAfterTerminal,
 		MSATAdaptiveIntegrityViolation,
 		MSATAdaptiveRouteTotal,
+		MSATClassroomPlanMissingTotal,
+		MSATClassroomResultTotal,
 		MSATAdaptiveModuleOpenTotal,
 		MSATModuleRouteBasisTotal,
 		MSATModuleCloseRequestTotal,
@@ -452,6 +467,7 @@ func Names() []string {
 		MJobDuration,
 		MJobFailures,
 		MSATPendingAge,
+		MSATClassroomUnreleased,
 		MProjectionLag,
 		MGradingProjectionCorrupt,
 		MWSConnections,

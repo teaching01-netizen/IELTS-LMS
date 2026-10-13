@@ -174,6 +174,22 @@ export interface AssessmentRoutingPolicyShell {
   revision: number;
 }
 
+/** Which modules students receive in a SAT Classroom section; absent = full adaptive. */
+export type SatClassroomShape = "m1_easy" | "m1_hard" | "m2_easy" | "m2_hard";
+export type SatClassroomPlan = Record<string, SatClassroomShape>;
+
+/**
+ * Versioned estimated-score converter (docs/sat-result.md §1–2). The server
+ * validates the full shape; the client only reads the identifying fields.
+ */
+export interface SatScoreConverter {
+  converterVersion: string;
+  scoreType: "estimated_sat";
+  calibrationSource: string;
+  sections: Record<string, Record<string, string>>;
+  tables: Record<string, { operationalQuestions: number; scores: Record<string, unknown> }>;
+}
+
 export interface AssessmentSectionShell {
   id: string;
   sectionKey: string;
@@ -206,6 +222,7 @@ export interface AssessmentAuthoringShell {
   versionId: string;
   versionRevision: number;
   sections: AssessmentSectionShell[];
+  singleModuleImportEnabled?: boolean;
 }
 
 /**
@@ -398,6 +415,25 @@ export interface SatWorkbookModuleDraft {
   questions: BatchQuestionDraft[];
 }
 
+export interface SatWorkbookImportOptions {
+  mode: "full" | "single_module";
+  targetModuleKey?: string;
+}
+
+export interface SatWorkbookPreviewQuestion extends Omit<BatchQuestionDraft, "isPretest"> {
+  isPretest?: boolean | null;
+}
+
+export interface SatWorkbookPreviewModule extends Omit<SatWorkbookModuleDraft, "questions"> {
+  questions: SatWorkbookPreviewQuestion[];
+}
+
+export interface SatWorkbookPretestResolution {
+  selectedOrders: number[];
+  designationSource: "source_verified" | "staff_defined";
+  confirmed: boolean;
+}
+
 export interface SatWorkbookAsset {
   key: string;
   fileName: string;
@@ -420,9 +456,13 @@ export interface SatWorkbookPreview {
   rowCount: number;
   questionCount: number;
   valid: boolean;
-  modules: SatWorkbookModuleDraft[];
+  modules: SatWorkbookPreviewModule[];
   assets: SatWorkbookAsset[];
   issues: SatWorkbookIssue[];
+  mode?: "full" | "single_module";
+  targetModuleKey?: string;
+  commitReady?: boolean;
+  ignoredScaffoldRows?: number;
 }
 
 export interface SatWorkbookCommitRequest {
@@ -433,6 +473,9 @@ export interface SatWorkbookCommitRequest {
   assets: SatWorkbookStagedAsset[];
   /** Retry-safety key: same key + identical content replays; reuse with different content is a 409. */
   operationKey?: string;
+  mode?: "full" | "single_module";
+  targetModuleKey?: string;
+  pretestResolution?: SatWorkbookPretestResolution;
 }
 
 export interface SatWorkbookUndoState {

@@ -1,0 +1,13 @@
+{
+  "allowlist": [
+    "Classical.choice",
+    "Quot.sound",
+    "propext"
+  ],
+  "audited_dependency_entries": 19,
+  "result": "accepted",
+  "actual_axioms": [
+    "Quot.sound",
+    "propext"
+  ]
+}

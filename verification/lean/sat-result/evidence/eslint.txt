@@ -1,0 +1,24 @@
+$ bunx eslint src/features/student-delivery/ui/transitions/SatScoreReport.tsx src/features/student-delivery/ui/transitions/SatCompleteScreen.tsx src/features/student-delivery/ui/transitions/__tests__/SatCompleteScreen.test.tsx src/features/student-delivery/hooks/useSatExamController.ts src/features/student-delivery/routes/SatStudentSessionRoute.tsx src/features/exam-rendering/RichStructuredContentRenderer.tsx src/features/exam-rendering/StructuredContentRenderer.tsx
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-rendering/RichStructuredContentRenderer.tsx
+    1:1   warning  Unused eslint-disable directive (no problems were reported from 'jsx-a11y/no-noninteractive-element-interactions')
+  286:65  warning  The ref value 'loadGeneration.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'loadGeneration.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student-delivery/hooks/useSatExamController.ts
+    36:3  warning  'calculatorWorkspaceKey' is defined but never used. Allowed unused vars must match /^_/u                          @typescript-eslint/no-unused-vars
+    37:3  warning  'clearCalculatorWorkspace' is defined but never used. Allowed unused vars must match /^_/u                        @typescript-eslint/no-unused-vars
+   819:6  warning  React Hook useEffect has a missing dependency: 'candidateId'. Either include it or remove the dependency array    react-hooks/exhaustive-deps
+  1262:5  warning  React Hook useCallback has a missing dependency: 'candidateId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+✖ 6 problems (0 errors, 6 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+
+exit: 0
+
+# Baseline: the same 6 warnings are reported for the HEAD (2c319e59) versions of
+# RichStructuredContentRenderer.tsx (1:1, 283:65) and useSatExamController.ts
+# (36:3, 37:3, 819:6, 1262:5) via `git show HEAD:<f> | bunx eslint --stdin`.
+# They predate this change; none is introduced by it.
+
+$ bunx eslint src/features/exam-authoring/ui/release/releaseSelectors.ts
+exit=0

@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { useOptionalAuthSession } from '../../features/auth/authSession';
 import { Exam } from '../../types';
 import { ExamEntity, ExamSchedule, ExamVersion } from '../../types/domain';
+import { SAT_SESSION_TYPE_LABELS, SAT_SESSION_TYPE_REQUEST, type SatSessionType } from '../../features/exam-authoring/contracts/satSessionType';
 import { examRepository, examDeliveryService } from '../../features/exam-authoring/api/examAuthoringGateway';
 
 interface ScheduleSessionModalProps {
@@ -20,6 +21,7 @@ interface ScheduleDraft {
   cohortName: string;
   proctorDisplayName: string;
   gradingDisplayName: string;
+  sessionType: SatSessionType;
 }
 
 export function ScheduleSessionModal({
@@ -40,6 +42,7 @@ export function ScheduleSessionModal({
     cohortName: 'Elite 2025-A',
     proctorDisplayName: defaultScheduleName,
     gradingDisplayName: defaultScheduleName,
+    sessionType: 'practice',
   });
   const [selectedVersion, setSelectedVersion] = useState<ExamVersion | null>(null);
   const [loadingVersion, setLoadingVersion] = useState(false);
@@ -59,6 +62,7 @@ export function ScheduleSessionModal({
       cohortName: 'Elite 2025-A',
       proctorDisplayName: displayName,
       gradingDisplayName: displayName,
+      sessionType: 'practice',
     });
   }, [defaultExamId, examEntities, isOpen]);
 
@@ -141,6 +145,7 @@ export function ScheduleSessionModal({
       createdAt: now,
       createdBy: schedulerName,
       updatedAt: now,
+      ...(selectedExamEntity?.providerKey === 'sat' ? SAT_SESSION_TYPE_REQUEST[draft.sessionType] : {}),
     };
 
     await onCreateSchedule(schedule);
@@ -185,6 +190,7 @@ export function ScheduleSessionModal({
                       nextExam?.currentPublishedVersionId || nextExam?.currentDraftVersionId || '',
                     proctorDisplayName: nextExam?.title || '',
                     gradingDisplayName: nextExam?.title || '',
+                    sessionType: 'practice',
                   }));
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
@@ -232,6 +238,28 @@ export function ScheduleSessionModal({
               <option>Weekend Intensive</option>
             </select>
           </div>
+
+          {selectedExamEntity?.providerKey === 'sat' && (
+            <div>
+              <label htmlFor="schedule-session-type" className="block text-sm font-semibold text-gray-700 mb-1">
+                Session type
+              </label>
+              <select
+                id="schedule-session-type"
+                value={draft.sessionType}
+                onChange={(e) => setDraft((prev) => ({ ...prev, sessionType: e.target.value as SatSessionType }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                aria-label="Session type"
+              >
+                {(Object.keys(SAT_SESSION_TYPE_LABELS) as SatSessionType[]).map((key) => (
+                  <option key={key} value={key}>{SAT_SESSION_TYPE_LABELS[key]}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                Classroom sessions let staff control Module 2. The exam's score report setting decides what students see when they finish. Classroom needs a version published with a module plan.
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>

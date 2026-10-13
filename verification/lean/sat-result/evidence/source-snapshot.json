@@ -1,0 +1,133 @@
+{
+  "capturedAt": "2026-10-13T14:43:34Z",
+  "baseHead": "2c319e59a7de3c15345e8ac575142d9254acb22a",
+  "branch": "feat/sat-bluebook-overlays-tools",
+  "workingTree": "dirty (application fixes and this package are uncommitted)",
+  "leanToolchain": "leanprover/lean4:v4.19.0",
+  "leanVersion": "Lean (version 4.19.0, arm64-apple-darwin23.6.0, commit 6caaee842e94, Release)",
+  "lakeVersion": "Lake version 5.0.0-6caaee8 (Lean version 4.19.0)",
+  "goVersion": "go version go1.26.3 darwin/arm64",
+  "nodeVersion": "v26.0.0",
+  "bunVersion": "1.3.14",
+  "mysqlServer": "MySQL 9.6.0 (local scratch DB sat_result_verify)",
+  "leanSources": {
+    "Model.lean": "2f9121d174bad4f94a5901570643d44659506d241b7ba16b57976ef83ab89a63",
+    "Safety.lean": "f9eb4e0f8022e1428279002798de878962a1ca7a6f810806349279bb17a6fb17",
+    "Counterexamples.lean": "07209e83a45d333b6720675c50d0c6f260c7edb8c6faf57b6a8e33f1bc9cec64",
+    "AxiomAudit.lean": "381afc638ac9ee5024df67a69f114546d01a9bca76289ee8ac3b5d12dff4e07e",
+    "SatResult.lean": "0b9015b62119ffee824d672de7cd9a3c77ac27afdfaf5b3bbde0e326c4c5457f",
+    "lakefile.lean": "8e9794d06d30cde575966aea2580d02b85ca79281168b551d017142d3b0f05a1",
+    "lean-toolchain": "55e97be96000b5e9e290c9e74482e5e317861499a5540353ce845471bded8cea",
+    "lake-manifest.json": "f657bd37f7bba539f11f77b74cf0d79684db04014700cb7f755f3d806e76de9e"
+  },
+  "appSources": {
+    "backend/go/internal/sat/service.go": {
+      "sha256": "05f0f678d549d1bb826b56173d579b822d24d5198b9ef36347f1fdfebb1e2f9e",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/sat/scoring_test.go": {
+      "sha256": "ee349a96b04dd809fc6f71d6a20063d2577defe2074942a901db805c8ec6929e",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/terminalization/service.go": {
+      "sha256": "4579456f32cece17d5c75462faad1de294cbdf84e163ba7ec609dce35424e4e7",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/terminalization/classroom_raw_test.go": {
+      "sha256": "92e638a48536b08ae2e081ef95bf57b69867f5bd16b90adf4e15b128521f7ac3",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/terminalization/classroom_raw_score_test.go": {
+      "sha256": "57f383a1a97cd6ceb796bb84d83c836f4f3bc2b23a81c660fe0da66dcd7c2b38",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/results/service.go": {
+      "sha256": "de23e524f2cdeba0013237a982da47790aa961cea7d448fab00b035158b3e387",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/results/service_test.go": {
+      "sha256": "6955f24962151956a156f1967efcf983d597c0caff75f113baa38f569531c66c",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/delivery/service.go": {
+      "sha256": "c443280b4a16c676d3371dfeb6f3677148fc7153ab1ace4e0bc797b489e6dbda",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/delivery/student_result_release.go": {
+      "sha256": "2abb87f5840f19adc50c027cfd97c7c169202bb9109274a4946852c00275ca3a",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/delivery/student_result_release_test.go": {
+      "sha256": "317dc8cb31900b47c7a7d5558db9b54f932c988d901a6b83c61e28a3dd0a6d5f",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/delivery/start_submit.go": {
+      "sha256": "20c3618f69b84d89404a75e3ef2ab15d591a791ca9d0b42bbeb8f2d506142d5c",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/delivery/score_scoring_rows_test.go": {
+      "sha256": "29da2b5edf668e24d15afb246fb4780356e944998d01c2b3713f36e22415cf3c",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/schedules/service.go": {
+      "sha256": "dc6e5de85919759d6f25c0f6dae2ac158d90be1a1cb642dca856bb56963627a5",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/schedules/update_version_freeze_test.go": {
+      "sha256": "1115b3d0af27f8aafe5342685c845c8e40d688f8bf3b87765b2ee1b6647d791d",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/satpublish/validator.go": {
+      "sha256": "cce0933f2ff1eecf1dbe88014b7c0730292e5c8b65f3699f490f5c9b1e9a2b62",
+      "uncommittedChange": true
+    },
+    "backend/go/internal/satpublish/validator_test.go": {
+      "sha256": "942922de3a479e079a9071d4bb4363d87e1732702ed9da216a807edd9e439d18",
+      "uncommittedChange": true
+    },
+    "backend/go/cmd/api/sat_publish_mysql_test.go": {
+      "sha256": "5e62969f3a808433ce337b61080ef092e8e229c97d946b4855dd161e4902e273",
+      "uncommittedChange": true
+    },
+    "src/features/student-delivery/ui/transitions/SatScoreReport.tsx": {
+      "sha256": "20e6d8708859902cfb8a9d63983dd1bcae717fb5734563d8a252b773fa164311",
+      "uncommittedChange": true
+    },
+    "src/features/student-delivery/ui/transitions/SatCompleteScreen.tsx": {
+      "sha256": "82e91c707b4bbe393e397873261c7cf4073d5640b3f39a6201327202b7b10fe0",
+      "uncommittedChange": true
+    },
+    "src/features/student-delivery/ui/transitions/__tests__/SatCompleteScreen.test.tsx": {
+      "sha256": "d379df6bd4caa97bf87118c67fbf8633929c0693c41650d74adc376424d083e9",
+      "uncommittedChange": true
+    },
+    "src/features/student-delivery/hooks/useSatExamController.ts": {
+      "sha256": "9d4361cfc63fa6cd29ca24a36081a6a5911ecab8ee7b5f0f3c3efdf9e50f0ab0",
+      "uncommittedChange": true
+    },
+    "src/features/student-delivery/routes/SatStudentSessionRoute.tsx": {
+      "sha256": "cbf36b726e6314c9d956a58c020c472f11cec96857aa89f51bf6a0e2b2a31e42",
+      "uncommittedChange": true
+    },
+    "src/features/exam-rendering/RichStructuredContentRenderer.tsx": {
+      "sha256": "018263dcf4314c18b78049c897f4e2e3cba49452f426a8ad774f08e236611282",
+      "uncommittedChange": true
+    },
+    "src/features/exam-rendering/StructuredContentRenderer.tsx": {
+      "sha256": "11344bf89271440720879a7096ccba0be3da416b8a62671e6e5e4a5024e0f238",
+      "uncommittedChange": true
+    },
+    "src/features/exam-authoring/ui/release/releaseSelectors.ts": {
+      "sha256": "b617808dee766dfb090d1abf8c9daee53385f94ca4171b8ef0697080199b96e2",
+      "uncommittedChange": true
+    },
+    "docs/sat-result.md": {
+      "sha256": "bfea4b7556161a43d3f7c5632d13a17f7ea711e10c7a600978f31d9ecd22a7f7",
+      "uncommittedChange": true
+    },
+    "backend/go/migrations/0085_sat_score_report_setting.sql": {
+      "sha256": "cbff7cc913bb1a928972067f20d1ad4a83096993aa82747b02fd3e22e7529506",
+      "uncommittedChange": true
+    }
+  }
+}

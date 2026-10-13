@@ -31,6 +31,7 @@ import { sessionPhaseFromRuntime, sessionStatusLine } from '../../../features/ex
 import { examWorkspacePath } from '../../../features/exam-authoring/ui/shell/examLifecycle';
 import { SatWaitingRoomPanel } from '../ui/SatWaitingRoomPanel';
 import { SatStartCodePanel } from '../ui/SatStartCodePanel';
+import { SatStaffRoutePanel } from '../ui/SatStaffRoutePanel';
 import '../ui/sat-session-room.css';
 
 const RELOAD_FAILED_SUFFIX = ' However, the live view could not refresh. Retry to confirm.';
@@ -375,6 +376,7 @@ export function SatSessionRoomRoute() {
 
         <div className="min-w-0">
         {schedule.satStartMode === 'access_code' && roomMode !== 'review' ? <SatStartCodePanel scheduleId={scheduleId} blocked={isStale} /> : null}
+        {roomMode !== 'review' ? <SatStaffRoutePanel scheduleId={scheduleId} blocked={isStale} /> : null}
         <SatSessionRoomTimeline
           key={runtime.scheduleId}
           runtime={runtime}

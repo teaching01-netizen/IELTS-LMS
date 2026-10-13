@@ -67,6 +67,15 @@ func newSATV2CompletionFixture(t *testing.T) satV2CompletionFixture {
 		uuid.NewString(), attemptID, highID, now.Add(-time.Minute), now); err != nil {
 		t.Fatal(err)
 	}
+	// The completion gate admits a Module 2 only with the decision that chose it.
+	if _, err := db.ExecContext(ctx, `INSERT INTO assessment_route_decisions (
+		id, attempt_id, section_id, base_module_attempt_id, base_module_id, selected_module_id, selected_route,
+		raw_correct, operational_question_count, policy_key, policy_revision, policy_config, route_basis
+	) SELECT ?, ma.attempt_id, m.section_id, ma.id, ma.module_id, ?, 'higher', 3, 3, 'sat_threshold', 1, '{"threshold":2}', 'window_closed'
+		FROM assessment_module_attempts ma JOIN assessment_modules m ON m.id = ma.module_id
+		WHERE ma.attempt_id = ? AND ma.module_id = ?`, uuid.NewString(), highID, attemptID, baseID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.ExecContext(ctx,
 		"UPDATE student_attempts SET user_id = ?, active_client_session_id = ? WHERE id = ?",
 		userID, sessionID, attemptID); err != nil {

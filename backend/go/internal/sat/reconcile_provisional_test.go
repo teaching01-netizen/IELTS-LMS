@@ -25,6 +25,7 @@ func expectRepairPrefix(mock sqlmock.Sqlmock) {
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(s.section_key, ''), ma.state")).
 		WillReturnRows(satCompleteTopologyRows())
+	satNotAwaitingStaffRoute(mock)
 }
 
 func TestSATWatchdogRepairsOldProvisionalAttemptWithoutScoring(t *testing.T) {

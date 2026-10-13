@@ -224,6 +224,20 @@ describe("ExamPublishSheet", () => {
     expect(screen.getByRole("button", { name: "Publish Full SAT" })).toBeEnabled();
   });
 
+  it("does not announce success when the publish response cannot be verified", async () => {
+    state.publish.mockRejectedValueOnce(
+      new Error("The publish response could not be verified. Refresh the exam status before continuing."),
+    );
+    const onPublished = vi.fn();
+    const { props } = renderSheet({ onPublished });
+    fireEvent.click(screen.getByRole("button", { name: "Publish Full SAT" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/response could not be verified/i);
+    expect(screen.queryByText(/published\./i)).not.toBeInTheDocument();
+    expect(onPublished).not.toHaveBeenCalled();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
   it("submits only once on a double click", async () => {
     state.publish.mockImplementation(() => new Promise(() => undefined));
     renderSheet();
@@ -234,9 +248,11 @@ describe("ExamPublishSheet", () => {
   });
 
   it("after publishing, makes room creation the next step for the exact version published", async () => {
-    const { props, rerender } = renderSheet();
+    const onPublished = vi.fn();
+    const { props, rerender } = renderSheet({ onPublished });
     fireEvent.click(screen.getByRole("button", { name: "Publish Full SAT" }));
     await waitFor(() => expect(state.publish).toHaveBeenCalled());
+    expect(onPublished).toHaveBeenCalledWith({ versionId: "pv-3", versionNumber: 3, publishScope: "full" });
     setHook({
       releaseState: release({
         state: "published_current",

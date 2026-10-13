@@ -71,7 +71,17 @@ type Service struct {
 	// refuses a prompt write through a room when it is off. It is wired once at
 	// startup from cfg.AuthoringRealtimeCoediting (cmd/api/main.go), which the
 	// application build defaults to on.
-	coeditEnabled bool
+	coeditEnabled              bool
+	singleModuleImportsEnabled bool
+}
+
+// SetSingleModuleImportsEnabled is wired once at startup; the server remains
+// authoritative even when an older client submits a single-module request.
+func (s *Service) SetSingleModuleImportsEnabled(enabled bool) *Service {
+	if s != nil {
+		s.singleModuleImportsEnabled = enabled
+	}
+	return s
 }
 
 // NewService wires dependencies explicitly.

@@ -50,6 +50,28 @@ function renderSheet(overrides: Partial<React.ComponentProps<typeof AccessLinkEd
 }
 
 describe("AccessLinkEditorSheet interaction contract", () => {
+  it("sends classroom mode and a forced Module 2 route on create, and nothing for standard practice", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    const { unmount } = renderSheet({ onCreate });
+    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday Class" } });
+    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom_higher" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+    expect(onCreate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ satSessionMode: "classroom", satRoutePolicy: "force_higher" }),
+    );
+    unmount();
+
+    const plain = vi.fn().mockResolvedValue(undefined);
+    renderSheet({ onCreate: plain });
+    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Practice room" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    await waitFor(() => expect(plain).toHaveBeenCalledTimes(1));
+    const sent = plain.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(sent).not.toHaveProperty("satSessionMode");
+    expect(sent).not.toHaveProperty("satRoutePolicy");
+  });
+
   it("AT-21: an in-flight save is announced, keeps focus, and refuses a second fire", async () => {
     let resolveSave: (() => void) | undefined;
     const onCreate = vi.fn(() => new Promise<void>((resolve) => { resolveSave = resolve; }));

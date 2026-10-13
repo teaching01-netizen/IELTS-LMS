@@ -192,6 +192,16 @@ func TestAuthoringHTTPContractsMySQL(t *testing.T) {
 	if current.VersionRevision <= shell.VersionRevision {
 		t.Fatal("authoring mutations did not invalidate draft revision")
 	}
+	// The scratch questions above are blank by design; publish needs a real SAT
+	// shape, so swap them for the publishable fixture before releasing.
+	if _, err := db.Exec("DELETE eq FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id WHERE s.exam_version_id = ?", shell.VersionID); err != nil {
+		t.Fatal(err)
+	}
+	makeSATDraftPublishable(t, context.Background(), db, authors, actor, exam.ID)
+	current, err = authors.Shell(context.Background(), exam.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	version := request(http.MethodGet, "/versions/"+shell.VersionID, nil, 200)
 	if version["createdAt"] == nil {
 		t.Fatal("version missing creation date")
@@ -203,6 +213,10 @@ func TestAuthoringHTTPContractsMySQL(t *testing.T) {
 	}
 	if published.CreatedAt.IsZero() {
 		t.Fatal("published version missing creation timestamp")
+	}
+	// Leave room in the module so the frozen-version guard, not capacity, answers.
+	if _, err := db.Exec("UPDATE assessment_modules SET target_question_count = target_question_count + 1 WHERE id = ?", module.ID); err != nil {
+		t.Fatal(err)
 	}
 	_, err = authors.CreateQuestion(context.Background(), module.ID, actor, authoring.QuestionDraft{})
 	if e, ok := apperrors.As(err); !ok || e.Code != apperrors.CodeConflict {
@@ -221,7 +235,7 @@ func TestAuthoringHTTPContractsMySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := authors.CreateQuestion(context.Background(), reopened.Sections[0].Modules[0].ID, actor, authoring.QuestionDraft{}); err != nil {
+	if _, err := authors.CreateQuestion(context.Background(), reopened.Sections[0].Modules[0].ID, actor, validSATPublishQuestion()); err != nil {
 		t.Fatal(err)
 	}
 	latest, err := authors.Shell(context.Background(), exam.ID)

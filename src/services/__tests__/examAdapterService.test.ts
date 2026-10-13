@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDefaultConfig } from '../../constants/examDefaults';
+import { getInsertedImages } from '../../utils/insertedImages';
 import { hydrateExamState } from '../examAdapterService';
 
 describe('hydrateExamState', () => {
@@ -50,6 +51,52 @@ describe('hydrateExamState', () => {
     const hydrated = hydrateExamState({ config } as any);
     expect(hydrated.reading.passages.length).toBeGreaterThan(0);
     expect(hydrated.listening.parts.length).toBeGreaterThan(0);
+  });
+
+  it('preserves block inserted images through delivery hydration', () => {
+    // The student/preview path reads blocks out of the published version
+    // snapshot via hydrateExamState; a normalizer that dropped insertedImages
+    // would silently remove the diagram from delivery while authoring still
+    // showed it.
+    const config = createDefaultConfig('Academic', 'Academic');
+    const insertedImage = {
+      id: 'img-1',
+      url: 'https://drive.google.com/file/d/1AbCDefG123456/view?usp=sharing',
+      caption: 'Water heater',
+    };
+
+    const hydrated = hydrateExamState({
+      config,
+      title: 'Inserted Image Exam',
+      type: 'Academic',
+      reading: { passages: [] },
+      listening: {
+        parts: [
+          {
+            id: 'l1',
+            title: 'Part 1',
+            pins: [],
+            audioUrl: '',
+            transcript: '',
+            questions: [],
+            blocks: [
+              {
+                id: 'sa-11-13',
+                type: 'SHORT_ANSWER',
+                instruction: 'Label the diagram below.',
+                insertedImages: [insertedImage],
+                questions: [
+                  { id: 'q-11', prompt: 'Prompt eleven', correctAnswer: '', answerRule: 'ONE_WORD' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as any);
+
+    const block = hydrated.listening.parts[0]?.blocks[0];
+    expect(block && getInsertedImages(block)).toEqual([insertedImage]);
   });
 
   it('normalizes legacy diagram image fields when imageUrl is empty', () => {

@@ -1,0 +1,156 @@
+ℹ [6/7] Replayed AxiomAudit
+info: ././././AxiomAudit.lean:7:0: 'Convert.convert_sound' does not depend on any axioms
+info: ././././AxiomAudit.lean:8:0: 'Convert.convert_complete' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:9:0: 'Convert.convert_fails_closed' does not depend on any axioms
+info: ././././AxiomAudit.lean:10:0: 'Convert.convert_refines_old' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:11:0: 'Convert.convert_local' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:12:0: 'Convert.normalizedRaw_bounds' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:13:0: 'Convert.tdiv_eq_ediv_nonneg' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:14:0: 'Convert.normalizedRaw_mono' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:15:0: 'Convert.normalizedRaw_full' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:16:0: 'Convert.total_requires_both' does not depend on any axioms
+info: ././././AxiomAudit.lean:17:0: 'Convert.total_in_range' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:18:0: 'Convert.total_absent_single_section' does not depend on any axioms
+info: ././././AxiomAudit.lean:19:0: 'Scoring.score_fold' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:20:0: 'Scoring.score_raw' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:21:0: 'Scoring.score_op' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:22:0: 'Scoring.score_le' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:23:0: 'Scoring.score_pretest_irrelevant' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:24:0: 'Report.sumBy_append' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:25:0: 'Report.nodup_concat' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:26:0: 'Report.addRow_key' does not depend on any axioms
+info: ././././AxiomAudit.lean:27:0: 'Report.secOf_key' does not depend on any axioms
+info: ././././AxiomAudit.lean:28:0: 'Report.firstKeys_snoc' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:29:0: 'Report.fk_mem' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:30:0: 'Report.firstKeys_mem' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:31:0: 'Report.fk_nodup' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:32:0: 'Report.firstKeys_nodup' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:33:0: 'Report.secOf_snoc' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:34:0: 'Report.secOf_absent' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:35:0: 'Report.upsert_map' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:36:0: 'Report.upsert_step' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:37:0: 'Report.group_fold' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:38:0: 'Report.group_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:39:0: 'Report.group_keys_unique' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:40:0: 'Report.group_keys_cover' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:41:0: 'Report.group_section_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:42:0: 'Report.sumBy_upsert_raw' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:43:0: 'Report.sumBy_upsert_total' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:44:0: 'Report.group_totals' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:45:0: 'Report.scoreAll_spec' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:46:0: 'Report.scored_spec' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:47:0: 'Report.scoreAll_mem' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:48:0: 'Report.scoreAll_complete' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:49:0: 'Report.reportOf_spec' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:50:0: 'Report.report_requires_all_scored' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:51:0: 'Report.report_complete' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:52:0: 'Report.sumBy_zero' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:53:0: 'Report.sumBy_le' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:54:0: 'Report.sumBy_pos' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:55:0: 'Report.report_bounds' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:56:0: 'Report.classroomRaw_disabled' does not depend on any axioms
+info: ././././AxiomAudit.lean:57:0: 'Attach.attach_exact' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:58:0: 'Attach.attach_sound' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:59:0: 'Attach.attach_complete' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:60:0: 'Release.visible_only_released' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:61:0: 'Release.studentSafe_release' does not depend on any axioms
+info: ././././AxiomAudit.lean:62:0: 'Release.studentSafe_payload' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:63:0: 'Release.studentSafe_withheld' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:64:0: 'Release.client_gate' does not depend on any axioms
+info: ././././AxiomAudit.lean:65:0: 'Release.student_sees_only_released_raw' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:66:0: 'Release.student_view_gate' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:67:0: 'ResultMachine.classroomRaw_some' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:68:0: 'ResultMachine.wantTerminated_invalid' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:69:0: 'ResultMachine.mem_of_get?' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:70:0: 'ResultMachine.released_rows_scored' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:71:0: 'ResultMachine.submit_cases' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:72:0: 'ResultMachine.terminate_cases' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:73:0: 'ResultMachine.repair_cases' depends on axioms: [Quot.sound]
+info: ././././AxiomAudit.lean:74:0: 'ResultMachine.inv_init' does not depend on any axioms
+info: ././././AxiomAudit.lean:75:0: 'ResultMachine.inv_step' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:76:0: 'ResultMachine.inv_reachable' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:77:0: 'ResultMachine.released_report_faithful' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:78:0: 'ResultMachine.released_only_when_enabled' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:79:0: 'ResultMachine.step_classroom' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:80:0: 'ResultMachine.practice_never_released' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:81:0: 'ResultMachine.never_started_no_result' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:82:0: 'ResultMachine.submit_idempotent' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:83:0: 'ResultMachine.terminate_idempotent' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:84:0: 'ResultMachine.released_immutable' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:85:0: 'ResultMachine.submit_releases' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:86:0: 'ResultMachine.repair_releases' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:87:0: 'ResultMachine.report_blocked' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:88:0: 'ResultMachine.zero_op_never_released' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:89:0: 'Paper.circle_iff' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:90:0: 'Paper.circle_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:91:0: 'Paper.unanswered_none' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:92:0: 'Paper.unmatched_no_circle' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:93:0: 'Paper.exactly_one_indication' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:94:0: 'Paper.fold_untouched' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:95:0: 'Paper.answer_unique' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:96:0: 'Paper.answer_absent' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:97:0: 'Paper.complete_iff' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:98:0: 'PrintGate.inv_init' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:99:0: 'PrintGate.inv_step' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:100:0: 'PrintGate.inv_reachable' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:101:0: 'PrintGate.print_gate_sound' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:102:0: 'PrintGate.single_flight' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:103:0: 'PrintGate.poll_can_end' does not depend on any axioms
+info: ././././AxiomAudit.lean:104:0: 'CloseAck.reload_faithful' does not depend on any axioms
+info: ././././AxiomAudit.lean:105:0: 'CloseAck.closed_server_frozen' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:106:0: 'CloseAck.sealed_reload_faithful' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:107:0: 'Convert.old_fabricates_from_null' does not depend on any axioms
+info: ././././AxiomAudit.lean:108:0: 'Convert.old_accepts_out_of_range' does not depend on any axioms
+info: ././././AxiomAudit.lean:109:0: 'Report.adjacent_duplicates' does not depend on any axioms
+info: ././././AxiomAudit.lean:110:0: 'Report.report_exists' does not depend on any axioms
+info: ././././AxiomAudit.lean:111:0: 'Report.report_withheld' does not depend on any axioms
+info: ././././AxiomAudit.lean:112:0: 'Attach.old_misattaches' does not depend on any axioms
+info: ././././AxiomAudit.lean:113:0: 'Release.flag_off_hides_released' does not depend on any axioms
+info: ././././AxiomAudit.lean:114:0: 'Paper.unmatched_was_silent' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:115:0: 'Paper.duplicate_ids_double_circle' does not depend on any axioms
+info: ././././AxiomAudit.lean:116:0: 'ResultMachine.good_init' does not depend on any axioms
+info: ././././AxiomAudit.lean:117:0: 'ResultMachine.zeroOp_init' does not depend on any axioms
+info: ././././AxiomAudit.lean:118:0: 'ResultMachine.release_reachable' does not depend on any axioms
+info: ././././AxiomAudit.lean:119:0: 'ResultMachine.old_gate_releases_practice' does not depend on any axioms
+info: ././././AxiomAudit.lean:120:0: 'ResultMachine.practice_withheld' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:121:0: 'ResultMachine.zero_op_stuck' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:122:0: 'ResultMachine.released_then_invalidated' does not depend on any axioms
+info: ././././AxiomAudit.lean:123:0: 'ResultMachine.flag_late_release' does not depend on any axioms
+info: ././././AxiomAudit.lean:124:0: 'PrintGate.print_reachable' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:125:0: 'PrintGate.old_prints_unready' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:126:0: 'CloseAck.close_ack_stale' does not depend on any axioms
+info: ././././AxiomAudit.lean:127:0: 'ConvertTopo.convert_spec' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:128:0: 'ConvertTopo.convert_sound' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:129:0: 'ConvertTopo.convert_fails_closed' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:130:0: 'ConvertTopo.convert_local' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:131:0: 'ConvertTopo.standalone_ignores_full' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:132:0: 'ConvertTopo.topologyOf_counts' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:133:0: 'ConvertTopo.topologyOf_rejects' does not depend on any axioms
+info: ././././AxiomAudit.lean:134:0: 'ConvertTopo.topologyOf_order' does not depend on any axioms
+info: ././././AxiomAudit.lean:135:0: 'ConvertTopo.sectionScore_spec' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:136:0: 'ConvertTopo.raw_only_never_scales' does not depend on any axioms
+info: ././././AxiomAudit.lean:137:0: 'ConvertTopo.total_requires_full' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:138:0: 'ConvertTopo.total_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:139:0: 'ConvertTopo.administered_in_plan' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:140:0: 'ConvertTopo.gate_complete' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:141:0: 'ConvertTopo.fullOnly_valid' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:142:0: 'ConvertTopo.old_reuses_full_for_standalone' does not depend on any axioms
+info: ././././AxiomAudit.lean:143:0: 'ConvertTopo.old_ignores_operational_count' does not depend on any axioms
+info: ././././AxiomAudit.lean:144:0: 'ConvertTopo.total_witness' does not depend on any axioms
+info: ././././AxiomAudit.lean:145:0: 'ConvertTopo.standalone_witness' does not depend on any axioms
+info: ././././AxiomAudit.lean:146:0: 'ConvertTopo.gate_witness' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:147:0: 'RepairQueue.scoreAll_isSome' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:148:0: 'RepairQueue.scoreAll_nil_iff' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:149:0: 'RepairQueue.upsert_ne_nil' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:150:0: 'RepairQueue.foldl_upsert_ne_nil' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:151:0: 'RepairQueue.groupNew_isEmpty' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:152:0: 'RepairQueue.sqlReady_iff' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:153:0: 'RepairQueue.sweep_keeps_withheld' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:154:0: 'RepairQueue.sweep_ready' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:155:0: 'RepairQueue.runs_ready' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:156:0: 'RepairQueue.every_ready_released' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:157:0: 'RepairQueue.old_sweep_stuck' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:158:0: 'RepairQueue.old_runs_stuck' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:159:0: 'RepairQueue.old_starves_ready' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:160:0: 'RepairQueue.sqlReady_witness' does not depend on any axioms
+Build completed successfully.

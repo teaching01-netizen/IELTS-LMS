@@ -486,8 +486,18 @@ func TestSATAccessCodeWindowAndExpiryMySQL(t *testing.T) {
 	if _, err := f.start(c, code); reasonOf(err) != "START_WINDOW_CLOSED" {
 		t.Fatalf("after close: %v", err)
 	}
-	if _, err := f.app.Proctor.ReconcileExpiredSections(ctx, time.Now().UTC(), 50, "test"); err != nil {
-		t.Fatalf("sweep: %v", err)
+	// The shared test DB can hold older unstarted candidates from other tests,
+	// and each sweep takes the oldest batch first. Sweep until this one is
+	// handled; production drains the same backlog across repeated sweeps.
+	for i := 0; i < 20; i++ {
+		if _, err := f.app.Proctor.ReconcileExpiredSections(ctx, time.Now().UTC(), 50, "test"); err != nil {
+			t.Fatalf("sweep: %v", err)
+		}
+		var handled int
+		_ = db.QueryRow("SELECT COUNT(*) FROM attempt_terminalizations WHERE attempt_id = ?", c.attemptID).Scan(&handled)
+		if handled > 0 {
+			break
+		}
 	}
 	var reason, status string
 	if err := db.QueryRow("SELECT reason FROM attempt_terminalizations WHERE attempt_id = ?", c.attemptID).Scan(&reason); err != nil || reason != "start_window_closed" {

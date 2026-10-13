@@ -6,7 +6,11 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("TRUSTED_PROXIES", "")
+	t.Setenv("SAT_SINGLE_MODULE_IMPORT_ENABLED", "")
 	c := Load()
+	if c.SATSingleModuleImportEnabled {
+		t.Fatal("single-module SAT import must default off")
+	}
 	if c.APIPort != 4000 {
 		t.Fatalf("default port = %d", c.APIPort)
 	}
@@ -32,6 +36,17 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if len(c.TrustedProxyCIDRs) != 2 || c.TrustedProxyCIDRs[0] != "127.0.0.0/8" || c.TrustedProxyCIDRs[1] != "::1/128" {
 		t.Fatalf("trusted-proxy defaults must be loopback only: %v", c.TrustedProxyCIDRs)
+	}
+}
+
+func TestSingleModuleImportFeatureFlag(t *testing.T) {
+	t.Setenv("SAT_SINGLE_MODULE_IMPORT_ENABLED", "true")
+	if !Load().SATSingleModuleImportEnabled {
+		t.Fatal("SAT_SINGLE_MODULE_IMPORT_ENABLED=true must enable the feature")
+	}
+	t.Setenv("SAT_SINGLE_MODULE_IMPORT_ENABLED", "false")
+	if Load().SATSingleModuleImportEnabled {
+		t.Fatal("SAT_SINGLE_MODULE_IMPORT_ENABLED=false must disable the feature")
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type {
@@ -19,7 +19,7 @@ import {
   useReorderAssessmentQuestions,
 } from "../api/assessmentQueries";
 import { authoringEffects } from "../api/authoringQueryEffects";
-import { useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
+import { toDraftOpenErrorInfo, useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
 import { AuthoringLifecycleSurface } from "./AuthoringLifecycleSurface";
 import { useDraftOpenOnEntry } from "./useDraftOpenOnEntry";
 import { SatAuthoringLoadingSurface } from "./SatAuthoringStateSurfaces";
@@ -92,7 +92,7 @@ import { flashAuthoringField } from "./spine/TargetFlash";
 import { motion, useReducedMotion } from "motion/react";
 import { spineMotion } from "@/src/shared/motion";
 import { ExamWorkspaceHeader } from "./shell/ExamWorkspaceHeader";
-import { deliveryDestination, describeExamLifecycle, examWorkspacePath, type ExamLifecycleCopy } from "./shell/examLifecycle";
+import { deliveryDestination, describeExamLifecycle, examWorkspacePath, type DeliveryTarget, type ExamLifecycleCopy, type ExamWorkspaceTab } from "./shell/examLifecycle";
 import { QuestionCardStack } from "./spine/QuestionCardStack";
 import { useOutlinePreference } from "./spine/useOutlinePreference";
 import { ExamPublishSheet } from "./publish/ExamPublishSheet";
@@ -106,12 +106,15 @@ export interface AuthoringWorkspaceChrome {
   canPublish: boolean;
   /** A published version exists; the header offers "Create room". */
   canCreateSession?: boolean;
+  /** Current release target, supplied by the authoritative release projection. */
+  publishedTarget?: DeliveryTarget | null;
 }
 
 const DEFAULT_CHROME: AuthoringWorkspaceChrome = {
   lifecycle: describeExamLifecycle(null),
   showResponses: false,
   canPublish: false,
+  publishedTarget: null,
 };
 
 export interface AuthoringWorkspaceProps {
@@ -212,6 +215,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   const rail = useRailWidth();
   const [outlineOpen, setOutlineOpenPreference] = useOutlinePreference();
   const [publishOpen, setPublishOpen] = useState(false);
+  const [publishReceipt, setPublishReceipt] = useState<{ examId: string; target: DeliveryTarget } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
@@ -222,6 +226,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   const requestField=useCallback((path:string|null)=>{const field=resolveAuthoringField(path);if(['tags','accessibility'].includes(field))openInspector();setFocusField(field);},[openInspector]);
   const questionSheetFocusRef = useRef<HTMLElement | null>(null);
   const inspectorSheetFocusRef = useRef<HTMLElement | null>(null);
+  const publishedRoomButtonRef = useRef<HTMLButtonElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const reduceMotion = useReducedMotion();
   // The lifecycle hook owns transport mapping (READY / NO_DRAFT /
@@ -229,6 +234,12 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   // a real shell or the lifecycle surface; no status code is inspected here.
   const shellState = shellLifecycle.state;
   const shell = shellState.kind === "ready" ? shellState.shell : undefined;
+  const acknowledgedTarget = publishReceipt?.examId === examId ? publishReceipt.target : null;
+  const publishedTarget = acknowledgedTarget ?? chrome.publishedTarget ?? null;
+  useEffect(() => {
+    setPublishReceipt(null);
+    setPublishOpen(false);
+  }, [examId]);
   // An author who ARRIVED here by choosing this exam in the Exam Library asked
   // to edit it, so a NO_DRAFT answer opens the draft for them instead of
   // stopping at the wall. The gesture is in-memory and one-shot
@@ -420,7 +431,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       setSelectedModuleId(firstModule?.id ?? null);
       setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
     },
-    [clearRowSelection, setSelectedExamQuestionId, setSelectedModuleId]
+    [clearDocument, clearRowSelection, setSelectedExamQuestionId, setSelectedModuleId]
   );
 
   // The workbook import transaction (stage → commit → undo availability) owns
@@ -884,6 +895,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
     flushBeforeNavigation,
     loadSampleExam,
     setSampleDialogOpen,
+    setNavigationError,
   ]);
 
   const toggleSelection = useCallback(
@@ -904,7 +916,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
         return next;
       });
     },
-    [selectedModule]
+    [selectedModule, selectionAnchorRef, setSelectedIds]
   );
 
   const openIssue = useCallback(
@@ -925,7 +937,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       setSelectedIds(new Set());
       if(await selectQuestion(questionId, target.moduleId))requestField(fieldPath??null);
     },
-    [selectQuestion, shell, requestField]
+    [selectQuestion, setSelectedIds, shell, requestField]
   );
 
   // Keyboard commands are a named surface, not a rule table buried in this
@@ -949,6 +961,63 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
     onOpenShortcutHelp: () => setShortcutHelpOpen(true),
   });
 
+  const goAfterFlush = (path: string) => {
+    void (async () => {
+      if (await flushBeforeRouteChange()) navigate(path);
+    })();
+  };
+  const openPublish = () => {
+    void (async () => {
+      if (await flushBeforeRouteChange()) setPublishOpen(true);
+    })();
+  };
+  const publishSheet = publishOpen ? (
+    <ExamPublishSheet
+      key="exam-publish-sheet"
+      examId={examId}
+      open
+      onClose={() => setPublishOpen(false)}
+      onOpenIssue={(issue) => void openIssue(issue)}
+      onOpenStudentAccess={(target) => {
+        // Publish already flushed this tab's work before the server sealed the
+        // draft. A receipt handoff is a route transition, not another draft
+        // flush against a read-only collaboration room.
+        if (target) navigate(deliveryDestination(examId, target));
+        else goAfterFlush(deliveryDestination(examId));
+      }}
+      onPublished={(target) => setPublishReceipt({ examId, target })}
+      focusFallback={() => publishedRoomButtonRef.current}
+    />
+  ) : null;
+  const recoverySurfaces = (
+    <>
+      {deviceRecovery.recovery ? (
+        <DeviceDraftRecoverySurface
+          onKeepChanges={keepDeviceDraft}
+          onDiscardChanges={discardDeviceDraft}
+          onCopyChanges={() => void copyDeviceDraft()}
+        />
+      ) : null}
+      {coeditRecoverySurface ? (
+        <CoeditRecoverySurface
+          body={coeditRecoverySurface.body}
+          {...(coeditRecoverySurface.roomEnded && shell
+            ? { onOpenCurrentDraft: openCurrentDraft, onReviewMyChanges: reviewCoeditChanges }
+            : {})}
+          onCopyMyChanges={() => void copyCoeditPrompt()}
+          {...(coeditRecovery?.canExportStaleCache
+            ? { onDiscardLocalCopy: discardCoeditLocalCopy }
+            : {})}
+        />
+      ) : !shell && draft && persistence.hasPendingChanges ? (
+        <CoeditRecoverySurface
+          body="The editable draft is unavailable. Your unsaved changes are still available on this device."
+          onCopyMyChanges={() => void copyMyWork()}
+        />
+      ) : null}
+    </>
+  );
+
   // The shell read is GET-only and never creates a draft. When there is no
   // shell we render the lifecycle surface, which is the ONLY place that decides
   // what NO_DRAFT vs EXAM_NOT_FOUND vs a real failure looks like. The explicit,
@@ -960,20 +1029,59 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   // mutation installs the shell in cache so this component re-renders with
   // data, and never auto-loops on failure.
   if (!shell) {
+    const showPublishedReceipt = Boolean(
+      publishedTarget &&
+      (shellState.kind === "no-draft" || acknowledgedTarget) &&
+      shellState.kind !== "forbidden" &&
+      shellState.kind !== "exam-not-found"
+    );
+    let lifecycleContent: ReactNode;
     if (draftOnEntry.opening) {
-      return <SatAuthoringLoadingSurface label="Opening SAT workspace…" />;
+      lifecycleContent = <SatAuthoringLoadingSurface label="Opening SAT workspace…" />;
+    } else if (showPublishedReceipt && publishedTarget) {
+      lifecycleContent = (
+        <PublishedExamWorkspaceSurface
+          examId={examId}
+          examTitle={examTitle}
+          target={publishedTarget}
+          showResponses={chrome.showResponses}
+          canOpenDraft={canOpenDraft}
+          draftOpen={{
+            isPending: ensureDraft.isPending,
+            error: ensureDraft.error,
+            open: () => {
+              if (!ensureDraft.isPending) ensureDraft.mutate();
+            },
+          }}
+          roomButtonRef={publishedRoomButtonRef}
+          onNavigate={(path) => navigate(path)}
+        />
+      );
+    } else {
+      lifecycleContent = (
+        <AuthoringLifecycleSurface
+          state={shellState}
+          canOpenDraft={canOpenDraft}
+          draftOpen={{
+            isPending: ensureDraft.isPending,
+            error: ensureDraft.error,
+            open: () => ensureDraft.mutate(),
+          }}
+          onRetry={() => void shellLifecycle.refetch()}
+        />
+      );
     }
     return (
-      <AuthoringLifecycleSurface
-        state={shellState}
-        canOpenDraft={canOpenDraft}
-        draftOpen={{
-          isPending: ensureDraft.isPending,
-          error: ensureDraft.error,
-          open: () => ensureDraft.mutate(),
-        }}
-        onRetry={() => void shellLifecycle.refetch()}
-      />
+      <div className="sat-product" data-authoring-workspace="lifecycle">
+        {recoverySurfaces}
+        {navigationError ? (
+          <p role="status" className="border-b px-5 py-2 text-center text-sm">
+            {navigationError}
+          </p>
+        ) : null}
+        {lifecycleContent}
+        {publishSheet}
+      </div>
     );
   }
 
@@ -998,16 +1106,6 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       return;
     }
     setOutlineOpenPreference(!outlineOpen);
-  };
-  const goAfterFlush = (path: string) => {
-    void (async () => {
-      if (await flushBeforeRouteChange()) navigate(path);
-    })();
-  };
-  const openPublish = () => {
-    void (async () => {
-      if (await flushBeforeRouteChange()) setPublishOpen(true);
-    })();
   };
   const addDisabledReason = !selectedModule
     ? "Choose a module first"
@@ -1243,32 +1341,11 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
           inspector={draft?<Inspector open={inspectorOpen&&(!inspectorModal||overlayStack.openSheet==='inspector')} modal={inspectorModal} question={draft} issues={selectedQuestionIssues} onChange={handleChange} onClose={closeInspector} readOnly={collaborationReadOnly} isPretest={sharedQuestionScalar?.isPretest ?? questionQuery.data?.isPretest} onPretestChange={selectedExamQuestionId && !collaborationReadOnly ? handlePretestChange : undefined}/>:undefined}
           banner={
             <>
-              {deviceRecovery.recovery ? (
-                <DeviceDraftRecoverySurface
-                  onKeepChanges={keepDeviceDraft}
-                  onDiscardChanges={discardDeviceDraft}
-                  onCopyChanges={() => void copyDeviceDraft()}
-                />
-              ) : null}
+              {recoverySurfaces}
               {navigationError ? (
                 <div role="alert" className="border-b px-5 py-2 text-center text-xs font-medium">
                   {navigationError}
                 </div>
-              ) : null}
-              {coeditRecoverySurface ? (
-                <CoeditRecoverySurface
-                  body={coeditRecoverySurface.body}
-                  // A refused or oversized write has no replacement draft to
-                  // open and no remote rows to review, so those actions are
-                  // absent rather than dead: the work's way out is the export.
-                  {...(coeditRecoverySurface.roomEnded
-                    ? { onOpenCurrentDraft: openCurrentDraft, onReviewMyChanges: reviewCoeditChanges }
-                    : {})}
-                  onCopyMyChanges={() => void copyCoeditPrompt()}
-                  {...(coeditRecovery?.canExportStaleCache
-                    ? { onDiscardLocalCopy: discardCoeditLocalCopy }
-                    : {})}
-                />
               ) : null}
               {activeRaceNotice ? (
                 <div className={`${coeditUiActive && publishedFrozen ? "hidden" : ""} border-b px-5 py-2 text-center text-xs font-semibold text-destructive`}>
@@ -1520,15 +1597,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
           }}
           onConfirm={() => void handleLoadSampleExam()}
         />
-        {publishOpen ? (
-          <ExamPublishSheet
-            examId={examId}
-            open
-            onClose={() => setPublishOpen(false)}
-            onOpenIssue={(issue) => void openIssue(issue)}
-            onOpenStudentAccess={(target) => goAfterFlush(deliveryDestination(examId, target))}
-          />
-        ) : null}
+        {publishSheet}
         {settingsOpen ? (
           <ExamSettingsSheet
             examId={examId}
@@ -1543,4 +1612,72 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
 
 export function getShellProvider(shell: AssessmentAuthoringShell): string {
   return shell.providerKey;
+}
+
+function PublishedExamWorkspaceSurface({
+  examId,
+  examTitle,
+  target,
+  showResponses,
+  canOpenDraft,
+  draftOpen,
+  roomButtonRef,
+  onNavigate,
+}: {
+  examId: string;
+  examTitle: string;
+  target: DeliveryTarget;
+  showResponses: boolean;
+  canOpenDraft: boolean;
+  draftOpen: { isPending: boolean; error: unknown; open: () => void };
+  roomButtonRef: { current: HTMLButtonElement | null };
+  onNavigate: (path: string) => void;
+}) {
+  const versionLabel = `Version ${target.versionNumber}`;
+  return (
+    <div className="sat-product min-h-screen bg-au-canvas text-slate-950" data-sat-authoring-state="published-receipt">
+      <ExamWorkspaceHeader
+        examTitle={examTitle}
+        lifecycle={{
+          label: `${versionLabel} published`,
+          detail: "Publish was confirmed for this version.",
+          tone: "info",
+        }}
+        activeTab={null}
+        showResponses={showResponses}
+        onSelectTab={(tab: ExamWorkspaceTab) => onNavigate(examWorkspacePath(examId, tab))}
+        onBack={() => onNavigate(satListReturnTarget("/sat/exams").to)}
+        onCreateSession={() => onNavigate(deliveryDestination(examId, target))}
+        onCreateSessionRef={roomButtonRef}
+      />
+      <main className="mx-auto flex w-full max-w-[1240px] flex-col gap-5 px-4 py-8 sm:px-6">
+        <section className="authoring-surface max-w-2xl p-6 sm:p-8" aria-labelledby="published-receipt-title">
+          <p role="status" aria-live="polite" className="text-sm font-semibold text-green-800">
+            {versionLabel} is published.
+          </p>
+          <h2 id="published-receipt-title" className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
+            Create a room or continue editing
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Create a room to give students access to {versionLabel}. Existing rooms keep the version they were created with.
+          </p>
+          {canOpenDraft ? (
+            <button
+              type="button"
+              disabled={draftOpen.isPending}
+              onClick={draftOpen.open}
+              className="sat-btn sat-btn--secondary sat-press mt-5"
+            >
+              {draftOpen.isPending ? "Opening draft…" : "Edit exam"}
+            </button>
+          ) : null}
+          {draftOpen.error ? (
+            <p role="alert" className="mt-4 text-sm text-destructive">
+              {toDraftOpenErrorInfo(draftOpen.error).message}
+            </p>
+          ) : null}
+        </section>
+      </main>
+    </div>
+  );
 }

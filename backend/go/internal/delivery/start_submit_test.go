@@ -61,6 +61,8 @@ func deliveryReconcileDrainedStranded(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_terminalizations WHERE attempt_id = ?")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
+	mock.ExpectQuery("sat_route_policy = 'staff_selects'").WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"awaiting"}).AddRow(false))
 	mock.ExpectCommit()
 }
 
@@ -312,6 +314,7 @@ func TestDeliverySubmitModuleTerminalRetryReturnsBootstrapWithoutDuplicateEvent(
 			deliveryModuleRow(mock, state, now.Add(-time.Minute))
 			mock.ExpectCommit()
 			deliveryBootstrapLoads(mock, now.Add(-time.Minute), state)
+			mock.ExpectQuery("SELECT EXISTS").WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"awaiting"}).AddRow(false))
 
 			out, err := svc.SubmitModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
 			if err != nil {

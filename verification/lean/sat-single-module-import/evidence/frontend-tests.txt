@@ -1,0 +1,15 @@
+Verification command: bun run test:run -- src/features/exam-authoring/import/__tests__/SatWorkbookImportSheet.test.tsx
+Exit status: 0
+---
+$ vitest run src/features/exam-authoring/import/__tests__/SatWorkbookImportSheet.test.tsx
+/opt/homebrew/bin/bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/features/exam-authoring/import/__tests__/SatWorkbookImportSheet.test.tsx (12 tests) 827ms
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  16:09:59
+   Duration  4.18s (transform 443ms, setup 658ms, collect 805ms, tests 827ms, environment 1.15s, prepare 162ms)
+

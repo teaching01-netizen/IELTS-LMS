@@ -1,0 +1,12 @@
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL/expected_draft_id
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL/expected_draft_revision
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL/exam_revision
+--- PASS: TestSATPublishPreservesRevisionFencesMySQL (0.66s)
+    --- PASS: TestSATPublishPreservesRevisionFencesMySQL/expected_draft_id (0.47s)
+    --- PASS: TestSATPublishPreservesRevisionFencesMySQL/expected_draft_revision (0.12s)
+    --- PASS: TestSATPublishPreservesRevisionFencesMySQL/exam_revision (0.07s)
+=== RUN   TestSATPublishOperationKeyReplaysOneReleaseMySQL
+--- PASS: TestSATPublishOperationKeyReplaysOneReleaseMySQL (0.14s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/api	1.535s

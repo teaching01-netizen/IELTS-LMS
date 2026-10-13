@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../api/assessmentQueries", () => ({
   useUpdateSectionDeliverySettings: () => mocks.update,
   useAssessmentReleaseState: () => ({ data: null }),
+  useClassroomPlan: () => ({ data: { plan: null }, isSuccess: true }),
+  useSetClassroomPlan: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
 }));
 vi.mock("../../../application/authoringShellLifecycle", () => ({
   useAuthoringShellLifecycle: () => ({ state: mocks.lifecycleState, refetch: mocks.refetch }),

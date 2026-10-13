@@ -153,6 +153,8 @@ export interface StructuredContentMediaProps {
   loadMediaUrl?: ((assetId: string, options?: { fresh?: boolean }) => Promise<string | null>) | undefined;
   onMediaFailure?: ((assetId: string, questionId: string) => void) | undefined;
   questionId?: string | undefined;
+  /** Load images even while not rendered (a print-only page is display:none on screen). */
+  eagerMedia?: boolean | undefined;
 }
 
 function StaticStructuredImage({
@@ -161,7 +163,8 @@ function StaticStructuredImage({
   loadMediaUrl,
   onMediaFailure,
   questionId = "",
-}: { node: RichTextNode; enlarge?: StaticStructuredImageEnlargeApi | undefined } & StructuredContentMediaProps) {
+  eagerMedia,
+}:{ node: RichTextNode; enlarge?: StaticStructuredImageEnlargeApi | undefined } & StructuredContentMediaProps) {
   const assetId = stringAttribute(node, "assetId");
   const fallbackSource = stringAttribute(node, "src");
   const alt = stringAttribute(node, "alt");
@@ -271,18 +274,18 @@ function StaticStructuredImage({
           setSource(asset.downloadUrl);
           setFailed(false);
         } else {
-          setFailed(true);
+          reportFailure();
         }
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (!cancelled) reportFailure();
       });
 
     return () => {
       cancelled = true;
       if (loadGeneration.current === generation) loadGeneration.current++;
     };
-  }, [assetId, fallbackSource, loadMediaUrl, loadProtected]);
+  }, [assetId, fallbackSource, loadMediaUrl, loadProtected, reportFailure]);
 
   useEffect(() => () => {
     // Loader-delivered URLs belong to the loader, which may be showing them elsewhere.
@@ -479,7 +482,7 @@ function StaticStructuredImage({
             {...(width ? { width } : {})}
             {...(height ? { height } : {})}
             decoding="async"
-            loading="lazy"
+            loading={eagerMedia ? "eager" : "lazy"}
             draggable={false}
             onError={refreshOnce}
             onLoad={measure}
@@ -675,12 +678,13 @@ export const RichStructuredContentRenderer = memo(function RichStructuredContent
   loadMediaUrl,
   onMediaFailure,
   questionId,
+  eagerMedia,
 }: {
   content: StructuredContent;
   renderText?: StructuredTextRenderer | undefined;
   enlarge?: StaticStructuredImageEnlargeApi | undefined;
 } & StructuredContentMediaProps) {
-  const mediaProps: StructuredContentMediaProps = { loadMediaUrl, onMediaFailure, questionId };
+  const mediaProps: StructuredContentMediaProps = { loadMediaUrl, onMediaFailure, questionId, eagerMedia };
   const document = documentFromStructuredContent(content) as RichTextDocument;
   return <div className={CONTENT_CLASS_NAME}>{renderNodes(trimEmptyEdges(document.content), "content", renderText, enlarge, mediaProps)}</div>;
 });

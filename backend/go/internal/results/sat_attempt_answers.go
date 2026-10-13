@@ -39,6 +39,22 @@ type SATAttemptAnswer struct {
 	MarkedForReview bool   `json:"markedForReview"`
 }
 
+// AuthorizeSATAttempt admits a staff read of one SAT attempt under the same
+// org + schedule-assignment scope as GetSATAttemptAnswers; an attempt outside
+// it is NotFound, so its existence is not disclosed.
+func (s *Service) AuthorizeSATAttempt(ctx context.Context, actor auth.ActorContext, attemptID string) error {
+	scope, scopeArgs := resultScope("sch", actor)
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM student_attempts a
+		JOIN exam_schedules sch ON sch.id = a.schedule_id
+		JOIN exam_entities exam ON exam.id = a.exam_id AND exam.provider_key = 'sat'
+		WHERE a.id = ?`+scope, append([]any{attemptID}, scopeArgs...)...).Scan(&one)
+	if err == sql.ErrNoRows {
+		return apperrors.New(apperrors.CodeNotFound, "SAT attempt not found.")
+	}
+	return err
+}
+
 // GetSATAttemptAnswers scopes the attempt before reading any answer content.
 // Both reads share a repeatable-read snapshot so the displayed revision and
 // question values describe the same committed server state.

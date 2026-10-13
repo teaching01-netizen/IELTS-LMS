@@ -1,0 +1,55 @@
+SatClassroom.ainv_init (pol : Policy) (plan : Shape) : AInv pol plan { }
+SatClassroom.ainv_step {pol : Policy} {plan : Shape} (hv : valid Mode.corrected pol plan) {a a' : Att}
+  (h : AInv pol plan a) (s : AStep Mode.corrected pol plan a a') : AInv pol plan a'
+SatClassroom.reachable_inv {w : World} (h : Reachable Mode.corrected w) :
+  valid Mode.corrected w.pol w.plan ∧ ∀ (i : Nat), AInv w.pol w.plan (w.att i)
+SatClassroom.t1_decision_stable {w w' : World} (h : Reachable Mode.corrected w) (s : Step Mode.corrected w w') (i : Nat)
+  (d : Route × Basis) (hd : (w.att i).decision = some d) : (w'.att i).decision = some d
+SatClassroom.t2_staff_only {w : World} (h : Reachable Mode.corrected w) : StaffOnly w
+SatClassroom.t3_route_fidelity {w : World} (h : Reachable Mode.corrected w) (i : Nat) (r : Route) (b : Basis)
+  (hd : (w.att i).decision = some (r, b)) : (w.att i).m2Opened = some r
+SatClassroom.t3_plan_fidelity {w : World} (h : Reachable Mode.corrected w) (i : Nat) (r : Route) (b : Basis)
+  (hd : (w.att i).decision = some (r, b)) : planRouteOK w.plan r
+SatClassroom.t4_snapshot {w : World} (h : Reachable Mode.corrected w) (i : Nat) (l : List Nat)
+  (hs : (w.att i).snapshot = some l) : l = (w.att i).writes
+SatClassroom.t5_sealed_gate {w : World} (h : Reachable Mode.corrected w) (i : Nat) (hs : (w.att i).sealed = true) :
+  gate w.plan (w.att i)
+SatClassroom.t6_release {w : World} (h : Reachable Mode.corrected w) (i : Nat) (hr : (w.att i).released = true) :
+  (w.att i).scored = true ∧ (w.att i).sealed = true
+SatClassroom.t7_served {w : World} (h : Reachable Mode.corrected w) (i : Nat) (r : Route)
+  (hs : (w.att i).served = some r) : (w.att i).m2Opened = some r
+SatClassroom.g7_standalone {w : World} (h : Reachable Mode.corrected w) (i : Nat) (b : Route)
+  (hp : w.plan.standalone = some b) : (w.att i).m1Open = false ∧ (w.att i).decision = none
+SatClassroom.corrected_replay_after_seal {w : World} (i : Nat) (r : Route) (b : Basis)
+  (hp : w.pol = Policy.staffSelects) (hc : (w.att i).m1Closed = true) (hd : (w.att i).decision = some (r, b)) :
+  (assign Mode.corrected w.pol (w.att i) r).fst = Outcome.replayed
+SatClassroom.current_violates_staff_only_plan_shape : ∃ w, Reachable Mode.current w ∧ ¬StaffOnly w
+SatClassroom.current_violates_staff_only_old_binary : ∃ w, Reachable Mode.current w ∧ ¬StaffOnly w
+SatClassroom.current_violates_plan_route :
+  Reachable Mode.current legacyFixedPlanBypass ∧
+    (legacyFixedPlanBypass.att 0).decision = some (Route.lower, Basis.auto) ∧
+      ¬planRouteOK legacyFixedPlanBypass.plan Route.lower
+SatClassroom.corrected_fence_rejects_plan_bypass : fenceOk Policy.adaptive Shape.m1Hard Route.lower Basis.auto = false
+'SatClassroom.ainv_init' depends on axioms: [propext, Quot.sound]
+'SatClassroom.ainv_step' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.reachable_inv' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.t1_decision_stable' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.t2_staff_only' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.t3_route_fidelity' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.t3_plan_fidelity' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.t4_snapshot' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.t5_sealed_gate' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.t6_release' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.t7_served' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.g7_standalone' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SatClassroom.corrected_replay_after_seal' depends on axioms: [propext]
+'SatClassroom.awaiting_reachable' depends on axioms: [propext, Quot.sound]
+'SatClassroom.sealed_staff_reachable_corrected' depends on axioms: [propext, Quot.sound]
+'SatClassroom.current_violates_staff_only_plan_shape' depends on axioms: [propext, Quot.sound]
+'SatClassroom.current_violates_staff_only_old_binary' depends on axioms: [propext]
+'SatClassroom.legacyFixedPlanBypass_reachable' depends on axioms: [propext, Quot.sound]
+'SatClassroom.current_violates_plan_route' depends on axioms: [propext, Quot.sound]
+'SatClassroom.corrected_fence_rejects_plan_bypass' does not depend on any axioms
+'SatClassroom.awaitingWorld_reachable' depends on axioms: [propext]
+'SatClassroom.sealedAfterStaff_reachable' depends on axioms: [propext, Quot.sound]
+'SatClassroom.current_replay_after_seal_refused' depends on axioms: [propext, Quot.sound]

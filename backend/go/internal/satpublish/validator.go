@@ -1,6 +1,6 @@
-// Package satpublish owns the intentionally small SAT publish-content
-// contract. Authoring diagnostics may be more detailed, but publishing only
-// depends on the four rules in this package.
+// Package satpublish owns the SAT publish-content contract: question content,
+// configured module counts, exactly two pretests, section question types, and
+// required adaptive module presence.
 package satpublish
 
 import (
@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"example.com/ielts-proctoring/internal/assessscore"
+	"example.com/ielts-proctoring/internal/satconvert"
 )
 
 // Queryer is the smallest database boundary needed to validate a draft. It is
@@ -25,6 +26,7 @@ type Question struct {
 	QuestionType   string
 	Prompt         string
 	Answer         string
+	IsPretest      bool
 }
 
 type Module struct {
@@ -73,10 +75,19 @@ func ValidateQuestion(question Question) []Issue {
 	return issues
 }
 
-// ValidateModule applies the module count rule and prefixes question findings
-// with the exam-question identity used by the release deep-link.
+// ValidateModule applies the question and pretest count rules and prefixes
+// question findings with the exam-question identity used by the release deep-link.
 func ValidateModule(module Module) []Issue {
 	issues := make([]Issue, 0)
+	pretests := 0
+	for _, question := range module.Questions {
+		if question.IsPretest {
+			pretests++
+		}
+	}
+	if pretests != 2 {
+		issues = append(issues, issue("sat.module.pretest_count", modulePath(module), fmt.Sprintf("%s requires exactly 2 designated pretest questions; found %d.", module.ModuleKey, pretests)))
+	}
 	if len(module.Questions) != module.TargetQuestionCount {
 		label := strings.TrimSpace(module.Title)
 		if label == "" {
@@ -130,10 +141,14 @@ func ValidateDraft(ctx context.Context, q Queryer, versionID string) ([]Issue, e
 	return ValidateDraftForScope(ctx, q, versionID, ScopeFull)
 }
 
-// ValidateDraftForScope applies the four-rule publish contract only to the
-// sections selected for this immutable SAT release.
+// ValidateDraftForScope applies the publish contract only to the sections
+// selected for this immutable SAT release.
 func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, scope Scope) ([]Issue, error) {
 	normalizedScope, err := NormalizeScope(scope)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := LoadPlan(ctx, q, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -179,10 +194,17 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 	}
 
 	issues := make([]Issue, 0)
+	present := map[string]bool{}
+	operational := map[string]int{}
 	for _, moduleRow := range modules {
+		role := RoleOfModuleKey(moduleRow.moduleKey)
+		if role != "" && !plan.Uses(moduleRow.sectionKey, role) {
+			continue // a Classroom plan that never delivers this module does not gate publish on it
+		}
+		present[moduleRow.sectionKey+"/"+role] = true
 		questionRows, err := q.QueryContext(ctx, `
 			SELECT eq.id, r.question_type,
-			       CAST(r.prompt AS CHAR), CAST(r.answer_definition AS CHAR)
+			       CAST(r.prompt AS CHAR), CAST(r.answer_definition AS CHAR), eq.is_pretest
 			FROM assessment_exam_questions eq
 			JOIN assessment_question_revisions r ON r.id = eq.question_revision_id
 			WHERE eq.module_id = ?
@@ -193,7 +215,7 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 		questions := make([]Question, 0)
 		for questionRows.Next() {
 			var question Question
-			if err := questionRows.Scan(&question.ExamQuestionID, &question.QuestionType, &question.Prompt, &question.Answer); err != nil {
+			if err := questionRows.Scan(&question.ExamQuestionID, &question.QuestionType, &question.Prompt, &question.Answer, &question.IsPretest); err != nil {
 				questionRows.Close()
 				return nil, err
 			}
@@ -204,6 +226,11 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 			return nil, err
 		}
 		questionRows.Close()
+		for _, question := range questions {
+			if !question.IsPretest {
+				operational[moduleRow.sectionKey+"/"+role]++
+			}
+		}
 
 		issues = append(issues, ValidateModule(Module{
 			SectionKey:          moduleRow.sectionKey,
@@ -213,7 +240,82 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 			Questions:           questions,
 		})...)
 	}
-	return issues, nil
+	sectionKeys, err := normalizedScope.SectionKeys()
+	if err != nil {
+		return nil, err
+	}
+	for _, section := range sectionKeys {
+		for _, role := range plan.ShapeFor(section).Roles() {
+			if !present[section+"/"+role] {
+				issues = append(issues, issue("sat.module.missing", section+"."+role, fmt.Sprintf("%s is missing its %s module.", section, role)))
+			}
+		}
+	}
+	converterIssues, err := validateConverter(ctx, q, versionID, plan, sectionKeys, operational)
+	if err != nil {
+		return nil, err
+	}
+	return append(issues, converterIssues...), nil
+}
+
+// topologiesFor lists the module topologies students can receive in a section
+// under its Classroom shape, with the roles each one sums.
+func topologiesFor(shape Shape) map[satconvert.Topology][]string {
+	switch shape {
+	case ShapeM1Easy:
+		return map[satconvert.Topology][]string{satconvert.FullLower: {RoleBase, RoleLower}}
+	case ShapeM1Hard:
+		return map[satconvert.Topology][]string{satconvert.FullHigher: {RoleBase, RoleHigher}}
+	case ShapeM2Easy:
+		return map[satconvert.Topology][]string{satconvert.M2LowerOnly: {RoleLower}}
+	case ShapeM2Hard:
+		return map[satconvert.Topology][]string{satconvert.M2HigherOnly: {RoleHigher}}
+	}
+	return map[satconvert.Topology][]string{satconvert.FullLower: {RoleBase, RoleLower}, satconvert.FullHigher: {RoleBase, RoleHigher}}
+}
+
+// validateConverter is the §2 release-time rule: a draft that declares a
+// versioned score converter cannot publish until every route its plan can
+// deliver has a valid table for exactly the operational questions students
+// will see. A draft without one publishes as a raw-score report.
+func validateConverter(ctx context.Context, q Queryer, versionID string, plan Plan, sectionKeys []string, operational map[string]int) ([]Issue, error) {
+	rows, err := q.QueryContext(ctx, "SELECT CAST(policy_config AS CHAR) FROM assessment_scoring_policies WHERE exam_version_id = ?", versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var raw string
+	found := rows.Next()
+	if found {
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !found || !satconvert.Configured([]byte(raw)) {
+		return nil, nil
+	}
+	conv, err := satconvert.Parse([]byte(raw))
+	if err != nil {
+		return []Issue{issue("sat.converter.invalid", "scoringPolicy", err.Error())}, nil
+	}
+	var reqs []satconvert.Requirement
+	for _, section := range sectionKeys {
+		for topo, roles := range topologiesFor(plan.ShapeFor(section)) {
+			n := 0
+			for _, role := range roles {
+				n += operational[section+"/"+role]
+			}
+			reqs = append(reqs, satconvert.Requirement{Section: section, Topology: topo, Operational: n})
+		}
+	}
+	var out []Issue
+	for _, msg := range conv.Missing(reqs) {
+		out = append(out, issue("sat.converter.missing", "scoringPolicy", msg))
+	}
+	return out, nil
 }
 
 func validateChoiceAnswer(answer map[string]any, issues *[]Issue) {
@@ -250,8 +352,20 @@ func validateChoiceAnswer(answer map[string]any, issues *[]Issue) {
 		}
 	}
 
+	// Answers, grading and the answered paper all match a choice by id, so a
+	// shared id would make two choices one answer.
+	seen := make(map[string]bool, len(options))
 	for index, option := range options {
 		object, _ := option.(map[string]any)
+		if id := stringField(object, "id"); seen[id] {
+			*issues = append(*issues, issue(
+				"sat.choice.id.duplicate",
+				fmt.Sprintf("answer.options[%d].id", index),
+				"Each answer choice needs its own id.",
+			))
+		} else {
+			seen[id] = true
+		}
 		content, exists := object["content"]
 		if !exists {
 			content = nil

@@ -19,6 +19,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // ModuleStartRequest mirrors AssessmentModuleStartRequest (camelCase) on the
@@ -828,7 +829,7 @@ func (s *Service) publishHubEvents(events []liveupdates.Event) {
 // sample sink is on with a bus handle. Deterministic counter (no rand in
 // the hot path); context is background (post-commit, never the request tx).
 func (s *Service) maybeSampleSink(events []liveupdates.Event) {
-	if s == nil || s.liveSinkBus == nil || s.liveSinkMode != config.LiveBusSinkSample {
+	if s == nil || s.liveSinkBus == nil || s.liveSinkCount == nil || s.liveSinkMode != config.LiveBusSinkSample {
 		return
 	}
 	for _, e := range events {
@@ -854,7 +855,7 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 		return nil, err
 	}
 	sections = deliverySectionsForScope(sections, scope)
-	if err := s.ensureBaseModuleAttempt(ctx, attemptID, sections); err != nil {
+	if err := s.ensureBaseModuleAttempt(ctx, attemptID, versionID, sections); err != nil {
 		return nil, err
 	}
 	moduleAttempts, err := s.loadModuleAttempts(ctx, attemptID, now)
@@ -905,7 +906,12 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
+	awaiting, err := s.awaitingStaffRoute(ctx, providerKey, attemptID, result, moduleAttempts)
+	if err != nil {
+		return nil, err
+	}
 	return &Bootstrap{
+		AwaitingStaffRoute:    awaiting,
 		ScheduleID:            scheduleID,
 		ExamID:                examID,
 		ProviderKey:           providerKey,
@@ -939,6 +945,9 @@ type nextModuleRow struct {
 	durationSeconds int
 	adaptiveRole    string
 	toolPolicy      sql.NullString
+	// awaitingRoute marks a staff_selects Module 1 close: no route decision or
+	// Module 2 attempt exists yet, so the attempt is neither routed nor complete.
+	awaitingRoute bool
 }
 
 // Route basis values recorded on assessment_route_decisions.route_basis: what
@@ -947,6 +956,7 @@ const (
 	routeBasisClientConfirmed = "client_confirmed"
 	routeBasisWindowClosed    = "window_closed"
 	routeBasisRoomCompleted   = "room_completed"
+	routeBasisStaffSelected   = "staff_selected"
 )
 
 // routeAudit carries the audit facts written with a route decision: the basis
@@ -954,6 +964,9 @@ const (
 type routeAudit struct {
 	basis    string
 	deadline *time.Time
+	// staffRoute ("lower"|"higher") is the branch staff assigned under a
+	// staff_selects policy; it is only set by AssignStaffRoute.
+	staffRoute string
 }
 
 // finalizeModuleTx mirrors finalize_module_tx (Rust
@@ -1015,9 +1028,22 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 	if next == nil {
 		return nil, nil
 	}
+	if next.awaitingRoute {
+		return next, nil
+	}
+	if err := s.openFollowUpModuleTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, next, audit, basis); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
+
+// openFollowUpModuleTx inserts the module attempt for the module a route
+// decision (or the next-section handoff) selected, honouring cohort/personal
+// timing, the scheduled break and the personal handoff mode.
+func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, currentSectionID string, breakAfterSeconds int, next *nextModuleRow, audit routeAudit, basis string) error {
 	now, err := dbTimeTx(ctx, t)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if audit.deadline != nil && (next.adaptiveRole == "lower_branch" || next.adaptiveRole == "higher_branch") {
 		telemetry.ObserveSeconds(telemetry.MSATRouteLagSeconds, now.Sub(*audit.deadline).Seconds(), "basis", basis)
@@ -1027,7 +1053,7 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 	if err := t.QueryRowContext(ctx,
 		"SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model IN ("+examruntime.CohortTimingModelsSQL+")), EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model = '"+examruntime.TimingModelPersonal+"')",
 		attemptID, attemptID).Scan(&cohortTimed, &personalTimed); err != nil {
-		return nil, err
+		return err
 	}
 	availableAt := nextModuleAvailableAt(now, currentSectionID, next.sectionID, breakAfterSeconds)
 	if cohortTimed != 0 {
@@ -1036,7 +1062,7 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 	var handoffMode string
 	if personalTimed != 0 {
 		if err := t.QueryRowContext(ctx, "SELECT COALESCE(r.sat_handoff_mode, 'server_start') FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ?", attemptID).Scan(&handoffMode); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if personalTimed != 0 {
@@ -1056,27 +1082,27 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 		// the module in hand (StartModule), and auto_start_at is the backstop.
 		if currentSectionID != next.sectionID && breakAfterSeconds > 0 {
 			if err := createActivePersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, now); err != nil {
-				return nil, err
+				return err
 			}
 			breakDeadline := now.Add(time.Duration(breakAfterSeconds) * time.Second)
 			availableAt = breakDeadline
 			if err := insertModuleAttemptTx(ctx, t, attemptID, next, availableAt); err != nil {
-				return nil, err
+				return err
 			}
 		} else if currentSectionID == next.sectionID && handoffMode == attempts.HandoffModeClientStart {
 			if err := insertAwaitingModuleAttemptTx(ctx, t, attemptID, next, now, now.Add(attempts.SATHandoff().AutoStart)); err != nil {
-				return nil, err
+				return err
 			}
 		} else {
 			if err := insertActiveModuleAttemptTx(ctx, t, attemptID, next, now); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	} else if err := insertModuleAttemptTx(ctx, t, attemptID, next, availableAt); err != nil {
-		return nil, err
+		return err
 	}
 	telemetry.IncCounter(telemetry.MSATAdaptiveModuleOpenTotal, "role", next.adaptiveRole)
-	return next, nil
+	return nil
 }
 
 // createPersonalBreakTx is deprecated: the normal path now uses
@@ -1343,9 +1369,54 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 		if baseModuleID != moduleID {
 			return nil, apperrors.New(apperrors.CodeValidation, "Adaptive routing policy base module does not match the submitted module.")
 		}
-		route, err := chooseAdaptiveRoute(rawCorrect, operationalCount, policyConfig)
+		// Classroom sessions may force a branch. The decision is still committed
+		// below, in this transaction, so the route-integrity chain is unchanged.
+		routePolicy, err := examdomain.AttemptSATRoutePolicy(ctx, t, attemptID)
 		if err != nil {
 			return nil, err
+		}
+		// A single-branch plan (m1_easy/m1_hard) fixes the branch for the section
+		// and wins over the session policy, except staff_selects: a plan never
+		// stands in for the staff choice that policy waits for.
+		plan, err := satpublish.LoadPlan(ctx, t, versionID)
+		if err != nil {
+			return nil, err
+		}
+		if forced := plan.ShapeFor(sectionKey).ForcedBranch(); forced != "" && routePolicy != examdomain.SATRouteStaffSelects {
+			routePolicy = examdomain.SATRouteForceLower
+			if forced == satpublish.RoleHigher {
+				routePolicy = examdomain.SATRouteForceHigher
+			}
+		}
+		policyKeyOverride := ""
+		if routePolicy == examdomain.SATRouteStaffSelects {
+			// A staff choice must be a branch the plan allows; otherwise the
+			// attempt keeps waiting and AssignStaffRoute refuses the choice.
+			if !plan.Uses(sectionKey, audit.staffRoute+"_branch") {
+				return &nextModuleRow{sectionID: sectionID, sectionKey: sectionKey, awaitingRoute: true}, nil
+			}
+			switch audit.staffRoute {
+			case "lower":
+				routePolicy = examdomain.SATRouteForceLower
+			case "higher":
+				routePolicy = examdomain.SATRouteForceHigher
+			default:
+				return &nextModuleRow{sectionID: sectionID, sectionKey: sectionKey, awaitingRoute: true}, nil
+			}
+			policyKeyOverride = "classroom_staff_selects"
+		}
+		var route string
+		if routePolicy == examdomain.SATRouteAdaptive {
+			route, err = chooseAdaptiveRoute(rawCorrect, operationalCount, policyConfig)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			route = strings.TrimSuffix(routePolicy.Branch(), "_branch")
+			policyKey = "classroom_" + string(routePolicy)
+			if policyKeyOverride != "" {
+				policyKey = policyKeyOverride
+			}
 		}
 		selectedModuleID := lowerModuleID
 		routeName := "lower"
@@ -1385,7 +1456,7 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 	if err != nil {
 		return nil, err
 	}
-	nextSectionQuery := "SELECT id FROM assessment_sections WHERE exam_version_id = ? AND display_order > ?"
+	nextSectionQuery := "SELECT id, section_key FROM assessment_sections WHERE exam_version_id = ? AND display_order > ?"
 	nextSectionArgs := []any{versionID, sectionOrder}
 	keys := examdomain.SectionScopeKeys(scope)
 	if scope != nil && len(keys) == 0 {
@@ -1398,8 +1469,8 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 		}
 	}
 	nextSectionQuery += " ORDER BY display_order LIMIT 1"
-	var nextSectionID sql.NullString
-	if err := t.QueryRowContext(ctx, nextSectionQuery, nextSectionArgs...).Scan(&nextSectionID); err != nil {
+	var nextSectionID, nextSectionKey sql.NullString
+	if err := t.QueryRowContext(ctx, nextSectionQuery, nextSectionArgs...).Scan(&nextSectionID, &nextSectionKey); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -1408,13 +1479,23 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 	if !nextSectionID.Valid {
 		return nil, nil
 	}
+	plan, err := satpublish.LoadPlan(ctx, t, versionID)
+	if err != nil {
+		return nil, err
+	}
 	var rowID, rowSectionID, rowSectionKey, rowModuleKey, rowAdaptiveRole string
 	var rowDuration int
 	var rowToolPolicy sql.NullString
 	if err := t.QueryRowContext(ctx,
-		"SELECT m.id, m.section_id, s.section_key, m.module_key, m.duration_seconds, m.adaptive_role, m.tool_policy FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.section_id = ? AND m.adaptive_role = 'base' ORDER BY m.display_order LIMIT 1",
-		nextSectionID.String).Scan(&rowID, &rowSectionID, &rowSectionKey, &rowModuleKey, &rowDuration, &rowAdaptiveRole, &rowToolPolicy); err != nil {
+		"SELECT m.id, m.section_id, s.section_key, m.module_key, m.duration_seconds, m.adaptive_role, m.tool_policy FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.section_id = ? AND m.adaptive_role = ? ORDER BY m.display_order LIMIT 1",
+		nextSectionID.String, plan.ShapeFor(nextSectionKey.String).EntryRole()).Scan(&rowID, &rowSectionID, &rowSectionKey, &rowModuleKey, &rowDuration, &rowAdaptiveRole, &rowToolPolicy); err != nil {
 		if err == sql.ErrNoRows {
+			// A plan that names a module the tree lacks must not silently skip the
+			// section; publish validation should make this unreachable.
+			if plan.ShapeFor(nextSectionKey.String).EntryRole() != satpublish.RoleBase {
+				telemetry.IncCounter(telemetry.MSATClassroomPlanMissingTotal)
+				return nil, apperrors.New(apperrors.CodeValidation, "The classroom plan references a module that does not exist.")
+			}
 			return nil, nil
 		}
 		return nil, err

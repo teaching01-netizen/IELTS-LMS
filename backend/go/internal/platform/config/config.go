@@ -389,6 +389,10 @@ type Config struct {
 	GradingProjectionEnabled  bool
 	GradingSyncOnReadFallback bool
 	StormAdmissionEnabled     bool
+	// SATClassroomEnabled gates NEW SAT Classroom session creation (rollout
+	// gate, docs/sat_newmode.md 10): keep it off until every instance runs
+	// classroom-aware code. Started classroom attempts are never affected.
+	SATClassroomEnabled bool
 	MasterKeyEnabled          bool
 	MasterKeyUsername         string
 	MasterKeyPassword         string
@@ -560,7 +564,8 @@ type Config struct {
 	// event rows on the durable live-update bus (AUTHORING_REALTIME_EVENTS,
 	// default off). Off = byte-identical legacy authoring behavior: no bus
 	// INSERT and no extra read. Rollback = unset/off.
-	AuthoringRealtimeEvents bool
+	AuthoringRealtimeEvents      bool
+	SATSingleModuleImportEnabled bool
 	// AuthoringRealtimeDelivery gates the Phase 03 SAT authoring realtime
 	// WebSocket delivery (AUTHORING_REALTIME_DELIVERY, default off). Off =
 	// subscriptions are refused as subscription_forbidden; HTTP authoring is
@@ -870,6 +875,7 @@ func Load() Config {
 		GradingProjectionEnabled:  getenvBool("GRADING_PROJECTION_ENABLED", true),
 		GradingSyncOnReadFallback: getenvBool("GRADING_SYNC_ON_READ_FALLBACK", false),
 		StormAdmissionEnabled:     getenvBool("STORM_ADMISSION_ENABLED", false),
+		SATClassroomEnabled:       getenvBool("SAT_CLASSROOM_ENABLED", false),
 		// Master-key emergency admin login (mirrors Rust AppConfig
 		// master_key_*: username defaults to "master" like Rust; blank
 		// username/password env values fall back to the defaults so an
@@ -930,6 +936,7 @@ func Load() Config {
 		WSCapSchedule:                    wsCapFromEnv("WS_CAP_SCHEDULE", DefaultWSCapSchedule),
 		LiveBusSink:                      parseLiveBusSink(os.Getenv("LIVE_BUS_SINK")),
 		AuthoringRealtimeEvents:          getenvBool("AUTHORING_REALTIME_EVENTS", false),
+		SATSingleModuleImportEnabled:     getenvBool("SAT_SINGLE_MODULE_IMPORT_ENABLED", false),
 		AuthoringRealtimeDelivery:        getenvBool("AUTHORING_REALTIME_DELIVERY", false),
 		AuthoringRealtimePresence:        getenvBool("AUTHORING_REALTIME_PRESENCE", false),
 		AuthoringRealtimeConflictCompare: getenvBool("AUTHORING_REALTIME_CONFLICT_COMPARE", false),

@@ -63,7 +63,7 @@ var expectedAnnotated = []string{
 	"POST /links/{linkID}/lifecycle", "POST /links/{linkID}/duplicate",
 	"GET /links/{linkID}/members", "GET /links/{linkID}/activity",
 	"GET /public/access-links/{linkID}",
-	"POST /schedules/{scheduleID}/bootstrap", "GET /schedules/{scheduleID}/state", "PATCH /schedules/{scheduleID}/responses/{examQuestionID}",
+	"POST /schedules/{scheduleID}/bootstrap", "GET /schedules/{scheduleID}/state", "GET /schedules/{scheduleID}/answered-exam", "PATCH /schedules/{scheduleID}/responses/{examQuestionID}",
 	"POST /schedules/{scheduleID}/modules/start", "POST /schedules/{scheduleID}/modules/enter",
 	"POST /schedules/{scheduleID}/modules/visible", "GET /schedules/{scheduleID}/modules/{moduleID}/entry-state", "POST /schedules/{scheduleID}/breaks/{breakID}/start",
 	"POST /schedules/{scheduleID}/breaks/enter", "POST /schedules/{scheduleID}/breaks/visible",
@@ -104,6 +104,7 @@ var expectedAnnotated = []string{
 	"GET /sessions/{scheduleID}/device-transfers",
 	"POST /sessions/{scheduleID}/device-transfers/{requestID}/decision",
 	"GET /sessions/{scheduleID}/start-code", "POST /sessions/{scheduleID}/start-code/rotate",
+	"POST /sessions/{scheduleID}/attempts/{attemptID}/route", "GET /sessions/{scheduleID}/route-queue",
 	"POST /alerts/{alertID}/ack", "GET /live-mode",
 	"GET /passages", "POST /passages", "GET /passages/{id}",
 	"PATCH /passages/{id}", "DELETE /passages/{id}",
@@ -131,7 +132,7 @@ var expectedAnnotated = []string{
 	"POST /submissions/{submissionID}/reopen-review",
 	"GET /results/{resultID}/events",
 	"GET /dashboard", "GET /analytics", "POST /export",
-	"GET /sat", "GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers", "GET /sat/export/rawdata", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
+	"GET /sat", "GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers", "GET /sat/attempts/{attemptID}/answered-exam", "GET /sat/export/rawdata", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
 	"GET /{resultID}/events", "GET /{resultID}",
 	"POST /uploads", "POST /import-url", "PUT /uploads/{assetID}", "POST /uploads/{assetID}/complete",
 	"GET /assets/{assetID}", "GET /{assetID}/content", "GET /{assetID}",
@@ -169,6 +170,10 @@ var expectedFullPaths = []string{
 	"PATCH /api/v1/assessment-authoring/question-revisions/{revisionID}",
 	"PATCH /api/v1/assessment-authoring/exams/{examID}/sections/{sectionID}/delivery-settings",
 	"POST /api/v1/assessment-authoring/exams/{examID}/validate",
+	"GET /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan",
+	"PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan",
+	"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter",
+	"PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter",
 	// Prompt co-editing (2026-09-13 design): public token issuance plus the
 	// private, service-signature-authenticated Hocuspocus endpoints.
 	"POST /api/v1/assessment-authoring/exam-questions/{examQuestionID}/coedit-token",
@@ -256,6 +261,21 @@ func TestAllowMatrix(t *testing.T) {
 	}
 }
 
+// TC-18: a student must not reach the staff classroom routing endpoint, even
+// with a valid session for the schedule.
+func TestStaffRouteRefusesStudentAndAnon(t *testing.T) {
+	policy, ok := Table["POST /sessions/{scheduleID}/attempts/{attemptID}/route"]
+	if !ok {
+		t.Fatal("staff route must have an explicit policy")
+	}
+	if Allow(RoleStudent, policy) {
+		t.Error("student must not pass the staff route policy")
+	}
+	if Allow("", policy) {
+		t.Error("anon must not pass the staff route policy")
+	}
+}
+
 func TestAssessmentAccessDeleteIsWriterOnly(t *testing.T) {
 	policy, ok := LookupKey(Table, "DELETE /links/{linkID}")
 	if !ok {
@@ -274,7 +294,7 @@ func TestAssessmentAccessDeleteIsWriterOnly(t *testing.T) {
 }
 
 func TestSATResultsWorkspaceReadAdmitsObserverAndAssignedStaff(t *testing.T) {
-	for _, key := range []string{"GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers", "GET /sat/export/rawdata"} {
+	for _, key := range []string{"GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers", "GET /sat/attempts/{attemptID}/answered-exam", "GET /sat/export/rawdata"} {
 		policy, ok := LookupKey(Table, key)
 		if !ok {
 			t.Fatalf("%s must have an explicit route policy", key)

@@ -16,6 +16,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/results"
 )
 
 // TestDeadlineDoubleSubmitReplaysWinner pins the dup-key INSERT path:
@@ -57,6 +58,8 @@ func TestDeadlineDoubleSubmitReplaysWinner(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"never_started"}).AddRow(false))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_results WHERE attempt_id")).
 		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(results.SATScoreReportOpenSQL)).
+		WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(false))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_results")).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()

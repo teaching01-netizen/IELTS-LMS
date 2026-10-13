@@ -64,8 +64,11 @@ func studentSafeBootstrapResult(providerKey string, result any) any {
 	case nil:
 		return nil
 	case *sat.AssessmentResult:
-		if typed == nil || StudentResultScoreVisible(providerKey, typed.ReleaseStatus) {
+		if typed == nil {
 			return typed
+		}
+		if StudentResultScoreVisible(providerKey, typed.ReleaseStatus) {
+			return satReleasedProjection(typed)
 		}
 		return satReceiptProjection(typed)
 	case map[string]any:
@@ -76,6 +79,18 @@ func studentSafeBootstrapResult(providerKey string, result any) any {
 	default:
 		return result
 	}
+}
+
+// satReleasedProjection is the allowlisted released SAT projection. The stored
+// score payload also carries the terminal snapshot (answers, flags), so only
+// the student-safe raw summary key is copied out of it.
+func satReleasedProjection(in *sat.AssessmentResult) *sat.AssessmentResult {
+	out := *in
+	out.ScorePayload = nil
+	if raw, ok := in.ScorePayload["classroomRaw"]; ok {
+		out.ScorePayload = map[string]any{"classroomRaw": raw}
+	}
+	return &out
 }
 
 // satReceiptProjection is the receipt-only SAT projection: the same wire type

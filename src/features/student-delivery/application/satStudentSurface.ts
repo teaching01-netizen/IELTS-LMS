@@ -16,6 +16,7 @@ export type SatStudentStageKind =
   | "scheduled-break"
   | "pre-start"
   | "finalizing"
+  | "awaiting-route"
   | "complete"
   | "terminated"
   | "error";
@@ -68,6 +69,11 @@ export interface SatFinalizingStage extends SatStudentStageBase {
   readonly failed: boolean;
 }
 
+/** Classroom staff_selects: Module 1 is done and staff have not picked Module 2 yet. */
+export interface SatAwaitingRouteStage extends SatStudentStageBase {
+  readonly kind: "awaiting-route";
+}
+
 export interface SatCompleteStage extends SatStudentStageBase {
   readonly kind: "complete";
 }
@@ -90,6 +96,7 @@ export type SatStudentStage =
   | SatScheduledBreakStage
   | SatPreStartStage
   | SatFinalizingStage
+  | SatAwaitingRouteStage
   | SatCompleteStage
   | SatTerminatedStage
   | SatErrorStage;
@@ -106,6 +113,8 @@ export interface DeriveSatStudentStageInput {
   terminatedByProctor: boolean;
   /** Finalization failed while every module is final (the retry panel). */
   finalizationFailed: boolean;
+  /** Server says a staff_selects attempt is waiting for the teacher's Module 2 choice. */
+  awaitingStaffRoute?: boolean;
   /** Every module attempt is submitted/locked. */
   allModulesFinal: boolean;
   /** First module of the exam, still waiting for the proctor's start. */
@@ -159,6 +168,7 @@ export function deriveSatStudentStage({
   terminated,
   terminatedByProctor,
   finalizationFailed,
+  awaitingStaffRoute,
   allModulesFinal,
   isInitialEntry,
   pendingModule,
@@ -184,6 +194,12 @@ export function deriveSatStudentStage({
   }
   if (terminated) {
     return { kind: "terminated", key: `terminated:${attemptKey}`, byProctor: terminatedByProctor };
+  }
+
+  // Before finalizing: with only Module 1 final the attempt looks finished,
+  // but completing it would be refused until staff assign a route.
+  if (awaitingStaffRoute) {
+    return { kind: "awaiting-route", key: `awaiting-route:${attemptKey}` };
   }
 
   if (

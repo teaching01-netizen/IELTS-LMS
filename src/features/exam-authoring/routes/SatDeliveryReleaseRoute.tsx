@@ -159,6 +159,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       onBackToExams={() => navigate(inSatWorkspace ? satListReturnTarget("/sat/exams").to : "/admin/exams")}
       onRetryLoad={() => { void releaseQuery.refetch(); }}
       onRefreshReadiness={() => readinessQuery.refetch()}
+      onExamRefresh={onExamRefresh}
       onPublish={handlePublish}
       onIssueClick={handleIssue}
       collaborationSlot={<CollaborationHeaderCluster surface="release" />}

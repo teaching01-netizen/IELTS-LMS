@@ -1,0 +1,74 @@
+# TEST_MYSQL_DSN -> scratch DB sat_result_verify (credentials omitted), migrated to 0085
+$ go test ./cmd/api -run 'TestSATPublish.*MySQL' -count=1 -race -v
+=== RUN   TestSATPublishUsesConfiguredQuestionCountsMySQL
+--- PASS: TestSATPublishUsesConfiguredQuestionCountsMySQL (0.23s)
+=== RUN   TestSATPublishScopeIgnoresExcludedIssuesAndPersistsScopeMySQL
+--- PASS: TestSATPublishScopeIgnoresExcludedIssuesAndPersistsScopeMySQL (0.10s)
+=== RUN   TestSATPublishRejectsInvalidPretestCountsMySQL
+=== RUN   TestSATPublishRejectsInvalidPretestCountsMySQL/0_designated
+=== RUN   TestSATPublishRejectsInvalidPretestCountsMySQL/1_designated
+--- PASS: TestSATPublishRejectsInvalidPretestCountsMySQL (0.16s)
+    --- PASS: TestSATPublishRejectsInvalidPretestCountsMySQL/0_designated (0.09s)
+    --- PASS: TestSATPublishRejectsInvalidPretestCountsMySQL/1_designated (0.07s)
+=== RUN   TestSATPublishMathScopeIgnoresExcludedIssuesAndPersistsScopeMySQL
+--- PASS: TestSATPublishMathScopeIgnoresExcludedIssuesAndPersistsScopeMySQL (0.13s)
+=== RUN   TestSATPublishRejectsUnknownScopeMySQL
+--- PASS: TestSATPublishRejectsUnknownScopeMySQL (0.07s)
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/empty_prompt
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/choice_count
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/choice_content
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/duplicate_choice_id
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/missing_correct_answer
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/invalid_correct_answer
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/SPR_without_accepted_response
+=== RUN   TestSATPublishRejectsEachContentViolationMySQL/module_count_differs_from_configured_target
+--- PASS: TestSATPublishRejectsEachContentViolationMySQL (0.57s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/empty_prompt (0.08s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/choice_count (0.07s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/choice_content (0.06s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/duplicate_choice_id (0.07s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/missing_correct_answer (0.07s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/invalid_correct_answer (0.08s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/SPR_without_accepted_response (0.06s)
+    --- PASS: TestSATPublishRejectsEachContentViolationMySQL/module_count_differs_from_configured_target (0.08s)
+=== RUN   TestSATPublishStrictSPRValidationMySQL
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["twelve"]}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12","bad"]}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["1/0"]}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["123456"]}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"numericTolerance":"0.1"}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeFraction":false}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeDecimal":false}
+=== RUN   TestSATPublishStrictSPRValidationMySQL/long_canonical_numeric_key
+--- PASS: TestSATPublishStrictSPRValidationMySQL (0.65s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["twelve"]} (0.06s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12","bad"]} (0.07s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["1/0"]} (0.06s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["123456"]} (0.07s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"numericTolerance":"0.1"} (0.06s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeFraction":false} (0.08s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeDecimal":false} (0.06s)
+    --- PASS: TestSATPublishStrictSPRValidationMySQL/long_canonical_numeric_key (0.19s)
+=== RUN   TestSATPublishIgnoresLegacyReadinessFieldsMySQL
+--- PASS: TestSATPublishIgnoresLegacyReadinessFieldsMySQL (0.09s)
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL/expected_draft_id
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL/expected_draft_revision
+=== RUN   TestSATPublishPreservesRevisionFencesMySQL/exam_revision
+--- PASS: TestSATPublishPreservesRevisionFencesMySQL (0.17s)
+    --- PASS: TestSATPublishPreservesRevisionFencesMySQL/expected_draft_id (0.06s)
+    --- PASS: TestSATPublishPreservesRevisionFencesMySQL/expected_draft_revision (0.06s)
+    --- PASS: TestSATPublishPreservesRevisionFencesMySQL/exam_revision (0.06s)
+=== RUN   TestSATPublishOperationKeyReplaysOneReleaseMySQL
+--- PASS: TestSATPublishOperationKeyReplaysOneReleaseMySQL (0.19s)
+=== RUN   TestSATPublishBlocksUnavailableMediaMySQL
+--- PASS: TestSATPublishBlocksUnavailableMediaMySQL (0.06s)
+=== RUN   TestSATPublishAfterLegacyImageReplacementMySQL
+--- PASS: TestSATPublishAfterLegacyImageReplacementMySQL (0.08s)
+=== RUN   TestSATPublishConflictsWhenDraftChangesDuringMediaCheckMySQL
+--- PASS: TestSATPublishConflictsWhenDraftChangesDuringMediaCheckMySQL (0.06s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/api	4.072s
+exit=0
+# Mutation: duplicate-id check disabled -> TestSATPublishRejectsEachContentViolationMySQL/duplicate_choice_id FAIL; source restored from a copy (cmp-verified) and the full run above re-passed.

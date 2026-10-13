@@ -69,6 +69,12 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "student_attempts", Column: "sat_start_code_required"},
 	{Table: "student_attempts", Column: "sat_start_code_accepted_at"},
 	{Table: "student_attempts", Column: "sat_start_code_generation"},
+	// SAT Practice Classroom (0083): nextModuleTx reads the session route policy.
+	{Table: "exam_versions", Column: "sat_classroom_plan"},
+	{Table: "exam_schedules", Column: "sat_route_policy"},
+	{Table: "exam_schedules", Column: "sat_session_mode"},
+	// SAT score report switch (0085): terminalization reads the release gate.
+	{Table: "exam_entities", Column: "sat_score_report_enabled"},
 }
 
 // RequiredIndex is one (table, index) pair the runtime depends on.

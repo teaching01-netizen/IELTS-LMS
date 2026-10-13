@@ -72,7 +72,7 @@ export function SatExamLibraryRoute() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { session } = useAuthSession();
-  const query = useExamListQuery(true, 'sat');
+  const query = useExamListQuery(true, 'sat', false);
   const { params, setParams } = useSatListParams();
   const search = params.q ?? '';
   const tab: SatLibraryTab = params.tab ?? 'active';

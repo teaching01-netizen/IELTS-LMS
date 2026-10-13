@@ -69,6 +69,7 @@ func TestSubmitZeroResponsesCanTerminalizeSAT(t *testing.T) {
 	satScopeUnscoped(mock)
 	mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").
 		WillReturnRows(satModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleLocked)))
+	mock.ExpectQuery("sat_route_policy = 'staff_selects'").WillReturnRows(sqlmock.NewRows([]string{"awaiting"}).AddRow(false))
 	// The final digest is computed after the topology gate.
 	mock.ExpectQuery("FROM attempt_responses_v2").
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))

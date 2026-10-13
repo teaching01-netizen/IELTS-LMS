@@ -1,6 +1,8 @@
 package delivery
 
 import (
+	"sync"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -144,25 +146,31 @@ type mediaIndexKey struct {
 // mediaIndexFor memoizes moduleMediaIndex beside the version cache: keyed by
 // the same probed revision, so a republish is a new key, never a stale hit.
 // Without the version cache the tree is reloaded per request anyway.
+type mediaIndexCache struct {
+	mu      sync.Mutex
+	entries map[mediaIndexKey]map[string]map[string]struct{}
+}
+
 func (s *Service) mediaIndexFor(versionID string, revision int64, sections []DeliverySection) map[string]map[string]struct{} {
-	if s.versions == nil {
+	c := s.mediaIndex
+	if s.versions == nil || c == nil {
 		return moduleMediaIndex(sections)
 	}
 	key := mediaIndexKey{versionID: versionID, revision: revision}
-	s.mediaIndexMu.Lock()
-	index, ok := s.mediaIndex[key]
-	s.mediaIndexMu.Unlock()
+	c.mu.Lock()
+	index, ok := c.entries[key]
+	c.mu.Unlock()
 	if ok {
 		return index
 	}
 	index = moduleMediaIndex(sections)
-	s.mediaIndexMu.Lock()
+	c.mu.Lock()
 	// offcut: wholesale reset at the bound; an exam day runs a handful of versions
-	if s.mediaIndex == nil || len(s.mediaIndex) >= VersionCacheMaxVersions {
-		s.mediaIndex = map[mediaIndexKey]map[string]map[string]struct{}{}
+	if c.entries == nil || len(c.entries) >= VersionCacheMaxVersions {
+		c.entries = map[mediaIndexKey]map[string]map[string]struct{}{}
 	}
-	s.mediaIndex[key] = index
-	s.mediaIndexMu.Unlock()
+	c.entries[key] = index
+	c.mu.Unlock()
 	return index
 }
 

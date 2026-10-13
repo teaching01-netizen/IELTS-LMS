@@ -198,6 +198,9 @@ export interface CreateAssessmentAccessLinkRequest {
   name: string;
   /** [] = all sections (the stored NULL shape). */
   enabledSections?: AccessLinkSectionKey[] | undefined;
+  /** SAT only. Omitted = standard practice. A forced route requires classroom. */
+  satSessionMode?: "practice" | "classroom" | undefined;
+  satRoutePolicy?: "adaptive" | "force_lower" | "force_higher" | "staff_selects" | undefined;
   audienceType: AccessLinkAudienceType;
   audienceLabel?: string | null;
   accessMode: AccessLinkMode;

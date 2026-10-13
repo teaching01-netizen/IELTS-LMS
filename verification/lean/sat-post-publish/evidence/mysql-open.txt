@@ -1,0 +1,11 @@
+=== RUN   TestOpenShellConcurrentExistingDraft
+    openshell_concurrency_test.go:121: N=20 concurrent OpenShell on existing draft: all shell, 1 draft, 0 clones
+--- PASS: TestOpenShellConcurrentExistingDraft (0.15s)
+=== RUN   TestOpenShellConcurrentNoDraftClonesFromPublished
+    openshell_concurrency_test.go:248: N=20 concurrent OpenShell on published+no-draft: 20 shell, 0 documented conflicts, 1 cloned draft (2 sections), source intact
+--- PASS: TestOpenShellConcurrentNoDraftClonesFromPublished (2.00s)
+=== RUN   TestOpenShellConcurrentNoDraftSingleClone
+    openshell_concurrency_test.go:314: N=20 concurrent OpenShell with no version: all documented errors, 0 partial shells
+--- PASS: TestOpenShellConcurrentNoDraftSingleClone (0.03s)
+PASS
+ok  	example.com/ielts-proctoring/internal/authoring	2.710s

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assessmentAuthoringApi } from "../../api/assessmentAuthoringApi";
 import { uploadAssessmentImportAsset } from "../../api/assessmentMediaApi";
@@ -387,5 +387,77 @@ describe("SAT workbook import sheet", () => {
       expect(screen.getByRole("button", { name: "Import 147 questions" })).toBeEnabled()
     );
     expect(previewSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("previews a single module with Unknown pretests and requires an explicit confirmed pair", async () => {
+    const singlePreview = {
+      ...validPreview,
+      mode: "single_module" as const,
+      targetModuleKey: "rw-m1",
+      questionCount: 27,
+      rowCount: 27,
+      commitReady: false,
+      modules: [{ moduleKey: "rw-m1", sectionKey: "reading-writing", questions: Array.from({ length: 27 }, () => ({ ...draft, isPretest: null })) }],
+    };
+    const preview = vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockResolvedValue(singlePreview);
+    const commit = vi.spyOn(assessmentAuthoringApi, "commitSatWorkbook").mockResolvedValue({ shell, undo: { importId: "import-1", available: true } });
+    render(<SatWorkbookImportSheet open examId="exam-1" shell={{ ...shell, singleModuleImportEnabled: true }} existingQuestionCount={20} onClose={vi.fn()} onCommitted={vi.fn()} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Import scope" }), { target: { value: "single_module" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Target module" }), { target: { value: "rw-m1" } });
+    const file = new File(["xlsx"], "Verbal.xlsx");
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), { target: { files: [file] } });
+    const action = await screen.findByRole("button", { name: "Import 27 questions" });
+    expect(preview).toHaveBeenCalledWith("exam-1", file, { mode: "single_module", targetModuleKey: "rw-m1" });
+    expect(screen.getAllByText("Unknown")).toHaveLength(27);
+    expect(action).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Designate question 8 as pretest" }));
+    expect(action).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Designate question 19 as pretest" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Pretest designation source" }), { target: { value: "staff_defined" } });
+    expect(action).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm these two pretests/ }));
+    expect(action).toBeEnabled();
+    expect(screen.queryByText(/this replaces all 20/)).not.toBeInTheDocument();
+    fireEvent.click(action);
+    await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+    const request = commit.mock.calls[0][1];
+    expect(request).toMatchObject({ mode: "single_module", targetModuleKey: "rw-m1", pretestResolution: { selectedOrders: [8, 19], designationSource: "staff_defined", confirmed: true } });
+    expect(request.modules[0].questions.map((q, i) => q.isPretest ? i+1 : null).filter(Boolean)).toEqual([8, 19]);
+  });
+
+  it("freezes the complete single-module request for a lost-response retry across a shell revision change", async () => {
+    const singlePreview = { ...validPreview, mode: "single_module" as const, targetModuleKey: "rw-m1", questionCount: 27, modules: [{ moduleKey: "rw-m1", sectionKey: "reading-writing", questions: Array.from({ length: 27 }, (_, i) => ({ ...draft, isPretest: i === 7 || i === 18 })) }] };
+    vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockResolvedValue(singlePreview);
+    const commit = vi.spyOn(assessmentAuthoringApi, "commitSatWorkbook").mockRejectedValueOnce(new Error("Response lost")).mockResolvedValueOnce({ shell, undo: { importId: "import-1", available: true } });
+    const props = { open: true, examId: "exam-1", shell: { ...shell, singleModuleImportEnabled: true }, existingQuestionCount: 0, onClose: vi.fn(), onCommitted: vi.fn() };
+    const view = render(<SatWorkbookImportSheet {...props} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Import scope" }), { target: { value: "single_module" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Target module" }), { target: { value: "rw-m1" } });
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), { target: { files: [new File(["xlsx"], "Verbal.xlsx")] } });
+    const action = await screen.findByRole("button", { name: "Import 27 questions" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Pretest designation source" }), { target: { value: "source_verified" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm these two pretests/ }));
+    fireEvent.click(action);
+    await screen.findByText("Response lost");
+    view.rerender(<SatWorkbookImportSheet {...props} shell={{ ...props.shell, versionRevision: 8 }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Retry import" }));
+    await waitFor(() => expect(commit).toHaveBeenCalledTimes(2));
+    expect(commit.mock.calls[1][1]).toEqual(commit.mock.calls[0][1]);
+    expect(commit.mock.calls[1][1].expectedVersionRevision).toBe(7);
+  });
+
+  it("discards an old workbook check response after a new file finishes checking", async () => {
+    let resolveOld!: (preview: SatWorkbookPreview) => void;
+    const old = new Promise<SatWorkbookPreview>((resolve) => { resolveOld = resolve; });
+    vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockReturnValueOnce(old).mockResolvedValueOnce({ ...validPreview, importId: "new", questionCount: 148 });
+    const commit = vi.spyOn(assessmentAuthoringApi, "commitSatWorkbook").mockResolvedValue({ shell, undo: { importId: "new", available: true } });
+    render(<SatWorkbookImportSheet open examId="exam-1" shell={shell} existingQuestionCount={0} onClose={vi.fn()} onCommitted={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), { target: { files: [new File(["xlsx"], "Old.xlsx")] } });
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), { target: { files: [new File(["xlsx"], "New.xlsx")] } });
+    await screen.findByRole("button", { name: "Import 148 questions" });
+    await act(async () => { resolveOld(validPreview); await old; });
+    expect(screen.getByRole("button", { name: "Import 148 questions" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Import 148 questions" }));
+    await waitFor(() => expect(commit.mock.calls[0][1].importId).toBe("new"));
   });
 });

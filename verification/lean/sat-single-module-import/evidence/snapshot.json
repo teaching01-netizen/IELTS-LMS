@@ -1,0 +1,309 @@
+{
+  "captured_at_utc": "2026-10-13T09:17:14.844756+00:00",
+  "repository_head": "2c319e59a7de3c15345e8ac575142d9254acb22a",
+  "branch": "feat/sat-bluebook-overlays-tools",
+  "working_tree_clean": false,
+  "working_tree_status_entry_count": 136,
+  "boundary": "Dirty working tree includes unrelated concurrent changes; hashes identify relevant observed files and do not assert a clean release snapshot.",
+  "sha256": {
+    "AGENTS.md": "9ff30ab7d1e5885f2c9e4823c0fa29fbd6d08aaf18fa7d307e4a187bad02377f",
+    "docs/importux.md": "ad06fdbd387ae3c736cd750005e55ed00ed74c1702252a669fcf3810b54483b6",
+    "docs/importux-formal-verification.md": "308cef3f039fe8b9a1fb78ae87b24889f062dbc66e7668275912af21d05068aa",
+    "docs/plans/2026-10-11-sat-single-module-import-implementation.md": "bf69b594e6cfe77f7142ec9b035f164c26e17130a7597aed6c03a34a9a4ef7ad",
+    "api/openapi/openapi.yaml": "acda4df9e7aed0431cfdd44f508e5c5691e2147f3acbfc3efacea480f9041853",
+    "backend/.env.example": "a1f209f0bb0470f2231c879bafc09438ad6c074f057458898ba01f62b2ef10f3",
+    "backend/go/cmd/api/handlers_authoring.go": "392edecb2a7f1d20df39cc3546c10ffc91b63bc596ff20f2da2e290375469208",
+    "backend/go/cmd/api/main.go": "e952fc59ed5cea745903d3f00169d040b0bc2223eca2ef853c9d89b341295e87",
+    "backend/go/cmd/api/sat_single_module_import_mysql_test.go": "c6a4059bde39f3ec66ba8f509350dcd89c84b07e300b2a873b8967a58efdd5ef",
+    "backend/go/cmd/api/sat_publish_mysql_test.go": "4edb918b3fae0738f1df037d70ce12fec83a9fa5171f6d2980e9b224e3b464b0",
+    "backend/go/internal/authoring/workbook.go": "3e06cfb9d3e80642c09e52da9521a688e32b71710f5d28c9bf9200efeacfeb5f",
+    "backend/go/internal/authoring/workbook_binding.go": "21189e3cff7b440186586eca51d61c028783b8cbbeda03617ddfc8f3679071c3",
+    "backend/go/internal/authoring/workbook_binding_test.go": "f32ccb76705388d2b9c746dc2ecdb989c57ba7a7f7144f3ade6a6f2b2967291c",
+    "backend/go/internal/authoring/workbook_single_module_test.go": "9833fca117c6e47169bb7bd4896ec1a509d7430b6d9cd4926bc086285b1951d4",
+    "backend/go/internal/authoring/workbook_import.go": "0a7f1690462e1ea0a192cbdf554e2a4153e4806e341408935d689213872f30be",
+    "backend/go/internal/satpublish/validator.go": "5afc94a46119a19848c0d0d43a4006e08774062d7e1e2be2b3181d6a03b0a4db",
+    "backend/go/internal/satpublish/validator_test.go": "ecce0472501556cec8588494a9bc8917ef6b7647a4c51d6907305eb15b411f9a",
+    "backend/go/internal/platform/config/config.go": "c267fda4266d582f506aea97944d6a7272553445a44c574d0efe6a34809322e6",
+    "backend/go/migrations/0082_sat_single_module_import.sql": "f75d65c5fa130994f53dca9f1a388b5afb9a80cbd5dfe889df8c752a36529e88",
+    "backend/go/migrations/README.md": "5289a100ba2ea740c4ba252a3af9305d86460b6516fb9a4948a2bd7366a0d153",
+    "src/features/exam-authoring/api/assessmentAuthoringApi.ts": "556805abb29b3c5aaa21201abb2284bedfc3e5f491af2c440388b3c475e43315",
+    "src/features/exam-authoring/contracts/assessment.ts": "ba1f69d9324a24ec0f3a8fc8ab3a93714eba6ee2cf111d5be1c8752a285cf847",
+    "src/features/exam-authoring/import/SatWorkbookImportSheet.tsx": "4ab1ebbe73b7ac80fcf429cdf4880915ae04019b2f48f28071a368f454ae4b44",
+    "src/features/exam-authoring/import/__tests__/SatWorkbookImportSheet.test.tsx": "24d0eff8c098c06bf2c4d76388731300082a9b10641019a63e00e38be76b6c37",
+    "verification/lean/sat-single-module-import/AxiomAudit.lean": "da15905565c2b0c1f071c2ab2e3d7e9dfd7bc6120f2043193dee3bb982a2e711",
+    "verification/lean/sat-single-module-import/Counterexamples.lean": "29174a1d8542f06ae8f59b0c7eb55ab347acb77c5a2b0fc7f378765fa0eaca6e",
+    "verification/lean/sat-single-module-import/Model.lean": "fca4b99f97d9930a3f4acf595f2021480d5363f56d3b8eac9a7247d509cc33fc",
+    "verification/lean/sat-single-module-import/Refinement.lean": "a0fbdd65eb3f3faeb51e01c70f7b4a18bc810e5ec31c487aa6b979062ea82803",
+    "verification/lean/sat-single-module-import/Safety.lean": "687420644a0c09b42787c96dc48b8d225d7c109c89175734181c56d2f1d82726",
+    "verification/lean/sat-single-module-import/SatSingleModuleImport.lean": "d2f69795c31d93f3f9ae001b246196764603d6a0cf3442b16910ad3008119d00",
+    "verification/lean/sat-single-module-import/lakefile.lean": "94718dae475b6b3d33c3ca52f28ac885d5bedda3b1fadc5c33764a697306de17",
+    "verification/lean/sat-single-module-import/lean-toolchain": "55e97be96000b5e9e290c9e74482e5e317861499a5540353ce845471bded8cea",
+    "verification/lean/sat-single-module-import/evidence/audit-summary.json": "0a6e81b1c7e870360b908f96f7b1c3e5c7aa80a0115bd38062b4a4e2560516c8",
+    "verification/lean/sat-single-module-import/evidence/axiom-audit.txt": "70ff53bf2df3634371a58537388bd72143c1e2897c43feb0b50e34eac8f4bf05",
+    "verification/lean/sat-single-module-import/evidence/eslint.txt": "7a817c8cf45083108a2432531fe57343095cc4f7c11bdaafa4916aec9aeb3a93",
+    "verification/lean/sat-single-module-import/evidence/frontend-build.txt": "13683513fa77aa715cb50f347d58325e126fb35136c165ae894fab10d734bc6d",
+    "verification/lean/sat-single-module-import/evidence/frontend-tests.txt": "9fb72a3b5c91f325401626ab022b97a041ece0a052a094c1235df02c337df3de",
+    "verification/lean/sat-single-module-import/evidence/go-unit-tests.txt": "a6edad36279ad25147d86d8e5ae1e7143596430f59539a948e643f237c8cffb3",
+    "verification/lean/sat-single-module-import/evidence/lean-build.txt": "f59303518886aa93ca2570f70b97b2e6ba9413f1ba8aca19b5702f57055da8f0",
+    "verification/lean/sat-single-module-import/evidence/mysql-feature-tests.txt": "3efd58c96836c815a2984f28f8f95ed5758ba7f880e46109b9877613fbf01001",
+    "verification/lean/sat-single-module-import/evidence/openapi-yaml-check.txt": "14ce39769f92e559f5072783b41b1bf8bfe947b39c6e3c5b0ab785f402f5eff9",
+    "verification/lean/sat-single-module-import/evidence/typecheck.txt": "5ec1ce4a888c49fa818ffdaf92062cf7aead108fca8d261d15a2db333ebd3f9d"
+  },
+  "versions": {
+    "lean": "Lean (version 4.19.0, arm64-apple-darwin23.6.0, commit 6caaee842e94, Release)",
+    "lake": "Lake version 5.0.0-6caaee8 (Lean version 4.19.0)",
+    "go": "go version go1.26.3 darwin/arm64",
+    "bun": "1.3.14",
+    "mysql_server": "9.6.0"
+  },
+  "toolchain": "leanprover/lean4:v4.19.0",
+  "formal_commands": {
+    "lake build": 0,
+    "lake env lean AxiomAudit.lean": 0
+  },
+  "axiom_audit": {
+    "command": "lake env lean AxiomAudit.lean",
+    "exit_status": 0,
+    "theorem_count": 59,
+    "allowed_axioms": [
+      "Classical.choice",
+      "Quot.sound",
+      "propext"
+    ],
+    "used_axioms": [
+      "Classical.choice",
+      "Quot.sound",
+      "propext"
+    ],
+    "theorems": {
+      "singleton_filter": [
+        "Quot.sound",
+        "propext"
+      ],
+      "pair_count": [
+        "Quot.sound",
+        "propext"
+      ],
+      "imported_exactly_two": [
+        "Classical.choice",
+        "Quot.sound",
+        "propext"
+      ],
+      "initiation": [
+        "Quot.sound",
+        "propext"
+      ],
+      "commit_preserves": [
+        "Quot.sound",
+        "propext"
+      ],
+      "consecution": [
+        "Quot.sound",
+        "propext"
+      ],
+      "reachable_invariant": [
+        "Quot.sound",
+        "propext"
+      ],
+      "at_most_once": [
+        "Quot.sound",
+        "propext"
+      ],
+      "effect_has_receipt": [
+        "Quot.sound",
+        "propext"
+      ],
+      "non_target_preserved": [
+        "Quot.sound",
+        "propext"
+      ],
+      "policies_preserved": [
+        "Quot.sound",
+        "propext"
+      ],
+      "imported_count": [
+        "Quot.sound",
+        "propext"
+      ],
+      "preview_content_bound": [],
+      "unknown_pretests_blocked": [],
+      "stale_revision_blocked": [],
+      "replay_no_mutation": [
+        "Quot.sound",
+        "propext"
+      ],
+      "replay_preserves_durable_result": [
+        "Quot.sound",
+        "propext"
+      ],
+      "disabled_blocks_fresh_commit": [
+        "Quot.sound",
+        "propext"
+      ],
+      "cached_key_blocks_fresh_commit": [
+        "Quot.sound",
+        "propext"
+      ],
+      "durable_receipt_survives_operation_key_cleanup": [
+        "Quot.sound",
+        "propext"
+      ],
+      "retry_after_operation_key_cleanup": [
+        "Quot.sound",
+        "propext"
+      ],
+      "consumed_preview": [
+        "Quot.sound",
+        "propext"
+      ],
+      "publish_pretests": [],
+      "rw_requires_three": [],
+      "undo_restores": [
+        "Quot.sound",
+        "propext"
+      ],
+      "crash_durable": [
+        "Quot.sound",
+        "propext"
+      ],
+      "substantive_other_row_blocked": [
+        "propext"
+      ],
+      "untouched_other_row_ignored": [
+        "propext"
+      ],
+      "changed_scaffold_blocked": [
+        "propext"
+      ],
+      "used_key_cannot_commit": [
+        "Quot.sound",
+        "propext"
+      ],
+      "altered_replay_blocked": [
+        "Quot.sound",
+        "propext"
+      ],
+      "stale_after_commit": [
+        "Quot.sound",
+        "propext"
+      ],
+      "stale_undo_blocked": [
+        "Quot.sound",
+        "propext"
+      ],
+      "fixture_ready": [
+        "Quot.sound",
+        "propext"
+      ],
+      "meaningful_commit": [
+        "Quot.sound",
+        "propext"
+      ],
+      "committed_reachable": [
+        "Quot.sound",
+        "propext"
+      ],
+      "fixture_pretest_flags": [
+        "Quot.sound",
+        "propext"
+      ],
+      "no_resolution": [
+        "Quot.sound",
+        "propext"
+      ],
+      "one_pretest": [
+        "Quot.sound",
+        "propext"
+      ],
+      "three_pretests": [
+        "Quot.sound",
+        "propext"
+      ],
+      "duplicate_pretests": [
+        "Quot.sound",
+        "propext"
+      ],
+      "zero_order": [
+        "Quot.sound",
+        "propext"
+      ],
+      "overflow_order": [
+        "Quot.sound",
+        "propext"
+      ],
+      "unconfirmed": [
+        "Quot.sound",
+        "propext"
+      ],
+      "wrong_count": [
+        "propext"
+      ],
+      "duplicate_order": [
+        "propext"
+      ],
+      "tampered_content": [
+        "propext"
+      ],
+      "wrong_actor": [
+        "propext"
+      ],
+      "wrong_module": [
+        "propext"
+      ],
+      "expired_at_boundary": [
+        "Quot.sound",
+        "propext"
+      ],
+      "stale_fixture": [
+        "Quot.sound",
+        "propext"
+      ],
+      "single_rw_not_publishable": [
+        "Quot.sound",
+        "propext"
+      ],
+      "competing_stale_commit": [
+        "Quot.sound",
+        "propext"
+      ],
+      "naive_two_read_two_write": [],
+      "deleting_other_modules_loses_content": [
+        "Quot.sound",
+        "propext"
+      ],
+      "concrete_step_refines_abstract": [
+        "Quot.sound",
+        "propext"
+      ],
+      "crash_discards_uncommitted_write_set": [
+        "Quot.sound",
+        "propext"
+      ],
+      "abort_discards_uncommitted_write_set": [
+        "Quot.sound",
+        "propext"
+      ],
+      "database_commit_publishes_one_abstract_commit": [
+        "Quot.sound",
+        "propext"
+      ]
+    }
+  },
+  "application_checks": {
+    "go_unit_tests": 0,
+    "isolated_mysql_feature_tests": 0,
+    "frontend_ui_tests": 0,
+    "typescript_typecheck": 0,
+    "eslint": 0,
+    "frontend_production_build": 0,
+    "openapi_yaml_parse": 0,
+    "gofmt_on_feature_sources": 0
+  },
+  "traceability_cases": {
+    "total": 36,
+    "PASS": 15,
+    "PARTIAL": 16,
+    "NOT RUN": 5
+  },
+  "production_evidence": "CONDITIONAL: isolated local MySQL functional tests only; no production DB, media store, crash rehearsal, mixed-version deployment, browser assistive-technology review, or load/soak evidence."
+}

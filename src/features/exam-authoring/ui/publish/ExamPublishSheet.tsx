@@ -24,7 +24,7 @@ import {
   toUserFacingPublishError,
 } from "../release/releaseSelectors";
 import { useReleaseOnline } from "../release/releaseUi";
-import { AuthoringConfirmDialog } from "../authoringPrimitives";
+import { AuthoringConfirmDialog, restoreAuthoringFocus } from "../authoringPrimitives";
 import { DeliverySettingsPanel } from "../settings/DeliverySettingsPanel";
 import type { DeliveryTarget } from "../shell/examLifecycle";
 import { useSatPublish } from "./useSatPublish";
@@ -37,6 +37,10 @@ export interface ExamPublishSheetProps {
   onOpenIssue: (issue: AssessmentValidationIssue) => void;
   /** Opens room setup for the version just published (pinned to it even if another author publishes again). */
   onOpenStudentAccess: (target?: DeliveryTarget) => void;
+  /** Saves the acknowledged version in the workspace before this sheet can close. */
+  onPublished?: ((target: DeliveryTarget) => void) | undefined;
+  /** Used when the button that opened the sheet was removed by the publish lifecycle. */
+  focusFallback?: (() => HTMLElement | null) | undefined;
   /** Optional: when omitted, timing and routing are edited inside this sheet instead of on another page. */
   onOpenSettings?: (() => void) | undefined;
 }
@@ -51,6 +55,7 @@ const BUTTON = "sat-btn sat-press";
  */
 export function ExamPublishSheet(props: ExamPublishSheetProps) {
   const examQuery = useExamQuery(props.examId);
+  const focusOpenerRef = useRef<HTMLElement | null>(null);
   const [view, setView] = useState<"publish" | "settings">("publish");
   const [dirtyCount, setDirtyCount] = useState(0);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -61,7 +66,23 @@ export function ExamPublishSheet(props: ExamPublishSheetProps) {
   return (
     <>
       <Sheet open={props.open} onOpenChange={(next) => !next && requestClose()}>
-        <SheetContent side="right" className={`sat-product sat-staff-root flex flex-col gap-0 p-0 ${view === "settings" ? "w-[min(96vw,720px)] max-w-[720px] sm:max-w-[720px]" : "w-[min(96vw,560px)] max-w-[560px] sm:max-w-[560px]"}`}>
+        <SheetContent
+          side="right"
+          className={`sat-product sat-staff-root flex flex-col gap-0 p-0 ${view === "settings" ? "w-[min(96vw,720px)] max-w-[720px] sm:max-w-[720px]" : "w-[min(96vw,560px)] max-w-[560px] sm:max-w-[560px]"}`}
+          onOpenAutoFocus={() => {
+            focusOpenerRef.current = document.activeElement instanceof HTMLElement
+              ? document.activeElement
+              : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const opener = focusOpenerRef.current;
+            focusOpenerRef.current = null;
+            restoreAuthoringFocus(
+              opener?.isConnected ? opener : props.focusFallback?.() ?? null
+            );
+          }}
+        >
           <SheetHeader className="border-b border-[var(--sat-staff-border-hairline)] px-6 py-5 text-left">
             <SheetTitle className="text-[20px] leading-7 tracking-[-0.015em]">{view === "settings" ? "Exam settings" : "Publish version"}</SheetTitle>
             <SheetDescription>
@@ -112,6 +133,7 @@ function PublishSheetBody({
   onClose,
   onOpenIssue,
   onOpenStudentAccess,
+  onPublished,
   onOpenSettings,
   onExamRefresh,
   view,
@@ -253,6 +275,7 @@ function PublishSheetBody({
       // someone else publishes again before the author continues.
       const published = await publish(publishScope, normalizePublishNotes(notes));
       setPublishedTarget(published);
+      onPublished?.(published);
       setDidPublish(true);
     } catch (error) {
       const diagnostic = publishMediaIssueDiagnostic(error);
@@ -272,12 +295,15 @@ function PublishSheetBody({
             {SAT_PUBLISH_SCOPE_OPTIONS.map((option) => (
               <label
                 key={option.value}
+                htmlFor={`sat-publish-sheet-scope-${option.value}`}
                 className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-[var(--sat-staff-radius-control,10px)] border px-3 text-[14px] font-semibold focus-within:ring-[3px] focus-within:ring-[var(--sat-staff-accent-ring)] ${publishScope === option.value ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)] text-[var(--sat-staff-text-primary,#1d1d1f)]" : "border-[var(--sat-staff-border-strong)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)]"}`}
               >
                 <input
+                  id={`sat-publish-sheet-scope-${option.value}`}
                   type="radio"
                   name="sat-publish-sheet-scope"
                   value={option.value}
+                  aria-label={option.label}
                   checked={publishScope === option.value}
                   disabled={isPublishing}
                   onChange={() => setPublishScope(option.value as SatPublishScope)}
@@ -394,15 +420,17 @@ function PublishSheetBody({
 
         <div>
           <div className="flex items-baseline justify-between gap-3">
-            <label htmlFor="sat-publish-sheet-notes" className="text-sm font-semibold text-foreground">
+            <div id="sat-publish-sheet-notes-label" className="text-sm font-semibold text-foreground">
               Publish notes <span className="font-normal text-muted-foreground">(optional)</span>
-            </label>
-            <span aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
+            </div>
+            <span id="sat-publish-sheet-notes-count" aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
               {notes.length}/{MAX_PUBLISH_NOTES_LENGTH}
             </span>
           </div>
           <textarea
             id="sat-publish-sheet-notes"
+            aria-labelledby="sat-publish-sheet-notes-label"
+            aria-describedby="sat-publish-sheet-notes-count"
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             rows={3}

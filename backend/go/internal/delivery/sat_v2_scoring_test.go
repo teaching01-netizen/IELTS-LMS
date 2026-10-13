@@ -66,6 +66,10 @@ func TestFinalizeModuleScoresV2AnswersWithoutLegacyRows(t *testing.T) {
 		WithArgs("sec-1").
 		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
 			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "threshold", `{"minimumCorrectForHigher":1}`, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_route_policy, 'adaptive') FROM student_attempts sa")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"policy"}).AddRow("adaptive"))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("pv-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_route_decisions")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-higher", "higher", 1, 1, "threshold", 1, sqlmock.AnyArg(), "window_closed", "att-1", "mod-base", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -133,6 +137,10 @@ func TestFinalizeModuleLegacyFallbackWithoutV2Rows(t *testing.T) {
 		WithArgs("sec-1").
 		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
 			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "threshold", `{"minimumCorrectForHigher":1}`, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_route_policy, 'adaptive') FROM student_attempts sa")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"policy"}).AddRow("adaptive"))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("pv-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_route_decisions")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-higher", "higher", 1, 1, "threshold", 1, sqlmock.AnyArg(), "window_closed", "att-1", "mod-base", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -205,6 +213,10 @@ func TestFinalizeModuleDedupsDualV2IdentityRows(t *testing.T) {
 		WithArgs("sec-1").
 		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
 			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "threshold", `{"minimumCorrectForHigher":1}`, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_route_policy, 'adaptive') FROM student_attempts sa")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"policy"}).AddRow("adaptive"))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("pv-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_route_decisions")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-higher", "higher", 1, 1, "threshold", 1, sqlmock.AnyArg(), "window_closed", "att-1", "mod-base", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -275,6 +287,10 @@ func TestFinalizeModuleZeroAnswerPassRoutesLower(t *testing.T) {
 		WithArgs("sec-1").
 		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
 			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "threshold", `{"minimumCorrectForHigher":1}`, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_route_policy, 'adaptive') FROM student_attempts sa")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"policy"}).AddRow("adaptive"))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("pv-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_route_decisions")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "sec-1", "ma-base", "mod-base", "mod-lower", "lower", 0, 2, "threshold", 1, sqlmock.AnyArg(), "window_closed", "att-1", "mod-base", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))

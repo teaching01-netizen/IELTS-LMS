@@ -46,6 +46,13 @@ function derive(overrides: Partial<DeriveSatStudentStageInput> = {}): SatStudent
 }
 
 describe("deriveSatStudentStage — terminal and finalizing surfaces", () => {
+  it("holds a staff_selects attempt on the awaiting screen instead of finalizing", () => {
+    expect(derive({ awaitingStaffRoute: true, allModulesFinal: true })).toMatchObject({
+      kind: "awaiting-route",
+    });
+    expect(derive({ awaitingStaffRoute: true, hasResult: true })).toMatchObject({ kind: "complete" });
+  });
+
   it("owns the load failure and the not-yet-loaded wait", () => {
     expect(derive({ loadFailed: true, hasData: false })).toMatchObject({
       kind: "error",

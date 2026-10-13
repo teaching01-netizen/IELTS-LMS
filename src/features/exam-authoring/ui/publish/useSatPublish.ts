@@ -7,7 +7,7 @@ import {
 } from "../../api/assessmentQueries";
 import { useAccessDistributionOverview } from "../../api/assessmentAccessLinkQueries";
 import { useAuthoringShellLifecycle } from "../../application/authoringShellLifecycle";
-import type { SatPublishScope } from "../../contracts/assessment";
+import type { PublishedAssessmentVersion, SatPublishScope } from "../../contracts/assessment";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
 import {
   COEDIT_MUTATION_FLUSH_TIMEOUT_MS,
@@ -103,9 +103,9 @@ export function useSatPublish(exam: ExamEntity, onExamRefresh: () => Promise<unk
     }
 
     const trimmedNotes = (publishNotes ?? "").trim();
-    // One key per publish confirmation: a double-click or lost response
-    // replays the same release instead of sealing a second version.
-    const { publishedVersion } = await publishMutation.mutateAsync({
+    // Fresh key for this confirmation. Automatic retries are disabled; a later
+    // user attempt is a new operation, not a replay of a lost response.
+    const publishedVersion = await publishMutation.mutateAsync({
       revision: exam.revision,
       expectedDraftVersionId: committedShell.versionId,
       expectedDraftRevision: committedShell.versionRevision,
@@ -113,19 +113,22 @@ export function useSatPublish(exam: ExamEntity, onExamRefresh: () => Promise<unk
       ...(trimmedNotes ? { publishNotes: trimmedNotes.slice(0, 1000) } : {}),
       operationKey: crypto.randomUUID(),
     });
-    // Refetch failures must never block the caller: the publish already
-    // succeeded, so settle every refresh independently and continue.
-    const settled = await Promise.allSettled([
-      onExamRefresh(),
-      releaseQuery.refetch(),
-      distributionQuery.refetch(),
-    ]);
-    for (const result of settled) {
-      if (result.status === "rejected") {
-        console.error("[sat-release] post-publish refresh failed", result.reason);
-      }
+    const target = publishedVersionToDeliveryTarget(publishedVersion, exam.id, scope);
+    // Refreshes reconcile projections in the background. Neither a rejected
+    // read nor a read that never settles can take away this POST receipt.
+    const refreshes = [
+      () => onExamRefresh(),
+      () => releaseQuery.refetch(),
+      () => distributionQuery.refetch(),
+    ];
+    for (const refresh of refreshes) {
+      void Promise.resolve()
+        .then(() => refresh())
+        .catch((error: unknown) => {
+          console.error("[sat-release] post-publish refresh failed", error);
+        });
     }
-    return { versionId: publishedVersion.id, versionNumber: publishedVersion.versionNumber, publishScope: scope };
+    return target;
   };
 
   const publishError = publishMutation.error
@@ -149,5 +152,35 @@ export function useSatPublish(exam: ExamEntity, onExamRefresh: () => Promise<unk
     /** A draft read is in flight or this tab holds room changes not yet confirmed. */
     draftBusy: shellState.kind === "loading" || shellLifecycle.isFetching || roomPending,
     publish,
+  };
+}
+
+/** A publish receipt names one immutable version; it does not claim that it is still current. */
+export function publishedVersionToDeliveryTarget(
+  version: PublishedAssessmentVersion,
+  examId: string,
+  requestedScope: SatPublishScope
+): DeliveryTarget {
+  if (
+    !version ||
+    typeof version !== "object" ||
+    typeof version.examId !== "string" ||
+    version.examId !== examId ||
+    typeof version.id !== "string" ||
+    !version.id.trim() ||
+    !Number.isSafeInteger(version.versionNumber) ||
+    version.versionNumber < 1 ||
+    version.isDraft !== false ||
+    version.isPublished !== true ||
+    (version.publishScope !== undefined && version.publishScope !== requestedScope)
+  ) {
+    throw new Error(
+      "The publish response could not be verified. Refresh the release page and confirm the version before publishing again."
+    );
+  }
+  return {
+    versionId: version.id,
+    versionNumber: version.versionNumber,
+    publishScope: requestedScope,
   };
 }

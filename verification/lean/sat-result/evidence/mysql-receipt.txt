@@ -1,0 +1,11 @@
+# TEST_MYSQL_DSN -> scratch DB sat_result_verify (credentials omitted)
+$ go test ./cmd/migrate ./internal/terminalization -run 'TestReceiptImmutabilityMySQL|TestSubmitVsTerminateCrossOutcomeConflicts' -count=1 -v
+=== RUN   TestReceiptImmutabilityMySQL
+--- PASS: TestReceiptImmutabilityMySQL (0.35s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/migrate	0.946s
+=== RUN   TestSubmitVsTerminateCrossOutcomeConflicts
+--- PASS: TestSubmitVsTerminateCrossOutcomeConflicts (0.00s)
+PASS
+ok  	example.com/ielts-proctoring/internal/terminalization	0.757s
+exit=0

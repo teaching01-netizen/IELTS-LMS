@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, FileSpreadsheet, UploadCloud, X } from "lucide-react";
 import type {
   AssessmentAuthoringShell,
-  BatchQuestionDraft,
   QuestionRevision,
   SatWorkbookCommitResult,
-  SatWorkbookModuleDraft,
+  SatWorkbookCommitRequest,
+  SatWorkbookImportOptions,
+  SatWorkbookPretestResolution,
+  SatWorkbookPreviewModule,
+  SatWorkbookPreviewQuestion,
   SatWorkbookPreview,
   SatWorkbookStagedAsset,
 } from "../contracts/assessment";
@@ -60,10 +63,17 @@ export function SatWorkbookImportSheet({
   // when the sheet closes or a new file is chosen. A lost-response commit
   // retry reuses it; committing a different workbook always mints a fresh one.
   const commitKeyRef = useRef<string | null>(null);
+  const inspectionRef = useRef(0);
+  const commitRequestRef = useRef<SatWorkbookCommitRequest | null>(null);
+  const [mode, setMode] = useState<SatWorkbookImportOptions["mode"]>("full");
+  const [targetModuleKey, setTargetModuleKey] = useState("");
+  const [pretestOrders, setPretestOrders] = useState<number[]>([]);
+  const [designationSource, setDesignationSource] = useState<SatWorkbookPretestResolution["designationSource"] | "">("");
+  const [pretestsConfirmed, setPretestsConfirmed] = useState(false);
   const [activity, setActivity] = useState<Activity>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<SatWorkbookPreview | null>(null);
-  const [renderModules, setRenderModules] = useState<SatWorkbookModuleDraft[] | null>(null);
+  const [renderModules, setRenderModules] = useState<SatWorkbookPreviewModule[] | null>(null);
   const [stagedAssets, setStagedAssets] = useState<SatWorkbookStagedAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [failedStep, setFailedStep] = useState<FailedStep | null>(null);
@@ -71,10 +81,11 @@ export function SatWorkbookImportSheet({
   const [selectedModuleKey, setSelectedModuleKey] = useState<string | null>(null);
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState(0);
   const busy = activity !== "idle";
-  const replacesContent = existingQuestionCount > 0;
+  const singleModule = mode === "single_module";
 
-  useEffect(() => {
-    if (open) return;
+  const clearInspection = useCallback(() => {
+    inspectionRef.current += 1;
+    commitRequestRef.current = null;
     commitKeyRef.current = null;
     setActivity("idle");
     setFile(null);
@@ -86,7 +97,17 @@ export function SatWorkbookImportSheet({
     setReplaceConfirmed(false);
     setSelectedModuleKey(null);
     setSelectedQuestionIndex(0);
-  }, [open]);
+    setPretestOrders([]);
+    setDesignationSource("");
+    setPretestsConfirmed(false);
+  }, []);
+
+  useEffect(() => {
+    clearInspection();
+    setMode("full");
+    setTargetModuleKey("");
+    return () => { inspectionRef.current += 1; };
+  }, [open, examId, clearInspection]);
 
   useEffect(() => {
     if (error) errorRef.current?.focus();
@@ -100,6 +121,9 @@ export function SatWorkbookImportSheet({
     return counts;
   }, [shell]);
 
+  const replacementCount = singleModule ? (beforeCountByModule.get(targetModuleKey) ?? 0) : existingQuestionCount;
+  const replacesContent = replacementCount > 0;
+
   const selectedModule = useMemo(
     () =>
       (renderModules ?? preview?.modules)?.find((module) => module.moduleKey === selectedModuleKey) ??
@@ -112,26 +136,35 @@ export function SatWorkbookImportSheet({
     [selectedDraft, selectedQuestionIndex]
   );
 
-  const stageAssets = async (nextPreview: SatWorkbookPreview) => {
+  const stageAssets = async (nextPreview: SatWorkbookPreview, generation = inspectionRef.current) => {
     setActivity("staging");
     setError(null);
     setFailedStep(null);
     try {
       const staged = await stageWorkbookAssets(nextPreview);
+      if (generation !== inspectionRef.current) return;
       setStagedAssets(staged.assets);
       setRenderModules(staged.renderModules);
       const firstModule =
         staged.renderModules.find((module) => module.questions.length > 0) ?? null;
       setSelectedModuleKey((current) => current ?? firstModule?.moduleKey ?? null);
     } catch (cause) {
+      if (generation !== inspectionRef.current) return;
       setFailedStep("stage");
       setError(cause instanceof Error ? cause.message : "The workbook visuals could not be secured.");
     } finally {
-      setActivity("idle");
+      if (generation === inspectionRef.current) setActivity("idle");
     }
   };
 
   const inspectFile = async (nextFile: File) => {
+    if (commitInFlightRef.current) return;
+    clearInspection();
+    const generation = inspectionRef.current;
+    if (singleModule && !targetModuleKey) {
+      setError("Choose the target module before checking the workbook.");
+      return;
+    }
     if (!nextFile.name.toLowerCase().endsWith(".xlsx")) {
       setError("Choose an .xlsx SAT workbook.");
       return;
@@ -150,7 +183,13 @@ export function SatWorkbookImportSheet({
     setStagedAssets([]);
     setSelectedModuleKey(null);
     try {
-      const nextPreview = await assessmentAuthoringApi.previewSatWorkbook(examId, nextFile);
+      const nextPreview = singleModule
+        ? await assessmentAuthoringApi.previewSatWorkbook(examId, nextFile, { mode, targetModuleKey })
+        : await assessmentAuthoringApi.previewSatWorkbook(examId, nextFile);
+      if (generation !== inspectionRef.current) return;
+      if (singleModule && (nextPreview.mode !== "single_module" || nextPreview.targetModuleKey !== targetModuleKey)) {
+        throw new Error("The server did not check the selected module. Refresh and check the workbook again.");
+      }
       // New workbook, new commit identity: the previous key must never leak
       // across workbooks, or a retry could replay the wrong replacement.
       commitKeyRef.current = nextPreview.valid ? crypto.randomUUID() : null;
@@ -159,15 +198,17 @@ export function SatWorkbookImportSheet({
       const firstModule = nextPreview.modules.find((module) => module.questions.length > 0) ?? null;
       setSelectedModuleKey(firstModule?.moduleKey ?? null);
       setSelectedQuestionIndex(0);
+      setPretestOrders(nextPreview.modules[0]?.questions.flatMap((question, index) => question.isPretest === true ? [index + 1] : []) ?? []);
       if (nextPreview.valid && nextPreview.assets.length > 0) {
-        await stageAssets(nextPreview);
+        await stageAssets(nextPreview, generation);
         return;
       }
     } catch (cause) {
+      if (generation !== inspectionRef.current) return;
       setFailedStep("check");
       setError(cause instanceof Error ? cause.message : "The workbook could not be checked.");
     }
-    setActivity("idle");
+    if (generation === inspectionRef.current) setActivity("idle");
   };
 
   const downloadTemplate = async () => {
@@ -195,6 +236,9 @@ export function SatWorkbookImportSheet({
   if (!preview) importDisabledReason = "Choose a workbook to check before importing.";
   else if (!preview.valid) importDisabledReason = "Fix the workbook issues, then choose the file again.";
   else if (!stagingComplete) importDisabledReason = "Workbook visuals must finish securing first.";
+  else if (singleModule && (pretestOrders.length !== 2 || !designationSource || !pretestsConfirmed)) {
+    importDisabledReason = "Pretest assignments are unresolved. Choose exactly two questions and confirm their designation source.";
+  }
   else if (replacesContent && !replaceConfirmed) {
     importDisabledReason = "Confirm the replacement to continue.";
   }
@@ -203,21 +247,32 @@ export function SatWorkbookImportSheet({
   const commit = async () => {
     if (!preview?.valid || !canCommit || commitInFlightRef.current) return;
     commitInFlightRef.current = true;
+    const generation = inspectionRef.current;
     setActivity("importing");
     setError(null);
     setFailedStep(null);
     try {
       if (!commitKeyRef.current) commitKeyRef.current = crypto.randomUUID();
-      const result = await assessmentAuthoringApi.commitSatWorkbook(examId, {
+      if (!commitRequestRef.current) {
+        const request: SatWorkbookCommitRequest = {
         importId: preview.importId,
         expectedVersionId: shell.versionId,
         expectedVersionRevision: shell.versionRevision,
-        modules: preview.modules,
+        modules: preview.modules.map((module) => ({ ...module, questions: module.questions.map((question, index) => ({ ...question, isPretest: singleModule ? pretestOrders.includes(index + 1) : question.isPretest === true })) })),
         assets: stagedAssets,
         operationKey: commitKeyRef.current,
-      });
+        ...(singleModule ? {
+          mode, targetModuleKey,
+          pretestResolution: { selectedOrders: [...pretestOrders].sort((a, b) => a - b), designationSource: designationSource as SatWorkbookPretestResolution["designationSource"], confirmed: pretestsConfirmed },
+        } : {}),
+        };
+        commitRequestRef.current = JSON.parse(JSON.stringify(request)) as SatWorkbookCommitRequest;
+      }
+      const result = await assessmentAuthoringApi.commitSatWorkbook(examId, commitRequestRef.current);
+      if (generation !== inspectionRef.current) return;
       onCommitted(result);
     } catch (cause) {
+      if (generation !== inspectionRef.current) return;
       setFailedStep("commit");
       setError(cause instanceof Error ? cause.message : "The SAT workbook could not be imported.");
       setActivity("idle");
@@ -235,7 +290,7 @@ export function SatWorkbookImportSheet({
   const importLabel = !preview?.valid
     ? "Import workbook"
     : replacesContent
-      ? `Replace draft with ${questionsLabel(preview.questionCount)}`
+      ? `Replace ${singleModule ? "module" : "draft"} with ${questionsLabel(preview.questionCount)}`
       : `Import ${questionsLabel(preview.questionCount)}`;
 
   return (
@@ -253,10 +308,10 @@ export function SatWorkbookImportSheet({
                   Import SAT from Excel
                 </h2>
                 <p className="mt-1 text-xs leading-5 text-slate-600">
-                  One workbook replaces the complete six-module draft pinned to the revision you
+                  {singleModule ? "Import only the selected module after confirming two pretests. Other modules, routing and scoring settings stay unchanged. A stale draft conflicts; you can undo until the next edit or publication." : <>One workbook replaces the complete six-module draft pinned to the revision you
                   inspected. If another author saves first, the import conflicts instead of
                   overwriting. Published versions are untouched. After the import you can undo it
-                  until you edit further or publish. Nothing changes until you confirm.
+                  until you edit further or publish. Nothing changes until you confirm.</>}
                 </p>
               </div>
               <button
@@ -272,9 +327,33 @@ export function SatWorkbookImportSheet({
 
             <div className="grid min-h-0 flex-1 lg:grid-cols-[430px_minmax(0,1fr)]">
               <div className="min-h-0 overflow-y-auto border-b border-au-separator p-4 sm:p-5 lg:border-b-0 lg:border-r">
+                {shell.singleModuleImportEnabled ? (
+                  <div className="mb-4 space-y-3 text-xs text-slate-700">
+                    <label htmlFor="sat-workbook-import-scope" className="block font-semibold">
+                      Import scope
+                      <select id="sat-workbook-import-scope" aria-label="Import scope" value={mode} disabled={busy || failedStep === "commit"}
+                        onChange={(event) => { clearInspection(); setMode(event.target.value as SatWorkbookImportOptions["mode"]); setTargetModuleKey(""); }}
+                        className="mt-1 min-h-11 w-full rounded-[9px] bg-au-fill px-3 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
+                        <option value="full">Complete SAT — all six modules</option>
+                        <option value="single_module">Single module</option>
+                      </select>
+                    </label>
+                    {singleModule ? (
+                      <label htmlFor="sat-workbook-target-module" className="block font-semibold">
+                        Target module
+                        <select id="sat-workbook-target-module" aria-label="Target module" value={targetModuleKey} disabled={busy || failedStep === "commit"}
+                          onChange={(event) => { clearInspection(); setTargetModuleKey(event.target.value); }}
+                          className="mt-1 min-h-11 w-full rounded-[9px] bg-au-fill px-3 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
+                          <option value="">Choose the destination module</option>
+                          {Object.entries(MODULE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                        </select>
+                      </label>
+                    ) : null}
+                  </div>
+                ) : null}
                 <DropTarget
                   file={file}
-                  checking={activity === "checking" || activity === "staging"}
+                  checking={busy || (singleModule && !targetModuleKey)}
                   onChoose={() => fileInputRef.current?.click()}
                   onDrop={(nextFile) => void inspectFile(nextFile)}
                 />
@@ -282,6 +361,7 @@ export function SatWorkbookImportSheet({
                   ref={fileInputRef}
                   className="sr-only"
                   type="file"
+                  disabled={activity === "importing" || (singleModule && !targetModuleKey)}
                   accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   aria-label="Choose SAT Excel workbook"
                   onChange={(event) => {
@@ -344,7 +424,7 @@ export function SatWorkbookImportSheet({
                       />
                     ) : null}
                     <ProgressStep
-                      label="Replace the draft"
+                      label={singleModule ? "Import the selected module" : "Replace the draft"}
                       state={stepState("commit", activity, failedStep, false)}
                     />
                   </ol>
@@ -358,6 +438,44 @@ export function SatWorkbookImportSheet({
                       <Metric label="Visuals" value={preview.assets.length} />
                       <Metric label="Issues" value={preview.issues.length} bad={!preview.valid} />
                     </div>
+                    {singleModule && preview.valid ? (
+                      <fieldset disabled={busy || failedStep === "commit"} className="mt-4 rounded-xl bg-au-fill p-3">
+                        <legend className="px-1 text-sm font-semibold text-slate-800">Pretest designation</legend>
+                        <p aria-live="polite" className="text-xs font-semibold text-slate-700">{pretestOrders.length} of 2 selected</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-600">Unknown is the workbook's unresolved designation. Verify the source or deliberately designate two pretests for a custom practice test. No pair is generated automatically.</p>
+                        <div className="mt-2 grid grid-cols-3 gap-1">
+                          {preview.modules[0]?.questions.map((question, index) => {
+                            const order = index + 1;
+                            const selected = pretestOrders.includes(order);
+                            return (
+                              <label key={order} htmlFor={`sat-pretest-${order}`} className="flex min-h-11 items-center gap-2 rounded-lg bg-au-surface px-2 text-xs text-slate-700">
+                                <input id={`sat-pretest-${order}`} type="checkbox" checked={selected} aria-label={`Designate question ${order} as pretest`}
+                                  disabled={!selected && pretestOrders.length >= 2}
+                                  onChange={() => { setPretestOrders((orders) => selected ? orders.filter((n) => n !== order) : [...orders, order].sort((a, b) => a-b)); setPretestsConfirmed(false); }}
+                                  className="h-4 w-4 shrink-0 accent-[var(--au-accent,#2563eb)]" />
+                                <span>{order}<span className="block text-xs text-slate-600">{question.isPretest == null ? "Unknown" : question.isPretest ? "Yes" : "No"}</span></span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <label htmlFor="sat-pretest-source" className="mt-3 block text-xs font-semibold text-slate-700">
+                          Pretest designation source
+                          <select id="sat-pretest-source" aria-label="Pretest designation source" value={designationSource}
+                            onChange={(event) => { setDesignationSource(event.target.value as SatWorkbookPretestResolution["designationSource"] | ""); setPretestsConfirmed(false); }}
+                            className="mt-1 min-h-11 w-full rounded-lg bg-au-surface px-2 outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
+                            <option value="">Choose how the pair was established</option>
+                            <option value="source_verified">Verified against the source</option>
+                            <option value="staff_defined">Staff-defined for a practice test</option>
+                          </select>
+                        </label>
+                        <label htmlFor="sat-pretest-confirmation" className="mt-2 flex min-h-11 items-start gap-2 text-xs leading-5 text-slate-700">
+                          <input id="sat-pretest-confirmation" type="checkbox" aria-labelledby="sat-pretest-confirmation-label" checked={pretestsConfirmed} disabled={!designationSource || pretestOrders.length !== 2}
+                            onChange={(event) => setPretestsConfirmed(event.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-[var(--au-accent,#2563eb)]" />
+                          <span id="sat-pretest-confirmation-label">I confirm these two pretests {designationSource === "staff_defined" ? "are staff-defined for this practice test." : "were verified against the source."}</span>
+                        </label>
+                        {preview.ignoredScaffoldRows ? <p className="mt-2 text-xs leading-5 text-slate-600">{preview.ignoredScaffoldRows} untouched template rows from other modules were ignored.</p> : null}
+                      </fieldset>
+                    ) : null}
                     <div className="mt-4">
                       <p className="px-1 text-xs font-semibold text-slate-600">
                         Before and after, by module
@@ -385,6 +503,7 @@ export function SatWorkbookImportSheet({
                                 <td colSpan={1} className="p-0">
                                   <button
                                     type="button"
+                                    aria-label={`Preview ${MODULE_LABELS[module.moduleKey] ?? module.moduleKey}`}
                                     aria-pressed={selected}
                                     onClick={() => {
                                       setSelectedModuleKey(module.moduleKey);
@@ -436,7 +555,7 @@ export function SatWorkbookImportSheet({
                     ) : stagingComplete && activity !== "staging" ? (
                       <div className="mt-4 flex items-center gap-2 rounded-xl bg-au-success-tint px-3 py-2.5 text-xs font-medium text-au-success-text">
                         <CheckCircle2 size={15} aria-hidden="true" />
-                        Complete SAT ready to import
+                        {singleModule ? "Module content checked" : "Complete SAT ready to import"}
                       </div>
                     ) : null}
                   </>
@@ -491,19 +610,21 @@ export function SatWorkbookImportSheet({
 
             <footer className="shrink-0 border-t border-au-separator px-5 py-3 sm:px-6">
               {replacesContent && preview?.valid ? (
-                <label className="mb-3 flex min-h-11 items-start gap-3 rounded-[12px] bg-au-warning-tint px-3 py-2.5 text-xs leading-5 text-au-warning-text">
+                <label htmlFor="sat-workbook-replacement-confirmation" className="mb-3 flex min-h-11 items-start gap-3 rounded-[12px] bg-au-warning-tint px-3 py-2.5 text-xs leading-5 text-au-warning-text">
                   <input
+                    id="sat-workbook-replacement-confirmation"
                     type="checkbox"
+                    aria-labelledby="sat-workbook-replacement-confirmation-label"
                     checked={replaceConfirmed}
                     disabled={busy}
                     onChange={(event) => setReplaceConfirmed(event.target.checked)}
                     className="mt-1 h-4 w-4 shrink-0 accent-[var(--au-accent,#2563eb)]"
                   />
-                  <span>
-                    I understand this replaces all {questionsLabel(existingQuestionCount)} in the
+                  <span id="sat-workbook-replacement-confirmation-label">
+                    {singleModule ? <>I understand this replaces the {questionsLabel(replacementCount)} in {MODULE_LABELS[targetModuleKey]} with {questionsLabel(preview.questionCount)}. The other five modules stay unchanged. I can undo until I edit or publish.</> : <>I understand this replaces all {questionsLabel(existingQuestionCount)} in the
                     current draft with the {questionsLabel(preview.questionCount)} from this
                     workbook. Published versions are untouched, and I can undo until I edit or
-                    publish.
+                    publish.</>}
                   </span>
                 </label>
               ) : null}
@@ -515,10 +636,10 @@ export function SatWorkbookImportSheet({
                 >
                   {activity === "importing"
                     ? "Importing… keep this window open."
-                    : importDisabledReason ??
+                    : importDisabledReason ?? (singleModule ? `${questionsLabel(preview?.questionCount ?? 0)} will be imported into ${MODULE_LABELS[targetModuleKey]}. Other modules stay unchanged.` :
                       (replacesContent
                         ? `${questionsLabel(existingQuestionCount)} in the current draft will be replaced.`
-                        : "Import creates the complete draft atomically; a failed import changes nothing.")}
+                        : "Import creates the complete draft atomically; a failed import changes nothing."))}
                 </p>
                 <div className="ml-auto flex items-center gap-2">
                   <button
@@ -582,7 +703,7 @@ function ProgressStep({ label, state }: { label: string; state: StepState }) {
 
 async function stageWorkbookAssets(preview: SatWorkbookPreview): Promise<{
   assets: SatWorkbookStagedAsset[];
-  renderModules: SatWorkbookModuleDraft[];
+  renderModules: SatWorkbookPreviewModule[];
 }> {
   if (preview.assets.length === 0) {
     return { assets: [], renderModules: preview.modules };
@@ -626,10 +747,10 @@ function fileFromWorkbookAsset(asset: SatWorkbookPreview["assets"][number]): Fil
 }
 
 function materializePreviewAssetIds(
-  modules: SatWorkbookModuleDraft[],
+  modules: SatWorkbookPreviewModule[],
   assetIdByKey: Map<string, string>
-): SatWorkbookModuleDraft[] {
-  const copy = JSON.parse(JSON.stringify(modules)) as SatWorkbookModuleDraft[];
+): SatWorkbookPreviewModule[] {
+  const copy = JSON.parse(JSON.stringify(modules)) as SatWorkbookPreviewModule[];
   replaceWorkbookAssetIds(copy, assetIdByKey);
   return copy;
 }
@@ -719,7 +840,7 @@ function Metric({ label, value, bad = false }: { label: string; value: number; b
   );
 }
 
-function revisionForPreview(draft: BatchQuestionDraft, index: number): QuestionRevision {
+function revisionForPreview(draft: SatWorkbookPreviewQuestion, index: number): QuestionRevision {
   return {
     id: `workbook-preview-${index}`,
     questionId: `workbook-preview-${index}`,

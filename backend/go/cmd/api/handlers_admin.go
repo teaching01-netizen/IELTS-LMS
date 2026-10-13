@@ -106,7 +106,9 @@ func examsUpdateHandler(app *App) http.HandlerFunc {
 			Status         *string `json:"status"`
 			Visibility     *string `json:"visibility"`
 			OrganizationID *string `json:"organizationId"`
-			Revision       int     `json:"revision"`
+			// SatScoreReportEnabled toggles the SAT completion score report.
+			SatScoreReportEnabled *bool `json:"satScoreReportEnabled"`
+			Revision              int   `json:"revision"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -114,11 +116,12 @@ func examsUpdateHandler(app *App) http.HandlerFunc {
 		}
 		id := chi.URLParam(r, "id")
 		out, err := app.Exams.UpdateForActor(r.Context(), actorOf(r.Context()), id, exams.UpdateRequest{
-			Title:          req.Title,
-			Status:         req.Status,
-			Visibility:     req.Visibility,
-			OrganizationID: req.OrganizationID,
-			Revision:       req.Revision,
+			Title:                 req.Title,
+			Status:                req.Status,
+			Visibility:            req.Visibility,
+			OrganizationID:        req.OrganizationID,
+			SatScoreReportEnabled: req.SatScoreReportEnabled,
+			Revision:              req.Revision,
 		})
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -458,6 +461,8 @@ func schedulesCreateHandler(app *App) http.HandlerFunc {
 			AutoStart          *bool     `json:"autoStart"`
 			AutoStop           *bool     `json:"autoStop"`
 			SatStartMode       string    `json:"satStartMode"`
+			SatRoutePolicy     string    `json:"satRoutePolicy"`
+			SatSessionMode     string    `json:"satSessionMode"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -512,6 +517,8 @@ func schedulesCreateHandler(app *App) http.HandlerFunc {
 			AutoStop:           autoStop,
 			CreatedBy:          sess.UserID,
 			SatStartMode:       req.SatStartMode,
+			SatRoutePolicy:     req.SatRoutePolicy,
+			SatSessionMode:     req.SatSessionMode,
 		})
 		if err != nil {
 			httpx.WriteError(w, r, err)

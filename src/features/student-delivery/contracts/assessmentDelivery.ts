@@ -79,6 +79,20 @@ export interface AssessmentAttemptSnapshot {
   provisionalSubmitted?: boolean;
 }
 
+/**
+ * GET …/answered-exam (docs/sat-result.md §4–5): a sealed attempt's pinned
+ * version narrowed to the modules it started, keyless, with the responses the
+ * server accepted.
+ */
+export interface AssessmentAnsweredExam {
+  attemptId: string;
+  examTitle: string;
+  candidateName: string;
+  versionId: string;
+  sections: AssessmentDeliverySection[];
+  attempt: AssessmentAttemptSnapshot;
+}
+
 export interface AssessmentPersonalBreakSnapshot {
   id: string;
   afterSectionId: string;
@@ -156,6 +170,8 @@ export interface AssessmentDeliveryBootstrap {
    * absent for non-SAT providers.
    */
   satStartPolicy?: SatStartPolicy | null;
+  /** Classroom staff_selects: Module 1 is closed and staff have not chosen Easy/Hard yet. */
+  awaitingStaffRoute?: boolean;
 }
 
 export type SatStartState = "code_required" | "started" | "closed";

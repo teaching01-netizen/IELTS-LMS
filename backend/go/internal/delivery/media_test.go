@@ -100,8 +100,8 @@ func TestCanAttemptReadMediaCachedIndexKeepsPerRequestFence(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
-	if len(service.mediaIndex) != 1 {
-		t.Fatalf("media index entries = %d, want 1", len(service.mediaIndex))
+	if len(service.mediaIndex.entries) != 1 {
+		t.Fatalf("media index entries = %d, want 1", len(service.mediaIndex.entries))
 	}
 }
 

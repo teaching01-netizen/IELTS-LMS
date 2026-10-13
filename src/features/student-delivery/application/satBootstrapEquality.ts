@@ -45,6 +45,7 @@ export function isEquivalentBootstrap(
   }
   if (prev.attempt.id !== next.attempt.id) return false;
   if (startPolicyKey(prev) !== startPolicyKey(next)) return false;
+  if (Boolean(prev.awaitingStaffRoute) !== Boolean(next.awaitingStaffRoute)) return false;
   if (!sameAttempts(prev, next) || !sameBreaks(prev, next) || !sameResponseRevisions(prev, next)) return false;
   return true;
 }

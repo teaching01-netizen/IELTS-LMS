@@ -290,6 +290,7 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		}
 		if app.Authoring != nil {
 			app.Authoring.SetCoeditEnabled(cfg.AuthoringRealtimeCoediting)
+			app.Authoring.SetSingleModuleImportsEnabled(cfg.SATSingleModuleImportEnabled)
 		}
 	}
 	wireCoedit(app, cfg)
@@ -342,6 +343,7 @@ func (a *App) CoeditCapability() bool {
 
 func main() {
 	cfg := config.Load()
+	exams.SetClassroomCreationEnabled(cfg.SATClassroomEnabled)
 	// Round 75: unknown-error hook logs the raw error server-side so
 	// masking bugs (raw driver errors escaping as silent 500s) self-
 	// report in the deploy log. The client envelope stays INTERNAL
@@ -611,6 +613,10 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Patch("/question-revisions/{revisionID}", authorize("PATCH /api/v1/assessment-authoring/question-revisions/{revisionID}", authorSaveRevisionHandler(app)))
 			r.With(adminLimit).Patch("/exams/{examID}/sections/{sectionID}/delivery-settings", authorize("PATCH /api/v1/assessment-authoring/exams/{examID}/sections/{sectionID}/delivery-settings", authorDeliverySettingsHandler(app)))
 			r.With(adminLimit).Post("/exams/{examID}/validate", authorize("POST /api/v1/assessment-authoring/exams/{examID}/validate", authorValidateHandler(app)))
+			r.With(adminLimit).Get("/exams/{examID}/sat-classroom-plan", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan", authorClassroomPlanHandler(app)))
+			r.With(adminLimit).Put("/exams/{examID}/sat-classroom-plan", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan", authorClassroomPlanHandler(app)))
+			r.With(adminLimit).Get("/exams/{examID}/sat-score-converter", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter", authorScoreConverterHandler(app)))
+			r.With(adminLimit).Put("/exams/{examID}/sat-score-converter", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter", authorScoreConverterHandler(app)))
 		})
 		// SAT delivery reads (the polled state view, module entry probes) must
 		// not spend the writes budget that answer saves and submits draw from.
@@ -621,6 +627,7 @@ func BuildRouter(app *App) http.Handler {
 		r.With(studentLimit, chimw.Compress(5, "application/json")).Route("/assessment-delivery", func(r chi.Router) {
 			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
 				authzRoute(r, "GET", "/schedules/{scheduleID}/state", deliveryStateHandler(app))
+				authzRoute(r, "GET", "/schedules/{scheduleID}/answered-exam", deliveryAnsweredExamHandler(app))
 				authzRoute(r, "GET", "/schedules/{scheduleID}/modules/{moduleID}/entry-state", deliveryModuleEntryStateHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Group(func(r chi.Router) {
@@ -729,6 +736,9 @@ func BuildRouter(app *App) http.Handler {
 			// org or assigned proctor; never polled, never in roster payloads.
 			authzRoute(r, "GET", "/sessions/{scheduleID}/start-code", proctorStartCodeRevealHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/start-code/rotate", proctorStartCodeRotateHandler(app))
+			// SAT Practice Classroom: staff assign Module 2 under staff_selects.
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/route", proctorAssignRouteHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}/route-queue", proctorStaffRouteQueueHandler(app))
 			authzRoute(r, "POST", "/alerts/{alertID}/ack", proctorAckAlertHandler(app))
 			authzRoute(r, "GET", "/live-mode", proctorLiveModeHandler(app))
 		})
@@ -789,6 +799,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/sat/access-groups", resultsSATAccessGroupsHandler(app))
 			authzRoute(r, "GET", "/sat/attempts", resultsSATAttemptsHandler(app))
 			authzRoute(r, "GET", "/sat/attempts/{attemptID}/answers", resultsSATAttemptAnswersHandler(app))
+			authzRoute(r, "GET", "/sat/attempts/{attemptID}/answered-exam", resultsSATAnsweredExamHandler(app))
 			authzRoute(r, "GET", "/sat/export/rawdata", resultsSATRawdataExportHandler(app))
 			authzRoute(r, "GET", "/sat/{resultID}", resultsSATGetHandler(app))
 			authzRoute(r, "GET", "/act-science", resultsACTScienceHandler(app))

@@ -10,6 +10,7 @@ const useSatAttemptsQueryMock = vi.hoisted(() => vi.fn());
 const useSatResultQueryMock = vi.hoisted(() => vi.fn());
 const useSatAttemptAnswersQueryMock = vi.hoisted(() => vi.fn());
 const downloadSatRawdataXlsxMock = vi.hoisted(() => vi.fn());
+const fetchSatAnsweredExamMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/results/api/satRawdataExport', () => ({
   downloadSatRawdataXlsx: downloadSatRawdataXlsxMock,
 }));
@@ -18,6 +19,7 @@ vi.mock('../../../../features/results/api/satResultsQueries', () => ({
   useSatAttemptsQuery: useSatAttemptsQueryMock,
   useSatResultQuery: useSatResultQueryMock,
   useSatAttemptAnswersQuery: useSatAttemptAnswersQueryMock,
+  fetchSatAnsweredExam: fetchSatAnsweredExamMock,
 }));
 
 const accessGroups = [
@@ -128,6 +130,56 @@ describe('SAT Results hierarchy', () => {
     expect(screen.getByRole('heading', { name: 'John Smith' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Back to Responses' }));
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-1&access=schedule-1');
+  });
+
+  it('shows pinned estimated scores on the staff detail and says when a section has none', () => {
+    useSatResultQueryMock.mockReturnValue({
+      data: {
+        summary: { id: 'result-1', attemptId: 'attempt-1', outcomeStatus: 'scored', releaseStatus: 'released', totalScore: null, scheduleId: 'schedule-1', examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S1', studentName: 'John Smith', studentEmail: null, cohortName: 'Morning', submittedAt: '2026-09-01T08:00:00Z' },
+        scorePayload: { classroomRaw: { conversion: { converterVersion: 'classroom-v1' }, sections: [
+          { sectionKey: 'reading-writing', conversionStatus: 'converted', scaled: { low: 600, high: 620 } },
+          { sectionKey: 'math', conversionStatus: 'unavailable' },
+        ] } },
+        sections: [
+          { sectionKey: 'reading-writing', rawCorrect: 40, operationalQuestionCount: 54, modules: [] },
+          { sectionKey: 'math', rawCorrect: 9, operationalQuestionCount: 22, modules: [] },
+        ],
+        questions: [],
+      },
+      isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
+    });
+    renderResultsRoute('/sat/results/result-1');
+    expect(screen.getByText(/Estimated total/)).toHaveTextContent('Estimated total unavailable');
+    expect(screen.getByText('600–620')).toBeInTheDocument();
+    expect(screen.getByText('Estimated score unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/Converter classroom-v1/)).toBeInTheDocument();
+  });
+
+  // PDF-08: staff print the same server projection the student does.
+  it('prints the answered exam from the staff projection, and never a partial one', async () => {
+    const text = (value: string) => ({ version: 1, nodes: [{ type: 'paragraph', id: value, text: value }] });
+    const exam = {
+      attemptId: 'attempt-1', examTitle: 'Practice Test 06', candidateName: 'John Smith', versionId: 'v12',
+      sections: [{ sectionKey: 'math', title: 'Math', modules: [{ id: 'm1', moduleKey: 'math-1', title: 'Module 1', displayOrder: 0, questions: [
+        { examQuestionId: 'q1', questionId: 'q1', displayOrder: 0, isPretest: false, questionType: 'student_produced_response', stimulus: text('stim'), prompt: text('P1'), answer: { kind: 'student_produced_response' }, metadata: {}, accessibility: { longDescription: null } },
+      ] }] }],
+      attempt: { id: 'attempt-1', moduleAttempts: [{ id: 'ma1', moduleId: 'm1', startedAt: '2026-09-01T07:00:00Z' }], responses: [{ moduleAttemptId: 'ma1', examQuestionId: 'q1', response: '7' }] },
+    };
+    let printed = '';
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {
+      printed = document.querySelector('body > .sat-answered-print .sat-answered-paper')?.textContent ?? '';
+    });
+    fetchSatAnsweredExamMock.mockResolvedValueOnce(exam).mockRejectedValueOnce(new Error('429'));
+    renderResultsRoute('/sat/results/result-1');
+    const button = screen.getByRole('button', { name: 'Download answered exam (PDF)' });
+    fireEvent.click(button);
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(fetchSatAnsweredExamMock).toHaveBeenCalledWith('attempt-1');
+    expect(printed).toContain('Your answer: 7');
+    fireEvent.click(screen.getByRole('button', { name: 'Download answered exam (PDF)' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('no PDF was made');
+    expect(print).toHaveBeenCalledTimes(1);
+    print.mockRestore();
   });
 
   it('explains a missing score instead of showing a zero', () => {

@@ -1274,6 +1274,8 @@ export function useSatExamController({
       state.phase === "loading" ||
       data.proctorStatus === "terminated" ||
       data.scheduleRuntimeStatus === "cancelled" ||
+      // Classroom staff_selects: the server refuses to complete until staff pick a route.
+      data.awaitingStaffRoute ||
       findPendingAttempt(data) ||
       data.attempt.moduleAttempts.length === 0 ||
       !data.attempt.moduleAttempts.every((moduleAttempt) =>

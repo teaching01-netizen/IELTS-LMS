@@ -9,6 +9,7 @@ import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import type { StudentHighlightColor } from './highlightPalette';
 import { QuestionRenderer } from './QuestionRenderer';
 import { StudentFlagButton } from './StudentFlagButton';
+import { StudentInsertedImages } from './StudentInsertedImages';
 import { SubAnswerTreeQuestionList } from './SubAnswerTreeQuestionList';
 import { formatQuestionRange } from './questionRangeLabel';
 import { resolveSharedStudentAnswerMeta } from './resolveSharedStudentAnswerMeta';
@@ -184,6 +185,13 @@ export const StudentQuestionBlockSection = React.memo(
           ) : null}
           {renderBlockInstruction(block.instruction, block.id)}
         </div>
+        {/* Inserted images own the slot the authoring editor promises: after the
+            instruction (and its own box) and before any question content. */}
+        <StudentInsertedImages
+          block={block}
+          compact={answerCompact}
+          className={answerCompact ? 'mb-3' : 'mb-4 md:mb-6'}
+        />
         <div className={answerCompact ? 'space-y-5' : expandedQuestionGapClassName}>
           {visibleTreeQuestions.length > 0 ? (
             <SubAnswerTreeQuestionList

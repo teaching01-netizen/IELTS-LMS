@@ -267,6 +267,7 @@ func TestCreatePersistsEnabledSections(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO exam_schedules")).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?")).
 		WithArgs("sat_personal_v1", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("ver-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_access_links")).
 		WithArgs(sqlmock.AnyArg(), "exam-1", "ver-1", sqlmock.AnyArg(), "Verbal only", `["reading-writing"]`, "anyone", nil, "student_code", "anytime", nil, nil, "actor-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -372,11 +373,14 @@ func TestDuplicateCopiesEnabledSections(t *testing.T) {
 			AddRow("SAT Mock", "sat", nil, "ver-1"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id")).WillReturnRows(
 		sqlmock.NewRows([]string{"is_published", "sat_publish_scope"}).AddRow(true, "full"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_session_mode, 'practice'), COALESCE(sch.sat_route_policy, 'adaptive') FROM assessment_access_links l")).
+		WillReturnRows(sqlmock.NewRows([]string{"mode", "policy"}).AddRow("practice", "adaptive"))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO exam_schedules")).
 		WithArgs(sqlmock.AnyArg(), "exam-1", "sat", nil, "SAT Mock", "SAT Mock", "SAT Mock", "ver-1", "Verbal only Copy", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "actor-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?")).
 		WithArgs("sat_personal_v1", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("ver-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_access_links")).
 		WithArgs(sqlmock.AnyArg(), "exam-1", "ver-1", sqlmock.AnyArg(), "Verbal only Copy", `["reading-writing"]`, "anyone", nil, "student_code", "anytime", nil, nil, "actor-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))

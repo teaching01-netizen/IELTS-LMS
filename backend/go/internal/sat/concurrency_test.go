@@ -65,9 +65,16 @@ func satUnscopedRun(mock sqlmock.Sqlmock) {
 }
 
 func satTopologyRows(rows ...[2]string) *sqlmock.Rows {
-	out := sqlmock.NewRows([]string{"section_key", "state"})
+	// One base row per section; a section's second row is its decided Module 2.
+	out := sqlmock.NewRows([]string{"section_key", "state", "adaptive_role", "module_id", "selected_module_id", "plan"})
+	seen := map[string]bool{}
 	for _, row := range rows {
-		out.AddRow(row[0], row[1])
+		if seen[row[0]] {
+			out.AddRow(row[0], row[1], "higher_branch", row[0]+"-m2", row[0]+"-m2", "")
+			continue
+		}
+		seen[row[0]] = true
+		out.AddRow(row[0], row[1], "base", row[0]+"-m1", row[0]+"-m2", "")
 	}
 	return out
 }
@@ -92,6 +99,12 @@ func expectCompleteAssessmentPrefix(mock sqlmock.Sqlmock, delivery, phase, proct
 		WillReturnRows(rows)
 }
 
+// satNotAwaitingStaffRoute answers the staff_selects probe that follows a valid topology.
+func satNotAwaitingStaffRoute(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery("sat_route_policy = 'staff_selects'").
+		WillReturnRows(sqlmock.NewRows([]string{"awaiting"}).AddRow(false))
+}
+
 func TestSATCompletionRequiresTerminalModulesAndReturnsUnscoredCompletion(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -114,6 +127,7 @@ func TestSATCompletionRequiresTerminalModulesAndReturnsUnscoredCompletion(t *tes
 			svc := satService(db)
 			expectCompleteAssessmentPrefix(mock, "running", "exam", "active", tc.rows)
 			if tc.wantCode == "" {
+				satNotAwaitingStaffRoute(mock)
 				mock.ExpectCommit()
 				result, err := svc.CompleteAssessment(context.Background(), CompleteRequest{
 					AttemptID: "att-1", ScheduleID: "sched-1", SubmissionID: "sub-1", ActorKind: "student",

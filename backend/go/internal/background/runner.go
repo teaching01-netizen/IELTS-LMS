@@ -953,6 +953,12 @@ func (w *Runner) runMaintenanceCycle(ctx context.Context, at time.Time) {
 			telemetry.IncCounter(telemetry.MRepairMissing)
 		}
 	}
+	if n, pending, err := terminalization.RepairClassroomResults(ctx, w.db, maintenance.SATRepairBatch); err != nil {
+		log.Printf("worker: RepairClassroomResults error: %v", err)
+	} else {
+		log.Printf("worker: RepairClassroomResults repaired=%d stillPending=%d", n, pending)
+		telemetry.SetGauge(telemetry.MSATClassroomUnreleased, float64(pending))
+	}
 	if n, err := terminalization.RepairMissingReceipts(ctx, w.db, maintenance.SATRepairBatch); err != nil {
 		log.Printf("worker: RepairMissingTerminalReceipts error: %v", err)
 	} else {

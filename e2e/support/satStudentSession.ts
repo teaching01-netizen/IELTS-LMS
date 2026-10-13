@@ -47,14 +47,14 @@ export async function createRunningSatSession(
     adminPage.getByRole("tab", { name: /^Reading & Writing, 81 of 81 authored/ })
   ).toBeVisible({ timeout: 90_000 });
   await expect(adminPage.getByRole("tab", { name: /^Math, 66 of 66 authored/ })).toBeVisible();
-  // The count is optimistic room state. Release reads the committed exam
-  // projection, so wait for this writer's co-edit acknowledgement before
-  // crossing the route durability barrier.
-  await expect(adminPage.getByText("Saved", { exact: true }).last()).toBeVisible({
-    timeout: 90_000,
-  });
-
-  await adminPage.getByRole("button", { name: "Publish version", exact: true }).click();
+  // Release navigation is the durability barrier for the current room state
+  // vector. A question-level "Saved" label does not prove the whole room is
+  // committed, so use the accessible route command that waits for that ACK.
+  await adminPage.getByRole("heading", { name: examTitle }).click();
+  await adminPage.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
+  const commandPalette = adminPage.getByRole("dialog", { name: "Jump to question" });
+  await expect(commandPalette).toBeVisible();
+  await commandPalette.getByText("Release exam", { exact: true }).click();
   try {
     await expect(adminPage).toHaveURL(/\/release$/, { timeout: 15_000 });
   } catch (error) {
@@ -78,17 +78,31 @@ export async function createRunningSatSession(
   await publishDialog.getByRole("button", { name: "Publish Full SAT", exact: true }).click();
 
   await expect(adminPage).toHaveURL(/\/access$/);
-  const newStudentLinkButton = adminPage.getByRole("button", { name: "New Student Link" }).first();
-  await expect(newStudentLinkButton).toBeVisible();
-  await newStudentLinkButton.click();
-  await adminPage.getByLabel("Student Link name").fill(linkName);
-  await adminPage.getByRole("button", { name: /Name \+ email only/i }).click();
-  await adminPage.getByRole("button", { name: /Anytime/i }).click();
-  await adminPage.getByRole("button", { name: "Create Link" }).click();
-  await expect(adminPage.getByText(linkName).first()).toBeVisible({ timeout: 20_000 });
-  const joinHref = await adminPage
-    .getByRole("link", { name: "Open student page" })
-    .getAttribute("href");
+  const roomSetup = adminPage.getByRole("dialog", { name: "Create room" });
+  const setupProgress = roomSetup.getByRole("progressbar", { name: "Room setup progress" });
+  await expect(roomSetup).toBeVisible();
+  await expect(setupProgress).toHaveAttribute("aria-valuenow", "1");
+  await expect(roomSetup).toContainText(`This room uses Version 1 of ${examTitle}.`);
+  await roomSetup.getByLabel("Room name").fill(linkName);
+  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(setupProgress).toHaveAttribute("aria-valuenow", "2");
+  await roomSetup.getByRole("button", { name: /Name \+ email only/i }).click();
+  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(setupProgress).toHaveAttribute("aria-valuenow", "3");
+  await roomSetup.getByRole("button", { name: /^Open now/ }).click();
+  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(setupProgress).toHaveAttribute("aria-valuenow", "4");
+  await expect(roomSetup.getByRole("heading", { name: "Summary" })).toBeVisible();
+  await expect(roomSetup.getByText(linkName, { exact: true })).toBeVisible();
+  await expect(roomSetup.getByText("The proctor starts the exam.", { exact: true })).toBeVisible();
+  await roomSetup.getByRole("button", { name: "Create room", exact: true }).click();
+
+  await expect(adminPage).toHaveURL(/\/sat\/sessions\/[0-9a-f-]+$/i, { timeout: 30_000 });
+  await expect(adminPage.getByRole("heading", { level: 1, name: linkName })).toBeVisible();
+  await adminPage.getByRole("button", { name: "Student link", exact: true }).click();
+  const shareDialog = adminPage.getByRole("dialog", { name: `Share ${linkName} with students` });
+  await expect(shareDialog).toBeVisible();
+  const joinHref = await shareDialog.getByText(/\/join\//).textContent();
   if (!joinHref) throw new Error("SAT student join URL was not created.");
 
   const studentContext = await browser.newContext(options.studentContext);
@@ -130,7 +144,7 @@ export async function createRunningSatSession(
   }
 
   await adminPage.goto("/sat/sessions");
-  await expect(adminPage.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  await expect(adminPage.getByRole("heading", { name: "Rooms" })).toBeVisible({ timeout: 30_000 });
   const sessionRow = adminPage
     .locator("button")
     .filter({ hasText: examTitle })
@@ -140,7 +154,11 @@ export async function createRunningSatSession(
   await sessionRow.click();
   await expect(adminPage).toHaveURL(new RegExp(`/sat/sessions/${scheduleId}$`));
   if (options.startRuntime !== false) {
-    await adminPage.getByRole("button", { name: "Start", exact: true }).click();
+    await adminPage.getByRole("button", { name: "Review and start exam" }).click();
+    await adminPage
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Start exam" })
+      .click();
 
     await studentPage.reload({ waitUntil: "domcontentloaded" });
     await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });

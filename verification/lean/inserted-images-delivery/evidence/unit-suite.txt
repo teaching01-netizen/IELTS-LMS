@@ -1,0 +1,3067 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/components/student/providers/__tests__/StudentRuntimeProvider.test.tsx (19 tests) 122ms
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > records a violation through the shared runtime
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:38.561Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078540-lmbyd1z97',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > persists the same violation id that is added to runtime state
+[2026-10-11T06:44:38.563Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078563-ps1mgq7f3',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > includes violationId when publishing a VIOLATION_DETECTED audit event
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:38.608Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078608-5fbnhmoqw',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > applies cooldowns per violation type
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:38.618Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078617-k7pf5aa2e',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not terminate the exam for non-critical violations when severity thresholds are configured
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:38.625Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078624-2zetwjfw4',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > terminates the exam for critical violations
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:38.635Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078635-p1rb86w2q',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > pauses the exam when high severity violations hit the configured threshold
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:38.689Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078683-kv8ufzj6n',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > terminates the exam when pause is disabled and high severity violations hit the configured threshold
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:38.700Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078699-d828g96vx',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > records exactly one tab-switch violation for one leave/return excursion
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:38.706Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078704-u60ypm1w9',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > reports a long background suspension on return without relying on timers
+[2026-10-11T06:44:38.706Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701078706-n7bocdxro',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows copy shortcut outside answer inputs during exam phase
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > keeps global keyboard listeners mounted while answers are updated
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows clipboard shortcuts when config disables clipboard blocking
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > defaults to allowing copy shortcut when clipboard flag is missing
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > blocks context menu interactions during exam phase
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > prevents context menus on protected question copy without recording a violation
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > blocks context menus on the editor answer control
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > blocks context menus on the objectiveInput answer control
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows copy events from highlightable reading/listening text surfaces
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows cut events from highlightable reading/listening text surfaces
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > blocks the context menu on highlightable reading text with highlight mode armed
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > blocks the context menu on highlightable text when highlight mode is off
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > blocks the context menu on SAT protected text during the exam without a violation
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > leaves the context menu to the browser on SAT protected text outside the exam phase
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > leaves the context menu to the browser on highlightable text outside the exam phase
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > blocks paste shortcut inside answer inputs
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows paste shortcut outside answer inputs
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows dragstart during exam phase so native text selection behaves normally
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows drop interactions during exam phase
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows dragstart inside highlightable reading text when highlight mode is active
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows dragstart inside highlightable reading text when highlight mode is off
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows dragstart when browser targets a text node inside highlightable reading text
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows dragstart inside highlightable listening text when highlight mode is active
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > allows same-editor select-all shortcuts
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > preserves normal typing inside editable inputs
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > does not trigger single-key shortcuts while selecting text in a highlightable passage
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > blocks undo shortcuts inside editable inputs without recording a restricted-shortcut violation
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > records a screenshot-attempt violation for PrintScreen
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > deduplicates rapid screenshot shortcut bursts
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx > StudentKeyboardProvider > does not enforce screenshot blocking when anti-screenshot guard is disabled
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx (30 tests) 636ms
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > reports a long background suspension on return without relying on timers
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > audits the excursion with the visibility evidence and no claims about what was opened
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:39.224Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079223-nmxixxyod',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > records one violation when the browser emits a burst of lifecycle events for one excursion
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:39.232Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079232-168762z50',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not treat window blur as evidence by itself
+[2026-10-11T06:44:39.233Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079233-53tbq0brj',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not log a tab-switch warning on blur-only browser popup focus loss
+[2026-10-11T06:44:39.238Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079238-5vo4rgt8r',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > records a second violation when the student leaves twice
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:39.257Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079256-bgami18zm',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not enforce tab switching when the exam policy is 'none'
+[2026-10-11T06:44:39.260Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079259-tygtw087z',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not count a visibility excursion after the exam is finished
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:39.265Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079265-1lwmnoo3d',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not log an iPad tab-switch warning when the writing editor causes window blur while typing
+[2026-10-11T06:44:39.266Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079266-t28hxm885',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > activates anti-cheat after runtime-backed pre-check completes (late entry)
+[2026-10-11T06:44:39.277Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079277-mqeaexby0',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > activates anti-cheat after runtime-backed pre-check completes (late entry)
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > terminates the exam when tab-switch policy is terminate
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:39.297Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079296-wosibqqnv',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > records the violating excursion before terminating when tab-switch policy is terminate
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-11T06:44:39.303Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079302-m9mk0a75m',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not terminate the exam on close/reload signals (pagehide) even when tab-switch policy is terminate
+[2026-10-11T06:44:39.303Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079303-zxl002y7u',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not log a tab-switch warning when refresh emits visibilitychange before beforeunload
+[2026-10-11T06:44:39.315Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079315-wd2bpjost',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not log a tab-switch warning when refresh emits blur before beforeunload
+[2026-10-11T06:44:39.319Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079319-4jjfmahjj',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > warns before unload when unsynced attempt changes exist
+[2026-10-11T06:44:39.327Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079326-vtahtnu57',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > does not warn before unload when attempt is already saved
+[2026-10-11T06:44:39.331Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079330-fqq2yhw03',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > ignores legacy fullscreen config without requesting fullscreen or recording fullscreen exits
+[2026-10-11T06:44:39.331Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079331-xc2qb63v2',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > records a secondary-screen violation when multiple displays are detected
+[2026-10-11T06:44:39.335Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079335-pv6xhvsf3',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > keeps the secondary-screen timer mounted while answers are updated
+[2026-10-11T06:44:39.357Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079355-fjuxrsv6l',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > keeps Safari fallback silent and non-violating when screen details are unavailable
+[2026-10-11T06:44:39.357Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079357-5y37awds1',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > ignores screen-details permission denial without creating a violation
+[2026-10-11T06:44:39.397Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079397-kf5nlni2p',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > marks the document as notranslate during the exam when preventTranslation is enabled
+[2026-10-11T06:44:39.405Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079405-nv9jl1q53',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > removes notranslate markers on unmount
+[2026-10-11T06:44:39.421Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079421-d9hbuuu1p',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > self-heals marker tampering and records only one cooldown-deduplicated violation
+[2026-10-11T06:44:39.452Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079452-zvz3tczi8',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > replaces invalid same-id nodes and restores the genuine meta to document head
+[2026-10-11T06:44:39.460Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079460-tb6jmz46l',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > cleans all owned markers when translation prevention is disabled or the exam phase exits
+[2026-10-11T06:44:39.476Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079475-jvdjc54ff',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx > StudentProctoringProvider > records a translation violation when translation markers are detected
+[2026-10-11T06:44:39.476Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701079476-ejsbg3b7a',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+ ✓ src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx (37 tests) 1158ms
+   ✓ StudentProctoringProvider > reports a long background suspension on return without relying on timers 507ms
+stderr | src/components/student/providers/__tests__/StudentNetworkProvider.test.tsx > StudentNetworkProvider > records offline state without entering blocking runtime mode
+[2026-10-11T06:44:39.799Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/student/sessions/sched-1/audit',
+  requestId: 'req-1791701079782-rngacgvsj',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)
+
+stderr | src/components/student/providers/__tests__/StudentNetworkProvider.test.tsx > StudentNetworkProvider > clears reconnect blocking after the V2 engine flush succeeds
+[2026-10-11T06:44:39.888Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/student/sessions/sched-1/audit',
+  requestId: 'req-1791701079887-d058iewkg',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)
+
+stderr | src/components/student/providers/__tests__/StudentNetworkProvider.test.tsx > StudentNetworkProvider > flushes the V2 engine before refreshing runtime on reconnect
+[2026-10-11T06:44:40.074Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/student/sessions/sched-1/audit',
+  requestId: 'req-1791701080073-rub45z4jw',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)
+
+stderr | src/components/student/providers/__tests__/StudentNetworkProvider.test.tsx > StudentNetworkProvider > keeps reconnect recovery active when the V2 engine reports a terminal conflict
+[2026-10-11T06:44:40.281Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/student/sessions/sched-1/audit',
+  requestId: 'req-1791701080280-earyzjtav',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)
+
+stderr | src/components/student/providers/__tests__/StudentNetworkProvider.test.tsx > StudentNetworkProvider > records heartbeat-lost violations without entering blocking runtime mode
+[2026-10-11T06:44:40.295Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/student/sessions/sched-1/audit',
+  requestId: 'req-1791701080295-q3s9jpbfg',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)
+[2026-10-11T06:44:40.305Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/student/sessions/sched-1/audit',
+  requestId: 'req-1791701080305-swvmwya45',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:353:20)
+
+ ✓ src/components/student/__tests__/StudentWriting.a11y.test.tsx (18 tests) 796ms
+stderr | src/components/student/__tests__/StudentWriting.lifecycle.test.tsx > StudentWriting lifecycle durability > commits blur draft and allows a subsequent edit after refocus
+An update to StudentWriting inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/__tests__/StudentWriting.lifecycle.test.tsx (20 tests) 847ms
+stderr | src/components/student/providers/__tests__/StudentNetworkProvider.test.tsx > StudentNetworkProvider > does not force a pageshow reconnect refresh when runtime is no longer block-gated
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentNetworkProvider.test.tsx > StudentNetworkProvider > does not force a visibility reconnect refresh when runtime is no longer block-gated
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/providers/__tests__/StudentNetworkProvider.test.tsx (11 tests) 1189ms
+   ✓ StudentNetworkProvider > retries reconnect recovery after a transient runtime refresh failure and eventually unblocks 527ms
+ ✓ src/components/student/__tests__/ProtectedInput.test.tsx (20 tests) 224ms
+ ✓ src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx (20 tests) 420ms
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > F12 developer tools > blocks F12 and records RESTRICTED_SHORTCUT violation
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > inspector shortcuts > blocks Cmd+Shift+I
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > inspector shortcuts > blocks Ctrl+Shift+C
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > inspector shortcuts > blocks Ctrl+Shift+J
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > global blocked modifier keys > blocks Cmd+P (print)
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > global blocked modifier keys > blocks Cmd+S (save)
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > global blocked modifier keys > blocks Cmd+F (find) when outside editing targets
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > global blocked modifier keys > allows Cmd+F when clipboard blocking is disabled
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > flag toggle (F key without modifier) > dispatches persistFlag when F is pressed without modifier on a current question
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > flag toggle (F key without modifier) > does not toggle flag when no current question
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > Cmd+Enter submit > does not prevent default on Cmd+Enter (submit is async)
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/__tests__/StudentInteractionMotion.test.tsx (16 tests) 1032ms
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > Cmd+Enter submit > routes Cmd+Enter through the registered submission handler
+[2026-10-11T06:44:42.396Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701082367-362i9w3m9',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+ ✓ src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx (21 tests) 499ms
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > Cmd+Enter submit > does not trigger submit when not in exam phase
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > question navigation (N/P keys) > does not navigate when no current question
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > question navigation (N/P keys) > does not crash when navigating with N key and no questions exist
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > question navigation (N/P keys) > does not crash when navigating with P key
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > number key navigation > jumps to question by number key
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > screenshot shortcuts > blocks Cmd+Shift+3
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > screenshot shortcuts > blocks Cmd+Shift+4
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > screenshot shortcuts > blocks Cmd+Shift+5
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx > StudentKeyboardProvider shortcuts > non-exam phase > does not block shortcuts outside exam phase
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/__tests__/StudentQuestionExperience.test.tsx (51 tests) 2013ms
+ ✓ src/components/student/__tests__/StudentReadingReadabilityControls.test.tsx (12 tests) 513ms
+ ✓ src/components/student/__tests__/StudentQuestionCalloutCss.test.ts (13 tests) 435ms
+   ✓ student question touch-callout CSS > does not include answer controls in the protection selector 427ms
+ ✓ src/components/student/__tests__/StudentTypingPerformance.test.tsx (6 tests) 350ms
+ ✓ src/components/student/__tests__/useStudentSubmissionOrchestration.test.tsx (9 tests) 1144ms
+   ✓ useStudentSubmissionOrchestration > retries the section flush when the durability barrier rejects 1020ms
+stderr | src/components/student/__tests__/StudentApp.test.tsx > StudentApp runtime-backed mode > does not render the completion screen when attempt phase is post-exam but terminal is unverified
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/providers/__tests__/StudentAttemptProvider.preservation.test.tsx (3 tests) 350ms
+stderr | src/components/student/__tests__/StudentProviderRuntime.test.tsx > Student Provider Runtime Integration > handles runtime waitingForNextSection by showing blocking overlay
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentProviderRuntime.test.tsx > Student Provider Runtime Integration > handles runtime paused status by showing blocking overlay
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentProviderRuntime.test.tsx > Student Provider Runtime Integration > initializes in pre-check phase when not runtime-backed
+An update to StudentExamPhaseRenderer inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentProviderRuntime.test.tsx > Student Provider Runtime Integration > handles runtime not_started status by showing blocking overlay
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentProviderRuntime.test.tsx > Student Provider Runtime Integration > syncs currentSectionKey changes across provider updates
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentProviderRuntime.test.tsx > Student Provider Runtime Integration > handles missing runtime snapshot gracefully
+An update to StudentExamPhaseRenderer inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentProviderRuntime.test.tsx > Student Provider Runtime Integration > handles partial runtime snapshot data gracefully
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentProviderRuntime.test.tsx > Student Provider Runtime Integration > boots with attempt-only state and skips cosmetic pre-check progress once pre-check is complete
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentProviderRuntime.test.tsx > Student Provider Runtime Integration > hydrates runtime UI state from attempt snapshot when runtime and attempt are both present
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/__tests__/StudentProviderRuntime.test.tsx (16 tests) 1871ms
+ ✓ src/components/student/__tests__/useSplitPaneResize.test.tsx (9 tests) 173ms
+ ✓ src/components/student/__tests__/highlightPersistence.test.tsx (16 tests) 4460ms
+   ✓ student highlight persistence v2 > releases surface ownership and preserves selection when the range cap is reached 4038ms
+stderr | src/components/student/__tests__/StudentApp.test.tsx > StudentApp runtime-backed mode > shows a blocking tab-switch warning overlay when tab switching is detected
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentApp.test.tsx > StudentApp runtime-backed mode > shows the integrity warning even when general exam warnings are disabled
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentApp.test.tsx > StudentApp runtime-backed mode > does not show screenshot blackout overlay when anti-screenshot guard is disabled
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/__tests__/StudentInsertedImages.test.tsx (9 tests) 430ms
+ ✓ src/components/student/__tests__/StudentSplitPaneResizer.test.tsx (13 tests) 390ms
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/providers/__tests__/StudentUIProvider.test.tsx (11 tests) 219ms
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/components/student/__tests__/StudentExamPreview.test.tsx > StudentExamPreview > performs zero network writes while typing and flagging in preview mode
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/__tests__/ProtectedExamSelect.test.tsx (13 tests) 2531ms
+   ✓ ProtectedExamSelect desktop menu (Radix, keyboard-only) > Tab reaches the trigger; Enter opens; arrows highlight; Enter on an item commits and closes 1430ms
+   ✓ ProtectedExamSelect desktop menu (Radix, keyboard-only) > Escape closes without mutating; a focusout inside the portal never commits 469ms
+ ✓ src/components/student/__tests__/highlightV2Engine.test.ts (13 tests) 233ms
+stderr | src/components/student/__tests__/StudentApp.test.tsx > StudentApp runtime-backed mode > does not trigger duplicate runtime auto-submit while the first zero-timer flush is still in-flight
+An update to StudentApp inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentApp inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+A component suspended inside an `act` scope, but the `act` call was not awaited. When testing React components that depend on asynchronous data, you must await the result:
+
+await act(() => ...)
+
+ ✓ src/components/student/__tests__/StudentExamPreview.test.tsx (7 tests) 5442ms
+   ✓ StudentExamPreview > shows accessibility controls without zoom controls in the preview shell 471ms
+   ✓ StudentExamPreview > performs zero network writes while typing and flagging in preview mode 3539ms
+   ✓ StudentExamPreview > uses the same image zoom fit contract in preview mode 703ms
+ ✓ src/components/student/__tests__/StudentQuestionNavigationDock.test.tsx (11 tests) 872ms
+   ✓ one navigation authority > renders no navigation rail inside the question pane 406ms
+stderr | src/components/student/__tests__/StudentApp.test.tsx > StudentApp runtime-backed mode > does not show dropped-mutation reconciliation banner to students
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentAttemptProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentRuntimeProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/student/__tests__/StudentOwnedTouchHighlight.test.tsx (7 tests) 1362ms
+   ✓ IELTS owned touch highlighting > highlights the dragged span without ever making a browser selection 983ms
+ ✓ src/components/student/__tests__/useStudentAutoSubmitBoundary.test.tsx (4 tests) 48ms
+ ✓ src/components/student/__tests__/StudentScienceImages.actReconciliation.test.tsx (7 tests) 1640ms
+   ✓ Phase 04 ACT science runtime images > uses natural wrapping for ACT passage HTML pasted with forced word breaks 1025ms
+ ✓ src/components/student/__tests__/StudentApp.test.tsx (29 tests) 14188ms
+   ✓ StudentApp runtime-backed mode > preserves native page zoom while keeping the exam page lock active 564ms
+   ✓ StudentApp runtime-backed mode > renders the persistent highlight tool in Reading exam mode without a floating toolbar 748ms
+   ✓ StudentApp runtime-backed mode > commits the mounted writing editor draft before runtime final submission 481ms
+   ✓ StudentApp runtime-backed mode > keeps local objective text input stable during same-attempt refresh 533ms
+   ✓ StudentApp runtime-backed mode > preserves a writing task draft after navigating away and back in runtime-backed mode 663ms
+   ✓ StudentApp runtime-backed mode > keeps local choice selection stable during same-attempt refresh 407ms
+   ✓ StudentApp runtime-backed mode > locks the UI when Finish is clicked in runtime-backed mode 1103ms
+   ✓ StudentApp runtime-backed mode > deduplicates rapid Finish clicks while a runtime-backed flush is already in-flight 2134ms
+   ✓ StudentApp runtime-backed mode > does not trigger duplicate runtime auto-submit while the first zero-timer flush is still in-flight 2257ms
+   ✓ StudentApp runtime-backed mode > retries the V2 response batch when batch delivery fails 398ms
+   ✓ StudentApp runtime-backed mode > blocks submission when unansweredSubmissionPolicy is block 448ms
+   ✓ StudentApp runtime-backed mode > shows a confirmation when unansweredSubmissionPolicy is confirm and allows submitting with unanswered 1646ms
+ ✓ src/components/student/__tests__/answerMutationDebug.redaction.test.ts (8 tests) 16ms
+ ✓ src/components/blocks/__tests__/SentenceCompletionBlock.sharedAnswerKeys.test.tsx (9 tests) 2123ms
+   ✓ SentenceCompletionBlock shared answer keys > shows primary and case-variant blank keys in the shared editor 517ms
+   ✓ SentenceCompletionBlock shared answer keys > preserves shared additions across off and on transitions 401ms
+   ✓ SentenceCompletionBlock shared answer keys > updates only sharedAcceptedAnswers and upgrades the answer rule in shared mode 481ms
+ ✓ src/components/student/__tests__/RichTextHighlighter.test.tsx (12 tests) 1260ms
+   ✓ RichTextHighlighter user-select ownership > declares no inline user-select when enabled=true 318ms
+   ✓ highlight tool selection tint > turns the selection tint on and off through the real provider actions 437ms
+ ✓ src/components/student/__tests__/answerUndoRedoGuard.test.ts (13 tests) 325ms
+ ✓ src/components/student/layout/__tests__/useStudentExamViewport.test.ts (10 tests) 549ms
+ ✓ src/components/student/providers/__tests__/StudentAttemptProvider.v2.test.tsx (3 tests) 533ms
+   ✓ StudentAttemptProvider V2 integration > does not redirect a save into a replacement attempt while recovery is pending 310ms
+ ✓ src/components/student/__tests__/SubAnswerTreeQuestionList.test.tsx (6 tests) 767ms
+   ✓ SubAnswerTreeQuestionList > renders prompt above the number/input row when prompt is present 397ms
+ ✓ src/components/student/__tests__/StudentFooterRepresentative.test.tsx (4 tests) 816ms
+   ✓ StudentFooter > uses the shared student exam footer class contract 397ms
+ ✓ src/components/student/__tests__/StudentExamWorkspace.test.tsx (3 tests) 119ms
+ ✓ src/components/student/layout/__tests__/studentLayoutMode.test.ts (19 tests) 5ms
+ ✓ src/components/student/__tests__/QuestionNavigator.test.tsx (10 tests) 972ms
+   ✓ QuestionNavigator > keeps an answered question visibly flagged until the student unflags it 507ms
+ ✓ src/components/student/__tests__/StudentStimulusReadabilityControls.test.tsx (2 tests) 521ms
+   ✓ Listening/Writing stimulus readability controls > does not render listening stimulus controls and keeps question pane sizing unchanged 423ms
+ ✓ src/components/student/__tests__/WarningOverlay.test.tsx (14 tests) 363ms
+ ✓ src/components/student/__tests__/AccessibilitySettings.test.tsx (9 tests) 1077ms
+   ✓ AccessibilitySettings > renders the reading-comfort, display, and listening sections 742ms
+ ✓ src/components/student/providers/__tests__/blockingStateMachine.priority.test.ts (14 tests) 7ms
+ ✓ src/components/student/__tests__/TableCompletionSlotCell.test.tsx (12 tests) 150ms
+ ✓ src/components/student/__tests__/resolveObjectiveAnswerUpdate.slots.test.ts (22 tests) 80ms
+ ✓ src/components/student/__tests__/StudentAppWrapperHighlightPersistence.test.tsx (2 tests) 344ms
+ ✓ src/components/student/layout/__tests__/CompactQuestionNavigation.test.tsx (5 tests) 191ms
+ ✓ src/services/__tests__/examAdapterService.test.ts (5 tests) 12ms
+ ✓ src/components/student/__tests__/StudentHeaderHighlightHint.test.tsx (5 tests) 542ms
+ ✓ src/components/student/__tests__/StudentViewportCss.test.ts (8 tests) 10ms
+ ✓ src/components/student/__tests__/WritingTaskNavigator.test.tsx (9 tests) 265ms
+ ✓ src/components/student/providers/__tests__/useStudentTranslationGuard.test.tsx (6 tests) 182ms
+ ✓ src/components/student/__tests__/ActScienceEliminationLatency.test.tsx (2 tests) 371ms
+   ✓ ACT science elimination latency > applies Eliminate synchronously on first click (no stale memo) 310ms
+ ✓ src/components/student/__tests__/SubmitConfirmation.test.tsx (13 tests) 147ms
+stderr | src/components/student/__tests__/StudentProctorInterventions.test.tsx > Student proctor interventions > shows and acknowledges a proctor warning
+[2026-10-11T06:45:12.472Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701112458-z0duicycr',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+stderr | src/components/student/__tests__/StudentProctorInterventions.test.tsx > Student proctor interventions > shows a termination message when the proctor terminates the individual session
+[2026-10-11T06:45:12.606Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701112582-vpa5yseur',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+ ✓ src/components/student/__tests__/StudentProctorInterventions.test.tsx (3 tests) 1012ms
+   ✓ Student proctor interventions > shows and acknowledges a proctor warning 887ms
+ ✓ src/components/student/layout/__tests__/StudentExamShell.test.tsx (8 tests) 181ms
+ ✓ src/components/student/__tests__/StudentListening.a11y.test.tsx (4 tests) 313ms
+ ✓ src/components/student/layout/__tests__/studentExamViewportPolicy.test.ts (10 tests) 6ms
+ ✓ src/components/student/__tests__/accessibilityPreferences.test.ts (12 tests) 27ms
+ ✓ src/components/student/highlight/__tests__/selectionObserver.test.ts (7 tests) 72ms
+ ✓ src/components/student/__tests__/FormattedText.test.tsx (10 tests) 488ms
+ ✓ src/components/student/__tests__/ProtectedSelect.test.tsx (5 tests) 237ms
+ ✓ src/components/student/__tests__/ProtectedChoiceInput.test.tsx (5 tests) 202ms
+stderr | src/components/student/__tests__/StudentCompletionSummary.test.tsx > Student completion summary > shows student info and hides per-section answer counts after exam completion
+[2026-10-11T06:45:15.208Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v2/student/attempts/attempt-1/responses',
+  requestId: 'req-1791701115164-tufhza7oi',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)\n' +
+    '    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)\n' +
+    '    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:344:20)
+    at withAttemptCredentialRefresh (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/infrastructure/responseDurabilityTransport.ts:31:12)
+    at DurableResponseEngine.recoverInternal (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/durability/DurableResponseEngine.ts:1129:18)
+
+ ✓ src/components/student/__tests__/StudentCompletionSummary.test.tsx (1 test) 290ms
+ ✓ src/components/student/layout/__tests__/studentLayoutCss.test.ts (7 tests) 7ms
+ ✓ src/components/student/__tests__/accessibilityScale.test.ts (7 tests) 7ms
+ ✓ src/components/blocks/__tests__/MatchingFeaturesBlock.test.tsx (4 tests) 385ms
+ ✓ src/components/student/__tests__/StudentListeningPlaybackRate.test.tsx (5 tests) 363ms
+ ✓ src/components/student/__tests__/StudentKeyboardOnlyPath.test.tsx (4 tests) 738ms
+ ✓ src/components/blocks/__tests__/AcceptedAnswersBlocks.test.tsx (2 tests) 563ms
+   ✓ accepted answer chips in block editors > keeps short-answer primary correctAnswer synced with acceptedAnswers 377ms
+ ✓ src/components/blocks/__tests__/TableCompletionBlock.test.tsx (3 tests) 806ms
+   ✓ TableCompletionBlock > updates only the edited blank when legacy duplicate cell IDs exist 490ms
+ ✓ src/components/student/__tests__/StudentMaterialWithQuestionPane.test.tsx (3 tests) 643ms
+   ✓ StudentMaterialWithQuestionPane > uses a single compact pane and lets the student switch between passage and questions 588ms
+ ✓ src/components/student/__tests__/StudentInteractionMotionCss.test.ts (7 tests) 27ms
+ ✓ src/components/student/__tests__/Lobby.test.tsx (2 tests) 179ms
+ ✓ src/components/student/__tests__/StudentZoomableMedia.test.tsx (2 tests) 601ms
+   ✓ StudentZoomableMedia > falls back to alternate sources and opens a zoom-only viewer 345ms
+ ✓ src/components/blocks/__tests__/SingleMCQBlock.test.tsx (2 tests) 868ms
+   ✓ SingleMCQBlock > block-local Add Question appends a new question entry 669ms
+ ✓ src/components/blocks/__tests__/InstructionFieldConsistency.test.tsx (10 tests) 630ms
+ ✓ src/components/student/__tests__/PreCheck.test.tsx (2 tests) 2566ms
+   ✓ PreCheck > shows the waiting room and silently submits compatibility details without any button 456ms
+   ✓ PreCheck > retries persistence automatically when it fails, without a student action 2109ms
+ ✓ src/components/student/__tests__/StudentWriting.undo.test.tsx (2 tests) 580ms
+   ✓ StudentWriting undo guard > blocks keyboard undo shortcuts in the writing editor 525ms
+ ✓ src/components/student/__tests__/highlightSelectionManager.state.test.tsx (8 tests) 163ms
+ ✓ src/components/student/__tests__/support/examFixtures.test.ts (8 tests) 9ms
+ ✓ src/components/student/__tests__/HighlightableSurfaceDomStability.test.tsx (4 tests) 109ms
+ ✓ src/components/blocks/__tests__/InsertedImagesEditor.test.tsx (3 tests) 643ms
+   ✓ InsertedImagesEditor > handles undefined insertedImages input for legacy blocks 336ms
+ ✓ src/components/student/__tests__/useStudentWarningVisibility.test.tsx (2 tests) 42ms
+ ✓ src/components/student/__tests__/examPageZoomGuard.test.ts (3 tests) 7ms
+ ✓ src/components/student/__tests__/StudentWriting.clipboard.test.tsx (2 tests) 299ms
+ ✓ src/components/student/__tests__/highlightSelectionPort.test.tsx (3 tests) 31ms
+ ✓ src/components/student/__tests__/StudentPostExamView.actReconciliation.test.tsx (4 tests) 374ms
+ ✓ src/components/student/__tests__/appleMobileDevice.test.ts (11 tests) 39ms
+ ✓ src/components/student/layout/__tests__/CompactStudentHeader.test.tsx (3 tests) 703ms
+   ✓ CompactStudentHeader > keeps the timer visible while putting secondary tools behind More 584ms
+ ✓ src/components/student/__tests__/StudentHighlightSelectionCss.test.ts (7 tests) 17ms
+ ✓ src/components/student/__tests__/QuestionNavigatorKeyboard.test.tsx (1 test) 451ms
+   ✓ keyboard-only path: question navigator (P3 gate) > focuses a question chip and navigates with Enter only 446ms
+ ✓ src/components/blocks/__tests__/InsertedImagesPlacement.test.tsx (2 tests) 152ms
+ ✓ src/components/student/__tests__/normalizeReadingPassageText.test.ts (5 tests) 77ms
+ ✓ src/components/student/layout/__tests__/studentCapabilities.test.ts (4 tests) 8ms
+ ✓ src/components/student/__tests__/autoSaveStatus.test.tsx (5 tests) 200ms
+ ✓ src/components/student/providers/__tests__/blockingStateMachine.test.ts (4 tests) 7ms
+ ✓ src/components/student/__tests__/sanitizeReadingPassageHtml.actWrap.test.ts (2 tests) 74ms
+ ✓ src/components/blocks/__tests__/MultiSelectMCQBlock.test.tsx (2 tests) 486ms
+   ✓ MultiSelectMCQBlock > keeps the final correct option marked and prevents deleting it 369ms
+ ✓ src/components/student/__tests__/timeExtensionPolicy.test.ts (4 tests) 2ms
+ ✓ src/components/student/__tests__/StudentPostExamView.test.tsx (2 tests) 192ms
+ ✓ src/components/student/__tests__/StudentUIProviderHighlight.test.tsx (2 tests) 264ms
+ ✓ src/components/student/__tests__/ExamEntryCard.test.tsx (4 tests) 327ms
+ ✓ src/components/student/layout/__tests__/studentQuestionNavigation.test.ts (1 test) 4ms
+ ✓ src/components/student/layout/__tests__/StudentToolsSheet.test.tsx (2 tests) 428ms
+   ✓ StudentToolsSheet > renders as an open native dialog with safe-area spacing 329ms
+ ✓ src/components/blocks/__tests__/ClozeBlock.answerRule.test.tsx (1 test) 117ms
+ ✓ src/components/student/__tests__/ActScienceHighlightGate.repro.test.ts (2 tests) 7ms
+ ✓ src/components/student/__tests__/StudentSpeaking.a11y.test.tsx (1 test) 270ms
+ ✓ src/components/student/__tests__/resolveObjectiveAnswerUpdate.test.ts (4 tests) 10ms
+ ✓ src/components/student/__tests__/useStudentQuestionPaneComposition.test.ts (2 tests) 3ms
+ ✓ src/components/student/__tests__/StudentQuestionNumber.test.tsx (2 tests) 44ms
+ ✓ src/components/student/__tests__/StudentFooterOverlayLayout.test.ts (5 tests) 20ms
+ ✓ src/components/student/__tests__/preCheckChecks.test.ts (1 test) 54ms
+ ✓ src/components/student/__tests__/studentHighlightToolContext.test.ts (1 test) 2ms
+ ✓ src/components/student/__tests__/StudentHeaderTimerAnnouncement.test.tsx (1 test) 117ms
+ ✓ src/components/student/__tests__/StudentSplitPaneCss.test.ts (3 tests) 3ms
+ ✓ src/components/student/__tests__/StudentTranslationGuardCss.test.ts (1 test) 4ms
+ ✓ src/components/student/__tests__/prefersReducedMotion.test.ts (2 tests) 2ms
+ ✓ src/components/student/__tests__/tabletMode.test.ts (2 tests) 2ms
+ ✓ src/components/student/__tests__/StudentDialogCss.test.ts (1 test) 2ms
+
+ Test Files  122 passed (122)
+      Tests  950 passed (950)
+   Start at  13:44:35
+   Duration  62.64s (transform 10.59s, setup 60.69s, collect 84.56s, tests 74.89s, environment 119.14s, prepare 19.02s)
+
+exit=0

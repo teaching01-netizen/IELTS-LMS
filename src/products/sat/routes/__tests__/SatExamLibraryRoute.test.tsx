@@ -57,7 +57,7 @@ describe('SatExamLibraryRoute', () => {
 
   it('requests the SAT provider boundary and never renders an IELTS exam', () => {
     renderRoute();
-    expect(useExamListQueryMock).toHaveBeenCalledWith(true, 'sat');
+    expect(useExamListQueryMock).toHaveBeenCalledWith(true, 'sat', false);
     expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
     expect(screen.queryByText('IELTS Academic 01')).not.toBeInTheDocument();
   });

@@ -80,6 +80,11 @@ func (DeterministicScorer) ScoreSection(sectionKey, _ string, normalized, maxRaw
 // default scale.
 type PolicyScorer struct{}
 
+const (
+	minScaledSectionScore = 200
+	maxScaledSectionScore = 800
+)
+
 func (PolicyScorer) ScoreSection(sectionKey, route string, normalized, _ int, policy PolicyConfig) (int, error) {
 	sectionField := map[string]string{
 		SectionReadingWriting: "readingWriting",
@@ -107,14 +112,16 @@ func (PolicyScorer) ScoreSection(sectionKey, route string, normalized, _ int, po
 	if !ok {
 		return 0, fmt.Errorf("configured score is missing for the raw score and route")
 	}
-	var score int64
-	if err := json.Unmarshal(rawScore, &score); err != nil {
-		return 0, fmt.Errorf("configured score is outside the supported integer range")
+	// A pointer target makes JSON null fail closed instead of decoding to 0.
+	// Model: verification/lean/sat-result (Convert.convert_sound).
+	var score *int64
+	if err := json.Unmarshal(rawScore, &score); err != nil || score == nil {
+		return 0, fmt.Errorf("configured score is missing for the raw score and route")
 	}
-	if int64(int(score)) != score {
-		return 0, fmt.Errorf("configured score is outside the supported integer range")
+	if *score < minScaledSectionScore || *score > maxScaledSectionScore {
+		return 0, fmt.Errorf("configured score is outside the supported 200-800 range")
 	}
-	return int(score), nil
+	return int(*score), nil
 }
 
 // Service is the SAT completion service. All state flows through explicit SQL

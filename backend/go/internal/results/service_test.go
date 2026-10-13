@@ -310,15 +310,26 @@ func TestAttachSATModulesNestsBySection(t *testing.T) {
 		{ModuleKey: "rw-base", AdaptiveRole: "base", RawCorrect: 12, Operational: 20, State: "submitted", IsAdministered: true},
 		{ModuleKey: "rw-higher", AdaptiveRole: "higher_branch", RawCorrect: 8, Operational: 14, State: "submitted", IsAdministered: true},
 	}
-	byModule := map[string]string{"rw-base": "reading-writing", "rw-higher": "reading-writing"}
-	attachSATModules(sections, modules, byModule)
+	attachSATModules(sections, modules, []string{"reading-writing", "reading-writing"})
 	if len(sections[0].Modules) != 2 || len(sections[1].Modules) != 0 {
 		t.Fatalf("expected modules nested under reading-writing only: %+v", sections)
 	}
 	// Unknown section mappings never create phantom sections.
-	attachSATModules(sections, []SATModule{{ModuleKey: "ghost"}}, map[string]string{"ghost": "nope"})
+	attachSATModules(sections, []SATModule{{ModuleKey: "ghost"}}, []string{"nope"})
 	if len(sections) != 2 {
 		t.Fatalf("expected no phantom sections, got %+v", sections)
+	}
+}
+
+// module_key is unique only per section: a key shared by both sections used
+// to nest both modules under whichever section was read last.
+func TestAttachSATModulesKeepsSharedModuleKeysInTheirSections(t *testing.T) {
+	sections := []SATSection{{SectionKey: "reading-writing"}, {SectionKey: "math"}}
+	modules := []SATModule{{ModuleKey: "module-1", RawCorrect: 20}, {ModuleKey: "module-1", RawCorrect: 15}}
+	attachSATModules(sections, modules, []string{"reading-writing", "math"})
+	if len(sections[0].Modules) != 1 || sections[0].Modules[0].RawCorrect != 20 ||
+		len(sections[1].Modules) != 1 || sections[1].Modules[0].RawCorrect != 15 {
+		t.Fatalf("shared module keys must stay in their own sections: %+v", sections)
 	}
 }
 
@@ -336,12 +347,12 @@ func TestSATModulesQueryOrdersBySectionThenModule(t *testing.T) {
 		}).AddRow("reading-writing", "rw-base", "base", 1, "submitted", int64(12), int64(20)).
 			AddRow("math", "m-base", "base", 1, "submitted", int64(9), int64(20)))
 	svc := NewService(db)
-	modules, byModule, err := svc.satModules(context.Background(), "attempt-1")
+	modules, sectionKeys, err := svc.satModules(context.Background(), "attempt-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(modules) != 2 || modules[0].ModuleKey != "rw-base" || byModule["m-base"] != "math" {
-		t.Fatalf("unexpected module rows: %+v %#v", modules, byModule)
+	if len(modules) != 2 || modules[0].ModuleKey != "rw-base" || sectionKeys[1] != "math" {
+		t.Fatalf("unexpected module rows: %+v %#v", modules, sectionKeys)
 	}
 	if modules[0].RawCorrect != 12 || modules[0].Operational != 20 || !modules[0].IsAdministered {
 		t.Fatalf("expected administered raw counts, got %+v", modules[0])

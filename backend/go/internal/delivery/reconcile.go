@@ -302,7 +302,12 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 					return err
 				}
 				if terminalCount == 0 {
-					shouldComplete = true
+					// A staff_selects attempt parked after Module 1 is waiting, not stranded.
+					awaiting, err := attempts.AwaitingStaffRouteTx(ctx, t, attemptID)
+					if err != nil {
+						return err
+					}
+					shouldComplete = !awaiting
 				}
 			}
 		}

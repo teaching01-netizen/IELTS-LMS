@@ -1,0 +1,63 @@
+✔ [2/7] Built Model
+✔ [3/7] Built Counterexamples
+✔ [4/7] Built Safety
+ℹ [5/7] Built AxiomAudit
+info: ./././proof/AxiomAudit.lean:6:0: SatClassroom.ainv_init (pol : Policy) (plan : Shape) : AInv pol plan { }
+info: ./././proof/AxiomAudit.lean:7:0: SatClassroom.ainv_step {pol : Policy} {plan : Shape} (hv : valid Mode.corrected pol plan) {a a' : Att}
+  (h : AInv pol plan a) (s : AStep Mode.corrected pol plan a a') : AInv pol plan a'
+info: ./././proof/AxiomAudit.lean:8:0: SatClassroom.reachable_inv {w : World} (h : Reachable Mode.corrected w) :
+  valid Mode.corrected w.pol w.plan ∧ ∀ (i : Nat), AInv w.pol w.plan (w.att i)
+info: ./././proof/AxiomAudit.lean:9:0: SatClassroom.t1_decision_stable {w w' : World} (h : Reachable Mode.corrected w) (s : Step Mode.corrected w w') (i : Nat)
+  (d : Route × Basis) (hd : (w.att i).decision = some d) : (w'.att i).decision = some d
+info: ./././proof/AxiomAudit.lean:10:0: SatClassroom.t2_staff_only {w : World} (h : Reachable Mode.corrected w) : StaffOnly w
+info: ./././proof/AxiomAudit.lean:11:0: SatClassroom.t3_route_fidelity {w : World} (h : Reachable Mode.corrected w) (i : Nat) (r : Route) (b : Basis)
+  (hd : (w.att i).decision = some (r, b)) : (w.att i).m2Opened = some r
+info: ./././proof/AxiomAudit.lean:12:0: SatClassroom.t3_plan_fidelity {w : World} (h : Reachable Mode.corrected w) (i : Nat) (r : Route) (b : Basis)
+  (hd : (w.att i).decision = some (r, b)) : planRouteOK w.plan r
+info: ./././proof/AxiomAudit.lean:13:0: SatClassroom.t4_snapshot {w : World} (h : Reachable Mode.corrected w) (i : Nat) (l : List Nat)
+  (hs : (w.att i).snapshot = some l) : l = (w.att i).writes
+info: ./././proof/AxiomAudit.lean:14:0: SatClassroom.t5_sealed_gate {w : World} (h : Reachable Mode.corrected w) (i : Nat) (hs : (w.att i).sealed = true) :
+  gate w.plan (w.att i)
+info: ./././proof/AxiomAudit.lean:15:0: SatClassroom.t6_release {w : World} (h : Reachable Mode.corrected w) (i : Nat) (hr : (w.att i).released = true) :
+  (w.att i).scored = true ∧ (w.att i).sealed = true
+info: ./././proof/AxiomAudit.lean:16:0: SatClassroom.t7_served {w : World} (h : Reachable Mode.corrected w) (i : Nat) (r : Route)
+  (hs : (w.att i).served = some r) : (w.att i).m2Opened = some r
+info: ./././proof/AxiomAudit.lean:17:0: SatClassroom.g7_standalone {w : World} (h : Reachable Mode.corrected w) (i : Nat) (b : Route)
+  (hp : w.plan.standalone = some b) : (w.att i).m1Open = false ∧ (w.att i).decision = none
+info: ./././proof/AxiomAudit.lean:18:0: SatClassroom.corrected_replay_after_seal {w : World} (i : Nat) (r : Route) (b : Basis)
+  (hp : w.pol = Policy.staffSelects) (hc : (w.att i).m1Closed = true) (hd : (w.att i).decision = some (r, b)) :
+  (assign Mode.corrected w.pol (w.att i) r).fst = Outcome.replayed
+info: ./././proof/AxiomAudit.lean:19:0: SatClassroom.current_violates_staff_only_plan_shape : ∃ w, Reachable Mode.current w ∧ ¬StaffOnly w
+info: ./././proof/AxiomAudit.lean:20:0: SatClassroom.current_violates_staff_only_old_binary : ∃ w, Reachable Mode.current w ∧ ¬StaffOnly w
+info: ./././proof/AxiomAudit.lean:21:0: SatClassroom.current_violates_plan_route :
+  Reachable Mode.current legacyFixedPlanBypass ∧
+    (legacyFixedPlanBypass.att 0).decision = some (Route.lower, Basis.auto) ∧
+      ¬planRouteOK legacyFixedPlanBypass.plan Route.lower
+info: ./././proof/AxiomAudit.lean:22:0: SatClassroom.corrected_fence_rejects_plan_bypass : fenceOk Policy.adaptive Shape.m1Hard Route.lower Basis.auto = false
+info: ./././proof/AxiomAudit.lean:23:0: 'SatClassroom.ainv_init' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:24:0: 'SatClassroom.ainv_step' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:25:0: 'SatClassroom.reachable_inv' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:26:0: 'SatClassroom.t1_decision_stable' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:27:0: 'SatClassroom.t2_staff_only' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:28:0: 'SatClassroom.t3_route_fidelity' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:29:0: 'SatClassroom.t3_plan_fidelity' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:30:0: 'SatClassroom.t4_snapshot' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:31:0: 'SatClassroom.t5_sealed_gate' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:32:0: 'SatClassroom.t6_release' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:33:0: 'SatClassroom.t7_served' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:34:0: 'SatClassroom.g7_standalone' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ./././proof/AxiomAudit.lean:35:0: 'SatClassroom.corrected_replay_after_seal' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:36:0: 'SatClassroom.awaiting_reachable' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:37:0: 'SatClassroom.sealed_staff_reachable_corrected' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:38:0: 'SatClassroom.current_violates_staff_only_plan_shape' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:39:0: 'SatClassroom.current_violates_staff_only_old_binary' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:40:0: 'SatClassroom.legacyFixedPlanBypass_reachable' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:41:0: 'SatClassroom.current_violates_plan_route' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:42:0: 'SatClassroom.corrected_fence_rejects_plan_bypass' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:43:0: 'SatClassroom.awaitingWorld_reachable' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:44:0: 'SatClassroom.sealedAfterStaff_reachable' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:45:0: 'SatClassroom.current_replay_after_seal_refused' depends on axioms: [propext, Quot.sound]
+✔ [6/7] Built SatClassroom
+Build completed successfully.
+Command: lake clean && lake build SatClassroom
+Exit status: 0

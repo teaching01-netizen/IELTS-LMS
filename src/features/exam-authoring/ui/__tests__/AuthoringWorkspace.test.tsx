@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AssessmentAuthoringShell,
@@ -10,6 +10,7 @@ import type {
 } from "../../contracts/assessment";
 
 const harness = vi.hoisted(() => ({
+  publishSheet: { nextInstance: 0 },
   shellResult: { data: null as unknown, isLoading: false, error: null as unknown, refetch: vi.fn() },
   details: {} as Record<string, AssessmentQuestionDetail>,
   useAuthoringShell: vi.fn(),
@@ -25,6 +26,7 @@ const harness = vi.hoisted(() => ({
   useLoadSample: vi.fn(),
   useReleaseReadiness: vi.fn(),
   useEnsureDraft: vi.fn(),
+  ensureDraft: { mutate: vi.fn(), isPending: false, error: null as unknown },
   autosave: {
     status: "saved",
     lastSavedAt: null as Date | null,
@@ -93,6 +95,28 @@ vi.mock("../settings/ExamSettingsSheet", () => ({
     </div>
   ),
 }));
+vi.mock("../publish/ExamPublishSheet", async () => {
+  const React = await import("react");
+  return {
+    ExamPublishSheet: (props: {
+      onClose: () => void;
+      onPublished?: (target: { versionId: string; versionNumber: number; publishScope: "math" }) => void;
+    }) => {
+      const [instance] = React.useState(() => ++harness.publishSheet.nextInstance);
+      return (
+        <div role="dialog" aria-label="Publish sheet" data-instance={instance}>
+          <button
+            type="button"
+            onClick={() => props.onPublished?.({ versionId: "published-9", versionNumber: 9, publishScope: "math" })}
+          >
+            Acknowledge publish
+          </button>
+          <button type="button" onClick={props.onClose}>Done</button>
+        </div>
+      );
+    },
+  };
+});
 import { SAVE_CONFLICT_COPY } from "../../realtime/connectionCopy";
 import { AuthoringWorkspace } from "../AuthoringWorkspace";
 
@@ -180,20 +204,37 @@ function setupDefaults() {
   (harness.useValidation as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => ({ mutateAsync: harness.mutations.validate, isPending: false, data: null }));
   (harness.useLoadSample as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => ({ mutateAsync: harness.mutations.loadSample, isPending: false }));
   (harness.useReleaseReadiness as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => ({ data: null, isPending: false }));
-  (harness.useEnsureDraft as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => ({ mutate: () => undefined, mutateAsync: (...args: unknown[]) => Promise.resolve(args), isPending: false, error: null }));
+  harness.ensureDraft.mutate.mockReset();
+  harness.ensureDraft.isPending = false;
+  harness.ensureDraft.error = null;
+  (harness.useEnsureDraft as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => ({ ...harness.ensureDraft, mutateAsync: (...args: unknown[]) => Promise.resolve(args) }));
   (harness.mutations.validate as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({ valid: true, errors: [], warnings: [] });
   (harness.api.getSatWorkbookUndoState as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue(null);
   (harness.api.getShell as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => Promise.resolve(shell));
 }
 
-function workspaceTree() {
+function workspaceTree(queryClient: QueryClient, canPublish = false) {
   return (
-    <QueryClientProvider client={renderWorkspaceClient()}>
+    <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
-        <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
+        <LocationProbe />
+        <AuthoringWorkspace
+          examId="exam-1"
+          examTitle="SAT Practice 1"
+          chrome={{
+            lifecycle: { label: "Draft", detail: null, tone: "draft" },
+            showResponses: false,
+            canPublish,
+          }}
+        />
       </MemoryRouter>
     </QueryClientProvider>
   );
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{location.pathname}{location.search}</output>;
 }
 
 function renderWorkspaceClient() {
@@ -201,7 +242,8 @@ function renderWorkspaceClient() {
 }
 
 function renderWorkspace() {
-  return render(workspaceTree());
+  const queryClient = renderWorkspaceClient();
+  return render(workspaceTree(queryClient));
 }
 
 function openOutline() {
@@ -209,7 +251,76 @@ function openOutline() {
 }
 
 describe("AuthoringWorkspace (spine-only)", () => {
-  beforeEach(() => { setupDefaults(); });
+  beforeEach(() => { setupDefaults(); harness.publishSheet.nextInstance = 0; });
+
+  it("keeps the open publish sheet mounted while the draft shell is removed", async () => {
+    const queryClient = renderWorkspaceClient();
+    const view = render(workspaceTree(queryClient, true));
+    fireEvent.click(await screen.findByRole("button", { name: "Publish version" }));
+    const firstSheet = await screen.findByRole("dialog", { name: "Publish sheet" });
+    const instance = firstSheet.getAttribute("data-instance");
+
+    harness.shellResult = {
+      ...harness.shellResult,
+      data: { state: "NO_DRAFT", shell: null },
+    };
+    view.rerender(workspaceTree(queryClient, true));
+
+    expect(await screen.findByRole("heading", { name: "No editable draft" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Publish sheet" })).toHaveAttribute("data-instance", instance);
+    expect(harness.publishSheet.nextInstance).toBe(1);
+  });
+
+  it("keeps the acknowledged version available after Done and pins room creation to it", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    const queryClient = renderWorkspaceClient();
+    const view = render(workspaceTree(queryClient, true));
+    fireEvent.click(await screen.findByRole("button", { name: "Publish version" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Acknowledge publish" }));
+
+    harness.shellResult = {
+      ...harness.shellResult,
+      data: { state: "NO_DRAFT", shell: null },
+    };
+    view.rerender(workspaceTree(queryClient, true));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(await screen.findByRole("heading", { name: "Create a room or continue editing" })).toBeInTheDocument();
+    expect(screen.getByText("Version 9 is published.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit exam" }));
+    expect(harness.ensureDraft.mutate).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/sat/exams/exam-1/access?new=1&version=published-9&versionNumber=9&scope=math"
+    );
+  });
+
+  it("keeps unsaved work exportable when publication removes the draft shell", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      const queryClient = renderWorkspaceClient();
+      const view = render(workspaceTree(queryClient));
+      await screen.findByLabelText("Question prompt");
+      harness.autosave.hasPendingChanges = true;
+      harness.autosave.status = "unsaved";
+      harness.shellResult = { ...harness.shellResult, data: { state: "NO_DRAFT", shell: null } };
+      view.rerender(workspaceTree(queryClient));
+
+      fireEvent.click(await screen.findByRole("button", { name: "Copy my work" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+      const exported = JSON.parse(writeText.mock.calls[0]![0] as string);
+      expect(exported.id).toBe("rev-1");
+      expect(JSON.stringify(exported)).toContain("First prompt");
+      expect(await screen.findByText("Your current question draft was copied to the clipboard.")).toBeInTheDocument();
+      expect(harness.autosave.flushNow).not.toHaveBeenCalled();
+      expect(harness.api.saveQuestionRevision).not.toHaveBeenCalled();
+    } finally {
+      if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
 
   it("renders the shared exam header, tabs, and the module's question cards", async () => {
     renderWorkspace();

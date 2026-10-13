@@ -38,9 +38,9 @@ export const SAT_PUBLISH_READINESS_FAMILIES = [
   {
     id: "answer-choices",
     label: "Answer choices",
-    codes: ["sat.choice.count", "sat.choice.content.required", "sat.rw.question_type"],
+    codes: ["sat.choice.count", "sat.choice.content.required", "sat.choice.id.duplicate", "sat.rw.question_type"],
   },
-  { id: "module-question-count", label: "Module question count", codes: ["sat.module.incomplete"] },
+  { id: "module-question-count", label: "Module question count", codes: ["sat.module.incomplete", "sat.module.missing", "sat.module.pretest_count"] },
   {
     id: "correct-answers",
     label: "Correct answers",
@@ -51,13 +51,14 @@ export const SAT_PUBLISH_READINESS_FAMILIES = [
       "sat.spr.answer.invalid",
     ],
   },
+  { id: "score-converter", label: "Score converter", codes: ["sat.converter.invalid", "sat.converter.missing"] },
 ] as const;
 
 const SAT_PUBLISH_READINESS_CODES = new Set<string>(
   SAT_PUBLISH_READINESS_FAMILIES.flatMap((family) => family.codes),
 );
 
-/** Release only renders findings owned by the four-rule SAT publish contract. */
+/** Release only renders findings owned by the SAT publish contract. */
 export function isSATPublishReadinessIssue(issue: AssessmentValidationIssue): boolean {
   return SAT_PUBLISH_READINESS_CODES.has(issue.code);
 }
@@ -465,6 +466,7 @@ export function toUserFacingReleaseError(error: unknown): string {
 export function toUserFacingPublishError(error: unknown): string {
   if (error instanceof Error) {
     const message = error.message;
+    if (/publish response could not be verified/i.test(message)) return message;
     if (/40[89]|412/.test(message)) {
       return "This release could not be published because the draft changed. Checks were refreshed; review them and try again.";
     }

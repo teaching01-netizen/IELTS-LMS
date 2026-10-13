@@ -71,7 +71,7 @@ export function SatSessionsRoute() {
   const queryClient = useQueryClient();
   const { session } = useAuthSession();
   const summariesQuery = useProctorSessionSummaries(4_000, 'sat');
-  const examsQuery = useExamListQuery(session?.user.role === 'admin', 'sat');
+  const examsQuery = useExamListQuery(session?.user.role === 'admin', 'sat', false);
   const { params, setParams } = useSatListParams();
   const search = params.q ?? '';
   const [createOpen, setCreateOpen] = useState(false);

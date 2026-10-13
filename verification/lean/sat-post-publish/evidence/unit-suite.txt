@@ -1,0 +1,1076 @@
+$ vitest run --silent
+/opt/homebrew/bin/bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/products/sat/ui/__tests__/sessionRunSheet.test.ts (39 tests) 58ms
+ ✓ src/shared/ui/selection-v2/__tests__/useStudentSelectionGesture.test.tsx (56 tests) 774ms
+ ✓ src/components/student/__tests__/StudentQuestionExperience.test.tsx (51 tests) 2164ms
+ ✓ src/features/student-delivery/ui/tools/SatFloatingCoexistence.test.tsx (41 tests) 1986ms
+   ✓ SatFloatingTool > renders two named tools side by side without trapping focus 446ms
+ ✓ src/features/student-delivery/ui/annotations/SatAnnotatedContent.test.tsx (36 tests) 433ms
+ ✓ src/features/student/hooks/__tests__/useStudentSessionRouteData.backend.test.tsx (25 tests) 4214ms
+   ✓ useStudentSessionRouteData backend mode > student realtime transport > opens the student socket and applies only newer runtime snapshots 1569ms
+   ✓ useStudentSessionRouteData backend mode > student realtime transport > does not let a stale poll response regress a newer socket snapshot 579ms
+   ✓ useStudentSessionRouteData backend mode > student realtime transport > reports the realtime rollout lifecycle metrics 635ms
+ ✓ src/components/admin/__tests__/gradingReviewUtils.test.ts (26 tests) 40ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.test.ts (25 tests) 440ms
+ ✓ src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx (44 tests) 5833ms
+   ✓ SatSessionRoomRoute > returns Back to the originating test and selected room 320ms
+   ✓ SatSessionRoomRoute > shows an error instead of acting when the bound student left the roster 349ms
+ ✓ src/services/__tests__/examLifecycleService.test.ts (55 tests) 28ms
+ ✓ src/components/admin/__tests__/ExamObjectiveOverviewPanel.test.tsx (20 tests) 1669ms
+ ✓ src/components/student/__tests__/StudentApp.test.tsx (29 tests) 7786ms
+   ✓ StudentApp runtime-backed mode > renders the persistent highlight tool in Reading exam mode without a floating toolbar 560ms
+   ✓ StudentApp runtime-backed mode > commits the mounted writing editor draft before runtime final submission 440ms
+   ✓ StudentApp runtime-backed mode > keeps local objective text input stable during same-attempt refresh 821ms
+   ✓ StudentApp runtime-backed mode > preserves sibling slot values during rapid multi-slot typing and focus switching 575ms
+   ✓ StudentApp runtime-backed mode > preserves a writing task draft after navigating away and back in runtime-backed mode 501ms
+   ✓ StudentApp runtime-backed mode > locks the UI when Finish is clicked in runtime-backed mode 1026ms
+   ✓ StudentApp runtime-backed mode > deduplicates rapid Finish clicks while a runtime-backed flush is already in-flight 514ms
+   ✓ StudentApp runtime-backed mode > does not trigger duplicate runtime auto-submit while the first zero-timer flush is still in-flight 680ms
+   ✓ StudentApp runtime-backed mode > retries the V2 response batch when batch delivery fails 400ms
+ ✓ src/components/proctor/__tests__/ProctorDashboard.test.tsx (39 tests) 6364ms
+   ✓ ProctorDashboard runtime controls > appended coverage: states, filters, actions, empty/error > reports names when one bulk pause target fails 312ms
+ ✓ src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx (37 tests) 484ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamController.autoEntry.test.tsx (24 tests | 2 skipped) 5721ms
+   ✓ useSatExamController auto-entry > starts the first module once when duplicate live payloads arrive mid-start 660ms
+   ✓ useSatExamController auto-entry > treats a transition conflict on entry as still-advancing, not a student error 1037ms
+   ✓ useSatExamController auto-entry > leaves the break alone while its countdown is still running 1265ms
+   ✓ useSatExamController auto-entry > never finalizes an attempt whose next section module is still waiting 680ms
+   ✓ useSatExamController auto-entry > retries a failed entry automatically with no new payload 860ms
+ ✓ src/features/student-delivery/ui/SatExamShell.test.tsx (40 tests) 3268ms
+ ✓ src/utils/__tests__/examTextExport.test.ts (39 tests) 162ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/workspaceProjection.test.ts (31 tests) 341ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.preservation.test.ts (23 tests) 440ms
+ ✓ src/services/__tests__/gradingService.pure.test.ts (40 tests) 67ms
+ ✓ src/utils/__tests__/validationUtils.extra.test.ts (64 tests) 32ms
+ ✓ src/features/proctor/hooks/__tests__/useProctorRouteController.backend.test.tsx (11 tests) 897ms
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx (26 tests) 6184ms
+   ✓ AuthoringWorkspace (spine-only) > keeps the open publish sheet mounted while the draft shell is removed 563ms
+   ✓ AuthoringWorkspace (spine-only) > keeps the acknowledged version available after Done and pins room creation to it 564ms
+   ✓ AuthoringWorkspace conflict routing without a socket > speaks one conflict vocabulary in the header and the footer 457ms
+   ✓ AuthoringWorkspace question load state machine > renders the editor from a successful question response 347ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.controlEpoch.test.ts (20 tests) 147ms
+ ✓ src/features/student-delivery/hooks/__tests__/satTwoStudentEntry.test.tsx (4 tests) 93ms
+ ✓ src/features/student-delivery/application/__tests__/useSatResponsePersistence.v2.test.tsx (11 tests) 959ms
+ ✓ src/features/student-delivery/ui/annotations/SatAnnotationFlow.test.tsx (33 tests) 10142ms
+   ✓ SAT annotation mode (the non-negotiable rule) > starts off, and selecting text in an unarmed exam raises nothing 306ms
+   ✓ SAT annotation mode (the non-negotiable rule) > stays armed after a highlight, so the next phrase needs no re-arming 448ms
+   ✓ SAT annotation mode (the non-negotiable rule) > keeps the student’s marks painted but inert while off 331ms
+   ✓ SAT shell annotation flow (armed mode) > restyles an existing underline from its own controls, and takes it off with None 361ms
+   ✓ SAT shell annotation flow (armed mode) > opens a new note in the Notes pane, with the caret already in its field 1024ms
+   ✓ SAT shell annotation flow (armed mode) > recolors an existing mark in one tap and forgives removal with Undo 412ms
+   ✓ SAT shell annotation flow (armed mode) > reopens an existing mark’s note with its saved text and its source 523ms
+   ✓ SAT shell annotation flow (armed mode) > leaves the note when the student presses back in the passage, so the next selection still raises the tools 384ms
+   ✓ SAT shell annotation flow (armed mode) > clears the tools on Escape without touching the mark or the mode 478ms
+   ✓ SAT shell annotation flow (armed mode) > lists anchored notes in the Notes column with their ink and their source 380ms
+   ✓ SAT shell annotation flow (armed mode) > retires the cue for good once the student makes a mark 303ms
+   ✓ SAT shell annotation flow (armed mode) > gives the question’s own note the same undo as a note on the passage 345ms
+   ✓ SAT shell annotation flow (armed mode) > removes a note’s words but not its mark, and puts them back with Undo 529ms
+   ✓ SAT annotation Bluebook surfaces (Phase 7) > leaves nothing in the middle until there is a note, then a handle that brings it back 781ms
+ ✓ src/shared/ui/selection-v2/__tests__/SelectionOverlay.test.tsx (27 tests) 596ms
+ ✓ src/services/__tests__/studentAttemptRepository.test.ts (19 tests) 181ms
+ ✓ src/components/admin/__tests__/StudentReviewWorkspace.answers.test.tsx (6 tests) 3248ms
+   ✓ StudentReviewWorkspace objective answers > renders reading answers from backend bundle map 1725ms
+   ✓ StudentReviewWorkspace objective answers > shows both writing tasks in the student preview with the correct labels and bands 309ms
+   ✓ StudentReviewWorkspace objective answers > renders writing responses as plain text without stored html tags 319ms
+   ✓ StudentReviewWorkspace objective answers > schedule release validates the date before calling scheduleRelease 545ms
+ ✓ src/features/student-delivery/domain/satDomain.test.ts (12 tests) 47ms
+ ✓ src/features/student-delivery/ui/annotations/SatNotesColumn.test.tsx (36 tests) 4558ms
+   ✓ SatNotesColumn > says nothing about saving until saving is actually happening 1731ms
+   ✓ SatNotesColumn > promises nothing about saving when a draft ends where it started 985ms
+   ✓ SatNotesColumn > writes the question’s own note through the same field, with no Save button 750ms
+ ✓ src/components/workspaces/__tests__/WritingWorkspace.test.tsx (29 tests) 3985ms
+   ✓ WritingWorkspace > adds a Task 2 essay through the side panel add menu 359ms
+   ✓ WritingWorkspace > opens the template library, filters it, and inserts a template prompt 374ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamController.convergence.test.tsx (14 tests) 620ms
+ ✓ src/shared/durability/__tests__/durabilityTelemetry.test.ts (19 tests) 323ms
+ ✓ src/features/student/routes/__tests__/StudentEntryRoute.test.tsx (18 tests) 6224ms
+   ✓ StudentEntryRoute > creates a behind-the-scenes student session and continues to the schedule-backed delivery route 338ms
+   ✓ StudentEntryRoute > shows bounded retry state and keeps polling until admission is granted 1190ms
+   ✓ StudentEntryRoute > recovers from a failed admission poll with working Retry and Leave-queue actions 2237ms
+   ✓ StudentEntryRoute > leaves bounded retry state after a failed poll and clears the payload 1296ms
+ ✓ src/products/sat/routes/__tests__/SatResultsRoutes.test.tsx (25 tests) 3264ms
+   ✓ SAT Results hierarchy > steps to the previous and next student inside the inspector 315ms
+   ✓ SAT Results hierarchy > returns focus to the last inspected row when the inspector closes 431ms
+   ✓ SAT Responses tab (exam-scoped results content) > opens a student response beside the list without leaving the tab, then closes back to the same filters 453ms
+ ✓ src/features/builder/routes/__tests__/BuilderRoot.test.tsx (33 tests) 4583ms
+   ✓ BuilderRoot > reflects unsaved, saving, and saved statuses across the autosave cycle 371ms
+   ✓ BuilderRoot > undoes and redoes builder changes from the palette 617ms
+   ✓ BuilderRoot > duplicates the active listening part with the duplicate shortcut 403ms
+   ✓ BuilderRoot > duplicates the active reading passage with the duplicate shortcut 393ms
+   ✓ BuilderRoot > jumps to a reading passage from the jumpField query param 365ms
+   ✓ BuilderRoot > jumps to a listening part from the short jumpField form 371ms
+   ✓ BuilderRoot > ignores an unparsable jumpField query param 475ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionSession.test.ts (25 tests) 264ms
+ ✓ src/features/exam-authoring/ui/__tests__/useWorkspaceProjectionWrites.test.tsx (17 tests) 75ms
+ ✓ src/utils/__tests__/cloneExamContent.test.ts (18 tests) 11ms
+ ✓ src/shared/ui/selection-v2/__tests__/SelectionLoupe.test.tsx (22 tests) 345ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamController.adaptiveHandoff.test.tsx (8 tests) 595ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/releaseSelectors.test.ts (42 tests) 10ms
+ ✓ src/components/admin/__tests__/ExamSettingsDrawer.test.tsx (27 tests) 3725ms
+   ✓ ExamSettingsDrawer timing validation > shows section flow validation errors for invalid timing config 354ms
+   ✓ ExamSettingsDrawer standards tab > updates standards and keeps writing section tasks synced 503ms
+ ✓ src/features/student-delivery/ui/question/SatQuestionWorkspace.test.tsx (19 tests) 442ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkEditorSheet.test.tsx (18 tests) 6504ms
+   ✓ AccessLinkEditorSheet > offers section toggles for a SAT link only 890ms
+   ✓ AccessLinkEditorSheet > guides SAT room creation through validated steps and preserves values when moving back 1777ms
+   ✓ AccessLinkEditorSheet > sends the narrowed scope on create and leaves it out of an unchanged update 302ms
+   ✓ AccessLinkEditorSheet > marks the sheet dirty and silently autosaves a section change 825ms
+   ✓ who can join vs. a group label > restricts admission only for listed students, and then needs a roster but no group name 664ms
+ ✓ src/components/student/providers/__tests__/StudentRuntimeProvider.test.tsx (19 tests) 167ms
+ ✓ src/features/student-delivery/hooks/__tests__/sat-cohort-clock.test.tsx (8 tests) 214ms
+ ✓ src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx (30 tests) 705ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.prewarm.test.tsx (14 tests) 1569ms
+   ✓ SatStudentSessionRoute prewarm gating > preserves warmed iframe identity through preparation, module, review and reopening 591ms
+ ✓ src/features/builder/services/__tests__/previewRuntimeSessionService.terminal-reuse.test.ts (9 tests) 26ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/imageValidation.test.ts (42 tests) 88ms
+ ✓ src/components/student/__tests__/StudentWriting.lifecycle.test.tsx (20 tests) 1086ms
+ ✓ src/components/admin/__tests__/StudentReviewWorkspace.core.test.tsx (18 tests) 5041ms
+   ✓ StudentReviewWorkspace core render > renders header, section navigation, checklist and disabled save with minimal props 360ms
+   ✓ StudentReviewWorkspace section navigation > switches to the writing canvas and between task tabs 396ms
+   ✓ StudentReviewWorkspace annotation and review actions > adds, updates and deletes annotations and drawings, deduping repeats 1130ms
+   ✓ StudentReviewWorkspace annotation and review actions > edits writing rubric bands and notes, then persists them via save 329ms
+   ✓ StudentReviewWorkspace annotation and review actions > edits feedback, internal notes, teacher summary and checklist, then saves 459ms
+   ✓ StudentReviewWorkspace save and release flows > mark ready to release advances to ready to release 448ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/ingestClipboard.test.ts (27 tests) 317ms
+ ✓ src/components/student/__tests__/StudentWriting.a11y.test.tsx (18 tests) 897ms
+   ✓ StudentWriting a11y > applies and erases a prompt highlight without making the writing editor highlightable 340ms
+ ✓ src/features/exam-authoring/editor/__tests__/RichQuestionComposer.test.tsx (20 tests) 4074ms
+   ✓ SAT rich question composer capabilities > shows the standard control set with visible undo and redo 418ms
+   ✓ SAT rich question composer capabilities > rejects unsupported dialog files before calling the upload API 578ms
+   ✓ SAT rich question composer capabilities > uploads a valid dialog file and never persists its preview URL 835ms
+   ✓ SAT rich question composer capabilities > imports an HTTPS dialog source before inserting a managed asset 390ms
+ ✓ src/components/student/providers/__tests__/StudentNetworkProvider.test.tsx (11 tests) 1334ms
+   ✓ StudentNetworkProvider > retries reconnect recovery after a transient runtime refresh failure and eventually unblocks 551ms
+ ✓ src/components/admin/__tests__/gradingAnswerUtils.test.ts (21 tests) 8ms
+ ✓ src/features/student-delivery/ui/annotations/__tests__/satAnnotationSurfacePlacement.test.tsx (23 tests) 1213ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionPoint.test.ts (36 tests) 52ms
+ ✓ src/services/__tests__/gradingService.backend.test.ts (7 tests) 73ms
+ ✓ src/features/student-delivery/application/__tests__/satTimingPolicy.test.ts (35 tests) 9ms
+ ✓ src/features/student-delivery/domain/satReadingLayout.test.ts (33 tests) 11ms
+ ✓ src/features/student-delivery/ui/annotations/SatAnnotationControls.test.tsx (19 tests) 1293ms
+ ✓ src/features/exam-authoring/ui/collaboration/__tests__/calmSurfaces.test.tsx (30 tests) 802ms
+ ✓ src/components/student/__tests__/ProtectedInput.test.tsx (20 tests) 227ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.moduleHandoff.test.tsx (9 tests) 1538ms
+   ✓ SatStudentSessionRoute module handoff > keeps Module 2 answer controls usable when a Module 1 draft is preserved 447ms
+ ✓ src/features/results/domain/__tests__/satResultsGroups.test.ts (18 tests) 128ms
+ ✓ src/features/exam-authoring/editor/__tests__/ComposerToolbar.test.tsx (20 tests) 4907ms
+   ✓ stable composer toolbar > keeps one row, in one order, and never moves Bold when the context changes 329ms
+   ✓ stable composer toolbar > reports the same row for image, equation, and table selections, with no object controls in it 307ms
+   ✓ stable composer toolbar > puts table structure on its own row inside the same toolbar 338ms
+   ✓ stable composer toolbar > centers only the current table and restores its alignment through Undo and the toggle 450ms
+   ✓ stable composer toolbar > disables Copy table during a write and reports a failed copy before allowing a retry 324ms
+   ✓ stable composer toolbar > states every text format on the row and toggles it in place 348ms
+   ✓ stable composer toolbar > inserts symbols and the SAT blank at the cursor from the Insert menu 343ms
+   ✓ stable composer toolbar > keeps undo and redo visible and functional in the text context 398ms
+ ✓ src/components/student/__tests__/StudentInteractionMotion.test.tsx (16 tests) 1505ms
+   ✓ student interaction motion class contracts > CompactStudentHeader > sweeps the tools trigger, sheet actions, and swatches with the recipe 412ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionGeometry.test.ts (26 tests) 77ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionPlacement.test.ts (18 tests) 7ms
+ ✓ src/products/sat/ui/__tests__/SatRunSheet.test.tsx (11 tests) 404ms
+ ✓ src/features/exam-authoring/editor/ingestion/testing/baselinePaste.behavior.test.tsx (19 tests) 2044ms
+   ✓ baseline paste behavior (B1-B12, observed) > B10: choice composer paste is UNFILTERED — headings/lists land despite blockStyles:false lists:false (phase-07 gap) 811ms
+ ✓ src/features/student-delivery/domain/satAnnotationsV2.test.ts (25 tests) 23ms
+ ✓ src/features/student-delivery/hooks/__tests__/sat-recovery-poll.test.tsx (10 tests) 193ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/coeditSession.test.ts (31 tests) 89ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionReducer.test.ts (20 tests) 11ms
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringWorkspaceCoedit.test.tsx (34 tests) 45082ms
+   ✓ AuthoringWorkspace × prompt co-editing > threads the room binding into the spine when every gate is on 1962ms
+   ✓ AuthoringWorkspace × prompt co-editing > the partial, prompt-free save > sends exactly the changed allow-listed fields and never the prompt 1963ms
+   ✓ AuthoringWorkspace × prompt co-editing > the partial, prompt-free save > writes nothing at all for a prompt-only change 827ms
+   ✓ AuthoringWorkspace × prompt co-editing > the partial, prompt-free save > keeps the author's newer prompt projection after a partial save 1246ms
+   ✓ AuthoringWorkspace × prompt co-editing > autosave ownership > suppresses the legacy autosave for a prompt-only edit 884ms
+   ✓ AuthoringWorkspace × prompt co-editing > autosave ownership > still schedules the legacy autosave for a non-prompt field edit 1036ms
+   ✓ AuthoringWorkspace × prompt co-editing > single ownership while the exam room is active > still writes through the partial endpoint when only the prompt room is open 1034ms
+   ✓ AuthoringWorkspace × prompt co-editing > one save truth > does not report Saved while the collaborative prompt is unacknowledged 602ms
+   ✓ AuthoringWorkspace × prompt co-editing > one save truth > does not report Saved while the legacy field save is pending 1052ms
+   ✓ AuthoringWorkspace × prompt co-editing > one save truth > reports Saved only once both writers are saved 1318ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > does not open a legacy prompt writer when room creation fails 707ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > explains a rejected session and re-mints on Retry 2131ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > does not present a plain disconnect as a lifecycle failure 1477ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > uses human offline and reconnecting copy without generic connection labels 1270ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > projects a retryable persistence failure as an inline retry action 1074ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > offers the prompt export when the service closes a replaced room 1431ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > offers the export when the room refused a write 2446ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > explains a room too large to save as one document 3320ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > offers the export in the exam workspace when the workspace room refuses a write 639ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > stops offering the recovery once the refused work is committed 2076ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > offers the export for a room closed by any other lifecycle reason 2328ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > applies the durable draft.replaced signal when the socket close is lost 1911ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > keeps a close with no lifecycle reason on the offline path 1435ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > freezes the mounted editor through the private publish lifecycle and restores it on active 1077ms
+   ✓ AuthoringWorkspace × prompt co-editing > shows a collaborator's edit in the live editor and the projection 1149ms
+   ✓ AuthoringWorkspace × prompt co-editing > refetch guard while the room owns the prompt > does not let a refetch replace the newer local prompt 1455ms
+   ✓ AuthoringWorkspace × prompt co-editing > leaving the workspace > clears a stalled-navigation banner after the room confirms the work 907ms
+   ✓ AuthoringWorkspace × prompt co-editing > leaving the workspace > navigates once this tab's exact room state is durable 503ms
+   ✓ AuthoringWorkspace × prompt co-editing > leaving the workspace > refuses to leave while the room cannot reach the service 1010ms
+   ✓ AuthoringWorkspace × prompt co-editing > leaving the workspace > does not leave when the room refused the latest changes 1326ms
+   ✓ AuthoringWorkspace × prompt co-editing > field-scoped collaboration readiness > renders the fields the room holds while one root is still unseeded 2024ms
+   ✓ AuthoringWorkspace × prompt co-editing > field-scoped collaboration readiness > tells the author WHY a field's shared copy was refused 1025ms
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringWorkspaceNoDraft.test.tsx (16 tests) 464ms
+ ✓ src/features/student-delivery/hooks/__tests__/satPersonalEntry.test.tsx (11 tests) 1740ms
+   ✓ SAT personal single-operation entry > retries a lost StartModule response idempotently without a second window 1008ms
+ ✓ src/features/student-delivery/ui/question/SatQuestionRenderer.test.tsx (7 tests) 467ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/DeliveryFlow.test.tsx (18 tests) 2963ms
+   ✓ Delivery: first-time setup > leads a new exam with a three-step guide and a single obvious next action 373ms
+   ✓ Delivery: first-time setup > continues from creation into Share and run, and lets the author finish later 509ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.elimination.test.tsx (9 tests) 3100ms
+   ✓ SatStudentSessionRoute question-scoped eliminator > keeps the eliminator open per question across navigation 942ms
+   ✓ SatStudentSessionRoute question-scoped eliminator > closes only the question the student disarms 723ms
+   ✓ SatStudentSessionRoute question-scoped eliminator > shows each attempt its own remembered arms 355ms
+ ✓ src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx (11 tests) 5040ms
+   ✓ SAT production composer clipboard integration > copies the whole current table and pastes its values, math, marks, spans, widths, and alignment 1230ms
+   ✓ SAT production composer clipboard integration > formats HTML-wrapped Markdown and emits bold marks 354ms
+   ✓ SAT production composer clipboard integration > stages an image through the real paste path, resolves it, and supports one undo 798ms
+   ✓ SAT production composer clipboard integration > stages an image through the real drop path, resolves it, and supports one undo 544ms
+   ✓ SAT production composer clipboard integration > renders retry and remove actions for a failed staged image 659ms
+   ✓ SAT production composer clipboard integration > keeps two images when the HTML representation is not byte-identical 316ms
+ ✓ src/features/student-delivery/ui/tools/reference/SatReferenceSheet.test.tsx (25 tests) 1067ms
+ ✓ src/features/student/routes/__tests__/StudentAccessLinkEntryRoute.test.tsx (18 tests) 2519ms
+   ✓ StudentAccessLinkEntryRoute > recovers from a failed admission poll with working Retry and Leave-queue actions 1182ms
+   ✓ StudentAccessLinkEntryRoute > persists the link queue ticket so a reload resumes polling from the stored position 547ms
+ ✓ src/services/__tests__/studentAttemptRepository.backend.test.ts (7 tests) 105ms
+ ✓ src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx (20 tests) 197ms
+ ✓ src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx (19 tests) 4189ms
+   ✓ SatSessionsRoute > never offers IELTS exams when creating a SAT room 415ms
+   ✓ SatSessionsRoute > opens the same room settings the exam uses, pinned to the exam’s published version, then lands in the new room 460ms
+   ✓ SatSessionsRoute > keeps the form and stays on the list when creation fails, so a retry cannot be lost 575ms
+   ✓ SatSessionsRoute > explains an invalid check-in window without clearing the form 467ms
+   ✓ SatSessionsRoute > rejects a past opening time for a new room (D2 policy) 460ms
+   ✓ SatSessionsRoute > rejects a check-in window shorter than 15 minutes (D2 policy) 362ms
+   ✓ SatSessionsRoute > confirms before discarding a dirty setup, closes quietly when pristine 383ms
+ ✓ src/features/exam-authoring/realtime/__tests__/divergenceStore.test.ts (23 tests) 10ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/clipboardImageDedupe.test.ts (14 tests) 24ms
+ ✓ src/features/builder/components/__tests__/StandardsTab.test.tsx (21 tests) 1165ms
+   ✓ StandardsTab > renders all key section headings and controls 345ms
+ ✓ src/services/__tests__/examLifecycleService.backend.test.ts (3 tests) 69ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatDeliveryReleasePage.test.tsx (19 tests) 1777ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.between-sections.test.tsx (7 tests) 247ms
+ ✓ src/components/student/providers/__tests__/StudentKeyboardProvider.shortcuts.test.tsx (21 tests) 228ms
+ ✓ src/features/exam-authoring/contracts/__tests__/actContracts.test.ts (17 tests) 24ms
+ ✓ src/products/sat/routes/__tests__/SatPhase02Copy.test.tsx (6 tests) 430ms
+ ✓ src/features/student-delivery/ui/annotations/SatNotesSurfaceHost.test.tsx (15 tests) 510ms
+ ✓ src/features/exam-rendering/__tests__/SatImageEnlarge.test.tsx (9 tests) 350ms
+ ✓ src/features/student/routes/__tests__/StudentSessionRoute.test.tsx (13 tests) 836ms
+   ✓ StudentSessionRoute > only exposes diagnostics when the session URL opts in:  363ms
+   ✓ StudentSessionRoute > passes bootstrapSeed + initialIsLoading through to the mounted SAT child 332ms
+ ✓ src/components/student/__tests__/StudentReadingReadabilityControls.test.tsx (12 tests) 505ms
+ ✓ src/features/student-delivery/ui/SatPopoverShell.test.tsx (13 tests) 1238ms
+   ✓ SatPopoverShell focus contract > moves focus into Directions on desktop open and returns it on Escape 329ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamController.identity.test.tsx (7 tests) 298ms
+ ✓ src/features/proctor/hooks/__tests__/useProctorRouteController.room-clock.test.tsx (3 tests) 281ms
+ ✓ src/features/exam-authoring/routes/__tests__/SatDeliveryReleaseRoute.test.tsx (11 tests) 278ms
+ ✓ src/components/student/__tests__/highlightPersistence.test.tsx (16 tests) 3629ms
+   ✓ student highlight persistence v2 > releases surface ownership and preserves selection when the range cap is reached 3428ms
+ ✓ src/features/exam-authoring/editor/__tests__/imageReplaceFlow.test.tsx (7 tests) 2679ms
+   ✓ replacing an image that publish rejected > repairs a missing asset behind empty alt text and commits the new finalized asset 684ms
+   ✓ replacing an image that publish rejected > never overwrites a stored description or caption when replacing the visual 431ms
+   ✓ replacing an image that publish rejected > refuses an image that left the question instead of reporting a replacement 312ms
+   ✓ replacing an image that publish rejected > describes an inserted image from the file that was uploaded 309ms
+   ✓ replacing an image that publish rejected > never overwrites a description the author wrote 393ms
+ ✓ src/features/student-delivery/api/assessmentDeliveryApi.test.ts (13 tests) 25ms
+ ✓ src/features/student-delivery/hooks/__tests__/sat-finalization-recovery.test.tsx (6 tests) 92ms
+ ✓ src/features/exam-authoring/editor/__tests__/ingestionImagePipe.test.ts (13 tests) 293ms
+ ✓ src/components/student/__tests__/StudentProviderRuntime.test.tsx (16 tests) 1135ms
+ ✓ src/components/admin/__tests__/WritingAnnotationCanvasLegacy.test.tsx (16 tests) 829ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx (4 tests) 1359ms
+   ✓ SpineOverlays (Phase 9.1+9.4 parity) > opens the jump palette with Ctrl+K in the spine branch 467ms
+   ✓ SpineOverlays (Phase 9.1+9.4 parity) > opens shortcut help with ? in the spine branch 421ms
+ ✓ src/features/exam-authoring/ui/publish/__tests__/ExamPublishSheet.test.tsx (16 tests) 1313ms
+   ✓ ExamPublishSheet > publishes the chosen scope with trimmed notes once every check has passed 304ms
+ ✓ src/features/student-delivery/application/__tests__/satBootstrapEquality.test.ts (19 tests) 9ms
+ ✓ src/features/exam-rendering/__tests__/StructuredContentRenderer.test.tsx (12 tests) 331ms
+ ✓ src/features/student-delivery/ui/media/SatImageViewer.test.tsx (18 tests) 889ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.skew.test.tsx (6 tests) 921ms
+ ✓ src/components/admin/__tests__/QuestionTracebackPanel.test.tsx (8 tests) 292ms
+ ✓ src/components/workspaces/__tests__/SpeakingWorkspace.test.tsx (18 tests) 519ms
+ ✓ src/components/student/__tests__/StudentQuestionCalloutCss.test.ts (13 tests) 408ms
+   ✓ student question touch-callout CSS > does not include answer controls in the protection selector 380ms
+ ✓ src/components/answer-history/__tests__/AnswerHistoryPage.test.tsx (9 tests) 543ms
+ ✓ src/features/exam-authoring/editor/ingestion/testing/baselineContracts.test.ts (22 tests) 58ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringConflictRecovery.test.tsx (15 tests) 151ms
+ ✓ src/components/admin/__tests__/AdminResults.test.tsx (10 tests) 672ms
+ ✓ src/features/exam-authoring/realtime/__tests__/authoringRealtime.integration.test.tsx (13 tests) 154ms
+ ✓ src/components/student/__tests__/StudentTypingPerformance.test.tsx (6 tests) 286ms
+ ✓ src/components/student/__tests__/useStudentSubmissionOrchestration.test.tsx (9 tests) 1139ms
+   ✓ useStudentSubmissionOrchestration > retries the section flush when the durability barrier rejects 1008ms
+ ✓ src/features/exam-authoring/import/__tests__/SatWorkbookImportSheet.test.tsx (9 tests) 1092ms
+ ✓ src/features/student-delivery/ui/question/SatSingleChoiceAnswer.test.tsx (16 tests) 528ms
+ ✓ src/features/student-delivery/application/__tests__/satRunnerReducer.test.ts (13 tests) 6ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionSegmenter.test.ts (33 tests) 55ms
+ ✓ src/features/exam-authoring/api/__tests__/authoringQueryEffects.test.ts (14 tests) 21ms
+ ✓ src/features/builder/utils/__tests__/answerKeyOverview.test.ts (6 tests) 5ms
+ ✓ src/products/sat/routes/__tests__/SatExamLibraryRoute.test.tsx (17 tests) 1243ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.displayRecovery.test.tsx (6 tests) 1038ms
+   ✓ SatStudentSessionRoute recovered display state > remembers the column across a reload, and remembers closing it 348ms
+ ✓ src/features/builder/hooks/__tests__/useConfigRouteController.test.tsx (9 tests) 571ms
+ ✓ src/features/student-delivery/ui/reading/__tests__/SatReadingLayoutContext.test.tsx (10 tests) 98ms
+ ✓ src/features/student-delivery/application/__tests__/satAdaptiveModuleIdentity.test.ts (11 tests) 17ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/satImageLifecycle.test.tsx (14 tests) 3316ms
+   ✓ SAT public image lifecycle matrix > accepts the clipboard file at the byte, side, and pixel boundaries 634ms
+   ✓ SAT public image lifecycle matrix > keeps a valid HTTPS HTML image in place and stages the fetched bytes 319ms
+   ✓ SAT public image lifecycle matrix > exposes Retry and Remove for a failed upload 487ms
+ ✓ src/products/sat/ui/__tests__/SatSessionRoomStudents.test.tsx (10 tests) 503ms
+ ✓ src/products/sat/__tests__/SatRoot.test.tsx (22 tests) 1582ms
+   ✓ SatRoot > hides all shell chrome on exam authoring pages 553ms
+ ✓ src/components/admin/__tests__/GradingSessionList.test.tsx (11 tests) 1770ms
+   ✓ GradingSessionList > renders a small fake session list with key details 409ms
+   ✓ GradingSessionList > debounces the search filter and queries the service 459ms
+ ✓ src/components/admin/__tests__/AdminSettings.test.tsx (28 tests) 4713ms
+   ✓ AdminSettings header and default tab > renders the header and the default scoring tab 368ms
+   ✓ AdminSettings modules tab > toggles a module enabled flag off 304ms
+   ✓ AdminSettings modules tab > toggles an allowed question type for listening only 432ms
+   ✓ AdminSettings time tab > toggles progression rules 324ms
+ ✓ src/features/exam-authoring/editor/plugins/__tests__/smartPastePlugin.test.ts (10 tests) 623ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.autoFit.test.tsx (6 tests) 1934ms
+   ✓ SatStudentSessionRoute default screen zoom > opens at 100% even when the question only fits at 0.75 330ms
+   ✓ SatStudentSessionRoute default screen zoom > keeps the 100% default across module boundaries 337ms
+   ✓ SatStudentSessionRoute default screen zoom > opens at 100% after a reload and for a new attempt 525ms
+   ✓ SatStudentSessionRoute default screen zoom > still fits the screen when the student requests it 391ms
+ ✓ src/features/student-delivery/routes/__tests__/SatPreviewRoute.test.tsx (3 tests) 1875ms
+   ✓ SatPreviewRoute > renders the real SAT shell and lets staff inspect adaptive modules and sections 1052ms
+   ✓ SatPreviewRoute > prewarms upcoming Math during the preview break and retains frames through review 537ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.interaction.test.tsx (6 tests) 1375ms
+   ✓ StudentLinksDashboard interaction contract > AT-07/08/09: a lifecycle write is acknowledged on its own row and settles in place 501ms
+   ✓ StudentLinksDashboard interaction contract > AT-12/13: a failed action surfaces one banner and keeps the stale-revision recovery 386ms
+ ✓ src/features/builder/components/__tests__/TimingTab.test.tsx (20 tests) 1043ms
+   ✓ TimingTab > renders key timing controls and the section flow summary 347ms
+ ✓ src/features/student/api/__tests__/examVisibilityIntegrity.test.ts (15 tests) 30ms
+ ✓ src/components/admin/__tests__/gradingPerStudentExportZip.test.ts (6 tests) 40ms
+ ✓ src/services/__tests__/studentMutationOutbox.coalescence.test.ts (23 tests) 11ms
+ ✓ src/components/proctor/__tests__/ViolationRulePanel.test.tsx (15 tests) 911ms
+ ✓ src/features/exam-authoring/editor/__tests__/ObjectControls.test.tsx (12 tests) 1231ms
+   ✓ the controls of the object you touched > offers replace and alt text as words, and hides destructive actions behind the menu 323ms
+ ✓ src/components/admin/__tests__/ObjectiveOverridesPanel.test.tsx (4 tests) 507ms
+ ✓ src/features/student-delivery/ui/media/SatQuestionImageEnlarge.test.tsx (9 tests) 914ms
+ ✓ src/features/student-delivery/ui/__tests__/satAdaptiveReadingShell.test.tsx (5 tests) 1113ms
+   ✓ auto-fit under the adaptive reading layout > lets a stacked reading layout answer the zoom question, without shrinking the exam 454ms
+   ✓ auto-fit under the adaptive reading layout > still fits when the student presses Fit to screen themselves 449ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionRange.test.ts (17 tests) 53ms
+ ✓ src/features/builder/routes/__tests__/BuilderRoot.review-navigation.test.tsx (5 tests) 571ms
+   ✓ BuilderRoot review navigation > flushes the latest draft before navigating to review 324ms
+ ✓ src/shared/ui/selection-v2/__tests__/SelectionActionMenu.test.tsx (15 tests) 476ms
+ ✓ src/features/exam-authoring/realtime/__tests__/authoringRealtimeClient.test.ts (14 tests) 72ms
+ ✓ src/utils/__tests__/validationUtils.test.ts (17 tests) 22ms
+ ✓ src/app/api/__tests__/apiClient.test.ts (11 tests) 52ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.moduleScope.test.ts (13 tests) 26ms
+ ✓ src/features/builder/hooks/__tests__/useBuilderAutosave.test.tsx (11 tests) 110ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionMachine.test.ts (22 tests) 21ms
+ ✓ src/features/student-delivery/ui/__tests__/satWaveB.test.tsx (12 tests) 836ms
+   ✓ save-failed stays available without covering exam content > navigator open + save-failed keeps Retry accessible in the save row 546ms
+ ✓ src/utils/__tests__/examUtils.questionCounting.test.ts (19 tests) 16ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.test.tsx (7 tests) 2330ms
+   ✓ StudentLinksDashboard > keeps older-release links visible by default after a newer release is published 575ms
+   ✓ StudentLinksDashboard > confirms permanent deletion, sends the displayed revision, and removes the link 810ms
+   ✓ StudentLinksDashboard > keeps a link and offers refresh when deletion loses the revision race 445ms
+ ✓ src/features/student/domain/exam-session/__tests__/studentExamAcceptance.contract.test.ts (12 tests) 8ms
+ ✓ src/components/student/providers/__tests__/StudentAttemptProvider.preservation.test.tsx (3 tests) 376ms
+ ✓ src/products/sat/ui/__tests__/SatPage.test.tsx (24 tests) 476ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.integrityWarning.test.tsx (3 tests) 496ms
+ ✓ src/features/proctor/hooks/__tests__/useProctorRouteController.test.tsx (1 test) 222ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/indexedDbPersistence.test.ts (6 tests) 1008ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/spineTokens.test.ts (20 tests) 15ms
+ ✓ src/components/student/__tests__/useSplitPaneResize.test.tsx (9 tests) 138ms
+ ✓ src/features/student-delivery/infrastructure/__tests__/satStudentResume.test.ts (6 tests) 52ms
+ ✓ src/components/student/__tests__/StudentSplitPaneResizer.test.tsx (13 tests) 493ms
+ ✓ src/utils/__tests__/versionUtils.test.ts (33 tests) 11ms
+ ✓ src/products/sat/ui/__tests__/Dialogs.test.tsx (20 tests) 376ms
+ ✓ src/components/admin/__tests__/GradingSessionDetail.printWriting.test.tsx (3 tests) 776ms
+   ✓ GradingSessionDetail print writing > prints writing document from grading session detail 406ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringQuestionCommands.test.tsx (10 tests) 105ms
+ ✓ src/features/exam-authoring/realtime/__tests__/presenceChannel.test.ts (26 tests) 44ms
+ ✓ src/features/student-delivery/domain/__tests__/satNotesUi.test.ts (25 tests) 5ms
+ ✓ src/features/student-delivery/application/__tests__/satStudentSurface.test.ts (21 tests) 8ms
+ ✓ src/features/student-delivery/domain/__tests__/satImageZoom.test.ts (13 tests) 8ms
+ ✓ src/components/student/__tests__/ProtectedExamSelect.test.tsx (13 tests) 655ms
+   ✓ ProtectedExamSelect desktop menu (Radix, keyboard-only) > Tab reaches the trigger; Enter opens; arrows highlight; Enter on an item commits and closes 323ms
+ ✓ src/components/student/__tests__/StudentExamPreview.test.tsx (7 tests) 3481ms
+   ✓ StudentExamPreview > shows accessibility controls without zoom controls in the preview shell 699ms
+   ✓ StudentExamPreview > performs zero network writes while typing and flagging in preview mode 1848ms
+ ✓ src/services/__tests__/examLifecycleService.publishReadiness.test.ts (2 tests) 30ms
+ ✓ src/features/exam-authoring/realtime/__tests__/eventContract.test.ts (18 tests) 14ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/fieldPatch.test.ts (15 tests) 8ms
+ ✓ src/features/exam-authoring/api/__tests__/authoringShellLifecycle.test.tsx (8 tests) 460ms
+ ✓ src/components/__tests__/QuestionBuilderPane.test.tsx (8 tests) 290ms
+ ✓ src/components/student/__tests__/StudentQuestionNavigationDock.test.tsx (11 tests) 218ms
+ ✓ src/test/studentAnswerLoss.probe.test.tsx (10 tests) 391ms
+ ✓ src/components/student/__tests__/highlightV2Engine.test.ts (13 tests) 37ms
+ ✓ src/services/__tests__/studentAttemptRepository.compaction.test.ts (16 tests) 21ms
+ ✓ src/components/student/providers/__tests__/StudentUIProvider.test.tsx (11 tests) 78ms
+ ✓ src/features/student-delivery/application/__tests__/satSubmitConflicts.test.ts (73 tests) 14ms
+ ✓ src/services/__tests__/studentMutationOutbox.conflicts.test.ts (10 tests) 23ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringDraft.test.tsx (12 tests) 54ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/useSatReferenceViewportWidth.test.ts (11 tests) 66ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/SatCalculatorPanel.test.tsx (11 tests) 1504ms
+   ✓ SatCalculatorPanel > resizes from 400x400 up to the whole screen 676ms
+ ✓ src/test/architecture/coedit-runtime-manifest.test.ts (13 tests) 877ms
+   ✓ co-edit runtime manifest > walks a real graph, including the schema the service converts documents with 395ms
+   ✓ co-edit runtime manifest > would fail if a reached module were dropped from the manifest 305ms
+ ✓ src/components/__tests__/StimulusPane.readingClipboard.test.tsx (5 tests) 1403ms
+   ✓ IELTS Reading passage images > rotates and uploads images added through the Passage toolbar 903ms
+ ✓ src/components/student/__tests__/StudentOwnedTouchHighlight.test.tsx (7 tests) 283ms
+ ✓ src/features/exam-authoring/ui/settings/__tests__/ExamSettingsPage.test.tsx (10 tests) 1154ms
+   ✓ ExamSettingsPage > marks Settings as the current tab inside the shared exam header 441ms
+ ✓ src/components/student/__tests__/StudentScienceImages.actReconciliation.test.tsx (7 tests) 490ms
+ ✓ src/features/student-delivery/ui/__tests__/bluebookShell.test.tsx (9 tests) 161ms
+ ✓ src/components/student/__tests__/RichTextHighlighter.test.tsx (12 tests) 326ms
+ ✓ src/components/admin/__tests__/gradingExportPlan.test.ts (7 tests) 8ms
+ ✓ src/features/student-delivery/ui/question/SatQuestionHeader.test.tsx (9 tests) 187ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionRaces.test.ts (8 tests) 4ms
+ ✓ src/features/exam-authoring/realtime/__tests__/authoringCacheReconciler.test.ts (14 tests) 21ms
+ ✓ src/features/student-delivery/application/__tests__/satCommitRouting.test.ts (7 tests) 11ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatIntegrityControl.test.tsx (10 tests) 62ms
+ ✓ src/services/__tests__/attemptCredentialAdapter.test.ts (19 tests) 36ms
+ ✓ src/features/proctor/domain/__tests__/mergeProctorRuntime.test.ts (11 tests) 3ms
+ ✓ src/features/student-delivery/ui/__tests__/satAccessibilityContracts.test.tsx (7 tests) 883ms
+ ✓ src/services/__tests__/examAdapterService.studentQuestions.test.ts (6 tests) 10ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionMotion.test.tsx (11 tests) 168ms
+ ✓ src/services/__tests__/examLifecycleService.draftHeal.test.ts (2 tests) 63ms
+ ✓ src/services/__tests__/actScienceChoiceImageService.test.ts (6 tests) 37ms
+ ✓ src/utils/__tests__/subAnswerTreeSlots.test.ts (5 tests) 9ms
+ ✓ src/features/student/infrastructure/exam-session/__tests__/studentRuntimePollLoop.test.ts (7 tests) 8ms
+ ✓ src/features/student-delivery/ui/annotations/satAnnotationDom.test.ts (15 tests) 65ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/satProvider.test.ts (11 tests) 15ms
+ ✓ src/features/student/infrastructure/exam-session/__tests__/studentRealtimeCoordinator.test.ts (8 tests) 6ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionCardStack.test.tsx (14 tests) 686ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatInteractionController.test.tsx (6 tests) 103ms
+ ✓ src/components/blocks/__tests__/SentenceCompletionBlock.sharedAnswerKeys.test.tsx (9 tests) 826ms
+   ✓ SentenceCompletionBlock shared answer keys > starts in per-blank mode with an unchecked toggle and both blank editors 379ms
+ ✓ src/components/student/__tests__/useStudentAutoSubmitBoundary.test.tsx (4 tests) 28ms
+ ✓ src/components/student/__tests__/answerMutationDebug.redaction.test.ts (8 tests) 11ms
+ ✓ src/features/student-delivery/ui/question/__tests__/SatReadingSplitHandle.test.tsx (9 tests) 178ms
+ ✓ src/services/__tests__/examRepository.test.ts (4 tests) 33ms
+ ✓ src/utils/__tests__/tableCompletion.test.ts (9 tests) 18ms
+ ✓ src/components/student/__tests__/SubAnswerTreeQuestionList.test.tsx (6 tests) 225ms
+ ✓ src/features/student-delivery/ui/__tests__/satWaveC.test.tsx (9 tests) 257ms
+ ✓ src/features/exam-authoring/application/__tests__/authoringShellLifecycle.integration.test.tsx (6 tests) 472ms
+ ✓ src/components/proctor/__tests__/AuditLogPanel.test.tsx (12 tests) 676ms
+ ✓ src/components/student/layout/__tests__/useStudentExamViewport.test.ts (10 tests) 43ms
+ ✓ src/components/student/__tests__/answerUndoRedoGuard.test.ts (13 tests) 22ms
+ ✓ src/features/exam-authoring/realtime/__tests__/authoringEventReducer.test.ts (16 tests) 12ms
+ ✓ src/products/sat/ui/__tests__/Menu.test.tsx (11 tests) 483ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/staleCacheRecovery.test.ts (2 tests) 450ms
+ ✓ src/hooks/__tests__/useDurableLatestAutosave.test.tsx (6 tests) 45ms
+ ✓ src/features/exam-authoring/editor/__tests__/EditableMathExtension.test.tsx (7 tests) 533ms
+ ✓ src/features/proctor/hooks/__tests__/useProctorRouteController.live-update.test.tsx (1 test) 157ms
+ ✓ src/components/__tests__/QuestionBuilderPane.editors.test.tsx (7 tests) 736ms
+ ✓ src/features/student-delivery/ui/review/SatReviewPage.test.tsx (10 tests) 330ms
+ ✓ src/app/hooks/__tests__/useLiveUpdates.test.ts (10 tests) 92ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringEdits.test.tsx (10 tests) 75ms
+ ✓ src/features/student-delivery/ui/__tests__/satWaveAFocusModal.test.tsx (7 tests) 588ms
+ ✓ src/shared/durability/__tests__/useResponseDurabilityStatus.test.ts (8 tests) 56ms
+ ✓ src/features/exam-authoring/editor/__tests__/editorSurfacesCss.test.ts (12 tests) 236ms
+ ✓ src/features/builder/hooks/__tests__/useBuilderRouteController.test.tsx (4 tests) 273ms
+ ✓ src/features/builder/routes/__tests__/ExamPreviewRoute.test.tsx (3 tests) 184ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ImportSuggestion.test.tsx (4 tests) 2345ms
+   ✓ ImportSuggestion wiring > no auto-apply: no card and no onChange without a paste 699ms
+   ✓ ImportSuggestion wiring > refuses the whole-question split while prompt co-editing is active 1558ms
+ ✓ src/test/architecture/student-exam-architecture.test.ts (6 tests) 168ms
+ ✓ src/features/student-delivery/application/__tests__/satResponseInvariant.test.ts (23 tests) 8ms
+ ✓ src/components/student/__tests__/StudentExamWorkspace.test.tsx (3 tests) 45ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/SatReferenceSheetPanelMemory.test.tsx (7 tests) 945ms
+   ✓ Reference sidebar memory > ignores legacy floating geometry and collapse while restoring zoom and scroll 356ms
+ ✓ src/services/__tests__/examDeliveryService.backend.test.ts (2 tests) 39ms
+ ✓ src/features/student/hooks/__tests__/studentSessionStateMachine.test.ts (9 tests) 4ms
+ ✓ src/features/exam-authoring/editor/ingestion/adapters/__tests__/fetchHtmlImagesAsFiles.test.ts (14 tests) 112ms
+ ✓ src/services/__tests__/backendBridge.mapping.test.ts (9 tests) 11ms
+ ✓ src/shared/ui/selection-v2/__tests__/selection-v2.performance.test.tsx (5 tests) 497ms
+ ✓ src/components/student/providers/__tests__/StudentAttemptProvider.v2.test.tsx (3 tests) 73ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/SatCalculatorGestures.test.tsx (9 tests) 687ms
+ ✓ src/features/exam-authoring/api/__tests__/assessmentMediaApi.test.ts (7 tests) 27ms
+ ✓ src/shared/ui/selection-v2/__tests__/nativeSelectionBreaker.test.tsx (8 tests) 209ms
+ ✓ src/features/student-delivery/ui/annotations/satTextSelection.test.ts (10 tests) 22ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/noEditableDraftRoom.test.tsx (5 tests) 138ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamFitZoom.test.tsx (11 tests) 75ms
+ ✓ src/features/exam-authoring/editor/__tests__/editorContextualSurfaces.test.tsx (4 tests) 843ms
+   ✓ surfaces that follow the author's action > offers text formatting next to the text and takes it away again 389ms
+ ✓ src/components/student/__tests__/StudentFooterRepresentative.test.tsx (4 tests) 222ms
+ ✓ src/components/student/__tests__/StudentStimulusReadabilityControls.test.tsx (2 tests) 297ms
+ ✓ src/products/sat/ui/__tests__/satPressCss.test.ts (13 tests) 8ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionQueueRail.test.tsx (8 tests) 381ms
+ ✓ src/services/__tests__/gradingFilters.test.ts (4 tests) 3ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkDetail.interaction.test.tsx (7 tests) 888ms
+   ✓ AccessLinkDetail interaction contract > AT-14: one indicator marks the selected tab and the panel reveals without translating 618ms
+ ✓ src/constants/__tests__/examDefaults.test.ts (6 tests) 28ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ClassificationFieldset.test.tsx (7 tests) 163ms
+ ✓ src/utils/__tests__/examTextExport.drift.test.ts (2 tests) 10ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringSelection.test.tsx (3 tests) 41ms
+ ✓ src/components/student/__tests__/QuestionNavigator.test.tsx (10 tests) 239ms
+ ✓ src/components/builder/__tests__/QuestionDetailModal.test.tsx (9 tests) 290ms
+ ✓ src/components/student/__tests__/AccessibilitySettings.test.tsx (9 tests) 313ms
+ ✓ src/shared/ui/touch-selection/__tests__/StudentTouchSelectionDiagnostics.test.tsx (4 tests) 190ms
+ ✓ src/features/exam-authoring/hooks/__tests__/useQuestionAutosave.networkPause.test.tsx (6 tests) 161ms
+ ✓ src/components/admin/__tests__/AdminScheduling.test.tsx (2 tests) 272ms
+ ✓ src/components/student/__tests__/WarningOverlay.test.tsx (14 tests) 334ms
+ ✓ src/features/builder/components/__tests__/PublishActions.test.tsx (10 tests) 560ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/coeditSaveTruth.test.ts (12 tests) 8ms
+ ✓ src/features/student-delivery/application/__tests__/satEntryControlEpoch.test.ts (9 tests) 9ms
+ ✓ src/features/student-delivery/infrastructure/satToolStateStore.test.ts (11 tests) 8ms
+ ✓ src/features/exam-authoring/realtime/__tests__/threeWayCompare.test.ts (14 tests) 13ms
+ ✓ src/features/exam-authoring/ui/__tests__/authoringDraftLifecycle.test.ts (13 tests) 10ms
+ ✓ src/features/builder/hooks/__tests__/useLazyVersionLoad.test.tsx (6 tests) 461ms
+ ✓ src/features/exam-authoring/realtime/__tests__/recovery.test.ts (7 tests) 8ms
+ ✓ src/components/student/layout/__tests__/studentLayoutMode.test.ts (19 tests) 32ms
+ ✓ src/features/student-delivery/ui/entry/__tests__/SatDeviceTransferPanel.test.tsx (4 tests) 530ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/NavigatorArchitecture.test.tsx (6 tests) 638ms
+   ✓ Navigator architecture > exposes every module of the section as one-click tabs, not a dropdown 315ms
+ ✓ src/features/exam-authoring/editor/__tests__/tableClipboard.test.ts (8 tests) 524ms
+ ✓ src/features/student-delivery/hooks/__tests__/sat-submit-conflicts.test.tsx (1 test) 44ms
+ ✓ src/features/builder/routes/__tests__/ExamAnswerKeyRoute.test.tsx (3 tests) 284ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathIngest.test.ts (12 tests) 37ms
+ ✓ src/components/student/__tests__/TableCompletionSlotCell.test.tsx (12 tests) 122ms
+ ✓ src/components/student/__tests__/StudentAppWrapperHighlightPersistence.test.tsx (2 tests) 215ms
+ ✓ src/components/student/providers/__tests__/blockingStateMachine.priority.test.ts (14 tests) 24ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionAutoScroll.test.ts (14 tests) 67ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/workspaceSeed.test.ts (7 tests) 38ms
+ ✓ src/features/exam-authoring/editor/ingestion/exam/applyWholeQuestionSplit.test.ts (5 tests) 34ms
+ ✓ src/features/proctor/domain/__tests__/sessionProjection.test.ts (8 tests) 6ms
+ ✓ src/components/admin/__tests__/AdminExams.test.tsx (6 tests) 520ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringSaveRouting.test.tsx (3 tests) 36ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/editorBinding.test.ts (11 tests) 125ms
+ ✓ src/components/student/layout/__tests__/CompactQuestionNavigation.test.tsx (5 tests) 216ms
+ ✓ src/features/exam-authoring/ui/__tests__/moduleQuestionMemory.test.tsx (10 tests) 40ms
+ ✓ src/features/exam-authoring/editor/__tests__/imagePresentationContract.test.tsx (4 tests) 310ms
+ ✓ src/features/student-delivery/ui/annotations/satSelectionAnchor.test.ts (6 tests) 45ms
+ ✓ src/features/exam-authoring/api/__tests__/publishMutationReceipt.test.tsx (3 tests) 260ms
+ ✓ src/features/student-delivery/ui/media/SatImageStrip.test.tsx (8 tests) 1045ms
+   ✓ SatImageStrip > keeps the magnification group together and the readout beside the zoom pair 395ms
+ ✓ src/features/student-delivery/ui/__tests__/bluebookBans.test.ts (8 tests) 671ms
+   ✓ bluebook bans (Phase 0 skeleton) > has no gradient utilities in SAT delivery scope 514ms
+ ✓ src/app/error/__tests__/errorTypes.test.ts (19 tests) 16ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/pdfCopy.test.ts (29 tests) 142ms
+ ✓ src/app/validation/__tests__/validateApiResponse.test.ts (16 tests) 238ms
+ ✓ src/components/student/__tests__/resolveObjectiveAnswerUpdate.slots.test.ts (22 tests) 21ms
+ ✓ src/utils/__tests__/sentenceCompletionAnswerPool.test.ts (9 tests) 7ms
+ ✓ src/features/exam-authoring/ui/__tests__/useDraftOpenOnEntry.test.tsx (8 tests) 204ms
+ ✓ src/features/auth/__tests__/LoginPage.test.tsx (3 tests) 483ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SaveCluster.test.tsx (23 tests) 1106ms
+   ✓ SaveCluster > hides only transient success and immediately reveals exceptional states 439ms
+   ✓ SaveCluster > fires the saved tick exactly once on entering saved, including StrictMode 368ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatPreviewController.test.tsx (4 tests) 364ms
+ ✓ src/utils/__tests__/subAnswerTree.test.ts (7 tests) 118ms
+ ✓ src/components/student/__tests__/StudentHeaderHighlightHint.test.tsx (5 tests) 1291ms
+   ✓ StudentHeader highlight tool > selects colors and erase mode from the palette while announcing the active mode 445ms
+   ✓ StudentHeader highlight tool > moves focus into the disclosure and restores it after Escape or outside dismissal 409ms
+ ✓ src/features/exam-authoring/api/__tests__/assessmentAuthoringApi.test.ts (8 tests) 38ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/spreadsheet.test.ts (14 tests) 36ms
+ ✓ src/features/exam-authoring/editor/__tests__/richContent.test.ts (9 tests) 10ms
+ ✓ src/features/results/api/__tests__/resultsExport.test.ts (3 tests) 8ms
+ ✓ src/components/student/__tests__/StudentProctorInterventions.test.tsx (3 tests) 2738ms
+   ✓ Student proctor interventions > shows and acknowledges a proctor warning 2612ms
+ ✓ src/features/student-delivery/application/__tests__/satRuntimeSelectors.test.ts (5 tests) 2ms
+ ✓ src/components/student/__tests__/StudentViewportCss.test.ts (8 tests) 8ms
+ ✓ src/components/student/__tests__/WritingTaskNavigator.test.tsx (9 tests) 147ms
+ ✓ src/features/student-delivery/domain/__tests__/satCopy.test.ts (6 tests) 12ms
+ ✓ src/features/student-delivery/domain/__tests__/satAnnotationEducation.test.ts (8 tests) 5ms
+ ✓ src/components/student/__tests__/ActScienceEliminationLatency.test.tsx (2 tests) 219ms
+ ✓ src/features/exam-authoring/editor/plugins/__tests__/insertIngestResult.test.ts (3 tests) 125ms
+ ✓ src/features/exam-authoring/ui/collaboration/__tests__/coeditNavigationGate.test.ts (13 tests) 26ms
+ ✓ src/utils/__tests__/examModuleValidation.test.ts (15 tests) 8ms
+ ✓ src/components/student/providers/__tests__/useStudentTranslationGuard.test.tsx (6 tests) 129ms
+ ✓ src/components/student/__tests__/SubmitConfirmation.test.tsx (13 tests) 153ms
+ ✓ src/services/__tests__/examRepository.cache.test.ts (5 tests) 81ms
+ ✓ src/components/student/__tests__/StudentListening.a11y.test.tsx (4 tests) 433ms
+ ✓ src/components/student/layout/__tests__/StudentExamShell.test.tsx (8 tests) 241ms
+ ✓ src/features/student-delivery/domain/satToolSizePolicy.test.ts (20 tests) 67ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.debounce.test.ts (4 tests) 42ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkEditorSheet.interaction.test.tsx (3 tests) 1552ms
+   ✓ AccessLinkEditorSheet interaction contract > AT-21: an in-flight save is announced, keeps focus, and refuses a second fire 964ms
+   ✓ AccessLinkEditorSheet interaction contract > AT-01: the sheet's choices, toggles, and helper actions all press 342ms
+ ✓ src/features/student-delivery/application/__tests__/satStartCode.test.ts (8 tests) 18ms
+ ✓ src/services/__tests__/studentMutationOutbox.flushNow.test.ts (2 tests) 8ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkRow.interaction.test.tsx (5 tests) 287ms
+ ✓ src/components/student/layout/__tests__/studentExamViewportPolicy.test.ts (10 tests) 5ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/workspaceCommands.test.ts (8 tests) 8ms
+ ✓ src/features/exam-authoring/realtime/__tests__/raceRecovery.test.ts (15 tests) 8ms
+ ✓ src/components/student/__tests__/StudentCompletionSummary.test.tsx (1 test) 468ms
+   ✓ Student completion summary > shows student info and hides per-section answer counts after exam completion 467ms
+ ✓ src/features/exam-authoring/editor/ingestion/adapters/__tests__/clipboardImageFingerprint.test.ts (4 tests) 16ms
+ ✓ src/features/student-delivery/ui/annotations/SatAnnotationDismiss.test.tsx (7 tests) 208ms
+ ✓ src/components/student/__tests__/accessibilityPreferences.test.ts (12 tests) 3ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionIntents.test.ts (6 tests) 3ms
+ ✓ src/components/student/__tests__/FormattedText.test.tsx (10 tests) 176ms
+ ✓ src/features/student-delivery/domain/satExamFit.test.ts (17 tests) 12ms
+ ✓ src/features/exam-authoring/editor/__tests__/EditorFeedback.test.tsx (7 tests) 138ms
+ ✓ src/features/exam-authoring/api/__tests__/examQueries.test.tsx (4 tests) 277ms
+ ✓ src/features/student/application/exam-session/__tests__/submissionCommands.test.ts (5 tests) 16ms
+ ✓ src/features/student-delivery/ui/__tests__/bluebookTokens.test.ts (9 tests) 12ms
+ ✓ src/features/student-delivery/ui/stage/SatStudentStageHost.test.tsx (5 tests) 504ms
+   ✓ SatStudentStageHost > marks the departing stage inert and hidden while it fades 438ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringDraftLifecycle.test.tsx (5 tests) 42ms
+ ✓ src/components/__tests__/ActScienceChoiceLabels.test.tsx (4 tests) 709ms
+   ✓ ACT Science choice labels > lets each question use its own answer-choice letters 639ms
+ ✓ src/test/studentProviderLoss.probe.test.tsx (1 test) 143ms
+ ✓ src/features/student-delivery/ui/question/SatStudentProducedAnswer.test.tsx (14 tests) 443ms
+ ✓ src/products/sat/__tests__/SatRootCollaboration.test.tsx (7 tests) 638ms
+   ✓ SatRoot collaboration boundary > opens the exam room for the authoring surface 373ms
+ ✓ src/features/exam-authoring/editor/plugins/__tests__/smartDropPlugin.test.ts (4 tests) 266ms
+ ✓ src/services/__tests__/gradingRepository.cache.test.ts (3 tests) 4ms
+ ✓ src/utils/__tests__/csvExport.test.ts (6 tests) 53ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionGuards.test.ts (7 tests) 12ms
+ ✓ src/services/__tests__/examRepository.saveConflict.test.ts (3 tests) 49ms
+ ✓ src/components/student/__tests__/ProtectedSelect.test.tsx (5 tests) 266ms
+ ✓ src/features/builder/components/__tests__/PublishConfirmationModal.test.tsx (12 tests) 570ms
+ ✓ src/utils/__tests__/examUtils.actReconciliation.test.ts (6 tests) 8ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/textHtml.test.ts (9 tests) 208ms
+ ✓ src/components/student/highlight/__tests__/selectionObserver.test.ts (7 tests) 12ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/PublishAssessmentDialog.test.tsx (5 tests) 581ms
+ ✓ src/features/student-delivery/ui/__tests__/bluebookOverlays.test.tsx (10 tests) 231ms
+ ✓ src/shared/api/__tests__/coldStart.test.ts (6 tests) 60ms
+ ✓ src/features/exam-authoring/hooks/__tests__/useQuestionAutosave.durability.test.tsx (4 tests) 169ms
+ ✓ src/components/builder/__tests__/SubAnswerTreeEditor.test.tsx (5 tests) 247ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/textHtmlProperties.test.ts (4 tests) 208ms
+ ✓ src/features/student-delivery/application/__tests__/satReadingPreferences.test.ts (5 tests) 4ms
+ ✓ src/components/student/layout/__tests__/studentLayoutCss.test.ts (7 tests) 9ms
+ ✓ src/components/student/__tests__/ProtectedChoiceInput.test.tsx (5 tests) 125ms
+ ✓ src/shared/hooks/__tests__/useLiveUpdatesRole.test.tsx (4 tests) 27ms
+11:59:29 AM [vite] warning: Duplicate "sectionKey" attribute in JSX element
+75 |          // expansion) available at all: without it the menu item is disabled, and a
+76 |          // disabled control swallows the press instead of reporting it.
+77 |          sectionKey="reading-writing"
+   |          ^
+78 |          directions={null}
+79 |          remainingLabel="28:33"
+
+  Plugin: vite:esbuild
+  File: /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student-delivery/ui/SatMoreHelpFlow.test.tsx
+ ✓ src/features/exam-authoring/ui/shell/__tests__/ExamWorkspaceHeader.test.tsx (8 tests) 442ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ExamOverviewPane.test.tsx (4 tests) 220ms
+ ✓ src/features/exam-authoring/realtime/__tests__/schemas.test.ts (7 tests) 16ms
+ ✓ src/services/__tests__/answerHistoryService.test.ts (6 tests) 36ms
+ ✓ src/features/student-delivery/ui/help/SatHelpModal.test.tsx (6 tests) 1429ms
+   ✓ SatHelpModal > renders all seven tool sections collapsed with expand controls 408ms
+   ✓ SatHelpModal > expands one section without affecting others, then expands all 344ms
+ ✓ src/features/student-delivery/ui/SatMoreHelpFlow.test.tsx (2 tests) 1027ms
+   ✓ SatMoreHelpFlow > opens More, launches Help, expands a section, timer untouched 788ms
+ ✓ src/components/student/__tests__/StudentListeningPlaybackRate.test.tsx (5 tests) 468ms
+   ✓ StudentListening playback speed > renders the speed group with the active rate pressed 349ms
+ ✓ src/features/student-delivery/domain/satTiming.test.ts (6 tests) 5ms
+ ✓ src/features/student-delivery/infrastructure/satToolGeometryStore.test.ts (9 tests) 7ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathInputRules.test.ts (6 tests) 130ms
+ ✓ src/components/admin/__tests__/AdminExams.ielts-scope.test.tsx (4 tests) 811ms
+   ✓ AdminExams IELTS scope (AT-06/AT-09) > offers IELTS and ACT providers only at creation (no SAT) 375ms
+ ✓ src/shared/ui/selection-v2/__tests__/pointerCapture.test.ts (5 tests) 57ms
+ ✓ src/features/student/routes/__tests__/studentBundleIsolation.test.ts (3 tests) 8ms
+ ✓ src/components/admin/__tests__/ExamVersionHistory.test.tsx (10 tests) 746ms
+ ✓ src/features/exam-authoring/realtime/__tests__/capabilityDependencies.test.ts (4 tests) 3ms
+ ✓ src/features/exam-authoring/ui/__tests__/ModuleScopePicker.test.tsx (4 tests) 319ms
+ ✓ src/components/student/__tests__/StudentKeyboardOnlyPath.test.tsx (4 tests) 447ms
+ ✓ src/utils/__tests__/writingTaskUtils.test.ts (5 tests) 4ms
+ ✓ src/hooks/__tests__/useCoalescedReload.test.tsx (4 tests) 85ms
+ ✓ src/utils/__tests__/examIdCollisionCheck.test.ts (4 tests) 6ms
+ ✓ src/features/admin/routes/__tests__/LibraryRoute.test.tsx (1 test) 273ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/queueModel.test.ts (5 tests) 6ms
+ ✓ src/features/student-delivery/timing/SatTemporalRuntime.test.tsx (1 test) 265ms
+ ✓ src/components/blocks/__tests__/MatchingFeaturesBlock.test.tsx (4 tests) 301ms
+ ✓ src/components/admin/__tests__/gradingPerStudentPdfFilenameTemplate.test.ts (7 tests) 6ms
+ ✓ src/features/builder/hooks/__tests__/useReviewRouteController.test.tsx (4 tests) 260ms
+ ✓ src/features/student-delivery/application/__tests__/satCalculatorWorkspace.test.ts (6 tests) 62ms
+ ✓ src/features/student-delivery/infrastructure/__tests__/satResumeLocator.test.ts (7 tests) 17ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.bootstrap.test.tsx (2 tests) 215ms
+ ✓ src/features/student/application/exam-session/__tests__/answerCommands.test.ts (3 tests) 25ms
+ ✓ src/features/student-delivery/bootstrap/__tests__/satBootstrapSeed.test.ts (6 tests) 4ms
+ ✓ src/features/student-delivery/application/__tests__/satEntryAck.test.ts (2 tests) 3ms
+ ✓ src/components/__tests__/StimulusPane.actImageUpload.test.tsx (2 tests) 346ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/AnswerKeyField.test.tsx (4 tests) 300ms
+ ✓ src/products/sat/ui/__tests__/satContrastTokens.test.ts (5 tests) 16ms
+ ✓ src/features/exam-authoring/ui/delivery/__tests__/sessionState.test.ts (17 tests) 6ms
+ ✓ src/components/admin/__tests__/GradingExportButtons.test.tsx (2 tests) 470ms
+   ✓ GradingExportButtons > renders the export menu and invokes the matching export callback 456ms
+ ✓ src/components/student/__tests__/accessibilityScale.test.ts (7 tests) 9ms
+ ✓ src/features/exam-authoring/editor/ingestion/application/pipeline.test.ts (4 tests) 11ms
+ ✓ src/components/student/__tests__/StudentMaterialWithQuestionPane.test.tsx (3 tests) 154ms
+ ✓ src/features/exam-authoring/editor/__tests__/composerContext.test.ts (5 tests) 123ms
+ ✓ src/products/sat/routes/__tests__/SatAccessRoute.test.tsx (4 tests) 220ms
+ ✓ src/services/__tests__/studentAttemptNormalization.test.ts (4 tests) 4ms
+ ✓ src/features/student-delivery/ui/primitives/SatCenterModal.test.tsx (6 tests) 394ms
+ ✓ src/features/exam-authoring/contracts/__tests__/accessLinkSections.test.ts (8 tests) 4ms
+ ✓ src/services/__tests__/examAdapterService.test.ts (4 tests) 8ms
+ ✓ src/features/exam-authoring/editor/ingestion/security/guards.test.ts (6 tests) 31ms
+ ✓ src/components/blocks/__tests__/TableCompletionBlock.test.tsx (3 tests) 220ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/accessLinkUi.test.ts (8 tests) 7ms
+ ✓ src/features/student-delivery/ui/break/SatScheduledBreakScreen.test.tsx (4 tests) 302ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/DesmosCalculator.test.tsx (5 tests) 254ms
+ ✓ src/features/exam-authoring/editor/ingestion/exam/analyzeWholeQuestion.test.ts (10 tests) 89ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionSelectors.test.ts (4 tests) 102ms
+ ✓ src/test/architecture/satEntryPathAdoption.test.ts (5 tests) 1613ms
+   ✓ SAT entry ack adoption coverage > has no caller of enterModule that bypasses the entry resolver 1336ms
+ ✓ src/services/__tests__/examDraft.navigation-persistence.test.ts (2 tests) 51ms
+ ✓ src/services/__tests__/examDeliveryService.test.ts (5 tests) 10ms
+ ✓ src/components/blocks/__tests__/AcceptedAnswersBlocks.test.tsx (2 tests) 215ms
+ ✓ src/features/student-delivery/application/__tests__/satFinalizationGate.test.ts (7 tests) 22ms
+ ✓ src/features/student-delivery/ui/reading/SatLineReader.test.tsx (5 tests) 264ms
+ ✓ src/features/student/infrastructure/exam-session/platform/__tests__/browserPlatformMonitors.test.ts (4 tests) 6ms
+ ✓ src/features/exam-authoring/import/__tests__/QuestionImportSheet.test.tsx (5 tests) 885ms
+   ✓ QuestionImportSheet > shows destination and capacity, and disables import with a reason when nothing is valid 459ms
+ ✓ src/components/blocks/__tests__/InstructionFieldConsistency.test.tsx (10 tests) 400ms
+ ✓ src/features/student-delivery/infrastructure/satEliminatorArmStore.test.ts (9 tests) 6ms
+ ✓ src/components/student/__tests__/Lobby.test.tsx (2 tests) 570ms
+   ✓ Lobby > renders the waiting room in the same exam-information shell without a student start action 519ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/AnswerKeyIdentity.test.tsx (2 tests) 2997ms
+   ✓ AnswerKeyField identity-safe reorder > moves a choice by stable id and keeps the key on the same content 1223ms
+   ✓ AnswerKeyField identity-safe reorder > asks before replacing existing supporting material 1764ms
+ ✓ src/features/student-delivery/ui/break/SatBreakRouteFlow.test.tsx (2 tests) 1160ms
+   ✓ SatBreakRouteFlow > More -> Start my break veils with live timer; Return restores 901ms
+ ✓ src/features/builder/hooks/__tests__/useBuilderRouteController.draftHeal.test.tsx (2 tests) 178ms
+ ✓ src/utils/__tests__/deviceFingerprinting.test.ts (3 tests) 346ms
+   ✓ deviceFingerprinting > caches fingerprint generation to avoid creating repeated WebGL contexts 334ms
+ ✓ src/features/exam-authoring/ui/shell/__tests__/examLifecycle.test.ts (7 tests) 6ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/protocol.test.ts (6 tests) 6ms
+ ✓ src/features/exam-authoring/import/__tests__/questionImportParser.test.ts (7 tests) 9ms
+ ✓ src/routes/__tests__/route-contract.test.tsx (6 tests) 30ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/imageImport.test.ts (5 tests) 14ms
+ ✓ src/components/student/__tests__/StudentInteractionMotionCss.test.ts (7 tests) 72ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/sampleExam.test.ts (3 tests) 61ms
+ ✓ src/features/student-delivery/domain/satToolPlacement.test.ts (7 tests) 6ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/DesmosHiddenSilence.test.tsx (6 tests) 512ms
+ ✓ src/features/exam-authoring/ui/settings/__tests__/ExamSettingsSheet.test.tsx (4 tests) 818ms
+   ✓ ExamSettingsSheet > edits settings in place and closes straight away when nothing is unsaved 309ms
+ ✓ src/features/exam-authoring/application/__tests__/authoringShellLifecycle.test.ts (8 tests) 3ms
+ ✓ src/products/sat/ui/__tests__/SegmentedControl.test.tsx (7 tests) 476ms
+   ✓ SatSegmentedControl > announces a radio group and marks the selection 318ms
+ ✓ src/features/exam-authoring/editor/ingestion/normalization/__tests__/markdownInline.test.ts (6 tests) 39ms
+ ✓ src/shared/ui/selection-v2/__tests__/selectionScheduler.test.ts (7 tests) 25ms
+ ✓ src/components/proctor/__tests__/proctorOverviewSessions.test.ts (5 tests) 4ms
+ ✓ src/components/student/__tests__/StudentWriting.undo.test.tsx (2 tests) 507ms
+   ✓ StudentWriting undo guard > blocks keyboard undo shortcuts in the writing editor 487ms
+ ✓ src/features/student-delivery/ui/transitions/__tests__/SatCompleteScreen.test.tsx (4 tests) 189ms
+ ✓ src/features/student/hooks/__tests__/StudentExamSessionProvider.test.tsx (1 test) 42ms
+ ✓ src/features/exam-authoring/routes/__tests__/ProviderPreviewRoute.test.tsx (4 tests) 146ms
+ ✓ src/utils/__tests__/studentObservability.test.ts (9 tests) 10ms
+ ✓ src/features/student/application/exam-session/__tests__/StudentAttemptController.test.ts (2 tests) 6ms
+ ✓ src/utils/__tests__/completionPromptText.test.ts (14 tests) 67ms
+ ✓ src/components/blocks/__tests__/SingleMCQBlock.test.tsx (2 tests) 568ms
+   ✓ SingleMCQBlock > block-local Add Question appends a new question entry 349ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QueueWorklist.test.tsx (2 tests) 587ms
+   ✓ QueueWorklist — scannable worklist > surfaces difficulty at a glance in every row 324ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkShareSheet.test.tsx (5 tests) 555ms
+   ✓ AccessLinkShareSheet > states the section scope on the share sheet 311ms
+ ✓ src/features/exam-authoring/editor/ingestion/architecture.test.ts (3 tests) 50ms
+ ✓ src/components/student/__tests__/StudentZoomableMedia.test.tsx (2 tests) 684ms
+   ✓ StudentZoomableMedia > falls back to alternate sources and opens a zoom-only viewer 479ms
+ ✓ src/app/__tests__/performance/performanceMonitor.test.ts (6 tests) 202ms
+ ✓ src/shared/hooks/__tests__/useAuthoritativeDeadlineClock.test.ts (8 tests) 61ms
+ ✓ src/features/builder/hooks/__tests__/useBuilderAutosave.durability.test.tsx (2 tests) 205ms
+ ✓ src/products/sat/ui/__tests__/satSessionRoomCss.test.ts (3 tests) 6ms
+ ✓ src/components/student/__tests__/highlightSelectionManager.state.test.tsx (8 tests) 24ms
+ ✓ src/utils/__tests__/builderEnhancements.test.ts (7 tests) 5ms
+ ✓ src/features/student-delivery/ui/feedback/__tests__/SatIntegrityWarning.test.tsx (5 tests) 113ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionEscape.test.ts (5 tests) 4ms
+ ✓ src/services/__tests__/actFixturesOracle.phase05.test.ts (5 tests) 6ms
+ ✓ src/services/__tests__/examDeliveryService.policy.test.ts (4 tests) 5ms
+ ✓ src/utils/__tests__/examIdCollisionCheck.actReconciliation.test.ts (4 tests) 6ms
+ ✓ src/components/student/__tests__/StudentWriting.clipboard.test.tsx (2 tests) 184ms
+ ✓ src/components/student/__tests__/PreCheck.test.tsx (2 tests) 2299ms
+   ✓ PreCheck > retries persistence automatically when it fails, without a student action 2098ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/spreadsheetFixtures.test.ts (7 tests) 26ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkRow.test.tsx (3 tests) 180ms
+ ✓ src/services/__tests__/studentIntegrityService.policy.test.ts (5 tests) 4ms
+ ✓ src/features/exam-authoring/ui/collaboration/__tests__/collaborationParticipants.test.ts (3 tests) 3ms
+ ✓ src/features/exam-authoring/editor/__tests__/objectOps.test.ts (2 tests) 63ms
+ ✓ src/components/blocks/__tests__/InsertedImagesEditor.test.tsx (3 tests) 221ms
+ ✓ src/utils/__tests__/examUtils.matching.test.ts (5 tests) 6ms
+ ✓ src/services/__tests__/studentAuditService.test.ts (2 tests) 87ms
+ ✓ src/features/student/infrastructure/__tests__/responseDurabilityTransport.test.ts (4 tests) 5ms
+ ✓ src/components/student/__tests__/support/examFixtures.test.ts (8 tests) 8ms
+ ✓ src/features/student-delivery/infrastructure/satNotesColumnStore.test.ts (6 tests) 6ms
+ ✓ src/components/student/__tests__/HighlightableSurfaceDomStability.test.tsx (4 tests) 41ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatMenu.test.tsx (2 tests) 285ms
+ ✓ src/features/builder/routes/__tests__/ExamReviewRoute.error-retry.test.tsx (2 tests) 116ms
+ ✓ src/features/student-delivery/routes/__tests__/satToolCoexistenceClose.test.tsx (2 tests) 441ms
+ ✓ src/hooks/__tests__/useUndoRedo.test.tsx (4 tests) 29ms
+ ✓ src/features/student-delivery/domain/satToolPolicy.test.ts (6 tests) 3ms
+ ✓ src/utils/__tests__/examStatsFilters.test.ts (6 tests) 4ms
+ ✓ src/components/student/__tests__/useStudentWarningVisibility.test.tsx (2 tests) 18ms
+ ✓ src/services/__tests__/adminPreferencesRepository.backend.test.ts (3 tests) 38ms
+ ✓ src/features/student-delivery/ui/SatFooterTimer.test.tsx (3 tests) 320ms
+ ✓ src/features/student-delivery/application/__tests__/satAnnotationRoundTrip.test.ts (3 tests) 4ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/storeRequest.test.ts (4 tests) 3ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ReadinessControl.test.tsx (4 tests) 112ms
+ ✓ src/features/student/routes/__tests__/StudentSessionRoute.bundle.test.tsx (1 test) 703ms
+   ✓ imports only the resolved provider branch and keeps its own loading surface 702ms
+ ✓ src/features/admin/routes/__tests__/AdminRoot.logout.test.tsx (3 tests) 300ms
+ ✓ src/services/__tests__/studentSessionTransport.test.ts (6 tests) 5ms
+ ✓ src/utils/__tests__/bandScore.test.ts (11 tests) 3ms
+ ✓ src/features/exam-authoring/editor/__tests__/satImagePresentation.test.ts (4 tests) 4ms
+ ✓ src/components/student/__tests__/examPageZoomGuard.test.ts (3 tests) 13ms
+ ✓ src/components/admin/__tests__/ExportBuilderFilters.test.tsx (2 tests) 560ms
+   ✓ ExportBuilderFilters > keeps multi-value filters compact and updates the selected values 445ms
+ ✓ src/components/__tests__/Workspace.memoBoundaries.test.tsx (3 tests) 501ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/useSatReferenceStageSize.lifecycle.test.tsx (2 tests) 86ms
+ ✓ src/features/results/api/__tests__/satRawdataExport.test.ts (4 tests) 11ms
+ ✓ src/utils/__tests__/multiSelectMcq.test.ts (6 tests) 11ms
+ ✓ src/features/builder/routes/__tests__/BuilderRoot.not-found.test.tsx (2 tests) 102ms
+ ✓ k6/sat-response-contract.test.js (4 tests) 5ms
+ ✓ src/products/sat/routes/__tests__/scheduleValidation.test.ts (11 tests) 3ms
+ ✓ src/components/student/__tests__/highlightSelectionPort.test.tsx (3 tests) 12ms
+ ✓ src/features/student-delivery/domain/__tests__/satNoteMarkers.test.ts (7 tests) 17ms
+ ✓ src/features/exam-authoring/editor/__tests__/editorTooltip.test.tsx (3 tests) 365ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineCard.test.tsx (4 tests) 85ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/conversion.test.ts (4 tests) 38ms
+ ✓ src/features/grading/api/__tests__/gradingQueries.test.tsx (2 tests) 92ms
+ ✓ src/components/student/layout/__tests__/CompactStudentHeader.test.tsx (3 tests) 166ms
+ ✓ src/features/student-delivery/ui/shell/SatMoreMenu.test.tsx (4 tests) 205ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathGolden.test.ts (2 tests) 26ms
+ ✓ src/features/scheduling/api/__tests__/scheduleQueries.test.tsx (2 tests) 174ms
+ ✓ src/test/postcss100vhFix.test.ts (2 tests) 13ms
+ ✓ src/products/sat/ui/__tests__/useSatListParams.test.tsx (5 tests) 48ms
+ ✓ src/services/__tests__/examAdapterService.actReconciliation.test.ts (2 tests) 18ms
+ ✓ src/features/auth/__tests__/RequireAuth.freeform.test.tsx (7 tests) 136ms
+ ✓ src/components/student/__tests__/StudentPostExamView.actReconciliation.test.tsx (4 tests) 155ms
+ ✓ src/features/student-delivery/ui/__tests__/satWaveD.test.tsx (3 tests) 303ms
+ ✓ src/features/student/application/exam-session/__tests__/studentExamStore.rendering.test.tsx (1 test) 22ms
+ ✓ src/features/student-delivery/ui/help/SatShortcutsModal.test.tsx (4 tests) 445ms
+ ✓ src/features/student-delivery/ui/transitions/SatTransitionScreens.test.tsx (4 tests) 116ms
+ ✓ src/features/content-library/api/__tests__/libraryQueries.test.tsx (2 tests) 146ms
+ ✓ src/components/__tests__/Workspace.readingEmpty.test.tsx (3 tests) 650ms
+ ✓ src/features/builder/routes/__tests__/ExamConfigRoute.error-retry.test.tsx (2 tests) 100ms
+ ✓ src/features/student/infrastructure/exam-session/__tests__/studentRuntimePoll.test.ts (5 tests) 7ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/Inspector.test.tsx (4 tests) 263ms
+ ✓ src/components/student/__tests__/QuestionNavigatorKeyboard.test.tsx (1 test) 190ms
+ ✓ src/features/student-delivery/ui/break/SatBreakFlow.test.tsx (4 tests) 266ms
+ ✓ src/features/exam-authoring/editor/__tests__/anchoredSurfaces.test.ts (4 tests) 123ms
+ ✓ src/features/student-delivery/ui/reading/__tests__/satExamFitProbe.test.ts (4 tests) 6ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/fieldWriter.test.ts (3 tests) 5ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/presence.test.ts (3 tests) 5ms
+ ✓ src/utils/__tests__/boldMarkdown.test.ts (9 tests) 5ms
+ ✓ src/features/exam-authoring/ui/collaboration/__tests__/CoeditRecoverySurface.test.tsx (3 tests) 181ms
+ ✓ src/components/student/__tests__/appleMobileDevice.test.ts (11 tests) 2ms
+ ✓ src/features/builder/hooks/__tests__/useConfigRouteController.draftHeal.test.tsx (1 test) 90ms
+ ✓ src/components/student/__tests__/StudentHighlightSelectionCss.test.ts (7 tests) 14ms
+ ✓ src/features/student-delivery/domain/__tests__/satMediaWarmUp.test.ts (5 tests) 3ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/htmlSanitizePolicy.test.ts (7 tests) 50ms
+ ✓ src/features/student-delivery/ui/primitives/satOverlayZ.test.ts (3 tests) 2ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkDetail.test.tsx (3 tests) 475ms
+   ✓ AccessLinkDetail > switches to the Activity tab with arrow keys 313ms
+ ✓ src/components/student/__tests__/normalizeReadingPassageText.test.ts (5 tests) 71ms
+ ✓ src/components/blocks/__tests__/InsertedImagesPlacement.test.tsx (2 tests) 151ms
+ ✓ src/services/__tests__/passageLibraryService.revision.test.ts (1 test) 54ms
+ ✓ src/features/student/application/exam-session/__tests__/studentExamStore.test.ts (3 tests) 3ms
+ ✓ src/app/__tests__/integration/errorHandling.integration.test.ts (5 tests) 24ms
+ ✓ src/services/__tests__/questionBankService.revision.test.ts (1 test) 28ms
+ ✓ src/features/exam-authoring/routes/__tests__/ProviderReviewRoute.test.tsx (2 tests) 49ms
+ ✓ src/components/admin/__tests__/ExamBulkActionBar.test.tsx (5 tests) 248ms
+ ✓ src/features/auth/__tests__/AuthSessionProviderUnauthorized.test.tsx (1 test) 187ms
+ ✓ src/services/__tests__/entryQueueFlatEnvelope.test.ts (3 tests) 7ms
+ ✓ src/features/exam-authoring/editor/ingestion/domain/importDocument.test.ts (4 tests) 7ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/altTextSuggestion.test.ts (4 tests) 3ms
+ ✓ src/features/exam-authoring/ui/delivery/__tests__/useAccessSessionBindings.test.tsx (3 tests) 32ms
+ ✓ src/features/exam-authoring/editor/ingestion/security/policy.test.ts (4 tests) 3ms
+ ✓ src/features/student-delivery/application/__tests__/satPollCadence.test.ts (5 tests) 8ms
+ ✓ src/components/__tests__/ActScienceQuestionBuilderPane.actReconciliation.test.tsx (2 tests) 217ms
+ ✓ src/features/auth/__tests__/RequireAuth.test.tsx (2 tests) 175ms
+ ✓ src/components/__tests__/Workspace.loading.test.tsx (3 tests) 202ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathProperties.test.ts (4 tests) 33ms
+ ✓ src/features/exam-authoring/application/__tests__/authoringEntryIntent.test.ts (6 tests) 6ms
+ ✓ src/components/admin/__tests__/gradingReviewUtils.sharedAnswerKeys.test.ts (1 test) 16ms
+ ✓ src/products/sat/ui/__tests__/useSatListReturn.test.tsx (2 tests) 902ms
+   ✓ useSatListReturn > returns from a record to the same filtered list, with the opened row marked and focused 870ms
+ ✓ src/services/__tests__/examRepository.violationRules.test.ts (1 test) 9ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionJumpPalette.test.tsx (2 tests) 353ms
+ ✓ src/utils/__tests__/htmlText.test.ts (8 tests) 11ms
+ ✓ src/features/student-delivery/ui/annotations/satSelectionDragGuard.test.ts (7 tests) 6ms
+ ✓ src/utils/__tests__/answerRuleAutoUpgrade.test.ts (11 tests) 5ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/OverlayStack.test.ts (4 tests) 78ms
+ ✓ src/utils/__tests__/sanitizeHtml.test.ts (8 tests) 114ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineStages.test.tsx (2 tests) 1381ms
+   ✓ Question canvas > uses content sections instead of stages and numbered cards 916ms
+   ✓ Question canvas > shows existing blockers in readiness and routes their real field 463ms
+ ✓ src/features/student-delivery/ui/question/SatSingleChoiceAnswer.guard.test.tsx (2 tests) 109ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathmlConvert.test.ts (5 tests) 22ms
+ ✓ src/components/admin/__tests__/gradingPerStudentWritingPdfGrid.test.ts (1 test) 275ms
+ ✓ src/features/student-delivery/ui/feedback/SatSaveStatus.test.tsx (4 tests) 121ms
+ ✓ src/features/student-delivery/ui/feedback/__tests__/SatLoadingSurface.test.tsx (7 tests) 130ms
+ ✓ src/features/student-delivery/ui/transitions/SatEntrySurfaces.test.tsx (3 tests) 228ms
+ ✓ src/features/student-delivery/hooks/useSatShortcuts.test.tsx (3 tests) 147ms
+ ✓ src/features/student-delivery/domain/satToolActions.test.ts (2 tests) 10ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ReleaseGateCard.test.tsx (3 tests) 217ms
+ ✓ src/test/architecture/coedit-transport-boundary.test.ts (2 tests) 5084ms
+   ✓ coedit transport boundary > does not import the collaborative transport outside the coedit package 5082ms
+ ✓ src/components/student/layout/__tests__/studentCapabilities.test.ts (4 tests) 3ms
+ ✓ src/features/exam-authoring/hooks/__tests__/useQuestionAutosave.offline.test.tsx (1 test) 72ms
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringDialog.test.tsx (2 tests) 280ms
+ ✓ src/components/student/__tests__/autoSaveStatus.test.tsx (5 tests) 87ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/rosterValidation.test.ts (5 tests) 5ms
+ ✓ src/features/results/api/__tests__/ieltsResultDetail.test.ts (1 test) 23ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ValidationChecklist.test.tsx (3 tests) 190ms
+ ✓ src/features/builder/components/__tests__/ValidationSummary.test.tsx (3 tests) 219ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/goldenFixtures.test.ts (3 tests) 57ms
+ ✓ src/products/sat/ui/__tests__/satContractsCss.test.ts (5 tests) 4ms
+ ✓ src/components/proctor/__tests__/StudentCard.test.tsx (2 tests) 90ms
+ ✓ src/components/results/__tests__/resultDetailTables.test.tsx (2 tests) 186ms
+ ✓ src/services/__tests__/gradingService.actReconciliation.test.ts (2 tests) 4ms
+ ✓ src/features/exam-authoring/editor/__tests__/imageObjectActions.test.ts (3 tests) 5ms
+ ✓ src/components/__tests__/QuestionBuilderPane.block-memo.test.tsx (1 test) 67ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/LinksToolbar.interaction.test.tsx (2 tests) 272ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/StageJumpExpands.test.tsx (1 test) 734ms
+   ✓ StageJumpExpands — collapse never strands a focus target > reveals empty explanation and keeps it mounted after one-shot focus clears 733ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpinePreviewSheet.test.tsx (2 tests) 188ms
+ ✓ src/components/student/providers/__tests__/blockingStateMachine.test.ts (4 tests) 3ms
+ ✓ src/services/__tests__/examAdapterService.getExamStateFromEntity.test.ts (1 test) 6ms
+ ✓ src/components/blocks/__tests__/MultiSelectMCQBlock.test.tsx (2 tests) 160ms
+ ✓ src/components/student/__tests__/sanitizeReadingPassageHtml.actWrap.test.ts (2 tests) 121ms
+ ✓ src/components/student/__tests__/StudentPostExamView.test.tsx (2 tests) 127ms
+ ✓ src/features/student-delivery/infrastructure/satAnnotationEducationStore.test.ts (4 tests) 4ms
+ ✓ src/hooks/__tests__/useDelayedLoading.test.ts (4 tests) 41ms
+ ✓ src/services/__tests__/examStatusTransitions.policy.test.ts (6 tests) 2ms
+ ✓ src/features/exam-authoring/editor/ingestion/telemetry/events.test.ts (1 test) 2ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/CoachingLayer.test.tsx (3 tests) 103ms
+ ✓ src/shared/api/__tests__/mutation.retry.test.ts (1 test) 23ms
+ ✓ src/utils/__tests__/imageUrl.test.ts (6 tests) 4ms
+ ✓ src/components/student/__tests__/timeExtensionPolicy.test.ts (4 tests) 6ms
+ ✓ src/features/exam-authoring/editor/__tests__/oneTimeHints.test.ts (3 tests) 4ms
+ ✓ src/features/exam-authoring/ui/__tests__/QuestionPaper.test.tsx (1 test) 51ms
+ ✓ src/features/student-delivery/ui/entry/__tests__/SatWriterLockGate.test.tsx (2 tests) 820ms
+   ✓ SatWriterLockGate > mounts the exam in one tab only and lets the other take over after it closes 801ms
+ ✓ src/services/__tests__/entryQueueRetry.test.ts (5 tests) 6ms
+ ✓ src/features/builder/routes/__tests__/ExamAnswerKeyRoute.error-retry.test.tsx (1 test) 207ms
+ ✓ src/components/student/__tests__/StudentUIProviderHighlight.test.tsx (2 tests) 151ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathConfidence.test.ts (13 tests) 13ms
+ ✓ src/shared/hooks/__tests__/useStudentTimerAnnouncement.test.tsx (3 tests) 18ms
+ ✓ src/utils/__tests__/examStats.actReconciliation.test.ts (2 tests) 14ms
+ ✓ src/features/exam-rendering/api/__tests__/SatQuestionBody.test.tsx (1 test) 25ms
+ ✓ src/features/student-delivery/ui/tools/satToolPointer.test.ts (3 tests) 7ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SaveTruth.test.tsx (1 test) 316ms
+   ✓ SaveTruth — one save vocabulary per question > renders exactly one save status region per question view 315ms
+ ✓ src/components/student/__tests__/ExamEntryCard.test.tsx (4 tests) 110ms
+ ✓ src/features/exam-authoring/api/assessmentAccessLinkQueries.test.tsx (1 test) 13ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/vendorNormalize.test.ts (6 tests) 46ms
+ ✓ src/components/student/layout/__tests__/studentQuestionNavigation.test.ts (1 test) 6ms
+ ✓ src/components/student/layout/__tests__/StudentToolsSheet.test.tsx (2 tests) 214ms
+ ✓ src/components/__tests__/Workspace.science.test.tsx (3 tests) 237ms
+ ✓ src/utils/__tests__/academicSampleExam.test.ts (1 test) 20ms
+ ✓ src/features/student-delivery/domain/satTimerReveal.test.ts (4 tests) 6ms
+ ✓ src/features/student-delivery/domain/__tests__/satNoteEntry.test.ts (4 tests) 443ms
+   ✓ satNoteEntry rules > reads the count the way a person speaks it 440ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/imagePolicy.test.ts (17 tests) 16ms
+ ✓ src/utils/__tests__/objectiveGradingSync.test.ts (3 tests) 5ms
+ ✓ src/products/sat/ui/__tests__/SatStudentLink.test.tsx (2 tests) 525ms
+   ✓ SatStudentLinkCard > copies the room entry URL it is given and confirms it 406ms
+ ✓ src/utils/__tests__/latestOnlyAsync.test.ts (2 tests) 34ms
+ ✓ src/features/builder/components/__tests__/SecurityTab.test.tsx (1 test) 361ms
+   ✓ SecurityTab > does not expose deleted fullscreen controls and still exposes active security controls 359ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatEntryTransitionHold.test.tsx (2 tests) 33ms
+ ✓ src/utils/__tests__/examTextExport.choiceLabels.test.ts (1 test) 22ms
+ ✓ src/features/student/routes/__tests__/StudentSessionRoute.satColdEntry.test.tsx (1 test) 360ms
+   ✓ loads only the SAT branch on a cold SAT entry 359ms
+ ✓ src/features/student/routes/__tests__/StudentSessionRoute.ieltsColdEntry.test.tsx (1 test) 413ms
+   ✓ loads only the IELTS branch on a cold IELTS entry 407ms
+ ✓ src/components/blocks/__tests__/ClozeBlock.answerRule.test.tsx (1 test) 101ms
+ ✓ src/features/student/__tests__/liveSnapshotFreshness.test.ts (4 tests) 3ms
+ ✓ src/products/sat/ui/__tests__/satTypeFloor.test.ts (3 tests) 7ms
+ ✓ src/features/student/application/exam-session/__tests__/reconcileServerSnapshot.test.ts (2 tests) 2ms
+ ✓ src/features/builder/services/__tests__/previewRuntimeSessionService.test.ts (4 tests) 6ms
+ ✓ src/features/answer-history/api/__tests__/answerHistoryQueries.test.tsx (1 test) 94ms
+ ✓ src/utils/__tests__/ttlLruCache.test.ts (3 tests) 3ms
+ ✓ src/components/admin/__tests__/StudentReviewWorkspace.printWriting.test.ts (1 test) 18ms
+ ✓ src/features/student-delivery/timing/satTemporalModel.test.ts (1 test) 3ms
+ ✓ src/shared/ui/touch-selection/__tests__/StudentExamInteractionScope.test.tsx (3 tests) 26ms
+ ✓ src/features/student-delivery/ui/zoom/__tests__/satExamZoomGeometry.test.ts (13 tests) 8ms
+ ✓ src/components/student/__tests__/StudentSpeaking.a11y.test.tsx (1 test) 66ms
+ ✓ src/features/exam-authoring/ui/__tests__/SampleExamLoadDialog.test.tsx (2 tests) 273ms
+ ✓ src/features/student-delivery/domain/satShortcuts.test.ts (3 tests) 5ms
+ ✓ src/shared/hooks/__tests__/useAsyncPolling.test.tsx (1 test) 31ms
+ ✓ src/features/builder/utils/__tests__/builderStateRecovery.test.ts (2 tests) 5ms
+ ✓ src/shared/api/__tests__/entryQueueHeaders.test.ts (1 test) 23ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatStudentResponseEditor.test.tsx (2 tests) 321ms
+ ✓ src/components/writing/__tests__/WritingChartPreview.test.tsx (6 tests) 187ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/screenshotCase.test.ts (7 tests) 21ms
+ ✓ src/components/student/__tests__/ActScienceHighlightGate.repro.test.ts (2 tests) 2ms
+ ✓ src/features/proctor/api/__tests__/proctorQueries.test.tsx (1 test) 88ms
+ ✓ src/components/ui/__tests__/Dialog.test.tsx (3 tests) 356ms
+   ✓ Dialog module > traps Tab focus using live focusable elements 347ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/LinksToolbar.test.tsx (2 tests) 384ms
+   ✓ LinksToolbar > announces the result count and toggles the status filter 356ms
+ ✓ src/components/student/__tests__/resolveObjectiveAnswerUpdate.test.ts (4 tests) 2ms
+ ✓ src/components/student/__tests__/useStudentQuestionPaneComposition.test.ts (2 tests) 4ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatAuthoringStateSurfaces.test.tsx (2 tests) 229ms
+ ✓ src/utils/__tests__/insertedImages.test.ts (3 tests) 16ms
+ ✓ src/features/exam-authoring/routes/__tests__/ProviderBuilderRoute.split.test.tsx (1 test) 337ms
+   ✓ ProviderBuilderRoute branch loading > loads only the selected provider authoring branch 335ms
+ ✓ src/features/student-delivery/__tests__/heartbeatCoalesce.test.ts (4 tests) 2ms
+ ✓ src/features/student/application/exam-session/__tests__/createStudentExamSession.test.ts (1 test) 9ms
+ ✓ src/components/student/__tests__/StudentQuestionNumber.test.tsx (2 tests) 29ms
+ ✓ src/utils/__tests__/audioUrl.test.ts (4 tests) 4ms
+ ✓ src/components/admin/__tests__/gradingPerStudentObjectiveTableRows.test.ts (2 tests) 6ms
+ ✓ src/app/validation/__tests__/schemas.registration.test.ts (7 tests) 9ms
+ ✓ src/features/exam-rendering/__tests__/structuredImageAssets.test.ts (2 tests) 5ms
+ ✓ scripts/eslint-rules/__tests__/authoring-materials.test.ts (1 test) 3ms
+ ✓ src/components/admin/__tests__/studentAnswerComparison.test.ts (4 tests) 15ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/contentTemplates.test.ts (3 tests) 41ms
+ ✓ src/services/__tests__/developmentFixtures.test.ts (2 tests) 42ms
+ ✓ src/components/student/__tests__/StudentFooterOverlayLayout.test.ts (5 tests) 33ms
+ ✓ src/components/admin/__tests__/buildPerStudentZipPdfExportInput.test.ts (1 test) 21ms
+ ✓ src/components/student/__tests__/preCheckChecks.test.ts (1 test) 37ms
+ ✓ src/components/student/__tests__/studentHighlightToolContext.test.ts (1 test) 22ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/studentResponse.test.ts (14 tests) 33ms
+ ✓ src/components/student/__tests__/StudentHeaderTimerAnnouncement.test.tsx (1 test) 567ms
+   ✓ StudentHeader timer announcements > announces the 5-minute warning once and never per tick (T2.5) 564ms
+ ✓ src/components/student/__tests__/StudentSplitPaneCss.test.ts (3 tests) 7ms
+ ✓ src/shared/api/__tests__/queryClient.retry.test.ts (4 tests) 26ms
+ ✓ src/features/exam-authoring/editor/__tests__/RichContentIdentityExtension.test.ts (1 test) 322ms
+   ✓ rich content editing identities > gives a split paragraph a distinct ID that survives subsequent typing 319ms
+ ✓ src/features/student/domain/exam-session/__tests__/terminalState.test.ts (1 test) 25ms
+ ✓ src/test/architecture/feature-internal-boundary.test.ts (1 test) 15846ms
+   ✓ feature internal boundary > does not let consumers outside a feature import its internals directly 15824ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ReleaseReadinessParity.test.tsx (1 test) 235ms
+ ✓ src/components/__tests__/Header.titleSync.test.tsx (1 test) 196ms
+ ✓ src/features/exam-rendering/answers/__tests__/StudentProducedAnswer.test.tsx (2 tests) 105ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineQueueSheet.test.tsx (2 tests) 693ms
+   ✓ SpineQueueSheet > labels the sheet for the queue in build mode 595ms
+ ✓ src/services/__tests__/examDeliveryService.actReconciliation.test.ts (2 tests) 5ms
+ ✓ src/services/__tests__/authService.session.test.ts (2 tests) 9ms
+ ✓ src/components/student/__tests__/StudentTranslationGuardCss.test.ts (1 test) 41ms
+ ✓ src/utils/__tests__/acceptedAnswers.test.ts (3 tests) 9ms
+ ✓ src/features/exam-authoring/ui/__tests__/WorkbookImportUndoBanner.test.tsx (2 tests) 533ms
+   ✓ WorkbookImportUndoBanner > offers one restrained undo action after a workbook import 485ms
+ ✓ src/test/architecture/architecture-baseline.test.ts (2 tests) 8ms
+ ✓ src/features/student/infrastructure/exam-session/__tests__/studentRealtimeRollout.test.ts (1 test) 15ms
+ ✓ src/components/__tests__/Header.preview.test.tsx (1 test) 120ms
+ ✓ src/components/admin/__tests__/AdminExams.empty-state.test.tsx (1 test) 1278ms
+   ✓ AdminExams empty state > guides the first exam creation when the library is empty 1271ms
+ ✓ src/features/student/api/access-link/studentAccessLinkQueries.test.ts (2 tests) 16ms
+ ✓ src/components/admin/__tests__/gradingExportProfiles.test.ts (1 test) 135ms
+ ✓ src/services/__tests__/examAdapterService.adaptExamEntitiesToLegacyExams.test.ts (1 test) 8ms
+ ✓ src/app/validation/__tests__/schemas.session.test.ts (1 test) 15ms
+ ✓ src/components/student/__tests__/prefersReducedMotion.test.ts (2 tests) 4ms
+ ✓ src/features/builder/components/__tests__/BasicInfoTab.test.tsx (1 test) 105ms
+ ✓ src/components/passage/__tests__/PassageListSidebar.test.tsx (1 test) 66ms
+ ✓ src/features/student/application/exam-session/__tests__/studentPlatformEventPolicy.test.ts (2 tests) 4ms
+ ✓ src/utils/__tests__/validationHelpers.test.ts (2 tests) 4ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/satToolPlacementRuntime.test.ts (1 test) 67ms
+ ✓ src/store/__tests__/useUIStore.test.ts (1 test) 43ms
+ ✓ src/features/builder/components/__tests__/ModulesTab.test.tsx (1 test) 86ms
+ ✓ src/test/architecture/browser-secrets.test.ts (1 test) 28ms
+ ✓ src/utils/__tests__/staffDraftKey.test.ts (2 tests) 3ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionFilterMenu.test.tsx (1 test) 406ms
+   ✓ QuestionFilterMenu > shows real counts only and forwards stable filter IDs 401ms
+ ✓ src/components/student/__tests__/tabletMode.test.ts (2 tests) 2ms
+ ✓ src/utils/__tests__/blankPlaceholders.test.ts (2 tests) 4ms
+ ✓ src/utils/__tests__/idUtils.test.ts (2 tests) 4ms
+ ✓ src/test/architecture/layer-dependencies.test.ts (1 test) 6473ms
+   ✓ frontend layer dependencies > does not add dependencies outside the permitted layer direction 6471ms
+ ✓ src/test/architecture/legacy-services.test.ts (2 tests) 12501ms
+   ✓ legacy service architecture guard > does not add service imports outside approved infrastructure adapters 12498ms
+ ✓ src/test/architecture/forbidden-browser-boundaries.test.ts (1 test) 8474ms
+   ✓ domain and application boundaries > does not add framework or browser dependencies to domain/application code 8469ms
+ ✓ src/components/student/__tests__/StudentDialogCss.test.ts (1 test) 8ms
+ ✓ src/test/architecture/domain-purity.test.ts (1 test) 9166ms
+   ✓ feature domain purity > does not add framework, browser, or service dependencies to domain code 9162ms
+ ✓ src/test/architecture/feature-isolation.test.ts (1 test) 9142ms
+   ✓ feature isolation > does not add imports across feature internals 9141ms
+ ✓ src/products/sat/routes/satTestTime.test.ts (1 test) 147ms
+ ✓ src/services/__tests__/libraryPersistenceMode.test.ts (1 test) 18ms
+(node:43023) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ✓ src/test/developmentEnvironment.test.ts (2 tests) 44ms
+ ✓ src/features/builder/routes/__tests__/builder-route-modules.test.tsx (1 test) 2541ms
+   ✓ builder route modules > exports the config and review route components used by lazy routing 2538ms
+
+ Test Files  783 passed (783)
+      Tests  6656 passed | 2 skipped (6658)
+   Start at  11:56:54
+   Duration  287.02s (transform 57.87s, setup 242.92s, collect 322.16s, tests 444.82s, environment 507.61s, prepare 83.51s)
+

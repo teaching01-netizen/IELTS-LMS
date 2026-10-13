@@ -40,6 +40,11 @@ const (
 	ReleaseInvalidated     = "invalidated"
 )
 
+// SATScoreReportOpenSQL reports whether an SAT attempt's student score report
+// is open: the exam's report switch is on and the attempt sat a classroom
+// session. Standard Practice sittings never get a report, whatever the switch.
+const SATScoreReportOpenSQL = "SELECT COALESCE(e.sat_score_report_enabled, FALSE) AND COALESCE(sch.sat_session_mode, 'practice') = 'classroom' FROM student_attempts sa JOIN exam_schedules sch ON sch.id = sa.schedule_id JOIN exam_entities e ON e.id = sch.exam_id WHERE sa.id = ?"
+
 // Analytics aggregates release counters over the latest student_results
 // versions (mirrors ResultsAnalytics: total_results, released_results,
 // ready_to_release, average_overall_band, camelCase wire shape).
@@ -858,8 +863,8 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 	// aggregates stay authoritative, so a detail-query failure degrades to
 	// empty detail instead of failing the whole result.
 	if sum.Outcome == OutcomeScored {
-		if modules, byModule, err := s.satModules(ctx, attemptID); err == nil {
-			attachSATModules(sections, modules, byModule)
+		if modules, sectionKeys, err := s.satModules(ctx, attemptID); err == nil {
+			attachSATModules(sections, modules, sectionKeys)
 		}
 		questions, err := s.satQuestions(ctx, attemptID)
 		if err != nil {
@@ -1013,8 +1018,9 @@ func (s *Service) satSections(ctx context.Context, resultID string) ([]SATSectio
 // satModules loads one row per administered module attempt for an SAT
 // attempt, ordered by section then module display order. Attempts without
 // module rows (provisional, invalidated) yield an empty slice, never an
-// error, so section aggregates stay authoritative.
-func (s *Service) satModules(ctx context.Context, attemptID string) ([]SATModule, map[string]string, error) {
+// error, so section aggregates stay authoritative. The second slice holds
+// each module's section key: module_key is unique only within a section.
+func (s *Service) satModules(ctx context.Context, attemptID string) ([]SATModule, []string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.section_key, m.module_key, m.adaptive_role, m.display_order,
 			ma.state, ma.raw_correct, ma.operational_question_count
@@ -1028,7 +1034,7 @@ func (s *Service) satModules(ctx context.Context, attemptID string) ([]SATModule
 	}
 	defer rows.Close()
 	modules := []SATModule{}
-	byModule := map[string]string{}
+	sectionKeys := []string{}
 	for rows.Next() {
 		var sectionKey, moduleKey, role, state string
 		var displayOrder int
@@ -1047,13 +1053,13 @@ func (s *Service) satModules(ctx context.Context, attemptID string) ([]SATModule
 			mod.Operational = operational.Int64
 		}
 		modules = append(modules, mod)
-		byModule[moduleKey] = sectionKey
+		sectionKeys = append(sectionKeys, sectionKey)
 	}
-	return modules, byModule, rows.Err()
+	return modules, sectionKeys, rows.Err()
 }
 
-// attachSATModules nests each administered module under its section.
-func attachSATModules(sections []SATSection, modules []SATModule, byModule map[string]string) {
+// attachSATModules nests modules[i] under the section keyed sectionKeys[i].
+func attachSATModules(sections []SATSection, modules []SATModule, sectionKeys []string) {
 	if len(modules) == 0 {
 		return
 	}
@@ -1064,12 +1070,11 @@ func attachSATModules(sections []SATSection, modules []SATModule, byModule map[s
 			sections[i].Modules = []SATModule{}
 		}
 	}
-	for _, mod := range modules {
-		sectionKey, ok := byModule[mod.ModuleKey]
-		if !ok {
-			continue
+	for i, mod := range modules {
+		if i >= len(sectionKeys) {
+			break
 		}
-		pos, ok := index[sectionKey]
+		pos, ok := index[sectionKeys[i]]
 		if !ok {
 			continue
 		}
@@ -1088,6 +1093,15 @@ func attachSATModules(sections []SATSection, modules []SATModule, byModule map[s
 // 500, and order deterministically by section/module/question display
 // order so large adaptive exams paginate stably on the client.
 func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQuestion, error) {
+	return satQuestionsQ(ctx, s.db, attemptID)
+}
+
+// rowQuerier is the read surface shared by *sql.DB and a transaction.
+type rowQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func satQuestionsQ(ctx context.Context, db rowQuerier, attemptID string) ([]SATQuestion, error) {
 	out := []SATQuestion{}
 	// V2-first read (exam-day P0): student answers written through the V2
 	// durability transport live in attempt_responses_v2; legacy
@@ -1097,7 +1111,7 @@ func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQues
 	// identity AND owning module + the attempt's published version, eq.id
 	// match first; Go-side dedup keeps exactly one row per eq.id so a
 	// question_id reused across modules/versions can't project phantoms.
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := db.QueryContext(ctx, `
 		SELECT s.section_key, m.module_key, m.display_order, eq.display_order,
 			eq.id AS exam_question_id, eq.question_id, eq.is_pretest, ar.marked_for_review, ar.response,
 			CAST(qr.answer_definition AS CHAR), CAST(v.response AS CHAR), v.response IS NOT NULL,

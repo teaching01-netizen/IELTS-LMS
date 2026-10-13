@@ -4,6 +4,7 @@ import { useUpdateSectionDeliverySettings } from "../../api/assessmentQueries";
 import type { AssessmentSectionShell } from "../../contracts/assessment";
 import { operationalCountForSection, secondsToMinutes, toUserFacingReleaseError } from "./releaseSelectors";
 import { NumericField } from "./NumericField";
+import { ClassroomPlanField } from "./ClassroomPlanField";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
 
 interface SectionDeliveryEditorProps {
@@ -319,6 +320,8 @@ function SectionDeliveryEditorInner({
           </p>
         </div>
       </div>
+
+      <ClassroomPlanField examId={examId} sectionKey={section.sectionKey} canEdit={effectiveCanEdit} />
 
       {localError ? (
         <p role="alert" className="mt-3 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">

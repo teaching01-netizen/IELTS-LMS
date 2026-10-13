@@ -277,6 +277,11 @@ type CreateRequest struct {
 	OpensAt          *time.Time
 	ClosesAt         *time.Time
 	SelectedStudents []MemberInput
+	// SatRoutePolicy is the SAT Practice Classroom Module 2 policy:
+	// "adaptive" (default), "force_lower", "force_higher" or "staff_selects".
+	SatRoutePolicy string
+	// SatSessionMode is "practice" (default) or "classroom".
+	SatSessionMode string
 }
 
 // UpdateRequest mirrors UpdateAssessmentAccessLinkRequest (revision fenced;
@@ -846,7 +851,7 @@ func listMembersTx(ctx context.Context, q tx.Tx, linkID string) ([]MemberInput, 
 
 // insertBackingScheduleTx writes the exam_schedules row behind a link. The
 // column shape follows internal/schedules Create.
-func insertBackingScheduleTx(ctx context.Context, q tx.Tx, scheduleID, examID string, pin examPin, cohort string, start, end time.Time, createdBy string) error {
+func insertBackingScheduleTx(ctx context.Context, q tx.Tx, scheduleID, examID string, pin examPin, cohort string, start, end time.Time, createdBy string, satSession examdomain.SATSession, scope []string) error {
 	planned := int(end.Sub(start).Minutes())
 	if planned < 1 {
 		planned = 1
@@ -867,7 +872,24 @@ func insertBackingScheduleTx(ctx context.Context, q tx.Tx, scheduleID, examID st
 	if err != nil {
 		return err
 	}
-	return satstartcode.ApplyCreateModeTx(ctx, q, scheduleID, mode, createdBy)
+	if err := satstartcode.ApplyCreateModeTx(ctx, q, scheduleID, mode, createdBy); err != nil {
+		return err
+	}
+	return persistLinkSATSession(ctx, q, scheduleID, pin, satSession, scope)
+}
+
+// persistLinkSATSession stores the classroom configuration on the backing
+// schedule, validated against the link's effective section scope.
+func persistLinkSATSession(ctx context.Context, q tx.Tx, scheduleID string, pin examPin, session examdomain.SATSession, enabledSections []string) error {
+	var linkScope map[string]bool
+	if enabledSections != nil {
+		linkScope = make(map[string]bool, len(enabledSections))
+		for _, key := range enabledSections {
+			linkScope[key] = true
+		}
+	}
+	scope := examdomain.IntersectSectionScopes(examdomain.ParseSATPublishScope(string(pin.publishScope)), linkScope)
+	return examdomain.PersistSATSession(ctx, q, scheduleID, pin.providerKey, pin.versionID, session, scope)
 }
 
 func insertLinkTx(ctx context.Context, q tx.Tx, linkID, examID, versionID, scheduleID, name string, enabledSections []string, audience AudienceType, label *string, mode Mode, availability AvailabilityType, opensAt, closesAt *time.Time, createdBy string) error {
@@ -988,6 +1010,10 @@ func (s *Service) Create(ctx context.Context, examID, createdBy string, req Crea
 	if err != nil {
 		return zero, err
 	}
+	satSession, err := examdomain.ParseSATSession(req.SatSessionMode, req.SatRoutePolicy)
+	if err != nil {
+		return zero, err
+	}
 	cohort := name
 	if label != nil {
 		cohort = *label
@@ -1002,7 +1028,7 @@ func (s *Service) Create(ctx context.Context, examID, createdBy string, req Crea
 		if err := validateEffectiveSections(pin.providerKey, pin.publishScope, enabledSections); err != nil {
 			return err
 		}
-		if err := insertBackingScheduleTx(ctx, q, scheduleID, examID, pin, cohort, start, end, createdBy); err != nil {
+		if err := insertBackingScheduleTx(ctx, q, scheduleID, examID, pin, cohort, start, end, createdBy, satSession, enabledSections); err != nil {
 			return err
 		}
 		if err := insertLinkTx(ctx, q, linkID, examID, pin.versionID, scheduleID, name, enabledSections, req.AudienceType, label, req.AccessMode, req.AvailabilityType, req.OpensAt, req.ClosesAt, createdBy); err != nil {
@@ -1310,7 +1336,13 @@ func (s *Service) Duplicate(ctx context.Context, linkID, createdBy string, req D
 		if label != nil {
 			cohort = *label
 		}
-		if err := insertBackingScheduleTx(ctx, q, newScheduleID, source.examID, pin, cohort, start, end, createdBy); err != nil {
+		// A copied classroom link keeps its session mode and Module 2 policy;
+		// they are revalidated against the (possibly newer) pinned version.
+		sourcePolicy, err := examdomain.SATSessionForLink(ctx, q, linkID)
+		if err != nil {
+			return err
+		}
+		if err := insertBackingScheduleTx(ctx, q, newScheduleID, source.examID, pin, cohort, start, end, createdBy, sourcePolicy, parseEnabledSections(source.enabledSections)); err != nil {
 			return err
 		}
 		if err := insertLinkTx(ctx, q, newLinkID, source.examID, pin.versionID, newScheduleID, normalizedName, parseEnabledSections(source.enabledSections), audienceType, label, accessMode, availability, opensAt, closesAt, createdBy); err != nil {

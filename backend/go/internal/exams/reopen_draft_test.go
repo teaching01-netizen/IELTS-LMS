@@ -41,12 +41,12 @@ func TestReopenDraftHealsOrphanDraftExam(t *testing.T) {
 			"id", "slug", "title", "provider_key", "provider_exam_type",
 			"exam_type", "status", "visibility", "organization_id", "owner_id",
 			"current_draft_version_id", "current_published_version_id",
-			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number",
+			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled",
 		}).AddRow(
 			"exam-orphan", "orphan", "Orphan Exam", "ielts", nil,
 			"Academic", "draft", "organization", nil, "owner-1",
 			nil, nil,
-			1, 0, time.Now(), time.Now(), nil, nil,
+			1, 0, time.Now(), time.Now(), nil, nil, false,
 		))
 	// No surviving versions.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE exam_id = ?")).
@@ -115,12 +115,12 @@ func TestReopenDraftClonesPublishedSnapshot(t *testing.T) {
 			"id", "slug", "title", "provider_key", "provider_exam_type",
 			"exam_type", "status", "visibility", "organization_id", "owner_id",
 			"current_draft_version_id", "current_published_version_id",
-			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number",
+			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled",
 		}).AddRow(
 			"exam-sealed", "sealed", "Sealed Exam", "ielts", nil,
 			"Academic", "published", "organization", nil, "owner-1",
 			nil, "ver-pub",
-			1, 7, time.Now(), time.Now(), "reading-writing", 3,
+			1, 7, time.Now(), time.Now(), "reading-writing", 3, false,
 		))
 	// Latest surviving version is the published seal; reuse its snapshots.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE exam_id = ?")).
@@ -185,12 +185,12 @@ func TestReopenDraftReturnsExistingDraft(t *testing.T) {
 			"id", "slug", "title", "provider_key", "provider_exam_type",
 			"exam_type", "status", "visibility", "organization_id", "owner_id",
 			"current_draft_version_id", "current_published_version_id",
-			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number",
+			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled",
 		}).AddRow(
 			"exam-live", "live", "Live Exam", "ielts", nil,
 			"Academic", "draft", "organization", nil, "owner-1",
 			"ver-live", nil,
-			1, 1, time.Now(), time.Now(), nil, nil,
+			1, 1, time.Now(), time.Now(), nil, nil, false,
 		))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id = ?")).
 		WithArgs("ver-live").

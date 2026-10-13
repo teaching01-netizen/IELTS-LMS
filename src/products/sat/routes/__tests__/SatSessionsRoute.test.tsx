@@ -105,7 +105,7 @@ describe('SatSessionsRoute', () => {
   it('requests SAT-only room and exam boundaries', () => {
     renderRoute();
     expect(useSummariesMock).toHaveBeenCalledWith(4_000, 'sat');
-    expect(useExamListQueryMock).toHaveBeenCalledWith(true, 'sat');
+    expect(useExamListQueryMock).toHaveBeenCalledWith(true, 'sat', false);
     expect(screen.getByText(/SAT Published ·/)).toBeInTheDocument();
   });
 

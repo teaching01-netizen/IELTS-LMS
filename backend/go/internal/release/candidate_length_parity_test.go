@@ -72,7 +72,9 @@ func releaseParityPool(t *testing.T) *sql.DB {
 		t.Fatalf("ping scratch pool: %v", err)
 	}
 	for _, stmt := range []string{
-		"CREATE TABLE assessment_sections (id VARCHAR(36) PRIMARY KEY, exam_version_id VARCHAR(64) NOT NULL, break_after_seconds INT NOT NULL DEFAULT 0)",
+		"CREATE TABLE exam_versions (id VARCHAR(64) PRIMARY KEY, sat_publish_scope VARCHAR(32) NULL)",
+		"INSERT INTO exam_versions (id) VALUES ('pv-parity')",
+		"CREATE TABLE assessment_sections (id VARCHAR(36) PRIMARY KEY, exam_version_id VARCHAR(64) NOT NULL, section_key VARCHAR(32) NOT NULL DEFAULT '', display_order INT NOT NULL DEFAULT 0, break_after_seconds INT NOT NULL DEFAULT 0)",
 		"CREATE TABLE assessment_modules (id VARCHAR(36) PRIMARY KEY, section_id VARCHAR(36) NOT NULL, adaptive_role VARCHAR(32) NOT NULL DEFAULT '', duration_seconds INT NOT NULL DEFAULT 0, target_question_count INT NOT NULL DEFAULT 0)",
 		"CREATE TABLE assessment_exam_questions (id VARCHAR(36) PRIMARY KEY, module_id VARCHAR(36) NOT NULL)",
 	} {

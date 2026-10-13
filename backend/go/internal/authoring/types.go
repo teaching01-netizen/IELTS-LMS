@@ -10,11 +10,12 @@ import (
 // Shell is the editable-draft projection (exam + sections + modules +
 // questions). Wire shape mirrors AssessmentAuthoringShell (camelCase).
 type Shell struct {
-	ExamID          string    `json:"examId"`
-	ProviderKey     string    `json:"providerKey"`
-	VersionID       string    `json:"versionId"`
-	VersionRevision int       `json:"versionRevision"`
-	Sections        []Section `json:"sections"`
+	ExamID                    string    `json:"examId"`
+	ProviderKey               string    `json:"providerKey"`
+	VersionID                 string    `json:"versionId"`
+	VersionRevision           int       `json:"versionRevision"`
+	Sections                  []Section `json:"sections"`
+	SingleModuleImportEnabled bool      `json:"singleModuleImportEnabled,omitempty"`
 }
 
 // Section is one draft section with modules + optional routing policy.

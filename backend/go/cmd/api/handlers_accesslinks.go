@@ -33,6 +33,8 @@ type accessLinkCreateBody struct {
 	OpensAt            *time.Time                   `json:"opensAt"`
 	ClosesAt           *time.Time                   `json:"closesAt"`
 	SelectedStudents   []accesslinks.MemberInput    `json:"selectedStudents"`
+	SatRoutePolicy     string                       `json:"satRoutePolicy"`
+	SatSessionMode     string                       `json:"satSessionMode"`
 }
 
 // accessLinkUpdateBody mirrors UpdateAssessmentAccessLinkRequest (camelCase;
@@ -136,6 +138,8 @@ func examLinkCreate(app *App) http.HandlerFunc {
 			OpensAt:            body.OpensAt,
 			ClosesAt:           body.ClosesAt,
 			SelectedStudents:   body.SelectedStudents,
+			SatRoutePolicy:     body.SatRoutePolicy,
+			SatSessionMode:     body.SatSessionMode,
 		})
 		if err != nil {
 			httpx.WriteError(w, r, err)

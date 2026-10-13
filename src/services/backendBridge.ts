@@ -49,6 +49,7 @@ type BackendExamEntity = {
   currentPublishedVersionId?: string | null | undefined;
   currentPublishedScope?: SatPublishScope | null | undefined;
   currentPublishedVersionNumber?: number | null | undefined;
+  satScoreReportEnabled?: boolean | undefined;
   totalQuestions?: number | null | undefined;
   totalReadingQuestions?: number | null | undefined;
   totalListeningQuestions?: number | null | undefined;
@@ -126,6 +127,8 @@ type BackendExamSchedule = {
   publishedVersionId: string;
   publishScope?: SatPublishScope | undefined;
   satStartMode?: ExamSchedule["satStartMode"];
+  satSessionMode?: ExamSchedule["satSessionMode"];
+  satRoutePolicy?: ExamSchedule["satRoutePolicy"];
   cohortName: string;
   institution?: string | null | undefined;
   startTime: string;
@@ -420,13 +423,15 @@ export function buildCreateAssessmentExamPayload(input: {
 }
 
 export function buildUpdateExamPayload(
-  exam: Pick<ExamEntity, "title" | "status" | "visibility">,
+  exam: Pick<ExamEntity, "title" | "status" | "visibility" | "providerKey" | "satScoreReportEnabled">,
   revision: number
 ) {
   return compactObject({
     title: exam.title,
     status: exam.status,
     visibility: exam.visibility,
+    // The server rejects this field on non-SAT exams.
+    satScoreReportEnabled: exam.providerKey === "sat" ? exam.satScoreReportEnabled : undefined,
     revision,
   });
 }
@@ -445,6 +450,8 @@ export function buildCreateSchedulePayload(
     | "autoStart"
     | "autoStop"
     | "satStartMode"
+    | "satSessionMode"
+    | "satRoutePolicy"
   >
 ) {
   return {
@@ -459,6 +466,8 @@ export function buildCreateSchedulePayload(
     autoStart: schedule.autoStart,
     autoStop: schedule.autoStop,
     satStartMode: schedule.satStartMode,
+    satSessionMode: schedule.satSessionMode,
+    satRoutePolicy: schedule.satRoutePolicy,
   };
 }
 
@@ -500,6 +509,7 @@ export function mapBackendExamEntity(payload: BackendExamEntity): ExamEntity {
     currentPublishedVersionId: payload.currentPublishedVersionId ?? null,
     currentPublishedScope: payload.currentPublishedScope ?? null,
     currentPublishedVersionNumber: payload.currentPublishedVersionNumber ?? null,
+    satScoreReportEnabled: payload.satScoreReportEnabled === true,
     canEdit: payload.canEdit === true,
     canPublish: payload.canPublish === true,
     canDelete: payload.canDelete === true,
@@ -592,6 +602,8 @@ export function mapBackendSchedule(payload: BackendExamSchedule): ExamSchedule {
     publishedVersionId: payload.publishedVersionId,
     publishScope: payload.publishScope,
     satStartMode: payload.satStartMode ?? "proctor",
+    satSessionMode: payload.satSessionMode ?? "practice",
+    satRoutePolicy: payload.satRoutePolicy,
     cohortName: payload.cohortName,
     institution: payload.institution ?? undefined,
     startTime: payload.startTime,

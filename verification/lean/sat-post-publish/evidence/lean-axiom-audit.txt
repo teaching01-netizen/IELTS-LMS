@@ -1,0 +1,113 @@
+SATPostPublish.reachable_publication_provenance {s : SATPostPublish.TrackedState}
+  (h : SATPostPublish.TrackedReachable s) : SATPostPublish.PublicationProvenance s
+SATPostPublish.acknowledged_receipt_has_commit {s : SATPostPublish.TrackedState} (h : SATPostPublish.TrackedReachable s)
+  (target : SATPostPublish.Target) (hReceipt : s.client.receipt = some target) : target ∈ s.publications
+SATPostPublish.tracked_step_refines_client_step (s : SATPostPublish.TrackedState) (action : SATPostPublish.Action) :
+  (SATPostPublish.trackedStep s action).client = SATPostPublish.step s.client action
+SATPostPublish.tracked_success_is_reachable (target : SATPostPublish.Target) :
+  ∃ s, SATPostPublish.TrackedReachable s ∧ s.client.receipt = some target ∧ target ∈ s.publications
+'SATPostPublish.reachable_publication_provenance' depends on axioms: [propext, Quot.sound]
+'SATPostPublish.acknowledged_receipt_has_commit' depends on axioms: [propext, Quot.sound]
+'SATPostPublish.tracked_step_refines_client_step' does not depend on any axioms
+'SATPostPublish.tracked_success_is_reachable' depends on axioms: [propext]
+SATPostPublish.all_reachable_receipts_belong_to_active_exam {s : SATPostPublish.State}
+  (h : SATPostPublish.Reachable s) : SATPostPublish.ReceiptSound s
+SATPostPublish.shell_answer_preserves_sheet_identity (s : SATPostPublish.State)
+  (shell : SATPostPublish.ShellProjection) :
+  let next := SATPostPublish.step s (SATPostPublish.Action.shellAnswered shell);
+  next.sheetInstance = s.sheetInstance ∧ next.sheetMounted = s.sheetMounted ∧ next.sheetOpen = s.sheetOpen
+SATPostPublish.receipt_survives_release_success (s : SATPostPublish.State) (projection : Option SATPostPublish.Target) :
+  (SATPostPublish.step s (SATPostPublish.Action.releaseReadSucceeded projection)).receipt = s.receipt
+SATPostPublish.receipt_survives_release_failure (s : SATPostPublish.State) :
+  (SATPostPublish.step s SATPostPublish.Action.releaseReadFailed).receipt = s.receipt
+SATPostPublish.receipt_survives_held_release_read (s : SATPostPublish.State) :
+  (SATPostPublish.step s SATPostPublish.Action.releaseReadHeld).receipt = s.receipt
+SATPostPublish.valid_ack_shows_success_if_sheet_is_open (s : SATPostPublish.State) (target : SATPostPublish.Target)
+  (hOpen : s.sheetOpen = true)
+  (hCommitted : s.outcome = SATPostPublish.PublishOutcome.committed ∧ s.committedTarget = some target)
+  (hExam : target.examId = s.examId) :
+  SATPostPublish.successVisible (SATPostPublish.step s (SATPostPublish.Action.acknowledge target))
+SATPostPublish.create_room_uses_acknowledged_target (s : SATPostPublish.State) (target : SATPostPublish.Target)
+  (hReceipt : s.receipt = some target) :
+  (SATPostPublish.step s SATPostPublish.Action.createRoom).roomTarget = some target
+SATPostPublish.create_room_stays_pinned_after_remote_publish (s : SATPostPublish.State)
+  (acknowledged newer : SATPostPublish.Target) (hReceipt : s.receipt = some acknowledged) :
+  (SATPostPublish.step (SATPostPublish.step s (SATPostPublish.Action.remotePublish newer))
+        SATPostPublish.Action.createRoom).roomTarget =
+    some acknowledged
+SATPostPublish.done_preserves_acknowledged_receipt (s : SATPostPublish.State) :
+  (SATPostPublish.step s SATPostPublish.Action.done).receipt = s.receipt
+SATPostPublish.reload_clears_ephemeral_receipt (s : SATPostPublish.State) :
+  (SATPostPublish.step s SATPostPublish.Action.reload).receipt = none
+SATPostPublish.reload_does_not_open_a_draft (s : SATPostPublish.State) :
+  (SATPostPublish.step s SATPostPublish.Action.reload).openDraftPosts = s.openDraftPosts
+SATPostPublish.shell_read_does_not_open_a_draft (s : SATPostPublish.State)
+  (projection : SATPostPublish.ShellProjection) :
+  (SATPostPublish.step s (SATPostPublish.Action.shellAnswered projection)).openDraftPosts = s.openDraftPosts
+SATPostPublish.malformed_ack_does_not_create_receipt (s : SATPostPublish.State) :
+  (SATPostPublish.step s SATPostPublish.Action.malformedAcknowledgment).receipt = s.receipt
+SATPostPublish.invalid_ack_does_not_create_receipt (s : SATPostPublish.State) (target : SATPostPublish.Target)
+  (hNoReceipt : s.receipt = none)
+  (hInvalid :
+    ¬(s.outcome = SATPostPublish.PublishOutcome.committed ∧
+        s.committedTarget = some target ∧ target.examId = s.examId)) :
+  (SATPostPublish.step s (SATPostPublish.Action.acknowledge target)).receipt = none
+SATPostPublish.delivered_ack_makes_success_visible (s : SATPostPublish.State) (target : SATPostPublish.Target)
+  (hOpen : s.sheetOpen = true)
+  (hCommitted : s.outcome = SATPostPublish.PublishOutcome.committed ∧ s.committedTarget = some target)
+  (hExam : target.examId = s.examId) :
+  SATPostPublish.successVisible (SATPostPublish.step s (SATPostPublish.Action.acknowledge target))
+SATPostPublish.held_refresh_does_not_change_receipt (s : SATPostPublish.State) :
+  (SATPostPublish.step s SATPostPublish.Action.releaseReadHeld).receipt = s.receipt
+SATPostPublish.lost_ack_is_unknown_without_fabricating_receipt (s : SATPostPublish.State) :
+  (SATPostPublish.step s SATPostPublish.Action.loseAcknowledgment).outcome = SATPostPublish.PublishOutcome.unknown ∧
+    (SATPostPublish.step s SATPostPublish.Action.loseAcknowledgment).receipt = s.receipt
+SATPostPublish.Counterexamples.committed_post_can_be_reported_as_failure :
+  let finalState :=
+    SATPostPublish.Counterexamples.runLegacy SATPostPublish.Counterexamples.legacyInitial
+      SATPostPublish.Counterexamples.readFailureTrace;
+  finalState.durableCommitted = true ∧ finalState.releaseReadFailed = true ∧ finalState.mutationReportedSuccess = false
+SATPostPublish.Counterexamples.shell_removal_can_destroy_local_success_state :
+  let finalState :=
+    SATPostPublish.Counterexamples.runLegacy SATPostPublish.Counterexamples.legacyInitial
+      SATPostPublish.Counterexamples.shellUnmountTrace;
+  finalState.durableCommitted = true ∧
+    finalState.mutationReportedSuccess = true ∧ finalState.sheetMounted = false ∧ finalState.sheetSuccessVisible = false
+SATPostPublish.Traces.successful_publish_trace_is_reachable :
+  SATPostPublish.Reachable SATPostPublish.Traces.acknowledged
+SATPostPublish.Traces.lost_ack_trace_is_reachable : SATPostPublish.Reachable SATPostPublish.Traces.lostAck
+SATPostPublish.Traces.rejected_publish_trace_is_reachable : SATPostPublish.Reachable SATPostPublish.Traces.rejected
+SATPostPublish.Traces.success_trace_has_receipt_and_visible_sheet :
+  SATPostPublish.Traces.acknowledged.receipt = some SATPostPublish.Traces.target ∧
+    SATPostPublish.successVisible SATPostPublish.Traces.acknowledged
+SATPostPublish.Traces.lost_ack_trace_has_unknown_outcome_and_no_new_receipt :
+  SATPostPublish.Traces.lostAck.outcome = SATPostPublish.PublishOutcome.unknown ∧
+    SATPostPublish.Traces.lostAck.receipt = none
+SATPostPublish.Traces.rejected_trace_has_rejected_outcome_and_no_receipt :
+  SATPostPublish.Traces.rejected.outcome = SATPostPublish.PublishOutcome.rejected ∧
+    SATPostPublish.Traces.rejected.receipt = none
+'SATPostPublish.all_reachable_receipts_belong_to_active_exam' depends on axioms: [propext, Quot.sound]
+'SATPostPublish.shell_answer_preserves_sheet_identity' depends on axioms: [propext]
+'SATPostPublish.receipt_survives_release_success' does not depend on any axioms
+'SATPostPublish.receipt_survives_release_failure' does not depend on any axioms
+'SATPostPublish.receipt_survives_held_release_read' does not depend on any axioms
+'SATPostPublish.valid_ack_shows_success_if_sheet_is_open' depends on axioms: [propext]
+'SATPostPublish.create_room_uses_acknowledged_target' depends on axioms: [propext]
+'SATPostPublish.create_room_stays_pinned_after_remote_publish' depends on axioms: [propext]
+'SATPostPublish.done_preserves_acknowledged_receipt' does not depend on any axioms
+'SATPostPublish.reload_clears_ephemeral_receipt' does not depend on any axioms
+'SATPostPublish.reload_does_not_open_a_draft' does not depend on any axioms
+'SATPostPublish.shell_read_does_not_open_a_draft' does not depend on any axioms
+'SATPostPublish.malformed_ack_does_not_create_receipt' does not depend on any axioms
+'SATPostPublish.invalid_ack_does_not_create_receipt' depends on axioms: [propext]
+'SATPostPublish.delivered_ack_makes_success_visible' depends on axioms: [propext]
+'SATPostPublish.held_refresh_does_not_change_receipt' does not depend on any axioms
+'SATPostPublish.lost_ack_is_unknown_without_fabricating_receipt' depends on axioms: [propext]
+'SATPostPublish.Counterexamples.committed_post_can_be_reported_as_failure' depends on axioms: [propext]
+'SATPostPublish.Counterexamples.shell_removal_can_destroy_local_success_state' depends on axioms: [propext]
+'SATPostPublish.Traces.successful_publish_trace_is_reachable' depends on axioms: [propext]
+'SATPostPublish.Traces.lost_ack_trace_is_reachable' depends on axioms: [propext]
+'SATPostPublish.Traces.rejected_publish_trace_is_reachable' depends on axioms: [propext]
+'SATPostPublish.Traces.success_trace_has_receipt_and_visible_sheet' depends on axioms: [propext]
+'SATPostPublish.Traces.lost_ack_trace_has_unknown_outcome_and_no_new_receipt' depends on axioms: [propext]
+'SATPostPublish.Traces.rejected_trace_has_rejected_outcome_and_no_receipt' depends on axioms: [propext]

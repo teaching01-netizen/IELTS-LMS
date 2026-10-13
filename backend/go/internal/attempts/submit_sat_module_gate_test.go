@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -20,12 +21,20 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 )
 
-// satModuleRows stages the (section_key, state) projection the topology gate
-// reads.
+// satModuleRows stages the module projection as Standard Practice unless a
+// test explicitly asks for a classroom row.
 func satModuleRows(rows ...[]driver.Value) *sqlmock.Rows {
-	out := sqlmock.NewRows([]string{"section_key", "state"})
+	return satModuleRowsFor(false, rows...)
+}
+
+func satClassroomModuleRows(rows ...[]driver.Value) *sqlmock.Rows {
+	return satModuleRowsFor(true, rows...)
+}
+
+func satModuleRowsFor(classroom bool, rows ...[]driver.Value) *sqlmock.Rows {
+	out := sqlmock.NewRows([]string{"is_classroom", "section_key", "state", "adaptive_role", "module_id", "selected_module_id", "plan"})
 	for _, row := range rows {
-		out.AddRow(row...)
+		out.AddRow(append([]driver.Value{classroom}, append(append([]driver.Value{}, row...), "base", fmt.Sprint(row[0], "-m1"), "", "")...)...)
 	}
 	return out
 }
@@ -267,6 +276,9 @@ func TestEnsureSATModuleTopologyHonorsReleaseAndLinkScope(t *testing.T) {
 				WithArgs("att-1").
 				WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(tc.link, tc.release))
 			mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").WillReturnRows(tc.rows)
+			if tc.wantMissing == "" {
+				mock.ExpectQuery("sat_route_policy = 'staff_selects'").WillReturnRows(sqlmock.NewRows([]string{"awaiting"}).AddRow(false))
+			}
 
 			err = ensureSATModuleTopologyTx(context.Background(), db, "att-1")
 			if tc.wantMissing == "" {
@@ -280,5 +292,91 @@ func TestEnsureSATModuleTopologyHonorsReleaseAndLinkScope(t *testing.T) {
 				t.Fatalf("want CONFLICT naming %s, got %v", tc.wantMissing, err)
 			}
 		})
+	}
+}
+
+// A staff_selects attempt parked after Module 1 has a terminal module in every
+// required section yet is not complete: the missing manual route blocks it.
+func TestEnsureSATModuleTopologyRefusesAwaitingStaffRoute(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a").
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(nil, "full"))
+	mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").
+		WillReturnRows(satClassroomModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleSubmitted)))
+	mock.ExpectQuery("sat_route_policy = 'staff_selects'").WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"awaiting"}).AddRow(true))
+
+	err = ensureSATModuleTopologyTx(context.Background(), db, "att-1")
+	if e, ok := apperrors.As(err); !ok || e.Code != apperrors.CodeConflict || !strings.Contains(e.Message, "staff") {
+		t.Fatalf("want CONFLICT naming staff assignment, got %v", err)
+	}
+}
+
+// F2 (docs/sat_newmode.md 5.5): completion refuses any module row the
+// section's shape does not admit, not only missing or unfinished ones.
+func TestSATExpectedSequence(t *testing.T) {
+	rw := SATSectionReadingWriting
+	base := satModuleRow{classroom: true, section: rw, role: "base", moduleID: "m1", selected: "hi"}
+	higher := satModuleRow{classroom: true, section: rw, role: "higher_branch", moduleID: "hi", selected: "hi"}
+	lower := satModuleRow{classroom: true, section: rw, role: "lower_branch", moduleID: "lo", selected: "hi"}
+	cases := []struct {
+		name string
+		rows []satModuleRow
+		ok   bool
+	}{
+		{"base plus decided branch", []satModuleRow{base, higher}, true},
+		{"base only, no decision", []satModuleRow{{classroom: true, section: rw, role: "base", moduleID: "m1"}}, false},
+		{"branch only, decision points to it", []satModuleRow{{classroom: true, section: rw, role: "higher_branch", moduleID: "hi", selected: "hi"}}, false},
+		{"undecided extra branch", []satModuleRow{base, higher, lower}, false},
+		{"branch without a decision", []satModuleRow{{classroom: true, section: rw, role: "base", moduleID: "m1"}, {classroom: true, section: rw, role: "lower_branch", moduleID: "lo"}}, false},
+		{"decision without its module", []satModuleRow{base}, false},
+		{"section outside the run's scope", []satModuleRow{base, higher}, false},
+		{"standalone M2 holds its entry branch", []satModuleRow{{classroom: true, section: rw, role: "higher_branch", moduleID: "hi", plan: `{"reading-writing":"m2_hard"}`}}, true},
+		{"standalone M2 with a Module 1", []satModuleRow{{classroom: true, section: rw, role: "base", moduleID: "m1", plan: `{"reading-writing":"m2_hard"}`}, {classroom: true, section: rw, role: "higher_branch", moduleID: "hi", plan: `{"reading-writing":"m2_hard"}`}}, false},
+		{"standalone M2 in the other branch", []satModuleRow{{classroom: true, section: rw, role: "lower_branch", moduleID: "lo", plan: `{"reading-writing":"m2_hard"}`}}, false},
+		{"standalone M2 has no route decision", []satModuleRow{{classroom: true, section: rw, role: "higher_branch", moduleID: "hi", selected: "hi", plan: `{"reading-writing":"m2_hard"}`}}, false},
+		{"decided branch the plan excludes", []satModuleRow{
+			{classroom: true, section: rw, role: "base", moduleID: "m1", selected: "lo", plan: `{"reading-writing":"m1_hard"}`},
+			{classroom: true, section: rw, role: "lower_branch", moduleID: "lo", selected: "lo", plan: `{"reading-writing":"m1_hard"}`}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			required := []string{rw}
+			if tc.name == "section outside the run's scope" {
+				required = []string{SATSectionMath}
+			}
+			err := satExpectedSequence(tc.rows, required)
+			if tc.ok != (err == nil) {
+				t.Fatalf("ok=%v, got err=%v", tc.ok, err)
+			}
+		})
+	}
+}
+
+func TestEnsureSATModuleTopologyRejectsIncompleteClassroomSequence(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a").
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections", "sat_publish_scope"}).AddRow(nil, "full"))
+	mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").
+		WillReturnRows(satClassroomModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleSubmitted)))
+	mock.ExpectQuery("sat_route_policy = 'staff_selects'").WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"awaiting"}).AddRow(false))
+
+	err = ensureSATModuleTopologyTx(context.Background(), db, "att-1")
+	if e, ok := apperrors.As(err); !ok || e.Code != apperrors.CodeConflict || !strings.Contains(e.Message, "expected sequence") {
+		t.Fatalf("classroom M1-only attempt must be refused, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

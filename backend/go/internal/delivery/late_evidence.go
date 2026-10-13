@@ -4,6 +4,7 @@ import (
  "context"
  "database/sql"
  "encoding/json"
+ "strings"
  "time"
 
  "github.com/google/uuid"
@@ -119,9 +120,11 @@ func (s *Service) RecordLateEvidence(ctx context.Context, bearerScheduleID, bear
 // known piece of evidence. Conflicting/unknown order stays a review signal;
 // timestamps never choose an answer, and canonical responses are unchanged.
 func (s *Service) evidenceWouldChangeRouteTx(ctx context.Context,t tx.Tx,attemptID string,module saveActiveModule,scoring []scoringRow,frontiers map[string]evidenceFrontier) (bool,string,string,error) {
- var scoredRoute,policyConfig string
- err:=t.QueryRowContext(ctx,"SELECT selected_route, CAST(policy_config AS CHAR) FROM assessment_route_decisions WHERE attempt_id = ? AND base_module_attempt_id = ?",attemptID,module.id).Scan(&scoredRoute,&policyConfig)
+ var scoredRoute,policyConfig,policyKey string
+ err:=t.QueryRowContext(ctx,"SELECT selected_route, CAST(policy_config AS CHAR), policy_key FROM assessment_route_decisions WHERE attempt_id = ? AND base_module_attempt_id = ?",attemptID,module.id).Scan(&scoredRoute,&policyConfig,&policyKey)
  if err==sql.ErrNoRows {return false,"","",nil};if err!=nil {return false,"","",err}
+ // Classroom routes are staff/plan decisions, not score-derived: late evidence cannot flip them.
+ if strings.HasPrefix(policyKey,"classroom_") {return false,scoredRoute,scoredRoute,nil}
  overlaid:=make([]scoringRow,len(scoring));copy(overlaid,scoring)
  for i:=range overlaid {
   frontier,ok:=frontiers[overlaid[i].examQuestionID]

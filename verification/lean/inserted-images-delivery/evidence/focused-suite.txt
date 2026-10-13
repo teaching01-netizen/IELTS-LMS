@@ -1,0 +1,12 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/services/__tests__/examAdapterService.test.ts (5 tests) 7ms
+ ✓ src/components/student/__tests__/StudentInsertedImages.test.tsx (9 tests) 146ms
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+   Start at  13:44:31
+   Duration  3.28s (transform 827ms, setup 534ms, collect 1.37s, tests 152ms, environment 1.16s, prepare 581ms)
+
+exit=0

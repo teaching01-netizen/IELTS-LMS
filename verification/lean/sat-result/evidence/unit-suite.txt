@@ -1,0 +1,414 @@
+# bunx vitest run src/features/student-delivery src/features/exam-rendering src/features/exam-authoring/ui/release
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/features/student-delivery/hooks/__tests__/satTwoStudentEntry.test.tsx (4 tests) 87ms
+stderr | src/features/student-delivery/ui/tools/SatFloatingCoexistence.test.tsx > SatFloatingTool > moves via keyboard grip arrows
+An update to SatFloatingTool inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/student-delivery/ui/tools/SatFloatingCoexistence.test.tsx > SatFloatingTool > applies zero transition to size during resize and keeps the SE keyboard contract
+An update to SatFloatingTool inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/student-delivery/application/__tests__/useSatResponsePersistence.v2.test.tsx > SAT V2 response persistence integration > surfaces blocked drafts as visible + retryable exam-stress-safe failure and gates submit
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/student-delivery/ui/tools/SatFloatingCoexistence.test.tsx > SatFloatingTool reference variant (R-01 Bluebook chrome, append-only) > keeps the decorative 9-dot cue aria-hidden with no role/tabIndex, and Move arrows still move
+An update to SatFloatingTool inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/student-delivery/ui/tools/SatFloatingCoexistence.test.tsx > SatFloatingTool reference variant (R-01 Bluebook chrome, append-only) > reuses all 8 resize targets for Reference: SE separator contract + 7 role-less edges
+An update to SatFloatingTool inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/student-delivery/ui/tools/SatFloatingCoexistence.test.tsx > SatFloatingTool reference variant (R-01 Bluebook chrome, append-only) > resize never snaps for Reference: keyboard step commits exactly (R-06 B1 no-jump, keyboard)
+An update to SatFloatingTool inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/student-delivery/application/__tests__/useSatResponsePersistence.v2.test.tsx (11 tests) 931ms
+stderr | src/features/student-delivery/ui/tools/SatFloatingCoexistence.test.tsx > SatFloatingTool reference variant (R-01 Bluebook chrome, append-only) > R-03 reference collapse + motion (append-only; R-01 asserts above untouched) > Escape is a no-op when Reference is idle (D5 contract change 2026-09-12: timed-exam safety; close stays explicit via X)
+An update to SatFloatingTool inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/student-delivery/ui/annotations/SatAnnotatedContent.test.tsx (36 tests) 291ms
+ ✓ src/features/student-delivery/ui/tools/SatFloatingCoexistence.test.tsx (41 tests) 1327ms
+ ✓ src/features/student-delivery/domain/satDomain.test.ts (12 tests) 8ms
+stderr | src/features/student-delivery/hooks/__tests__/useSatExamController.convergence.test.tsx > useSatExamController convergence (Phase 04) > T2b: poll carrying a finalized current module + different pending dispatches showDirections synchronously
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamController.convergence.test.tsx (14 tests) 580ms
+stderr | src/features/student-delivery/hooks/__tests__/useSatExamController.adaptiveHandoff.test.tsx > useSatExamController adaptive handoff > drops an older payload at the SAME runtimeRevision (attempt-scoped guard)
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/ui/release/__tests__/releaseSelectors.test.ts (42 tests) 12ms
+ ✓ src/features/student-delivery/ui/SatExamShell.test.tsx (40 tests) 1808ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamController.adaptiveHandoff.test.tsx (8 tests) 540ms
+ ✓ src/features/student-delivery/ui/question/SatQuestionWorkspace.test.tsx (19 tests) 147ms
+ ✓ src/features/student-delivery/hooks/__tests__/sat-cohort-clock.test.tsx (8 tests) 128ms
+ ✓ src/features/student-delivery/ui/annotations/__tests__/satAnnotationSurfacePlacement.test.tsx (23 tests) 1072ms
+ ✓ src/features/student-delivery/ui/annotations/SatNotesColumn.test.tsx (36 tests) 4015ms
+   ✓ SatNotesColumn > says nothing about saving until saving is actually happening 1720ms
+   ✓ SatNotesColumn > promises nothing about saving when a draft ends where it started 921ms
+   ✓ SatNotesColumn > writes the question’s own note through the same field, with no Save button 738ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.prewarm.test.tsx (14 tests) 836ms
+   ✓ SatStudentSessionRoute prewarm gating > preserves warmed iframe identity through preparation, module, review and reopening 351ms
+ ✓ src/features/student-delivery/ui/annotations/SatAnnotationControls.test.tsx (19 tests) 539ms
+ ✓ src/features/student-delivery/application/__tests__/satTimingPolicy.test.ts (35 tests) 17ms
+ ✓ src/features/student-delivery/domain/satReadingLayout.test.ts (33 tests) 6ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.moduleHandoff.test.tsx (9 tests) 921ms
+ ✓ src/features/student-delivery/domain/satAnnotationsV2.test.ts (25 tests) 7ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamController.autoEntry.test.tsx (24 tests | 2 skipped) 6045ms
+   ✓ useSatExamController auto-entry > starts the first module once when duplicate live payloads arrive mid-start 667ms
+   ✓ useSatExamController auto-entry > treats a transition conflict on entry as still-advancing, not a student error 1173ms
+   ✓ useSatExamController auto-entry > leaves the break alone while its countdown is still running 1282ms
+   ✓ useSatExamController auto-entry > never finalizes an attempt whose next section module is still waiting 658ms
+   ✓ useSatExamController auto-entry > retries a failed entry automatically with no new payload 1098ms
+ ✓ src/features/student-delivery/hooks/__tests__/sat-recovery-poll.test.tsx (10 tests) 133ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionReducer.test.ts (20 tests) 7ms
+ ✓ src/features/student-delivery/ui/annotations/SatAnnotationFlow.test.tsx (33 tests) 5473ms
+   ✓ SAT shell annotation flow (armed mode) > opens a new note in the Notes pane, with the caret already in its field 861ms
+   ✓ SAT annotation Bluebook surfaces (Phase 7) > leaves nothing in the middle until there is a note, then a handle that brings it back 459ms
+ ✓ src/features/student-delivery/ui/question/SatQuestionRenderer.test.tsx (7 tests) 360ms
+ ✓ src/features/student-delivery/ui/tools/reference/SatReferenceSheet.test.tsx (25 tests) 755ms
+ ✓ src/features/student-delivery/ui/annotations/SatNotesSurfaceHost.test.tsx (15 tests) 313ms
+ ✓ src/features/student-delivery/ui/transitions/__tests__/SatCompleteScreen.test.tsx (14 tests) 515ms
+ ✓ src/features/student-delivery/hooks/__tests__/satPersonalEntry.test.tsx (11 tests) 1590ms
+   ✓ SAT personal single-operation entry > retries a lost StartModule response idempotently without a second window 942ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.between-sections.test.tsx (7 tests) 187ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.elimination.test.tsx (9 tests) 995ms
+   ✓ SatStudentSessionRoute question-scoped eliminator > keeps the eliminator open per question across navigation 329ms
+ ✓ src/features/exam-rendering/__tests__/SatImageEnlarge.test.tsx (9 tests) 222ms
+ ✓ src/features/student-delivery/hooks/__tests__/sat-finalization-recovery.test.tsx (6 tests) 74ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamController.identity.test.tsx (7 tests) 287ms
+ ✓ src/features/student-delivery/api/assessmentDeliveryApi.test.ts (13 tests) 42ms
+ ✓ src/features/student-delivery/application/__tests__/satBootstrapEquality.test.ts (19 tests) 7ms
+ ✓ src/features/student-delivery/ui/SatPopoverShell.test.tsx (13 tests) 811ms
+ ✓ src/features/exam-rendering/__tests__/StructuredContentRenderer.test.tsx (12 tests) 331ms
+ ✓ src/features/student-delivery/ui/question/SatSingleChoiceAnswer.test.tsx (16 tests) 385ms
+ ✓ src/features/student-delivery/ui/media/SatImageViewer.test.tsx (18 tests) 747ms
+ ✓ src/features/student-delivery/application/__tests__/satRunnerReducer.test.ts (13 tests) 7ms
+ ✓ src/features/student-delivery/application/__tests__/satAdaptiveModuleIdentity.test.ts (11 tests) 4ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.skew.test.tsx (6 tests) 562ms
+ ✓ src/features/student-delivery/ui/reading/__tests__/SatReadingLayoutContext.test.tsx (10 tests) 66ms
+ ✓ src/features/student-delivery/application/__tests__/satStudentSurface.test.ts (22 tests) 23ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.displayRecovery.test.tsx (6 tests) 718ms
+ ✓ src/features/student-delivery/ui/media/SatQuestionImageEnlarge.test.tsx (9 tests) 593ms
+ ✓ src/features/student-delivery/ui/__tests__/satWaveB.test.tsx (12 tests) 264ms
+ ✓ src/features/student-delivery/infrastructure/__tests__/satStudentResume.test.ts (6 tests) 10ms
+ ✓ src/features/student-delivery/ui/__tests__/satAdaptiveReadingShell.test.tsx (5 tests) 459ms
+ ✓ src/features/student-delivery/domain/__tests__/satNotesUi.test.ts (25 tests) 12ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.autoFit.test.tsx (6 tests) 986ms
+ ✓ src/features/student-delivery/routes/__tests__/SatPreviewRoute.test.tsx (3 tests) 1022ms
+   ✓ SatPreviewRoute > renders the real SAT shell and lets staff inspect adaptive modules and sections 609ms
+ ✓ src/features/student-delivery/domain/__tests__/satImageZoom.test.ts (13 tests) 4ms
+ ✓ src/features/student-delivery/application/__tests__/satSubmitConflicts.test.ts (73 tests) 14ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.integrityWarning.test.tsx (3 tests) 296ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/useSatReferenceViewportWidth.test.ts (11 tests) 50ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionRaces.test.ts (8 tests) 4ms
+ ✓ src/features/student-delivery/ui/question/SatQuestionHeader.test.tsx (9 tests) 134ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/SatCalculatorPanel.test.tsx (11 tests) 638ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatIntegrityControl.test.tsx (10 tests) 27ms
+ ✓ src/features/student-delivery/application/__tests__/satCommitRouting.test.ts (7 tests) 4ms
+ ✓ src/features/student-delivery/ui/__tests__/bluebookShell.test.tsx (9 tests) 84ms
+ ✓ src/features/student-delivery/ui/annotations/satAnnotationDom.test.ts (15 tests) 30ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatInteractionController.test.tsx (6 tests) 29ms
+ ✓ src/features/student-delivery/ui/__tests__/satAccessibilityContracts.test.tsx (7 tests) 492ms
+ ✓ src/features/student-delivery/ui/question/__tests__/SatReadingSplitHandle.test.tsx (9 tests) 142ms
+ ✓ src/features/student-delivery/ui/__tests__/satWaveC.test.tsx (9 tests) 158ms
+ ✓ src/features/student-delivery/ui/review/SatReviewPage.test.tsx (10 tests) 280ms
+ ✓ src/features/student-delivery/application/__tests__/satResponseInvariant.test.ts (23 tests) 9ms
+ ✓ src/features/student-delivery/ui/annotations/satTextSelection.test.ts (10 tests) 49ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatExamFitZoom.test.tsx (11 tests) 23ms
+ ✓ src/features/student-delivery/ui/__tests__/satWaveAFocusModal.test.tsx (7 tests) 716ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/SatCalculatorGestures.test.tsx (9 tests) 531ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/SatReferenceSheetPanelMemory.test.tsx (7 tests) 730ms
+ ✓ src/features/student-delivery/application/__tests__/satEntryControlEpoch.test.ts (9 tests) 6ms
+ ✓ src/features/student-delivery/infrastructure/satToolStateStore.test.ts (11 tests) 26ms
+ ✓ src/features/student-delivery/ui/entry/__tests__/SatDeviceTransferPanel.test.tsx (4 tests) 295ms
+ ✓ src/features/student-delivery/ui/annotations/satSelectionAnchor.test.ts (6 tests) 18ms
+ ✓ src/features/student-delivery/hooks/__tests__/sat-submit-conflicts.test.tsx (1 test) 31ms
+ ✓ src/features/student-delivery/ui/__tests__/bluebookBans.test.ts (8 tests) 106ms
+ ✓ src/features/student-delivery/application/__tests__/satRuntimeSelectors.test.ts (5 tests) 3ms
+ ✓ src/features/student-delivery/ui/media/SatImageStrip.test.tsx (8 tests) 249ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatPreviewController.test.tsx (4 tests) 300ms
+ ✓ src/features/student-delivery/domain/__tests__/satCopy.test.ts (6 tests) 9ms
+ ✓ src/features/student-delivery/domain/satToolSizePolicy.test.ts (20 tests) 6ms
+ ✓ src/features/student-delivery/domain/__tests__/satAnnotationEducation.test.ts (8 tests) 3ms
+ ✓ src/features/student-delivery/application/__tests__/satStartCode.test.ts (8 tests) 8ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionIntents.test.ts (6 tests) 5ms
+ ✓ src/features/student-delivery/domain/satExamFit.test.ts (17 tests) 7ms
+ ✓ src/features/student-delivery/ui/__tests__/bluebookTokens.test.ts (9 tests) 9ms
+ ✓ src/features/student-delivery/ui/annotations/SatAnnotationDismiss.test.tsx (7 tests) 241ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionGuards.test.ts (7 tests) 20ms
+ ✓ src/features/student-delivery/ui/stage/SatStudentStageHost.test.tsx (5 tests) 301ms
+ ✓ src/features/student-delivery/ui/question/SatStudentProducedAnswer.test.tsx (14 tests) 264ms
+ ✓ src/features/student-delivery/application/__tests__/satReadingPreferences.test.ts (5 tests) 5ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/PublishAssessmentDialog.test.tsx (5 tests) 441ms
+ ✓ src/features/student-delivery/ui/__tests__/bluebookOverlays.test.tsx (10 tests) 241ms
+9:39:29 PM [vite] warning: Duplicate "sectionKey" attribute in JSX element
+75 |          // expansion) available at all: without it the menu item is disabled, and a
+76 |          // disabled control swallows the press instead of reporting it.
+77 |          sectionKey="reading-writing"
+   |          ^
+78 |          directions={null}
+79 |          remainingLabel="28:33"
+
+  Plugin: vite:esbuild
+  File: /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student-delivery/ui/SatMoreHelpFlow.test.tsx
+ ✓ src/features/student-delivery/domain/satTiming.test.ts (6 tests) 4ms
+ ✓ src/features/student-delivery/infrastructure/satToolGeometryStore.test.ts (9 tests) 9ms
+ ✓ src/features/student-delivery/ui/help/SatHelpModal.test.tsx (6 tests) 707ms
+ ✓ src/features/student-delivery/application/__tests__/satCalculatorWorkspace.test.ts (6 tests) 20ms
+ ✓ src/features/student-delivery/infrastructure/__tests__/satResumeLocator.test.ts (7 tests) 12ms
+ ✓ src/features/student-delivery/bootstrap/__tests__/satBootstrapSeed.test.ts (6 tests) 4ms
+ ✓ src/features/student-delivery/ui/SatMoreHelpFlow.test.tsx (2 tests) 382ms
+ ✓ src/features/student-delivery/timing/SatTemporalRuntime.test.tsx (1 test) 206ms
+ ✓ src/features/student-delivery/application/__tests__/satEntryAck.test.ts (2 tests) 4ms
+ ✓ src/features/student-delivery/routes/__tests__/SatStudentSessionRoute.bootstrap.test.tsx (2 tests) 108ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionSelectors.test.ts (4 tests) 3ms
+ ✓ src/features/student-delivery/ui/break/SatScheduledBreakScreen.test.tsx (4 tests) 131ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/DesmosCalculator.test.tsx (5 tests) 79ms
+ ✓ src/features/student-delivery/ui/primitives/SatCenterModal.test.tsx (6 tests) 237ms
+ ✓ src/features/student-delivery/application/__tests__/satFinalizationGate.test.ts (7 tests) 4ms
+ ✓ src/features/student-delivery/ui/reading/SatLineReader.test.tsx (5 tests) 181ms
+ ✓ src/features/student-delivery/infrastructure/satEliminatorArmStore.test.ts (9 tests) 21ms
+ ✓ src/features/student-delivery/domain/satToolPlacement.test.ts (7 tests) 4ms
+ ✓ src/features/student-delivery/domain/__tests__/satInteractionEscape.test.ts (5 tests) 4ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/DesmosHiddenSilence.test.tsx (6 tests) 320ms
+ ✓ src/features/student-delivery/ui/feedback/__tests__/SatIntegrityWarning.test.tsx (5 tests) 155ms
+ ✓ src/features/student-delivery/infrastructure/satNotesColumnStore.test.ts (6 tests) 2ms
+ ✓ src/features/student-delivery/ui/break/SatBreakRouteFlow.test.tsx (2 tests) 649ms
+   ✓ SatBreakRouteFlow > More -> Start my break veils with live timer; Return restores 491ms
+ ✓ src/features/student-delivery/routes/__tests__/satToolCoexistenceClose.test.tsx (2 tests) 474ms
+   ✓ SAT tool coexistence close (Phase 05) > closing Calculator leaves Reference Sheet open 328ms
+ ✓ src/features/student-delivery/domain/satToolPolicy.test.ts (6 tests) 3ms
+ ✓ src/features/student-delivery/application/__tests__/satAnnotationRoundTrip.test.ts (3 tests) 4ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/useSatReferenceStageSize.lifecycle.test.tsx (2 tests) 53ms
+ ✓ src/features/student-delivery/ui/transitions/SatTransitionScreens.test.tsx (5 tests) 217ms
+ ✓ src/features/student-delivery/ui/SatFooterTimer.test.tsx (3 tests) 463ms
+ ✓ src/features/student-delivery/domain/__tests__/satNoteMarkers.test.ts (7 tests) 4ms
+ ✓ src/features/student-delivery/ui/reading/__tests__/satExamFitProbe.test.ts (4 tests) 4ms
+ ✓ src/features/student-delivery/ui/shell/SatMoreMenu.test.tsx (4 tests) 218ms
+ ✓ src/features/student-delivery/ui/__tests__/satWaveD.test.tsx (3 tests) 205ms
+ ✓ src/features/student-delivery/ui/primitives/satOverlayZ.test.ts (3 tests) 2ms
+ ✓ src/features/student-delivery/ui/help/SatShortcutsModal.test.tsx (4 tests) 259ms
+ ✓ src/features/student-delivery/domain/__tests__/satMediaWarmUp.test.ts (5 tests) 7ms
+ ✓ src/features/student-delivery/ui/break/SatBreakFlow.test.tsx (4 tests) 234ms
+ ✓ src/features/student-delivery/application/__tests__/satPollCadence.test.ts (5 tests) 8ms
+ ✓ src/features/student-delivery/ui/annotations/satSelectionDragGuard.test.ts (7 tests) 2ms
+ ✓ src/features/student-delivery/ui/feedback/SatSaveStatus.test.tsx (4 tests) 91ms
+ ✓ src/features/student-delivery/ui/feedback/__tests__/SatLoadingSurface.test.tsx (7 tests) 78ms
+ ✓ src/features/student-delivery/ui/question/SatSingleChoiceAnswer.guard.test.tsx (2 tests) 54ms
+ ✓ src/features/student-delivery/ui/transitions/SatEntrySurfaces.test.tsx (3 tests) 101ms
+ ✓ src/features/student-delivery/domain/satToolActions.test.ts (2 tests) 15ms
+ ✓ src/features/student-delivery/hooks/useSatShortcuts.test.tsx (3 tests) 145ms
+ ✓ src/features/student-delivery/infrastructure/satAnnotationEducationStore.test.ts (4 tests) 8ms
+ ✓ src/features/student-delivery/ui/tools/satToolPointer.test.ts (3 tests) 2ms
+ ✓ src/features/student-delivery/domain/satTimerReveal.test.ts (4 tests) 2ms
+ ✓ src/features/exam-rendering/api/__tests__/SatQuestionBody.test.tsx (1 test) 20ms
+ ✓ src/features/student-delivery/domain/__tests__/satNoteEntry.test.ts (4 tests) 31ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatEntryTransitionHold.test.tsx (2 tests) 23ms
+ ✓ src/features/student-delivery/timing/satTemporalModel.test.ts (1 test) 3ms
+ ✓ src/features/student-delivery/ui/entry/__tests__/SatWriterLockGate.test.tsx (2 tests) 720ms
+   ✓ SatWriterLockGate > mounts the exam in one tab only and lets the other take over after it closes 702ms
+ ✓ src/features/student-delivery/ui/zoom/__tests__/satExamZoomGeometry.test.ts (13 tests) 45ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ClassroomPlanField.test.tsx (2 tests) 76ms
+ ✓ src/features/student-delivery/domain/satShortcuts.test.ts (3 tests) 2ms
+ ✓ src/features/student-delivery/__tests__/heartbeatCoalesce.test.ts (4 tests) 4ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ReleaseReadinessParity.test.tsx (1 test) 65ms
+ ✓ src/features/exam-rendering/__tests__/structuredImageAssets.test.ts (2 tests) 2ms
+ ✓ src/features/exam-rendering/answers/__tests__/StudentProducedAnswer.test.tsx (2 tests) 27ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/satToolPlacementRuntime.test.ts (1 test) 32ms
+
+ Test Files  158 passed (158)
+      Tests  1564 passed | 2 skipped (1566)
+   Start at  21:39:06
+   Duration  33.13s (transform 5.29s, setup 28.13s, collect 39.98s, tests 51.26s, environment 61.55s, prepare 9.47s)
+
+exit=0

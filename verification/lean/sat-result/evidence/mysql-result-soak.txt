@@ -1,0 +1,38 @@
+# go test ./cmd/api -run 'TestSATClassroomRepairSoakMySQL|TestSATClassroomRepairNotStarvedByWithheldMySQL|TestSATClassroomRawScoreReleasedOnceMySQL|TestSATPracticeSittingNeverReleasesWithReportOnMySQL' -count=5 -race -v (scratch DB sat_result_verify, MySQL 9.6.0)
+--- PASS: TestSATClassroomRawScoreReleasedOnceMySQL (0.21s)
+--- PASS: TestSATPracticeSittingNeverReleasesWithReportOnMySQL (0.11s)
+    sat_classroom_repair_soak_mysql_test.go:156: attempts=16 workers=6 sweeps/worker/phase=40 batch=3 transient lock errors=0
+--- PASS: TestSATClassroomRepairSoakMySQL (1.15s)
+--- PASS: TestSATClassroomRepairNotStarvedByWithheldMySQL (0.08s)
+--- PASS: TestSATClassroomRawScoreReleasedOnceMySQL (0.04s)
+--- PASS: TestSATPracticeSittingNeverReleasesWithReportOnMySQL (0.03s)
+    sat_classroom_repair_soak_mysql_test.go:156: attempts=16 workers=6 sweeps/worker/phase=40 batch=3 transient lock errors=0
+--- PASS: TestSATClassroomRepairSoakMySQL (1.50s)
+--- PASS: TestSATClassroomRepairNotStarvedByWithheldMySQL (0.08s)
+--- PASS: TestSATClassroomRawScoreReleasedOnceMySQL (0.07s)
+--- PASS: TestSATPracticeSittingNeverReleasesWithReportOnMySQL (0.03s)
+    sat_classroom_repair_soak_mysql_test.go:156: attempts=16 workers=6 sweeps/worker/phase=40 batch=3 transient lock errors=0
+--- PASS: TestSATClassroomRepairSoakMySQL (1.16s)
+--- PASS: TestSATClassroomRepairNotStarvedByWithheldMySQL (0.06s)
+--- PASS: TestSATClassroomRawScoreReleasedOnceMySQL (0.05s)
+--- PASS: TestSATPracticeSittingNeverReleasesWithReportOnMySQL (0.03s)
+    sat_classroom_repair_soak_mysql_test.go:156: attempts=16 workers=6 sweeps/worker/phase=40 batch=3 transient lock errors=0
+--- PASS: TestSATClassroomRepairSoakMySQL (1.33s)
+--- PASS: TestSATClassroomRepairNotStarvedByWithheldMySQL (0.07s)
+--- PASS: TestSATClassroomRawScoreReleasedOnceMySQL (0.05s)
+--- PASS: TestSATPracticeSittingNeverReleasesWithReportOnMySQL (0.06s)
+    sat_classroom_repair_soak_mysql_test.go:156: attempts=16 workers=6 sweeps/worker/phase=40 batch=3 transient lock errors=0
+--- PASS: TestSATClassroomRepairSoakMySQL (1.24s)
+--- PASS: TestSATClassroomRepairNotStarvedByWithheldMySQL (0.21s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/api	9.345s
+exit=0
+
+# Pre-fix counterexample (classroomPendingSQL without the readiness filter), same scratch DB:
+    sat_classroom_repair_soak_mysql_test.go:156: attempts=16 workers=6 sweeps/worker/phase=40 batch=3 transient lock errors=0
+--- PASS: TestSATClassroomRepairSoakMySQL (2.26s)
+    sat_classroom_repair_soak_mysql_test.go:196: releasable result starved behind a withheld one: pending
+--- FAIL: TestSATClassroomRepairNotStarvedByWithheldMySQL (0.08s)
+FAIL
+FAIL	example.com/ielts-proctoring/cmd/api	3.374s
+FAIL

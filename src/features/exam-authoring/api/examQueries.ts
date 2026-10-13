@@ -15,12 +15,24 @@ const examListQueryPolicy = {
 
 export const examKeys = {
   all: ['exam-authoring'] as const,
-  list: (providerKey?: 'sat' | 'ielts' | 'act') => [...examKeys.all, 'list', providerKey ?? 'all'] as const,
+  list: (providerKey?: 'sat' | 'ielts' | 'act', withContent = true) =>
+    [...examKeys.all, 'list', providerKey ?? 'all', withContent ? 'content' : 'entities'] as const,
   detail: (examId: string) => [...examKeys.all, 'detail', examId] as const,
 };
 
-export async function fetchExamList(providerKey?: 'sat' | 'ielts' | 'act'): Promise<ExamListData> {
+/**
+ * `withContent: false` skips the per-exam version fetch that builds legacy
+ * `exams`; callers that only read `entities` would otherwise issue one version
+ * read per exam, which trips the authed-reads limit on large libraries.
+ */
+export async function fetchExamList(
+  providerKey?: 'sat' | 'ielts' | 'act',
+  withContent = true,
+): Promise<ExamListData> {
   const entities = await examAuthoringFacade.repository.getAllExamsWithLegacyMigration(providerKey);
+  if (!withContent) {
+    return { entities, exams: [] };
+  }
   const exams = await examAuthoringFacade.adaptExamEntitiesToLegacyExams(
     entities,
     examAuthoringFacade.repository,
@@ -29,10 +41,14 @@ export async function fetchExamList(providerKey?: 'sat' | 'ielts' | 'act'): Prom
   return { entities, exams };
 }
 
-export function useExamListQuery(enabled = true, providerKey?: 'sat' | 'ielts' | 'act') {
+export function useExamListQuery(
+  enabled = true,
+  providerKey?: 'sat' | 'ielts' | 'act',
+  withContent = true,
+) {
   return useQuery({
-    queryKey: examKeys.list(providerKey),
-    queryFn: () => fetchExamList(providerKey),
+    queryKey: examKeys.list(providerKey, withContent),
+    queryFn: () => fetchExamList(providerKey, withContent),
     enabled,
     ...examListQueryPolicy,
   });

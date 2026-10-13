@@ -141,10 +141,24 @@ type startCodeView struct {
 	RotatedAt    *time.Time `json:"rotatedAt,omitempty"`
 }
 
-// requireStartCodeSchedule authorizes a start-code staff request: admin in
-// the schedule's organization or a proctor with a live assignment; anything
-// else (and any non-code session) collapses to 404.
+// requireStartCodeSchedule authorizes a start-code staff request: the staff
+// schedule check below plus a code-start session; anything else collapses to 404.
 func requireStartCodeSchedule(w http.ResponseWriter, r *http.Request, app *App) (*auth.Session, *schedules.Schedule, bool) {
+	sess, schedule, ok := requireStaffSchedule(w, r, app)
+	if !ok {
+		return nil, nil, false
+	}
+	if schedule.SatStartMode != satstartcode.ModeAccessCode {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Resource not found."))
+		return nil, nil, false
+	}
+	return sess, schedule, true
+}
+
+// requireStaffSchedule authorizes a SAT staff request on {scheduleID}: admin in
+// the schedule's organization or a proctor with a live proctor assignment;
+// anything else collapses to 404.
+func requireStaffSchedule(w http.ResponseWriter, r *http.Request, app *App) (*auth.Session, *schedules.Schedule, bool) {
 	sess := requireRole(w, r, auth.RoleAdmin, auth.RoleProctor)
 	if sess == nil {
 		return nil, nil, false
@@ -178,10 +192,6 @@ func requireStartCodeSchedule(w http.ResponseWriter, r *http.Request, app *App) 
 	}
 	notFound := apperrors.New(apperrors.CodeNotFound, "Resource not found.")
 	if sess.OrganizationID != nil && schedule.OrganizationID != nil && *sess.OrganizationID != *schedule.OrganizationID {
-		httpx.WriteError(w, r, notFound)
-		return nil, nil, false
-	}
-	if schedule.SatStartMode != satstartcode.ModeAccessCode {
 		httpx.WriteError(w, r, notFound)
 		return nil, nil, false
 	}

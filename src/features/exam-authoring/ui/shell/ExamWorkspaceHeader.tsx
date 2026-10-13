@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { motion } from "motion/react";
 import { AlertTriangle, ArrowLeft, CalendarPlus, Eye, FileUp, MoreHorizontal, Send, Settings2 } from "lucide-react";
 import { SatWorkspaceSwitcher } from "@/src/products/sat/ui/SatWorkspaceNav";
@@ -43,6 +43,8 @@ export interface ExamWorkspaceHeaderProps {
   onPublish?: (() => void) | undefined;
   /** Primary action once a version is published: prepare a sitting. */
   onCreateSession?: (() => void) | undefined;
+  /** Optional focus target for hosts that must restore focus after a sheet closes. */
+  onCreateSessionRef?: Ref<HTMLButtonElement> | undefined;
   /**
    * Opens the settings sheet over the current page without leaving it. The
    * Settings TAB always navigates to the settings page, so tabs stay real
@@ -81,7 +83,7 @@ const TAB_LABEL: Record<ExamWorkspaceTab, string> = {
 export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
   const {
     examTitle, lifecycle, activeTab, showResponses, onSelectTab, onBack, saveSlot, collaborationSlot,
-    onPreview, previewDisabled, onPublish, onCreateSession, onQuickSettings,
+    onPreview, previewDisabled, onPublish, onCreateSession, onCreateSessionRef, onQuickSettings,
     publishDisabledReason, publishLabel = "Publish version", issueCount = 0, onOpenIssues,
     importItems, menuItems, contextLine,
   } = props;
@@ -186,7 +188,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
             </>
           ) : null}
           {onCreateSession ? (
-            <button type="button" onClick={onCreateSession} className={createIsPrimary ? PRIMARY : ACTION}>
+            <button ref={onCreateSessionRef} type="button" onClick={onCreateSession} className={createIsPrimary ? PRIMARY : ACTION}>
               <CalendarPlus size={16} aria-hidden="true" />
               Create room
             </button>

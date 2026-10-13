@@ -311,6 +311,39 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /assessment-delivery/schedules/{scheduleId}/answered-exam:
+    get:
+      security:
+        - attemptBearer: []
+      tags: [delivery]
+      summary: Answered exam of the bearer's own completed SAT attempt
+      description: |-
+        Print projection (docs/sat-result.md §4–5): the attempt's pinned
+        published version narrowed to the modules it started, with accepted
+        responses; no answer keys, rationales or scoring rules. The attempt
+        comes from the bearer; the URL scheduleId must match it (403). Open
+        only while the attempt's score report is visible (403), after the
+        attempt is terminal (409). 429 with Retry-After when the server's
+        build bound is full. Cache-Control: no-store.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Answered exam (keyless)
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnsweredExam" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /assessment-delivery/schedules/{scheduleId}/responses/{examQuestionId}:
     patch:
       security:
@@ -964,6 +997,91 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/attempts/{attemptId}/route:
+    post:
+      tags: [proctor]
+      summary: Assign Module 2 for a staff_selects SAT classroom student
+      description: >-
+        Commits the route decision and the selected Module 2 attempt together.
+        An identical repeat returns the committed decision; a different choice
+        after commit is a 409.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sectionKey, route]
+              properties:
+                sectionKey: { type: string }
+                route: { type: string, enum: [lower, higher] }
+      responses:
+        "200":
+          description: The committed Module 2 assignment
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sectionKey: { type: string }
+                  route: { type: string, enum: [lower, higher] }
+                  selectedModuleId: { type: string }
+                  replayed: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/route-queue:
+    get:
+      tags: [proctor]
+      summary: Students awaiting a staff Module 2 choice
+      description: >-
+        Derived from closed Module 1 attempts with no route decision. `enabled`
+        is false unless the session policy is staff_selects.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The pending choices, oldest first
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        attemptId: { type: string }
+                        studentName: { type: string }
+                        sectionKey: { type: string }
+                        rawCorrect: { type: integer, nullable: true }
+                        total: { type: integer, nullable: true }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /proctor/sessions/{scheduleId}/device-transfers:
     get:
@@ -1998,6 +2116,20 @@ paths:
           in: path
           required: true
           schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                mode: { type: string, enum: [full, single_module], description: Omit to preserve complete-workbook mode. }
+                targetModuleKey:
+                  type: string
+                  enum: [rw-m1, rw-m2-lower, rw-m2-higher, math-m1, math-m2-lower, math-m2-higher]
+                  description: Required when mode is single_module.
       responses:
         "200":
           description: Preview
@@ -2005,7 +2137,24 @@ paths:
             X-Request-Id: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                type: object
+                properties:
+                  mode: { type: string, enum: [full, single_module] }
+                  targetModuleKey: { type: string, nullable: true }
+                  commitReady: { type: boolean, description: Single-module previews require an explicit pretest resolution before commit. }
+                  ignoredScaffoldRows: { type: integer }
+                  modules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        questions:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              isPretest: { type: boolean, nullable: true, description: null means the workbook did not designate this question. }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
@@ -2020,6 +2169,31 @@ paths:
           in: path
           required: true
           schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [importId, expectedVersionId, expectedVersionRevision, modules]
+              properties:
+                mode: { type: string, enum: [full, single_module], description: Omit to preserve complete-workbook mode. }
+                targetModuleKey:
+                  type: string
+                  enum: [rw-m1, rw-m2-lower, rw-m2-higher, math-m1, math-m2-lower, math-m2-higher]
+                pretestResolution:
+                  type: object
+                  required: [selectedOrders, designationSource, confirmed]
+                  properties:
+                    selectedOrders: { type: array, minItems: 2, maxItems: 2, uniqueItems: true, items: { type: integer, minimum: 1 } }
+                    designationSource: { type: string, enum: [source_verified, staff_defined] }
+                    confirmed: { type: boolean, enum: [true] }
+                importId: { type: string }
+                expectedVersionId: { type: string }
+                expectedVersionRevision: { type: integer, minimum: 0 }
+                modules: { type: array, items: { type: object } }
+                assets: { type: array, items: { type: object } }
+                operationKey: { type: string, maxLength: 128 }
       responses:
         "200":
           description: Committed
@@ -2484,6 +2658,86 @@ paths:
               schema: { type: object }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-classroom-plan:
+    get:
+      tags: [authoring]
+      summary: Read the SAT Classroom module plan of the draft
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Plan
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [authoring]
+      summary: Replace the SAT Classroom module plan of the draft
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Plan
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-score-converter:
+    get:
+      tags: [authoring]
+      summary: Read the versioned SAT score converter of the draft (null = raw scores only)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Converter
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [authoring]
+      summary: Replace or clear the versioned SAT score converter of the draft
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Converter
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /assessment-authoring/exams/{examId}/validate:
     post:
       tags: [authoring]
@@ -4135,6 +4389,34 @@ paths:
                 properties:
                   results: { type: array, items: { $ref: "#/components/schemas/ResultSummary" } }
         "401": { $ref: "#/components/responses/Error" }
+  /results/sat/attempts/{attemptId}/answered-exam:
+    get:
+      tags: [sat, results]
+      summary: Answered exam of one completed SAT attempt (staff)
+      description: |-
+        Same keyless projection as the student route, for staff inside the
+        results scope (organization + schedule assignment); out-of-scope
+        attempts are 404. 409 until the attempt is terminal; 429 with
+        Retry-After when the build bound is full. Cache-Control: no-store.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Answered exam (keyless)
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnsweredExam" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /results/sat/{resultId}:
     get:
       tags: [sat, results]
@@ -4490,6 +4772,16 @@ components:
         sections: { type: array, items: { type: object } }
         attempt: { type: object, additionalProperties: true }
         result: { type: object, nullable: true }
+    AnsweredExam:
+      type: object
+      required: [attemptId, examTitle, candidateName, versionId, sections, attempt]
+      properties:
+        attemptId: { type: string }
+        examTitle: { type: string }
+        candidateName: { type: string }
+        versionId: { type: string }
+        sections: { type: array, items: { type: object } }
+        attempt: { type: object, additionalProperties: true }
     DeliveryResponseRequest:
       type: object
       required: [revision, markedForReview, eliminatedOptions, annotations]

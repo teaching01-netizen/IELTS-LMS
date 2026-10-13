@@ -5741,3 +5741,22 @@ textarea.sat-input {
     zoom: min(1, calc(1 / var(--sat-screen-zoom)));
   }
 }
+
+/* Answered SAT exam print: let the paper flow across pages. */
+@media print {
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .sat-ui {
+    display: block !important;
+    min-height: 0 !important;
+    background: white !important;
+  }
+  /* The answered-exam paper prints alone (useAnsweredExamPrint). */
+  body:has(> .sat-answered-print) > :not(.sat-answered-print) {
+    display: none !important;
+  }
+}

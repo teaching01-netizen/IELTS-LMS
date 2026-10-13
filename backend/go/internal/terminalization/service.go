@@ -36,6 +36,9 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/results"
+	"example.com/ielts-proctoring/internal/satconvert"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // materializeBlobsForSeal rebuilds the legacy answers/writing_answers/flags
@@ -1005,11 +1008,161 @@ func (s *Service) materializeSATResult(ctx context.Context, q tx.Tx, attemptID, 
 		if outcome == OutcomeTerminated {
 			relStatus = "invalidated"
 		}
+		if outcome == OutcomeSubmitted {
+			// Classroom sessions release the raw score immediately; any
+			// unscored module leaves the result pending ("score processing").
+			// TC-15: a failed score read must not roll back the receipt; the
+			// result stays withheld and RepairClassroomResults releases it later.
+			raw, err := classroomRawScoreTx(ctx, q, attemptID)
+			if err != nil {
+				telemetry.IncCounter(telemetry.MSATClassroomResultTotal, "outcome", "failed")
+				raw = nil
+			}
+			if raw != nil {
+				telemetry.IncCounter(telemetry.MSATClassroomResultTotal, "outcome", "released")
+				want, relStatus = "scored", "released"
+				payload, _ = json.Marshal(map[string]any{
+					"providerKey": "sat", "outcomeStatus": want, "completionReason": reason,
+					"terminalizationId": terminalizationID, "submittedAt": effectiveAt,
+					"snapshot": json.RawMessage(snapshot), "classroomRaw": raw,
+				})
+			}
+		}
 		_, err = q.ExecContext(ctx, "INSERT INTO assessment_results (id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status) VALUES (?, ?, NULL, 'sat', ?, NULL, ?, ?)", uuid.NewString(), attemptID, want, string(payload), relStatus)
 		return err
 	default:
 		return err
 	}
+}
+
+// classroomRawScoreTx returns the student-facing score report of an attempt
+// whose exam has the SAT score report enabled: per-section and per-module
+// correct/total over the module attempts the student actually received, plus
+// best-effort raw domain accuracy. It returns nil when the report is off and
+// when any module attempt is not scored yet, so the caller falls back to the
+// withheld "pending" result instead of publishing a partial or invented score.
+func classroomRawScoreTx(ctx context.Context, q tx.Tx, attemptID string) (map[string]any, error) {
+	var enabled bool
+	err := q.QueryRowContext(ctx, results.SATScoreReportOpenSQL, attemptID).Scan(&enabled)
+	if err == sql.ErrNoRows || (err == nil && !enabled) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.QueryContext(ctx, `
+		SELECT s.section_key, m.module_key, COALESCE(ma.raw_correct, 0), COALESCE(ma.operational_question_count, 0),
+		       (ma.raw_correct IS NULL OR ma.operational_question_count IS NULL OR ma.operational_question_count <= 0)
+		FROM assessment_module_attempts ma
+		JOIN assessment_modules m ON m.id = ma.module_id
+		JOIN assessment_sections s ON s.id = m.section_id
+		WHERE ma.attempt_id = ?
+		ORDER BY s.display_order, m.display_order`, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sections := []map[string]any{}
+	// Grouped by key, not adjacency: section display_order has no unique
+	// constraint, so tied sections can interleave their module rows.
+	// Model: verification/lean/sat-result (Report.group_keys_unique).
+	sectionIndex := map[string]int{}
+	var correct, total int64
+	for rows.Next() {
+		var sectionKey, moduleKey string
+		var c, t int64
+		var unscored bool
+		if err := rows.Scan(&sectionKey, &moduleKey, &c, &t, &unscored); err != nil {
+			return nil, err
+		}
+		if unscored {
+			return nil, nil
+		}
+		i, ok := sectionIndex[sectionKey]
+		if !ok {
+			i = len(sections)
+			sectionIndex[sectionKey] = i
+			sections = append(sections, map[string]any{"sectionKey": sectionKey, "rawCorrect": int64(0), "total": int64(0), "modules": []map[string]any{}})
+		}
+		section := sections[i]
+		section["rawCorrect"] = section["rawCorrect"].(int64) + c
+		section["total"] = section["total"].(int64) + t
+		section["modules"] = append(section["modules"].([]map[string]any), map[string]any{"moduleKey": moduleKey, "rawCorrect": c, "total": t})
+		section["roles"] = append(sectionRoles(section), satpublish.RoleOfModuleKey(moduleKey))
+		correct += c
+		total += t
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(sections) == 0 {
+		return nil, nil
+	}
+	out := map[string]any{"rawCorrect": correct, "total": total, "sections": sections}
+	if err := convertClassroomScoresTx(ctx, q, attemptID, sections, out); err != nil {
+		return nil, err
+	}
+	// The domain breakdown is supplementary: a failed read omits it rather
+	// than withholding the raw score.
+	if domains, err := results.SATDomainAccuracyQ(ctx, q, attemptID); err == nil && len(domains) > 0 {
+		out["domains"] = domains
+	}
+	return out, nil
+}
+
+func sectionRoles(section map[string]any) []string {
+	roles, _ := section["roles"].([]string)
+	return roles
+}
+
+// convertClassroomScoresTx applies the exam version's versioned score converter
+// (docs/sat-result.md §2) to the grouped report. Without a converter the report
+// stays raw-only. With one, every section is marked converted or unavailable;
+// a section is never given a number from another topology's table, and the
+// 400–1600 total appears only when both sections converted from full
+// two-module topologies. The converter version is persisted with the scores,
+// so later converter edits (draft-only) never change a released result.
+func convertClassroomScoresTx(ctx context.Context, q tx.Tx, attemptID string, sections []map[string]any, out map[string]any) error {
+	defer func() {
+		for _, section := range sections {
+			delete(section, "roles")
+		}
+	}()
+	var policy string
+	err := q.QueryRowContext(ctx, "SELECT CAST(sp.policy_config AS CHAR) FROM student_attempts sa JOIN assessment_scoring_policies sp ON sp.exam_version_id = sa.published_version_id WHERE sa.id = ?", attemptID).Scan(&policy)
+	if err == sql.ErrNoRows || (err == nil && !satconvert.Configured([]byte(policy))) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	conv, parseErr := satconvert.Parse([]byte(policy))
+	if parseErr == nil {
+		out["conversion"] = map[string]any{"converterVersion": conv.Version, "scoreType": satconvert.ScoreType, "calibrationSource": conv.CalibrationSource}
+	}
+	converted := map[string]*satconvert.Score{}
+	topologies := map[string]satconvert.Topology{}
+	for _, section := range sections {
+		key, _ := section["sectionKey"].(string)
+		section["conversionStatus"] = "unavailable"
+		topo, ok := satconvert.TopologyOf(sectionRoles(section))
+		if !ok {
+			continue
+		}
+		section["topology"] = string(topo)
+		raw, _ := section["rawCorrect"].(int64)
+		op, _ := section["total"].(int64)
+		if score, ok := conv.Convert(key, topo, int(raw), int(op)); ok {
+			section["conversionStatus"] = "converted"
+			section["scaled"] = score
+			converted[key], topologies[key] = &score, topo
+		}
+	}
+	rw, math := satconvert.SectionReadingWriting, satconvert.SectionMath
+	if total, ok := satconvert.Total(converted[rw], converted[math], topologies[rw], topologies[math]); ok {
+		out["totalScaled"] = total
+	}
+	return nil
 }
 
 // materializeACTResult keeps the provider-neutral result table aligned with
@@ -1425,6 +1578,65 @@ func RepairSATResults(ctx context.Context, db tx.DB, batchSize int) (int64, erro
 		return nil
 	})
 	return repaired, err
+}
+
+// classroomPendingSQL finds completed classroom attempts whose result is still
+// withheld (a module was unscored when the attempt was sealed) and is now
+// releasable: every module row is scored, as classroomRawScoreTx requires. A
+// row that cannot be released yet must not take a batch slot, or a full batch
+// of them starves every newer result (TestSATClassroomRepairNotStarvedByWithheldMySQL).
+const classroomPendingSQL = "SELECT ar.id, ar.attempt_id FROM assessment_results ar JOIN student_attempts a ON a.id = ar.attempt_id JOIN exam_schedules sch ON sch.id = a.schedule_id WHERE ar.provider_key = 'sat' AND ar.outcome_status = 'pending' AND ar.release_status = 'pending' AND COALESCE(sch.sat_session_mode, 'practice') = 'classroom' AND EXISTS (SELECT 1 FROM exam_entities e WHERE e.id = sch.exam_id AND e.sat_score_report_enabled) AND EXISTS (SELECT 1 FROM assessment_module_attempts ma JOIN assessment_modules m ON m.id = ma.module_id JOIN assessment_sections s ON s.id = m.section_id WHERE ma.attempt_id = ar.attempt_id) AND NOT EXISTS (SELECT 1 FROM assessment_module_attempts ma JOIN assessment_modules m ON m.id = ma.module_id JOIN assessment_sections s ON s.id = m.section_id WHERE ma.attempt_id = ar.attempt_id AND (ma.raw_correct IS NULL OR ma.operational_question_count IS NULL OR ma.operational_question_count <= 0)) ORDER BY ar.updated_at ASC, ar.id ASC LIMIT ? FOR UPDATE OF ar"
+
+// RepairClassroomResults releases the raw score of classroom attempts that were
+// sealed while a module was still unscored. It only rewrites the result row:
+// it never resubmits the exam and never touches a committed route decision.
+// It returns how many results it released and how many it selected but found
+// not releasable by the time it read them (a racing switch-off or rescore).
+func RepairClassroomResults(ctx context.Context, db tx.DB, batchSize int) (repaired, stillPending int64, err error) {
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	err = tx.NewRunner(db).WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		rows, err := q.QueryContext(ctx, classroomPendingSQL, batchSize)
+		if err != nil {
+			return err
+		}
+		type pending struct{ resultID, attemptID string }
+		var batch []pending
+		func() {
+			defer rows.Close()
+			for rows.Next() {
+				var p pending
+				if rows.Scan(&p.resultID, &p.attemptID) == nil {
+					batch = append(batch, p)
+				}
+			}
+		}()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, p := range batch {
+			raw, err := classroomRawScoreTx(ctx, q, p.attemptID)
+			if err != nil {
+				telemetry.IncCounter(telemetry.MSATClassroomResultTotal, "outcome", "failed")
+				return err
+			}
+			if raw == nil {
+				stillPending++
+				continue
+			}
+			rawJSON, _ := json.Marshal(raw)
+			if _, err := q.ExecContext(ctx,
+				"UPDATE assessment_results SET outcome_status = 'scored', release_status = 'released', score_payload = JSON_SET(score_payload, '$.outcomeStatus', 'scored', '$.classroomRaw', CAST(? AS JSON)), updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND release_status = 'pending'",
+				string(rawJSON), p.resultID); err != nil {
+				return err
+			}
+			repaired++
+			telemetry.IncCounter(telemetry.MSATClassroomResultTotal, "outcome", "repaired")
+		}
+		return nil
+	})
+	return repaired, stillPending, err
 }
 
 // asTime coerces driver time representations (time.Time, or TEXT when the DSN

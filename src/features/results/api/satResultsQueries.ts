@@ -191,3 +191,12 @@ export function useSatAttemptAnswersQuery(attemptId?: string) {
     refetchIntervalInBackground: false,
   });
 }
+
+/**
+ * The keyless print projection of a terminal attempt (docs/sat-result.md §4–5),
+ * scoped like the answers read. The shape is student-delivery's
+ * AssessmentAnsweredExam, which the caller names.
+ */
+export function fetchSatAnsweredExam<T>(attemptId: string): Promise<T> {
+  return resultsGateway.get<T>(`/v1/results/sat/attempts/${encodeURIComponent(attemptId)}/answered-exam`);
+}

@@ -15,6 +15,8 @@ import { ReadinessPanel } from "./release/ReadinessPanel";
 import { ReleaseStatusHero } from "./release/ReleaseStatusHero";
 import { ReleaseSummary } from "./release/ReleaseSummary";
 import { RuntimePolicyPanel } from "./release/RuntimePolicyPanel";
+import { ScoreConverterPanel } from "./release/ScoreConverterPanel";
+import { ScoreReportSettingPanel } from "./release/ScoreReportSettingPanel";
 import { SectionHeading, ReleaseLoadingSurface } from "./release/releaseChrome";
 import {
   candidateSecondsForSection,
@@ -58,6 +60,8 @@ export interface SatDeliveryReleasePageProps {
   /** Re-reads the release state after a load failure. */
   onRetryLoad?: () => void;
   onRefreshReadiness: () => Promise<unknown>;
+  /** Re-reads the exam after a setting is saved. */
+  onExamRefresh?: () => Promise<unknown>;
   onPublishScopeChange: (scope: SatPublishScope) => void;
   onPublish: (scope: SatPublishScope, publishNotes?: string) => Promise<void>;
   onIssueClick: (issue: AssessmentValidationIssue) => void;
@@ -306,6 +310,8 @@ function ReleasePageBody(
               </button>
             </section>
 
+            <ScoreReportSettingPanel exam={exam} onSaved={props.onExamRefresh ?? (async () => undefined)} />
+            <ScoreConverterPanel examId={exam.id} canEdit={exam.canEdit} />
             <RuntimePolicyPanel />
           </div>
 

@@ -12,6 +12,8 @@ import type {
   LoadSampleExamRequest,
   PublishAssessmentRequest,
   ReorderQuestionsRequest,
+  SatClassroomPlan,
+  SatScoreConverter,
   SatPublishScope,
   UpdateSectionDeliverySettingsRequest,
 } from "../contracts/assessment";
@@ -184,12 +186,12 @@ export function usePublishAssessment(examId: string) {
     // it would hammer the object store for the same rejection. The idempotency
     // key already covers a genuinely lost response.
     retry: false,
-    mutationFn: async (request: PublishAssessmentRequest) => {
-      const publishedVersion = await assessmentAuthoringApi.publishExam(examId, request);
-      const releaseState = await assessmentReleaseApi.get(examId);
-      return { publishedVersion, releaseState };
-    },
-    onSuccess: ({ releaseState }) => void authoringEffects.published(queryClient, examId, releaseState),
+    // The POST response is the acknowledgment for this operation. Release and
+    // list reads are projections that may fail or lag; they refresh in the
+    // background and cannot downgrade a committed publish result.
+    mutationFn: (request: PublishAssessmentRequest) =>
+      assessmentAuthoringApi.publishExam(examId, request),
+    onSuccess: () => void authoringEffects.published(queryClient, examId),
   });
 }
 
@@ -237,5 +239,45 @@ export function useUpdateSectionDeliverySettings(examId: string) {
       request: UpdateSectionDeliverySettingsRequest;
     }) => assessmentAuthoringApi.updateSectionDeliverySettings(examId, sectionId, request),
     onSuccess: (shell) => void authoringEffects.deliveryChanged(queryClient, examId, shell),
+  });
+}
+
+export function useClassroomPlan(examId: string) {
+  return useQuery({
+    queryKey: ["assessment", examId, "classroom-plan"] as const,
+    queryFn: () => assessmentAuthoringApi.getClassroomPlan(examId),
+    enabled: Boolean(examId),
+  });
+}
+
+export function useSetClassroomPlan(examId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (plan: SatClassroomPlan) => assessmentAuthoringApi.setClassroomPlan(examId, plan),
+    onSuccess: (result) => {
+      queryClient.setQueryData(["assessment", examId, "classroom-plan"], result);
+      // The plan changes which modules publish validation requires.
+      void authoringEffects.shellChanged(queryClient, examId);
+    },
+  });
+}
+
+export function useScoreConverter(examId: string) {
+  return useQuery({
+    queryKey: ["assessment", examId, "score-converter"] as const,
+    queryFn: () => assessmentAuthoringApi.getScoreConverter(examId),
+    enabled: Boolean(examId),
+  });
+}
+
+export function useSetScoreConverter(examId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (converter: unknown) => assessmentAuthoringApi.setScoreConverter(examId, converter),
+    onSuccess: (result: { converter: SatScoreConverter | null }) => {
+      queryClient.setQueryData(["assessment", examId, "score-converter"], result);
+      // Publish validation requires a table for every route the plan delivers.
+      void authoringEffects.shellChanged(queryClient, examId);
+    },
   });
 }

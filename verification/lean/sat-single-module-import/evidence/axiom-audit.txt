@@ -1,0 +1,290 @@
+Verification command: lake env lean AxiomAudit.lean
+Exit status: 0
+---
+SingleModuleImport.singleton_filter (xs : List Nat) (a : Nat) (nd : xs.Nodup) :
+  List.filter (fun n => decide (n = a)) xs = if a ∈ xs then [a] else []
+'SingleModuleImport.singleton_filter' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.pair_count (xs : List Nat) (a b : Nat) (different : a ≠ b) :
+  List.countP (fun n => decide (n ∈ [a, b])) xs =
+    List.countP (fun n => decide (n = a)) xs + List.countP (fun n => decide (n = b)) xs
+'SingleModuleImport.pair_count' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.imported_exactly_two (r : SingleModuleImport.Request) (shape : SingleModuleImport.ShapeOK r)
+  (tests : SingleModuleImport.PretestsOK r) :
+  (List.filter (fun p => p.isPretest) (SingleModuleImport.imported r)).length = 2
+'SingleModuleImport.imported_exactly_two' depends on axioms: [propext, Classical.choice, Quot.sound]
+SingleModuleImport.initiation {s : SingleModuleImport.State} (h : SingleModuleImport.Init s) :
+  SingleModuleImport.Invariant s
+'SingleModuleImport.initiation' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.commit_preserves {s : SingleModuleImport.State} (h : SingleModuleImport.Invariant s)
+  (r : SingleModuleImport.Request) (unused : s.receipts r.key = none) :
+  SingleModuleImport.Invariant (SingleModuleImport.committed s r)
+'SingleModuleImport.commit_preserves' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.consecution {s t : SingleModuleImport.State} {a : SingleModuleImport.Action}
+  (h : SingleModuleImport.Invariant s) (step : SingleModuleImport.Step s a t) : SingleModuleImport.Invariant t
+'SingleModuleImport.consecution' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.reachable_invariant {s : SingleModuleImport.State} (h : SingleModuleImport.Reachable s) :
+  SingleModuleImport.Invariant s
+'SingleModuleImport.reachable_invariant' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.at_most_once {s : SingleModuleImport.State} (h : SingleModuleImport.Reachable s)
+  (k : SingleModuleImport.Key) : s.effects k ≤ 1
+'SingleModuleImport.at_most_once' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.effect_has_receipt {s : SingleModuleImport.State} (h : SingleModuleImport.Reachable s)
+  (k : SingleModuleImport.Key) (effect : s.effects k = 1) : ∃ receipt, s.receipts k = some receipt
+'SingleModuleImport.effect_has_receipt' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.non_target_preserved (d : SingleModuleImport.Draft) (r : SingleModuleImport.Request)
+  (m : SingleModuleImport.Module) (other : m ≠ r.target) :
+  (SingleModuleImport.replace d r).placements m = d.placements m
+'SingleModuleImport.non_target_preserved' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.policies_preserved (d : SingleModuleImport.Draft) (r : SingleModuleImport.Request) :
+  (SingleModuleImport.replace d r).routing = d.routing ∧ (SingleModuleImport.replace d r).scoring = d.scoring
+'SingleModuleImport.policies_preserved' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.imported_count {now : Nat} {d : SingleModuleImport.Draft} {r : SingleModuleImport.Request}
+  {p : SingleModuleImport.Preview} (h : SingleModuleImport.Ready now d r p) :
+  ((SingleModuleImport.replace d r).placements r.target).length = SingleModuleImport.expected r.target
+'SingleModuleImport.imported_count' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.preview_content_bound {now : Nat} {d : SingleModuleImport.Draft} {r : SingleModuleImport.Request}
+  {p : SingleModuleImport.Preview} (h : SingleModuleImport.Ready now d r p) : p.questions = r.questions
+'SingleModuleImport.preview_content_bound' does not depend on any axioms
+SingleModuleImport.unknown_pretests_blocked {now : Nat} {d : SingleModuleImport.Draft} {r : SingleModuleImport.Request}
+  {p : SingleModuleImport.Preview} (unknown : r.source = none) : ¬SingleModuleImport.Ready now d r p
+'SingleModuleImport.unknown_pretests_blocked' does not depend on any axioms
+SingleModuleImport.stale_revision_blocked {now : Nat} {d : SingleModuleImport.Draft} {r : SingleModuleImport.Request}
+  {p : SingleModuleImport.Preview} (stale : d.revision ≠ r.revision) : ¬SingleModuleImport.Ready now d r p
+'SingleModuleImport.stale_revision_blocked' does not depend on any axioms
+SingleModuleImport.replay_no_mutation {s t : SingleModuleImport.State} {r : SingleModuleImport.Request}
+  (h : SingleModuleImport.Step s (SingleModuleImport.Action.replay r) t) :
+  t.draft = s.draft ∧ t.previews = s.previews ∧ t.receipts = s.receipts ∧ t.effects = s.effects
+'SingleModuleImport.replay_no_mutation' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.replay_preserves_durable_result {s t : SingleModuleImport.State} {r : SingleModuleImport.Request}
+  (h : SingleModuleImport.Step s (SingleModuleImport.Action.replay r) t) :
+  t.receipts r.key = s.receipts r.key ∧ t.effects r.key = s.effects r.key
+'SingleModuleImport.replay_preserves_durable_result' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.disabled_blocks_fresh_commit {s t : SingleModuleImport.State} {r : SingleModuleImport.Request}
+  (disabled : s.singleModuleEnabled = false) : ¬SingleModuleImport.Step s (SingleModuleImport.Action.commit r) t
+'SingleModuleImport.disabled_blocks_fresh_commit' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.cached_key_blocks_fresh_commit {s t : SingleModuleImport.State} {r : SingleModuleImport.Request}
+  (cached : s.operationKeys r.key ≠ none) : ¬SingleModuleImport.Step s (SingleModuleImport.Action.commit r) t
+'SingleModuleImport.cached_key_blocks_fresh_commit' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.durable_receipt_survives_operation_key_cleanup {s t : SingleModuleImport.State}
+  {key : SingleModuleImport.Key}
+  (step : SingleModuleImport.Step s (SingleModuleImport.Action.evictOperationKey key) t) :
+  t.receipts key = s.receipts key
+'SingleModuleImport.durable_receipt_survives_operation_key_cleanup' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.retry_after_operation_key_cleanup {s : SingleModuleImport.State} {key : SingleModuleImport.Key}
+  (receipt : SingleModuleImport.Receipt) (durable : s.receipts key = some receipt)
+  (_cleaned : s.operationKeys key = none) (requestKey : receipt.request.key = key) :
+  ∃ t,
+    SingleModuleImport.Step s (SingleModuleImport.Action.replay receipt.request) t ∧
+      t.operationKeys key = some receipt.request
+'SingleModuleImport.retry_after_operation_key_cleanup' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.consumed_preview (s : SingleModuleImport.State) (r : SingleModuleImport.Request) :
+  (SingleModuleImport.committed s r).previews r.importId = none
+'SingleModuleImport.consumed_preview' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.publish_pretests {d : SingleModuleImport.Draft} {scope : SingleModuleImport.Scope}
+  (h : SingleModuleImport.PublishReady d scope) (m : SingleModuleImport.Module)
+  (selected : SingleModuleImport.included scope m = true) :
+  (List.filter (fun p => p.isPretest) (d.placements m)).length = 2
+'SingleModuleImport.publish_pretests' does not depend on any axioms
+SingleModuleImport.rw_requires_three {d : SingleModuleImport.Draft}
+  (h : SingleModuleImport.PublishReady d SingleModuleImport.Scope.rw) :
+  SingleModuleImport.ModuleReady d SingleModuleImport.Module.rw1 ∧
+    SingleModuleImport.ModuleReady d SingleModuleImport.Module.rwLower ∧
+      SingleModuleImport.ModuleReady d SingleModuleImport.Module.rwHigher
+'SingleModuleImport.rw_requires_three' does not depend on any axioms
+SingleModuleImport.undo_restores {s t : SingleModuleImport.State} {key : SingleModuleImport.Key}
+  (step : SingleModuleImport.Step s (SingleModuleImport.Action.undo key) t) :
+  ∃ receipt, s.receipts key = some receipt ∧ t.draft = receipt.before
+'SingleModuleImport.undo_restores' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.crash_durable {s t : SingleModuleImport.State} {actor : Nat}
+  (step : SingleModuleImport.Step s (SingleModuleImport.Action.crash actor) t) : t = s
+'SingleModuleImport.crash_durable' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.substantive_other_row_blocked (target : SingleModuleImport.Module) (row : SingleModuleImport.Row)
+  (other : row.module ≠ target) (content : ∃ cell, cell ∈ row.authoringCells ∧ cell ≠ "") :
+  SingleModuleImport.classify target row = SingleModuleImport.RowDecision.block
+'SingleModuleImport.substantive_other_row_blocked' depends on axioms: [propext]
+SingleModuleImport.untouched_other_row_ignored (target : SingleModuleImport.Module) (row : SingleModuleImport.Row)
+  (other : row.module ≠ target) (untouched : SingleModuleImport.UntouchedScaffold row) :
+  SingleModuleImport.classify target row = SingleModuleImport.RowDecision.ignore
+'SingleModuleImport.untouched_other_row_ignored' depends on axioms: [propext]
+SingleModuleImport.changed_scaffold_blocked (target : SingleModuleImport.Module) (row : SingleModuleImport.Row)
+  (other : row.module ≠ target) (changed : ¬SingleModuleImport.UntouchedScaffold row) :
+  SingleModuleImport.classify target row = SingleModuleImport.RowDecision.block
+'SingleModuleImport.changed_scaffold_blocked' depends on axioms: [propext]
+SingleModuleImport.used_key_cannot_commit {s t : SingleModuleImport.State} {r : SingleModuleImport.Request}
+  (reachable : SingleModuleImport.Reachable s) (used : s.effects r.key = 1) :
+  ¬SingleModuleImport.Step s (SingleModuleImport.Action.commit r) t
+'SingleModuleImport.used_key_cannot_commit' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.altered_replay_blocked {s t : SingleModuleImport.State} {r : SingleModuleImport.Request}
+  (receipt : SingleModuleImport.Receipt) (found : s.receipts r.key = some receipt) (changed : receipt.request ≠ r) :
+  ¬SingleModuleImport.Step s (SingleModuleImport.Action.replay r) t
+'SingleModuleImport.altered_replay_blocked' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.stale_after_commit (d : SingleModuleImport.Draft) (first second : SingleModuleImport.Request)
+  (p : SingleModuleImport.Preview) (now : Nat) (sameRevision : second.revision = d.revision) :
+  ¬SingleModuleImport.Ready now (SingleModuleImport.replace d first) second p
+'SingleModuleImport.stale_after_commit' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.stale_undo_blocked {s t : SingleModuleImport.State} {key : SingleModuleImport.Key}
+  (receipt : SingleModuleImport.Receipt) (found : s.receipts key = some receipt)
+  (stale : s.draft.revision ≠ receipt.afterRevision) : ¬SingleModuleImport.Step s (SingleModuleImport.Action.undo key) t
+'SingleModuleImport.stale_undo_blocked' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.fixture_ready :
+  SingleModuleImport.Ready 99 SingleModuleImport.fixtureDraft SingleModuleImport.fixture
+    SingleModuleImport.fixturePreview
+'SingleModuleImport.fixture_ready' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.meaningful_commit :
+  SingleModuleImport.Step SingleModuleImport.fixtureState (SingleModuleImport.Action.commit SingleModuleImport.fixture)
+    (SingleModuleImport.committed SingleModuleImport.fixtureState SingleModuleImport.fixture)
+'SingleModuleImport.meaningful_commit' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.committed_reachable :
+  SingleModuleImport.Reachable (SingleModuleImport.committed SingleModuleImport.fixtureState SingleModuleImport.fixture)
+'SingleModuleImport.committed_reachable' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.fixture_pretest_flags :
+  (List.filter (fun p => p.isPretest) (SingleModuleImport.imported SingleModuleImport.fixture)).length = 2
+'SingleModuleImport.fixture_pretest_flags' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.no_resolution :
+  ¬SingleModuleImport.PretestsOK
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision, questions := __src.questions, selected := __src.selected, source := none,
+        confirmed := __src.confirmed })
+'SingleModuleImport.no_resolution' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.one_pretest :
+  ¬SingleModuleImport.PretestsOK
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision, questions := __src.questions, selected := [8], source := __src.source,
+        confirmed := __src.confirmed })
+'SingleModuleImport.one_pretest' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.three_pretests :
+  ¬SingleModuleImport.PretestsOK
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision, questions := __src.questions, selected := [8, 19, 20], source := __src.source,
+        confirmed := __src.confirmed })
+'SingleModuleImport.three_pretests' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.duplicate_pretests :
+  ¬SingleModuleImport.PretestsOK
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision, questions := __src.questions, selected := [8, 8], source := __src.source,
+        confirmed := __src.confirmed })
+'SingleModuleImport.duplicate_pretests' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.zero_order :
+  ¬SingleModuleImport.PretestsOK
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision, questions := __src.questions, selected := [0, 19], source := __src.source,
+        confirmed := __src.confirmed })
+'SingleModuleImport.zero_order' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.overflow_order :
+  ¬SingleModuleImport.PretestsOK
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision, questions := __src.questions, selected := [8, 28], source := __src.source,
+        confirmed := __src.confirmed })
+'SingleModuleImport.overflow_order' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.unconfirmed :
+  ¬SingleModuleImport.PretestsOK
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision, questions := __src.questions, selected := __src.selected, source := __src.source,
+        confirmed := false })
+'SingleModuleImport.unconfirmed' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.wrong_count :
+  ¬SingleModuleImport.ShapeOK
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision, questions := List.drop 1 SingleModuleImport.questions27, selected := __src.selected,
+        source := __src.source, confirmed := __src.confirmed })
+'SingleModuleImport.wrong_count' depends on axioms: [propext]
+SingleModuleImport.duplicate_order :
+  ¬SingleModuleImport.ShapeOK
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision,
+        questions := { order := 2, canonical := "changed" } :: List.drop 1 SingleModuleImport.questions27,
+        selected := __src.selected, source := __src.source, confirmed := __src.confirmed })
+'SingleModuleImport.duplicate_order' depends on axioms: [propext]
+SingleModuleImport.tampered_content :
+  ¬SingleModuleImport.Bound
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := __src.target, version := __src.version,
+        revision := __src.revision, questions := [], selected := __src.selected, source := __src.source,
+        confirmed := __src.confirmed })
+      SingleModuleImport.fixturePreview
+'SingleModuleImport.tampered_content' depends on axioms: [propext]
+SingleModuleImport.wrong_actor :
+  ¬SingleModuleImport.Bound
+      (let __src := SingleModuleImport.fixture;
+      {
+        key :=
+          let __src := SingleModuleImport.fixture.key;
+          { actor := 2, exam := __src.exam, operation := __src.operation },
+        importId := __src.importId, target := __src.target, version := __src.version, revision := __src.revision,
+        questions := __src.questions, selected := __src.selected, source := __src.source,
+        confirmed := __src.confirmed })
+      SingleModuleImport.fixturePreview
+'SingleModuleImport.wrong_actor' depends on axioms: [propext]
+SingleModuleImport.wrong_module :
+  ¬SingleModuleImport.Bound
+      (let __src := SingleModuleImport.fixture;
+      { key := __src.key, importId := __src.importId, target := SingleModuleImport.Module.math1,
+        version := __src.version, revision := __src.revision, questions := __src.questions, selected := __src.selected,
+        source := __src.source, confirmed := __src.confirmed })
+      SingleModuleImport.fixturePreview
+'SingleModuleImport.wrong_module' depends on axioms: [propext]
+SingleModuleImport.expired_at_boundary :
+  ¬SingleModuleImport.Ready 100 SingleModuleImport.fixtureDraft SingleModuleImport.fixture
+      SingleModuleImport.fixturePreview
+'SingleModuleImport.expired_at_boundary' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.stale_fixture :
+  ¬SingleModuleImport.Ready 99
+      (let __src := SingleModuleImport.fixtureDraft;
+      { exam := __src.exam, version := __src.version, revision := 13, editable := __src.editable,
+        placements := __src.placements, targets := __src.targets, routing := __src.routing, scoring := __src.scoring })
+      SingleModuleImport.fixture SingleModuleImport.fixturePreview
+'SingleModuleImport.stale_fixture' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.single_rw_not_publishable :
+  ¬SingleModuleImport.PublishReady
+      (SingleModuleImport.replace SingleModuleImport.fixtureDraft SingleModuleImport.fixture)
+      SingleModuleImport.Scope.rw
+'SingleModuleImport.single_rw_not_publishable' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.competing_stale_commit :
+  ¬SingleModuleImport.Ready 99 (SingleModuleImport.replace SingleModuleImport.fixtureDraft SingleModuleImport.fixture)
+      (let __src := SingleModuleImport.fixture;
+      { key := { actor := 2, exam := 1, operation := 2 }, importId := __src.importId, target := __src.target,
+        version := __src.version, revision := __src.revision, questions := __src.questions, selected := __src.selected,
+        source := __src.source, confirmed := __src.confirmed })
+      (let __src := SingleModuleImport.fixturePreview;
+      { actor := 2, exam := __src.exam, target := __src.target, version := __src.version, revision := __src.revision,
+        questions := __src.questions, expiresAt := __src.expiresAt, contentChecked := __src.contentChecked,
+        assetsChecked := __src.assetsChecked })
+'SingleModuleImport.competing_stale_commit' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.naive_two_read_two_write :
+  SingleModuleImport.uncheckedWrite (SingleModuleImport.uncheckedWrite 0 true) true = 2
+'SingleModuleImport.naive_two_read_two_write' does not depend on any axioms
+SingleModuleImport.deleting_other_modules_loses_content :
+  (SingleModuleImport.badReplace SingleModuleImport.populatedDraft SingleModuleImport.fixture).placements
+      SingleModuleImport.Module.math1 ≠
+    SingleModuleImport.populatedDraft.placements SingleModuleImport.Module.math1
+'SingleModuleImport.deleting_other_modules_loses_content' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.concrete_step_refines_abstract {s t : SingleModuleImport.ConcreteState}
+  {action : SingleModuleImport.ConcreteAction} (step : SingleModuleImport.ConcreteStep s action t) :
+  SingleModuleImport.project s = SingleModuleImport.project t ∨
+    ∃ abstractAction,
+      SingleModuleImport.Step (SingleModuleImport.project s) abstractAction (SingleModuleImport.project t)
+'SingleModuleImport.concrete_step_refines_abstract' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.crash_discards_uncommitted_write_set {s t : SingleModuleImport.ConcreteState}
+  (crash : SingleModuleImport.ConcreteStep s SingleModuleImport.ConcreteAction.processCrash t) : t.durable = s.durable
+'SingleModuleImport.crash_discards_uncommitted_write_set' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.abort_discards_uncommitted_write_set {base : SingleModuleImport.State}
+  {pending : SingleModuleImport.PendingTxn base} :
+  SingleModuleImport.project { durable := base, pending := some pending } =
+    SingleModuleImport.project { durable := base, pending := none }
+'SingleModuleImport.abort_discards_uncommitted_write_set' depends on axioms: [propext, Quot.sound]
+SingleModuleImport.database_commit_publishes_one_abstract_commit {base : SingleModuleImport.State}
+  {pending : SingleModuleImport.PendingTxn base} (complete : pending.writesMade = 5) :
+  pending.writesMade = 5 ∧
+    SingleModuleImport.Step (SingleModuleImport.project { durable := base, pending := some pending })
+      (SingleModuleImport.Action.commit pending.request)
+      (SingleModuleImport.project { durable := pending.prepared, pending := none })
+'SingleModuleImport.database_commit_publishes_one_abstract_commit' depends on axioms: [propext, Quot.sound]

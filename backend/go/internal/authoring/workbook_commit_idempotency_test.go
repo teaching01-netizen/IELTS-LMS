@@ -40,7 +40,7 @@ func expectReplaceGates(mock sqlmock.Sqlmock) {
 func expectReplaceBody(mock sqlmock.Sqlmock) {
 
 	mock.ExpectQuery("SELECT expected_version_id, expected_version_revision").WithArgs("imp-1", "exam-1").
-		WillReturnRows(sqlmock.NewRows([]string{"expected_version_id", "expected_version_revision", "asset_manifest", "created_by"}).AddRow("v-1", 3, `[]`, "actor"))
+		WillReturnRows(sqlmock.NewRows([]string{"expected_version_id", "expected_version_revision", "asset_manifest", "created_by", "target_module_key", "content_digest"}).AddRow("v-1", 3, `[]`, "actor", nil, nil))
 	targetCols := []string{"id", "section_key", "module_key", "target_question_count"}
 	targetRows := sqlmock.NewRows(targetCols)
 	for i, spec := range satWorkbookModules {

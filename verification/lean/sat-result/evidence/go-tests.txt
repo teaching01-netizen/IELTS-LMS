@@ -1,0 +1,40 @@
+$ go test -count=1 ./internal/sat/... ./internal/terminalization/... ./internal/results/... ./internal/delivery/... ./internal/schedules/... ./internal/satpublish/... ./internal/exams/... ./cmd/api/
+ok  	example.com/ielts-proctoring/internal/sat	1.023s
+ok  	example.com/ielts-proctoring/internal/terminalization	1.400s
+ok  	example.com/ielts-proctoring/internal/results	3.950s
+ok  	example.com/ielts-proctoring/internal/delivery	0.560s
+ok  	example.com/ielts-proctoring/internal/schedules	0.721s
+ok  	example.com/ielts-proctoring/internal/satpublish	1.176s
+ok  	example.com/ielts-proctoring/internal/exams	0.918s
+ok  	example.com/ielts-proctoring/cmd/api	2.665s
+exit=0
+
+$ go test -count=1 -v -run "TestUpdateFreezesVersionOnceCandidatesJoined" ./internal/schedules/
+=== RUN   TestUpdateFreezesVersionOnceCandidatesJoined
+--- PASS: TestUpdateFreezesVersionOnceCandidatesJoined (0.00s)
+PASS
+ok  	example.com/ielts-proctoring/internal/schedules	0.216s
+exit=0
+
+$ go test -count=1 -v -run "TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule" ./internal/satpublish/
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/empty_prompt
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/choice_count
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/choice_content
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/missing_correct_answer
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/invalid_correct_answer
+=== RUN   TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/duplicate_choice_id
+--- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/empty_prompt (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/choice_count (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/choice_content (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/missing_correct_answer (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/invalid_correct_answer (0.00s)
+    --- PASS: TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/duplicate_choice_id (0.00s)
+PASS
+ok  	example.com/ielts-proctoring/internal/satpublish	0.183s
+exit=0
+
+# Mutation: guard restricted to existing.SatStartMode == ModeAccessCode (the pre-fix placement) -> FAIL "admitted: want a release-frozen conflict, got call to ExecQuery UPDATE exam_schedules ..."; source restored afterwards.
+# Mutation: loadBootstrapResult flag gate removed -> TestLoadBootstrapResultReadsScoreReportFlagLive FAIL (enabled=false showed classroomRaw); source restored and verified with cmp.
+# Mutation: duplicate-id check disabled (`false && seen[id]`) -> TestValidateQuestionFlagsEachRequiredChoiceAndAnswerRule/duplicate_choice_id FAIL "expected sat.choice.id.duplicate, got []"; source restored from a copy and re-run ok.

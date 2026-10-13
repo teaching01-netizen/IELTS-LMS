@@ -95,6 +95,25 @@ describe("StructuredContentRenderer", () => {
     expect(getAssessmentMediaAsset).not.toHaveBeenCalled();
   });
 
+  // The staff answered-exam paper resolves media through the staff read; a
+  // figure it cannot resolve must stop the print at once (PDF-10).
+  it("reports a staff figure that cannot be resolved", async () => {
+    const managed: StructuredContent = {
+      version: 2,
+      nodes: [],
+      document: { type: "doc", content: [{ type: "image", attrs: { assetId: "asset-1", alt: "Graph" } }] },
+    };
+    for (const lookup of [Promise.reject(new Error("403")), Promise.resolve({ downloadUrl: null })]) {
+      vi.mocked(getAssessmentMediaAsset).mockReturnValueOnce(lookup as never);
+      const onMediaFailure = vi.fn();
+      const { unmount } = render(<StructuredContentRenderer content={managed} onMediaFailure={onMediaFailure} questionId="q1" />);
+      await waitFor(() => expect(onMediaFailure).toHaveBeenCalledWith("asset-1", "q1"));
+      expect(screen.getByRole("status")).toHaveTextContent("Visual could not be loaded");
+      unmount();
+    }
+    vi.mocked(getAssessmentMediaAsset).mockClear();
+  });
+
   it("downloads fresh bytes once when the loaded image fails, then gives up", async () => {
     const managed: StructuredContent = {
       version: 2,

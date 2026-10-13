@@ -1,8 +1,12 @@
 package delivery
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"example.com/ielts-proctoring/internal/sat"
 )
@@ -51,8 +55,11 @@ func TestStudentSafeBootstrapResultWithholdsSATTotals(t *testing.T) {
 		Sections: []sat.SectionResult{{SectionKey: "reading-writing"}},
 	}
 
-	if got := studentSafeBootstrapResult("sat", released); got != released {
-		t.Fatalf("released result must pass through unchanged, got %#v", got)
+	// Released keeps the score fields; the payload is narrowed to the
+	// allowlisted raw summary (see satReleasedProjection).
+	got, ok := studentSafeBootstrapResult("sat", released).(*sat.AssessmentResult)
+	if !ok || got.TotalScore == nil || *got.TotalScore != total || len(got.Sections) != 1 || got.ScorePayload != nil {
+		t.Fatalf("released result must keep totals and drop non-allowlisted payload, got %#v", got)
 	}
 
 	pending := *released
@@ -119,5 +126,60 @@ func TestStudentSafeBootstrapResultWithholdsACTScorePayload(t *testing.T) {
 	}
 	if projected["outcomeStatus"] != "scored" || projected["releaseStatus"] != "pending" || projected["submissionId"] != "sub-2" {
 		t.Fatalf("withheld ACT receipt lost receipt fields: %#v", projected)
+	}
+}
+
+func TestStudentSafeBootstrapResultReleasedSATExposesOnlyRawSummary(t *testing.T) {
+	in := &sat.AssessmentResult{
+		ID: "r1", AttemptID: "a1", ProviderKey: "sat", OutcomeStatus: "scored", ReleaseStatus: "released",
+		ScorePayload: map[string]any{
+			"classroomRaw": map[string]any{"rawCorrect": 35, "total": 49},
+			"snapshot":     map[string]any{"answers": map[string]any{"q1": "B"}},
+		},
+	}
+	got, ok := studentSafeBootstrapResult("sat", in).(*sat.AssessmentResult)
+	if !ok {
+		t.Fatal("expected a SAT result projection")
+	}
+	if len(got.ScorePayload) != 1 || got.ScorePayload["classroomRaw"] == nil {
+		t.Fatalf("released payload must carry only classroomRaw, got %v", got.ScorePayload)
+	}
+	if in.ScorePayload["snapshot"] == nil {
+		t.Fatal("projection must not mutate the stored result")
+	}
+}
+
+// Model: verification/lean/sat-result (Release.student_view_gate,
+// Release.flag_off_hides_released): the exam's score-report flag is read
+// live, so turning it off hides an already-released report.
+func TestLoadBootstrapResultReadsScoreReportFlagLive(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mock.ExpectQuery("FROM assessment_results WHERE attempt_id").WithArgs("a1").
+			WillReturnRows(sqlmock.NewRows([]string{"id", "attempt_id", "submission_id", "provider_key", "outcome_status", "total_score", "score_payload", "release_status"}).
+				AddRow("r1", "a1", "s1", "sat", "scored", nil, `{"classroomRaw":{"rawCorrect":7,"total":10},"snapshot":{}}`, "released"))
+		mock.ExpectQuery("FROM assessment_section_results").WithArgs("r1").
+			WillReturnRows(sqlmock.NewRows([]string{"section_key", "route", "raw_correct", "operational_question_count", "scaled_score", "details"}))
+		mock.ExpectQuery("sat_score_report_enabled").WithArgs("a1").
+			WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(enabled))
+		submitted := time.Now()
+		got, err := NewService(db, nil).loadBootstrapResult(context.Background(), "sat", "a1", attemptControl{submittedAt: &submitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, ok := got.(*sat.AssessmentResult)
+		if !ok || res == nil || res.ReleaseStatus != "released" {
+			t.Fatalf("enabled=%v: want the released receipt, got %#v", enabled, got)
+		}
+		if shown := res.ScorePayload["classroomRaw"] != nil; shown != enabled {
+			t.Fatalf("enabled=%v: classroomRaw shown=%v", enabled, shown)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+		db.Close()
 	}
 }

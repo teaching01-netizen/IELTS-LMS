@@ -73,11 +73,15 @@ func migDir(t *testing.T) string {
 // and credential authentication proof (0079) bumped 76->79. SAT access-code
 // start (0080: mode, encrypted session codes, first-start acceptance,
 // verification guard, start_window_closed reason) bumped 79->80.
-// Independent reservation slots (0081) bump count/max 80->81. Any other
+// Independent reservation slots (0081) bump count/max 80->81. Single-module
+// SAT import (0082) and the classroom route policy (0083) bump 81->83. The
+// route-policy fence trigger (0084) bumps 83->84. The per-exam SAT score
+// report switch (0085) bumps 84->85. The classroom plan write fence (0086)
+// bumps 85->86. Any other
 // count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 81
-	pinnedMigrationMax   = 81
+	pinnedMigrationFiles = 86
+	pinnedMigrationMax   = 86
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

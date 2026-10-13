@@ -1,0 +1,24 @@
+{
+  "capturedAt": "2026-10-11T06:46:10Z",
+  "baseHead": "2c319e59a7de3c15345e8ac575142d9254acb22a",
+  "leanToolchain": "leanprover/lean4:v4.19.0",
+  "leanVersion": "Lean (version 4.19.0, arm64-apple-darwin23.6.0, commit 6caaee842e94, Release)",
+  "lakeVersion": "Lake version 5.0.0-6caaee8 (Lean version 4.19.0)",
+  "leanSources": {
+    "Model.lean": "f163fe2c2555186d0dc9a6ba4547d09289ccc55e4467c25e3e452b8144cdc2d3",
+    "Safety.lean": "d4366106ad8910bc0b816c7b746f0b140865d4a7e8d072b721a53bbc59e32aae",
+    "Counterexamples.lean": "d6b8e46965aeabde031199aaf5b2470cc68816240b485fa053e2a4d2c36a5402",
+    "AxiomAudit.lean": "d336c3690b8e878c9d4b7a2ae1a5de74fc224de8f332e5c0e426bf45f0b1b413",
+    "InsertedImagesDelivery.lean": "0b9015b62119ffee824d672de7cd9a3c77ac27afdfaf5b3bbde0e326c4c5457f",
+    "lakefile.lean": "4a7e772dd0dfbe1b3a654449878b96a3d176d2d6cbd71e57caa6ddb360818424",
+    "lean-toolchain": "55e97be96000b5e9e290c9e74482e5e317861499a5540353ce845471bded8cea",
+    "_": ""
+  },
+  "appSources": {
+    "src/components/student/StudentInsertedImages.tsx": "0ca17d4d8b94f85605a0fbac3a404cf2e39dc59bc1c890fa36710788d093e6aa",
+    "src/components/student/StudentQuestionBlockSection.tsx": "4af09a70ce766f83b24ac530d50a8e880ad9641859a197da6ebd4641b45d84a5",
+    "src/components/student/__tests__/StudentInsertedImages.test.tsx": "46b3e3d125c98f65040cbb58b4c3d5f98066f0fe60198b496eac01a2b8775b33",
+    "src/services/__tests__/examAdapterService.test.ts": "64497a8918a28c8ea865216829360197b212737387cfcd02f7d599f3b1f6bcb0",
+    "_": ""
+  }
+}

@@ -36,7 +36,6 @@ import (
 	"example.com/ielts-proctoring/internal/platform/config"
 	platformdb "example.com/ielts-proctoring/internal/platform/db"
 	"example.com/ielts-proctoring/internal/platform/tx"
-	"example.com/ielts-proctoring/internal/proctor"
 	"example.com/ielts-proctoring/internal/schedules"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -224,7 +223,7 @@ func TestSATSessionDetailRouteCarriesTheRuntimeClock(t *testing.T) {
 	// database clock rather than on the instant passed here, so the inflated row
 	// is what protects the room; the authored clock would long since have closed
 	// it.
-	reconciler := proctor.NewService(runner, db, nil, nil, nil)
+	reconciler := BuildApp(config.Load(), db).Proctor
 	for _, asOf := range []time.Time{anchor.Add(64*time.Minute + attempts.SATSaveGrace), anchor.Add(70 * time.Minute)} {
 		if _, err := reconciler.ReconcileExpiredSections(ctx, asOf, 20, "route-verify"); err != nil {
 			t.Fatalf("reconcile at +%s: %v", asOf.Sub(anchor), err)

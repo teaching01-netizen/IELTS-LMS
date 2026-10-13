@@ -2,6 +2,7 @@ package sat
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -27,6 +28,27 @@ func TestPolicyScorerFailsClosedForMissingEntries(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "configured score is missing") {
 		t.Fatalf("expected missing conversion error, got %v", err)
+	}
+}
+
+// Counterexamples from verification/lean/sat-result: null decoded to 0, and off-scale
+// integers were reported as scores.
+func TestPolicyScorerRejectsNullAndOffScaleEntries(t *testing.T) {
+	for _, entry := range []string{`null`, `0`, `199`, `801`, `7000`, `650.5`, `"650"`} {
+		_, err := (PolicyScorer{}).ScoreSection(SectionMath, "lower", 5, 20, PolicyConfig{
+			Raw: json.RawMessage(`{"math":{"lower":{"5":` + entry + `}}}`),
+		})
+		if err == nil {
+			t.Fatalf("entry %s: expected error, got a score", entry)
+		}
+	}
+	for _, s := range []int{200, 800} {
+		got, err := (PolicyScorer{}).ScoreSection(SectionMath, "lower", 5, 20, PolicyConfig{
+			Raw: json.RawMessage(`{"math":{"lower":{"5":` + strconv.Itoa(s) + `}}}`),
+		})
+		if err != nil || got != s {
+			t.Fatalf("boundary %d: got %d, %v", s, got, err)
+		}
 	}
 }
 

@@ -1,0 +1,4 @@
+Verification command: Ruby Psych YAML parse and assertions for workbook preview request-body placement
+Exit status: 0
+---
+OpenAPI YAML parsed; SAT workbook request body is on the intended endpoint.

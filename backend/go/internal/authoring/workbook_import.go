@@ -21,6 +21,24 @@ func (s *Service) RegisterSATWorkbookPreview(ctx context.Context, examID, actorI
 	if !preview.Valid {
 		return validationError("Only a valid SAT workbook can be staged for import.")
 	}
+	opts, err := normalizeSATWorkbookOptions(SatWorkbookImportOptions{Mode: preview.Mode, TargetModuleKey: preview.TargetModuleKey})
+	if err != nil {
+		return validationError(err.Error())
+	}
+	var contentDigest string
+	if opts.Mode == "single_module" {
+		if !s.singleModuleImportsEnabled {
+			return validationError("Single-module SAT imports are disabled on this server.")
+		}
+		modules := previewWorkbookModules(preview)
+		if len(modules) != 1 || modules[0].ModuleKey != opts.TargetModuleKey {
+			return validationError("The checked preview must contain only its selected module.")
+		}
+		contentDigest, err = workbookContentDigest(opts.TargetModuleKey, modules)
+		if err != nil {
+			return err
+		}
+	}
 	shell, err := s.Shell(ctx, examID)
 	if err != nil {
 		return err
@@ -62,8 +80,14 @@ func (s *Service) RegisterSATWorkbookPreview(ctx context.Context, examID, actorI
 		if _, err := q.ExecContext(ctx, "UPDATE sat_workbook_imports SET state = 'expired', updated_at = CURRENT_TIMESTAMP(6) WHERE exam_id = ? AND created_by = ? AND state = 'previewed'", examID, actorID); err != nil {
 			return err
 		}
-		_, err := q.ExecContext(ctx, "INSERT INTO sat_workbook_imports (id, exam_id, expected_version_id, expected_version_revision, asset_manifest, state, created_by, expires_at) VALUES (?, ?, ?, ?, ?, 'previewed', ?, DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 DAY))", preview.ImportID, examID, shell.VersionID, shell.VersionRevision, string(manifestJSON), actorID)
-		return err
+		if _, err := q.ExecContext(ctx, "INSERT INTO sat_workbook_imports (id, exam_id, expected_version_id, expected_version_revision, asset_manifest, state, created_by, expires_at) VALUES (?, ?, ?, ?, ?, 'previewed', ?, DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 DAY))", preview.ImportID, examID, shell.VersionID, shell.VersionRevision, string(manifestJSON), actorID); err != nil {
+			return err
+		}
+		if opts.Mode == "single_module" {
+			_, err := q.ExecContext(ctx, "INSERT INTO sat_single_module_imports (import_id, exam_id, actor_id, target_module_key, content_digest) VALUES (?, ?, ?, ?, ?)", preview.ImportID, examID, actorID, opts.TargetModuleKey, contentDigest)
+			return err
+		}
+		return nil
 	})
 }
 
@@ -84,12 +108,25 @@ func (s *Service) CommitSATWorkbook(ctx context.Context, examID string, request 
 	if strings.TrimSpace(request.ImportID) == "" {
 		return CommitResult{}, validationError("Workbook import id is required.")
 	}
-	if len(request.Modules) != len(satWorkbookModules) {
+	importOptions, err := normalizeSATWorkbookOptions(SatWorkbookImportOptions{Mode: request.Mode, TargetModuleKey: request.TargetModuleKey})
+	if err != nil {
+		return CommitResult{}, validationError(err.Error())
+	}
+	var contentDigest string
+	if importOptions.Mode == "single_module" {
+		request, contentDigest, err = prepareSingleModuleCommit(request)
+		if err != nil {
+			return CommitResult{}, err
+		}
+	} else if len(request.Modules) != len(satWorkbookModules) {
 		return CommitResult{}, validationError("A complete SAT workbook must contain all six modules.")
 	}
-	cfg := operationConfig{}
+	cfg := operationConfig{operationKey: request.OperationKey}
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+	if importOptions.Mode == "single_module" && strings.TrimSpace(cfg.operationKey) == "" {
+		return CommitResult{}, validationError("Single-module imports require a stable operation key for safe retries.")
 	}
 	var operationKey, fingerprint string
 	if strings.TrimSpace(cfg.operationKey) != "" {
@@ -98,7 +135,13 @@ func (s *Service) CommitSATWorkbook(ctx context.Context, examID string, request 
 			return CommitResult{}, err
 		}
 		operationKey = key
-		fp, err := operationFingerprint(map[string]any{"import": request.ImportID, "version": request.ExpectedVersionID, "rev": request.ExpectedVersionRevision, "modules": request.Modules, "assets": request.Assets})
+		payload := map[string]any{"import": request.ImportID, "version": request.ExpectedVersionID, "rev": request.ExpectedVersionRevision, "modules": request.Modules, "assets": request.Assets}
+		fingerprintFn := operationFingerprint
+		if importOptions.Mode == "single_module" {
+			payload["mode"], payload["target"], payload["pretests"] = importOptions.Mode, importOptions.TargetModuleKey, request.PretestResolution
+			fingerprintFn = canonicalWorkbookFingerprint
+		}
+		fp, err := fingerprintFn(payload)
 		if err != nil {
 			return CommitResult{}, err
 		}
@@ -113,16 +156,17 @@ func (s *Service) CommitSATWorkbook(ctx context.Context, examID string, request 
 			Questions:  module.Questions,
 		})
 	}
+	stagedImport := &satImportRequest{ImportID: request.ImportID, Assets: request.Assets, Mode: importOptions.Mode, TargetModuleKey: importOptions.TargetModuleKey, ContentDigest: contentDigest, Resolution: request.PretestResolution}
 	// Single-tx path: claim + mutation + replay-store commit atomically
 	// inside replaceCompleteSATDraftOpKey (no pre/post-tx window).
 	if operationKey != "" {
-		shell, err := s.replaceCompleteSATDraftOpKey(ctx, examID, request.ExpectedVersionID, request.ExpectedVersionRevision, actorID, requests, &satImportRequest{ImportID: request.ImportID, Assets: request.Assets}, operationKey, scope, fingerprint)
+		shell, err := s.replaceSATDraftOpKey(ctx, examID, request.ExpectedVersionID, request.ExpectedVersionRevision, actorID, requests, stagedImport, operationKey, scope, fingerprint)
 		if err != nil {
 			return CommitResult{}, err
 		}
 		return CommitResult{Shell: shell, Undo: UndoState{ImportID: request.ImportID, Available: true}}, nil
 	}
-	shell, err := s.replaceCompleteSATDraft(ctx, examID, request.ExpectedVersionID, request.ExpectedVersionRevision, actorID, requests, &satImportRequest{ImportID: request.ImportID, Assets: request.Assets})
+	shell, err := s.replaceCompleteSATDraft(ctx, examID, request.ExpectedVersionID, request.ExpectedVersionRevision, actorID, requests, stagedImport)
 	if err != nil {
 		return CommitResult{}, err
 	}
@@ -283,8 +327,12 @@ type satReplacementRequest struct {
 }
 
 type satImportRequest struct {
-	ImportID string
-	Assets   []SatWorkbookStagedAsset
+	ImportID        string
+	Assets          []SatWorkbookStagedAsset
+	Mode            string
+	TargetModuleKey string
+	ContentDigest   string
+	Resolution      *SatWorkbookPretestResolution
 }
 
 type satTargetModule struct {
@@ -293,7 +341,7 @@ type satTargetModule struct {
 }
 
 func (s *Service) replaceCompleteSATDraft(ctx context.Context, examID, expectedVersionID string, expectedRevision int, actorID string, requests []satReplacementRequest, importRequest *satImportRequest) (Shell, error) {
-	return s.replaceCompleteSATDraftOpKey(ctx, examID, expectedVersionID, expectedRevision, actorID, requests, importRequest, "", "", "")
+	return s.replaceSATDraftOpKey(ctx, examID, expectedVersionID, expectedRevision, actorID, requests, importRequest, "", "", "")
 }
 
 // replaceCompleteSATDraftOpKey runs claim + mutation + replay-store in ONE
@@ -302,7 +350,8 @@ func (s *Service) replaceCompleteSATDraft(ctx context.Context, examID, expectedV
 // replayable result (or a committed draft without one). The replay Shell
 // is built from in-tx reads; every other op (create/duplicate/batch/bulk)
 // already claims+stores in-tx via claimOperationKey/storeOperationResult.
-func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expectedVersionID string, expectedRevision int, actorID string, requests []satReplacementRequest, importRequest *satImportRequest, operationKey, opScope, opFingerprint string) (Shell, error) {
+func (s *Service) replaceSATDraftOpKey(ctx context.Context, examID, expectedVersionID string, expectedRevision int, actorID string, requests []satReplacementRequest, importRequest *satImportRequest, operationKey, opScope, opFingerprint string) (Shell, error) {
+	single := importRequest != nil && importRequest.Mode == "single_module"
 	emission := &eventEmission{}
 	for moduleIndex := range requests {
 		for questionIndex := range requests[moduleIndex].Questions {
@@ -333,6 +382,32 @@ func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expe
 				return nil
 			}
 		}
+		if single {
+			// The shared key claim serializes this identity. Avoid gap-locking
+			// a missing receipt: distinct first-time imports must not deadlock.
+			var storedHash string
+			var result []byte
+			err := q.QueryRowContext(ctx, "SELECT request_hash, CAST(result_json AS CHAR) FROM sat_single_module_imports WHERE actor_id = ? AND exam_id = ? AND operation_key = ?", actorID, examID, operationKey).Scan(&storedHash, &result)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+			if err == nil {
+				if storedHash != opFingerprint {
+					return conflictError("This operation key was already used with different content; use a new key.")
+				}
+				if err := json.Unmarshal(result, &replayed); err != nil {
+					return err
+				}
+				if err := storeOperationResult(ctx, q, actorID, opScope, operationKey, replayed); err != nil {
+					return err
+				}
+				replayHit = true
+				return nil
+			}
+			if !s.singleModuleImportsEnabled {
+				return validationError("Single-module SAT imports are disabled on this server.")
+			}
+		}
 		var provider string
 		var currentDraft sql.NullString
 		if err := q.QueryRowContext(ctx, "SELECT provider_key, current_draft_version_id FROM exam_entities WHERE id = ? FOR UPDATE", examID).Scan(&provider, &currentDraft); err != nil {
@@ -361,8 +436,10 @@ func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expe
 			var expectedID, createdBy string
 			var importRevision int
 			var manifestRaw string
-			if err := q.QueryRowContext(ctx, `SELECT expected_version_id, expected_version_revision, asset_manifest, created_by
-				FROM sat_workbook_imports WHERE id = ? AND exam_id = ? AND state = 'previewed' AND expires_at > CURRENT_TIMESTAMP(6) FOR UPDATE`, importRequest.ImportID, examID).Scan(&expectedID, &importRevision, &manifestRaw, &createdBy); err != nil {
+			var checkedTarget, checkedDigest sql.NullString
+			if err := q.QueryRowContext(ctx, `SELECT expected_version_id, expected_version_revision, asset_manifest, created_by, b.target_module_key, b.content_digest
+				FROM sat_workbook_imports i LEFT JOIN sat_single_module_imports b ON b.import_id = i.id
+				WHERE i.id = ? AND i.exam_id = ? AND i.state = 'previewed' AND i.expires_at > CURRENT_TIMESTAMP(6) FOR UPDATE`, importRequest.ImportID, examID).Scan(&expectedID, &importRevision, &manifestRaw, &createdBy, &checkedTarget, &checkedDigest); err != nil {
 				if err == sql.ErrNoRows {
 					return conflictError("This SAT workbook preview has expired or was already used. Check the workbook again before importing.")
 				}
@@ -370,6 +447,13 @@ func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expe
 			}
 			if createdBy != actorID || expectedID != expectedVersionID || importRevision != expectedRevision {
 				return conflictError("The SAT workbook preview does not belong to the current draft session.")
+			}
+			if single {
+				if !checkedTarget.Valid || checkedTarget.String != importRequest.TargetModuleKey || !checkedDigest.Valid || checkedDigest.String != importRequest.ContentDigest {
+					return conflictError("The module or question content no longer matches the checked workbook preview.")
+				}
+			} else if checkedTarget.Valid {
+				return conflictError("A single-module preview cannot authorize a complete SAT replacement.")
 			}
 			if err := json.Unmarshal([]byte(manifestRaw), &manifest); err != nil {
 				return validationError("The workbook asset manifest is unreadable.")
@@ -392,7 +476,18 @@ func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expe
 		if err != nil {
 			return err
 		}
-		if len(targets) != len(satWorkbookModules) || len(requests) != len(targets) {
+		if single {
+			selected := make([]satTargetModule, 0, 1)
+			for _, target := range targets {
+				if target.ModuleKey == importRequest.TargetModuleKey {
+					selected = append(selected, target)
+				}
+			}
+			if len(selected) != 1 || len(requests) != 1 {
+				return validationError("The selected SAT module must exist exactly once in the editable draft.")
+			}
+			targets = selected
+		} else if len(targets) != len(satWorkbookModules) || len(requests) != len(targets) {
 			return validationError("Complete SAT replacement must contain every module exactly once.")
 		}
 		byID := make(map[string]int, len(requests))
@@ -567,6 +662,23 @@ func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expe
 			if err := storeOperationResult(ctx, q, actorID, opScope, operationKey, committed); err != nil {
 				return err
 			}
+			if single {
+				resolution, err := json.Marshal(importRequest.Resolution)
+				if err != nil {
+					return err
+				}
+				result, err := json.Marshal(committed)
+				if err != nil {
+					return err
+				}
+				updated, err := q.ExecContext(ctx, "UPDATE sat_single_module_imports SET pretest_resolution = ?, operation_key = ?, request_hash = ?, result_json = ? WHERE import_id = ? AND exam_id = ? AND actor_id = ? AND result_json IS NULL", string(resolution), operationKey, opFingerprint, string(result), importRequest.ImportID, examID, actorID)
+				if err != nil {
+					return err
+				}
+				if n, _ := updated.RowsAffected(); n != 1 {
+					return conflictError("The single-module import receipt was already completed.")
+				}
+			}
 		}
 		return nil
 	})
@@ -604,11 +716,12 @@ func buildShellTx(ctx context.Context, s *Service, q tx.Tx, examID string) (Shel
 		}
 		return Shell{}, err
 	}
-	sections, err := s.loadSections(ctx, q, draftID.String)
+	shell, err := loadShellTree(ctx, q, shellIdentity{providerKey: providerKey, versionID: draftID.String, revision: rev}, examID)
 	if err != nil {
 		return Shell{}, err
 	}
-	return Shell{ExamID: examID, ProviderKey: providerKey, VersionID: draftID.String, VersionRevision: rev, Sections: sections}, nil
+	shell.SingleModuleImportEnabled = s.singleModuleImportsEnabled && providerKey == "sat"
+	return shell, nil
 }
 
 func importRequestID(r *satImportRequest) string {
@@ -1035,11 +1148,23 @@ func cloneCheckpointRouting(ctx context.Context, q tx.Tx, versionID string, sect
 		return err
 	}
 	defer rows.Close()
+	type route struct{ sectionID, baseID, lowerID, higherID, policyKey, policyConfig string }
+	routes := []route{}
 	for rows.Next() {
-		var sectionID, baseID, lowerID, higherID, policyKey, policyConfig string
-		if err := rows.Scan(&sectionID, &baseID, &lowerID, &higherID, &policyKey, &policyConfig); err != nil {
+		var source route
+		if err := rows.Scan(&source.sectionID, &source.baseID, &source.lowerID, &source.higherID, &source.policyKey, &source.policyConfig); err != nil {
 			return err
 		}
+		routes = append(routes, source)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, source := range routes {
+		sectionID, baseID, lowerID, higherID, policyKey, policyConfig := source.sectionID, source.baseID, source.lowerID, source.higherID, source.policyKey, source.policyConfig
 		newSection, ok1 := sectionIDs[sectionID]
 		newBase, ok2 := moduleIDs[baseID]
 		newLower, ok3 := moduleIDs[lowerID]
@@ -1051,7 +1176,7 @@ func cloneCheckpointRouting(ctx context.Context, q tx.Tx, versionID string, sect
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func cloneCheckpointScoring(ctx context.Context, q tx.Tx, versionID, checkpointID string) error {

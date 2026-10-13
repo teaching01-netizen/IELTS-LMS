@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SAT_SESSION_TYPE_LABELS, SAT_SESSION_TYPE_REQUEST, type SatSessionType } from "../../contracts/satSessionType";
 import { Clock3, Link2, LockKeyhole, X } from "lucide-react";
 import {
   ACCESS_LINK_SECTION_KEYS,
@@ -107,6 +108,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   // Both sections by default: a new link is unscoped (stored NULL), which is
   // what every link created before this feature holds.
   const [sections, setSections] = useState<AccessLinkSectionKey[]>([...ACCESS_LINK_SECTION_KEYS]);
+  const [sessionType, setSatSessionType] = useState<SatSessionType>("practice");
   const [membersSource, setMembersSource] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -455,6 +457,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       } else {
         await props.onCreate({
           ...shared,
+          ...(isSat ? SAT_SESSION_TYPE_REQUEST[sessionType] : {}),
           selectedStudents,
         });
       }
@@ -616,6 +619,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                   />
                 </Field>
                 {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this room. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div id="access-link-sections" className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[14px] leading-5 text-amber-800">{sectionsLocked ? "This room has no available sections and is fixed because a student has joined. Create a new room with an available section." : "This room’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[14px] leading-5 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
+                {isSat && !props.link ? <Field label="Session type" description="Classroom sessions let staff control Module 2. Forcing Module 2 skips the Module 1 score check. The exam's score report setting decides what students see when they finish."><select aria-label="Session type" value={sessionType} onChange={(event) => { setSatSessionType(event.target.value as SatSessionType); setIsDirty(true); }} className={inputClass}>{(Object.keys(SAT_SESSION_TYPE_LABELS) as SatSessionType[]).map((key) => <option key={key} value={key}>{SAT_SESSION_TYPE_LABELS[key]}</option>)}</select></Field> : null}
                 </div>
                 <div hidden={isSteppedCreation && creationStep !== 1} className="space-y-5">
                 {isSat && !isSteppedCreation ? <GroupHeading id="access-link-group-audience" title="Who can join" /> : null}

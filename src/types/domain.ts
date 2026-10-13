@@ -94,6 +94,8 @@ export interface ExamEntity {
   currentPublishedVersionId: string | null;
   currentPublishedScope?: SatPublishScope | null | undefined;
   currentPublishedVersionNumber?: number | null | undefined;
+  /** SAT only: show the score report on completion; off shows "SAT complete" only. */
+  satScoreReportEnabled?: boolean | undefined;
 
   // Permissions summary (simplified for now, can be expanded)
   canEdit: boolean;
@@ -226,6 +228,8 @@ export interface ExamSchedule {
   publishedVersionId: string; // Always points to immutable version
   publishScope?: SatPublishScope | undefined;
   satStartMode?: "proctor" | "access_code" | undefined;
+  satSessionMode?: "practice" | "classroom" | undefined;
+  satRoutePolicy?: "adaptive" | "force_lower" | "force_higher" | "staff_selects" | undefined;
 
   // Schedule details
   cohortName: string;

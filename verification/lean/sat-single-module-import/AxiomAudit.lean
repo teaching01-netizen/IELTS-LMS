@@ -1,0 +1,121 @@
+import Refinement
+
+-- Exact theorem statements and transitive axiom audit for every checked theorem.
+#check SingleModuleImport.singleton_filter
+#print axioms SingleModuleImport.singleton_filter
+#check SingleModuleImport.pair_count
+#print axioms SingleModuleImport.pair_count
+#check SingleModuleImport.imported_exactly_two
+#print axioms SingleModuleImport.imported_exactly_two
+#check SingleModuleImport.initiation
+#print axioms SingleModuleImport.initiation
+#check SingleModuleImport.commit_preserves
+#print axioms SingleModuleImport.commit_preserves
+#check SingleModuleImport.consecution
+#print axioms SingleModuleImport.consecution
+#check SingleModuleImport.reachable_invariant
+#print axioms SingleModuleImport.reachable_invariant
+#check SingleModuleImport.at_most_once
+#print axioms SingleModuleImport.at_most_once
+#check SingleModuleImport.effect_has_receipt
+#print axioms SingleModuleImport.effect_has_receipt
+#check SingleModuleImport.non_target_preserved
+#print axioms SingleModuleImport.non_target_preserved
+#check SingleModuleImport.policies_preserved
+#print axioms SingleModuleImport.policies_preserved
+#check SingleModuleImport.imported_count
+#print axioms SingleModuleImport.imported_count
+#check SingleModuleImport.preview_content_bound
+#print axioms SingleModuleImport.preview_content_bound
+#check SingleModuleImport.unknown_pretests_blocked
+#print axioms SingleModuleImport.unknown_pretests_blocked
+#check SingleModuleImport.stale_revision_blocked
+#print axioms SingleModuleImport.stale_revision_blocked
+#check SingleModuleImport.replay_no_mutation
+#print axioms SingleModuleImport.replay_no_mutation
+#check SingleModuleImport.replay_preserves_durable_result
+#print axioms SingleModuleImport.replay_preserves_durable_result
+#check SingleModuleImport.disabled_blocks_fresh_commit
+#print axioms SingleModuleImport.disabled_blocks_fresh_commit
+#check SingleModuleImport.cached_key_blocks_fresh_commit
+#print axioms SingleModuleImport.cached_key_blocks_fresh_commit
+#check SingleModuleImport.durable_receipt_survives_operation_key_cleanup
+#print axioms SingleModuleImport.durable_receipt_survives_operation_key_cleanup
+#check SingleModuleImport.retry_after_operation_key_cleanup
+#print axioms SingleModuleImport.retry_after_operation_key_cleanup
+#check SingleModuleImport.consumed_preview
+#print axioms SingleModuleImport.consumed_preview
+#check SingleModuleImport.publish_pretests
+#print axioms SingleModuleImport.publish_pretests
+#check SingleModuleImport.rw_requires_three
+#print axioms SingleModuleImport.rw_requires_three
+#check SingleModuleImport.undo_restores
+#print axioms SingleModuleImport.undo_restores
+#check SingleModuleImport.crash_durable
+#print axioms SingleModuleImport.crash_durable
+#check SingleModuleImport.substantive_other_row_blocked
+#print axioms SingleModuleImport.substantive_other_row_blocked
+#check SingleModuleImport.untouched_other_row_ignored
+#print axioms SingleModuleImport.untouched_other_row_ignored
+#check SingleModuleImport.changed_scaffold_blocked
+#print axioms SingleModuleImport.changed_scaffold_blocked
+#check SingleModuleImport.used_key_cannot_commit
+#print axioms SingleModuleImport.used_key_cannot_commit
+#check SingleModuleImport.altered_replay_blocked
+#print axioms SingleModuleImport.altered_replay_blocked
+#check SingleModuleImport.stale_after_commit
+#print axioms SingleModuleImport.stale_after_commit
+#check SingleModuleImport.stale_undo_blocked
+#print axioms SingleModuleImport.stale_undo_blocked
+#check SingleModuleImport.fixture_ready
+#print axioms SingleModuleImport.fixture_ready
+#check SingleModuleImport.meaningful_commit
+#print axioms SingleModuleImport.meaningful_commit
+#check SingleModuleImport.committed_reachable
+#print axioms SingleModuleImport.committed_reachable
+#check SingleModuleImport.fixture_pretest_flags
+#print axioms SingleModuleImport.fixture_pretest_flags
+#check SingleModuleImport.no_resolution
+#print axioms SingleModuleImport.no_resolution
+#check SingleModuleImport.one_pretest
+#print axioms SingleModuleImport.one_pretest
+#check SingleModuleImport.three_pretests
+#print axioms SingleModuleImport.three_pretests
+#check SingleModuleImport.duplicate_pretests
+#print axioms SingleModuleImport.duplicate_pretests
+#check SingleModuleImport.zero_order
+#print axioms SingleModuleImport.zero_order
+#check SingleModuleImport.overflow_order
+#print axioms SingleModuleImport.overflow_order
+#check SingleModuleImport.unconfirmed
+#print axioms SingleModuleImport.unconfirmed
+#check SingleModuleImport.wrong_count
+#print axioms SingleModuleImport.wrong_count
+#check SingleModuleImport.duplicate_order
+#print axioms SingleModuleImport.duplicate_order
+#check SingleModuleImport.tampered_content
+#print axioms SingleModuleImport.tampered_content
+#check SingleModuleImport.wrong_actor
+#print axioms SingleModuleImport.wrong_actor
+#check SingleModuleImport.wrong_module
+#print axioms SingleModuleImport.wrong_module
+#check SingleModuleImport.expired_at_boundary
+#print axioms SingleModuleImport.expired_at_boundary
+#check SingleModuleImport.stale_fixture
+#print axioms SingleModuleImport.stale_fixture
+#check SingleModuleImport.single_rw_not_publishable
+#print axioms SingleModuleImport.single_rw_not_publishable
+#check SingleModuleImport.competing_stale_commit
+#print axioms SingleModuleImport.competing_stale_commit
+#check SingleModuleImport.naive_two_read_two_write
+#print axioms SingleModuleImport.naive_two_read_two_write
+#check SingleModuleImport.deleting_other_modules_loses_content
+#print axioms SingleModuleImport.deleting_other_modules_loses_content
+#check SingleModuleImport.concrete_step_refines_abstract
+#print axioms SingleModuleImport.concrete_step_refines_abstract
+#check SingleModuleImport.crash_discards_uncommitted_write_set
+#print axioms SingleModuleImport.crash_discards_uncommitted_write_set
+#check SingleModuleImport.abort_discards_uncommitted_write_set
+#print axioms SingleModuleImport.abort_discards_uncommitted_write_set
+#check SingleModuleImport.database_commit_publishes_one_abstract_commit
+#print axioms SingleModuleImport.database_commit_publishes_one_abstract_commit

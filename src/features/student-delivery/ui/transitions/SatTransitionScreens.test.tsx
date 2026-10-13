@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SatBreakScreen } from "./SatBreakScreen";
-import { SatCompleteScreen } from "./SatCompleteScreen";
+import { SatAwaitingRouteScreen, SatCompleteScreen } from "./SatCompleteScreen";
 
 describe("SAT transition screens (Phase 6c)", () => {
   it("gives waiting and break distinct titles with the auto-advance promise", () => {
@@ -44,5 +44,11 @@ describe("SAT transition screens (Phase 6c)", () => {
     expect(screen.getByText(/All responses submitted/)).toBeInTheDocument();
     expect(screen.queryByText(/score/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Back to dashboard" })).toBeInTheDocument();
+  });
+
+  it("tells a staff_selects student to wait for the teacher, without a score", () => {
+    render(<SatAwaitingRouteScreen onExit={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Awaiting teacher assignment" })).toBeInTheDocument();
+    expect(screen.queryByText(/score/i)).not.toBeInTheDocument();
   });
 });

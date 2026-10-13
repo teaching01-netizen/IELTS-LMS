@@ -48,7 +48,7 @@ import { SatReferenceSheetPanel } from "../ui/tools/SatReferenceSheetPanel";
 import { SatScheduledBreakScreen } from "../ui/break/SatScheduledBreakScreen";
 import { SatPresenceSurface } from "../ui/motion/SatPresenceSurface";
 import { SatStudentStageHost } from "../ui/stage/SatStudentStageHost";
-import { SatCompleteScreen, SatTerminatedScreen } from "../ui/transitions/SatCompleteScreen";
+import { SatAwaitingRouteScreen, SatCompleteScreen, SatTerminatedScreen } from "../ui/transitions/SatCompleteScreen";
 import { SatPreStartScreen } from "../ui/transitions/SatPreStartScreen";
 import { SatStartCodeScreen } from "../ui/transitions/SatStartCodeScreen";
 import { SatWriterTransferControl } from "../ui/entry/SatWriterTransferControl";
@@ -63,7 +63,7 @@ import {
 } from "../ui/feedback/SatControlFeedback";
 import { SatIntegrityWarning } from "../ui/feedback/SatIntegrityWarning";
 import { SatTemporalRuntime } from "../timing/SatTemporalRuntime";
-import { loadAssessmentDeliveryMedia, releaseAssessmentDeliveryMedia } from "../api/assessmentDeliveryApi";
+import { assessmentDeliveryApi, loadAssessmentDeliveryMedia, releaseAssessmentDeliveryMedia } from "../api/assessmentDeliveryApi";
 import { satMediaWarmUp } from "../domain/satMediaWarmUp";
 import { emitStudentObservabilityMetric } from "../../../utils/studentObservability";
 
@@ -402,6 +402,7 @@ export function SatStudentSessionRoute({
     terminated,
     terminatedByProctor: data?.proctorStatus === "terminated",
     finalizationFailed: Boolean(error),
+    awaitingStaffRoute: Boolean(data?.awaitingStaffRoute),
     allModulesFinal,
     isInitialEntry: initialEntry,
     pendingModule:
@@ -460,8 +461,16 @@ export function SatStudentSessionRoute({
     // those drafts; that signal is not part of the student's terminal surface.
     return stageHost(
       stage,
-      <SatCompleteScreen result={data.result ?? result} onExit={onExit} />,
+      <SatCompleteScreen
+        result={data.result ?? result}
+        onExit={onExit}
+        answered={{ sections: data.sections, loadMediaUrl, load: () => assessmentDeliveryApi.answeredExam(scheduleId, attemptId) }}
+      />,
     );
+  }
+  if (stage.kind === "awaiting-route") {
+    lastValidFrameRef.current = null;
+    return stageHost(stage, <SatAwaitingRouteScreen onExit={onExit} />);
   }
   if (stage.kind === "terminated") {
     lastValidFrameRef.current = null;

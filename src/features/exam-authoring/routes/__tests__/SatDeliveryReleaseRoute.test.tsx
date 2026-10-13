@@ -234,20 +234,17 @@ beforeEach(() => {
   mocks.refetchReadiness.mockResolvedValue(undefined);
   mocks.refetchRelease.mockResolvedValue(undefined);
   mocks.refetchDistribution.mockResolvedValue(undefined);
-  // The real mutation resolves { publishedVersion, releaseState } (see usePublishAssessment).
+  // The publish mutation resolves the committed version returned by POST.
   mocks.publish.mockResolvedValue({
-    publishedVersion: {
-      id: "draft-v5",
-      examId: exam.id,
-      versionNumber: 5,
-      revision: 43,
-      isDraft: false,
-      isPublished: true,
-      publishNotes: "Release notes",
-      publishScope: "full",
-      createdAt: "2026-08-28T08:00:00.000Z",
-    },
-    releaseState: {},
+    id: "draft-v5",
+    examId: exam.id,
+    versionNumber: 5,
+    revision: 43,
+    isDraft: false,
+    isPublished: true,
+    publishNotes: "Release notes",
+    publishScope: "full",
+    createdAt: "2026-08-28T08:00:00.000Z",
   });
 });
 describe("SatDeliveryReleaseRoute", () => {
