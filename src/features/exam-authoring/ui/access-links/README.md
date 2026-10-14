@@ -6,12 +6,21 @@ the check-in window, the waiting room and the responses. Storage is unchanged �
 room is one `assessment_access_links` row plus its backing schedule, created
 atomically. Route: `SatAccessRoute` (kept at `/sat/exams/:id/access`; the tab is
 labelled **Rooms**) → `StudentLinksDashboard`. The global Rooms page
-(`SatSessionsRoute` → `SatNewSessionFlow`) asks which exam, then opens the same
-`AccessLinkEditorSheet`, so both entry points create the same thing.
+(`SatSessionsRoute` → `SatNewSessionFlow`) renders the same
+`AccessLinkEditorSheet` with an **Exam** picker as its first field, so both entry
+points create the same thing from one sheet. Creating from inside an exam goes
+through `SatCreateRoomFlow`, which pins the published version or, for unpublished
+changes, asks explicitly: *Use published Version N* (default) or *Publish changes
+first*.
 
-The setup sheet is grouped as **Room details** (name, class or group, sections,
-pinned version) · **Who can join** (audience, roster, identification) ·
-**Check-in settings** (window).
+Creating a SAT room is ONE form, never a wizard: Room name · Session type
+(Practice / Classroom; Classroom reveals Module 2 routing in place) · Who can join
+(roster appears for *Listed students only*) · Check-in (dates appear for
+*Scheduled*) · **More options** (sections — hidden when the release has only one —
+student identification, class or group). The closed disclosure summarizes its
+current values; Create validates every field and opens More options when the
+first problem lives there. Editing an existing room keeps the grouped layout
+**Room details** · **Who can join** · **Check-in settings**.
 
 ## Vocabulary
 
@@ -51,7 +60,10 @@ pinned version) · **Who can join** (audience, roster, identification) ·
 - `AccessLinkRow` — memoized two-line row + `SatStatusPill` + overflow
   `SatMenu` (Copy/Share/Present/Edit/Duplicate/Pause-Resume/Revoke).
 - `AccessLinkDetail` — tabbed `Overview | Activity | Settings`. Overview keeps
-  the stale-version banner + `Create Version N Link`.
+  the stale-version banner + `Create Version N Link`. With session bindings the
+  room panel states check-in and exam state, so the header omits its own
+  check-in pill; the student link has one copy action (Settings shows the link
+  ID as text).
 - `AccessLinkEditorSheet` — inline per-field errors + progressive roster
   validation (`rosterValidation.ts`: per-row issues, live count, template).
 - `AccessLinkShareSheet` — QR (lazy `qrcode` import), break-all URL, 44px

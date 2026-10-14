@@ -658,44 +658,23 @@ test.describe("SAT guided room setup", () => {
     await page.goto("/sat/sessions");
 
     await page.getByRole("button", { name: "Create room" }).click();
-    const examChoice = page.getByRole("dialog", { name: "Create room" });
-    await expect(examChoice.getByRole("progressbar", { name: "Room setup progress" })).toHaveAttribute("aria-valuenow", "1");
-    await expect(examChoice.getByLabel("Exam")).toHaveValue("sat-room-setup-exam");
-    await examChoice.getByRole("button", { name: "Continue" }).click();
+    const roomSetup = page.getByRole("dialog", { name: "Create room" });
+    await expect(roomSetup).toBeVisible();
+    await expect(roomSetup.getByLabel("Exam")).toHaveValue("sat-room-setup-exam");
+    await expect(roomSetup.getByText("SAT Practice 03 · Version 3", { exact: true })).toBeVisible();
+    await expect(roomSetup.getByRole("group", { name: "Who can join" })).toBeVisible();
+    await expect(roomSetup.getByRole("group", { name: "Check-in" })).toBeVisible();
 
-    const setupProgress = page.getByRole("progressbar", { name: "Room setup progress" });
-    await expect(setupProgress).toHaveAttribute("aria-valuenow", "2");
-    await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page.getByText("Give this room a name people will recognize.")).toBeVisible();
-    await page.getByRole("textbox", { name: "Room name" }).fill("October morning mock");
-    await page.getByRole("button", { name: "Continue" }).click();
-
-    await expect(setupProgress).toHaveAttribute("aria-valuenow", "3");
-    await expect(page.getByRole("group", { name: "Audience" })).toBeVisible();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await expect(setupProgress).toHaveAttribute("aria-valuenow", "4");
-    await expect(page.getByRole("group", { name: "Check-in window" })).toBeVisible();
-    await page.getByRole("button", { name: "Continue" }).click();
-
-    await expect(setupProgress).toHaveAttribute("aria-valuenow", "5");
-    await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
-    await expect(page.getByText("SAT Practice 03 · Version 3", { exact: true }).last()).toBeVisible();
-    await expect(page.getByText("October morning mock", { exact: true })).toBeVisible();
-    await expect(page.getByText("Check-in lets students enter.", { exact: false })).toBeVisible();
+    const roomName = roomSetup.getByRole("textbox", { name: "Room name" });
+    await roomSetup.getByRole("button", { name: "Create room", exact: true }).click();
+    await expect(roomSetup.getByText("Give this room a name people will recognize.")).toBeVisible();
+    await expect(roomName).toBeFocused();
+    await expect(roomSetup.getByLabel("Exam")).toHaveValue("sat-room-setup-exam");
+    await roomName.fill("October morning mock");
     await expectNoSeriousAxeViolations(page, "SAT guided room setup review");
+    await expect(roomName).toHaveValue("October morning mock");
 
-    await page.getByRole("button", { name: "Back" }).click();
-    await expect(setupProgress).toHaveAttribute("aria-valuenow", "4");
-    await page.getByRole("button", { name: "Back" }).click();
-    await page.getByRole("button", { name: "Back" }).click();
-    await expect(setupProgress).toHaveAttribute("aria-valuenow", "2");
-    await expect(page.getByRole("textbox", { name: "Room name" })).toHaveValue("October morning mock");
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await expect(setupProgress).toHaveAttribute("aria-valuenow", "5");
-
-    await page.getByRole("button", { name: "Create room" }).click();
+    await roomSetup.getByRole("button", { name: "Create room", exact: true }).click();
     await expect(page).toHaveURL(/\/sat\/sessions\/sat-room-created$/);
     await expect(page.getByRole("heading", { level: 1, name: "October morning mock" })).toBeVisible();
     expect(recording.createdRequests).toHaveLength(1);
@@ -720,21 +699,14 @@ test.describe("SAT guided room setup", () => {
     const header = page.getByTestId("exam-workspace-header");
     await expect(header.getByRole("heading", { name: "SAT Practice 03" })).toBeVisible();
     await header.getByRole("button", { name: "Create room" }).click();
-    const progress = page.getByRole("progressbar", { name: "Room setup progress" });
-    await expect(progress).toHaveAttribute("aria-valuenow", "1");
-    await expect(page.getByText("This room uses Version 3 of SAT Practice 03.")).toBeVisible();
-    await page.getByRole("textbox", { name: "Room name" }).fill("Exam Rooms tab setup");
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await expect(progress).toHaveAttribute("aria-valuenow", "4");
-    await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
-    await expect(page.getByText("SAT Practice 03 · Version 3", { exact: true }).last()).toBeVisible();
-    await expect(page.getByText("Exam Rooms tab setup", { exact: true })).toBeVisible();
+    const roomSetup = page.getByRole("dialog", { name: "Create room" });
+    await expect(roomSetup).toBeVisible();
+    await expect(roomSetup.getByText("SAT Practice 03 · Version 3", { exact: true })).toBeVisible();
+    await roomSetup.getByRole("textbox", { name: "Room name" }).fill("Exam Rooms tab setup");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await expectNoSeriousAxeViolations(page, "SAT exam Rooms guided setup review");
 
-    await page.getByRole("button", { name: "Create room", exact: true }).last().click();
+    await roomSetup.getByRole("button", { name: "Create room", exact: true }).click();
     await expect(page).toHaveURL(/\/sat\/sessions\/sat-room-created$/);
     expect(recording.createdRequests).toHaveLength(1);
     expect(recording.createdRequests[0]).toMatchObject({

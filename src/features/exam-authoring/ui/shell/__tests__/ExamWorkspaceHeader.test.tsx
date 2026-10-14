@@ -5,7 +5,7 @@ import { ExamWorkspaceHeader, type ExamWorkspaceHeaderProps } from "../ExamWorks
 function props(overrides: Partial<ExamWorkspaceHeaderProps> = {}): ExamWorkspaceHeaderProps {
   return {
     examTitle: "Practice Test 06",
-    lifecycle: { label: "Published · Version 2", detail: null, tone: "published" },
+    lifecycle: { label: "Published · Version 2", detail: null, tone: "published", state: "published_current" },
     activeTab: "questions",
     showResponses: true,
     onSelectTab: vi.fn(),
@@ -69,6 +69,25 @@ describe("ExamWorkspaceHeader", () => {
     expect(onOpenIssues).toHaveBeenCalledOnce();
     rerender(<ExamWorkspaceHeader {...props({ issueCount: 1, onOpenIssues })} />);
     expect(screen.getByRole("button", { name: "Review 1 issue" })).toBeInTheDocument();
+  });
+
+  it("makes the lifecycle's next step the one primary action", () => {
+    const actions = { onPublish: vi.fn(), onCreateSession: vi.fn() };
+    const primaryNames = () =>
+      screen.getAllByRole("button").filter((button) => button.className.includes("sat-btn--primary")).map((button) => button.textContent);
+    const { rerender } = render(<ExamWorkspaceHeader {...props(actions)} />);
+    expect(primaryNames()).toEqual(["Create room"]);
+
+    rerender(<ExamWorkspaceHeader {...props({ ...actions, lifecycle: { label: "Unpublished changes", detail: null, tone: "changes", state: "unpublished_changes" } })} />);
+    expect(primaryNames()).toEqual(["Publish changes"]);
+    // The published version stays one click away as a secondary action.
+    expect(screen.getByRole("button", { name: "Create room" })).toBeInTheDocument();
+
+    rerender(<ExamWorkspaceHeader {...props({ onPublish: actions.onPublish, lifecycle: { label: "Draft", detail: null, tone: "draft", state: "never_published" } })} />);
+    expect(primaryNames()).toEqual(["Publish version"]);
+
+    rerender(<ExamWorkspaceHeader {...props({ onPublish: actions.onPublish, issueCount: 2, onOpenIssues: vi.fn(), lifecycle: { label: "Draft", detail: null, tone: "draft", state: "never_published" } })} />);
+    expect(primaryNames()).toEqual(["Review 2 issues"]);
   });
 
   it("offers one Import menu holding every import path", () => {

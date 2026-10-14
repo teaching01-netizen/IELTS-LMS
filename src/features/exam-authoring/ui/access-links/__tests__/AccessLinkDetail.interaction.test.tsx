@@ -122,7 +122,7 @@ describe("AccessLinkDetail interaction contract", () => {
     expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("AT-10: the copy confirmation swaps in place on both copy affordances", () => {
+  it("AT-10: the copy confirmation swaps in place on the one student-link copy action", () => {
     const { rerender } = render(<AccessLinkDetail {...detailProps()} />);
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
 
@@ -130,9 +130,6 @@ describe("AccessLinkDetail interaction contract", () => {
 
     expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
-    // The Settings row keeps its own copy control, named as before.
-    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
-    expect(screen.getByRole("button", { name: "Copy link ID" })).toHaveTextContent("Copied");
   });
 
   it("AT-17: Escape asks the dashboard to return focus to the row", () => {

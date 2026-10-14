@@ -1,243 +1,395 @@
-# Recommended Design System for Your SAT Internal Platform
+# SAT Internal Platform — End-to-End UX Redesign
 
-My recommendation: Copy the visual language of Linear and implement it using shadcn/ui + Tailwind CSS 4 + Radix UI.
+Repository reviewed: [IELTS-LMS](https://github.com/teaching01-netizen/IELTS-LMS), current `main` branch.
 
-Use Vercel Geist Design System as the reference for typography, spacing, colors, and precise component styling.
+My recommendation is to redesign the entire SAT staff journey around one simple sequence:
 
-This gives your SAT platform the polished feel of a professional SaaS application without introducing a completely different technology stack.
+Create
 
-References: Linear's redesigned workspace and Vercel's Geist Design System.
+Edit
 
-## 1. The three references to follow
+Publish
 
-1\. Linear — Copy the overall product experience
+Room
 
-Use its understated navigation, information-dense lists, selected-row treatments, side panels, and smooth interactions.
+Once the room exists: Share → Run exam → View results
 
-[Linear's official redesign explanation](https://linear.app/now/how-we-redesigned-the-linear-ui).&#x20;
+The staff experience should feel like Google Forms for creating and publishing an exam, Google Classroom for configuring the session, and Kahoot for getting students into a room.
 
-2\. shadcn/ui — Copy the React component patterns
+## 1. What is making the current flow complicated?
 
-Buttons, dialogs, sheets, dropdowns, data tables, forms, and sidebars built for modern React applications.
+After inspecting the actual React routes and components, I found several points where the experience becomes more complicated than necessary.
 
-[Official dashboard examples](https://ui.shadcn.com/blocks?category=dashboard).&#x20;
+| Current implementation                                                              | UX problem                                         | Recommended change                                                 |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------ |
+| Global Create room uses a five-step flow                                            | Too much navigation for common configurations      | One compact setup form                                             |
+| Exam-specific Create room uses four steps                                           | Staff must repeatedly press Continue               | Display essential fields immediately                               |
+| Publish opens a separate sheet, then a success screen, then room setup              | A task feels like several separate workflows       | Seamless Publish → Create room transition                          |
+| Full SAT/R&W/Math can be selected at publishing and sections again at room creation | Two decisions that appear similar                  | Clearly separate published content from what this sitting uses     |
+| Exam Settings, Quick settings and settings inside Publish all exist                 | Several entry points to the same configuration     | One canonical settings editor                                      |
+| Five session types appear as technical choices                                      | Staff must understand adaptive-routing terminology | Simple Practice/Classroom choice, with advanced routing underneath |
+| Rooms exist both globally and inside each exam                                      | The distinction isn't immediately apparent         | Same room-management experience, filtered by context               |
+| Room details, check-in controls, live room and sharing use separate surfaces        | Staff must learn where each action lives           | One Room page with contextual sections                             |
 
-[image](https://www.google.com/s2/favicons?domain=https://ui.shadcn.com\&sz=32)
+This is primarily an information architecture and interaction design problem, not a missing component-library problem.
 
-shadcn/ui
+### Important things already implemented correctly
 
+The code has several safeguards that must be preserved: published versions are immutable, room creation pins an exact version, publish checks verify the committed draft, and room creation uses one server mutation for the linked room setup. These are good foundations.
 
+We should remove unnecessary user decisions and navigation, not the safety checks.
 
-3\. Vercel Geist Design System — Copy the visual foundations
+## 2. Which famous apps should we copy?
 
-Neutral surfaces, high-contrast typography, precise spacing, subtle borders, and restrained color.
+Google Forms — Create and publish
 
-[Official Geist documentation](https://vercel.com/geist/introduction).&#x20;
+Keep editing focused. Settings remain accessible. Publishing is explicit, and sharing becomes available at the right moment.
 
-[image](https://www.google.com/s2/favicons?domain=https://vercel.com\&sz=32)
+[Official publishing flow](https://support.google.com/docs/answer/2839588)&#x20;
 
-vercel.com
+[image](https://www.google.com/s2/favicons?domain=https://support.google.com\&sz=32)
 
+Google Docs Editors Help
 
 
-Important: These are design references, not three component libraries to install together. Your repository already uses React, Radix, Tailwind and several shadcn-style primitives. Extend what you have rather than replacing everything.
 
-## 2. SAT Staff Design System — Recommended specification
+Google Classroom — Configure a session
 
-Call the internal system SAT Staff UI. One visual language should apply to Exams, Authoring, Publishing, Rooms, and Responses.
+Present the task and its most important settings together. Use defaults for routine decisions; offer scheduling and drafts when needed.
 
-### Colors
+[Official assignment workflow](https://support.google.com/edu/classroom/answer/6020265)&#x20;
 
-Use your existing SAT staff blue as the accent and a light, neutral workspace.
+[image](https://www.google.com/s2/favicons?domain=https://support.google.com\&sz=32)
 
-Canvas
+Classroom Help
 
-\#F7F7F8
 
-Surface
 
-\#FFFFFF
+Kahoot! — Room and live controls
 
-Primary text
+After setup, go directly to the lobby. Make joining, waiting participants, and the appropriate start action obvious.
 
-\#1D1D1F
+[Official hosting flow](https://support.kahoot.com/hc/en-us/articles/360039422694-How-to-host-a-live-kahoot)&#x20;
 
-Secondary text
+[image](https://www.google.com/s2/favicons?domain=https://support.kahoot.com\&sz=32)
 
-\#515154
+Kahoot! Help & Resource Center
 
-Hairline
 
-\#E9E9EC
 
-Accent
+Typeform — Publishing handoff
 
-\#0071E3
+After publishing, immediately surface the meaningful next action rather than leaving staff in a technical release-management view.
 
-Success
+[Official share flow](https://help.typeform.com/hc/en-us/articles/360029252892-Share-your-form)&#x20;
 
-\#067647
+[image](https://www.google.com/s2/favicons?domain=https://help.typeform.com\&sz=32)
 
-Warning
+Help Center
 
-\#92400E
 
-Danger
 
-\#B42318
+These are interaction patterns to adapt, not workflows to copy mechanically. SAT has stricter requirements for exam versions, candidate identity, timing, and adaptive routing than those products.
 
-These colors are close to the project's existing design tokens, so this is a consolidation rather than a new brand. Verify foreground/background contrast for all supported component states.
+## 3. The new SAT user journey
 
-### Component sizing
+I would design three paths based on what staff are trying to accomplish.
 
-| Property           | Standard                                       |
-| ------------------ | ---------------------------------------------- |
-| Font               | Inter, already configured in your project      |
-| Page title         | 24px / 600                                     |
-| Section title      | 16–18px / 600                                  |
-| Body               | 14px / 400–500                                 |
-| Supporting text    | 12–13px                                        |
-| Buttons and inputs | 40px visually; 44px minimum interactive target |
-| Control radius     | 10px                                           |
-| Card radius        | 14px                                           |
-| Dialog radius      | 18px                                           |
-| Sidebar width      | Approximately 240px, collapsible               |
-| Standard spacing   | 8 / 12 / 16 / 24 / 32px                        |
-| Borders            | 1px, low contrast                              |
-| Shadows            | None by default; subtle for floating surfaces  |
+A. New exam
 
-These should map to your existing `--sat-staff-*` variables in `src/index.css`, not become duplicate hardcoded values in every component.
+Create exam → Add questions → Publish → Create room → Room ready
 
-## 3. What to copy for each SAT screen
+B. Existing published exam
 
-| Your SAT screen | Reference pattern           | Design approach                                                           |
-| --------------- | --------------------------- | ------------------------------------------------------------------------- |
-| Exam library    | Linear issue list           | Compact exam rows, status, search, one primary Create exam action         |
-| Exam authoring  | Notion-style editor         | Focused editing canvas, unobtrusive outline, contextual tools             |
-| Publish         | Geist dialog / validation   | Simple readiness summary, actionable issues, one primary Publish action   |
-| Create room     | shadcn form + sheet         | A short form, progressive disclosure, no unnecessary stepper              |
-| Live room       | Linear split-pane workspace | Students on the left, operational context on the right, student inspector |
-| Responses       | shadcn data table           | Search, filters, sortable rows, clear result states and exports           |
-| Settings        | Geist settings layout       | Grouped sections, concise explanations, no crowded cards                  |
+Open exam → Create room → Room ready
 
-The visual styling stays consistent. Only the interaction layout changes to suit the task.
+C. Reusing an exam
 
-## 4. The React components to standardize
+Open exam → Create another room → Reuse previous settings → Room ready
 
-Your repository already has many reusable UI primitives. Rather than installing an entire dashboard kit, standardize the following set across the internal SAT experience.
+For an exam with unpublished changes, show a clear choice between using the currently published version and publishing those changes first. Never silently deliver an unpublished draft.
 
-Application shell
+### Screen A — Exam creation
 
-Sidebar, header, breadcrumbs, page title, contextual actions
+Your existing Create exam dialog is already close to ideal.
 
-Data display
+## Create SAT exam
 
-Lists, tables, statuses, filters, empty states
+Give your exam a name. You can edit its content and settings afterward.
 
-Forms
+Exam name
 
-Inputs, selects, switches, validation, buttons
+e.g. SAT Mock Test — October
 
-Overlays
+Cancel
 
-Sheets, dialogs, dropdowns, tooltips, confirmations
+Create exam
 
-For implementation, use the existing Radix-based components, with shadcn/ui as the reference for composability and styling. Radix handles many focus-management and keyboard patterns that are especially important during live exam operation.&#x20;
+No section selection, publishing settings, scheduling or room options at this stage. Create the standard SAT structure as your existing code does and take the user directly into the question editor.
 
-[image](https://www.google.com/s2/favicons?domain=https://www.radix-ui.com\&sz=32)
+### Screen B — Exam editor
 
-Radix Primitives
+Keep a persistent exam identity and lifecycle indicator:
 
+## SAT Mock Test — October
 
+Draft
 
-The recommended shadcn styling reference is the restrained New York family, rather than oversized cards or highly decorative dashboard templates. The official Tailwind v4 guidance supports React 19 and CSS-variable-based theming.&#x20;
+All changes saved
 
-[image](https://www.google.com/s2/favicons?domain=https://ui.shadcn.com\&sz=32)
+Publish
 
-shadcn/ui
+Questions
 
-+1
+Rooms
 
+Results
 
+Settings
 
-## 5. Specific templates worth copying
+Reading & Writing · Module 1
 
-These are the practical starting points I'd give your frontend developer.
+Ready for review
 
-[shadcn Sidebar-07](https://ui.shadcn.com/blocks/sidebar)
+Question editing workspace
 
-For the SAT navigation. Copy its collapsible layout and active-item treatment, adapting it to your existing roles and routes.
+Your existing editor stays in place
 
-[shadcn Dashboard-01](https://ui.shadcn.com/blocks?category=dashboard)
+The top-right primary action changes according to the actual lifecycle:
 
-For tables, top-level page layout, and responsive dashboard composition. Skip unnecessary analytics charts and metric cards.
+| State                                 | Main action                                     |
+| ------------------------------------- | ----------------------------------------------- |
+| Never published, editing              | Publish                                         |
+| Published, no changes                 | Create room                                     |
+| Published, new draft changes          | Publish changes                                 |
+| Published, but staff want old content | Create room using published version (secondary) |
+| Cannot publish                        | Review issues                                   |
 
-[Linear workspace redesign](https://linear.app/now/how-we-redesigned-the-linear-ui)
+Don't make staff open a separate release-management page simply to learn whether their exam is ready.
 
-For the Room and Responses pages: information hierarchy, list selection, contextual panels, and compact navigation.
+### Screen C — Publish
 
-The Linear redesign is particularly relevant: its designers explicitly focused on reducing visual noise, improving alignment, and creating a consistent hierarchy across lists, panels, headers, and navigation.&#x20;
+Copy the Google Forms pattern: a focused review before making content available.
 
-[image](https://www.google.com/s2/favicons?domain=https://linear.app\&sz=32)
+Keep the essential information visible:
 
-linear.app
+- What is being published: Full SAT, Reading & Writing, or Math.
+- Whether all required checks pass.
+- Which question or setting needs fixing, if blocked.
+- Which published version will be created.
 
+Publishing must remain an explicit action. Do not publish automatically when someone clicks Create room if the exam is still a draft.
 
+After a successful publish, offer Create room as the prominent next action and Done as an alternative. The existing code already provides those actions; the main improvement is making the handoff feel continuous and removing unnecessary room-setup screens.
 
-## 6. Rules for keeping the design professional
+### Screen D — Create room
 
-These should be enforced during code review.
+This is where I would make the biggest change.
 
-| Prefer                                      | Avoid                                             |
-| ------------------------------------------- | ------------------------------------------------- |
-| One clear primary action per screen state   | Three or four competing primary buttons           |
-| Quiet white and neutral surfaces            | Every section filled with a different color       |
-| Flat lists with subtle separators           | One oversized card per row                        |
-| Contextual student inspector                | Large permanent panels showing irrelevant details |
-| Simple status text and icons                | Excessive badges, colored pills and animation     |
-| Consistent 10–18px corner radius system     | Random 6px, 12px, 20px, 28px radii                |
-| Tailwind utilities backed by tokens         | Repeated arbitrary hex values                     |
-| Predictable focus and keyboard interactions | Hover-only actions and decorative controls        |
+Replace the current four-/five-step wizard with one compact configuration sheet. Its default layout should work for most practice sessions without opening advanced settings.
 
-I would also use light mode as the initial reference implementation. Dark mode can follow using the same semantic tokens, but don't let it delay fixing consistency across existing SAT screens.
+## Create room
 
-## 7. How to adopt it in IELTS-LMS
+SAT Mock Test — October · Published Version 2
 
-The sensible order is to establish a few canonical components and migrate screens gradually.
+Room name
+
+Saturday Morning SAT
+
+Session type
+
+Practice
+
+Standard SAT
+
+Classroom
+
+Teacher controls
+
+Who can join?
+
+Anyone with the link
+
+Check-in
+
+Open now
+
+Opening check-in does not start the exam.
+
+More options
+
+Sections, identification, scheduling
+
+Cancel
+
+Create room
+
+This is a conceptual design, not an interactive production form. Actual defaults and choices must come from the published exam and server-supported room configuration.
+
+Crucially, don't remove the important capabilities. Place them contextually:
+
+- Selecting Classroom reveals adaptive/forced/teacher-selected Module 2 behavior.
+- Selecting Listed students only reveals the student roster input.
+- Selecting Scheduled reveals the check-in date and time fields.
+- If the published version contains both SAT sections, staff may choose a subset for this room; if only one section is available, don't show a meaningless choice.
+- Student identification remains a separate setting from the shared exam-start code.
+
+This uses progressive disclosure: simple defaults first, advanced configuration only when needed.
+
+### Screen E — Room ready
+
+After the backend confirms creation, go directly to the actual room.
+
+Don't land on another room-details page that asks staff to select the newly created room.
+
+The room should immediately show the correct student link, QR presentation, student list, and applicable start behavior. Staff can share the room or begin running it according to the chosen session mode.
+
+This matches the essential Kahoot hosting interaction: select a game, configure the session, enter the lobby, then manage participants.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://support.kahoot.com\&sz=32)
+
+Kahoot! Help & Resource Center
+
+
+
+## 4. Simplify Settings into three clear concepts
+
+Today, exam-level settings and room-level settings can feel interchangeable. They should be distinguished by what they control.
+
+| Setting location   | What belongs there                                                              | When staff use it                    |
+| ------------------ | ------------------------------------------------------------------------------- | ------------------------------------ |
+| Exam Settings      | Module timing, breaks, adaptive threshold, scoring and result visibility        | While preparing exam content         |
+| Room Settings      | Room name, admitted students, identification, check-in window, enabled sections | While preparing a particular sitting |
+| Live Room Controls | Start, pause/resume, add time, student interventions, complete exam             | During a sitting                     |
+
+The existing `DeliverySettingsPanel` already powers both `ExamSettingsPage` and `ExamSettingsSheet`. Keep one underlying editor, but avoid creating additional settings entry points inside Publish.
+
+A clean approach is: Settings tab for full editing, and Quick settings as an optional shortcut to the same editor. The Publish sheet should link to Settings when changes are needed, then restore publishing context after saving.
+
+For room settings, enforce the current lifecycle constraints. Your code locks the room's section scope once students participate and only exposes session-type selection during creation. Display these restrictions clearly instead of presenting controls that cannot actually be changed.
+
+## 5. The frontend architecture I would implement
+
+Keep the existing API contracts and business logic. Refactor the UI around reusable flows.
 
 ```
 
-src/products/sat/ui/
-  design-system/
-    SatStaffButton.tsx
-    SatStaffSurface.tsx
-    SatStaffStatus.tsx
-    SatStaffPageHeader.tsx
-    SatStaffEmptyState.tsx
-    SatStaffListRow.tsx
+SAT Staff
+│
+├── Exams
+│   └── Exam workspace
+│       ├── Questions
+│       ├── Rooms
+│       ├── Results
+│       └── Settings
+│
+├── PublishExamSheet
+│   ├── Publish scope
+│   ├── Readiness checks
+│   └── Publish result
+│       └── Create room
+│
+├── CreateRoomSheet
+│   ├── Room name
+│   ├── Session type
+│   ├── Audience
+│   ├── Check-in
+│   └── More options
+│       ├── Sections
+│       ├── Student identification
+│       ├── Student roster
+│       └── Module 2 policy
+│
+└── Room workspace
+    ├── Student entry
+    ├── Student roster
+    ├── Current exam / controls
+    └── Results
 
 ```
 
-Only create a component when an existing `SatPage` or shared component doesn't already satisfy the same role. Use `src/index.css` as the canonical token source; keep the new directory small.
+### File-by-file implementation
 
-First apply the system to SAT Room, because it exercises buttons, lists, panels, statuses and dialogs together. Then adopt the same primitives in Exams, Authoring, Publish and Responses. Use Storybook stories and Playwright screenshots to prevent visual drift.
+| Priority | Current file                                         | Change                                                                              |
+| -------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| P0       | `AccessLinkEditorSheet.tsx`                          | Replace SAT guided steps with one responsive, progressively disclosed form          |
+| P0       | `SatNewSessionFlow.tsx`                              | Move global exam selection into the same room setup sheet                           |
+| P0       | `StudentLinksDashboard.tsx`                          | Preserve version pin and single creation mutation; direct users to the created room |
+| P0       | `ExamPublishSheet.tsx`                               | Simplify Publish → Create room handoff, keeping the exact publish receipt           |
+| P1       | `ExamWorkspaceHeader.tsx`                            | Use consistent lifecycle-aware primary actions and simpler navigation               |
+| P1       | `SatExamLibraryRoute.tsx`                            | Clarify opening, editing and managing an exam                                       |
+| P1       | `ExamSettingsPage.tsx`, `ExamSettingsSheet.tsx`      | Consolidate the settings experience around the existing shared panel                |
+| P1       | `SatAccessRoute.tsx`                                 | Keep exam-specific rooms and global rooms using the same creation experience        |
+| P2       | `AccessLinkDetail.tsx`, `AccessLinkSessionPanel.tsx` | Reduce duplicated room information and share actions                                |
 
-The direction I'd commit to is:
+I would extract a `SatCreateRoomForm` containing the actual fields, validation and request construction, and use it from both global and exam-specific entry points. Avoid implementing two separate forms with superficially similar layouts.
 
-SAT Staff UI
+## 6. Important technical rules
 
-Design direction v1
+The flow should feel automatic to staff, but the system must remain explicit about consequential actions.
 
-# Linear-like clarity. Geist-like precision.
+Publishing and creating a room are separate server operations. We can make them feel continuous in the UI without pretending they are one atomic transaction. If publishing succeeds and room creation fails, keep the published version and offer a safe retry of room setup—never silently publish another version.
 
-Implemented with your existing React + Tailwind + Radix stack, using shadcn/ui component patterns.
+Room creation should still submit once with its selected audience, check-in window, session type and immutable published-version ID. When the response is uncertain, reconcile server state before offering another submission; do not blindly create a duplicate room.
 
-Neutral surfaces
+The existing protections for unsaved drafts, stale publish checks, roster validation, invalid dates, room revision conflicts and permission checks should remain.
 
-Compact typography
+### Important behavior cases
 
-Minimal borders
+| Situation                                   | Correct UX                                                                               |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Exam has no published version               | Explain that publishing is required, with a direct Publish action                        |
+| Published exam has draft edits              | Clearly offer existing published version or Publish changes first                        |
+| Staff create a room from global Rooms       | Choose published exam inside the room setup sheet                                        |
+| Staff create a room from an exam            | Exam and published version are already selected                                          |
+| Staff choose a one-section sitting          | Show only supported sections and explain score implications                              |
+| Staff choose teacher-selected Module 2      | Show the routing behavior clearly; assignments remain tied to real students and sections |
+| Staff try to edit locked room settings      | Explain why and offer Duplicate setup where appropriate                                  |
+| Room creation succeeds but navigation fails | Show the confirmed room and a working Open room action                                   |
+| User lacks permission to operate a room     | Show the permitted management/sharing experience, not inaccessible controls              |
 
-Contextual actions
+## 7. Implementation sequence
 
-This is the strongest fit for your project because it improves the appearance without forcing a framework migration or sacrificing operational clarity during a live SAT exam.
+01
+
+Simplify Create room first
+
+Remove the five-step and four-step SAT wizards in favor of one shared sheet. Keep validation, conditional fields and version pinning. This delivers the largest reduction in friction.
+
+02
+
+Improve Publish → Room transition
+
+Keep the same publish mutation, but simplify the success state and transition into the shared creation form without requiring an unnecessary visit to the room-management list.
+
+03
+
+Unify exam navigation and settings
+
+Make Create room, Publish, Edit questions and Settings discoverable from the same exam workspace, with one primary action determined by the exam's lifecycle.
+
+04
+
+Polish Room ready and recovery
+
+Make the landing screen immediately usable. Improve the next action, sharing, and error recovery without changing live exam timing or routing.
+
+### Tests to update
+
+Your existing `e2e/sat-staff-room-ux.spec.ts`, `e2e/sat-authoring-lifecycle.spec.ts`, `SatSessionsRoute.test.tsx`, `AccessLinkEditorSheet.interaction.test.tsx`, and `ExamPublishSheet.test.tsx` already cover significant parts of the flow.
+
+Update the guided-step assertions to the new single-sheet behavior while preserving tests for pinned versions, duplicate-submit prevention, focus restoration, invalid windows, incomplete exams, successful publishing and safe retries.
+
+The acceptance target is simple: an administrator with an existing published SAT exam should be able to open Create room, enter the necessary details, submit once, and arrive at a usable room without stepping through unrelated configuration screens.
+
+## Final recommendation
+
+The central design principle for your internal SAT platform should be:
+
+Every screen has one obvious next action, and the system handles routine complexity without asking teachers to make unnecessary decisions.
+
+Your existing code already has most of the important functionality. I would avoid a large rewrite or introducing a new UI framework.
+
+Instead, make Create room a single well-designed sheet, make Publish lead naturally into it, and make Exam Settings and Room Settings unambiguous.
+
+That gives you the familiar usability of Google Forms, Google Classroom and Kahoot, while keeping the precise versioning and exam controls that SAT requires.

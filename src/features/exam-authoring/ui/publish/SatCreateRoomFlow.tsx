@@ -38,7 +38,8 @@ const EMPTY_MEMBERS: AccessLinkMemberInput[] = [];
 
 type SetupSnapshot =
   | { kind: "published"; target: DeliveryTarget }
-  | { kind: "draft"; versionId: string; versionRevision: number; versionNumber: number }
+  /** `existing` is the version students get today when the draft has unpublished changes. */
+  | { kind: "draft"; versionId: string; versionRevision: number; versionNumber: number; existing: DeliveryTarget | null }
   | { kind: "unavailable"; message: string };
 
 interface SatCreateRoomFlowProps {
@@ -90,6 +91,9 @@ function SatCreateRoomFlowReady({
   const targetRef = useRef<DeliveryTarget | null>(props.pinnedTarget ?? null);
   const [phase, setPhase] = useState<"idle" | "publishing" | "creating" | "checking">("idle");
   const [outcomeUnknown, setOutcomeUnknown] = useState(false);
+  // With unpublished changes, staff choose explicitly between the published
+  // version and publishing the draft first. The safe default publishes nothing.
+  const [source, setSource] = useState<"existing" | "draft">("draft");
   const [reconciliationMessage, setReconciliationMessage] = useState<string | null>(null);
   const [reconciliationBusy, setReconciliationBusy] = useState(false);
   const submittingRef = useRef(false);
@@ -132,12 +136,15 @@ function SatCreateRoomFlowReady({
     if (publish.shell) {
       const draft = releaseState.workingDraft;
       if (draft && draft.id === publish.shell.versionId) {
+        const existing = currentPublished ? releaseTarget(currentPublished) : null;
         setSetupSnapshot({
           kind: "draft",
           versionId: publish.shell.versionId,
           versionRevision: publish.shell.versionRevision,
           versionNumber: draft.versionNumber,
+          existing,
         });
+        setSource(existing ? "existing" : "draft");
       } else {
         setSetupSnapshot({ kind: "unavailable", message: "The latest saved draft could not be matched to this setup. Close Create room and reopen it to refresh." });
       }
@@ -165,16 +172,19 @@ function SatCreateRoomFlowReady({
   ]);
 
   // If another staff member publishes the exact draft and scope selected here,
-  // pin to that same immutable version. A different version or scope is never adopted.
+  // pin to that same immutable version. A different version or scope is never
+  // adopted, and nothing is adopted while the room uses the existing version.
   useEffect(() => {
-    if (targetRef.current || setupSnapshot?.kind !== "draft" || !currentPublished) return;
+    if (targetRef.current || setupSnapshot?.kind !== "draft" || source !== "draft" || !currentPublished) return;
     if (currentPublished.id !== setupSnapshot.versionId || currentPublished.publishScope !== publish.publishScope) return;
     const selectedTarget = releaseTarget(currentPublished);
     targetRef.current = selectedTarget;
     setTarget(selectedTarget);
-  }, [currentPublished, exam.id, publish.publishScope, setupSnapshot]);
+  }, [currentPublished, exam.id, publish.publishScope, setupSnapshot, source]);
 
-  const needsPublish = setupSnapshot?.kind === "draft" && !target;
+  const existingTarget = setupSnapshot?.kind === "draft" && source === "existing" ? setupSnapshot.existing : null;
+  const effectiveTarget = target ?? existingTarget;
+  const needsPublish = setupSnapshot?.kind === "draft" && !effectiveTarget;
   const readiness = publish.readinessQuery.data ?? null;
   const readinessFresh = isReadinessFresh(readiness, publish.shell, publish.publishScope);
   const blockers = getSATPublishBlockers(readiness, readinessFresh);
@@ -209,7 +219,7 @@ function SatCreateRoomFlowReady({
     setupSnapshot &&
     setupSnapshot.kind !== "unavailable" &&
     !outcomeUnknown &&
-    (target || (needsPublish && scopeConfirmed && canPublish && !draftChanged && !selectedDraftPublishedWithOtherScope && !selectedDraftSuperseded)),
+    (effectiveTarget || (needsPublish && scopeConfirmed && canPublish && !draftChanged && !selectedDraftPublishedWithOtherScope && !selectedDraftSuperseded)),
   );
 
   const setPublishedTarget = useCallback((next: DeliveryTarget) => {
@@ -232,7 +242,7 @@ function SatCreateRoomFlowReady({
     if (!canSubmit && !targetRef.current) throw new Error("Choose the exam content and resolve its publish checks before creating the room.");
     submittingRef.current = true;
     try {
-      let selectedTarget = targetRef.current;
+      let selectedTarget = targetRef.current ?? existingTarget;
       if (!selectedTarget) {
         if (!needsPublish || setupSnapshot?.kind !== "draft") {
           throw new Error("The selected exam version is unavailable. Close Create room and reopen it to refresh.");
@@ -326,17 +336,46 @@ function SatCreateRoomFlowReady({
 
   const contentBeforeFields = (
     <section className="space-y-4 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4" aria-label="Exam content and publish status">
-      {target ? (
+      {setupSnapshot?.kind === "draft" && setupSnapshot.existing && !target ? (
+        <fieldset className="space-y-2" disabled={publish.isPublishing || phase !== "idle"}>
+          <legend className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">This exam has unpublished changes. Which version should this room use?</legend>
+          {([
+            { value: "existing", title: `Use published Version ${setupSnapshot.existing.versionNumber}`, detail: "Students get the content that is published now. Your unpublished changes are not included." },
+            { value: "draft", title: "Publish changes first", detail: `Checks and publishes Version ${setupSnapshot.versionNumber}, then creates the room on it.` },
+          ] as const).map((option) => (
+            <label key={option.value} htmlFor={`sat-create-room-source-${option.value}`} className={`flex cursor-pointer items-start gap-3 rounded-xl border bg-white px-3 py-2.5 text-[14px] leading-5 ${source === option.value ? "border-[var(--sat-staff-accent,#0071e3)]" : "border-[var(--sat-staff-border-strong)]"}`}>
+              <input
+                id={`sat-create-room-source-${option.value}`}
+                type="radio"
+                name="sat-create-room-version-source"
+                value={option.value}
+                aria-label={option.title}
+                aria-describedby={`sat-create-room-source-${option.value}-detail`}
+                checked={source === option.value}
+                onChange={() => setSource(option.value)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--sat-staff-accent,#0071e3)]"
+              />
+              <span>
+                <span className="block font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">{option.title}</span>
+                <span id={`sat-create-room-source-${option.value}-detail`} className="block text-[var(--sat-staff-text-secondary,#515154)]">{option.detail}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+      {effectiveTarget ? (
         <div role="status" className="space-y-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-          <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Room uses Version {target.versionNumber} · {satPublishScopeCopy(target.publishScope)}</p>
+          <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Room uses Version {effectiveTarget.versionNumber} · {satPublishScopeCopy(effectiveTarget.publishScope)}</p>
           <p>Existing rooms keep their version. No exam timer starts yet.</p>
         </div>
-      ) : setupSnapshot?.kind === "draft" && !target ? (
+      ) : setupSnapshot?.kind === "draft" ? (
         <>
-          <div className="space-y-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-            <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Publish the latest draft and create this room</p>
-            <p>Version {setupSnapshot.versionNumber} will be checked and published as a new version. Existing rooms keep their version. No exam timer starts yet.</p>
-          </div>
+          {setupSnapshot.existing ? null : (
+            <div className="space-y-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+              <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">This exam is not published yet</p>
+              <p>A room delivers a published version. Version {setupSnapshot.versionNumber} will be checked and published, then the room is created on it. No exam timer starts yet.</p>
+            </div>
+          )}
           <fieldset className="space-y-2" disabled={publish.isPublishing || phase !== "idle" || !exam.canPublish}>
             <legend className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Exam content students will receive</legend>
             {SAT_PUBLISH_SCOPE_OPTIONS.map((option) => (
@@ -447,13 +486,13 @@ function SatCreateRoomFlowReady({
       link={null}
       providerKey="sat"
       examTitle={props.examTitle}
-      publishScope={target?.publishScope ?? publish.publishScope}
-      targetVersionNumber={target?.versionNumber ?? (setupSnapshot.kind === "draft" ? setupSnapshot.versionNumber : null)}
+      publishScope={effectiveTarget?.publishScope ?? publish.publishScope}
+      targetVersionNumber={effectiveTarget?.versionNumber ?? (setupSnapshot.kind === "draft" ? setupSnapshot.versionNumber : null)}
       members={EMPTY_MEMBERS}
       isSaving={publish.isPublishing || createMutation.isPending || reconciliationBusy}
       inputsDisabled={outcomeUnknown}
       submitDisabled={!canSubmit || phase === "checking"}
-      submitLabel={target ? "Create room" : "Publish & create room"}
+      submitLabel={effectiveTarget ? "Create room" : "Publish & create room"}
       pendingLabel={phase === "publishing" ? "Publishing…" : phase === "checking" ? "Checking…" : "Creating…"}
       contentBeforeFields={contentBeforeFields}
       onClose={props.onClose}

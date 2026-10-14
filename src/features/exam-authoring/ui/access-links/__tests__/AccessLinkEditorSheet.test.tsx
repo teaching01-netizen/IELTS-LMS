@@ -98,7 +98,7 @@ describe("AccessLinkEditorSheet", () => {
     expect(screen.queryByRole("button", { name: /Reading & Writing/ })).not.toBeInTheDocument();
   });
 
-  it("summarizes a SAT room before submit and shows no summary for IELTS", () => {
+  it("creates a SAT room from one form: essentials visible, the rest summarized under More options", () => {
     const { unmount } = render(
       <AccessLinkEditorSheet
         open
@@ -113,14 +113,18 @@ describe("AccessLinkEditorSheet", () => {
         onUpdate={vi.fn().mockResolvedValue(undefined)}
       />,
     );
-    for (const heading of ["Room details", "Room name", "Who can join", "Audience", "Check-in settings", "Check-in window"]) {
+    expect(screen.getByText("Digital SAT · Version 5")).toBeInTheDocument();
+    for (const heading of ["Room name", "Session type", "Who can join?", "Check-in"]) {
       expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
     }
-    const summary = screen.getByRole("region", { name: "Summary" });
-    expect(within(summary).getByText("Digital SAT · Version 5")).toBeInTheDocument();
-    expect(within(summary).getByText("Anyone with the link")).toBeInTheDocument();
-    expect(within(summary).getByText("Both sections, with a total score")).toBeInTheDocument();
-    expect(within(summary).getByText("Open now, until paused or revoked")).toBeInTheDocument();
+    // No wizard: no progress, no Continue, no separate review step.
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Room details" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create room" })).toBeInTheDocument();
+    const moreOptions = screen.getByText("More options").closest("details");
+    expect(moreOptions).not.toHaveAttribute("open");
+    expect(within(moreOptions!).getByText("Both sections, with a total score · Student code · No class label")).toBeInTheDocument();
     unmount();
 
     render(
@@ -135,17 +139,16 @@ describe("AccessLinkEditorSheet", () => {
         onUpdate={vi.fn().mockResolvedValue(undefined)}
       />,
     );
-    expect(screen.queryByRole("heading", { name: "Room details" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
+    expect(screen.queryByText("More options")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Session type" })).not.toBeInTheDocument();
   });
 
-  it("guides SAT room creation through setup and review, and preserves values when moving back", async () => {
+  it("validates the whole form on Create, focuses the first problem, then submits once fixed", async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(
       <AccessLinkEditorSheet
         open
         link={null}
-        guidedCreation
         providerKey="sat"
         examTitle="Digital SAT"
         targetVersionNumber={5}
@@ -157,66 +160,20 @@ describe("AccessLinkEditorSheet", () => {
       />,
     );
 
-    const progress = screen.getByRole("progressbar", { name: "Room setup progress" });
-    expect(progress).toHaveAttribute("aria-valuenow", "1");
-    expect(progress).toHaveAttribute("aria-valuemax", "2");
-    expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create room" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
     expect(await screen.findByText("Give this room a name people will recognize.")).toBeInTheDocument();
     expect(screen.getByLabelText("Room name")).toHaveFocus();
     expect(onCreate).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday mock" } });
-    expect(screen.getByRole("group", { name: "Audience" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Check-in window" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText("Opens"), { target: { value: "2099-09-01T10:00" } });
     fireEvent.change(screen.getByLabelText("Closes"), { target: { value: "2099-09-01T13:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "2"));
-    const summary = screen.getByRole("region", { name: "Summary" });
-    expect(within(summary).getByText("Digital SAT · Version 5")).toBeInTheDocument();
-    expect(within(summary).getByText("Saturday mock")).toBeInTheDocument();
-    expect(within(summary).getByText("Anyone with the link")).toBeInTheDocument();
-    expect(within(summary).getByText("Student code")).toBeInTheDocument();
-    expect(within(summary).getByText("Both sections, with a total score")).toBeInTheDocument();
-    const timeZone = new Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
-    expect(within(summary).getByText((text) => text.includes(timeZone) && text.includes(" to "))).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create room" })).toBeInTheDocument();
-    expect(onCreate).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "1"));
-    expect(screen.getByLabelText("Room name")).toHaveValue("Saturday mock");
-    expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
-  });
-
-  it("confirms before leaving a dirty first setup step for exam selection", () => {
-    const onBackToPreviousStep = vi.fn();
-    render(
-      <AccessLinkEditorSheet
-        open
-        link={null}
-        guidedCreation
-        providerKey="sat"
-        members={[]}
-        isSaving={false}
-        onClose={vi.fn()}
-        onCreate={vi.fn().mockResolvedValue(undefined)}
-        onBackToPreviousStep={onBackToPreviousStep}
-      />,
-    );
-
-    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday class" } });
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-
-    expect(screen.getByRole("alertdialog", { name: "Discard room settings changes?" })).toBeInTheDocument();
-    expect(onBackToPreviousStep).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(onBackToPreviousStep).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ name: "Saturday mock", availabilityType: "scheduled", audienceType: "anyone", accessMode: "student_code" });
+    expect(onCreate.mock.calls[0]![0]).not.toHaveProperty("satSessionMode");
   });
 
   it("treats a session-type-only change as unsaved work and resets the mode on reopen", async () => {
@@ -232,7 +189,7 @@ describe("AccessLinkEditorSheet", () => {
     } as const;
     const { rerender } = render(<AccessLinkEditorSheet open {...props} />);
 
-    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Classroom/ }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     // A mode-only edit is real work: it must not be discarded silently.
@@ -244,49 +201,15 @@ describe("AccessLinkEditorSheet", () => {
 
     rerender(<AccessLinkEditorSheet open={false} {...props} />);
     rerender(<AccessLinkEditorSheet open {...props} />);
-    expect(screen.getByLabelText("Session type")).toHaveValue("practice");
+    expect(screen.getByRole("button", { name: /^Practice/ })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("reviews the session type and sends its exact request mapping", async () => {
+  it("reveals Module 2 routing only for Classroom and sends the chosen route", async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(
       <AccessLinkEditorSheet
         open
         link={null}
-        guidedCreation
-        providerKey="sat"
-        examTitle="Digital SAT"
-        targetVersionNumber={5}
-        members={[]}
-        isSaving={false}
-        onClose={vi.fn()}
-        onCreate={onCreate}
-        onUpdate={vi.fn().mockResolvedValue(undefined)}
-      />,
-    );
-
-    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom" } });
-    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Adaptive Saturday" } });
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-
-    const summary = screen.getByRole("region", { name: "Summary" });
-    expect(within(summary).getByText("Classroom (adaptive Module 2)")).toBeInTheDocument();
-    // The starting instructions are deliberately neutral until the room exists.
-    expect(within(summary).getByText(/Starting instructions appear in the room/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
-    await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
-    expect(onCreate.mock.calls[0]![0]).toMatchObject({ satSessionMode: "classroom" });
-    expect(onCreate.mock.calls[0]![0]).not.toHaveProperty("satRoutePolicy", "staff_selects");
-  });
-
-  it("keeps Module 2 routing under More settings and sends the chosen route", async () => {
-    const onCreate = vi.fn().mockResolvedValue(undefined);
-    render(
-      <AccessLinkEditorSheet
-        open
-        link={null}
-        guidedCreation
         providerKey="sat"
         examTitle="Digital SAT"
         targetVersionNumber={5}
@@ -300,22 +223,22 @@ describe("AccessLinkEditorSheet", () => {
     // Standard practice has no routing choice at all.
     expect(screen.queryByLabelText("Module 2 routing")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom" } });
-    const moreSettings = screen.getByText("More settings").closest("details");
-    expect(moreSettings).not.toBeNull();
-    expect(within(moreSettings!).getByLabelText("Module 2 routing")).toHaveValue("classroom");
-    fireEvent.change(within(moreSettings!).getByLabelText("Module 2 routing"), { target: { value: "classroom_higher" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Classroom/ }));
+    // Revealed in place, not behind a disclosure, and adaptive by default.
+    expect(screen.getByText("More options").closest("details")).not.toContainElement(screen.getByLabelText("Module 2 routing"));
+    expect(screen.getByLabelText("Module 2 routing")).toHaveValue("classroom");
+    fireEvent.change(screen.getByLabelText("Module 2 routing"), { target: { value: "classroom_higher" } });
+    // Pressing Classroom again keeps the chosen route.
+    fireEvent.click(screen.getByRole("button", { name: /^Classroom/ }));
+    expect(screen.getByLabelText("Module 2 routing")).toHaveValue("classroom_higher");
     fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Harder Saturday" } });
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-
-    const summary = await screen.findByRole("region", { name: "Summary" });
-    expect(within(summary).getByText("Classroom (everyone gets harder Module 2)")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+
     await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
     expect(onCreate.mock.calls[0]![0]).toMatchObject({ satSessionMode: "classroom", satRoutePolicy: "force_higher" });
   });
 
-  it("limits a new link to the sections in its pinned release", async () => {
+  it("offers no section choice for a one-section release and pins the room to it", async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(
       <AccessLinkEditorSheet
@@ -333,7 +256,7 @@ describe("AccessLinkEditorSheet", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Room name" }), {
       target: { value: "Reading & Writing Link" },
     });
-    expect(screen.getByRole("button", { name: /Reading & Writing/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("heading", { name: "Sections" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Math/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Create room" }));
@@ -385,6 +308,8 @@ describe("AccessLinkEditorSheet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create room" }));
 
     expect(screen.getByText("A room needs at least one section.")).toBeInTheDocument();
+    // The problem lives under More options, so it is opened rather than left hidden.
+    expect(screen.getByText("More options").closest("details")).toHaveAttribute("open");
     expect(onCreate).not.toHaveBeenCalled();
   });
 

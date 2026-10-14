@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExamEntity } from "../../../../../types/domain";
 import type {
@@ -15,7 +15,6 @@ const state = vi.hoisted(() => ({
   setPublishScope: vi.fn(),
   refetchReadiness: vi.fn(),
   hook: {} as Record<string, unknown>,
-  reportDirty: (_count: number) => undefined as void,
 }));
 
 vi.mock("../../../api/examQueries", () => ({
@@ -23,12 +22,6 @@ vi.mock("../../../api/examQueries", () => ({
 }));
 vi.mock("../useSatPublish", () => ({
   useSatPublish: () => state.hook,
-}));
-vi.mock("../../settings/DeliverySettingsPanel", () => ({
-  DeliverySettingsPanel: ({ onDirtyCountChange }: { onDirtyCountChange?: (count: number) => void }) => {
-    state.reportDirty = (count) => onDirtyCountChange?.(count);
-    return <div data-testid="settings-panel">editors</div>;
-  },
 }));
 
 import { ExamPublishSheet } from "../ExamPublishSheet";
@@ -337,46 +330,5 @@ describe("ExamPublishSheet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(props.onClose).toHaveBeenCalled();
     expect(props.onOpenStudentAccess).not.toHaveBeenCalled();
-  });
-
-  describe("editing timing without leaving the sheet", () => {
-    function openInline() {
-      const view = renderSheet({ onOpenSettings: undefined });
-      fireEvent.click(screen.getByRole("button", { name: "Edit timing and routing" }));
-      return view;
-    }
-
-    it("swaps to the settings editors inside the same sheet, with no navigation", () => {
-      const { props } = openInline();
-      expect(screen.getByRole("dialog", { name: "Exam settings" })).toBeInTheDocument();
-      expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
-      expect(props.onClose).not.toHaveBeenCalled();
-      expect(screen.queryByRole("button", { name: /Publish Full SAT/ })).not.toBeInTheDocument();
-    });
-
-    it("returns to publishing and re-runs the checks against the revised draft", () => {
-      openInline();
-      fireEvent.click(screen.getByRole("button", { name: "Back to publish" }));
-      expect(screen.getByRole("dialog", { name: "Publish version" })).toBeInTheDocument();
-      expect(state.refetchReadiness).toHaveBeenCalledOnce();
-    });
-
-    it("holds the author on the editors until unsaved changes are saved", () => {
-      openInline();
-      act(() => state.reportDirty(1));
-      expect(screen.getByRole("button", { name: "Back to publish" })).toBeDisabled();
-      expect(screen.getByText("Save your changes to return to publishing.")).toBeInTheDocument();
-      act(() => state.reportDirty(0));
-      expect(screen.getByRole("button", { name: "Back to publish" })).toBeEnabled();
-    });
-
-    it("asks before closing the sheet over unsaved timing changes", () => {
-      const { props } = openInline();
-      act(() => state.reportDirty(1));
-      fireEvent.keyDown(screen.getByRole("dialog", { name: "Exam settings" }), { key: "Escape" });
-      expect(props.onClose).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-      expect(props.onClose).toHaveBeenCalledOnce();
-    });
   });
 });

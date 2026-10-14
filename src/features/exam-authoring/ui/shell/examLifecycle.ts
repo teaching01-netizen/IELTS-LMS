@@ -7,6 +7,8 @@ export interface ExamLifecycleCopy {
   /** Extra sentence for the title attribute / secondary text. */
   detail: string | null;
   tone: SatStatusTone;
+  /** The release state the copy describes; `null` while it is unknown. Drives the header's primary action. */
+  state: AssessmentReleaseState["state"] | null;
 }
 
 /**
@@ -16,17 +18,18 @@ export interface ExamLifecycleCopy {
 export function describeExamLifecycle(
   releaseState: Pick<AssessmentReleaseState, "state" | "currentPublishedVersion" | "access"> | null | undefined,
 ): ExamLifecycleCopy {
-  if (!releaseState) return { label: "Draft", detail: null, tone: "draft" };
+  if (!releaseState) return { label: "Draft", detail: null, tone: "draft", state: null };
   const version = releaseState.currentPublishedVersion?.versionNumber;
   const versionLabel = typeof version === "number" ? `Version ${version}` : null;
   switch (releaseState.state) {
     case "never_published":
-      return { label: "Draft", detail: "Not published yet", tone: "draft" };
+      return { label: "Draft", detail: "Not published yet", tone: "draft", state: "never_published" };
     case "unpublished_changes":
       return {
         label: "Unpublished changes",
         detail: versionLabel ? `${versionLabel} remains available to students` : "The published version remains available",
         tone: "changes",
+        state: "unpublished_changes",
       };
     case "published_current":
       if (releaseState.access.totalLinks === 0) {
@@ -34,12 +37,14 @@ export function describeExamLifecycle(
           label: versionLabel ? `Published · ${versionLabel} · No rooms yet` : "Published · No rooms yet",
           detail: "Create a room so students can check in",
           tone: "info",
+          state: "published_current",
         };
       }
       return {
         label: versionLabel ? `Published · ${versionLabel}` : "Published",
         detail: null,
         tone: "published",
+        state: "published_current",
       };
   }
 }

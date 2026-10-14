@@ -221,7 +221,8 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   const [publishReceipt, setPublishReceipt] = useState<{ examId: string; target: DeliveryTarget } | null>(null);
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
   const [createRoomTarget, setCreateRoomTarget] = useState<DeliveryTarget | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // "publish" means the settings sheet was opened from Publish and returns there on close.
+  const [settingsOpen, setSettingsOpen] = useState<false | "quick" | "publish">(false);
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [focusField, setFocusField] = useState<string | null>(null);
@@ -1054,7 +1055,22 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
         openCreateRoom(target ?? publishedTarget ?? undefined);
       }}
       onPublished={(target) => setPublishReceipt({ examId, target })}
+      onOpenSettings={() => {
+        setPublishOpen(false);
+        setSettingsOpen("publish");
+      }}
       focusFallback={() => publishedRoomButtonRef.current}
+    />
+  ) : null;
+  const settingsSheet = settingsOpen ? (
+    <ExamSettingsSheet
+      examId={examId}
+      open
+      onClose={() => {
+        const returnToPublish = settingsOpen === "publish";
+        setSettingsOpen(false);
+        if (returnToPublish) openPublish();
+      }}
     />
   ) : null;
   const recoverySurfaces = (
@@ -1153,6 +1169,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
           ) : null}
           {lifecycleContent}
           {publishSheet}
+          {settingsSheet}
         </div>
         {createRoomFlow}
       </>
@@ -1301,7 +1318,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
                 // is the in-place sheet that keeps the author's question and text.
                 if (tab !== "questions") goAfterFlush(examWorkspacePath(examId, tab));
               }}
-              onQuickSettings={() => setSettingsOpen(true)}
+              onQuickSettings={() => setSettingsOpen("quick")}
               onBack={() => goAfterFlush(satListReturnTarget("/sat/exams").to)}
               contextLine={
                 [selectedSection?.title, selectedModule?.title].filter(Boolean).join(" · ") || null
@@ -1676,13 +1693,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
           onConfirm={() => void handleLoadSampleExam()}
         />
         {publishSheet}
-        {settingsOpen ? (
-          <ExamSettingsSheet
-            examId={examId}
-            open
-            onClose={() => setSettingsOpen(false)}
-          />
-        ) : null}
+        {settingsSheet}
       </div>
       {createRoomFlow}
       </>
@@ -1724,6 +1735,7 @@ function PublishedExamWorkspaceSurface({
           label: `${versionLabel} published`,
           detail: "Publish was confirmed for this version.",
           tone: "info",
+          state: "published_current",
         }}
         activeTab={null}
         showResponses={showResponses}

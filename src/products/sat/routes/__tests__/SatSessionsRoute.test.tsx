@@ -83,15 +83,9 @@ function renderRoute() {
   return render(routeElement(newClient()));
 }
 
-/** Opens the unified setup for the (only) SAT exam: exam question first, then the shared session form. */
+/** Opens the one room setup sheet; the exam is its first field. */
 function openSetup() {
   fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-}
-
-// Setup carries the check-in window too, so a single Continue reaches Review.
-function continueToReview() {
-  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 }
 
 describe('SatSessionsRoute', () => {
@@ -113,18 +107,40 @@ describe('SatSessionsRoute', () => {
 
   it('never offers IELTS exams when creating a SAT room', () => {
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
-    const progress = screen.getByRole('progressbar', { name: 'Room setup progress' });
-    expect(progress).toHaveAttribute('aria-valuenow', '1');
-    expect(progress).toHaveAttribute('aria-valuemax', '3');
+    openSetup();
     expect(screen.getByRole('option', { name: 'SAT Published' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'IELTS Published' })).not.toBeInTheDocument();
-    expect(screen.getByText(/Students receive Reading & Writing only/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    const setupProgress = screen.getByRole('progressbar', { name: 'Room setup progress' });
-    expect(setupProgress).toHaveAttribute('aria-valuenow', '2');
-    expect(setupProgress).toHaveAttribute('aria-valuemax', '3');
-    expect(screen.getByText('Version 9')).toBeInTheDocument();
+    expect(screen.getByText(/Students receive Reading & Writing only from Version 9/)).toBeInTheDocument();
+    // Exam choice and room setup share one sheet: no chooser step before the form.
+    expect(screen.getByLabelText('Room name')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+    expect(screen.getByText('SAT Published · Version 9')).toBeInTheDocument();
+  });
+
+  it('re-pins to the newly chosen exam’s version without clearing the room name', async () => {
+    const otherSat = { id: 'sat-2', title: 'SAT October', providerKey: 'sat', currentPublishedVersionId: 'v-oct', currentPublishedScope: 'full' };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, otherSat], exams: [] }, isLoading: false, error: null });
+    useOverviewMock.mockImplementation((examId: string) => ({
+      data: {
+        currentPublishedVersion: examId === 'sat-2'
+          ? { ...publishedVersion, id: 'v-oct-3', versionNumber: 3, publishScope: 'full' }
+          : publishedVersion,
+        links: [],
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }));
+    renderRoute();
+    openSetup();
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
+    fireEvent.change(screen.getByLabelText('Exam'), { target: { value: 'sat-2' } });
+
+    expect(await screen.findByText('SAT October · Version 3')).toBeInTheDocument();
+    expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    await waitFor(() => expect(createMutateMock).toHaveBeenCalledOnce());
+    expect(createMutateMock.mock.calls[0]![0]).toMatchObject({ name: 'Saturday mock', publishedVersionId: 'v-oct-3' });
   });
 
   it('renders header plus skeleton while loading, without blanking the page', () => {
@@ -153,9 +169,8 @@ describe('SatSessionsRoute', () => {
   it('opens the same room settings the exam uses, pinned to the exam’s published version, then lands in the new room', async () => {
     renderRoute();
     openSetup();
-    expect(screen.getByText('Version 9')).toBeInTheDocument();
+    expect(screen.getByText('SAT Published · Version 9')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
-    continueToReview();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
 
     await waitFor(() => expect(createMutateMock).toHaveBeenCalledOnce());
@@ -169,7 +184,7 @@ describe('SatSessionsRoute', () => {
     const client = newClient();
     const view = render(routeElement(client));
     openSetup();
-    expect(screen.getByText('Version 9')).toBeInTheDocument();
+    expect(screen.getByText('SAT Published · Version 9')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
 
     // Another author publishes Version 10 while this setup is being filled in.
@@ -182,11 +197,10 @@ describe('SatSessionsRoute', () => {
     view.rerender(routeElement(client));
 
     // The captured target wins: neither the label nor the entered fields move.
-    expect(screen.getByText('Version 9')).toBeInTheDocument();
-    expect(screen.queryByText('Version 10')).not.toBeInTheDocument();
+    expect(screen.getByText('SAT Published · Version 9')).toBeInTheDocument();
+    expect(screen.queryByText(/Version 10/)).not.toBeInTheDocument();
     expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
 
-    continueToReview();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     await waitFor(() => expect(createMutateMock).toHaveBeenCalledOnce());
     expect(createMutateMock.mock.calls[0]![0]).toMatchObject({ publishedVersionId: 'v-9', name: 'Saturday mock' });
@@ -197,14 +211,11 @@ describe('SatSessionsRoute', () => {
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
-    continueToReview();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('The room could not be created.');
     expect(screen.getByRole('dialog', { name: 'Create room' })).toBeInTheDocument();
-    expect(screen.getByText('Saturday mock')).toBeInTheDocument();
+    expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
     expect(screen.queryByTestId('location')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-    expect(await screen.findByLabelText('Room name')).toHaveValue('Saturday mock');
   });
 
   it('explains an invalid check-in window without clearing the form', async () => {
@@ -215,7 +226,7 @@ describe('SatSessionsRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2099-09-01T13:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2099-09-01T10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByText('Closing time must be after opening time.')).toBeInTheDocument();
     expect(screen.getByLabelText('Opens')).toHaveValue('2099-09-01T13:00');
     expect(createMutateMock).not.toHaveBeenCalled();
@@ -228,7 +239,7 @@ describe('SatSessionsRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2000-09-01T10:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2000-09-01T13:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByText('Start time is in the past.')).toBeInTheDocument();
     expect(createMutateMock).not.toHaveBeenCalled();
   });
@@ -240,7 +251,7 @@ describe('SatSessionsRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2099-09-01T10:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2099-09-01T10:10' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByText('Rooms must be at least 15 minutes long.')).toBeInTheDocument();
     expect(createMutateMock).not.toHaveBeenCalled();
   });
@@ -260,9 +271,6 @@ describe('SatSessionsRoute', () => {
 
   it('confirms before discarding a dirty setup, closes quietly when pristine', () => {
     renderRoute();
-    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     openSetup();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
@@ -294,7 +302,7 @@ describe('SatSessionsRoute', () => {
     expect(screen.getByText(/No rooms match/)).toHaveTextContent('zzz-no-match');
   });
 
-  it('closes a pristine exam chooser on Escape with no alertdialog', () => {
+  it('closes a pristine setup on Escape with no alertdialog', () => {
     renderRoute();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(screen.getByRole('dialog', { name: 'Create room' })).toBeInTheDocument();
@@ -313,14 +321,15 @@ describe('SatSessionsRoute', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
-  it('returns focus to the Create room trigger after pristine Cancel', () => {
+  it('returns focus to the Create room trigger after pristine Cancel', async () => {
     renderRoute();
     const trigger = screen.getByRole('button', { name: 'Create room' });
     trigger.focus();
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog', { name: 'Create room' })).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(trigger);
+    // The sheet restores focus once Radix finishes unmounting it.
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
   it('keeps every room data point on one merged meta line (04A hierarchy guard)', () => {

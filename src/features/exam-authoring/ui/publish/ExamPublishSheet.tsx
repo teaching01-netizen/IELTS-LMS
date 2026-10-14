@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { AlertTriangle, ArrowLeft, CheckCircle2, RefreshCw, Rocket, Settings2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, RefreshCw, Rocket, Settings2 } from "lucide-react";
 import { SatInlineError } from "@/src/products/sat/ui/SatPage";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/src/components/ui/sheet";
 import type { ExamEntity } from "../../../../types/domain";
@@ -26,8 +26,7 @@ import {
   toUserFacingPublishError,
 } from "../release/releaseSelectors";
 import { useReleaseOnline } from "../release/releaseUi";
-import { AuthoringConfirmDialog, restoreAuthoringFocus } from "../authoringPrimitives";
-import { DeliverySettingsPanel } from "../settings/DeliverySettingsPanel";
+import { restoreAuthoringFocus } from "../authoringPrimitives";
 import type { DeliveryTarget } from "../shell/examLifecycle";
 import { useSatPublish } from "./useSatPublish";
 
@@ -43,8 +42,11 @@ export interface ExamPublishSheetProps {
   onPublished?: ((target: DeliveryTarget) => void) | undefined;
   /** Used when the button that opened the sheet was removed by the publish lifecycle. */
   focusFallback?: (() => HTMLElement | null) | undefined;
-  /** Optional: when omitted, timing and routing are edited inside this sheet instead of on another page. */
-  onOpenSettings?: (() => void) | undefined;
+  /**
+   * Opens the exam's one settings editor. Publish never hosts a second copy of
+   * it; the host returns the author to Publish when Settings closes.
+   */
+  onOpenSettings: () => void;
 }
 
 const BUTTON = "sat-btn sat-press";
@@ -58,75 +60,48 @@ const BUTTON = "sat-btn sat-press";
 export function ExamPublishSheet(props: ExamPublishSheetProps) {
   const examQuery = useExamQuery(props.examId);
   const focusOpenerRef = useRef<HTMLElement | null>(null);
-  const [view, setView] = useState<"publish" | "settings">("publish");
-  const [dirtyCount, setDirtyCount] = useState(0);
-  const [confirmClose, setConfirmClose] = useState(false);
-  const requestClose = () => {
-    if (dirtyCount > 0) setConfirmClose(true);
-    else props.onClose();
-  };
   return (
-    <>
-      <Sheet open={props.open} onOpenChange={(next) => !next && requestClose()}>
-        <SheetContent
-          side="right"
-          className={`sat-product sat-staff-root flex flex-col gap-0 p-0 ${view === "settings" ? "w-[min(96vw,720px)] max-w-[720px] sm:max-w-[720px]" : "w-[min(96vw,560px)] max-w-[560px] sm:max-w-[560px]"}`}
-          onOpenAutoFocus={() => {
-            focusOpenerRef.current = document.activeElement instanceof HTMLElement
-              ? document.activeElement
-              : null;
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            const opener = focusOpenerRef.current;
-            focusOpenerRef.current = null;
-            restoreAuthoringFocus(
-              opener?.isConnected ? opener : props.focusFallback?.() ?? null
-            );
-          }}
-        >
-          <SheetHeader className="border-b border-[var(--sat-staff-border-hairline)] px-6 py-5 text-left">
-            <SheetTitle className="text-[20px] leading-7 tracking-[-0.015em]">{view === "settings" ? "Exam settings" : "Publish version"}</SheetTitle>
-            <SheetDescription>
-              {view === "settings"
-                ? "Change timing, breaks and routing without leaving publishing. Saved changes re-run the checks."
-                : "Review the checks, then release a new student-facing version. Existing rooms and attempts keep their version."}
-            </SheetDescription>
-          </SheetHeader>
-          {examQuery.data ? (
-            <PublishSheetBody
-              {...props}
-              exam={examQuery.data}
-              onExamRefresh={() => examQuery.refetch()}
-              view={view}
-              setView={setView}
-              dirtyCount={dirtyCount}
-              setDirtyCount={setDirtyCount}
-            />
-          ) : examQuery.error ? (
-            <div className="p-6">
-              <SatInlineError title="Publishing is unavailable" description="The exam could not be loaded." onRetry={() => void examQuery.refetch()} />
-            </div>
-          ) : (
-            <p role="status" className="p-6 text-sm text-muted-foreground">
-              Loading publish details…
-            </p>
-          )}
-        </SheetContent>
-      </Sheet>
-      <AuthoringConfirmDialog
-        open={confirmClose}
-        title="Close with unsaved changes?"
-        description="Your timing changes have not been saved. Closing now discards them."
-        confirmLabel="Discard changes"
-        destructive
-        onCancel={() => setConfirmClose(false)}
-        onConfirm={() => {
-          setConfirmClose(false);
-          props.onClose();
+    <Sheet open={props.open} onOpenChange={(next) => !next && props.onClose()}>
+      <SheetContent
+        side="right"
+        className="sat-product sat-staff-root flex w-[min(96vw,560px)] max-w-[560px] flex-col gap-0 p-0 sm:max-w-[560px]"
+        onOpenAutoFocus={() => {
+          focusOpenerRef.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
         }}
-      />
-    </>
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const opener = focusOpenerRef.current;
+          focusOpenerRef.current = null;
+          restoreAuthoringFocus(
+            opener?.isConnected ? opener : props.focusFallback?.() ?? null
+          );
+        }}
+      >
+        <SheetHeader className="border-b border-[var(--sat-staff-border-hairline)] px-6 py-5 text-left">
+          <SheetTitle className="text-[20px] leading-7 tracking-[-0.015em]">Publish version</SheetTitle>
+          <SheetDescription>
+            Review the checks, then release a new student-facing version. Existing rooms and attempts keep their version.
+          </SheetDescription>
+        </SheetHeader>
+        {examQuery.data ? (
+          <PublishSheetBody
+            {...props}
+            exam={examQuery.data}
+            onExamRefresh={() => examQuery.refetch()}
+          />
+        ) : examQuery.error ? (
+          <div className="p-6">
+            <SatInlineError title="Publishing is unavailable" description="The exam could not be loaded." onRetry={() => void examQuery.refetch()} />
+          </div>
+        ) : (
+          <p role="status" className="p-6 text-sm text-muted-foreground">
+            Loading publish details…
+          </p>
+        )}
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -138,17 +113,9 @@ function PublishSheetBody({
   onPublished,
   onOpenSettings,
   onExamRefresh,
-  view,
-  setView,
-  dirtyCount,
-  setDirtyCount,
 }: ExamPublishSheetProps & {
   exam: ExamEntity;
   onExamRefresh: () => Promise<unknown>;
-  view: "publish" | "settings";
-  setView: (view: "publish" | "settings") => void;
-  dirtyCount: number;
-  setDirtyCount: (count: number) => void;
 }) {
   const {
     shell, shellLoadError, releaseState, readinessQuery, publishScope, setPublishScope,
@@ -161,6 +128,11 @@ function PublishSheetBody({
   const [didPublish, setDidPublish] = useState(false);
   const [publishedTarget, setPublishedTarget] = useState<DeliveryTarget | null>(null);
   const submitting = useRef(false);
+  const createRoomRef = useRef<HTMLButtonElement | null>(null);
+  // The publish → room handoff is one continuous move: the next action takes focus.
+  useEffect(() => {
+    if (didPublish) createRoomRef.current?.focus();
+  }, [didPublish]);
 
   if (didPublish) {
     const version = publishedTarget?.versionNumber ?? releaseState?.currentPublishedVersion?.versionNumber ?? null;
@@ -179,6 +151,7 @@ function PublishSheetBody({
         </div>
         <div className="flex flex-col gap-2">
           <button
+            ref={createRoomRef}
             type="button"
             className={`${BUTTON} sat-btn--primary`}
             onClick={() => {
@@ -192,31 +165,6 @@ function PublishSheetBody({
             Done
           </button>
         </div>
-      </div>
-    );
-  }
-  if (view === "settings") {
-    return (
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
-        <button
-          type="button"
-          disabled={dirtyCount > 0}
-          onClick={() => {
-            setView("publish");
-            // Timing changes revise the draft: re-run the checks against it.
-            void readinessQuery.refetch();
-          }}
-          className="sat-btn sat-btn--quiet sat-press -ml-3 px-3"
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
-          Back to publish
-        </button>
-        {dirtyCount > 0 ? (
-          <p role="status" className="text-sm text-muted-foreground">
-            Save your changes to return to publishing.
-          </p>
-        ) : null}
-        <DeliverySettingsPanel exam={exam} onDirtyCountChange={setDirtyCount} />
       </div>
     );
   }
@@ -424,17 +372,13 @@ function PublishSheetBody({
           <button
             type="button"
             onClick={() => {
-              if (onOpenSettings) {
-                onClose();
-                onOpenSettings();
-              } else {
-                setView("settings");
-              }
+              onClose();
+              onOpenSettings();
             }}
             className="sat-btn sat-btn--secondary sat-press mt-3"
           >
             <Settings2 size={15} aria-hidden="true" />
-            {onOpenSettings ? "Edit timing and routing in Settings" : "Edit timing and routing"}
+            Edit timing and routing in Settings
           </button>
         </section>
 

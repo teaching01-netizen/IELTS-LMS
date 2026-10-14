@@ -54,7 +54,7 @@ describe("AccessLinkEditorSheet interaction contract", () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     const { unmount } = renderSheet({ onCreate });
     fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday Class" } });
-    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Classroom/ }));
     fireEvent.change(screen.getByLabelText("Module 2 routing"), { target: { value: "classroom_higher" } });
     fireEvent.click(screen.getByRole("button", { name: "Create room" }));
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));

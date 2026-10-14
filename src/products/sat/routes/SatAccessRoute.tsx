@@ -40,7 +40,8 @@ export function SatAccessRoute() {
   const chrome = useExamWorkspaceChrome(examId ?? '');
   const role = useOptionalAuthSession()?.session?.user.role ?? null;
   const [publishOpen, setPublishOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // 'publish' means the settings sheet was opened from Publish and returns there on close.
+  const [settingsOpen, setSettingsOpen] = useState<false | 'quick' | 'publish'>(false);
   // "?new=1&version=…" (from the publish success panel) opens the create form once,
   // pinned to the version that was just published, then the URL is cleaned up.
   const [createRequest, setCreateRequest] = useState<CreateRequest | null>(() => {
@@ -129,7 +130,7 @@ export function SatAccessRoute() {
           onSelectTab: (tab) => {
             if (tab !== 'delivery') navigate(examWorkspacePath(exam.id, tab));
           },
-          onQuickSettings: () => setSettingsOpen(true),
+          onQuickSettings: () => setSettingsOpen('quick'),
           onBack: () => {
             const back = satListReturnTarget('/sat/exams');
             navigate(back.to, back.state ? { state: back.state } : undefined);
@@ -148,9 +149,24 @@ export function SatAccessRoute() {
             setPublishOpen(false);
             setCreateRequest({ id: Date.now(), ...(target ?? {}) });
           }}
+          onOpenSettings={() => {
+            setPublishOpen(false);
+            setSettingsOpen('publish');
+          }}
         />
       ) : null}
-      {settingsOpen ? <ExamSettingsSheet examId={exam.id} open onClose={() => setSettingsOpen(false)} onEditExam={() => navigate(examWorkspacePath(exam.id, 'questions'))} /> : null}
+      {settingsOpen ? (
+        <ExamSettingsSheet
+          examId={exam.id}
+          open
+          onClose={() => {
+            const returnToPublish = settingsOpen === 'publish';
+            setSettingsOpen(false);
+            if (returnToPublish) setPublishOpen(true);
+          }}
+          onEditExam={() => navigate(examWorkspacePath(exam.id, 'questions'))}
+        />
+      ) : null}
     </>
   );
   return existingCollaboration ? content : (

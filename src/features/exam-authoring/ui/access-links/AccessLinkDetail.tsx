@@ -150,10 +150,14 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <SatStatusPill tone={STATUS_TONE[link.status]} pulse={shouldPulseAccessLinkStatus(link.status)}>
-            {formatAccessLinkStatus(link.status)}
-          </SatStatusPill>
-          <h2 className="mt-2 text-[20px] font-semibold tracking-[-0.03em] text-slate-950 sm:text-[22px]">
+          {/* With a session, the room panel below states check-in and exam
+              state side by side; repeating check-in here said it twice. */}
+          {!session ? (
+            <SatStatusPill tone={STATUS_TONE[link.status]} pulse={shouldPulseAccessLinkStatus(link.status)}>
+              {formatAccessLinkStatus(link.status)}
+            </SatStatusPill>
+          ) : null}
+          <h2 className={`${session ? "" : "mt-2 "}text-[20px] font-semibold tracking-[-0.03em] text-slate-950 sm:text-[22px]`}>
             {link.name}
           </h2>
           <p className="mt-1 text-[14px] leading-5 text-slate-500">
@@ -447,23 +451,8 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
             ) : null}
             <div className="flex min-h-11 items-center gap-3 py-2">
               <dt className="w-28 shrink-0 text-[14px] text-slate-500">Link ID</dt>
-              <dd className="flex min-w-0 flex-1 items-center justify-end gap-2">
-                <span className="min-w-0 flex-1 truncate break-words text-right font-mono text-[14px] font-semibold text-slate-900">
-                  {link.id}
-                </span>
-                <button
-                  type="button"
-                  onClick={onCopy}
-                  aria-label="Copy link ID"
-                  className="sat-btn sat-btn--quiet sat-press shrink-0 px-2"
-                >
-                  {copyConfirmed ? (
-                    <Check size={13} className="text-emerald-600" aria-hidden="true" />
-                  ) : (
-                    <Copy size={13} aria-hidden="true" />
-                  )}
-                  {copyConfirmed ? "Copied" : "Copy"}
-                </button>
+              <dd className="min-w-0 flex-1 select-all break-all text-right font-mono text-[14px] font-semibold text-slate-900">
+                {link.id}
               </dd>
             </div>
           </dl>

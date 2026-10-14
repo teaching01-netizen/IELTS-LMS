@@ -503,23 +503,13 @@ async function startSatAttempt(
 
   await expect(page).toHaveURL(`/sat/exams/${examId}/access`, { timeout: 30_000 });
   const roomSetup = page.getByRole("dialog", { name: "Create room" });
-  const setupProgress = roomSetup.getByRole("progressbar", { name: "Room setup progress" });
   // Publishing a first release opens room setup on the exam's access route.
   await expect(roomSetup).toBeVisible({ timeout: 30_000 });
-  await expect(setupProgress).toHaveAttribute("aria-valuenow", "1");
-  await expect(roomSetup).toContainText(`This room uses Version 1 of ${examTitle}.`);
+  await expect(roomSetup.getByText(`${examTitle} · Version 1`, { exact: true })).toBeVisible();
   await roomSetup.getByLabel("Room name").fill(linkName);
-  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(setupProgress).toHaveAttribute("aria-valuenow", "2");
+  await roomSetup.getByText("More options", { exact: true }).click();
   await roomSetup.getByRole("button", { name: /Name \+ email only/i }).click();
-  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(setupProgress).toHaveAttribute("aria-valuenow", "3");
   await roomSetup.getByRole("button", { name: /^Open now/ }).click();
-  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(setupProgress).toHaveAttribute("aria-valuenow", "4");
-  await expect(roomSetup.getByRole("heading", { name: "Summary" })).toBeVisible();
-  await expect(roomSetup.getByText(linkName, { exact: true })).toBeVisible();
-  await expect(roomSetup.getByText("Check-in lets students enter.", { exact: false })).toBeVisible();
   await roomSetup.getByRole("button", { name: "Create room", exact: true }).click();
 
   await expect(page).toHaveURL(/\/sat\/sessions\/[0-9a-f-]+$/i, { timeout: 30_000 });
