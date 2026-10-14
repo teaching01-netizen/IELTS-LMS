@@ -1,0 +1,3 @@
+2026/10/14 23:39:54 migrate: schema_migration_versions absent, using legacy schema_migrations history
+2026/10/14 23:39:54 migrate: applying 0089_sat_room_response_snapshot.sql
+2026/10/14 23:39:54 migrate: up to date (dir=migrations)

@@ -18,31 +18,35 @@ export interface ExamLifecycleCopy {
 export function describeExamLifecycle(
   releaseState: Pick<AssessmentReleaseState, "state" | "currentPublishedVersion" | "access"> | null | undefined,
 ): ExamLifecycleCopy {
-  if (!releaseState) return { label: "Draft", detail: null, tone: "draft", state: null };
+  if (!releaseState) return { label: "Editing", detail: null, tone: "draft", state: null };
   const version = releaseState.currentPublishedVersion?.versionNumber;
   const versionLabel = typeof version === "number" ? `Version ${version}` : null;
+  // Staff never publish: a room captures the latest saved exam. The version
+  // number is secondary detail, never the headline.
   switch (releaseState.state) {
     case "never_published":
-      return { label: "Draft", detail: "Not published yet", tone: "draft", state: "never_published" };
+      return { label: "Editing", detail: "Changes are saved automatically. A room uses the latest saved exam.", tone: "draft", state: "never_published" };
     case "unpublished_changes":
       return {
-        label: "Unpublished changes",
-        detail: versionLabel ? `${versionLabel} remains available to students` : "The published version remains available",
+        label: "Editing",
+        detail: versionLabel
+          ? `Existing rooms keep ${versionLabel}. A new room uses your latest saved changes.`
+          : "A new room uses your latest saved changes.",
         tone: "changes",
         state: "unpublished_changes",
       };
     case "published_current":
       if (releaseState.access.totalLinks === 0) {
         return {
-          label: versionLabel ? `Published · ${versionLabel} · No rooms yet` : "Published · No rooms yet",
+          label: "Ready · No rooms yet",
           detail: "Create a room so students can check in",
           tone: "info",
           state: "published_current",
         };
       }
       return {
-        label: versionLabel ? `Published · ${versionLabel}` : "Published",
-        detail: null,
+        label: "Rooms available",
+        detail: versionLabel ? `Latest room exam: ${versionLabel}` : null,
         tone: "published",
         state: "published_current",
       };
@@ -70,35 +74,9 @@ export interface DeliveryTarget {
   publishScope: "full" | "reading-writing" | "math";
 }
 
-/** Delivery, optionally opening the create form for a specific just-published version. */
-export function examDeliveryPath(examId: string, create?: DeliveryTarget): string {
-  const base = examWorkspacePath(examId, "delivery");
-  if (!create) return base;
-  const params = new URLSearchParams({
-    new: "1",
-    version: create.versionId,
-    versionNumber: String(create.versionNumber),
-    scope: create.publishScope,
-  });
-  return `${base}?${params.toString()}`;
-}
-
-/**
- * Where "Create room" leads from any exam surface. With a target it pins
- * the setup to the exact version a publish just returned.
- */
-export function deliveryDestination(examId: string, target?: DeliveryTarget): string {
-  return target ? examDeliveryPath(examId, target) : `${examWorkspacePath(examId, "delivery")}?new=1`;
-}
-
-export function parseDeliveryCreate(params: URLSearchParams): DeliveryTarget | "any" | null {
-  if (params.get("new") !== "1") return null;
-  const versionId = params.get("version");
-  const versionNumber = Number(params.get("versionNumber"));
-  const scope = params.get("scope");
-  if (!versionId || !Number.isInteger(versionNumber) || versionNumber < 1) return "any";
-  if (scope !== "full" && scope !== "reading-writing" && scope !== "math") return "any";
-  return { versionId, versionNumber, publishScope: scope };
+/** Where "Create room" leads from any exam surface: Rooms, with the create form open. */
+export function deliveryDestination(examId: string): string {
+  return `${examWorkspacePath(examId, "delivery")}?new=1`;
 }
 
 /**

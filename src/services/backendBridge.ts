@@ -411,6 +411,8 @@ export function buildCreateAssessmentExamPayload(input: {
   providerKey: "sat" | "act";
   providerExamType: "SAT" | "ACT";
   visibility?: ExamEntity["visibility"];
+  /** SAT only: exam-level configuration applied in the creation transaction. */
+  configuration?: object | undefined;
 }) {
   return {
     slug: input.slug,
@@ -419,6 +421,7 @@ export function buildCreateAssessmentExamPayload(input: {
     visibility: input.visibility ?? "organization",
     providerKey: input.providerKey,
     providerExamType: input.providerExamType,
+    ...(input.configuration ? { configuration: input.configuration } : {}),
   };
 }
 

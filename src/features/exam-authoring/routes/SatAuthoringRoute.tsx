@@ -19,7 +19,6 @@ function SatAuthoringWorkspaceHost({ examId, examTitle }: { examId: string; exam
       examTitle={examTitle}
       chrome={{
         ...chrome,
-        canPublish: Boolean(exam?.canPublish),
         canCreateSession: Boolean(exam?.canEdit),
       }}
     />

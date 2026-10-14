@@ -5,19 +5,14 @@ import { useAccessDistributionOverview } from '../../../features/exam-authoring/
 import { useExamQuery } from '../../../features/exam-authoring/api/examQueries';
 import { StudentLinksDashboard, type CreateRequest } from '../../../features/exam-authoring/ui/access-links/StudentLinksDashboard';
 import { useAccessSessionBindings } from '../../../features/exam-authoring/ui/delivery/useAccessSessionBindings';
-import { ExamPublishSheet } from '../../../features/exam-authoring/ui/publish/ExamPublishSheet';
 import { ExamSettingsSheet } from '../../../features/exam-authoring/ui/settings/ExamSettingsSheet';
 import {
   canViewExamResponses,
   examWorkspacePath,
-  parseDeliveryCreate,
 } from '../../../features/exam-authoring/ui/shell/examLifecycle';
 import { useExamWorkspaceChrome } from '../../../features/exam-authoring/ui/shell/useExamWorkspaceChrome';
 import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/api/authoringEntryIntent';
-import {
-  publishModuleDeepLink,
-  resolvePublishIssueDestination,
-} from '../../../features/exam-authoring/ui/release/releaseSelectors';
+import { satIssueRoute } from '../../../features/exam-authoring/ui/release/satIssueRoute';
 import type { AssessmentValidationIssue } from '../../../features/exam-authoring/contracts/assessment';
 import { useOptionalAuthSession } from '../../../features/auth/api/authSession';
 import {
@@ -39,16 +34,10 @@ export function SatAccessRoute() {
   const distributionQuery = useAccessDistributionOverview(examId ?? '');
   const chrome = useExamWorkspaceChrome(examId ?? '');
   const role = useOptionalAuthSession()?.session?.user.role ?? null;
-  const [publishOpen, setPublishOpen] = useState(false);
-  // 'publish' means the settings sheet was opened from Publish and returns there on close.
-  const [settingsOpen, setSettingsOpen] = useState<false | 'quick' | 'publish'>(false);
-  // "?new=1&version=…" (from the publish success panel) opens the create form once,
-  // pinned to the version that was just published, then the URL is cleaned up.
-  const [createRequest, setCreateRequest] = useState<CreateRequest | null>(() => {
-    const parsed = parseDeliveryCreate(searchParams);
-    if (!parsed) return null;
-    return { id: 1, ...(parsed === 'any' ? {} : parsed) };
-  });
+  const [settingsOpen, setSettingsOpen] = useState<false | 'quick'>(false);
+  // "?new=1" (Create room from another exam page) opens the create form once,
+  // then the URL is cleaned up.
+  const [createRequest] = useState<CreateRequest | null>(() => (searchParams.get('new') === '1' ? { id: 1 } : null));
   useEffect(() => {
     if (searchParams.get('new')) {
       setSearchParams((current) => {
@@ -86,23 +75,10 @@ export function SatAccessRoute() {
   }
 
   const openIssue = (issue: AssessmentValidationIssue) => {
-    const destination = resolvePublishIssueDestination(issue, null);
-    if (destination.kind === 'unresolved') return;
-    // A converter finding belongs with the release policy; questions and modules
-    // belong in the builder, each with its own deep link.
-    if (destination.kind === 'score-policy') {
-      navigate(`/sat/exams/${encodeURIComponent(exam.id)}/release?panel=scoring`);
-      return;
-    }
-    const params = new URLSearchParams();
-    if (destination.kind === 'question') {
-      params.set('question', destination.questionId);
-      if (destination.field) params.set('field', destination.field);
-    } else {
-      params.set('module', publishModuleDeepLink(destination));
-    }
-    requestAuthoringDraftOnEntry(exam.id);
-    navigate(`${examWorkspacePath(exam.id, 'questions')}?${params.toString()}`);
+    const target = satIssueRoute(exam.id, issue);
+    if (!target) return;
+    if (target.needsDraft) requestAuthoringDraftOnEntry(exam.id);
+    navigate(target.path);
   };
 
   const content = (
@@ -113,7 +89,8 @@ export function SatAccessRoute() {
         isLoading={distributionQuery.isLoading && !distributionQuery.data}
         error={distributionQuery.error instanceof Error ? distributionQuery.error.message : null}
         onRefresh={() => distributionQuery.refetch()}
-        onBackToRelease={() => navigate(`/sat/exams/${exam.id}/release`)}
+        canCreate={chrome.canCreateSession}
+        onFixIssue={openIssue}
         createRequest={createRequest}
         selectedLinkId={searchParams.get('link')}
         onSelectionChange={(linkId) => setSearchParams((current) => {
@@ -136,34 +113,13 @@ export function SatAccessRoute() {
             navigate(back.to, back.state ? { state: back.state } : undefined);
           },
           onPreview: () => navigate(`/sat/exams/${encodeURIComponent(exam.id)}/preview`),
-          ...(exam.canPublish ? { onPublish: () => setPublishOpen(true) } : {}),
         }}
       />
-      {publishOpen ? (
-        <ExamPublishSheet
-          examId={exam.id}
-          open
-          onClose={() => setPublishOpen(false)}
-          onOpenIssue={openIssue}
-          onOpenStudentAccess={(target) => {
-            setPublishOpen(false);
-            setCreateRequest({ id: Date.now(), ...(target ?? {}) });
-          }}
-          onOpenSettings={() => {
-            setPublishOpen(false);
-            setSettingsOpen('publish');
-          }}
-        />
-      ) : null}
       {settingsOpen ? (
         <ExamSettingsSheet
           examId={exam.id}
           open
-          onClose={() => {
-            const returnToPublish = settingsOpen === 'publish';
-            setSettingsOpen(false);
-            if (returnToPublish) setPublishOpen(true);
-          }}
+          onClose={() => setSettingsOpen(false)}
           onEditExam={() => navigate(examWorkspacePath(exam.id, 'questions'))}
         />
       ) : null}

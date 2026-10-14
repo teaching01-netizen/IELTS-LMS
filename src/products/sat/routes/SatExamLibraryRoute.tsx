@@ -10,6 +10,9 @@ import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/a
 import type { ExamEntity } from '../../../types/domain';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { SatConfirmDialog, SatFormDialog, isSatCreationDirty } from '../ui/ConfirmDialog';
+import { useSatExamConfigDefaults } from '../../../features/exam-authoring/api/satExamConfigApi';
+import { satExamConfigDiffers, validateSatExamConfig, type SatConfigFieldErrors, type SatExamConfig } from '../../../features/exam-authoring/contracts/satExamConfig';
+import { SatExamConfigFields } from '../../../features/exam-authoring/ui/create-exam/SatExamConfigFields';
 import { SatSegmentedControl } from '../ui/SegmentedControl';
 import { useSatListParams, type SatLibraryTab } from '../ui/useSatListParams';
 import { useSatListReturn } from '../ui/useSatListReturn';
@@ -39,7 +42,7 @@ function formatDate(value: string | null | undefined): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(time));
 }
 
-const TAB_NOUN: Record<SatLibraryTab, string> = { active: 'active', drafts: 'draft', published: 'published', archived: 'archived' };
+const TAB_NOUN: Record<SatLibraryTab, string> = { active: 'active', drafts: 'unused', published: 'room-ready', archived: 'archived' };
 
 /**
  * One grid for the column labels and every row, so Exam / Status / Updated
@@ -66,13 +69,10 @@ function statusTone(exam: ExamEntity): SatStatusTone {
 
 function statusLabel(exam: ExamEntity): string {
   const tone = statusTone(exam);
-  if (tone === 'published') {
-    const version = exam.currentPublishedVersionNumber;
-    return version ? `Published · Version ${version}` : 'Published';
-  }
-  if (tone === 'changes') return 'Unpublished changes';
+  // Staff never publish: "available" means a room has captured a saved version.
+  if (tone === 'published') return 'Rooms available';
   if (tone === 'archived') return 'Archived';
-  return 'Draft';
+  return 'Editing';
 }
 
 export function SatExamLibraryRoute() {
@@ -89,6 +89,10 @@ export function SatExamLibraryRoute() {
   const [confirmDiscardExam, setConfirmDiscardExam] = useState(false);
   const [title, setTitle] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
+  const [customize, setCustomize] = useState(false);
+  const [config, setConfig] = useState<SatExamConfig | null>(null);
+  const [configErrors, setConfigErrors] = useState<SatConfigFieldErrors>({});
+  const defaultsQuery = useSatExamConfigDefaults(createOpen);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const satExams = useMemo(() => (query.data?.entities ?? []).filter((exam) => exam.providerKey === 'sat'), [query.data?.entities]);
   const counts = useMemo(() => {
@@ -124,9 +128,17 @@ export function SatExamLibraryRoute() {
   const openCreate = () => {
     setTitle('');
     setCreateError(null);
+    setCustomize(false);
+    setConfig(null);
+    setConfigErrors({});
     setCreateOpen(true);
   };
-  const examDirty = isSatCreationDirty({ title });
+  // Customizing seeds the form from the server defaults once; toggling back and
+  // forth keeps what was typed.
+  useEffect(() => {
+    if (customize && !config && defaultsQuery.data) setConfig(defaultsQuery.data.config);
+  }, [customize, config, defaultsQuery.data]);
+  const examDirty = isSatCreationDirty({ title }) || customize;
   const requestExamClose = () => {
     if (creating) return;
     if (examDirty) setConfirmDiscardExam(true);
@@ -137,12 +149,21 @@ export function SatExamLibraryRoute() {
     event.preventDefault();
     const nextTitle = title.trim();
     if (!nextTitle || creating) return;
+    // Only a customized, changed configuration is sent: otherwise the server's
+    // blueprint defaults apply, exactly as before.
+    let configuration: SatExamConfig | undefined;
+    if (customize && config && defaultsQuery.data) {
+      const errors = validateSatExamConfig(config, defaultsQuery.data.limits);
+      setConfigErrors(errors);
+      if (Object.keys(errors).length > 0) return;
+      if (satExamConfigDiffers(config, defaultsQuery.data.config)) configuration = config;
+    }
     setCreating(true);
     setCreateError(null);
     try {
       const actor = session?.user.displayName?.trim() || session?.user.email || 'Staff';
       const result = await examAuthoringFacade.lifecycle.createProviderExam(
-        { providerKey: 'sat', providerExamType: 'SAT', title: nextTitle },
+        { providerKey: 'sat', providerExamType: 'SAT', title: nextTitle, ...(configuration ? { configuration } : {}) },
         actor,
       );
       if (!result.success || !result.exam) throw new Error(result.error ?? 'The exam could not be created.');
@@ -162,7 +183,7 @@ export function SatExamLibraryRoute() {
     <SatContainer>
       <SatPageHeader
         title="Exams"
-        description="Author Digital SAT practice exams, publish versions, and prepare rooms."
+        description="Author Digital SAT practice exams and prepare rooms. Changes are saved automatically."
         actions={<SatButton variant="primary" onClick={openCreate} icon={<Plus size={16} aria-hidden="true" />}>Create exam</SatButton>}
       />
 
@@ -174,8 +195,8 @@ export function SatExamLibraryRoute() {
             value={tab}
             options={[
               { value: 'active', label: 'All active', count: counts.active },
-              { value: 'drafts', label: 'Drafts', count: counts.drafts },
-              { value: 'published', label: 'Published', count: counts.published },
+              { value: 'drafts', label: 'Not in a room', count: counts.drafts },
+              { value: 'published', label: 'Rooms available', count: counts.published },
               { value: 'archived', label: 'Archived', count: counts.archived },
             ]}
             onChange={(next) => setParams({ tab: next === 'active' ? '' : next })}
@@ -304,7 +325,7 @@ export function SatExamLibraryRoute() {
         <SatEmptyState
           icon={<BookOpen size={20} aria-hidden="true" />}
           title={`No ${TAB_NOUN[tab]} exams`}
-          hint="Exams move between these groups as they are edited and published."
+          hint="Exams move between these groups as rooms are created from them."
           action={<SatButton variant="secondary" onClick={() => setParams({ tab: '' })}>Show all active</SatButton>}
         />
       ) : counts.archived > 0 ? (
@@ -325,12 +346,32 @@ export function SatExamLibraryRoute() {
 
       <SatFormDialog open={createOpen} eyebrow="Digital SAT" title="Create exam" onClose={requestExamClose}>
         <form onSubmit={createExam} noValidate>
-          <div className="px-6 py-5">
+          <div className="max-h-[70vh] space-y-4 overflow-y-auto px-6 py-5">
             <SatField id="sat-title" label="Exam name" error={createError} help="Reading & Writing, Math, adaptive modules, and the SAT tool policy are created with the exam.">
               {(control) => (
                 <input ref={inputRef} {...control} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Practice Test 06" maxLength={255} autoComplete="off" className="sat-input" />
               )}
             </SatField>
+            <div>
+              <p className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Standard Digital SAT settings</p>
+              <p className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">You can change exam settings later in Settings. Rooms already created keep their exam content and timing.</p>
+              <button
+                type="button"
+                aria-expanded={customize}
+                aria-controls="sat-exam-config"
+                disabled={creating || !defaultsQuery.data}
+                onClick={() => setCustomize((open) => !open)}
+                className="sat-btn sat-btn--quiet sat-press mt-2 px-0"
+              >
+                {customize ? 'Use standard settings' : 'Customize settings'}
+              </button>
+              {defaultsQuery.error ? <p role="alert" className="text-[14px] text-[var(--sat-staff-danger,#b42318)]">Settings could not load. The standard settings will be used.</p> : null}
+            </div>
+            {customize && config && defaultsQuery.data ? (
+              <div id="sat-exam-config">
+                <SatExamConfigFields idPrefix="sat-create" value={config} limits={defaultsQuery.data.limits} errors={configErrors} disabled={creating} onChange={setConfig} />
+              </div>
+            ) : null}
           </div>
           <div className="flex justify-end gap-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-6 py-4">
             <SatButton variant="quiet" onClick={requestExamClose}>Cancel</SatButton>

@@ -1,0 +1,1 @@
+ok  	example.com/ielts-proctoring/cmd/migrate	0.301s

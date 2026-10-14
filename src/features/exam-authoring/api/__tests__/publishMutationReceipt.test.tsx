@@ -20,7 +20,6 @@ vi.mock("../../infrastructure/examAuthoringBackendGateway", () => ({
 import { useAssessmentReleaseState, usePublishAssessment } from "../assessmentQueries";
 import { assessmentKeys } from "../authoringQueryEffects";
 import type { AssessmentReleaseState } from "../../contracts/release";
-import { publishedVersionToDeliveryTarget } from "../../ui/publish/useSatPublish";
 
 const request: PublishAssessmentRequest = {
   revision: 8,
@@ -65,29 +64,6 @@ function setup() {
 beforeEach(() => vi.clearAllMocks());
 
 describe("publish mutation acknowledgment", () => {
-  it("accepts only a valid receipt for this exam and the requested scope", () => {
-    expect(publishedVersionToDeliveryTarget(publishedVersion, "exam-1", "math")).toEqual({
-      versionId: "published-9",
-      versionNumber: 9,
-      publishScope: "math",
-    });
-    expect(() => publishedVersionToDeliveryTarget(
-      { ...publishedVersion, examId: "other-exam" },
-      "exam-1",
-      "math"
-    )).toThrow(/could not be verified/i);
-    expect(() => publishedVersionToDeliveryTarget(
-      { ...publishedVersion, isPublished: false },
-      "exam-1",
-      "math"
-    )).toThrow(/could not be verified/i);
-    expect(() => publishedVersionToDeliveryTarget(
-      undefined as unknown as PublishedAssessmentVersion,
-      "exam-1",
-      "math"
-    )).toThrow(/could not be verified/i);
-  });
-
   it("returns the committed POST version while an invalidated release read hangs", async () => {
     gateway.backendPost.mockResolvedValue(publishedVersion);
     let finishReleaseRefresh: ((value: AssessmentReleaseState) => void) | undefined;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssessmentReleaseState } from "../../../contracts/release";
-import { canViewExamResponses, describeExamLifecycle, deliveryDestination, examWorkspacePath, parseDeliveryCreate } from "../examLifecycle";
+import { canViewExamResponses, describeExamLifecycle, deliveryDestination, examWorkspacePath } from "../examLifecycle";
 
 const access = (totalLinks: number): AssessmentReleaseState["access"] => ({
   totalLinks,
@@ -19,31 +19,30 @@ const published = (versionNumber: number): AssessmentReleaseState["currentPublis
 });
 
 describe("describeExamLifecycle", () => {
-  it("calls an unloaded or never-published exam a draft", () => {
-    expect(describeExamLifecycle(null).label).toBe("Draft");
-    expect(
-      describeExamLifecycle({ state: "never_published", currentPublishedVersion: null, access: access(0) }).label,
-    ).toBe("Draft");
+  it("calls an unloaded or never-published exam Editing, never a publish state", () => {
+    expect(describeExamLifecycle(null).label).toBe("Editing");
+    const draft = describeExamLifecycle({ state: "never_published", currentPublishedVersion: null, access: access(0) });
+    expect(draft.label).toBe("Editing");
+    expect(draft.detail).toBe("Changes are saved automatically. A room uses the latest saved exam.");
   });
 
-  it("names the live version and says it stays available while changes are unpublished", () => {
+  it("keeps earlier rooms on their version while the exam is edited", () => {
     const copy = describeExamLifecycle({
       state: "unpublished_changes",
       currentPublishedVersion: published(2),
       access: access(1),
     });
-    expect(copy.label).toBe("Unpublished changes");
-    expect(copy.detail).toBe("Version 2 remains available to students");
+    expect(copy.label).toBe("Editing");
+    expect(copy.detail).toBe("Existing rooms keep Version 2. A new room uses your latest saved changes.");
     expect(copy.tone).toBe("changes");
   });
 
-  it("distinguishes a published exam with sessions from one nobody can enter yet", () => {
-    expect(
-      describeExamLifecycle({ state: "published_current", currentPublishedVersion: published(3), access: access(2) }).label,
-    ).toBe("Published · Version 3");
-    expect(
-      describeExamLifecycle({ state: "published_current", currentPublishedVersion: published(3), access: access(0) }).label,
-    ).toBe("Published · Version 3 · No rooms yet");
+  it("distinguishes an exam with rooms from one nobody can enter yet, with the version as detail only", () => {
+    const withRooms = describeExamLifecycle({ state: "published_current", currentPublishedVersion: published(3), access: access(2) });
+    expect(withRooms.label).toBe("Rooms available");
+    expect(withRooms.detail).toBe("Latest room exam: Version 3");
+    const noRooms = describeExamLifecycle({ state: "published_current", currentPublishedVersion: published(3), access: access(0) });
+    expect(noRooms.label).toBe("Ready · No rooms yet");
   });
 });
 
@@ -62,20 +61,10 @@ describe("exam workspace navigation", () => {
   });
 });
 
-
-describe("published version setup navigation", () => {
-  const target = { versionId: "version/4", versionNumber: 4, publishScope: "math" as const };
-
-  it("carries the exact version into the create-session path", () => {
-    const path = deliveryDestination("exam-1", target);
-    const params = new URL(path, "https://example.com").searchParams;
-    expect(params.get("new")).toBe("1");
-    expect(parseDeliveryCreate(params)).toEqual(target);
-  });
-
-  it("opens an unpinned create form from any exam surface, and ignores the retired reuse handoff", () => {
-    const params = new URL(deliveryDestination("exam-1"), "https://example.com").searchParams;
-    expect(parseDeliveryCreate(params)).toBe("any");
-    expect(parseDeliveryCreate(new URLSearchParams({ reuse: "1", version: "version/4", versionNumber: "4", scope: "math" }))).toBeNull();
+describe("create-room navigation", () => {
+  it("opens the Rooms tab with the create form requested, from any exam surface", () => {
+    const url = new URL(deliveryDestination("exam-1"), "https://example.com");
+    expect(url.pathname).toBe("/sat/exams/exam-1/access");
+    expect(url.searchParams.get("new")).toBe("1");
   });
 });

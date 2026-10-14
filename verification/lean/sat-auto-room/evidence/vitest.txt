@@ -1,0 +1,12 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/features/exam-authoring/contracts/__tests__/satExamConfig.test.ts (3 tests) 9ms
+ ✓ src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomRecoveryVerification.test.tsx (2 tests) 20ms
+ ✓ src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomFlow.test.tsx (6 tests) 568ms
+
+ Test Files  3 passed (3)
+      Tests  11 passed (11)
+   Start at  23:34:13
+   Duration  2.66s (transform 533ms, setup 692ms, collect 1.13s, tests 597ms, environment 1.65s, prepare 186ms)
+

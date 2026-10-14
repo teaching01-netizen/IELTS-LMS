@@ -2760,6 +2760,95 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /sat/exams/{examId}/rooms:
+    post:
+      tags: [access-links]
+      summary: Create a SAT room in one action (captures or reuses the immutable release server-side)
+      description: >
+        Validates the room, reuses the latest saved release or seals the working
+        draft, and creates the backing schedule, access link and roster in one
+        transaction. operationKey makes a lost-response retry replay the original
+        room (200); the same key with a different body is OPERATION_KEY_CONFLICT.
+        Errors carry details.issues (EXAM_NOT_READY) and details.currentExamRevision
+        (EXAM_REVISION_CHANGED).
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operationKey, expectedExamRevision, expectedDraftVersionId, room]
+              properties:
+                operationKey: { type: string, minLength: 1, maxLength: 128 }
+                expectedExamRevision: { type: integer, minimum: 0 }
+                expectedDraftVersionId:
+                  type: string
+                  description: Working draft ID; an empty string asserts that no working draft exists.
+                expectedDraftRevision:
+                  type: integer
+                  minimum: 0
+                  description: Required when expectedDraftVersionId is nonempty.
+                room: { type: object }
+      responses:
+        "200":
+          description: Replay of a committed operation
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "201":
+          description: Room created
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /sat/exam-config/defaults:
+    get:
+      tags: [exams]
+      summary: Blueprint-derived SAT exam configuration defaults and limits
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Defaults
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /sat/room-operations/{operationKey}:
+    get:
+      tags: [access-links]
+      summary: Read the committed outcome of the caller's room operation key
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: operationKey
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The committed room operation
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /library/passages:
     get:
       tags: [library]

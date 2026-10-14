@@ -154,10 +154,10 @@ describe("SatCompleteScreen", () => {
       />,
     );
     const report = screen.getByRole("region", { name: "Score report" });
-    expect(report).toHaveTextContent("35 / 49");
-    expect(report).toHaveTextContent("15 / 22");
-    expect(report).toHaveTextContent("math-1");
-    expect(report).toHaveTextContent("not an official SAT score");
+    expect(report).toHaveTextContent("35 of 49");
+    expect(report).toHaveTextContent("15 of 22 scored questions correct");
+    expect(report).toHaveTextContent("Module 1");
+    expect(report).toHaveTextContent("Estimated SAT scores are not available for this sitting.");
     expect(screen.getByRole("meter", { name: "Algebra accuracy" })).toHaveAttribute("aria-valuenow", "75");
     expect(screen.queryByRole("button", { name: /answered exam/ })).not.toBeInTheDocument();
   });
@@ -183,10 +183,11 @@ describe("SatCompleteScreen", () => {
       />,
     );
     const report = screen.getByRole("region", { name: "Score report" });
-    expect(report).toHaveTextContent("Estimated total score1100–1120");
-    expect(report).toHaveTextContent("Estimated score 600");
-    expect(report).toHaveTextContent("Estimated score 500–520");
-    expect(report).toHaveTextContent("Converter classroom-v1");
+    expect(report).toHaveTextContent("Estimated total SAT score1100–1120");
+    expect(report).toHaveTextContent("Score scale 400–1600");
+    expect(report).toHaveTextContent("Reading & Writing600");
+    expect(report).toHaveTextContent("Math500–520");
+    expect(report).toHaveTextContent("Conversion table version: classroom-v1");
   });
 
   it("never invents a number when a section's conversion is unavailable", () => {
@@ -206,9 +207,52 @@ describe("SatCompleteScreen", () => {
       />,
     );
     const report = screen.getByRole("region", { name: "Score report" });
-    expect(report).toHaveTextContent("Estimated score unavailable");
-    expect(report).toHaveTextContent("Estimated total scoreUnavailable");
+    expect(report).toHaveTextContent("An estimated SAT score is not available for this sitting.");
+    expect(report).toHaveTextContent("9 of 22 correct");
+    expect(report).not.toHaveTextContent(/Estimated total/);
     expect(report).not.toHaveTextContent(/\b[2-8]\d0\b/);
+  });
+
+  it("shows raw correctness, not an estimate, for a single subject without a converter", () => {
+    render(
+      <SatCompleteScreen
+        result={result({
+          scorePayload: { classroomRaw: { rawCorrect: 18, total: 22, sections: [{ sectionKey: "math", rawCorrect: 18, total: 22 }] } },
+        })}
+        onExit={vi.fn()}
+      />,
+    );
+    const report = screen.getByRole("region", { name: "Score report" });
+    expect(screen.getByRole("heading", { level: 1, name: "Your Math results" })).toBeInTheDocument();
+    expect(report).toHaveTextContent("18 of 22 correct");
+    expect(report).toHaveTextContent("An estimated SAT score is not available for this sitting.");
+    expect(report).not.toHaveTextContent(/Estimated (total|Math|score)/);
+    expect(report).not.toHaveTextContent(/Reading|400–1600/);
+  });
+
+  it("makes the section estimate primary for a Math-only sitting, hiding a stray total", () => {
+    render(
+      <SatCompleteScreen
+        result={result({
+          scorePayload: {
+            classroomRaw: {
+              rawCorrect: 34,
+              total: 44,
+              conversion: { converterVersion: "classroom-v1" },
+              totalScaled: { low: 1200, high: 1200 },
+              sections: [{ sectionKey: "math", rawCorrect: 34, total: 44, conversionStatus: "converted", scaled: { low: 620, high: 620 } }],
+            },
+          },
+        })}
+        onExit={vi.fn()}
+      />,
+    );
+    const report = screen.getByRole("region", { name: "Score report" });
+    expect(report).toHaveTextContent("Estimated Math score");
+    expect(report).toHaveTextContent("620");
+    expect(report).toHaveTextContent("Score scale 200–800");
+    expect(report).toHaveTextContent("34 of 44 scored questions correct");
+    expect(report).not.toHaveTextContent(/1200|Estimated total|400–1600/);
   });
 
   it("shows no estimated score without a converter", () => {

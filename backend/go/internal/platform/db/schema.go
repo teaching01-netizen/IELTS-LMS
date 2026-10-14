@@ -35,6 +35,9 @@ var RequiredTables = []string{
 	"sat_score_conversion_revisions",
 	"sat_score_conversion_active",
 	"sat_score_conversion_audit",
+	// One-action SAT room creation (0088): the replay receipt for every
+	// Create room request; without it a lost response cannot be recovered.
+	"sat_room_operations",
 }
 
 // RequiredColumns: 19 durability-critical columns from the Rust
@@ -80,6 +83,7 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "exam_schedules", Column: "sat_session_mode"},
 	// SAT score report switch (0085): terminalization reads the release gate.
 	{Table: "exam_entities", Column: "sat_score_report_enabled"},
+	{Table: "sat_room_operations", Column: "response_snapshot"},
 }
 
 // RequiredIndex is one (table, index) pair the runtime depends on.

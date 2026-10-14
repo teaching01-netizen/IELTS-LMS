@@ -5,22 +5,21 @@ import type { AccessDistributionOverview, AssessmentAccessLink } from "../../../
 import type { AccessSessionBindings, AccessSessionInfo } from "../../delivery/sessionState";
 
 const mocks = vi.hoisted(() => ({
-  create: vi.fn(),
-  editorProps: null as null | {
+  flowProps: null as null | {
+    examId: string;
     prefill?: { name: string } | null;
-    targetVersionNumber?: number | null;
-    publishScope?: string;
     reuseOptions?: ReadonlyArray<{ name: string }>;
     onReuseSetup?: (link: AssessmentAccessLink) => void;
-    onCreate: (request: Record<string, unknown>) => Promise<void>;
+    onClose: () => void;
+    onRoomCreated: (link: AssessmentAccessLink, receipt: unknown) => void;
   },
+  created: null as null | AssessmentAccessLink,
 }));
 
 vi.mock("../../../realtime/coedit", () => ({
   useSatAuthoringCollaboration: () => null,
 }));
 vi.mock("../../../api/assessmentAccessLinkQueries", () => ({
-  useCreateAccessLink: () => ({ mutateAsync: mocks.create, isPending: false }),
   useUpdateAccessLink: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useSetAccessLinkLifecycle: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteAccessLink: () => ({ mutateAsync: vi.fn(), isPending: false, variables: undefined }),
@@ -29,17 +28,21 @@ vi.mock("../../../api/assessmentAccessLinkQueries", () => ({
   useAccessLinkActivity: () => ({ data: [], isLoading: false }),
 }));
 vi.mock("../AccessLinkEditorSheet", () => ({
-  AccessLinkEditorSheet: (props: NonNullable<typeof mocks.editorProps> & { open: boolean }) => {
-    mocks.editorProps = props;
-    return props.open ? (
-      <div role="dialog" aria-label="Student link editor">
-        <p data-testid="editor-target">Version {props.targetVersionNumber}</p>
-        <p data-testid="editor-prefill">{props.prefill?.name ?? "none"}</p>
-        <button type="button" onClick={() => void props.onCreate({ name: "New group" })}>
-          Submit form
+  AccessLinkEditorSheet: ({ open }: { open: boolean }) => (open ? <div role="dialog" aria-label="Room settings">edit</div> : null),
+}));
+// The one-action create flow is covered by its own tests; here it is a stub so
+// the dashboard's hand-offs (open, prefill, completion) can be asserted.
+vi.mock("../../publish/SatCreateRoomFlow", () => ({
+  SatCreateRoomFlow: (props: NonNullable<typeof mocks.flowProps>) => {
+    mocks.flowProps = props;
+    return (
+      <div role="dialog" aria-label="Create room">
+        <p data-testid="flow-prefill">{props.prefill?.name ?? "none"}</p>
+        <button type="button" onClick={() => mocks.created && props.onRoomCreated(mocks.created, {})}>
+          Finish create
         </button>
       </div>
-    ) : null;
+    );
   },
 }));
 vi.mock("../AccessLinkShareSheet", () => ({ AccessLinkShareSheet: () => null, AccessLinkPresentView: () => null }));
@@ -64,7 +67,7 @@ function link(id: string, name: string, over: Partial<AssessmentAccessLink> = {}
 const version = { id: "v-3", versionNumber: 3, revision: 1, publishNotes: null, publishScope: "full", createdAt: "2026-09-01T00:00:00Z" } as const;
 const overviewWith = (links: AssessmentAccessLink[]): AccessDistributionOverview => ({ currentPublishedVersion: version, links });
 
-const shell = { lifecycle: { label: "Published · Version 3", detail: null, tone: "published" as const }, showResponses: true, onSelectTab: vi.fn(), onBack: vi.fn(), onPreview: vi.fn() };
+const shell = { lifecycle: { label: "Rooms available", detail: null, tone: "published" as const, state: "published_current" as const }, showResponses: true, onSelectTab: vi.fn(), onBack: vi.fn(), onPreview: vi.fn() };
 
 function session(infos: Record<string, AccessSessionInfo>, over: Partial<AccessSessionBindings> = {}): AccessSessionBindings {
   return {
@@ -79,37 +82,44 @@ function session(infos: Record<string, AccessSessionInfo>, over: Partial<AccessS
   };
 }
 
-function renderDashboard(links: AssessmentAccessLink[], extra: { createRequest?: CreateRequest | null; session?: AccessSessionBindings } = {}) {
-  return render(
+function dashboard(links: AssessmentAccessLink[], extra: { createRequest?: CreateRequest | null; session?: AccessSessionBindings; selectedLinkId?: string; onSelectionChange?: (id: string | null) => void; overview?: AccessDistributionOverview } = {}) {
+  return (
     <StudentLinksDashboard
       exam={exam}
-      overview={overviewWith(links)}
+      overview={extra.overview ?? overviewWith(links)}
       isLoading={false}
       error={null}
       onRefresh={vi.fn()}
-      onBackToRelease={vi.fn()}
+      canCreate
+      onFixIssue={vi.fn()}
       shell={shell}
       {...(extra.createRequest !== undefined ? { createRequest: extra.createRequest } : {})}
       {...(extra.session ? { session: extra.session } : {})}
-    />,
+      {...(extra.selectedLinkId ? { selectedLinkId: extra.selectedLinkId } : {})}
+      {...(extra.onSelectionChange ? { onSelectionChange: extra.onSelectionChange } : {})}
+    />
   );
+}
+
+function renderDashboard(links: AssessmentAccessLink[], extra: Parameters<typeof dashboard>[1] = {}) {
+  return render(dashboard(links, extra));
 }
 
 const READY: AccessSessionInfo = { phase: "ready", timingModel: "sat_personal_v1", joined: 12 };
 
 beforeEach(() => {
-  mocks.create.mockReset();
-  mocks.editorProps = null;
+  mocks.flowProps = null;
+  mocks.created = null;
 });
 
 describe("Delivery: first-time setup", () => {
-  it("leads a new exam with a three-step guide and a single obvious next action", () => {
+  it("leads a new exam with a two-step guide, no publish step, and a single obvious next action", () => {
     renderDashboard([]);
     const steps = within(screen.getByRole("list", { name: "Room settings steps" }));
-    expect(steps.getByText("Publish").closest("li")).not.toHaveAttribute("aria-current");
+    expect(steps.queryByText("Publish")).not.toBeInTheDocument();
     expect(steps.getByText("Create room").closest("li")).toHaveAttribute("aria-current", "step");
     fireEvent.click(within(screen.getByRole("region", { name: "Set up a room" })).getByRole("button", { name: "Create room" }));
-    expect(screen.getByRole("dialog", { name: "Student link editor" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Create room" })).toBeInTheDocument();
   });
 
   it("collapses the guide once access exists, but keeps it reopenable", () => {
@@ -119,39 +129,26 @@ describe("Delivery: first-time setup", () => {
     expect(guide).not.toHaveAttribute("open");
   });
 
-  it("opens the create form straight away for a publish request and pins the exact published version", async () => {
-    mocks.create.mockResolvedValue(link("new", "New group"));
-    renderDashboard([link("new", "New group")], {
-      createRequest: { id: 1, versionId: "v-4", versionNumber: 4, publishScope: "math" },
-    });
-    expect(await screen.findByRole("dialog", { name: "Student link editor" })).toBeInTheDocument();
-    // The form states its target version and scope; nothing is implicit.
-    expect(screen.getByTestId("editor-target")).toHaveTextContent("Version 4");
-    expect(mocks.editorProps?.publishScope).toBe("math");
-
-    fireEvent.click(screen.getByRole("button", { name: "Submit form" }));
-    await waitFor(() => expect(mocks.create).toHaveBeenCalled());
-    // Even though Version 3 is current, the group is created on the version the author just published.
-    expect(mocks.create).toHaveBeenCalledWith({ name: "New group", publishedVersionId: "v-4" });
+  it("opens the create form straight away for a request from another page", async () => {
+    renderDashboard([link("a", "Morning class")], { createRequest: { id: 1 } });
+    expect(await screen.findByRole("dialog", { name: "Create room" })).toBeInTheDocument();
+    expect(mocks.flowProps?.examId).toBe("exam-1");
   });
 
   it("opens the form once per request, not again on every re-render", async () => {
     const request: CreateRequest = { id: 7 };
     const view = renderDashboard([link("a", "Morning class")], { createRequest: request });
-    expect(await screen.findByRole("dialog", { name: "Student link editor" })).toBeInTheDocument();
-    fireEvent.keyDown(document.body, { key: "Escape" });
-    act(() => mocks.editorProps?.["onClose" as never]?.());
-    view.rerender(
-      <StudentLinksDashboard exam={exam} overview={overviewWith([link("a", "Morning class")])} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shell} createRequest={request} />,
-    );
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Student link editor" })).not.toBeInTheDocument());
+    expect(await screen.findByRole("dialog", { name: "Create room" })).toBeInTheDocument();
+    act(() => mocks.flowProps?.onClose());
+    view.rerender(dashboard([link("a", "Morning class")], { createRequest: request }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create room" })).not.toBeInTheDocument());
   });
 
   it("continues from creation into Share and run, and lets the author finish later", async () => {
-    mocks.create.mockResolvedValue(link("new", "New group"));
+    mocks.created = link("new", "New group");
     const bindings = session({ "sched-new": READY });
     renderDashboard([link("new", "New group")], { createRequest: { id: 1 }, session: bindings });
-    fireEvent.click(await screen.findByRole("button", { name: "Submit form" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Finish create" }));
     const panel = within(await screen.findByRole("region", { name: "Room" }));
     const next = await panel.findByText("Room created");
     expect(next.closest("[role=status]")).toHaveTextContent("Copying is optional");
@@ -164,11 +161,11 @@ describe("Delivery: first-time setup", () => {
   });
 
   it("keeps staff who cannot run rooms on the page after creating one", async () => {
-    mocks.create.mockResolvedValue(link("new", "New group"));
+    mocks.created = link("new", "New group");
     const bindings = session({ "sched-new": READY }, { canRun: false });
     renderDashboard([link("new", "New group")], { createRequest: { id: 1 }, session: bindings });
-    fireEvent.click(await screen.findByRole("button", { name: "Submit form" }));
-    await waitFor(() => expect(mocks.create).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: "Finish create" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create room" })).not.toBeInTheDocument());
     expect(bindings.onOpenRoom).not.toHaveBeenCalled();
   });
 });
@@ -210,16 +207,15 @@ describe("Delivery: running a group", () => {
     expect(screen.getByRole("button", { name: "Open Morning class" })).not.toHaveTextContent("Room:");
   });
 
-  it("turns a finished room into View results with Duplicate setup, opening a prefilled form", () => {
+  it("turns a finished room into View results with Duplicate setup, opening a prefilled create form", () => {
     const bindings = session({ "sched-a": { phase: "finished", timingModel: null, joined: 12 } });
     renderDashboard([link("a", "Morning class")], { session: bindings });
     fireEvent.click(screen.getByRole("button", { name: "View results" }));
     expect(bindings.onOpenResults).toHaveBeenCalledWith("sched-a");
 
     fireEvent.click(screen.getByRole("button", { name: "Duplicate setup" }));
-    expect(screen.getByRole("dialog", { name: "Student link editor" })).toBeInTheDocument();
-    expect(screen.getByTestId("editor-prefill")).toHaveTextContent("Morning class");
-    expect(screen.getByTestId("editor-target")).toHaveTextContent("Version 3");
+    expect(screen.getByRole("dialog", { name: "Create room" })).toBeInTheDocument();
+    expect(screen.getByTestId("flow-prefill")).toHaveTextContent("Morning class");
   });
 
   it("resumes a paused room in its room, not from the list", () => {
@@ -239,46 +235,31 @@ describe("Delivery: running a group", () => {
   });
 });
 
-
 describe("Delivery continuity and action safety", () => {
-  it("keeps workspace navigation before publishing and opens Publish in place", () => {
-    const onPublish = vi.fn();
-    render(<StudentLinksDashboard exam={exam} overview={{ currentPublishedVersion: null, links: [] }} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={{ ...shell, onPublish }} />);
+  it("lets staff create the first room before anything is published, keeping workspace navigation", () => {
+    renderDashboard([], { overview: { currentPublishedVersion: null, links: [] } });
     expect(screen.getByRole("navigation", { name: "Exam sections" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Publish exam" }));
-    expect(onPublish).toHaveBeenCalledOnce();
-    expect(screen.queryByText("Return to Release")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Create room" })[0]!);
+    expect(screen.getByRole("dialog", { name: "Create room" })).toBeInTheDocument();
   });
 
-  it("does not mark Version 3 access configured just because Version 2 has a group", () => {
+  it("counts rooms from earlier releases toward configured setup", () => {
     renderDashboard([link("old", "Old class", { publishedVersionId: "v-2", versionNumber: 2 })]);
-    expect(screen.getByRole("region", { name: "Set up a room" })).toHaveTextContent("Version 3 has no room yet");
+    expect(screen.queryByRole("region", { name: "Set up a room" })).not.toBeInTheDocument();
   });
 
-  it("pins ordinary new groups to the version displayed when the form opens", async () => {
-    mocks.create.mockResolvedValue(link("new", "New group"));
-    const view = renderDashboard([link("a", "Morning class")]);
-    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
-    view.rerender(<StudentLinksDashboard exam={exam} overview={{ currentPublishedVersion: { ...version, id: "v-4", versionNumber: 4 }, links: [link("a", "Morning class")] }} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shell} />);
-    expect(screen.getByTestId("editor-target")).toHaveTextContent("Version 3");
-    fireEvent.click(screen.getByRole("button", { name: "Submit form" }));
-    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({ name: "New group", publishedVersionId: "v-3" }));
-  });
-
-  it("offers earlier rooms inside the create form, keeping the exact newly published version", async () => {
-    renderDashboard([link("a", "Morning class")], { createRequest: { id: 9, versionId: "v-4", versionNumber: 4, publishScope: "math" } });
-    await screen.findByRole("dialog", { name: "Student link editor" });
-    expect(mocks.create).not.toHaveBeenCalled();
-    expect(mocks.editorProps?.reuseOptions?.map((option) => option.name)).toEqual(["Morning class"]);
-    act(() => mocks.editorProps?.onReuseSetup?.(link("a", "Morning class")));
-    expect(screen.getByTestId("editor-prefill")).toHaveTextContent("Morning class");
-    expect(screen.getByTestId("editor-target")).toHaveTextContent("Version 4");
-    expect(mocks.editorProps?.publishScope).toBe("math");
+  it("offers earlier rooms inside the create form and reopens it prefilled", async () => {
+    renderDashboard([link("a", "Morning class")], { createRequest: { id: 9 } });
+    await screen.findByRole("dialog", { name: "Create room" });
+    expect(mocks.flowProps?.reuseOptions?.map((option) => option.name)).toEqual(["Morning class"]);
+    act(() => mocks.flowProps?.onReuseSetup?.(link("a", "Morning class")));
+    expect(screen.getByTestId("flow-prefill")).toHaveTextContent("Morning class");
   });
 
   it("restores the requested access group and reports a newly selected group", () => {
     const onSelectionChange = vi.fn();
-    render(<StudentLinksDashboard exam={exam} overview={overviewWith([link("a", "Morning class"), link("b", "Evening class")])} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shell} selectedLinkId="b" onSelectionChange={onSelectionChange} />);
+    renderDashboard([link("a", "Morning class"), link("b", "Evening class")], { selectedLinkId: "b", onSelectionChange });
     expect(screen.getByRole("button", { name: "Open Evening class" })).toHaveAttribute("aria-current", "true");
     fireEvent.click(screen.getByRole("button", { name: "Open Morning class" }));
     expect(onSelectionChange).toHaveBeenCalledWith("a");

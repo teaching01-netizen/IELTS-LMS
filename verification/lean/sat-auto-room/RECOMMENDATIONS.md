@@ -1,0 +1,23 @@
+# Recommendations and remediation
+
+## Implemented during this verification
+
+1. **High: preserve the committed response and remove the post-commit projection dependency.** `satrooms.CreateRoom` now loads the link inside its transaction and writes `response_snapshot` with the effects. Replay and GET status use that snapshot. Migration 0089 is additive/rerunnable and the runtime requires its column. Regression: full response equality after rename, original receipt after deletion, rollback after a forced link INSERT failure. Deletion does not resurrect the student link.
+2. **High: require revision fences at the service boundary.** New requests must carry entity revision, draft identity, and draft revision when a draft exists. Empty draft ID asserts absence. Replay is checked before new-operation validation, preserving previously committed old request hashes. Regression: missing/stale fences reject without new effects. Existing tests now prepare explicit fences rather than silently skipping them.
+3. **High: retain unknown operation identity across component lifetime and conservative error handling.** Actor/exam-scoped tab storage contains only the opaque key. The unchanged request remains in memory for up to 30 minutes on lookup; after reload/expiry only status recovery is available. Generic 4xx/in-progress/key-conflict responses cannot silently authorize another key. A retry denied permission retains uncertainty. Regressions cover remount, actor/exam isolation, body expiry and 404/409 outcomes.
+4. **Medium: prevent a late abandoned submission and isolate global-form operation state.** An unmounted preparation cannot later POST; changing selected exam resets operation state without clearing typed room fields. Existing Rooms route tests still pass.
+
+Deploy migration 0089 before the new API binary. A missing `response_snapshot` column fails the startup schema guard. Old writers in a mixed rollout still generate legacy NULL snapshots, so exact replay applies only to receipts written by the new coordinator. No historical response backfill is invented.
+
+## Outstanding obligations, ranked
+
+| Priority | Smallest next change / owner | Regression or proof impact |
+|---|---|---|
+| High | Resolve the document's equal-scope/fingerprint requirements against its implemented-deviations paragraph. If strict §4.2 remains normative, define versioned canonical fingerprint fields and ID-remap semantics, persist fingerprints and serialize lookup/creation under the exam lock. Do not describe revision-zero reuse as equivalent. | Add selected-section/unselected-edit, change-then-revert, equal-scope and historical-release lookup tests. Prove uniqueness over that defined fingerprint, not scope coverage. |
+| High | Validate the deployed DB/coedit/asset/authorization envelope in `PRODUCTION_TEST_PLAN.md`. | Required for production safety; current Lean theorem abstracts these boundaries. |
+| High | If recovery must survive loss of the request body without a commit, introduce a durable pending/abort protocol or privacy-reviewed server-side request retention. A client-side not-found read alone cannot prove no later commit. | Add reload-before-commit and fair-retry recovery tests; then formalize conditional liveness. Current client intentionally blocks duplicate creation rather than inventing a successful retry. |
+| Medium | Decide how to present legacy NULL response receipts and deleted legacy rooms. Original response fields no longer exist and cannot be proved/reconstructed. | Explicit compatibility migration/UX decision; never label a live projection as the historical exact response. |
+| Medium | Audit all mutation callers and mixed-version legacy publishing for common lock/freeze order. Only then use the existing transient-only `WithTxRetry` helper if measured deadlocks justify it. | Force the relevant lock order with barriers; confirm same-key safety across retry before adding automatic retries. |
+| Medium | Run endpoint authorization, real browser/Hocuspocus and multi-instance fault tests, then realistic load/soak. | No arbitrary-traffic, failover, full UI accessibility, IELTS/ACT or deployed durability claim from the local tests. |
+
+An unrelated existing migration integration probe failed on the empty disposable DB because `attempt_terminalizations` had zero rows and its BEFORE UPDATE trigger therefore did not fire. Both triggers were installed. The failed transcript is retained; migration unit tests and the room migration/runtime guard passed. This engagement did not alter unrelated attempt terminalization behavior or disguise that probe as a passing integration test.

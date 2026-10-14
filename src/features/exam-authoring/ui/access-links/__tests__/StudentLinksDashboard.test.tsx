@@ -5,7 +5,6 @@ import type { AccessDistributionOverview, AssessmentAccessLink } from '../../../
 import { StudentLinksDashboard } from '../StudentLinksDashboard';
 
 const mocks = vi.hoisted(() => ({
-  create: vi.fn(),
   update: vi.fn(),
   lifecycle: vi.fn(),
   duplicate: vi.fn(),
@@ -13,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   sharedSetValue: vi.fn(),
   publishCommand: vi.fn(),
   setPresence: vi.fn(),
+  flowProps: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("../../../realtime/coedit", () => ({
@@ -27,7 +27,6 @@ vi.mock("../../../realtime/coedit", () => ({
 }));
 
 vi.mock('../../../api/assessmentAccessLinkQueries', () => ({
-  useCreateAccessLink: () => ({ mutateAsync: mocks.create, isPending: false }),
   useUpdateAccessLink: () => ({ mutateAsync: mocks.update, isPending: false }),
   useSetAccessLinkLifecycle: () => ({ mutateAsync: mocks.lifecycle, isPending: false }),
   useDeleteAccessLink: () => ({ mutateAsync: mocks.remove, isPending: false, variables: undefined }),
@@ -36,8 +35,15 @@ vi.mock('../../../api/assessmentAccessLinkQueries', () => ({
   useAccessLinkActivity: () => ({ data: [], isLoading: false }),
 }));
 
+// Existing rooms still edit in the settings sheet; new rooms go through the one-action flow.
 vi.mock('../AccessLinkEditorSheet', () => ({
   AccessLinkEditorSheet: ({ open }: { open: boolean }) => open ? <div data-testid="link-editor">editor</div> : null,
+}));
+vi.mock('../../publish/SatCreateRoomFlow', () => ({
+  SatCreateRoomFlow: (props: Record<string, unknown>) => {
+    mocks.flowProps.push(props);
+    return <div data-testid="create-room-flow">flow</div>;
+  },
 }));
 vi.mock('../AccessLinkShareSheet', () => ({
   AccessLinkShareSheet: () => null,
@@ -76,7 +82,6 @@ const overview: AccessDistributionOverview = {
 };
 
 beforeEach(() => {
-  mocks.create.mockReset();
   mocks.update.mockReset();
   mocks.lifecycle.mockReset();
   mocks.duplicate.mockReset();
@@ -84,15 +89,32 @@ beforeEach(() => {
   mocks.sharedSetValue.mockReset();
   mocks.publishCommand.mockReset();
   mocks.setPresence.mockReset();
+  mocks.flowProps.length = 0;
   mocks.lifecycle.mockResolvedValue(overview.links[0]);
   mocks.duplicate.mockResolvedValue({ ...overview.links[0], id: 'link-copy', name: 'Saturday Class Copy' });
 });
 
-const shellNav = { lifecycle: { label: 'Published · Version 1', detail: null, tone: 'published' as const }, showResponses: false, onSelectTab: vi.fn(), onBack: vi.fn(), onPreview: vi.fn() };
+const shellNav = { lifecycle: { label: 'Rooms available', detail: null, tone: 'published' as const, state: 'published_current' as const }, showResponses: false, onSelectTab: vi.fn(), onBack: vi.fn(), onPreview: vi.fn() };
+
+function renderDashboard(props: Partial<Parameters<typeof StudentLinksDashboard>[0]> = {}) {
+  return render(
+    <StudentLinksDashboard
+      exam={exam}
+      overview={overview}
+      isLoading={false}
+      error={null}
+      onRefresh={vi.fn()}
+      canCreate
+      onFixIssue={vi.fn()}
+      shell={shellNav}
+      {...props}
+    />,
+  );
+}
 
 describe('StudentLinksDashboard', () => {
-  it('keeps older-release links visible by default after a newer release is published', () => {
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
+  it('keeps older-release links visible by default after a newer release is created', () => {
+    renderDashboard();
 
     expect(screen.getAllByText('Saturday Class').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Monday Class').length).toBeGreaterThan(0);
@@ -104,7 +126,7 @@ describe('StudentLinksDashboard', () => {
   });
 
   it('reconciles detail selection with the visible search result', async () => {
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
+    renderDashboard();
     fireEvent.change(screen.getByLabelText('Search rooms'), { target: { value: 'Monday' } });
 
     // Search is debounced (150ms) to avoid re-sorting on every keystroke.
@@ -113,8 +135,8 @@ describe('StudentLinksDashboard', () => {
     expect(screen.queryByText('No matching links')).not.toBeInTheDocument();
   });
 
-  it('runs lifecycle and duplicate actions without mutating a published release', async () => {
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
+  it('runs lifecycle and duplicate actions without mutating a release, opening the one-action form for a duplicate', async () => {
+    renderDashboard();
 
     fireEvent.click(screen.getByLabelText('Actions for Saturday Class'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Pause check-in' }));
@@ -124,18 +146,19 @@ describe('StudentLinksDashboard', () => {
 
     fireEvent.click(screen.getByLabelText('Actions for Saturday Class'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate setup' }));
-    expect(screen.getByTestId('link-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('create-room-flow')).toBeInTheDocument();
+    expect(mocks.flowProps.at(-1)).toMatchObject({ examId: 'exam-1', prefill: expect.objectContaining({ id: 'link-current' }) });
     expect(mocks.duplicate).not.toHaveBeenCalled();
   });
 
-  it('reviews a replacement setup before creating a current-version group', () => {
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
+  it('reviews a replacement setup in the create form instead of creating a group directly', () => {
+    renderDashboard();
     fireEvent.click(screen.getByText('Old Scholarship'));
     fireEvent.click(screen.getByRole('button', { name: 'Use setup for Version 5' }));
 
-    expect(screen.getByTestId('link-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('create-room-flow')).toBeInTheDocument();
+    expect(mocks.flowProps.at(-1)).toMatchObject({ prefill: expect.objectContaining({ id: 'link-old' }) });
     expect(mocks.duplicate).not.toHaveBeenCalled();
-    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("confirms permanent deletion, sends the displayed revision, and removes the link", async () => {
@@ -144,7 +167,7 @@ describe('StudentLinksDashboard', () => {
       ...overview,
       links: overview.links.map((item) => item.id === "link-current" ? { ...item, revision: 0 } : item),
     };
-    render(<StudentLinksDashboard exam={exam} overview={revisionZeroOverview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
+    renderDashboard({ overview: revisionZeroOverview });
 
     fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
@@ -170,7 +193,7 @@ describe('StudentLinksDashboard', () => {
   it("keeps a link and offers refresh when deletion loses the revision race", async () => {
     mocks.remove.mockRejectedValue(new Error("409 revision conflict: Student Link changed while you were editing it"));
     const onRefresh = vi.fn().mockResolvedValue(undefined);
-    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={onRefresh} onBackToRelease={vi.fn()} shell={shellNav} />);
+    renderDashboard({ onRefresh });
 
     fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
@@ -183,10 +206,31 @@ describe('StudentLinksDashboard', () => {
   });
 
   it('makes room creation the primary empty-state action', () => {
-    render(<StudentLinksDashboard exam={exam} overview={{ ...overview, links: [] }} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} shell={shellNav} />);
+    renderDashboard({ overview: { ...overview, links: [] } });
     expect(screen.queryByRole('button', { name: 'New access group' })).not.toBeInTheDocument();
     // The header offers the same action, so the first-time guide's button is scoped to its own region.
     fireEvent.click(within(screen.getByRole('region', { name: 'Set up a room' })).getByRole('button', { name: 'Create room' }));
-    expect(screen.getByTestId('link-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('create-room-flow')).toBeInTheDocument();
+  });
+
+  it('lets staff create the very first room before anything was ever published', () => {
+    renderDashboard({ overview: { currentPublishedVersion: null, links: [] } });
+    expect(screen.queryByRole('button', { name: /publish/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
+    expect(screen.getByTestId('create-room-flow')).toBeInTheDocument();
+  });
+
+  it('hides Create room from staff who cannot create rooms', () => {
+    renderDashboard({ canCreate: false, overview: { currentPublishedVersion: null, links: [] } });
+    expect(screen.queryByRole('button', { name: 'Create room' })).not.toBeInTheDocument();
+  });
+
+  it('passes the exam issue a create-room check named up to the host', () => {
+    const onFixIssue = vi.fn();
+    renderDashboard({ onFixIssue, overview: { ...overview, links: [] } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
+    const flow = mocks.flowProps.at(-1) as { onFixIssue: (issue: unknown) => void };
+    flow.onFixIssue({ code: 'x', path: 'examQuestion:q1:prompt', message: 'm', blocking: true });
+    expect(onFixIssue).toHaveBeenCalledWith(expect.objectContaining({ path: 'examQuestion:q1:prompt' }));
   });
 });

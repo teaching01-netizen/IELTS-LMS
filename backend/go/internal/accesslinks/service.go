@@ -987,6 +987,12 @@ func (s *Service) Get(ctx context.Context, linkID string) (AccessLink, error) {
 	return l, err
 }
 
+// GetInTx reads the response projection before the caller's transaction
+// commits, so later room edits/deletion cannot change a creation receipt.
+func (s *Service) GetInTx(ctx context.Context, q tx.Tx, linkID string) (AccessLink, error) {
+	return scanAccessLink(q.QueryRowContext(ctx, linkSelectSQL()+" WHERE l.id = ?", linkID))
+}
+
 // PublicLink mirrors public_link(): the unauthenticated entry projection.
 func (s *Service) PublicLink(ctx context.Context, linkID string) (PublicAccessLink, error) {
 	link, err := s.Get(ctx, linkID)
@@ -1009,66 +1015,124 @@ func (s *Service) PublicLink(ctx context.Context, linkID string) (PublicAccessLi
 // with the handlers.
 func (s *Service) Create(ctx context.Context, examID, createdBy string, req CreateRequest) (AccessLink, error) {
 	var zero AccessLink
-	if strings.TrimSpace(examID) == "" {
-		return zero, badRequest("Exam id is required.")
-	}
-	if strings.TrimSpace(createdBy) == "" {
-		return zero, badRequest("Created-by actor is required.")
-	}
-	if err := validateRequestFields(req.Name, req.AudienceType, req.AudienceLabel, req.AccessMode, req.AvailabilityType, req.OpensAt, req.ClosesAt, req.SelectedStudents); err != nil {
-		return zero, err
-	}
-	now := time.Now().UTC()
-	start, end, err := backingScheduleWindow(req.AvailabilityType, req.OpensAt, req.ClosesAt, now)
+	prepared, err := PrepareCreate(examID, createdBy, req)
 	if err != nil {
 		return zero, err
 	}
-	name, err := normalizeName(req.Name)
-	if err != nil {
-		return zero, err
-	}
-	label, err := normalizeOptionalLabel(req.AudienceLabel)
-	if err != nil {
-		return zero, err
-	}
-	members, err := normalizeMembers(req.SelectedStudents)
-	if err != nil {
-		return zero, err
-	}
-	enabledSections, err := NormalizeEnabledSections(req.EnabledSections)
-	if err != nil {
-		return zero, err
-	}
-	satSession, err := examdomain.ParseSATSession(req.SatSessionMode, req.SatRoutePolicy)
-	if err != nil {
-		return zero, err
-	}
-	cohort := name
-	if label != nil {
-		cohort = *label
-	}
-	linkID := uuid.NewString()
-	scheduleID := uuid.NewString()
+	var linkID string
 	err = s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		pin, err := pinExamVersionTx(ctx, q, examID, req.PublishedVersionID)
+		id, err := prepared.InsertTx(ctx, q)
 		if err != nil {
 			return err
 		}
-		if err := validateEffectiveSections(pin.providerKey, pin.publishScope, enabledSections); err != nil {
-			return err
-		}
-		if err := insertBackingScheduleTx(ctx, q, scheduleID, examID, pin, cohort, start, end, createdBy, satSession, enabledSections); err != nil {
-			return err
-		}
-		if err := insertLinkTx(ctx, q, linkID, examID, pin.versionID, scheduleID, name, enabledSections, req.AudienceType, label, req.AccessMode, req.AvailabilityType, req.OpensAt, req.ClosesAt, createdBy); err != nil {
-			return err
-		}
-		return replaceMembersTx(ctx, q, linkID, members)
+		linkID = id
+		return nil
 	})
 	if err != nil {
 		return zero, err
 	}
 	return s.Get(ctx, linkID)
+}
+
+// PreparedCreate is a fully validated, normalized access-link creation that has
+// not touched the database. Other services (the SAT one-action room
+// coordinator) validate early with PrepareCreate, then insert inside their own
+// transaction with InsertTx, so link creation has exactly one implementation.
+type PreparedCreate struct {
+	examID, createdBy string
+	req               CreateRequest
+	name              string
+	label             *string
+	members           []MemberInput
+	enabledSections   []string
+	satSession        examdomain.SATSession
+	cohort            string
+	start, end        time.Time
+}
+
+// EnabledSections is the normalized section scope (nil = all sections).
+func (p *PreparedCreate) EnabledSections() []string { return p.enabledSections }
+
+// PinVersion targets one immutable published version for InsertTx.
+func (p *PreparedCreate) PinVersion(versionID string) {
+	p.req.PublishedVersionID = &versionID
+}
+
+// PrepareCreate validates and normalizes a create request with no I/O.
+func PrepareCreate(examID, createdBy string, req CreateRequest) (*PreparedCreate, error) {
+	if strings.TrimSpace(examID) == "" {
+		return nil, badRequest("Exam id is required.")
+	}
+	if strings.TrimSpace(createdBy) == "" {
+		return nil, badRequest("Created-by actor is required.")
+	}
+	if err := validateRequestFields(req.Name, req.AudienceType, req.AudienceLabel, req.AccessMode, req.AvailabilityType, req.OpensAt, req.ClosesAt, req.SelectedStudents); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	start, end, err := backingScheduleWindow(req.AvailabilityType, req.OpensAt, req.ClosesAt, now)
+	if err != nil {
+		return nil, err
+	}
+	name, err := normalizeName(req.Name)
+	if err != nil {
+		return nil, err
+	}
+	label, err := normalizeOptionalLabel(req.AudienceLabel)
+	if err != nil {
+		return nil, err
+	}
+	members, err := normalizeMembers(req.SelectedStudents)
+	if err != nil {
+		return nil, err
+	}
+	enabledSections, err := NormalizeEnabledSections(req.EnabledSections)
+	if err != nil {
+		return nil, err
+	}
+	satSession, err := examdomain.ParseSATSession(req.SatSessionMode, req.SatRoutePolicy)
+	if err != nil {
+		return nil, err
+	}
+	cohort := name
+	if label != nil {
+		cohort = *label
+	}
+	return &PreparedCreate{
+		examID: examID, createdBy: createdBy, req: req, name: name, label: label, members: members,
+		enabledSections: enabledSections, satSession: satSession, cohort: cohort, start: start, end: end,
+	}, nil
+}
+
+// InsertTx resolves the published version (the exam row is locked FOR UPDATE),
+// then writes the backing schedule, link, and roster inside the caller's
+// transaction. It returns the new link id and the backing schedule id.
+func (p *PreparedCreate) InsertTx(ctx context.Context, q tx.Tx) (string, error) {
+	id, _, err := p.InsertWithScheduleTx(ctx, q)
+	return id, err
+}
+
+// InsertWithScheduleTx is InsertTx that also reports the backing schedule id.
+func (p *PreparedCreate) InsertWithScheduleTx(ctx context.Context, q tx.Tx) (linkID, scheduleID string, err error) {
+	linkID = uuid.NewString()
+	scheduleID = uuid.NewString()
+	pin, err := pinExamVersionTx(ctx, q, p.examID, p.req.PublishedVersionID)
+	if err != nil {
+		return "", "", err
+	}
+	if err := validateEffectiveSections(pin.providerKey, pin.publishScope, p.enabledSections); err != nil {
+		return "", "", err
+	}
+	if err := insertBackingScheduleTx(ctx, q, scheduleID, p.examID, pin, p.cohort, p.start, p.end, p.createdBy, p.satSession, p.enabledSections); err != nil {
+		return "", "", err
+	}
+	if err := insertLinkTx(ctx, q, linkID, p.examID, pin.versionID, scheduleID, p.name, p.enabledSections, p.req.AudienceType, p.label, p.req.AccessMode, p.req.AvailabilityType, p.req.OpensAt, p.req.ClosesAt, p.createdBy); err != nil {
+		return "", "", err
+	}
+	if err := replaceMembersTx(ctx, q, linkID, p.members); err != nil {
+		return "", "", err
+	}
+	return linkID, scheduleID, nil
 }
 
 // Update mirrors update(): locks the link (FOR UPDATE), fences on revision,

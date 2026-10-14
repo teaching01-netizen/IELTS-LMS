@@ -4,7 +4,6 @@ import type { ExamEntity } from "../../../../types/domain";
 import {
   useAccessLinkActivity,
   useAccessLinkMembers,
-  useCreateAccessLink,
   useDeleteAccessLink,
   useSetAccessLinkLifecycle,
   useUpdateAccessLink,
@@ -14,7 +13,6 @@ import type {
   AccessLinkMemberInput,
   AccessLinkStatus,
   AssessmentAccessLink,
-  CreateAssessmentAccessLinkRequest,
   UpdateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
 import { logError, useNotificationStore } from "../../infrastructure/authoringUiGateway";
@@ -37,7 +35,8 @@ import {
 import { ExamWorkspaceHeader, type ExamShellNavigation } from "../shell/ExamWorkspaceHeader";
 import { DeliverySetupGuide } from "../delivery/DeliverySetupGuide";
 import { SESSION_PHASE_LABEL, type AccessSessionBindings, type AccessSessionInfo } from "../delivery/sessionState";
-import type { SatPublishScope } from "../../contracts/assessment";
+import type { AssessmentValidationIssue } from "../../contracts/assessment";
+import { SatCreateRoomFlow } from "../publish/SatCreateRoomFlow";
 import { copyText, studentJoinUrl } from "./accessLinkUi";
 import { CollaborationHeaderCluster } from "../collaboration/CollaborationHeaderCluster";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
@@ -48,14 +47,13 @@ interface StudentLinksDashboardProps {
   isLoading: boolean;
   error: string | null;
   onRefresh: () => Promise<unknown>;
-  onBackToRelease: () => void;
+  /** Staff who may create rooms; a room needs no prior publication. */
+  canCreate: boolean;
+  /** Opens the exam content a create-room check named, so the author can fix it. */
+  onFixIssue: (issue: AssessmentValidationIssue) => void;
   /** Navigation + lifecycle for the shared exam header, supplied by the route. */
   shell: ExamShellNavigation;
-  /**
-   * Opens the create form immediately when `id` changes (the publish sheet's
-   * "Configure student access"). `versionId` pins the new group to the exact
-   * version that was just published, even if someone publishes again meanwhile.
-   */
+  /** Opens the create form immediately when `id` changes. */
   createRequest?: CreateRequest | null;
   selectedLinkId?: string | null;
   onSelectionChange?: (linkId: string | null) => void;
@@ -65,9 +63,6 @@ interface StudentLinksDashboardProps {
 
 export interface CreateRequest {
   id: number;
-  versionId?: string;
-  versionNumber?: number;
-  publishScope?: SatPublishScope;
 }
 
 const EMPTY_ACCESS_LINKS: AssessmentAccessLink[] = [];
@@ -138,7 +133,7 @@ function isRevisionConflict(error: unknown): boolean {
   return /revision|stale|conflict|changed (?:elsewhere|while)|409/i.test(error.message);
 }
 
-export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefresh, onBackToRelease, shell, createRequest = null, session, selectedLinkId = null, onSelectionChange }: StudentLinksDashboardProps) {
+export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefresh, canCreate, onFixIssue, shell, createRequest = null, session, selectedLinkId = null, onSelectionChange }: StudentLinksDashboardProps) {
   const version = overview?.currentPublishedVersion ?? null;
   const collaboration = useSatAuthoringCollaboration();
   const announceWorkspaceCommand = useCallback(
@@ -200,7 +195,6 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const notifySuccess = useNotificationStore((state) => state.addSuccess);
   const searchTimer = useRef<number | null>(null);
 
-  const createMutation = useCreateAccessLink(exam.id);
   const updateMutation = useUpdateAccessLink(exam.id);
   const lifecycleMutation = useSetAccessLinkLifecycle(exam.id);
   const deleteMutation = useDeleteAccessLink(exam.id);
@@ -339,28 +333,6 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     logError(err, { feature: "student-access", ...context });
   }, []);
 
-  const createLink = async (request: CreateAssessmentAccessLinkRequest) => {
-    // A group created from the publish flow is pinned to the exact version that was
-    // just published; any other creation follows the current release as before.
-    const pinned = createTarget?.versionId ? { publishedVersionId: createTarget.versionId } : {};
-    const created = await createMutation.mutateAsync({ ...request, ...pinned });
-    setJustCreatedId(created.id);
-    setCreateTarget(null);
-    setPrefillLink(null);
-    collaboration?.setValue(`access/${created.id}`, created);
-    announceWorkspaceCommand("access.created", { linkId: created.id });
-    setSearch("");
-    setDebouncedSearch("");
-    setStatusFilter("all");
-    selectLink(created.id);
-    // The new row lands already confirmed: the page never relies on a global
-    // channel to say the write was accepted.
-    showConfirmation({ linkId: created.id, kind: "action", text: "Room created" });
-    showToast("Room created");
-    // The session is the object staff work with next: take runners straight to its waiting room.
-    // Staff who cannot run sessions stay here, where the new row is selected and shareable.
-    if (session?.canRun) session.onOpenRoom(created.scheduleId);
-  };
   const updateLink = async (linkId: string, request: UpdateAssessmentAccessLinkRequest, options?: LinkUpdateOptions) => {
     const updated = await updateMutation.mutateAsync({ linkId, request });
     collaboration?.setValue(`access/${linkId}`, updated);
@@ -442,29 +414,67 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const openEditor = useCallback((link: AssessmentAccessLink | null) => {
     setEditingLink(link);
     setPrefillLink(null);
-    setCreateTarget(!link && version ? { id: Date.now(), versionId: version.id, versionNumber: version.versionNumber, publishScope: version.publishScope } : null);
     setEditorOpen(true);
-  }, [version]);
+  }, []);
 
-  const openDuplicateSetup = useCallback((link: AssessmentAccessLink, target?: CreateRequest) => {
+  const openDuplicateSetup = useCallback((link: AssessmentAccessLink) => {
     setEditingLink(null);
     setPrefillLink(link);
-    setCreateTarget(target ?? (version ? { id: Date.now(), versionId: version.id, versionNumber: version.versionNumber, publishScope: version.publishScope } : null));
     setEditorOpen(true);
-  }, [version]);
+  }, []);
 
-  // The publish sheet asks for the create form with a request id; each new id opens it once.
+  // A host (publish-less now) can ask for the create form with a request id; each new id opens it once.
   const handledCreateRequest = useRef<number | null>(null);
   useEffect(() => {
     if (!createRequest || handledCreateRequest.current === createRequest.id) return;
-    if (!version || isLoading || error) return;
+    if (isLoading || error) return;
     handledCreateRequest.current = createRequest.id;
-    const target = createRequest.versionId ? createRequest : { ...createRequest, versionId: version.id, versionNumber: version.versionNumber, publishScope: version.publishScope };
-    setCreateTarget(target);
     setEditingLink(null);
     setPrefillLink(null);
     setEditorOpen(true);
-  }, [createRequest, version, isLoading, error]);
+  }, [createRequest, isLoading, error]);
+
+  const onRoomCreated = (created: AssessmentAccessLink) => {
+    setEditorOpen(false);
+    setPrefillLink(null);
+    setJustCreatedId(created.id);
+    collaboration?.setValue(`access/${created.id}`, created);
+    announceWorkspaceCommand("access.created", { linkId: created.id });
+    setSearch("");
+    setDebouncedSearch("");
+    setStatusFilter("all");
+    selectLink(created.id);
+    // The new row lands already confirmed: the page never relies on a global
+    // channel to say the write was accepted.
+    showConfirmation({ linkId: created.id, kind: "action", text: "Room created" });
+    showToast("Room created");
+    // The session is the object staff work with next: take runners straight to its waiting room.
+    // Staff who cannot run sessions stay here, where the new row is selected and shareable.
+    if (session?.canRun) session.onOpenRoom(created.scheduleId);
+  };
+
+  const rosterSource = prefillLink;
+  const createFlow = editorOpen && !editingLink ? (
+    <SatCreateRoomFlow
+      key={prefillLink?.id ?? "new-room"}
+      examId={exam.id}
+      examTitle={exam.title}
+      prefill={prefillLink}
+      reuseOptions={links}
+      onReuseSetup={openDuplicateSetup}
+      members={(membersQuery.data ?? EMPTY_MEMBERS) as AccessLinkMemberInput[]}
+      membersLoading={Boolean(rosterSource?.audienceType === "selected_students" && membersQuery.isLoading)}
+      membersError={rosterSource?.audienceType === "selected_students" && membersQuery.error ? "The student roster could not load. Retry before continuing." : null}
+      onRetryMembers={() => void membersQuery.refetch()}
+      onClose={() => { setEditorOpen(false); setPrefillLink(null); }}
+      onFixIssue={(issue) => {
+        setEditorOpen(false);
+        setPrefillLink(null);
+        onFixIssue(issue);
+      }}
+      onRoomCreated={onRoomCreated}
+    />
+  ) : null;
 
   // While one write is in flight the menu closes behind it; the row keeps the
   // acknowledgement, so the actions stay visible but cannot be re-fired.
@@ -489,12 +499,11 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         showResponses={shell.showResponses}
         onSelectTab={shell.onSelectTab}
         onBack={shell.onBack}
-        contextLine={version ? `Current release · Version ${version.versionNumber} · ${version.publishScope === "full" ? "Full SAT" : version.publishScope === "math" ? "Math only" : "Reading & Writing only"}` : "Publish an exam version to create rooms"}
+        contextLine={version ? `Latest room exam · Version ${version.versionNumber} · ${version.publishScope === "full" ? "Full SAT" : version.publishScope === "math" ? "Math only" : "Reading & Writing only"}` : "A room captures your latest saved exam"}
         collaborationSlot={<CollaborationHeaderCluster surface="access" />}
         onPreview={shell.onPreview}
-        {...(shell.onPublish ? { onPublish: shell.onPublish } : {})}
         {...(shell.onQuickSettings ? { onQuickSettings: shell.onQuickSettings } : {})}
-        {...(version ? { onCreateSession: () => openEditor(null) } : {})}
+        {...(canCreate ? { onCreateSession: () => openEditor(null) } : {})}
       />
   );
 
@@ -533,16 +542,17 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         <SatContainer>
           <SatEmptyState
             icon={<Link2 size={20} aria-hidden="true" />}
-            title="Publish your exam to create rooms"
-            hint="Publish a version, create a room, then share its student link and start the exam when everyone is ready."
-            action={<SatPrimaryButton onClick={shell.onPublish ?? onBackToRelease}>{shell.onPublish ? "Publish exam" : "Review publishing"}</SatPrimaryButton>}
+            title="Create your first room"
+            hint="Create a room, then share its student link and start the exam when everyone is ready. The room captures your latest saved exam automatically."
+            action={canCreate ? <SatPrimaryButton onClick={() => openEditor(null)}>Create room</SatPrimaryButton> : undefined}
           />
         </SatContainer>
+        {createFlow}
       </div>
     );
   }
 
-  const saving = createMutation.isPending || updateMutation.isPending;
+  const saving = updateMutation.isPending;
 
   return (
     <div className="sat-product min-h-screen bg-au-fill text-slate-950">
@@ -570,7 +580,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
           </div>
         ) : null}
 
-        <DeliverySetupGuide versionNumber={version.versionNumber} groupCount={links.filter((link) => link.publishedVersionId === version.id && link.lifecycleState !== "revoked").length} runningCount={links.filter((link) => link.publishedVersionId === version.id && session?.infoFor(link.scheduleId)?.phase === "live").length} finishedCount={links.filter((link) => link.publishedVersionId === version.id && session?.infoFor(link.scheduleId)?.phase === "finished").length} onCreate={() => openEditor(null)} />
+        <DeliverySetupGuide groupCount={links.filter((link) => link.lifecycleState !== "revoked").length} runningCount={links.filter((link) => session?.infoFor(link.scheduleId)?.phase === "live").length} finishedCount={links.filter((link) => session?.infoFor(link.scheduleId)?.phase === "finished").length} onCreate={() => openEditor(null)} />
 
         <div className="mt-4 overflow-hidden rounded-2xl border border-black/[0.06] bg-white lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
           <section aria-label="Rooms" className="flex min-w-0 flex-col border-black/[0.06] max-lg:border-b lg:border-r">
@@ -615,7 +625,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
                 <SatEmptyState
                   icon={<Link2 size={20} aria-hidden="true" />}
                   title="No rooms yet"
-                  hint="Create a room when you are ready to run this exam. Each room stays on the version it was created for."
+                  hint="Create a room when you are ready to run this exam. Each room keeps the exam content it was created with."
                 />
               )}
             </div>
@@ -657,25 +667,24 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         </div>
       </SatContainer>
 
-      <AccessLinkEditorSheet
-        open={editorOpen}
-        link={editingLink}
-        prefill={prefillLink}
-        targetVersionNumber={createTarget?.versionNumber ?? version.versionNumber}
-        providerKey={exam.providerKey ?? null}
-        examTitle={exam.title}
-        publishScope={createTarget?.publishScope ?? version?.publishScope ?? "full"}
-        members={(membersQuery.data ?? EMPTY_MEMBERS) as AccessLinkMemberInput[]}
-        membersLoading={Boolean((editingLink ?? prefillLink)?.audienceType === "selected_students" && membersQuery.isLoading)}
-        membersError={(editingLink ?? prefillLink)?.audienceType === "selected_students" && membersQuery.error ? "The student roster could not load. Retry before continuing." : null}
-        onRetryMembers={() => void membersQuery.refetch()}
-        isSaving={saving}
-        reuseOptions={links}
-        onReuseSetup={(link) => openDuplicateSetup(link, createTarget ?? undefined)}
-        onClose={() => { if (!saving) { setEditorOpen(false); setEditingLink(null); setPrefillLink(null); setCreateTarget(null); } }}
-        onCreate={createLink}
-        onUpdate={updateLink}
-      />
+      {createFlow}
+      {editingLink ? (
+        <AccessLinkEditorSheet
+          open={editorOpen}
+          link={editingLink}
+          providerKey={exam.providerKey ?? null}
+          examTitle={exam.title}
+          publishScope={version?.publishScope ?? "full"}
+          members={(membersQuery.data ?? EMPTY_MEMBERS) as AccessLinkMemberInput[]}
+          membersLoading={Boolean(editingLink.audienceType === "selected_students" && membersQuery.isLoading)}
+          membersError={editingLink.audienceType === "selected_students" && membersQuery.error ? "The student roster could not load. Retry before continuing." : null}
+          onRetryMembers={() => void membersQuery.refetch()}
+          isSaving={saving}
+          onClose={() => { if (!saving) { setEditorOpen(false); setEditingLink(null); } }}
+          onCreate={async () => { throw new Error("Rooms are created from Create room."); }}
+          onUpdate={updateLink}
+        />
+      ) : null}
       <AccessLinkShareSheet open={Boolean(shareLink)} link={shareLink} onClose={() => setShareLink(null)} onPresent={() => { setPresentLink(shareLink); setShareLink(null); }} />
       <AccessLinkPresentView open={Boolean(presentLink)} link={presentLink} onClose={() => setPresentLink(null)} />
       <AuthoringConfirmDialog

@@ -41,6 +41,11 @@ func init() {
 		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":                       {MinRoles: writeStaff},
 		"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":                      {MinRoles: readStaff},
 		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":                      {MinRoles: writeStaff},
+		// SAT one-action room creation (internal/satrooms): admin/builder write;
+		// the receipt lookup is the actor's own operation key.
+		"POST /api/v1/sat/exams/{id}/rooms":              {MinRoles: writeStaff},
+		"GET /api/v1/sat/room-operations/{operationKey}": {MinRoles: writeStaff},
+		"GET /api/v1/sat/exam-config/defaults":           {MinRoles: writeStaff},
 		// Prompt co-editing (2026-09-13 design). Token issuance is a
 		// write-capable authoring read (admin/builder/observer may request;
 		// the handler mints a read-mode token for observers). The partial

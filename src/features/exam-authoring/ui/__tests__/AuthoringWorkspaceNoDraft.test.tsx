@@ -180,7 +180,8 @@ describe("AuthoringWorkspace shell lifecycle surfaces", () => {
     render(workspaceTree(client, target));
 
     expect(await screen.findByRole("heading", { name: "Create a room or continue editing" })).toBeInTheDocument();
-    expect(screen.getByText("Version 4 is published.")).toBeInTheDocument();
+    expect(screen.getByText("Your exam is saved and ready for rooms.")).toBeInTheDocument();
+    expect(screen.getByText(/currently Version 4/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create room" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit exam" })).toBeInTheDocument();
     expect(harness.ensureState.mutate).not.toHaveBeenCalled();

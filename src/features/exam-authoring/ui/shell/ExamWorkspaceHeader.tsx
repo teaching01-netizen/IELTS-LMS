@@ -1,6 +1,6 @@
 import type { ReactNode, Ref } from "react";
 import { motion } from "motion/react";
-import { AlertTriangle, ArrowLeft, CalendarPlus, Eye, FileUp, MoreHorizontal, Send, Settings2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarPlus, Eye, FileUp, MoreHorizontal, Settings2 } from "lucide-react";
 import { SatWorkspaceSwitcher } from "@/src/products/sat/ui/SatWorkspaceNav";
 import { SatMenu, type SatMenuItem } from "@/src/products/sat/ui/Menu";
 import { SatStatusPill } from "@/src/products/sat/ui/SatPage";
@@ -13,7 +13,6 @@ export interface ExamShellNavigation {
   onSelectTab: (tab: ExamWorkspaceTab) => void;
   onBack: () => void;
   onPreview: () => void;
-  onPublish?: (() => void) | undefined;
   /** Opens the room workflow; absent when this staff member cannot create rooms. */
   onCreateSession?: (() => void) | undefined;
   /** Opens the in-place settings sheet; the Settings tab itself is always the page. */
@@ -40,7 +39,6 @@ export interface ExamWorkspaceHeaderProps {
   collaborationSlot?: ReactNode;
   onPreview?: (() => void) | undefined;
   previewDisabled?: boolean;
-  onPublish?: (() => void) | undefined;
   /** Primary task action for staff who can create a room. */
   onCreateSession?: (() => void) | undefined;
   /** Optional focus target for hosts that must restore focus after a sheet closes. */
@@ -51,8 +49,6 @@ export interface ExamWorkspaceHeaderProps {
    * pages for Back, refresh and direct links.
    */
   onQuickSettings?: (() => void) | undefined;
-  publishDisabledReason?: string | null;
-  publishLabel?: string;
   /** Exam-level issue indicator; opens the grouped list. */
   issueCount?: number;
   onOpenIssues?: (() => void) | undefined;
@@ -83,20 +79,12 @@ const TAB_LABEL: Record<ExamWorkspaceTab, string> = {
 export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
   const {
     examTitle, lifecycle, activeTab, showResponses, onSelectTab, onBack, saveSlot, collaborationSlot,
-    onPreview, previewDisabled, onPublish, onCreateSession, onCreateSessionRef, onQuickSettings,
-    publishDisabledReason, publishLabel, issueCount = 0, onOpenIssues,
+    onPreview, previewDisabled, onCreateSession, onCreateSessionRef, onQuickSettings,
+    issueCount = 0, onOpenIssues,
     importItems, menuItems, contextLine,
   } = props;
-  // One obvious next action per lifecycle state (docs/ux/ui.md §3, Screen B):
-  // draft → Publish; unpublished changes → Publish changes (Create room stays
-  // available for the published version); published → Create room; publishing
-  // blocked by issues → Review issues.
-  const releaseState = lifecycle.state;
-  const issuesArePrimary = Boolean(onOpenIssues && issueCount > 0 && onPublish && releaseState !== "published_current");
-  const publishIsPrimary = Boolean(onPublish) && !issuesArePrimary &&
-    (releaseState === "never_published" || releaseState === "unpublished_changes" || !onCreateSession);
-  const createIsPrimary = Boolean(onCreateSession) && !issuesArePrimary && !publishIsPrimary;
-  const resolvedPublishLabel = publishLabel ?? (releaseState === "unpublished_changes" ? "Publish changes" : "Publish version");
+  // One primary action: Create room. Staff never publish; the server captures
+  // the latest saved exam when a room is created.
   const tabs: ExamWorkspaceTab[] = showResponses
     ? ["questions", "delivery", "responses", "settings"]
     : ["questions", "delivery", "settings"];
@@ -148,11 +136,11 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
             <button
               type="button"
               onClick={onOpenIssues}
-              className={issuesArePrimary ? PRIMARY : `${QUIET} text-[var(--sat-staff-warning-text,#92400e)]`}
+              className={`${QUIET} text-[var(--sat-staff-warning-text,#92400e)]`}
               aria-label={`Review ${issueCount} ${issueCount === 1 ? "issue" : "issues"}`}
             >
               <AlertTriangle size={16} aria-hidden="true" />
-              {issuesArePrimary ? "Review " : ""}{issueCount} {issueCount === 1 ? "issue" : "issues"}
+              {issueCount} {issueCount === 1 ? "issue" : "issues"}
             </button>
           ) : null}
           {importItems && importItems.length > 0 ? (
@@ -177,26 +165,8 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
               <span className="hidden lg:inline">Preview</span>
             </button>
           ) : null}
-          {onPublish ? (
-            // A blocked publish stays focusable so its reason is reachable by
-            // keyboard and announced; the press is refused, not swallowed.
-            <>
-              <button
-                type="button"
-                onClick={() => { if (!publishDisabledReason) onPublish(); }}
-                aria-disabled={publishDisabledReason ? true : undefined}
-                aria-describedby={publishDisabledReason ? "exam-publish-blocked-reason" : undefined}
-                title={publishDisabledReason ?? undefined}
-                className={publishIsPrimary ? PRIMARY : ACTION}
-              >
-                <Send size={16} aria-hidden="true" />
-                {resolvedPublishLabel}
-              </button>
-              {publishDisabledReason ? <span id="exam-publish-blocked-reason" className="sr-only">{publishDisabledReason}</span> : null}
-            </>
-          ) : null}
           {onCreateSession ? (
-            <button ref={onCreateSessionRef} type="button" onClick={onCreateSession} className={createIsPrimary ? PRIMARY : ACTION}>
+            <button ref={onCreateSessionRef} type="button" onClick={onCreateSession} className={PRIMARY}>
               <CalendarPlus size={16} aria-hidden="true" />
               Create room
             </button>

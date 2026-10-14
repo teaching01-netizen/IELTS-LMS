@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { SAT_SESSION_TYPE_LABELS, SAT_SESSION_TYPE_REQUEST, type SatSessionType } from "../../contracts/satSessionType";
+import { SAT_SESSION_TYPE_LABELS, SAT_SESSION_TYPE_REQUEST, satSessionTypeOf, type SatSessionType } from "../../contracts/satSessionType";
+import type { SatRoomFields } from "../../contracts/satCreateRoom";
 import { Clock3, GraduationCap, Link2, LockKeyhole, Timer, X } from "lucide-react";
 import {
   ACCESS_LINK_SECTION_KEYS,
@@ -41,6 +42,11 @@ interface AccessLinkEditorSheetProps {
   publishScope?: SatPublishScope;
   /** The version a NEW link will be pinned to, shown so the target is never implicit. */
   targetVersionNumber?: number | null;
+  /**
+   * Replaces the "Version N" wording for a NEW room whose release the server
+   * resolves at submit time (SAT one-action create): e.g. "the latest saved exam".
+   */
+  versionSummary?: string | undefined;
   /** The test's title, shown in the SAT pre-submit summary. An existing link carries its own. */
   examTitle?: string | null;
   /**
@@ -49,6 +55,8 @@ interface AccessLinkEditorSheetProps {
    * window is always an explicit choice.
    */
   prefill?: AssessmentAccessLink | null;
+  /** Room fields to start a NEW room from (the draft kept while the author fixed an exam issue). */
+  restoreDraft?: SatRoomFields | null | undefined;
   /**
    * Earlier sessions of this exam. When given (new session only) the form offers
    * "Start from an earlier session", which re-opens the form as a duplicate setup.
@@ -146,7 +154,9 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const releaseSections = useMemo(() => availableAccessLinkSections(pinnedPublishScope), [pinnedPublishScope]);
   const sectionsLocked = Boolean(props.link?.hasParticipation);
   const summaryTest = props.link?.examTitle ?? props.examTitle ?? "Selected test";
-  const versionLabel = `Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}`;
+  const versionLabel = props.link
+    ? `Version ${props.link.versionNumber}`
+    : props.versionSummary ?? `Version ${props.targetVersionNumber ?? "being published"}`;
   // A one-section release has nothing to choose, so the toggle is not shown.
   const showSectionChoice = isSat && (Boolean(props.link) || releaseSections.length > 1);
   // The roster arrives as an array whose IDENTITY changes whenever the host
@@ -204,20 +214,25 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       return;
     }
     const link = props.link;
-    const source = link ?? props.prefill ?? null;
-    const nextName = link?.name ?? (props.prefill ? `${props.prefill.name} (copy)` : "");
+    // A draft saved when the author left to fix an exam issue; never merged
+    // into an existing room or a duplicate setup.
+    const restored = !link && !props.prefill ? props.restoreDraft ?? null : null;
+    const source = link ?? props.prefill ?? restored ?? null;
+    const nextName = link?.name ?? (props.prefill ? `${props.prefill.name} (copy)` : restored?.name ?? "");
     const nextAudienceType = source?.audienceType ?? "anyone";
     const nextAudienceLabel = source?.audienceLabel ?? "";
     const nextAccessMode = source?.accessMode ?? "student_code";
-    const nextAvailabilityType = link?.availabilityType ?? props.prefill?.availabilityType ?? "anytime";
-    const nextOpensAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.opensAt) : defaults.opensAt;
-    const nextClosesAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.closesAt) : defaults.closesAt;
+    const nextAvailabilityType = link?.availabilityType ?? props.prefill?.availabilityType ?? restored?.availabilityType ?? "anytime";
+    const scheduledSource = link?.availabilityType === "scheduled" ? link : restored?.availabilityType === "scheduled" ? restored : null;
+    const nextOpensAt = scheduledSource?.opensAt ? toLocalDateTimeInput(scheduledSource.opensAt) : defaults.opensAt;
+    const nextClosesAt = scheduledSource?.closesAt ? toLocalDateTimeInput(scheduledSource.closesAt) : defaults.closesAt;
     const nextSections = editableAccessLinkSections(source?.enabledSections, link?.publishScope ?? publishScopeRef.current ?? "full");
     const nextMembersSource = membersSignature;
     // Session type is chosen per NEW room. Reopening the form starts from the
     // default again instead of resurrecting a mode the author abandoned, and
     // it participates in the dirty comparison so a mode-only edit is protected.
-    setSatSessionType("practice");
+    const nextSessionType = restored ? satSessionTypeOf(restored) : "practice";
+    setSatSessionType(nextSessionType);
     setName(nextName);
     setAudienceType(nextAudienceType);
     setAudienceLabel(nextAudienceLabel);
@@ -243,11 +258,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       nextClosesAt,
       nextSections,
       nextMembersSource,
-      "practice",
+      nextSessionType,
     );
     hydratingRef.current = true;
     setIsDirty(false);
-  }, [defaults.closesAt, defaults.opensAt, membersSignature, props.link, props.open, props.prefill]);
+  }, [defaults.closesAt, defaults.opensAt, membersSignature, props.link, props.open, props.prefill, props.restoreDraft]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -676,7 +691,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                 ) : null}
                 {!props.link && props.prefill ? (
                   <p role="note" className="rounded-xl bg-au-accent/10 p-3 text-[14px] leading-5 text-slate-700">
-                    Creates a new room on <strong>Version {props.targetVersionNumber ?? "—"}</strong> with the audience, identification and sections of “{props.prefill.name}”. Choose its check-in window below.
+                    Creates a new room on <strong>{props.versionSummary ?? `Version ${props.targetVersionNumber ?? "—"}`}</strong> with the audience, identification and sections of “{props.prefill.name}”. Choose its check-in window below.
                   </p>
                 ) : null}
                 {isSat && !isCreatingSat ? <GroupHeading id="access-link-group-details" title="Room details" detail={`Pinned to ${versionLabel} of ${summaryTest}. Publishing a newer version never changes this room.`} /> : null}

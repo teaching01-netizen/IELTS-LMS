@@ -10,8 +10,7 @@ import type {
 } from "../../contracts/assessment";
 
 const harness = vi.hoisted(() => ({
-  publishSheet: { nextInstance: 0 },
-  createRoomFlowProps: null as unknown,
+  createRoomFlow: { nextInstance: 0, props: null as unknown },
   shellResult: { data: null as unknown, isLoading: false, error: null as unknown, refetch: vi.fn() },
   details: {} as Record<string, AssessmentQuestionDetail>,
   useAuthoringShell: vi.fn(),
@@ -96,39 +95,15 @@ vi.mock("../settings/ExamSettingsSheet", () => ({
     </div>
   ),
 }));
-vi.mock("../publish/ExamPublishSheet", async () => {
-  const React = await import("react");
-  return {
-    ExamPublishSheet: (props: {
-      onClose: () => void;
-      onPublished?: (target: { versionId: string; versionNumber: number; publishScope: "math" }) => void;
-    }) => {
-      const [instance] = React.useState(() => ++harness.publishSheet.nextInstance);
-      return (
-        <div role="dialog" aria-label="Publish sheet" data-instance={instance}>
-          <button
-            type="button"
-            onClick={() => props.onPublished?.({ versionId: "published-9", versionNumber: 9, publishScope: "math" })}
-          >
-            Acknowledge publish
-          </button>
-          <button type="button" onClick={props.onClose}>Done</button>
-        </div>
-      );
-    },
-  };
-});
 vi.mock("../publish/SatCreateRoomFlow", async () => {
   const React = await import("react");
   return {
-    SatCreateRoomFlow: (props: {
-      pinnedTarget?: { versionId: string; versionNumber: number; publishScope: "math" } | null;
-      onClose: () => void;
-    }) => {
-      harness.createRoomFlowProps = props;
+    SatCreateRoomFlow: (props: { examId: string; onClose: () => void }) => {
+      const [instance] = React.useState(() => ++harness.createRoomFlow.nextInstance);
+      harness.createRoomFlow.props = props;
       return React.createElement(
         "div",
-        { "data-testid": "sat-create-room-flow" },
+        { "data-testid": "sat-create-room-flow", "data-instance": instance },
         React.createElement("button", { type: "button", onClick: props.onClose }, "Close room flow"),
       );
     },
@@ -230,7 +205,11 @@ function setupDefaults() {
   (harness.api.getShell as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => Promise.resolve(shell));
 }
 
-function workspaceTree(queryClient: QueryClient, canPublish = false, canCreateSession = false) {
+function workspaceTree(
+  queryClient: QueryClient,
+  canCreateSession = false,
+  publishedTarget: { versionId: string; versionNumber: number; publishScope: "full" | "reading-writing" | "math" } | null = null,
+) {
   return (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
@@ -239,10 +218,10 @@ function workspaceTree(queryClient: QueryClient, canPublish = false, canCreateSe
           examId="exam-1"
           examTitle="SAT Practice 1"
           chrome={{
-            lifecycle: { label: "Draft", detail: null, tone: "draft" },
+            lifecycle: { label: "Editing", detail: null, tone: "draft" },
             showResponses: false,
-            canPublish,
             canCreateSession,
+            publishedTarget,
           }}
         />
       </MemoryRouter>
@@ -269,15 +248,18 @@ function openOutline() {
 }
 
 describe("AuthoringWorkspace (spine-only)", () => {
-  beforeEach(() => { setupDefaults(); harness.publishSheet.nextInstance = 0; });
+  beforeEach(() => { setupDefaults(); harness.createRoomFlow.nextInstance = 0; });
 
-  it("keeps the open publish sheet mounted while the draft shell is removed", async () => {
+  it("keeps the open create-room flow mounted while the draft shell is sealed away", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
     const queryClient = renderWorkspaceClient();
     const view = render(workspaceTree(queryClient, true));
-    fireEvent.click(await screen.findByRole("button", { name: "Publish version" }));
-    const firstSheet = await screen.findByRole("dialog", { name: "Publish sheet" });
-    const instance = firstSheet.getAttribute("data-instance");
+    fireEvent.click(await screen.findByRole("button", { name: "Create room" }));
+    const flow = await screen.findByTestId("sat-create-room-flow");
+    const instance = flow.getAttribute("data-instance");
+    expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
 
+    // The server seals the working draft while creating the room.
     harness.shellResult = {
       ...harness.shellResult,
       data: { state: "NO_DRAFT", shell: null },
@@ -285,31 +267,22 @@ describe("AuthoringWorkspace (spine-only)", () => {
     view.rerender(workspaceTree(queryClient, true));
 
     expect(await screen.findByRole("heading", { name: "No editable draft" })).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Publish sheet" })).toHaveAttribute("data-instance", instance);
-    expect(harness.publishSheet.nextInstance).toBe(1);
+    expect(screen.getByTestId("sat-create-room-flow")).toHaveAttribute("data-instance", instance);
+    expect(harness.createRoomFlow.nextInstance).toBe(1);
   });
 
-  it("keeps the acknowledged version available after Done and pins room creation to it", async () => {
+  it("offers Create room, with no pinned version, for a saved exam that has no draft", async () => {
     harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    harness.shellResult = { ...harness.shellResult, data: { state: "NO_DRAFT", shell: null } };
     const queryClient = renderWorkspaceClient();
-    const view = render(workspaceTree(queryClient, true, true));
-    fireEvent.click(await screen.findByRole("button", { name: "Publish version" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Acknowledge publish" }));
-
-    harness.shellResult = {
-      ...harness.shellResult,
-      data: { state: "NO_DRAFT", shell: null },
-    };
-    view.rerender(workspaceTree(queryClient, true, true));
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    render(workspaceTree(queryClient, true, { versionId: "published-9", versionNumber: 9, publishScope: "math" }));
 
     expect(await screen.findByRole("heading", { name: "Create a room or continue editing" })).toBeInTheDocument();
-    expect(screen.getByText("Version 9 is published.")).toBeInTheDocument();
+    expect(screen.getByText("Your exam is saved and ready for rooms.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create room" }));
     expect(await screen.findByTestId("sat-create-room-flow")).toBeInTheDocument();
-    expect(harness.createRoomFlowProps).toMatchObject({
-      pinnedTarget: { versionId: "published-9", versionNumber: 9, publishScope: "math" },
-    });
+    expect(harness.createRoomFlow.props).not.toHaveProperty("pinnedTarget");
+    expect(harness.createRoomFlow.props).toMatchObject({ examId: "exam-1" });
     fireEvent.click(screen.getByRole("button", { name: "Close room flow" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit exam" }));
     expect(harness.ensureDraft.mutate).toHaveBeenCalledOnce();
@@ -350,7 +323,7 @@ describe("AuthoringWorkspace (spine-only)", () => {
     expect(within(tabs).getByRole("button", { name: "Settings" })).toBeInTheDocument();
     // Responses is an admin-only tab: this session has no admin role.
     expect(within(tabs).queryByRole("button", { name: "Responses" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("exam-lifecycle")).toHaveTextContent("Draft");
+    expect(screen.getByTestId("exam-lifecycle")).toHaveTextContent("Editing");
     expect(screen.getByText(/2 of 3 questions/)).toBeInTheDocument();
     // One editor is mounted, in the active card; the other question is a summary.
     expect(screen.getByRole("region", { name: "Question 1, editing" })).toBeInTheDocument();
@@ -419,10 +392,10 @@ describe("AuthoringWorkspace (spine-only)", () => {
     // Sessions (student access, check-in and running) live under their own tab, not a header button.
     expect(screen.queryByRole("button", { name: /^student access$/i })).not.toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Exam sections" })).getByRole("button", { name: "Rooms" })).toBeInTheDocument();
-    // Creating a session needs a published version: a draft-only exam is not offered it.
-    expect(screen.queryByRole("button", { name: "Create session" })).not.toBeInTheDocument();
-    // Publish only exists for exams the viewer may publish.
-    expect(screen.queryByRole("button", { name: /^publish$/i })).not.toBeInTheDocument();
+    // Creating a room needs no prior publication; only staff who may create rooms see the action.
+    expect(screen.queryByRole("button", { name: "Create room" })).not.toBeInTheDocument();
+    // There is no publish action anywhere in the SAT header.
+    expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Authoring view" })).not.toBeInTheDocument();
   });
 

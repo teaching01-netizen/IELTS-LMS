@@ -17,3 +17,20 @@ export const SAT_SESSION_TYPE_REQUEST: Record<SatSessionType, Pick<ExamSchedule,
   classroom_higher: { satSessionMode: "classroom", satRoutePolicy: "force_higher" },
   classroom_staff: { satSessionMode: "classroom", satRoutePolicy: "staff_selects" },
 };
+
+/** The session type a stored/requested mode + route policy pair selects. */
+export function satSessionTypeOf(
+  fields: Pick<ExamSchedule, "satSessionMode" | "satRoutePolicy">,
+): SatSessionType {
+  if (fields.satSessionMode !== "classroom") return "practice";
+  switch (fields.satRoutePolicy) {
+    case "force_lower":
+      return "classroom_lower";
+    case "force_higher":
+      return "classroom_higher";
+    case "staff_selects":
+      return "classroom_staff";
+    default:
+      return "classroom";
+  }
+}

@@ -1,0 +1,7 @@
+self-test: forged proof of False rejected ((kernel) declaration type mismatch, 'forged' has type
+  True
+but it is expected to have type
+  False)
+proof.Model: kernel re-checked 242/463 constants, including all 69 theorems; skipped 221 unsafe/partial compiler auxiliaries; safe axioms declared: []
+proof.Safety: kernel re-checked 21/21 constants, including all 21 theorems; skipped 0 unsafe/partial compiler auxiliaries; safe axioms declared: []
+proof.Counterexamples: kernel re-checked 38/183 constants, including all 22 theorems; skipped 145 unsafe/partial compiler auxiliaries; safe axioms declared: []

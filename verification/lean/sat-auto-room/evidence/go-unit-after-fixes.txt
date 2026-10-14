@@ -1,0 +1,9 @@
+ok  	example.com/ielts-proctoring/internal/accesslinks	0.534s
+ok  	example.com/ielts-proctoring/internal/exams	1.156s
+ok  	example.com/ielts-proctoring/internal/platform/db	1.451s
+ok  	example.com/ielts-proctoring/internal/platform/tx	(cached)
+--- FAIL: TestReceiptImmutabilityMySQL (0.01s)
+    receipt_immutability_test.go:179: UPDATE on attempt_terminalizations must fail post-0056 (BEFORE UPDATE guard)
+FAIL
+FAIL	example.com/ielts-proctoring/cmd/migrate	2.760s
+FAIL

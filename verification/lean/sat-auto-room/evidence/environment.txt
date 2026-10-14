@@ -1,0 +1,19 @@
+mysql_version	default_engine	default_isolation	flush_at_commit	sync_binlog
+9.6.0	InnoDB	REPEATABLE-READ	1	1
+TABLE_NAME	ENGINE
+assessment_access_link_members	InnoDB
+assessment_access_links	InnoDB
+exam_entities	InnoDB
+exam_schedules	InnoDB
+exam_versions	InnoDB
+sat_room_operations	InnoDB
+INDEX_NAME	NON_UNIQUE	SEQ_IN_INDEX	COLUMN_NAME
+idx_sat_room_operations_exam	1	1	exam_id
+idx_sat_room_operations_exam	1	2	created_at
+PRIMARY	0	1	actor_id
+PRIMARY	0	2	operation_key
+existing_terminalization_rows
+0
+TRIGGER_NAME
+attempt_terminalizations_immutable_update
+attempt_terminalizations_immutable_delete

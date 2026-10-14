@@ -1,0 +1,8 @@
+{
+  "permitted": [
+    "propext",
+    "Quot.sound"
+  ],
+  "reason": "Core logical axioms; transitive dependency audit contains no custom, sorryAx or native-evaluation axiom.",
+  "dependency_packages": []
+}

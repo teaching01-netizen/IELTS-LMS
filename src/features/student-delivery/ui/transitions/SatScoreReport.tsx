@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import type {
@@ -6,6 +6,14 @@ import type {
   AssessmentDeliverySection,
   AssessmentResult,
 } from "../../contracts/assessmentDelivery";
+import { logWarn } from "../../../../shared/observability/errorLogger";
+import { SatKnowledgeSkills } from "./score-report/SatKnowledgeSkills";
+import { SatReportActions } from "./score-report/SatReportActions";
+import { SatReportHeader } from "./score-report/SatReportHeader";
+import { SatReportMethodology } from "./score-report/SatReportMethodology";
+import { SatScoreOverview } from "./score-report/SatScoreOverview";
+import { SatSubjectPerformance } from "./score-report/SatSubjectPerformance";
+import { buildStudentScoreReportView } from "./score-report/scoreReportViewModel";
 
 /** An estimated 200–800 section (or 400–1600 total) score; a range when low < high. */
 export interface ScaledScore {
@@ -61,10 +69,6 @@ function isScaled(value: unknown): value is ScaledScore {
   return typeof score?.low === "number" && typeof score.high === "number";
 }
 
-export function formatScaled(score: ScaledScore): string {
-  return score.low === score.high ? String(score.low) : `${score.low}–${score.high}`;
-}
-
 /** What the paper prints from the server's answered-exam projection. */
 export type AnsweredExam = Pick<AssessmentAnsweredExam, "sections" | "attempt">;
 
@@ -99,10 +103,6 @@ export function answeredPaperReady(paper: HTMLElement): boolean {
     const image = figure.querySelector("img");
     return image !== null && image.complete && image.naturalWidth > 0;
   });
-}
-
-function percent(correct: number, total: number) {
-  return total > 0 ? Math.round((correct / total) * 100) : 0;
 }
 
 /**
@@ -178,153 +178,50 @@ export function useAnsweredExamPrint(source: AnsweredExamPrintSource | null): {
   return { download, print, paper };
 }
 
-/** Released classroom score report: raw section, module and domain results plus the answered-exam download. */
+/**
+ * Released classroom score report, laid out from the subjects actually sat
+ * (see score-report/scoreReportViewModel). Also hosts the answered-exam download.
+ */
 export function SatScoreReport({
   report,
   answered,
+  onExit,
 }: {
   report: ClassroomReport;
   answered: AnsweredExamSource | null;
+  onExit: () => void | Promise<void>;
 }) {
   const { download, print: printAnsweredExam, paper } = useAnsweredExamPrint(answered);
-  const moduleTitles = new Map<string, string>();
-  for (const section of answered?.sections ?? []) {
-    for (const module of section.modules)
-      moduleTitles.set(`${section.sectionKey}:${module.moduleKey}`, module.title);
-  }
+  const view = useMemo(
+    () => buildStudentScoreReportView(report, answered?.sections),
+    [report, answered?.sections]
+  );
+  const issues = view.issues.join(",");
+  useEffect(() => {
+    // Codes only: nothing here identifies the student.
+    if (issues) logWarn("SAT score report contained invalid data", { issues });
+  }, [issues]);
   return (
     <>
-      <section aria-label="Score report" className="mt-8 text-left print:hidden">
-        {report.conversion ? (
-          <div className="mb-4 rounded-2xl border border-[var(--sat-divider)] p-5 text-center">
-            <p className="text-[14px] font-semibold text-[var(--sat-text-secondary)]">
-              Estimated total score
-            </p>
-            <p className="mt-1 text-4xl font-semibold tabular-nums">
-              {report.totalScaled ? formatScaled(report.totalScaled) : "Unavailable"}
-            </p>
-            <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">
-              {report.totalScaled
-                ? "Estimated from a classroom score table, not an official SAT score."
-                : "A total needs both sections with Module 1 and Module 2."}{" "}
-              Converter {report.conversion.converterVersion}.
-            </p>
-          </div>
-        ) : null}
-        <div className="rounded-2xl border border-[var(--sat-divider)] p-5 text-center">
-          <p className="text-[14px] font-semibold text-[var(--sat-text-secondary)]">
-            Total raw score
-          </p>
-          <p className="mt-1 text-4xl font-semibold tabular-nums">
-            {report.rawCorrect} / {report.total}
-          </p>
-          <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">
-            Correct operational questions. Classroom practice result, not an official SAT score.
-          </p>
-        </div>
-        <div className={`mt-4 grid gap-4 ${report.sections.length > 1 ? "sm:grid-cols-2" : ""}`}>
-          {report.sections.map((section) => (
-            <div
-              key={section.sectionKey}
-              className="rounded-2xl border border-[var(--sat-divider)] p-5"
-            >
-              <h2 className="text-[14px] font-semibold text-[var(--sat-text-secondary)]">
-                {SAT_SECTION_LABEL[section.sectionKey] ?? section.sectionKey}
-              </h2>
-              <p className="mt-1 text-3xl font-semibold tabular-nums">
-                {section.rawCorrect} / {section.total}
-              </p>
-              {section.conversionStatus === "converted" && isScaled(section.scaled) ? (
-                <p className="mt-1 text-[14px] text-[var(--sat-text-secondary)]">
-                  Estimated score{" "}
-                  <span className="font-semibold tabular-nums">{formatScaled(section.scaled)}</span>
-                </p>
-              ) : section.conversionStatus === "unavailable" ? (
-                <p className="mt-1 text-[14px] text-[var(--sat-text-secondary)]">
-                  Estimated score unavailable
-                </p>
-              ) : null}
-              {section.modules?.length ? (
-                <dl className="mt-3 space-y-1 text-[14px] text-[var(--sat-text-secondary)]">
-                  {section.modules.map((module) => (
-                    <div key={module.moduleKey} className="flex justify-between gap-3">
-                      <dt>
-                        {moduleTitles.get(`${section.sectionKey}:${module.moduleKey}`) ??
-                          module.moduleKey}
-                      </dt>
-                      <dd className="tabular-nums">
-                        {module.rawCorrect} / {module.total}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              ) : null}
+      <div className="sat-ui min-h-[100dvh] bg-[var(--sat-background)] pl-[calc(1rem+var(--student-safe-left))] pr-[calc(1rem+var(--student-safe-right))] pt-[calc(2rem+var(--student-safe-top))] pb-[calc(3rem+var(--student-safe-bottom))] text-[var(--sat-text)] sm:pl-[calc(1.5rem+var(--student-safe-left))] sm:pr-[calc(1.5rem+var(--student-safe-right))] print:hidden">
+        <main className="mx-auto w-full max-w-[920px]">
+          <section aria-label="Score report">
+            <SatReportHeader title={view.title} />
+            <div className="mt-6">
+              <SatScoreOverview view={view} />
             </div>
-          ))}
-        </div>
-        {report.domains?.length ? (
-          <div className="mt-4 rounded-2xl border border-[var(--sat-divider)] p-5">
-            <h2 className="text-[16px] font-semibold">Knowledge and skills</h2>
-            <p className="text-[13px] text-[var(--sat-text-secondary)]">
-              Accuracy on operational questions by domain.
-            </p>
-            <ul className="mt-3 space-y-3">
-              {report.domains.map((domain) => {
-                const value = percent(domain.correct, domain.total);
-                return (
-                  <li key={`${domain.sectionKey}:${domain.domain}`}>
-                    <div className="flex justify-between gap-3 text-[14px]">
-                      <span>{domain.domain}</span>
-                      <span className="tabular-nums text-[var(--sat-text-secondary)]">
-                        {domain.correct} / {domain.total} · {value}%
-                      </span>
-                    </div>
-                    <div
-                      role="meter"
-                      aria-label={`${domain.domain} accuracy`}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={value}
-                      className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--sat-divider)]"
-                    >
-                      <div
-                        className="h-full rounded-full bg-[var(--sat-accent)]"
-                        style={{ width: `${value}%` }}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ) : null}
-        {answered ? (
-          <div className="mt-4 text-center">
-            <button
-              type="button"
-              disabled={download === "preparing"}
-              onClick={() => void printAnsweredExam()}
-              className="sat-touch-target sat-pressable rounded-full border border-[var(--sat-divider)] px-6 text-[14px] font-semibold disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-            >
-              {download === "preparing"
-                ? "Preparing answered exam…"
-                : "Download answered exam (PDF)"}
-            </button>
-            {download === "failed" ? (
-              <p role="alert" className="mt-2 text-[14px] text-[var(--sat-danger)]">
-                Your answered exam could not be fully loaded, so no PDF was made. Check your
-                connection and try again.
-              </p>
-            ) : (
-              <p role="status" className="mt-2 text-[13px] text-[var(--sat-text-secondary)]">
-                {download === "preparing"
-                  ? "Loading your answers and images."
-                  : "Choose “Save as PDF” in the print dialog."}
-              </p>
-            )}
-          </div>
-        ) : null}
-      </section>
+            <SatSubjectPerformance view={view} />
+            <SatKnowledgeSkills subjects={view.subjects} />
+            <SatReportMethodology methodology={view.methodology} />
+            <SatReportActions
+              canPrint={answered !== null}
+              download={download}
+              onPrint={() => void printAnsweredExam()}
+              onExit={() => void onExit()}
+            />
+          </section>
+        </main>
+      </div>
       {paper}
     </>
   );

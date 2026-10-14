@@ -177,6 +177,10 @@ var expectedFullPaths = []string{
 	"PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan",
 	"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter",
 	"PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter",
+	// SAT one-action room creation.
+	"POST /api/v1/sat/exams/{id}/rooms",
+	"GET /api/v1/sat/room-operations/{operationKey}",
+	"GET /api/v1/sat/exam-config/defaults",
 	// Prompt co-editing (2026-09-13 design): public token issuance plus the
 	// private, service-signature-authenticated Hocuspocus endpoints.
 	"POST /api/v1/assessment-authoring/exam-questions/{examQuestionID}/coedit-token",

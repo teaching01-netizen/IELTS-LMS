@@ -1,577 +1,229 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
-import type { ExamEntity } from "../../../../types/domain";
+import { useRef, useState, type ReactNode } from "react";
 import { useExamQuery } from "../../api/examQueries";
-import { assessmentAccessLinksApi } from "../../api/assessmentAccessLinksApi";
-import { useCreateAccessLink } from "../../api/assessmentAccessLinkQueries";
+import { clearSatRoomDraft, peekSatRoomDraft, stashSatRoomDraft } from "../../application/satRoomDraftStore";
+import { useCreateSatRoom } from "./useCreateSatRoom";
 import type {
   AccessLinkMemberInput,
   AssessmentAccessLink,
-  CreateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
-import type { AssessmentValidationIssue, SatPublishScope } from "../../contracts/assessment";
-import type { AssessmentReleaseState } from "../../contracts/release";
+import type { AssessmentValidationIssue } from "../../contracts/assessment";
+import type { CreateRoomState, SatRoomFields, SatRoomIssue, SatRoomReceipt } from "../../contracts/satCreateRoom";
 import { AccessLinkEditorSheet } from "../access-links/AccessLinkEditorSheet";
-import {
-  availableAccessLinkSections,
-  effectiveAccessLinkSections,
-} from "../../contracts/accessLinks";
-import {
-  canPublishFromBlockers,
-  getFreshWarnings,
-  getPublishBlockers,
-  getSATPublishBlockers,
-  isReadinessFresh,
-  isSATPublishReadinessIssue,
-  isSATPublishReadinessValid,
-  publishIssueDestinationLabel,
-  resolvePublishIssueDestination,
-  SAT_PUBLISH_SCOPE_OPTIONS,
-  satPublishScopeCopy,
-} from "../release/releaseSelectors";
+import { publishIssueDestinationLabel, resolvePublishIssueDestination } from "../release/releaseSelectors";
 import { useReleaseOnline } from "../release/releaseUi";
-import type { DeliveryTarget } from "../shell/examLifecycle";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../../../components/ui/sheet";
-import { useSatPublish } from "./useSatPublish";
 
 const EMPTY_MEMBERS: AccessLinkMemberInput[] = [];
-
-type SetupSnapshot =
-  | { kind: "published"; target: DeliveryTarget }
-  /** `existing` is the version students get today when the draft has unpublished changes. */
-  | { kind: "draft"; versionId: string; versionRevision: number; versionNumber: number; existing: DeliveryTarget | null }
-  | { kind: "unavailable"; message: string };
+const VERSION_SUMMARY = "the latest saved exam";
 
 interface SatCreateRoomFlowProps {
   examId: string;
   examTitle: string;
-  pinnedTarget?: DeliveryTarget | null;
+  /** Host content above the room name (the global Rooms page's exam picker). */
+  examPicker?: ReactNode;
+  /** Duplicate setup: start from an earlier room's audience, entry and sections. */
+  prefill?: AssessmentAccessLink | null;
+  reuseOptions?: readonly AssessmentAccessLink[];
+  onReuseSetup?: (link: AssessmentAccessLink) => void;
+  members?: readonly AccessLinkMemberInput[];
+  membersLoading?: boolean;
+  membersError?: string | null;
+  onRetryMembers?: () => void;
   onClose: () => void;
   onFixIssue: (issue: AssessmentValidationIssue) => void;
-  onPublished?: (target: DeliveryTarget) => void;
-  onRoomCreated: (link: AssessmentAccessLink) => void;
+  onRoomCreated: (link: AssessmentAccessLink, receipt: SatRoomReceipt) => void;
 }
 
-/** Creates a room from the currently published version or publishes the exact draft shown in setup. */
+/**
+ * The one room-creation surface for a SAT exam. Staff enter room details and
+ * press Create room once; the server saves-checks the exam, captures (or reuses)
+ * its immutable release, and creates the room in one transaction. There is no
+ * publish step, version chooser, or scope chooser here by design.
+ */
 export function SatCreateRoomFlow(props: SatCreateRoomFlowProps) {
+  const room = useCreateSatRoom(props.examId);
   const examQuery = useExamQuery(props.examId);
-  if (!examQuery.data) {
-    return (
-      <Sheet open onOpenChange={(open) => { if (!open) props.onClose(); }}>
-        <SheetContent side="right" className="sat-product sat-staff-root flex w-[min(96vw,560px)] max-w-[560px] flex-col gap-0 p-0">
-          <SheetHeader className="border-b border-[var(--sat-staff-border-hairline)] px-6 py-5 text-left">
-            <SheetTitle className="text-[20px] leading-7">Create room</SheetTitle>
-            <SheetDescription>The latest exam setup is needed before a room can be created.</SheetDescription>
-          </SheetHeader>
-          {examQuery.error ? (
-            <div className="space-y-3 p-6">
-              <p role="alert" className="text-sm text-[var(--sat-staff-danger,#b42318)]">The exam could not be loaded.</p>
-              <button type="button" onClick={() => void examQuery.refetch()} className="sat-btn sat-btn--secondary sat-press">Retry</button>
-            </div>
-          ) : <p role="status" className="p-6 text-sm text-[var(--sat-staff-text-secondary,#515154)]">Loading exam details…</p>}
-        </SheetContent>
-      </Sheet>
-    );
-  }
-  return <SatCreateRoomFlowReady {...props} exam={examQuery.data} onExamRefresh={() => examQuery.refetch()} />;
-}
-
-function SatCreateRoomFlowReady({
-  exam,
-  onExamRefresh,
-  ...props
-}: SatCreateRoomFlowProps & { exam: ExamEntity; onExamRefresh: () => Promise<unknown> }) {
-  const publish = useSatPublish(exam, onExamRefresh);
   const online = useReleaseOnline();
-  const createMutation = useCreateAccessLink(exam.id);
-  const [setupSnapshot, setSetupSnapshot] = useState<SetupSnapshot | null>(null);
-  const [scopeInitialized, setScopeInitialized] = useState(false);
-  const [scopeConfirmed, setScopeConfirmed] = useState(false);
-  const [target, setTarget] = useState<DeliveryTarget | null>(props.pinnedTarget ?? null);
-  const targetRef = useRef<DeliveryTarget | null>(props.pinnedTarget ?? null);
-  const [phase, setPhase] = useState<"idle" | "publishing" | "creating" | "checking">("idle");
-  const [outcomeUnknown, setOutcomeUnknown] = useState(false);
-  // With unpublished changes, staff choose explicitly between the published
-  // version and publishing the draft first. The safe default publishes nothing.
-  const [source, setSource] = useState<"existing" | "draft">("draft");
-  const [reconciliationMessage, setReconciliationMessage] = useState<string | null>(null);
-  const [reconciliationBusy, setReconciliationBusy] = useState(false);
-  const submittingRef = useRef(false);
-  const publishOperationRef = useRef<Map<string, string>>(new Map());
-  const pendingCreateRef = useRef<CreateAttempt | null>(null);
-  const releaseState = publish.releaseState;
-  const currentPublished = releaseState?.currentPublishedVersion ?? null;
+  // Read once per mount: an author who left to fix an exam issue returns to the
+  // form they had filled in. A duplicate setup never mixes with a restored one.
+  const [restoreDraft] = useState<SatRoomFields | null>(() => (props.prefill ? null : peekSatRoomDraft(props.examId)));
+  const lastFieldsRef = useRef<SatRoomFields | null>(null);
+  const state = room.state;
+  const canEdit = examQuery.data ? examQuery.data.canEdit : true;
 
-  useEffect(() => {
-    if (props.pinnedTarget && !targetRef.current) {
-      targetRef.current = props.pinnedTarget;
-      setTarget(props.pinnedTarget);
-    }
-    if (scopeInitialized) return;
-    if (props.pinnedTarget) {
-      publish.setPublishScope(props.pinnedTarget.publishScope);
-      targetRef.current = props.pinnedTarget;
-      setTarget(props.pinnedTarget);
-      setSetupSnapshot({ kind: "published", target: props.pinnedTarget });
-      setScopeInitialized(true);
-      return;
-    }
-    if (!releaseState) return;
-
-    const initialScope = currentPublished?.publishScope ?? "full";
-    publish.setPublishScope(initialScope);
-    if (releaseState.state === "published_current" && currentPublished) {
-      const selectedTarget = releaseTarget(currentPublished);
-      targetRef.current = selectedTarget;
-      setTarget(selectedTarget);
-      setSetupSnapshot({ kind: "published", target: selectedTarget });
-      setScopeInitialized(true);
-      return;
-    }
-    if (releaseState.state === "published_current") {
-      setSetupSnapshot({ kind: "unavailable", message: "The published version could not be confirmed. Retry to load the current exam version." });
-      setScopeInitialized(true);
-      return;
-    }
-    if (publish.shell) {
-      const draft = releaseState.workingDraft;
-      if (draft && draft.id === publish.shell.versionId) {
-        const existing = currentPublished ? releaseTarget(currentPublished) : null;
-        setSetupSnapshot({
-          kind: "draft",
-          versionId: publish.shell.versionId,
-          versionRevision: publish.shell.versionRevision,
-          versionNumber: draft.versionNumber,
-          existing,
-        });
-        setSource(existing ? "existing" : "draft");
-      } else {
-        setSetupSnapshot({ kind: "unavailable", message: "The latest saved draft could not be matched to this setup. Close Create room and reopen it to refresh." });
-      }
-      setScopeInitialized(true);
-      return;
-    }
-    if (publish.shellState.kind === "no-draft") {
-      setSetupSnapshot({ kind: "unavailable", message: "There is no editable draft to publish. Open the exam draft, then create a room." });
-      setScopeInitialized(true);
-    } else if (publish.shellState.kind === "error" || publish.shellState.kind === "forbidden" || publish.shellState.kind === "exam-not-found") {
-      setSetupSnapshot({ kind: "unavailable", message: publish.shellLoadError ?? "The draft could not be loaded." });
-      setScopeInitialized(true);
-    }
-  }, [
-    currentPublished,
-    exam.id,
-    props.pinnedTarget,
-    publish,
-    publish.shell,
-    publish.shellLoadError,
-    publish.shellState.kind,
-    publish.setPublishScope,
-    releaseState,
-    scopeInitialized,
-  ]);
-
-  // If another staff member publishes the exact draft and scope selected here,
-  // pin to that same immutable version. A different version or scope is never
-  // adopted, and nothing is adopted while the room uses the existing version.
-  useEffect(() => {
-    if (targetRef.current || setupSnapshot?.kind !== "draft" || source !== "draft" || !currentPublished) return;
-    if (currentPublished.id !== setupSnapshot.versionId || currentPublished.publishScope !== publish.publishScope) return;
-    const selectedTarget = releaseTarget(currentPublished);
-    targetRef.current = selectedTarget;
-    setTarget(selectedTarget);
-  }, [currentPublished, exam.id, publish.publishScope, setupSnapshot, source]);
-
-  const existingTarget = setupSnapshot?.kind === "draft" && source === "existing" ? setupSnapshot.existing : null;
-  const effectiveTarget = target ?? existingTarget;
-  const needsPublish = setupSnapshot?.kind === "draft" && !effectiveTarget;
-  const readiness = publish.readinessQuery.data ?? null;
-  const readinessFresh = isReadinessFresh(readiness, publish.shell, publish.publishScope);
-  const blockers = getSATPublishBlockers(readiness, readinessFresh);
-  const warnings = getFreshWarnings(readiness, readinessFresh).filter(isSATPublishReadinessIssue);
-  const readinessValid = isSATPublishReadinessValid(readiness, readinessFresh, publish.publishScope);
-  const publishGate = getPublishBlockers({
-    lifecycleState: releaseState?.state ?? "never_published",
-    readinessFresh,
-    readinessValid,
-    blockerCount: blockers.length,
-    dirtyCount: 0,
-    isPublishing: publish.isPublishing,
-    canEdit: exam.canEdit,
-    canPublishExam: exam.canPublish,
-  });
-  const canPublish = online && !publish.draftBusy && canPublishFromBlockers(publishGate);
-  const draftChanged = setupSnapshot?.kind === "draft" && (
-    (releaseState?.workingDraft
-      ? releaseState.workingDraft.id !== setupSnapshot.versionId
-      : currentPublished ? currentPublished.id !== setupSnapshot.versionId : false) ||
-    Boolean(publish.shell &&
-      (publish.shell.versionId !== setupSnapshot.versionId || publish.shell.versionRevision !== setupSnapshot.versionRevision))
-  );
-  const selectedDraftPublishedWithOtherScope = setupSnapshot?.kind === "draft" && Boolean(
-    currentPublished?.id === setupSnapshot.versionId && currentPublished.publishScope !== publish.publishScope,
-  );
-  const selectedDraftSuperseded = setupSnapshot?.kind === "draft" && Boolean(
-    releaseState?.state === "published_current" && currentPublished?.id !== setupSnapshot.versionId,
-  );
-  const canSubmit = Boolean(
-    exam.canEdit &&
-    setupSnapshot &&
-    setupSnapshot.kind !== "unavailable" &&
-    !outcomeUnknown &&
-    (effectiveTarget || (needsPublish && scopeConfirmed && canPublish && !draftChanged && !selectedDraftPublishedWithOtherScope && !selectedDraftSuperseded)),
-  );
-
-  const setPublishedTarget = useCallback((next: DeliveryTarget) => {
-    targetRef.current = next;
-    setTarget(next);
-    props.onPublished?.(next);
-  }, [props]);
-
-  const publishKeyFor = (snapshot: Extract<SetupSnapshot, { kind: "draft" }>, scope: SatPublishScope) => {
-    const fingerprint = `${snapshot.versionId}:${snapshot.versionRevision}:${scope}`;
-    const existing = publishOperationRef.current.get(fingerprint);
-    if (existing) return existing;
-    const key = crypto.randomUUID();
-    publishOperationRef.current.set(fingerprint, key);
-    return key;
+  const complete = (receipt: SatRoomReceipt) => {
+    clearSatRoomDraft(props.examId);
+    props.onRoomCreated(receipt.room, receipt);
   };
 
-  const onCreate = async (request: CreateAssessmentAccessLinkRequest) => {
-    if (submittingRef.current) return;
-    if (!canSubmit && !targetRef.current) throw new Error("Choose the exam content and resolve its publish checks before creating the room.");
-    submittingRef.current = true;
-    try {
-      let selectedTarget = targetRef.current ?? existingTarget;
-      if (!selectedTarget) {
-        if (!needsPublish || setupSnapshot?.kind !== "draft") {
-          throw new Error("The selected exam version is unavailable. Close Create room and reopen it to refresh.");
-        }
-        setPhase("publishing");
-        const operationKey = publishKeyFor(setupSnapshot, publish.publishScope);
-        try {
-          selectedTarget = await publish.publish(publish.publishScope, undefined, {
-            expectedDraft: {
-              versionId: setupSnapshot.versionId,
-              versionRevision: setupSnapshot.versionRevision,
-            },
-            operationKey,
-          });
-        } catch (publishError) {
-          // A retry reuses its operation key. If another staff member already
-          // published this exact draft and scope, the release projection is its receipt.
-          const refreshed = await publish.releaseQuery.refetch().catch(() => null);
-          const published = refreshed?.data?.currentPublishedVersion;
-          if (published?.id === setupSnapshot.versionId && published.publishScope === publish.publishScope) {
-            selectedTarget = releaseTarget(published);
-          } else {
-            throw publishError;
-          }
-        }
-        setPublishedTarget(selectedTarget);
-      }
+  const onCreate = async (fields: SatRoomFields) => {
+    lastFieldsRef.current = fields;
+    const receipt = await room.submit(fields);
+    if (receipt) {
+      complete(receipt);
+      return;
+    }
+    // Keep the typed form for a "Fix" round trip; the host re-opens it restored.
+    stashSatRoomDraft(props.examId, fields);
+    throw new Error(failureSummary(room.getState()));
+  };
 
-      const pinnedRequest = { ...request, publishedVersionId: selectedTarget.versionId };
-      const attempt: CreateAttempt = {
-        request: pinnedRequest,
-        target: selectedTarget,
-        startedAt: Date.now(),
-      };
-      setPhase("creating");
-      try {
-        const created = await createMutation.mutateAsync(pinnedRequest);
-        props.onRoomCreated(created);
-      } catch (createError) {
-        if (isDefinitiveCreateRejection(createError)) throw createError;
-        pendingCreateRef.current = attempt;
-        setPhase("checking");
-        setReconciliationBusy(true);
-        const outcome = await reconcileCreate(exam.id, attempt);
-        setReconciliationBusy(false);
-        if (outcome.kind === "found") {
-          pendingCreateRef.current = null;
-          props.onRoomCreated(outcome.link);
-          return;
-        }
-        if (outcome.kind === "not-found") {
-          pendingCreateRef.current = null;
-          setReconciliationMessage("No room matching this setup was found. You can retry creation.");
-          throw createError;
-        }
-        setOutcomeUnknown(true);
-        setReconciliationMessage(outcome.kind === "ambiguous"
-          ? "Several rooms match this setup. Check Rooms before retrying."
-          : "The room could not be confirmed. Check again before retrying.");
-        throw new Error("Room creation could not be confirmed. Check its status before trying again.");
-      }
-    } finally {
-      submittingRef.current = false;
-      setPhase("idle");
-      setReconciliationBusy(false);
+  /** An unresolved attempt that turns out to have committed finishes exactly like a normal create. */
+  const resolveUnknown = async (attempt: () => Promise<SatRoomReceipt | null>) => {
+    const receipt = await attempt();
+    if (receipt) {
+      complete(receipt);
+      props.onClose();
     }
   };
 
-  const checkCreateOutcome = async () => {
-    const attempt = pendingCreateRef.current;
-    if (!attempt || reconciliationBusy) return;
-    setReconciliationBusy(true);
-    setPhase("checking");
-    const outcome = await reconcileCreate(exam.id, attempt);
-    setReconciliationBusy(false);
-    setPhase("idle");
-    if (outcome.kind === "found") {
-      pendingCreateRef.current = null;
-      setOutcomeUnknown(false);
-      props.onRoomCreated(outcome.link);
-    } else if (outcome.kind === "not-found") {
-      pendingCreateRef.current = null;
-      setOutcomeUnknown(false);
-      setReconciliationMessage("No matching room was found. You can retry creation.");
-    } else {
-      setReconciliationMessage(outcome.kind === "ambiguous"
-        ? "Several rooms match this setup. Check Rooms before retrying."
-        : "The room could not be confirmed. Check again before retrying.");
-    }
+  const fixIssue = (issue: SatRoomIssue) => {
+    if (lastFieldsRef.current) stashSatRoomDraft(props.examId, lastFieldsRef.current);
+    props.onFixIssue({ code: issue.code, path: issue.path, message: issue.message, blocking: true });
   };
 
-  const contentBeforeFields = (
-    <section className="space-y-4 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4" aria-label="Exam content and publish status">
-      {setupSnapshot?.kind === "draft" && setupSnapshot.existing && !target ? (
-        <fieldset className="space-y-2" disabled={publish.isPublishing || phase !== "idle"}>
-          <legend className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">This exam has unpublished changes. Which version should this room use?</legend>
-          {([
-            { value: "existing", title: `Use published Version ${setupSnapshot.existing.versionNumber}`, detail: "Students get the content that is published now. Your unpublished changes are not included." },
-            { value: "draft", title: "Publish changes first", detail: `Checks and publishes Version ${setupSnapshot.versionNumber}, then creates the room on it.` },
-          ] as const).map((option) => (
-            <label key={option.value} htmlFor={`sat-create-room-source-${option.value}`} className={`flex cursor-pointer items-start gap-3 rounded-xl border bg-white px-3 py-2.5 text-[14px] leading-5 ${source === option.value ? "border-[var(--sat-staff-accent,#0071e3)]" : "border-[var(--sat-staff-border-strong)]"}`}>
-              <input
-                id={`sat-create-room-source-${option.value}`}
-                type="radio"
-                name="sat-create-room-version-source"
-                value={option.value}
-                aria-label={option.title}
-                aria-describedby={`sat-create-room-source-${option.value}-detail`}
-                checked={source === option.value}
-                onChange={() => setSource(option.value)}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--sat-staff-accent,#0071e3)]"
-              />
-              <span>
-                <span className="block font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">{option.title}</span>
-                <span id={`sat-create-room-source-${option.value}-detail`} className="block text-[var(--sat-staff-text-secondary,#515154)]">{option.detail}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-      ) : null}
-      {effectiveTarget ? (
-        <div role="status" className="space-y-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-          <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Room uses Version {effectiveTarget.versionNumber} · {satPublishScopeCopy(effectiveTarget.publishScope)}</p>
-          <p>Existing rooms keep their version. No exam timer starts yet.</p>
-        </div>
-      ) : setupSnapshot?.kind === "draft" ? (
-        <>
-          {setupSnapshot.existing ? null : (
-            <div className="space-y-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-              <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">This exam is not published yet</p>
-              <p>A room delivers a published version. Version {setupSnapshot.versionNumber} will be checked and published, then the room is created on it. No exam timer starts yet.</p>
-            </div>
-          )}
-          <fieldset className="space-y-2" disabled={publish.isPublishing || phase !== "idle" || !exam.canPublish}>
-            <legend className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Exam content students will receive</legend>
-            {SAT_PUBLISH_SCOPE_OPTIONS.map((option) => (
-              <label key={option.value} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border border-[var(--sat-staff-border-strong)] bg-white px-3 text-[14px] font-medium text-[var(--sat-staff-text-primary,#1d1d1f)]">
-                <input
-                  type="radio"
-                  name="sat-create-room-publish-scope"
-                  value={option.value}
-                  checked={scopeConfirmed && publish.publishScope === option.value}
-                  onChange={() => { publish.setPublishScope(option.value); setScopeConfirmed(true); }}
-                  className="h-4 w-4 accent-[var(--sat-staff-accent,#0071e3)]"
-                />
-                {option.label}{option.value !== "full" ? " only" : ""}
-              </label>
-            ))}
-          </fieldset>
-          {publish.readinessQuery.isFetching ? (
-            <p role="status" className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Checking the latest draft…</p>
-          ) : null}
-          {publish.readinessQuery.error ? (
-            <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">
-              <span>The publish checks could not load.</span>
-              <button type="button" disabled={phase !== "idle"} onClick={() => void publish.readinessQuery.refetch()} className="sat-btn sat-btn--quiet sat-press">Retry checks</button>
-            </div>
-          ) : null}
-          {blockers.length > 0 ? (
-            <ul className="space-y-2" aria-label="Issues to fix before publishing">
-              {blockers.map((issue, index) => {
-                const destination = resolvePublishIssueDestination(issue, publish.shell ?? null);
-                const destinationLabel = publishIssueDestinationLabel(destination);
-                return (
-                  <li key={`${issue.code}:${issue.path}:${index}`} className="flex items-start justify-between gap-3 rounded-xl border border-[var(--sat-staff-danger,#b42318)]/20 bg-white px-3 py-2 text-[14px] leading-5">
-                    <span>{issue.message}</span>
-                    {destinationLabel ? (
-                      <button type="button" disabled={phase !== "idle"} aria-label={`Fix ${destinationLabel}`} onClick={() => props.onFixIssue(issue)} className="min-h-11 shrink-0 font-semibold text-[var(--sat-staff-accent,#0071e3)] disabled:opacity-50">Fix</button>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
-          {warnings.length > 0 && readinessFresh ? (
-            <p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{warnings.length} publish {warnings.length === 1 ? "note" : "notes"} will remain visible for review.</p>
-          ) : null}
-          {!scopeConfirmed ? <p role="status" className="text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">Choose the exam content for this room before continuing.</p> : null}
-          {draftChanged ? <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">The draft changed while you were setting up this room. Close Create room and reopen it to review the latest draft.</p> : null}
-          {selectedDraftPublishedWithOtherScope ? <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">This draft was published with a different scope while you were setting up. Close and reopen Create room to review that version.</p> : null}
-          {selectedDraftSuperseded ? <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">A different version was published while you were setting up. Close and reopen Create room to review it.</p> : null}
-          {!exam.canPublish ? <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">You do not have permission to publish this draft.</p> : null}
-          {!online ? <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">Reconnect before publishing and creating a room.</p> : null}
-          {!publish.draftBusy && scopeConfirmed && !publish.readinessQuery.isFetching && !publish.readinessQuery.error && !readinessValid && blockers.length === 0 ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-              <span>Run checks to confirm this draft is ready.</span>
-              <button type="button" disabled={phase !== "idle"} onClick={() => void publish.readinessQuery.refetch()} className="sat-btn sat-btn--quiet sat-press"><RefreshCw size={15} aria-hidden="true" />Run checks</button>
-            </div>
-          ) : null}
-          {publishGate.length > 0 && !blockers.length && scopeConfirmed && !publish.readinessQuery.isFetching ? (
-            <p role="status" className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{publishGate[0]}</p>
-          ) : null}
-        </>
-      ) : setupSnapshot?.kind === "unavailable" ? (
-        <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">{setupSnapshot.message}</p>
-      ) : (
-        <p role="status" className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Loading the current exam version…</p>
-      )}
-      {reconciliationMessage ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]" role={outcomeUnknown ? "alert" : "status"}>
-          <span>{reconciliationMessage}</span>
-          {outcomeUnknown ? (
-            <button type="button" disabled={reconciliationBusy} onClick={() => void checkCreateOutcome()} className="sat-btn sat-btn--secondary sat-press">
-              {reconciliationBusy ? "Checking…" : "Check again"}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+  const pendingLabel = state.status === "syncing" ? "Saving changes…" : "Creating room…";
+  const submitDisabled = !online || !canEdit || state.status === "unknown";
+
+  const status = (
+    <section
+      className="space-y-3 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4"
+      aria-label="Exam content for this room"
+    >
+      <div className="space-y-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+        <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">This room uses {VERSION_SUMMARY}</p>
+        <p>Your changes are saved automatically. Existing rooms keep the exam they were created with. No exam timer starts yet.</p>
+      </div>
+      <FlowNotices
+        state={state}
+        online={online}
+        canEdit={canEdit}
+        onFix={fixIssue}
+        onRetry={() => void resolveUnknown(() => room.retryUnknown())}
+        onCheck={() => void resolveUnknown(() => room.checkStatus())}
+        onDismiss={room.dismiss}
+        canRetryUnknown={room.canRetryUnknown}
+      />
     </section>
   );
-
-  if (!scopeInitialized || !setupSnapshot) {
-    return (
-      <Sheet open onOpenChange={(open) => { if (!open) props.onClose(); }}>
-        <SheetContent side="right" className="sat-product sat-staff-root flex w-[min(96vw,560px)] max-w-[560px] flex-col gap-0 p-0">
-          <SheetHeader className="border-b border-[var(--sat-staff-border-hairline)] px-6 py-5 text-left">
-            <SheetTitle className="text-[20px] leading-7">Create room</SheetTitle>
-            <SheetDescription>Checking the latest saved exam version and publish status.</SheetDescription>
-          </SheetHeader>
-          {publish.releaseQuery.error ? (
-            <div className="space-y-3 p-6">
-              <p role="alert" className="text-sm text-[var(--sat-staff-danger,#b42318)]">The current exam version could not be loaded.</p>
-              <button
-                type="button"
-                onClick={() => {
-                  void publish.releaseQuery.refetch();
-                  void publish.shellLifecycle.refresh();
-                }}
-                className="sat-btn sat-btn--secondary sat-press"
-              >Retry</button>
-            </div>
-          ) : <p role="status" className="p-6 text-sm text-[var(--sat-staff-text-secondary,#515154)]">Loading the latest exam setup…</p>}
-        </SheetContent>
-      </Sheet>
-    );
-  }
 
   return (
     <AccessLinkEditorSheet
       open
       link={null}
+      prefill={props.prefill ?? null}
+      restoreDraft={restoreDraft}
       providerKey="sat"
       examTitle={props.examTitle}
-      publishScope={effectiveTarget?.publishScope ?? publish.publishScope}
-      targetVersionNumber={effectiveTarget?.versionNumber ?? (setupSnapshot.kind === "draft" ? setupSnapshot.versionNumber : null)}
-      members={EMPTY_MEMBERS}
-      isSaving={publish.isPublishing || createMutation.isPending || reconciliationBusy}
-      inputsDisabled={outcomeUnknown}
-      submitDisabled={!canSubmit || phase === "checking"}
-      submitLabel={effectiveTarget ? "Create room" : "Publish & create room"}
-      pendingLabel={phase === "publishing" ? "Publishing…" : phase === "checking" ? "Checking…" : "Creating…"}
-      contentBeforeFields={contentBeforeFields}
-      onClose={props.onClose}
+      publishScope="full"
+      versionSummary={VERSION_SUMMARY}
+      members={props.members ?? restoreDraft?.selectedStudents ?? EMPTY_MEMBERS}
+      {...(props.membersLoading !== undefined ? { membersLoading: props.membersLoading } : {})}
+      membersError={props.membersError ?? null}
+      {...(props.onRetryMembers ? { onRetryMembers: props.onRetryMembers } : {})}
+      isSaving={room.isBusy}
+      inputsDisabled={state.status === "unknown"}
+      submitDisabled={submitDisabled}
+      submitLabel="Create room"
+      pendingLabel={pendingLabel}
+      contentBeforeFields={
+        <div className="space-y-3">
+          {props.examPicker}
+          {status}
+        </div>
+      }
+      {...(props.reuseOptions ? { reuseOptions: props.reuseOptions } : {})}
+      {...(props.onReuseSetup ? { onReuseSetup: props.onReuseSetup } : {})}
+      onClose={() => {
+        // A close that follows a successful create has nothing to keep.
+        if (!room.isBusy) props.onClose();
+      }}
       onCreate={onCreate}
     />
   );
 }
 
-interface CreateAttempt {
-  request: CreateAssessmentAccessLinkRequest;
-  target: DeliveryTarget;
-  startedAt: number;
-}
-
-type ReconcileResult =
-  | { kind: "found"; link: AssessmentAccessLink }
-  | { kind: "not-found" }
-  | { kind: "unknown" }
-  | { kind: "ambiguous" };
-
-async function reconcileCreate(examId: string, attempt: CreateAttempt): Promise<ReconcileResult> {
-  let readSucceeded = false;
-  for (let check = 0; check < 3; check += 1) {
-    if (check > 0) await new Promise((resolve) => window.setTimeout(resolve, check * 250));
-    try {
-      const overview = await assessmentAccessLinksApi.overview(examId);
-      readSucceeded = true;
-      const matches = overview.links.filter((link) => matchesCreateAttempt(link, attempt));
-      if (matches.length === 1) return { kind: "found", link: matches[0]! };
-      if (matches.length > 1) return { kind: "ambiguous" };
-    } catch {
-      // Retry the authoritative room listing before allowing another create.
-    }
+function failureSummary(state: CreateRoomState): string {
+  switch (state.status) {
+    case "invalid":
+      return state.issues.length > 0
+        ? `Room not created — fix ${state.issues.length} exam ${state.issues.length === 1 ? "issue" : "issues"}.`
+        : state.message;
+    case "conflict":
+    case "failed":
+    case "unknown":
+      return state.message;
+    default:
+      return "The room could not be created.";
   }
-  return readSucceeded ? { kind: "not-found" } : { kind: "unknown" };
 }
 
-function matchesCreateAttempt(link: AssessmentAccessLink, attempt: CreateAttempt): boolean {
-  const { request, target, startedAt } = attempt;
-  const createdAt = new Date(link.createdAt).getTime();
-  const expectedSections = (request.enabledSections?.length
-    ? request.enabledSections
-    : availableAccessLinkSections(target.publishScope)).slice().sort();
-  const actualSections = effectiveAccessLinkSections(link.enabledSections, target.publishScope).slice().sort();
+function FlowNotices({
+  state,
+  online,
+  canEdit,
+  onFix,
+  onRetry,
+  onCheck,
+  onDismiss,
+  canRetryUnknown,
+}: {
+  state: CreateRoomState;
+  online: boolean;
+  canEdit: boolean;
+  onFix: (issue: SatRoomIssue) => void;
+  onRetry: () => void;
+  onCheck: () => void;
+  onDismiss: () => void;
+  canRetryUnknown: boolean;
+}) {
+  const danger = "text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]";
   return (
-    createdAt >= startedAt - 60_000 &&
-    link.publishedVersionId === target.versionId &&
-    link.name === request.name &&
-    link.audienceType === request.audienceType &&
-    link.audienceLabel === (request.audienceLabel ?? null) &&
-    link.accessMode === request.accessMode &&
-    link.availabilityType === request.availabilityType &&
-    sameInstant(link.opensAt, request.opensAt ?? null) &&
-    sameInstant(link.closesAt, request.closesAt ?? null) &&
-    link.selectedStudentCount === request.selectedStudents.length &&
-    expectedSections.length === actualSections.length &&
-    expectedSections.every((section, index) => section === actualSections[index])
+    <>
+      {state.status === "syncing" ? <p role="status" className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Checking saved changes…</p> : null}
+      {state.status === "creating" ? <p role="status" className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Preparing the exam and creating the room…</p> : null}
+      {!online ? <p role="alert" className={danger}>Reconnect before creating a room. Your entries are kept.</p> : null}
+      {!canEdit ? <p role="alert" className={danger}>You do not have permission to create rooms for this exam.</p> : null}
+      {state.status === "invalid" ? (
+        <div role="alert" className="space-y-2">
+          <p className={`${danger} font-semibold`}>{failureSummary(state)}</p>
+          <ul className="space-y-2" aria-label="Exam issues to fix">
+            {state.issues.map((issue, index) => {
+              const label = publishIssueDestinationLabel(resolvePublishIssueDestination({ path: issue.path, code: issue.code }, null));
+              return (
+                <li key={`${issue.code}:${issue.path}:${index}`} className="flex items-start justify-between gap-3 rounded-xl border border-[var(--sat-staff-danger,#b42318)]/20 bg-white px-3 py-2 text-[14px] leading-5">
+                  <span>{issue.message}</span>
+                  {label ? (
+                    <button type="button" aria-label={`Fix: ${label}`} onClick={() => onFix(issue)} className="min-h-11 shrink-0 font-semibold text-[var(--sat-staff-accent,#0071e3)]">Fix</button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+          <button type="button" onClick={onDismiss} className="sat-btn sat-btn--quiet sat-press">Dismiss</button>
+        </div>
+      ) : null}
+      {state.status === "conflict" ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2">
+          <span className={danger}>{state.message}</span>
+          <button type="button" onClick={onDismiss} className="sat-btn sat-btn--secondary sat-press">Review latest exam</button>
+        </div>
+      ) : null}
+      {state.status === "failed" ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2">
+          <span className={danger}>{state.message}</span>
+          <button type="button" onClick={onDismiss} className="sat-btn sat-btn--quiet sat-press">Dismiss</button>
+        </div>
+      ) : null}
+      {state.status === "unknown" ? (
+        <div role="alert" className="space-y-2">
+          <p className={danger}>{state.message}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={onCheck} className="sat-btn sat-btn--secondary sat-press">Check status</button>
+            <button type="button" onClick={onRetry} disabled={!canRetryUnknown} className="sat-btn sat-btn--quiet sat-press">Try again</button>
+          </div>
+        </div>
+      ) : null}
+      {state.status === "created" ? <p role="status" className="text-[14px] leading-5">Room created.</p> : null}
+    </>
   );
-}
-
-function sameInstant(left: string | null, right: string | null): boolean {
-  if (!left || !right) return left === right;
-  const leftTime = new Date(left).getTime();
-  const rightTime = new Date(right).getTime();
-  return Number.isFinite(leftTime) && leftTime === rightTime;
-}
-
-function isDefinitiveCreateRejection(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  const status = "status" in error ? (error as { status?: unknown }).status
-    : "statusCode" in error ? (error as { statusCode?: unknown }).statusCode
-      : null;
-  return typeof status === "number" && status >= 400 && status < 500;
-}
-
-function releaseTarget(version: NonNullable<AssessmentReleaseState["currentPublishedVersion"]>): DeliveryTarget {
-  return {
-    versionId: version.id,
-    versionNumber: version.versionNumber,
-    publishScope: version.publishScope,
-  };
 }

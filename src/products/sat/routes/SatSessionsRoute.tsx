@@ -3,6 +3,8 @@ import { ArrowRight, CalendarPlus, Radio, SearchX } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthSession } from '../../../features/auth/authSession';
+import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/api/authoringEntryIntent';
+import { satIssueRoute } from '../../../features/exam-authoring/ui/release/satIssueRoute';
 import { useExamListQuery } from '../../../features/exam-authoring/api/examQueries';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { proctorKeys, useProctorSessionSummaries } from '../../../features/proctor/api/proctorQueries';
@@ -209,10 +211,17 @@ export function SatSessionsRoute() {
 
       {createOpen ? (
         <SatNewSessionFlow
-          exams={(examsQuery.data?.entities ?? []).filter((exam) => exam.providerKey === 'sat' && Boolean(exam.currentPublishedVersionId))}
+          exams={(examsQuery.data?.entities ?? []).filter((exam) => exam.providerKey === 'sat' && exam.status !== 'archived')}
           examsLoading={examsQuery.isLoading}
           onClose={() => setCreateOpen(false)}
           onGoToExamLibrary={() => navigate('/sat/exams')}
+          onFixIssue={(examId, issue) => {
+            const target = satIssueRoute(examId, issue);
+            if (!target) return;
+            setCreateOpen(false);
+            if (target.needsDraft) requestAuthoringDraftOnEntry(examId);
+            navigate(target.path);
+          }}
           onCreated={(scheduleId) => {
             void queryClient.invalidateQueries({ queryKey: proctorKeys.sessions('sat') });
             setCreateOpen(false);

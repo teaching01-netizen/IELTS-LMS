@@ -112,7 +112,9 @@ func satInitialScoringPolicy() (string, error) {
 // initializeSATDraftTx creates the complete editable SAT blueprint. This is
 // part of exam creation so a new SAT can immediately open authoring, load the
 // built-in sample, or accept a workbook without a second repair transaction.
-func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string) (string, error) {
+// A non-nil cfg (already validated) overlays timings, breaks and routing
+// thresholds on the blueprint inside this same transaction.
+func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string, cfg *SATExamConfig) (string, error) {
 	var versionNumber int
 	if err := q.QueryRowContext(ctx, "SELECT COALESCE(MAX(version_number), 0) + 1 FROM exam_versions WHERE exam_id = ?", examID).Scan(&versionNumber); err != nil {
 		return "", err
@@ -126,7 +128,8 @@ func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string) 
 		return "", err
 	}
 
-	for sectionIndex, section := range satInitialBlueprint {
+	blueprint, thresholds := cfg.apply(satInitialBlueprint)
+	for sectionIndex, section := range blueprint {
 		sectionID := uuid.NewString()
 		// The section's authored length is base + the longer branch (a candidate
 		// sits Module 1 plus exactly one Module 2), not the sum of all three
@@ -163,8 +166,7 @@ func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string) 
 		if !baseOK || !lowerOK || !higherOK {
 			return "", fmt.Errorf("SAT blueprint section %q is missing an adaptive branch", section.key)
 		}
-		operational := section.modules[0].questionCount - 2
-		threshold := operational/2 + 1
+		threshold := thresholds[section.key]
 		policyConfig, err := json.Marshal(map[string]int{"minimumCorrectForHigher": threshold})
 		if err != nil {
 			return "", err

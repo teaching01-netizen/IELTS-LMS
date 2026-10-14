@@ -1,3 +1,5 @@
+import type { SatExamConfig } from './satExamConfig';
+
 export type ExamProviderKey = 'ielts' | 'sat' | 'act';
 
 export type CreateExamInput =
@@ -11,6 +13,8 @@ export type CreateExamInput =
       providerKey: 'sat';
       title: string;
       providerExamType: 'SAT';
+      /** Exam-level configuration saved in the creation transaction; omitted = server defaults. */
+      configuration?: SatExamConfig;
     }
   | {
       providerKey: 'act';

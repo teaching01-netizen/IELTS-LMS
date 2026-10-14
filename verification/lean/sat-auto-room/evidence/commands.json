@@ -1,0 +1,62 @@
+[
+  {
+    "cwd": "verification/lean/sat-auto-room",
+    "command": "lake build",
+    "exit_status": 0,
+    "evidence": "lean-build.txt"
+  },
+  {
+    "cwd": "verification/lean/sat-auto-room",
+    "command": "lake env lean proof/AxiomAudit.lean",
+    "exit_status": 0,
+    "evidence": "lean-axiom-audit.txt"
+  },
+  {
+    "cwd": "verification/lean/sat-auto-room",
+    "command": "lake env lean --run Replay.lean proof.Model proof.Safety proof.Counterexamples",
+    "exit_status": 0,
+    "evidence": "kernel-replay.txt"
+  },
+  {
+    "cwd": "backend/go",
+    "command": "TEST_MYSQL_DSN='root@unix(/tmp/mysql.sock)/codex_sat_auto_room_verify_20261014?parseTime=true&multiStatements=true' go test ./cmd/api -run 'TestSat(Rooms|RoomVerification|ExamConfig)|TestSATPublish(OperationKeyReplaysOneRelease|PreservesRevisionFences)MySQL' -count=1 -v",
+    "exit_status": 0,
+    "evidence": "mysql-tests-final.txt"
+  },
+  {
+    "cwd": "backend/go",
+    "command": "go test ./internal/accesslinks ./internal/exams ./internal/platform/db ./internal/platform/tx ./internal/authz",
+    "exit_status": 0,
+    "evidence": "go-unit.txt"
+  },
+  {
+    "cwd": "backend/go",
+    "command": "env -u TEST_MYSQL_DSN go test ./cmd/migrate",
+    "exit_status": 0,
+    "evidence": "migration-unit.txt"
+  },
+  {
+    "cwd": ".",
+    "command": "bunx vitest run src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomFlow.test.tsx src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomRecoveryVerification.test.tsx src/features/exam-authoring/contracts/__tests__/satExamConfig.test.ts src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx src/products/sat/routes/__tests__/SatAccessRoute.test.tsx",
+    "exit_status": 0,
+    "evidence": "vitest-final.txt"
+  },
+  {
+    "cwd": ".",
+    "command": "bun run typecheck",
+    "exit_status": 0,
+    "evidence": "typecheck-final.txt"
+  },
+  {
+    "cwd": ".",
+    "command": "bunx eslint src/features/exam-authoring/application/satRoomPendingAttempt.ts src/features/exam-authoring/application/satRoomErrorMapper.ts src/features/exam-authoring/ui/publish/useCreateSatRoom.ts src/features/exam-authoring/ui/publish/SatCreateRoomFlow.tsx src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomRecoveryVerification.test.tsx src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx",
+    "exit_status": 0,
+    "evidence": "eslint.txt"
+  },
+  {
+    "cwd": "backend/go",
+    "command": "TEST_MYSQL_DSN='root@unix(/tmp/mysql.sock)/codex_sat_auto_room_verify_20261014?parseTime=true&multiStatements=true' go test ./internal/accesslinks ./internal/exams ./internal/platform/db ./internal/platform/tx ./cmd/migrate",
+    "exit_status": 1,
+    "evidence": "go-unit-after-fixes.txt"
+  }
+]

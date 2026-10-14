@@ -13,19 +13,23 @@ export function SatCompleteScreen({
   answered?: AnsweredExamSource | null;
 }) {
   const report = classroomReport(result);
+  if (!report) return <SatCompletionOnly onExit={onExit} />;
+  return <SatScoreReport report={report} answered={answered} onExit={onExit} />;
+}
+
+function SatCompletionOnly({ onExit }: { onExit: () => void | Promise<void> }) {
   return (
     <div className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] pl-[calc(1.25rem+var(--student-safe-left))] pr-[calc(1.25rem+var(--student-safe-right))] pt-[var(--student-safe-top)] pb-[var(--student-safe-bottom)] text-center text-[var(--sat-text)]">
-      <main className={`w-full ${report ? "max-w-2xl" : "max-w-lg"} border-y border-[var(--sat-divider)] py-10 print:border-0 print:py-0`}>
-        <p className="text-[14px] font-semibold text-[var(--sat-text-secondary)] print:hidden">Digital SAT</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight print:hidden">{SAT_COPY.transitions.completeTitle}</h1>
-        <p className="mt-3 text-[14px] leading-6 text-[var(--sat-text-secondary)] print:hidden">
+      <main className="w-full max-w-lg border-y border-[var(--sat-divider)] py-10">
+        <p className="text-[14px] font-semibold text-[var(--sat-text-secondary)]">Digital SAT</p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight">{SAT_COPY.transitions.completeTitle}</h1>
+        <p className="mt-3 text-[14px] leading-6 text-[var(--sat-text-secondary)]">
           {SAT_COPY.transitions.completeSubtitle}
         </p>
-        {report ? <SatScoreReport report={report} answered={answered} /> : null}
         <button
           type="button"
           onClick={() => void onExit()}
-          className="sat-touch-target sat-pressable mt-8 rounded-full bg-[var(--sat-accent)] print:hidden px-6 text-[14px] font-semibold text-[var(--sat-accent-text)] hover:bg-[var(--sat-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+          className="sat-touch-target sat-pressable mt-8 rounded-full bg-[var(--sat-accent)] px-6 text-[14px] font-semibold text-[var(--sat-accent-text)] hover:bg-[var(--sat-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
         >
           Back to dashboard
         </button>

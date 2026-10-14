@@ -1,0 +1,7 @@
+name = "sat-auto-room"
+version = "0.1.0"
+defaultTargets = ["SatAutoRoom"]
+
+[[lean_lib]]
+name = "SatAutoRoom"
+roots = ["SatAutoRoom", "proof.Model", "proof.Safety", "proof.Counterexamples", "proof.AxiomAudit"]

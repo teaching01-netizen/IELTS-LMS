@@ -37,8 +37,8 @@ func TestVerifyFailsClosedOnMissingTable(t *testing.T) {
 }
 
 func TestSchemaGuardListSizes(t *testing.T) {
-	if len(RequiredTables) != 8 {
-		t.Fatalf("RequiredTables must include the authoring table, 3 existing SAT start-code tables, the 0081 slot table, and the 3 0087 score-conversion tables; got %d", len(RequiredTables))
+	if len(RequiredTables) != 9 {
+		t.Fatalf("RequiredTables must include the authoring table, 3 existing SAT start-code tables, the 0081 slot table, the 3 0087 score-conversion tables, and the 0088 room-operation receipt; got %d", len(RequiredTables))
 	}
 	if len(RequiredIndexes) != 13 {
 		t.Fatalf("RequiredIndexes must include the 10 existing guards and 3 SAT slot indexes, got %d", len(RequiredIndexes))

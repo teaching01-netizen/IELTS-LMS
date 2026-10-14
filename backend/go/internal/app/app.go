@@ -34,6 +34,7 @@ import (
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/satrooms"
 	"example.com/ielts-proctoring/internal/satscoring"
 	"example.com/ielts-proctoring/internal/satstartcode"
 	"example.com/ielts-proctoring/internal/schedules"
@@ -58,6 +59,7 @@ type Services struct {
 	Authoring     *authoring.Service
 	SatScoring    *satscoring.Service
 	AccessLinks   *accesslinks.Service
+	SatRooms      *satrooms.Service
 	SAT           *sat.Service
 	ACT           *act.Service
 	Delivery      *delivery.Service
@@ -126,6 +128,7 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	s.Library = library.NewService(pool, s.Tx)
 	s.AnswerHistory = answerhistory.NewService(pool)
 	s.AccessLinks = accesslinks.NewService(pool, s.Tx)
+	s.SatRooms = satrooms.NewService(pool, s.Tx, s.Exams, s.AccessLinks)
 	s.SAT = sat.NewService(pool, s.Tx, clock.System{}, nil, s.Terminal)
 	s.ACT = act.NewService(pool, s.Tx)
 	s.Terminal.SetAttemptScorer(s.ACT)

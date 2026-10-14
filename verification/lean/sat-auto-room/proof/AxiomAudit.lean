@@ -1,0 +1,34 @@
+import proof.Safety
+import proof.Counterexamples
+
+#check SatAutoRoom.reachable_invariant
+#check SatAutoRoom.at_most_one_effect
+#check SatAutoRoom.room_has_atomic_receipt_and_schedule
+#check SatAutoRoom.room_has_matching_release
+#check SatAutoRoom.room_pin_preserved
+#check SatAutoRoom.supplied_fences_match
+#print axioms SatAutoRoom.initiation
+#print axioms SatAutoRoom.selection_covers
+#print axioms SatAutoRoom.selection_preserves_release
+#print axioms SatAutoRoom.commit_preserves
+#print axioms SatAutoRoom.consecution
+#print axioms SatAutoRoom.reachable_invariant
+#print axioms SatAutoRoom.at_most_one_effect
+#print axioms SatAutoRoom.room_has_atomic_receipt_and_schedule
+#print axioms SatAutoRoom.room_has_matching_release
+#print axioms SatAutoRoom.room_pin_preserved
+#print axioms SatAutoRoom.replay_no_effect
+#print axioms SatAutoRoom.different_body_not_replayable
+#print axioms SatAutoRoom.supplied_fences_match
+#print axioms SatAutoRoom.stale_preflight_cannot_seal
+#print axioms SatAutoRoom.commit_requires_revision_fences
+#print axioms SatAutoRoom.new_release_validated
+#print axioms SatAutoRoom.full_reuse_is_not_equal_scope
+#print axioms SatAutoRoom.no_op_write_defeats_clone_reuse
+#print axioms SatAutoRoom.omitted_fences_accept_changed_revision
+#print axioms SatAutoRoom.live_projection_not_exact_response
+#print axioms SatAutoRoom.remount_loses_unresolved_identity
+#print axioms SatAutoRoom.successful_seal_reachable
+#print axioms SatAutoRoom.lost_ack_retry_reachable
+#print axioms SatAutoRoom.lost_ack_retry_one_effect
+#print axioms SatAutoRoom.permanent_abort_run

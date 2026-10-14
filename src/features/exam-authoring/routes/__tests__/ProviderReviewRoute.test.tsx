@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExamEntity } from "../../../../types/domain";
 import { ProviderReviewRoute } from "../ProviderReviewRoute";
@@ -8,9 +8,6 @@ const useExamQueryMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/examQueries", () => ({
   useExamQuery: useExamQueryMock,
-}));
-vi.mock("../SatDeliveryReleaseRoute", () => ({
-  SatDeliveryReleaseRoute: () => <div>sat-release-route</div>,
 }));
 vi.mock("../../../builder/routes/ExamReviewRoute", () => ({
   ExamReviewRoute: () => <div>legacy-review-route</div>,
@@ -36,11 +33,18 @@ const baseExam: ExamEntity = {
   schemaVersion: 4,
 };
 
-function renderRoute() {
+function Where() {
+  const location = useLocation();
+  return <div data-testid="where">{`${location.pathname}${location.search}`}</div>;
+}
+
+function renderRoute(entry: string) {
   return render(
-    <MemoryRouter initialEntries={["/builder/exam-1/review"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/builder/:examId/review" element={<ProviderReviewRoute />} />
+        <Route path="/sat/exams/:examId/release" element={<ProviderReviewRoute />} />
+        <Route path="*" element={<Where />} />
       </Routes>
     </MemoryRouter>
   );
@@ -51,16 +55,17 @@ describe("ProviderReviewRoute", () => {
     useExamQueryMock.mockReset();
   });
 
-  it("dispatches SAT exams to the SAT Delivery & Release route", () => {
-    useExamQueryMock.mockReturnValue({
-      data: baseExam,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-    renderRoute();
-    expect(screen.getByText("sat-release-route")).toBeInTheDocument();
-    expect(screen.queryByText("legacy-review-route")).not.toBeInTheDocument();
+  it("sends a legacy SAT release URL to Settings, keeping the scoring deep link", () => {
+    useExamQueryMock.mockReturnValue({ data: baseExam, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute("/sat/exams/exam-1/release?panel=scoring");
+    expect(screen.getByTestId("where")).toHaveTextContent("/sat/exams/exam-1/settings?panel=scoring");
+  });
+
+  it("sends the old student-access view to Rooms", () => {
+    useExamQueryMock.mockReturnValue({ data: baseExam, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute("/sat/exams/exam-1/release?view=access");
+    expect(screen.getByTestId("where")).toHaveTextContent("/sat/exams/exam-1/access");
+    expect(screen.getByTestId("where")).not.toHaveTextContent("view=");
   });
 
   it("keeps non-SAT exams on the legacy review route", () => {
@@ -70,8 +75,7 @@ describe("ProviderReviewRoute", () => {
       error: null,
       refetch: vi.fn(),
     });
-    renderRoute();
+    renderRoute("/builder/exam-1/review");
     expect(screen.getByText("legacy-review-route")).toBeInTheDocument();
-    expect(screen.queryByText("sat-release-route")).not.toBeInTheDocument();
   });
 });

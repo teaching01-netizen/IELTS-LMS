@@ -1,0 +1,34 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ❯ src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomRecoveryVerification.test.tsx (2 tests | 1 failed) 26ms
+   × SAT room recovery verification counterexamples > treats a post-commit live-projection 404 as permission to use a new key 7ms
+     → expected true to be false // Object.is equality
+ ✓ src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomFlow.test.tsx (6 tests) 575ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomRecoveryVerification.test.tsx > SAT room recovery verification counterexamples > treats a post-commit live-projection 404 as permission to use a new key
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomRecoveryVerification.test.tsx:63:54
+     61|     const view = mount();
+     62|     await act(async () => { await view.result.current.submit(fields); …
+     63|     expect(view.result.current.hasUnresolvedAttempt).toBe(false);
+       |                                                      ^
+     64|     const originalKey = mocks.create.mock.calls[0]![1].operationKey;
+     65|     await act(async () => { await view.result.current.submit(fields); …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 7 passed (8)
+   Start at  23:39:51
+   Duration  2.72s (transform 808ms, setup 558ms, collect 1.44s, tests 601ms, environment 795ms, prepare 151ms)
+

@@ -1,0 +1,27 @@
+=== RUN   TestSatExamConfigAtCreateMySQL
+--- PASS: TestSatExamConfigAtCreateMySQL (0.13s)
+=== RUN   TestSatRoomsReleaseLifecycleMySQL
+--- PASS: TestSatRoomsReleaseLifecycleMySQL (0.08s)
+=== RUN   TestSatRoomsSameKeyRaceMySQL
+--- PASS: TestSatRoomsSameKeyRaceMySQL (0.06s)
+=== RUN   TestSatRoomsNotReadyWritesNothingMySQL
+--- PASS: TestSatRoomsNotReadyWritesNothingMySQL (0.01s)
+=== RUN   TestSatRoomsStaleFenceMySQL
+--- PASS: TestSatRoomsStaleFenceMySQL (0.04s)
+=== RUN   TestSatRoomVerificationPolicyAndReplayMySQL
+=== RUN   TestSatRoomVerificationPolicyAndReplayMySQL/replay_reads_mutable_room_fields
+    sat_rooms_verification_mysql_test.go:42: SPEC gap: original name is not replayed; the receipt loads the renamed room
+=== RUN   TestSatRoomVerificationPolicyAndReplayMySQL/full_release_reused_for_math_scope
+    sat_rooms_verification_mysql_test.go:54: SPEC gap: scope coverage is accepted instead of scope equality
+=== RUN   TestSatRoomVerificationPolicyAndReplayMySQL/deleted_room_receipt_returns_not_found
+    sat_rooms_verification_mysql_test.go:71: SPEC gap: receipt survives deletion but recovery cannot return its committed result
+--- PASS: TestSatRoomVerificationPolicyAndReplayMySQL (0.07s)
+    --- PASS: TestSatRoomVerificationPolicyAndReplayMySQL/replay_reads_mutable_room_fields (0.00s)
+    --- PASS: TestSatRoomVerificationPolicyAndReplayMySQL/full_release_reused_for_math_scope (0.00s)
+    --- PASS: TestSatRoomVerificationPolicyAndReplayMySQL/deleted_room_receipt_returns_not_found (0.00s)
+=== RUN   TestSatRoomVerificationUnfencedAndNoOpMySQL
+    sat_rooms_verification_mysql_test.go:103: SPEC gap: an equivalent question body creates a new release after a no-op save
+    sat_rooms_verification_mysql_test.go:126: SPEC gap: nil revision fences accept a draft changed after request preparation
+--- PASS: TestSatRoomVerificationUnfencedAndNoOpMySQL (0.09s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/api	1.187s

@@ -27,14 +27,14 @@ vi.mock("../../../application/authoringEntryIntent", () => ({
 vi.mock("../../collaboration/CollaborationHeaderCluster", () => ({
   CollaborationHeaderCluster: () => null,
 }));
-vi.mock("../../publish/ExamPublishSheet", () => ({
-  ExamPublishSheet: ({ onClose }: { onClose: () => void }) => (
-    <div role="dialog" aria-label="Publish exam">
-      <button type="button" onClick={onClose}>
-        Close publish
-      </button>
-    </div>
-  ),
+vi.mock("../../release/ScoreReportSettingPanel", () => ({
+  ScoreReportSettingPanel: () => <div data-testid="score-report-panel" />,
+}));
+vi.mock("../../release/ScoreConverterPanel", () => ({
+  ScoreConverterPanel: () => <div data-testid="score-converter-panel" />,
+}));
+vi.mock("../../../api/examQueries", () => ({
+  useExamQuery: () => ({ data: undefined, refetch: vi.fn() }),
 }));
 vi.mock("../../../../auth/api/authSession", () => ({
   useOptionalAuthSession: () => ({ session: { user: { id: "u1", role: "builder" } } }),
@@ -112,7 +112,8 @@ const shell: AssessmentAuthoringShell = {
 };
 
 function Where() {
-  return <p data-testid="where">{useLocation().pathname}</p>;
+  const location = useLocation();
+  return <p data-testid="where">{`${location.pathname}${location.search}`}</p>;
 }
 
 function renderPage(entity: ExamEntity = exam) {
@@ -184,7 +185,8 @@ describe("ExamSettingsPage", () => {
   it("protects unsaved timing when changing tabs, and leaves on confirmation", () => {
     renderPage();
     fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
-    expect(screen.getByRole("button", { name: "Publish version" })).toHaveAttribute("aria-disabled", "true");
+    // A pending edit never blocks starting a room: the room captures saved content only.
+    expect(screen.getByRole("button", { name: "Create room" })).toBeEnabled();
 
     fireEvent.click(within(screen.getByRole("navigation", { name: "Exam sections" })).getByRole("button", { name: "Questions" }));
     expect(screen.getByRole("alertdialog", { name: "Leave with unsaved changes?" })).toBeInTheDocument();
@@ -200,12 +202,18 @@ describe("ExamSettingsPage", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/sat/exams/exam-sat-1/access");
   });
 
-  it("opens the publish sheet over Settings", () => {
+  it("starts a room from Settings without any publish step", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
-    expect(screen.getByRole("dialog", { name: "Publish exam" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close publish" }));
-    expect(screen.queryByRole("dialog", { name: "Publish exam" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/sat/exams/exam-sat-1/access?new=1");
+  });
+
+  it("hosts Results & scoring beside timing, so the score converter has one home", () => {
+    renderPage();
+    expect(screen.getByRole("heading", { name: "Results & scoring" })).toBeInTheDocument();
+    expect(screen.getByTestId("score-report-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("score-converter-panel")).toBeInTheDocument();
   });
 
   it("offers an explicit Edit this exam action when only a published version exists", () => {

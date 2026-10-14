@@ -91,6 +91,27 @@ const (
 	CodeDraftIntegrity Code = "DRAFT_INTEGRITY_VIOLATION"
 )
 
+// SAT one-action room creation (internal/satrooms). Each code is a stable
+// client contract: the frontend keys its recovery path on the code alone.
+const (
+	// CodeExamNotReady: the exam failed release validation; details.issues
+	// lists every blocking finding. Nothing was created.
+	CodeExamNotReady Code = "EXAM_NOT_READY"
+	// CodeExamRevisionChanged: the exam moved past the revision the client
+	// prepared against; details.currentExamRevision names the new one.
+	CodeExamRevisionChanged Code = "EXAM_REVISION_CHANGED"
+	// CodeRoomInvalid: the room fields were rejected before any write.
+	CodeRoomInvalid Code = "ROOM_INVALID"
+	// CodeOperationKeyConflict: the operation key was already used for a
+	// different request body.
+	CodeOperationKeyConflict Code = "OPERATION_KEY_CONFLICT"
+	// CodeOperationNotFound: no committed room operation has this key.
+	CodeOperationNotFound Code = "OPERATION_NOT_FOUND"
+	// CodeExamScopeUnavailable: the saved release does not cover the sections
+	// the room asks for and there is no working draft to seal.
+	CodeExamScopeUnavailable Code = "EXAM_SCOPE_UNAVAILABLE"
+)
+
 // Error is a typed application error with a stable code.
 type Error struct {
 	Code       Code
@@ -120,7 +141,7 @@ func statusFor(c Code) int {
 		return http.StatusUnauthorized
 	case CodeForbidden, CodeCSRF, CodeLeaseFenced, CodeAttemptProctorBlocked, CodeStartCodeInvalid:
 		return http.StatusForbidden
-	case CodeNotFound, CodeExamNotFound:
+	case CodeNotFound, CodeExamNotFound, CodeOperationNotFound:
 		return http.StatusNotFound
 	case CodeMethodNotAllowed:
 		return http.StatusMethodNotAllowed
@@ -128,7 +149,7 @@ func statusFor(c Code) int {
 		CodeTerminalConflict, CodeSubmissionReplayMisuse, CodeResponseRevisionMismatch,
 		CodeRuntimeRevisionStale, CodeAssessmentConflict, CodeActiveSessionSuperseded,
 		CodeSessionAlreadyActive, CodeTransferApprovalRequired, CodeTransferConflict,
-		CodeProtocolUpgradeRequired:
+		CodeProtocolUpgradeRequired, CodeExamRevisionChanged, CodeOperationKeyConflict:
 		return http.StatusConflict
 	case CodeTransferExpired:
 		return http.StatusGone
@@ -144,7 +165,8 @@ func statusFor(c Code) int {
 		return http.StatusGone
 	case CodeBadRequest, CodeStartCodeFormatInvalid:
 		return http.StatusBadRequest
-	case CodeValidation, CodeUnsupportedProvider, CodeInvalidAssessment:
+	case CodeValidation, CodeUnsupportedProvider, CodeInvalidAssessment,
+		CodeExamNotReady, CodeRoomInvalid, CodeExamScopeUnavailable:
 		return http.StatusUnprocessableEntity
 	case CodeInternal, CodeDraftIntegrity:
 		return http.StatusInternalServerError

@@ -18,6 +18,22 @@ vi.mock('../../../../features/exam-authoring/api/examQueries', () => ({
 vi.mock('../../../../features/exam-authoring/api/examAuthoringFacade', () => ({
   examAuthoringFacade: { lifecycle: { createProviderExam: createProviderExamMock } },
 }));
+const defaultsMock = vi.hoisted(() => ({
+  data: {
+    preset: 'standard_sat',
+    config: {
+      sections: {
+        'reading-writing': { module1Minutes: 32, module2LowerMinutes: 32, module2HigherMinutes: 32, breakAfterMinutes: 10, minimumCorrectForHigher: 13 },
+        math: { module1Minutes: 35, module2LowerMinutes: 35, module2HigherMinutes: 35, breakAfterMinutes: 0, minimumCorrectForHigher: 11 },
+      },
+      showClassroomScoreReport: false,
+    },
+    limits: { minModuleMinutes: 1, maxModuleMinutes: 600, maxBreakMinutes: 240, operationalQuestions: { 'reading-writing': 27, math: 22 } },
+  },
+}));
+vi.mock('../../../../features/exam-authoring/api/satExamConfigApi', () => ({
+  useSatExamConfigDefaults: () => ({ data: defaultsMock.data, error: null }),
+}));
 vi.mock('../../../../features/auth/authSession', () => ({
   useAuthSession: () => ({ session: { user: { displayName: 'Admin', email: 'admin@example.com' } } }),
 }));
@@ -89,7 +105,7 @@ describe('SatExamLibraryRoute', () => {
     expect(screen.queryByText('IELTS Academic 01')).not.toBeInTheDocument();
   });
 
-  it('shows the published version number and scope in the library row', () => {
+  it('shows rooms-available status and scope, never a publish state, in the library row', () => {
     const published = {
       ...satExam,
       status: 'published',
@@ -100,7 +116,9 @@ describe('SatExamLibraryRoute', () => {
     };
     useExamListQueryMock.mockReturnValue({ data: { entities: [published], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
-    expect(screen.getByText('Published · Version 2')).toBeInTheDocument();
+    // The filter tab and the row's status pill both say it.
+    expect(screen.getAllByText('Rooms available')).toHaveLength(2);
+    expect(screen.queryByText(/Published/)).not.toBeInTheDocument();
     expect(screen.getByText(/0 questions · Math only/)).toBeInTheDocument();
   });
 
@@ -114,6 +132,35 @@ describe('SatExamLibraryRoute', () => {
     await waitFor(() => expect(createProviderExamMock).toHaveBeenCalledWith(
       { providerKey: 'sat', providerExamType: 'SAT', title: 'October Practice' }, 'Admin',
     ));
+  });
+
+  it('sends nothing extra until settings are customized and changed, then creates with the whole configuration', async () => {
+    createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'Custom timing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Customize settings' }));
+    expect(screen.getByLabelText('Module 1', { selector: '#sat-create-math-module1Minutes' })).toHaveValue(35);
+    fireEvent.change(document.getElementById('sat-create-math-module1Minutes')!, { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(createProviderExamMock).toHaveBeenCalledOnce());
+    const input = createProviderExamMock.mock.calls[0]![0];
+    expect(input.configuration.sections.math.module1Minutes).toBe(40);
+    expect(input.configuration.sections['reading-writing'].module1Minutes).toBe(32);
+    expect(input.configuration.showClassroomScoreReport).toBe(false);
+  });
+
+  it('keeps the dialog open and names every invalid field instead of creating', async () => {
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'Bad timing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Customize settings' }));
+    fireEvent.change(document.getElementById('sat-create-math-module1Minutes')!, { target: { value: '0' } });
+    fireEvent.change(document.getElementById('sat-create-reading-writing-minimumCorrectForHigher')!, { target: { value: '99' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    expect(await screen.findByText('Module 1 duration must be at least 1 minute.')).toBeInTheDocument();
+    expect(screen.getByText('Threshold cannot exceed 27 correct answers.')).toBeInTheDocument();
+    expect(createProviderExamMock).not.toHaveBeenCalled();
   });
 
   it('renders header plus skeleton while loading, without blanking the page', () => {

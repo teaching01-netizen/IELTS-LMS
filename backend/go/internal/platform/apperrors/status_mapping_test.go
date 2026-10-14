@@ -52,6 +52,12 @@ func TestStatusForMapsEveryCode(t *testing.T) {
 		{CodeAssessmentReleaseInvariant, http.StatusInternalServerError},
 		{CodeProtocolUpgradeRequired, http.StatusConflict},
 		{CodeStudentWSRetired, http.StatusGone},
+		{CodeExamNotReady, http.StatusUnprocessableEntity},
+		{CodeRoomInvalid, http.StatusUnprocessableEntity},
+		{CodeExamScopeUnavailable, http.StatusUnprocessableEntity},
+		{CodeExamRevisionChanged, http.StatusConflict},
+		{CodeOperationKeyConflict, http.StatusConflict},
+		{CodeOperationNotFound, http.StatusNotFound},
 	}
 	for _, tc := range cases {
 		if got := statusFor(tc.code); got != tc.want {

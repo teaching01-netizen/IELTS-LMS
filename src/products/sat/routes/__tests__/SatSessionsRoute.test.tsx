@@ -1,29 +1,47 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../../../shared/api-client/errors';
+import { clearSatRoomDraft } from '../../../../features/exam-authoring/application/satRoomDraftStore';
 import { SatSessionsRoute } from '../SatSessionsRoute';
 
 const useSummariesMock = vi.hoisted(() => vi.fn());
 const useExamListQueryMock = vi.hoisted(() => vi.fn());
 const useOverviewMock = vi.hoisted(() => vi.fn());
-const createMutateMock = vi.hoisted(() => vi.fn());
-const createStateMock = vi.hoisted(() => ({ isPending: false }));
+const createRoomMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/proctor/api/proctorQueries', () => ({
   proctorKeys: { sessions: (provider?: string) => ['proctor', 'sessions', provider ?? 'all'] },
   useProctorSessionSummaries: useSummariesMock,
 }));
-vi.mock('../../../../features/exam-authoring/api/examQueries', () => ({ useExamListQuery: useExamListQueryMock }));
+vi.mock('../../../../features/exam-authoring/api/examQueries', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useExamListQuery: useExamListQueryMock,
+    useExamQuery: (examId?: string) => ({ data: { id: examId, canEdit: true, revision: 4 }, refetch: vi.fn().mockResolvedValue({ data: { id: examId, canEdit: true, revision: 4 } }) }),
+  };
+});
 vi.mock('../../../../features/exam-authoring/api/assessmentAccessLinkQueries', () => ({
   useAccessDistributionOverview: useOverviewMock,
-  useCreateAccessLink: () => ({ mutateAsync: createMutateMock, isPending: createStateMock.isPending }),
   useAccessLinkMembers: () => ({ data: [], isLoading: false, error: null, refetch: vi.fn() }),
 }));
+vi.mock('../../../../features/exam-authoring/api/satCreateRoomApi', () => ({
+  satCreateRoomApi: { create: createRoomMock, operation: vi.fn() },
+}));
+vi.mock('../../../../features/exam-authoring/application/authoringShellLifecycle', () => ({
+  useAuthoringShellLifecycle: () => ({ refresh: vi.fn().mockResolvedValue({ kind: 'no-draft' }) }),
+}));
+vi.mock('../../../../features/exam-authoring/realtime/coedit', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, useSatAuthoringCollaboration: () => null };
+});
 vi.mock('../../../../features/proctor/application/proctorFacade', () => ({
   proctorFacade: { isPreviewRuntimeCohortName: () => false },
 }));
 vi.mock('../../../../features/auth/authSession', () => ({
   useAuthSession: () => ({ session: { user: { role: 'admin' } } }),
+  useOptionalAuthSession: () => null,
 }));
 
 beforeAll(() => {
@@ -35,12 +53,10 @@ beforeAll(() => {
   }
 });
 
-const satExam = {
-  id: 'sat-1', title: 'SAT Published', providerKey: 'sat', currentPublishedVersionId: 'v-sat', currentPublishedScope: 'reading-writing',
-};
-const ieltsExam = {
-  id: 'ielts-1', title: 'IELTS Published', providerKey: 'ielts', currentPublishedVersionId: 'v-ielts',
-};
+// Neither exam was ever published: a room needs no prior publication.
+const satExam = { id: 'sat-1', title: 'SAT Mock', providerKey: 'sat', status: 'draft', currentPublishedVersionId: null };
+const archivedExam = { id: 'sat-old', title: 'SAT Retired', providerKey: 'sat', status: 'archived', currentPublishedVersionId: 'v-old' };
+const ieltsExam = { id: 'ielts-1', title: 'IELTS Published', providerKey: 'ielts', status: 'published', currentPublishedVersionId: 'v-ielts' };
 const summary = {
   schedule: {
     id: 'sched-1', examId: 'sat-1', providerKey: 'sat', examTitle: 'SAT Published', proctorDisplayName: 'SAT Published',
@@ -56,7 +72,11 @@ const summary = {
   },
   studentCount: 0, activeCount: 0, alertCount: 0, violationCount: 0, degradedLiveMode: false,
 };
-const publishedVersion = { id: 'v-9', versionNumber: 9, revision: 1, publishNotes: null, publishScope: 'reading-writing', createdAt: '2026-09-01T00:00:00Z' };
+const receipt = {
+  room: { id: 'link-new', scheduleId: 'sched-new' },
+  version: { id: 'v-new', number: 1, scope: 'full', createdNow: true },
+  exam: { revision: 5 },
+};
 
 function LocationProbe() {
   return <p data-testid="location">{useLocation().pathname}</p>;
@@ -69,6 +89,7 @@ function routeElement(client: QueryClient) {
         <Routes>
           <Route path="/sat/sessions" element={<SatSessionsRoute />} />
           <Route path="/sat/sessions/:scheduleId" element={<LocationProbe />} />
+          <Route path="/sat/exams/:examId" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -91,11 +112,12 @@ function openSetup() {
 describe('SatSessionsRoute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    createStateMock.isPending = false;
+    clearSatRoomDraft('sat-1');
+    clearSatRoomDraft('sat-2');
     useSummariesMock.mockReturnValue({ data: [summary], isLoading: false, error: null, refetch: vi.fn() });
-    useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, satExam], exams: [] }, isLoading: false, error: null });
-    useOverviewMock.mockReturnValue({ data: { currentPublishedVersion: publishedVersion, links: [] }, isLoading: false, error: null, refetch: vi.fn() });
-    createMutateMock.mockResolvedValue({ id: 'link-new', scheduleId: 'sched-new' });
+    useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, archivedExam, satExam], exams: [] }, isLoading: false, error: null });
+    useOverviewMock.mockReturnValue({ data: { currentPublishedVersion: null, links: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    createRoomMock.mockResolvedValue(receipt);
   });
 
   it('requests SAT-only room and exam boundaries', () => {
@@ -105,42 +127,33 @@ describe('SatSessionsRoute', () => {
     expect(screen.getByText(/SAT Published ·/)).toBeInTheDocument();
   });
 
-  it('never offers IELTS exams when creating a SAT room', () => {
+  it('offers any active SAT exam, published or not, and never IELTS or archived exams', () => {
     renderRoute();
     openSetup();
-    expect(screen.getByRole('option', { name: 'SAT Published' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'SAT Mock' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'IELTS Published' })).not.toBeInTheDocument();
-    expect(screen.getByText(/Students receive Reading & Writing only from Version 9/)).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'SAT Retired' })).not.toBeInTheDocument();
+    // No publish step or version wording: the room captures the latest saved exam.
+    expect(screen.getByText('This room uses the latest saved exam')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog', { name: 'Create room' })).queryByText(/Publish/)).not.toBeInTheDocument();
     // Exam choice and room setup share one sheet: no chooser step before the form.
     expect(screen.getByLabelText('Room name')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
-    expect(screen.getByText('SAT Published · Version 9')).toBeInTheDocument();
   });
 
-  it('re-pins to the newly chosen exam’s version without clearing the room name', async () => {
-    const otherSat = { id: 'sat-2', title: 'SAT October', providerKey: 'sat', currentPublishedVersionId: 'v-oct', currentPublishedScope: 'full' };
+  it('creates the room on the exam chosen last, keeping the room name typed before the switch', async () => {
+    const otherSat = { id: 'sat-2', title: 'SAT October', providerKey: 'sat', status: 'published', currentPublishedVersionId: 'v-oct' };
     useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, otherSat], exams: [] }, isLoading: false, error: null });
-    useOverviewMock.mockImplementation((examId: string) => ({
-      data: {
-        currentPublishedVersion: examId === 'sat-2'
-          ? { ...publishedVersion, id: 'v-oct-3', versionNumber: 3, publishScope: 'full' }
-          : publishedVersion,
-        links: [],
-      },
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    }));
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
     fireEvent.change(screen.getByLabelText('Exam'), { target: { value: 'sat-2' } });
 
-    expect(await screen.findByText('SAT October · Version 3')).toBeInTheDocument();
     expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
-    await waitFor(() => expect(createMutateMock).toHaveBeenCalledOnce());
-    expect(createMutateMock.mock.calls[0]![0]).toMatchObject({ name: 'Saturday mock', publishedVersionId: 'v-oct-3' });
+    await waitFor(() => expect(createRoomMock).toHaveBeenCalledOnce());
+    expect(createRoomMock.mock.calls[0]![0]).toBe('sat-2');
+    expect(createRoomMock.mock.calls[0]![1].room).toMatchObject({ name: 'Saturday mock' });
   });
 
   it('renders header plus skeleton while loading, without blanking the page', () => {
@@ -166,56 +179,50 @@ describe('SatSessionsRoute', () => {
     expect(screen.getByLabelText('Exam')).toBeInTheDocument();
   });
 
-  it('opens the same room settings the exam uses, pinned to the exam’s published version, then lands in the new room', async () => {
+  it('creates from the unpublished exam in one request with no version pin, then lands in the new room', async () => {
     renderRoute();
     openSetup();
-    expect(screen.getByText('SAT Published · Version 9')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
 
-    await waitFor(() => expect(createMutateMock).toHaveBeenCalledOnce());
-    expect(createMutateMock.mock.calls[0]![0]).toMatchObject({
-      name: 'Saturday mock', publishedVersionId: 'v-9', audienceType: 'anyone', availabilityType: 'anytime', enabledSections: ['reading-writing'],
-    });
+    await waitFor(() => expect(createRoomMock).toHaveBeenCalledOnce());
+    const [examId, request] = createRoomMock.mock.calls[0]!;
+    expect(examId).toBe('sat-1');
+    expect(request.room).toMatchObject({ name: 'Saturday mock', audienceType: 'anyone', availabilityType: 'anytime' });
+    expect(request.room).not.toHaveProperty('publishedVersionId');
+    expect(request).toMatchObject({ expectedExamRevision: 4, expectedDraftVersionId: '' });
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/sat/sessions/sched-new'));
   });
 
-  it('keeps the version it captured when a background refresh reports a newer release', async () => {
-    const client = newClient();
-    const view = render(routeElement(client));
-    openSetup();
-    expect(screen.getByText('SAT Published · Version 9')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
-
-    // Another author publishes Version 10 while this setup is being filled in.
-    useOverviewMock.mockReturnValue({
-      data: { currentPublishedVersion: { ...publishedVersion, id: 'v-10', versionNumber: 10 }, links: [] },
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-    view.rerender(routeElement(client));
-
-    // The captured target wins: neither the label nor the entered fields move.
-    expect(screen.getByText('SAT Published · Version 9')).toBeInTheDocument();
-    expect(screen.queryByText(/Version 10/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
-    await waitFor(() => expect(createMutateMock).toHaveBeenCalledOnce());
-    expect(createMutateMock.mock.calls[0]![0]).toMatchObject({ publishedVersionId: 'v-9', name: 'Saturday mock' });
-  });
-
-  it('keeps the form and stays on the list when creation fails, so a retry cannot be lost', async () => {
-    createMutateMock.mockRejectedValueOnce(new Error('The room could not be created.'));
+  it('keeps the form and stays on the list when creation is refused, so a retry cannot be lost', async () => {
+    createRoomMock.mockRejectedValueOnce(new ApiError({ code: 'ROOM_INVALID', message: 'The room could not be created.', status: 422 }));
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('The room could not be created.');
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts.some((alert) => alert.textContent?.includes('The room could not be created.'))).toBe(true);
     expect(screen.getByRole('dialog', { name: 'Create room' })).toBeInTheDocument();
     expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
     expect(screen.queryByTestId('location')).not.toBeInTheDocument();
+  });
+
+  it('sends an exam-content finding to the question that needs fixing and restores the form on return', async () => {
+    createRoomMock.mockRejectedValueOnce(new ApiError({
+      code: 'EXAM_NOT_READY',
+      message: 'Fix the exam issues before creating a room.',
+      status: 422,
+      details: { currentExamRevision: 4, issues: [{ code: 'question.prompt.required', path: 'examQuestion:q-9:prompt', message: 'Question text is required.' }] },
+    }));
+    renderRoute();
+    openSetup();
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Needs a fix' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Fix:/ }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/sat/exams/sat-1'));
+
+    // Back on the list, reopening the form restores what was typed.
+    expect(screen.queryByRole('dialog', { name: 'Create room' })).not.toBeInTheDocument();
   });
 
   it('explains an invalid check-in window without clearing the form', async () => {
@@ -229,7 +236,7 @@ describe('SatSessionsRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByText('Closing time must be after opening time.')).toBeInTheDocument();
     expect(screen.getByLabelText('Opens')).toHaveValue('2099-09-01T13:00');
-    expect(createMutateMock).not.toHaveBeenCalled();
+    expect(createRoomMock).not.toHaveBeenCalled();
   });
 
   it('rejects a past opening time for a new room (D2 policy)', async () => {
@@ -241,7 +248,7 @@ describe('SatSessionsRoute', () => {
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2000-09-01T13:00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByText('Start time is in the past.')).toBeInTheDocument();
-    expect(createMutateMock).not.toHaveBeenCalled();
+    expect(createRoomMock).not.toHaveBeenCalled();
   });
 
   it('rejects a check-in window shorter than 15 minutes (D2 policy)', async () => {
@@ -253,7 +260,7 @@ describe('SatSessionsRoute', () => {
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2099-09-01T10:10' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByText('Rooms must be at least 15 minutes long.')).toBeInTheDocument();
-    expect(createMutateMock).not.toHaveBeenCalled();
+    expect(createRoomMock).not.toHaveBeenCalled();
   });
 
   it('offers an earlier room’s setup as a starting point', () => {
@@ -261,7 +268,7 @@ describe('SatSessionsRoute', () => {
       id: 'link-1', name: 'Morning class', versionNumber: 8, audienceType: 'cohort', audienceLabel: 'Morning', accessMode: 'student_code',
       availabilityType: 'anytime', opensAt: null, closesAt: null, enabledSections: null, publishScope: 'reading-writing', providerKey: 'sat', selectedStudentCount: 0,
     };
-    useOverviewMock.mockReturnValue({ data: { currentPublishedVersion: publishedVersion, links: [earlier] }, isLoading: false, error: null, refetch: vi.fn() });
+    useOverviewMock.mockReturnValue({ data: { currentPublishedVersion: null, links: [earlier] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByRole('combobox', { name: 'Start from an earlier room' }), { target: { value: 'link-1' } });
@@ -280,7 +287,7 @@ describe('SatSessionsRoute', () => {
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Discard room settings changes?');
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(createMutateMock).not.toHaveBeenCalled();
+    expect(createRoomMock).not.toHaveBeenCalled();
   });
 
   it('distinguishes filtered-zero from bucket-empty with query echo and clear action', () => {
@@ -311,11 +318,13 @@ describe('SatSessionsRoute', () => {
     expect(screen.queryByRole('dialog', { name: 'Create room' })).not.toBeInTheDocument();
   });
 
-  it('keeps the setup open while creation is pending', () => {
-    createStateMock.isPending = true;
+  it('keeps the setup open while creation is pending', async () => {
+    createRoomMock.mockReturnValue(new Promise(() => undefined));
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    await waitFor(() => expect(createRoomMock).toHaveBeenCalledOnce());
     fireEvent.click(screen.getByRole('button', { name: 'Close room settings' }));
     expect(screen.getByLabelText('Room name')).toBeInTheDocument();
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();

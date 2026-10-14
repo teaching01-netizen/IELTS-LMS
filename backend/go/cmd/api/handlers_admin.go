@@ -57,6 +57,8 @@ func examsCreateHandler(app *App) http.HandlerFunc {
 			OrganizationID   *string `json:"organizationId"`
 			ProviderKey      *string `json:"providerKey"`
 			ProviderExamType *string `json:"providerExamType"`
+			// Configuration overlays the SAT blueprint (SAT only; nil = defaults).
+			Configuration *exams.SATExamConfig `json:"configuration"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -70,6 +72,7 @@ func examsCreateHandler(app *App) http.HandlerFunc {
 			OrganizationID:   req.OrganizationID,
 			ProviderKey:      req.ProviderKey,
 			ProviderExamType: req.ProviderExamType,
+			SATConfig:        req.Configuration,
 		})
 		if err != nil {
 			httpx.WriteError(w, r, err)

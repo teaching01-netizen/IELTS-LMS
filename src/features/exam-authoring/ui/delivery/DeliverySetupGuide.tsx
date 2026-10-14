@@ -1,8 +1,7 @@
 import { Check, ChevronRight } from "lucide-react";
 
 export interface DeliverySetupGuideProps {
-  versionNumber: number;
-  /** Sessions already prepared on this version (not revoked). */
+  /** Rooms already prepared for this exam (not revoked). */
   groupCount: number;
   runningCount?: number;
   finishedCount?: number;
@@ -10,20 +9,20 @@ export interface DeliverySetupGuideProps {
 }
 
 /**
- * First-time guidance as three connected steps. It is a full card until the
- * first session exists, then collapses to a disclosure that frequent users
+ * First-time guidance as two connected steps. There is no publish step: a room
+ * captures the latest saved exam when it is created. It is a full card until
+ * the first room exists, then collapses to a disclosure that frequent users
  * can ignore and anyone can reopen.
  */
-export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0, finishedCount = 0, onCreate }: DeliverySetupGuideProps) {
+export function DeliverySetupGuide({ groupCount, runningCount = 0, finishedCount = 0, onCreate }: DeliverySetupGuideProps) {
   const configured = groupCount > 0 || runningCount > 0 || finishedCount > 0;
   const steps = [
-    { label: "Publish", detail: `Version ${versionNumber} is published.`, done: true },
     {
       label: "Create room",
       detail: groupCount > 0
-        ? `${groupCount} ${groupCount === 1 ? "room" : "rooms"} prepared on this version.`
+        ? `${groupCount} ${groupCount === 1 ? "room" : "rooms"} prepared for this exam.`
         : configured ? "A room was prepared for this exam."
-        : `Version ${versionNumber} has no room yet. Name it, choose who can join and when check-in is open.`,
+        : "This exam has no room yet. Name it, choose who can join and when check-in is open. It uses your latest saved exam.",
       done: configured,
     },
     {
@@ -37,7 +36,7 @@ export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0
     },
   ];
   const list = (
-    <ol aria-label="Room settings steps" className="grid gap-3 sm:grid-cols-3">
+    <ol aria-label="Room settings steps" className="grid gap-3 sm:grid-cols-2">
       {steps.map((step, index) => {
         const current = !step.done && steps.slice(0, index).every((previous) => previous.done);
         return (
@@ -77,7 +76,7 @@ export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0
   }
   return (
     <section aria-label="Set up a room" className="sat-route-enter mt-4 rounded-2xl border border-black/[0.06] bg-white p-4">
-      <h2 className="text-[15px] font-semibold text-slate-950">Run this exam in three steps</h2>
+      <h2 className="text-[15px] font-semibold text-slate-950">Run this exam in two steps</h2>
       <div className="mt-3">{list}</div>
       <button
         type="button"

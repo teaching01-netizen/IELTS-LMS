@@ -24,11 +24,11 @@ vi.mock("../../../../features/exam-authoring/ui/delivery/useAccessSessionBinding
 vi.mock("../../../../features/exam-authoring/ui/access-links/StudentLinksDashboard", () => ({
   StudentLinksDashboard: (props: {
     selectedLinkId: string | null;
-    createRequest: { versionId?: string } | null;
+    createRequest: { id: number } | null;
     session: { onOpenRoom: (id: string) => void; onOpenResults: (id: string) => void };
   }) => <>
     <p>Selected group: {props.selectedLinkId}</p>
-    {props.createRequest ? <p>Setup: {props.createRequest.versionId ?? "current"}</p> : null}
+    {props.createRequest ? <p>Create form requested</p> : null}
     <button onClick={() => props.session.onOpenRoom("schedule-b")}>Open room</button>
     <button onClick={() => props.session.onOpenResults("schedule-b")}>View results</button>
   </>,
@@ -62,15 +62,15 @@ describe("Rooms navigation", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/sat/exams/exam-1/responses?access=schedule-b");
   });
 
-  it("consumes a pinned create-room request while preserving room selection in the URL", async () => {
-    open("/sat/exams/exam-1/access?link=b&new=1&version=v-4&versionNumber=4&scope=math");
-    expect(screen.getByText("Setup: v-4")).toBeInTheDocument();
+  it("consumes a create-room request while preserving room selection in the URL", async () => {
+    open("/sat/exams/exam-1/access?link=b&new=1");
+    expect(screen.getByText("Create form requested")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/sat/exams/exam-1/access?link=b · Return:"));
     expect(screen.getByTestId("location")).not.toHaveTextContent("new=1");
   });
 
   it("ignores the retired reuse handoff instead of opening a form", () => {
     open("/sat/exams/exam-1/access?link=b&reuse=1&version=v-4&versionNumber=4&scope=math");
-    expect(screen.queryByText(/Setup:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Create form requested")).not.toBeInTheDocument();
   });
 });

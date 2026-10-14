@@ -251,6 +251,8 @@ type CreateRequest struct {
 	ProviderKey      *string
 	ProviderExamType *string
 	OwnerID          string
+	// SATConfig overlays the SAT blueprint at creation (nil keeps the defaults).
+	SATConfig *SATExamConfig
 }
 
 // UpdateRequest mirrors UpdateExamRequest with revision fencing.
@@ -376,6 +378,14 @@ func validateCreate(req CreateRequest) error {
 	}
 	if strings.TrimSpace(req.OwnerID) == "" {
 		return validationError("Exam owner is required.")
+	}
+	if req.SATConfig != nil {
+		if NormalizeProviderKey(firstNonEmpty(req.ProviderKey)) != ProviderSAT {
+			return validationError("Exam configuration is only supported for SAT exams.")
+		}
+		if err := req.SATConfig.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -655,9 +665,14 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Exam, error) {
 			// SAT creation owns the complete editable blueprint. The authoring
 			// shell requires sections, adaptive modules, routing policies, and a
 			// table-driven scoring policy before the first sample/workbook import.
-			versionID, err = initializeSATDraftTx(ctx, q, id, strings.TrimSpace(req.OwnerID))
+			versionID, err = initializeSATDraftTx(ctx, q, id, strings.TrimSpace(req.OwnerID), req.SATConfig)
 			if err != nil {
 				return err
+			}
+			if req.SATConfig != nil && req.SATConfig.ShowClassroomScoreReport != nil {
+				if _, err := q.ExecContext(ctx, "UPDATE exam_entities SET sat_score_report_enabled = ? WHERE id = ?", *req.SATConfig.ShowClassroomScoreReport, id); err != nil {
+					return err
+				}
 			}
 		} else {
 			versionID = uuid.NewString()
@@ -878,138 +893,7 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 				return nil
 			}
 		}
-		var draftID string
-		var versionNumber int
-		var content, config string
-		var draftRev int
-		var providerKey, examType string
-		var organizationID sql.NullString
-		if err := q.QueryRowContext(ctx, "SELECT v.id, v.version_number, CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), v.revision, e.provider_key, e.exam_type, e.organization_id FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND v.id = (SELECT current_draft_version_id FROM exam_entities WHERE id = ?) FOR UPDATE", examID, examID).Scan(&draftID, &versionNumber, &content, &config, &draftRev, &providerKey, &examType, &organizationID); err != nil {
-			if err == sql.ErrNoRows {
-				return notFoundError("Draft version not found.")
-			}
-			return err
-		}
-		if req.ExpectedDraftVersionID != nil && *req.ExpectedDraftVersionID != draftID {
-			return conflictError("Draft changed while publish checks were running. Run the checks again.")
-		}
-		if req.ExpectedDraftRevision != nil && *req.ExpectedDraftRevision != draftRev {
-			return conflictError("Draft changed while publish checks were running. Run the checks again.")
-		}
-		if preflightVersionID != "" && (draftID != preflightVersionID || draftRev != preflightRevision) {
-			return conflictError("Draft changed while publish checks were running. Run the checks again.")
-		}
-		var entityRevision int
-		if err := q.QueryRowContext(ctx, "SELECT revision FROM exam_entities WHERE id = ? FOR UPDATE", examID).Scan(&entityRevision); err != nil {
-			return err
-		}
-		// SAT sends both counters: revision fences the entity and
-		// expectedDraftRevision fences its content. Legacy IELTS clients send
-		// only revision, which historically fences the draft.
-		if req.ExpectedDraftRevision != nil {
-			if entityRevision != req.Revision {
-				return conflictError("Exam changed while publish checks were running. Run the checks again.")
-			}
-		} else if draftRev != req.Revision {
-			return conflictError("Draft changed while publish checks were running. Run the checks again.")
-		}
-		provider := EffectiveProviderKey(providerKey, examType)
-		if provider != ProviderSAT {
-			if isEmptySnapshot(content) {
-				return validationError("Draft content is missing. Save a draft before publishing.")
-			}
-			if isEmptySnapshot(config) {
-				return validationError("Draft configuration is missing. Save a draft before publishing.")
-			}
-			if issues := validateContentShape(content, config, provider); len(issues) > 0 {
-				return validationError("Draft content is invalid: " + issues[0].Message)
-			}
-		}
-		if provider == ProviderSAT {
-			// New releases score every question. Clear legacy pretest flags on
-			// the locked draft so the sealed rows match what was validated.
-			if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id SET eq.is_pretest = FALSE WHERE s.exam_version_id = ? AND eq.is_pretest = TRUE", draftID); err != nil {
-				return err
-			}
-			issues, err := satpublish.ValidateDraftForScope(ctx, q, draftID, requestedScope)
-			if err != nil {
-				return err
-			}
-			if len(issues) > 0 {
-				first := issues[0]
-				rejection := validationError("SAT publish requirements are not met: " + first.Message)
-				rejection.Details = map[string]any{"code": first.Code, "path": first.Path}
-				return rejection
-			}
-			var sealedConfig map[string]json.RawMessage
-			if json.Unmarshal([]byte(config), &sealedConfig) != nil || sealedConfig == nil {
-				return validationError("SAT draft configuration must be a JSON object.")
-			}
-			sealedConfig[assessscore.SATSPRPolicyConfigKey] = json.RawMessage(`"strict_v1"`)
-			pinnedConfig, err := json.Marshal(sealedConfig)
-			if err != nil {
-				return err
-			}
-			if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET config_snapshot = ? WHERE id = ?", string(pinnedConfig), draftID); err != nil {
-				return err
-			}
-		}
-		var persistedScope any
-		if provider == ProviderSAT {
-			persistedScope = string(requestedScope)
-		}
-		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET is_draft = FALSE, is_published = TRUE, publish_notes = ?, sat_publish_scope = ?, revision = revision + 1 WHERE id = ?", nullableStrPtr(req.PublishNotes), persistedScope, draftID); err != nil {
-			return err
-		}
-		// The entity and draft remain locked until both publication pointers commit.
-		if _, err := q.ExecContext(ctx, "UPDATE exam_entities SET current_draft_version_id = NULL, current_published_version_id = ?, status = 'published', published_at = NOW(), revision = revision + 1 WHERE id = ?", draftID, examID); err != nil {
-			return err
-		}
-		if _, err := q.ExecContext(ctx, "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, from_state, to_state, created_at) VALUES (?, ?, ?, ?, 'published', 'draft', 'published', NOW())", uuid.NewString(), examID, draftID, actorID); err != nil {
-			return err
-		}
-		// Phase 02: exam.published, appended in-tx with the pointer flip so a
-		// rollback leaves no event.
-		//
-		// Publishing REMOVES the working draft (current_draft_version_id -> NULL),
-		// so this is a draft REPLACEMENT with no successor. Subscribers learn their
-		// workspace is no longer editable, stop autosaving against it, and keep
-		// local dirty work.
-		//
-		// DraftRevision is the post-flip generation (the UPDATE above bumps it by
-		// one); the entity revision is not meaningful for an exam-scoped event, so
-		// it stays 0. The emission is recorded on the publisher so the metric is
-		// counted only after this transaction commits.
-		if s.eventsOn() {
-			evt, err := authoringrealtime.NewEvent(authoringrealtime.EventInput{
-				Kind:           authoringrealtime.KindDraftReplaced,
-				OrganizationID: orgPtr(organizationID),
-				ExamID:         examID,
-				DraftVersionID: draftID,
-				DraftRevision:  draftRev + 1,
-				ActorID:        actorID,
-				Entity: authoringrealtime.Entity{
-					Kind:   authoringrealtime.EntityExam,
-					ExamID: examID,
-				},
-				ChangedFields: authoringrealtime.NewChangedFields(
-					string(authoringrealtime.FieldDeliverySettings),
-					string(authoringrealtime.FieldDraftRevision),
-				),
-				CausationID: normalizedKey,
-			})
-			if err == nil {
-				err = authoringrealtime.AppendInTx(ctx, q, s.liveOrigin, evt)
-			}
-			if err != nil {
-				emission.operation = "publish"
-				return authoringrealtime.WrapPublishError(err)
-			}
-			emission.operation = "publish"
-			emission.appended = true
-		}
-		_ = versionNumber
-		v, err := loadVersion(ctx, q, draftID)
+		v, err := s.publishDraftTx(ctx, q, actorID, examID, req, requestedScope, preflightVersionID, preflightRevision, normalizedKey, emission)
 		if err != nil {
 			return err
 		}
@@ -1027,6 +911,195 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 	})
 	emission.flush(err)
 	return out, err
+}
+
+// PublishPreflight is the draft identity a media preflight verified. A zero
+// value means no SAT draft existed to verify.
+type PublishPreflight struct {
+	VersionID string
+	Revision  int
+}
+
+// PreflightSATPublish runs the SAT media/readiness preflight against the exam's
+// current draft OUTSIDE any transaction. The returned identity must be handed
+// to PublishDraftInTx, which re-fences it under the draft row lock so a stale
+// preflight can never authorize different content.
+func (s *Service) PreflightSATPublish(ctx context.Context, examID string, scope SATPublishScope) (PublishPreflight, error) {
+	normalized, err := satpublish.NormalizeScope(scope)
+	if err != nil {
+		return PublishPreflight{}, validationError(err.Error())
+	}
+	versionID, revision, err := s.verifySATPublishMedia(ctx, examID, normalized)
+	if err != nil {
+		return PublishPreflight{}, err
+	}
+	return PublishPreflight{VersionID: versionID, Revision: revision}, nil
+}
+
+// PublishEmission defers post-commit telemetry for a publish that runs inside a
+// caller-owned transaction. Call Flush exactly once with the transaction result.
+type PublishEmission struct{ inner eventEmission }
+
+// Flush reports the outcome of the finished transaction.
+func (e *PublishEmission) Flush(err error) { e.inner.flush(err) }
+
+// PublishDraftInTx seals the exam's working draft inside the caller's
+// transaction. It performs every check Publish performs (draft identity and
+// revision fences, SAT release validation, config pinning, pointer flip,
+// audit event, realtime draft-replaced event) but owns no transaction and no
+// operation-key ledger: the caller supplies both. req.Revision fences the exam
+// entity; req.ExpectedDraft* fence the draft.
+func (s *Service) PublishDraftInTx(ctx context.Context, q tx.Tx, actorID, examID string, req PublishRequest, pre PublishPreflight, causationKey string, emission *PublishEmission) (Version, error) {
+	scope, err := satpublish.NormalizeScope(req.PublishScope)
+	if err != nil {
+		return Version{}, validationError(err.Error())
+	}
+	if emission == nil {
+		emission = &PublishEmission{}
+	}
+	return s.publishDraftTx(ctx, q, actorID, examID, req, scope, pre.VersionID, pre.Revision, causationKey, &emission.inner)
+}
+
+// publishDraftTx is the single implementation of "seal the locked draft". The
+// legacy Publish endpoint and the SAT one-action room creation both call it, so
+// the two paths cannot drift apart.
+func (s *Service) publishDraftTx(ctx context.Context, q tx.Tx, actorID, examID string, req PublishRequest, requestedScope satpublish.Scope, preflightVersionID string, preflightRevision int, normalizedKey string, emission *eventEmission) (Version, error) {
+	var draftID string
+	var versionNumber int
+	var content, config string
+	var draftRev int
+	var providerKey, examType string
+	var organizationID sql.NullString
+	if err := q.QueryRowContext(ctx, "SELECT v.id, v.version_number, CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), v.revision, e.provider_key, e.exam_type, e.organization_id FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND v.id = (SELECT current_draft_version_id FROM exam_entities WHERE id = ?) FOR UPDATE", examID, examID).Scan(&draftID, &versionNumber, &content, &config, &draftRev, &providerKey, &examType, &organizationID); err != nil {
+		if err == sql.ErrNoRows {
+			return Version{}, notFoundError("Draft version not found.")
+		}
+		return Version{}, err
+	}
+	if req.ExpectedDraftVersionID != nil && *req.ExpectedDraftVersionID != draftID {
+		return Version{}, conflictError("Draft changed while publish checks were running. Run the checks again.")
+	}
+	if req.ExpectedDraftRevision != nil && *req.ExpectedDraftRevision != draftRev {
+		return Version{}, conflictError("Draft changed while publish checks were running. Run the checks again.")
+	}
+	if preflightVersionID != "" && (draftID != preflightVersionID || draftRev != preflightRevision) {
+		return Version{}, conflictError("Draft changed while publish checks were running. Run the checks again.")
+	}
+	var entityRevision int
+	if err := q.QueryRowContext(ctx, "SELECT revision FROM exam_entities WHERE id = ? FOR UPDATE", examID).Scan(&entityRevision); err != nil {
+		return Version{}, err
+	}
+	// SAT sends both counters: revision fences the entity and
+	// expectedDraftRevision fences its content. Legacy IELTS clients send
+	// only revision, which historically fences the draft.
+	if req.ExpectedDraftRevision != nil {
+		if entityRevision != req.Revision {
+			return Version{}, conflictError("Exam changed while publish checks were running. Run the checks again.")
+		}
+	} else if draftRev != req.Revision {
+		return Version{}, conflictError("Draft changed while publish checks were running. Run the checks again.")
+	}
+	provider := EffectiveProviderKey(providerKey, examType)
+	if provider != ProviderSAT {
+		if isEmptySnapshot(content) {
+			return Version{}, validationError("Draft content is missing. Save a draft before publishing.")
+		}
+		if isEmptySnapshot(config) {
+			return Version{}, validationError("Draft configuration is missing. Save a draft before publishing.")
+		}
+		if issues := validateContentShape(content, config, provider); len(issues) > 0 {
+			return Version{}, validationError("Draft content is invalid: " + issues[0].Message)
+		}
+	}
+	if provider == ProviderSAT {
+		// New releases score every question. Clear legacy pretest flags on
+		// the locked draft so the sealed rows match what was validated.
+		if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id SET eq.is_pretest = FALSE WHERE s.exam_version_id = ? AND eq.is_pretest = TRUE", draftID); err != nil {
+			return Version{}, err
+		}
+		issues, err := satpublish.ValidateDraftForScope(ctx, q, draftID, requestedScope)
+		if err != nil {
+			return Version{}, err
+		}
+		if len(issues) > 0 {
+			first := issues[0]
+			rejection := validationError("SAT publish requirements are not met: " + first.Message)
+			wire := make([]map[string]any, 0, len(issues))
+			for _, found := range issues {
+				wire = append(wire, map[string]any{"code": found.Code, "path": found.Path, "message": found.Message})
+			}
+			rejection.Details = map[string]any{"code": first.Code, "path": first.Path, "blockingIssues": wire}
+			return Version{}, rejection
+		}
+		var sealedConfig map[string]json.RawMessage
+		if json.Unmarshal([]byte(config), &sealedConfig) != nil || sealedConfig == nil {
+			return Version{}, validationError("SAT draft configuration must be a JSON object.")
+		}
+		sealedConfig[assessscore.SATSPRPolicyConfigKey] = json.RawMessage(`"strict_v1"`)
+		pinnedConfig, err := json.Marshal(sealedConfig)
+		if err != nil {
+			return Version{}, err
+		}
+		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET config_snapshot = ? WHERE id = ?", string(pinnedConfig), draftID); err != nil {
+			return Version{}, err
+		}
+	}
+	var persistedScope any
+	if provider == ProviderSAT {
+		persistedScope = string(requestedScope)
+	}
+	if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET is_draft = FALSE, is_published = TRUE, publish_notes = ?, sat_publish_scope = ?, revision = revision + 1 WHERE id = ?", nullableStrPtr(req.PublishNotes), persistedScope, draftID); err != nil {
+		return Version{}, err
+	}
+	// The entity and draft remain locked until both publication pointers commit.
+	if _, err := q.ExecContext(ctx, "UPDATE exam_entities SET current_draft_version_id = NULL, current_published_version_id = ?, status = 'published', published_at = NOW(), revision = revision + 1 WHERE id = ?", draftID, examID); err != nil {
+		return Version{}, err
+	}
+	if _, err := q.ExecContext(ctx, "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, from_state, to_state, created_at) VALUES (?, ?, ?, ?, 'published', 'draft', 'published', NOW())", uuid.NewString(), examID, draftID, actorID); err != nil {
+		return Version{}, err
+	}
+	// Phase 02: exam.published, appended in-tx with the pointer flip so a
+	// rollback leaves no event.
+	//
+	// Publishing REMOVES the working draft (current_draft_version_id -> NULL),
+	// so this is a draft REPLACEMENT with no successor. Subscribers learn their
+	// workspace is no longer editable, stop autosaving against it, and keep
+	// local dirty work.
+	//
+	// DraftRevision is the post-flip generation (the UPDATE above bumps it by
+	// one); the entity revision is not meaningful for an exam-scoped event, so
+	// it stays 0. The emission is recorded on the publisher so the metric is
+	// counted only after this transaction commits.
+	if s.eventsOn() {
+		evt, err := authoringrealtime.NewEvent(authoringrealtime.EventInput{
+			Kind:           authoringrealtime.KindDraftReplaced,
+			OrganizationID: orgPtr(organizationID),
+			ExamID:         examID,
+			DraftVersionID: draftID,
+			DraftRevision:  draftRev + 1,
+			ActorID:        actorID,
+			Entity: authoringrealtime.Entity{
+				Kind:   authoringrealtime.EntityExam,
+				ExamID: examID,
+			},
+			ChangedFields: authoringrealtime.NewChangedFields(
+				string(authoringrealtime.FieldDeliverySettings),
+				string(authoringrealtime.FieldDraftRevision),
+			),
+			CausationID: normalizedKey,
+		})
+		if err == nil {
+			err = authoringrealtime.AppendInTx(ctx, q, s.liveOrigin, evt)
+		}
+		if err != nil {
+			emission.operation = "publish"
+			return Version{}, authoringrealtime.WrapPublishError(err)
+		}
+		emission.operation = "publish"
+		emission.appended = true
+	}
+	_ = versionNumber
+	return loadVersion(ctx, q, draftID)
 }
 
 type blockedMediaDiagnostic struct {

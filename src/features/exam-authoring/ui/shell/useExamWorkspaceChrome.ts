@@ -6,7 +6,10 @@ import { canViewExamResponses, describeExamLifecycle, type DeliveryTarget, type 
 export interface ExamWorkspaceChrome {
   lifecycle: ExamLifecycleCopy;
   showResponses: boolean;
-  /** A published version exists, so a session can be prepared from any exam surface. */
+  /**
+   * Staff who may create rooms (the server gate: admin and builder). Creating a
+   * room needs no prior publication: it captures the latest saved exam.
+   */
   canCreateSession: boolean;
   /** Authoritative current version, used for direct/reloaded published workspaces. */
   publishedTarget: DeliveryTarget | null;
@@ -21,7 +24,7 @@ export function useExamWorkspaceChrome(examId: string): ExamWorkspaceChrome {
     () => ({
       lifecycle: describeExamLifecycle(releaseState),
       showResponses: canViewExamResponses(role),
-      canCreateSession: Boolean(releaseState?.currentPublishedVersion),
+      canCreateSession: role === "admin" || role === "builder",
       publishedTarget: releaseState?.currentPublishedVersion
         ? {
             versionId: releaseState.currentPublishedVersion.id,

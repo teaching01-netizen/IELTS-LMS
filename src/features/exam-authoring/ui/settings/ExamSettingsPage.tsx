@@ -1,20 +1,19 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { ExamEntity } from "../../../../types/domain";
 import { requestAuthoringDraftOnEntry } from "../../application/authoringEntryIntent";
-import type { AssessmentValidationIssue } from "../../contracts/assessment";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
 import { CollaborationHeaderCluster } from "../collaboration/CollaborationHeaderCluster";
-import { ExamPublishSheet } from "../publish/ExamPublishSheet";
-import {
-  publishModuleDeepLink,
-  resolvePublishIssueDestination,
-} from "../release/releaseSelectors";
 import { ExamWorkspaceHeader } from "../shell/ExamWorkspaceHeader";
 import { deliveryDestination, examWorkspacePath, type ExamWorkspaceTab } from "../shell/examLifecycle";
 import { useExamWorkspaceChrome } from "../shell/useExamWorkspaceChrome";
 import { satListReturnTarget } from "@/src/products/sat/ui/useSatListReturn";
 import { DeliverySettingsPanel } from "./DeliverySettingsPanel";
+import { ScoreConverterPanel } from "../release/ScoreConverterPanel";
+import { ScoreReportSettingPanel } from "../release/ScoreReportSettingPanel";
+import { useExamQuery } from "../../api/examQueries";
+
+const SETTINGS_SCORING_PANEL_ID = "sat-settings-scoring";
 
 /**
  * Settings tab: always a full page, so the tab behaves like every other tab
@@ -23,10 +22,11 @@ import { DeliverySettingsPanel } from "./DeliverySettingsPanel";
  */
 export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const examQuery = useExamQuery(exam.id);
   const chrome = useExamWorkspaceChrome(exam.id);
   const [dirtyCount, setDirtyCount] = useState(0);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
-  const [publishOpen, setPublishOpen] = useState(false);
 
   useEffect(() => {
     if (dirtyCount === 0) return;
@@ -38,31 +38,23 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirtyCount]);
 
+  // A create-room finding about the converter deep-links here with ?panel=scoring.
+  const focusScoring = searchParams.get("panel") === "scoring";
+  useEffect(() => {
+    if (!focusScoring) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(SETTINGS_SCORING_PANEL_ID);
+      target?.scrollIntoView?.({ block: "start" });
+      target?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusScoring]);
   const go = (path: string) => {
     if (dirtyCount > 0) setPendingPath(path);
     else navigate(path);
   };
   const onSelectTab = (tab: ExamWorkspaceTab) => {
     if (tab !== "settings") go(examWorkspacePath(exam.id, tab));
-  };
-  const openIssue = (issue: AssessmentValidationIssue) => {
-    const destination = resolvePublishIssueDestination(issue, null);
-    if (destination.kind === "unresolved") return;
-    // Converter findings are fixed beside the release policy, not in the
-    // question column; timing/routing stay on this page.
-    if (destination.kind === "score-policy") {
-      go(`/sat/exams/${encodeURIComponent(exam.id)}/release?panel=scoring`);
-      return;
-    }
-    const params = new URLSearchParams();
-    if (destination.kind === "question") {
-      params.set("question", destination.questionId);
-      if (destination.field) params.set("field", destination.field);
-    } else {
-      params.set("module", publishModuleDeepLink(destination));
-    }
-    requestAuthoringDraftOnEntry(exam.id);
-    go(`${examWorkspacePath(exam.id, "questions")}?${params.toString()}`);
   };
 
   return (
@@ -76,9 +68,7 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
         onBack={() => go(satListReturnTarget("/sat/exams").to)}
         collaborationSlot={<CollaborationHeaderCluster surface="release" />}
         onPreview={() => go(`/sat/exams/${encodeURIComponent(exam.id)}/preview`)}
-        {...(exam.canPublish ? { onPublish: () => setPublishOpen(true) } : {})}
         {...(chrome.canCreateSession ? { onCreateSession: () => go(deliveryDestination(exam.id)) } : {})}
-        publishDisabledReason={dirtyCount > 0 ? "Save your timing changes before publishing" : null}
       />
       <div className="mx-auto w-full max-w-[920px] px-4 pb-20 pt-8 sm:px-6">
         <section aria-labelledby="exam-settings-delivery">
@@ -98,18 +88,25 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
             }}
           />
         </section>
+        {/* One addressable home for exam-level score policy, so a create-room
+            finding about the converter has somewhere to land. */}
+        <section
+          id={SETTINGS_SCORING_PANEL_ID}
+          tabIndex={-1}
+          aria-labelledby="exam-settings-results"
+          className="mt-12 space-y-6 outline-none"
+        >
+          <div>
+            <h2 id="exam-settings-results" className="text-[length:var(--sat-staff-type-title-size,28px)] font-semibold leading-[var(--sat-staff-type-title-line,34px)] tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">Results &amp; scoring</h2>
+            <p className="mt-2 max-w-2xl text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+              What students see when they finish, and how estimated scores are produced.
+            </p>
+          </div>
+          <ScoreReportSettingPanel exam={exam} onSaved={() => examQuery.refetch()} />
+          <ScoreConverterPanel examId={exam.id} canEdit={exam.canEdit} />
+        </section>
       </div>
 
-      {publishOpen ? (
-        <ExamPublishSheet
-          examId={exam.id}
-          open
-          onClose={() => setPublishOpen(false)}
-          onOpenIssue={openIssue}
-          onOpenStudentAccess={(target) => go(deliveryDestination(exam.id, target))}
-          onOpenSettings={() => setPublishOpen(false)}
-        />
-      ) : null}
       <AuthoringConfirmDialog
         open={pendingPath !== null}
         title="Leave with unsaved changes?"

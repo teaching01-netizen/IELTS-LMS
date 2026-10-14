@@ -1,0 +1,47 @@
+✔ [2/7] Built proof.Model
+✔ [3/7] Built proof.Safety
+✔ [4/7] Built proof.Counterexamples
+ℹ [5/7] Built proof.AxiomAudit
+info: ././././proof/AxiomAudit.lean:4:0: SatAutoRoom.reachable_invariant {valid : SatAutoRoom.Validator} {s : SatAutoRoom.State}
+  (h : SatAutoRoom.Reachable valid s) : SatAutoRoom.Invariant s
+info: ././././proof/AxiomAudit.lean:5:0: SatAutoRoom.at_most_one_effect {valid : SatAutoRoom.Validator} {s : SatAutoRoom.State}
+  (h : SatAutoRoom.Reachable valid s) (k : SatAutoRoom.Key) : s.counts k ≤ 1
+info: ././././proof/AxiomAudit.lean:6:0: SatAutoRoom.room_has_atomic_receipt_and_schedule {valid : SatAutoRoom.Validator} {s : SatAutoRoom.State}
+  {k : SatAutoRoom.Key} {e : SatAutoRoom.Effect} (h : SatAutoRoom.Reachable valid s) (room : s.rooms k = some e) :
+  s.receipts k = some e ∧ s.schedules k = some e.version
+info: ././././proof/AxiomAudit.lean:7:0: SatAutoRoom.room_has_matching_release {valid : SatAutoRoom.Validator} {s : SatAutoRoom.State} {k : SatAutoRoom.Key}
+  {e : SatAutoRoom.Effect} (h : SatAutoRoom.Reachable valid s) (room : s.rooms k = some e) :
+  ∃ rel, s.releases e.version = some rel ∧ rel.payload = e.payload ∧ SatAutoRoom.Covers rel.scope e.scope
+info: ././././proof/AxiomAudit.lean:8:0: SatAutoRoom.room_pin_preserved {valid : SatAutoRoom.Validator} {s : SatAutoRoom.State} {a : SatAutoRoom.Action}
+  {t : SatAutoRoom.State} {k : SatAutoRoom.Key} {e : SatAutoRoom.Effect} (inv : SatAutoRoom.Invariant s)
+  (room : s.rooms k = some e) (step : SatAutoRoom.Step valid s a t) : t.rooms k = some e
+info: ././././proof/AxiomAudit.lean:9:0: SatAutoRoom.supplied_fences_match {s : SatAutoRoom.State} {r : SatAutoRoom.Request}
+  {revision draftId draftRevision : Nat} {d : SatAutoRoom.Draft} (fence : SatAutoRoom.Fences s r)
+  (he : r.expectedExam = some revision) (hd : r.expectedDraft = some (some draftId))
+  (hv : r.expectedRevision = some draftRevision) (actual : s.draft = some d) :
+  s.examRevision = revision ∧ d.id = draftId ∧ d.revision = draftRevision
+info: ././././proof/AxiomAudit.lean:10:0: 'SatAutoRoom.initiation' depends on axioms: [propext, Quot.sound]
+info: ././././proof/AxiomAudit.lean:11:0: 'SatAutoRoom.selection_covers' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:12:0: 'SatAutoRoom.selection_preserves_release' depends on axioms: [propext]
+info: ././././proof/AxiomAudit.lean:13:0: 'SatAutoRoom.commit_preserves' depends on axioms: [propext]
+info: ././././proof/AxiomAudit.lean:14:0: 'SatAutoRoom.consecution' depends on axioms: [propext]
+info: ././././proof/AxiomAudit.lean:15:0: 'SatAutoRoom.reachable_invariant' depends on axioms: [propext, Quot.sound]
+info: ././././proof/AxiomAudit.lean:16:0: 'SatAutoRoom.at_most_one_effect' depends on axioms: [propext, Quot.sound]
+info: ././././proof/AxiomAudit.lean:17:0: 'SatAutoRoom.room_has_atomic_receipt_and_schedule' depends on axioms: [propext, Quot.sound]
+info: ././././proof/AxiomAudit.lean:18:0: 'SatAutoRoom.room_has_matching_release' depends on axioms: [propext, Quot.sound]
+info: ././././proof/AxiomAudit.lean:19:0: 'SatAutoRoom.room_pin_preserved' depends on axioms: [propext]
+info: ././././proof/AxiomAudit.lean:20:0: 'SatAutoRoom.replay_no_effect' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:21:0: 'SatAutoRoom.different_body_not_replayable' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:22:0: 'SatAutoRoom.supplied_fences_match' depends on axioms: [propext]
+info: ././././proof/AxiomAudit.lean:23:0: 'SatAutoRoom.stale_preflight_cannot_seal' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:24:0: 'SatAutoRoom.full_reuse_is_not_equal_scope' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:25:0: 'SatAutoRoom.no_op_write_defeats_clone_reuse' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:26:0: 'SatAutoRoom.omitted_fences_accept_changed_revision' depends on axioms: [propext, Quot.sound]
+info: ././././proof/AxiomAudit.lean:27:0: 'SatAutoRoom.live_projection_not_exact_response' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:28:0: 'SatAutoRoom.remount_loses_unresolved_identity' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:29:0: 'SatAutoRoom.successful_seal_reachable' depends on axioms: [propext, Quot.sound]
+info: ././././proof/AxiomAudit.lean:30:0: 'SatAutoRoom.lost_ack_retry_reachable' depends on axioms: [propext, Quot.sound]
+info: ././././proof/AxiomAudit.lean:31:0: 'SatAutoRoom.lost_ack_retry_one_effect' depends on axioms: [propext]
+info: ././././proof/AxiomAudit.lean:32:0: 'SatAutoRoom.permanent_abort_run' does not depend on any axioms
+✔ [6/7] Built SatAutoRoom
+Build completed successfully.

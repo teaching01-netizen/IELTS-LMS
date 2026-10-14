@@ -97,7 +97,6 @@ import { ExamWorkspaceHeader } from "./shell/ExamWorkspaceHeader";
 import { describeExamLifecycle, examWorkspacePath, type DeliveryTarget, type ExamLifecycleCopy, type ExamWorkspaceTab } from "./shell/examLifecycle";
 import { QuestionCardStack } from "./spine/QuestionCardStack";
 import { useOutlinePreference } from "./spine/useOutlinePreference";
-import { ExamPublishSheet } from "./publish/ExamPublishSheet";
 import { SatCreateRoomFlow } from "./publish/SatCreateRoomFlow";
 import { ExamSettingsSheet } from "./settings/ExamSettingsSheet";
 import { satListReturnTarget } from "@/src/products/sat/ui/useSatListReturn";
@@ -106,8 +105,7 @@ import { satListReturnTarget } from "@/src/products/sat/ui/useSatListReturn";
 export interface AuthoringWorkspaceChrome {
   lifecycle: ExamLifecycleCopy;
   showResponses: boolean;
-  canPublish: boolean;
-  /** This staff member may create a room from the current version or draft. */
+  /** This staff member may create a room; a room needs no prior publication. */
   canCreateSession?: boolean;
   /** Current release target, supplied by the authoritative release projection. */
   publishedTarget?: DeliveryTarget | null;
@@ -116,7 +114,6 @@ export interface AuthoringWorkspaceChrome {
 const DEFAULT_CHROME: AuthoringWorkspaceChrome = {
   lifecycle: describeExamLifecycle(null),
   showResponses: false,
-  canPublish: false,
   publishedTarget: null,
 };
 
@@ -217,12 +214,8 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   } = useAuthoringOverlays();
   const rail = useRailWidth();
   const [outlineOpen, setOutlineOpenPreference] = useOutlinePreference();
-  const [publishOpen, setPublishOpen] = useState(false);
-  const [publishReceipt, setPublishReceipt] = useState<{ examId: string; target: DeliveryTarget } | null>(null);
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
-  const [createRoomTarget, setCreateRoomTarget] = useState<DeliveryTarget | null>(null);
-  // "publish" means the settings sheet was opened from Publish and returns there on close.
-  const [settingsOpen, setSettingsOpen] = useState<false | "quick" | "publish">(false);
+  const [settingsOpen, setSettingsOpen] = useState<false | "quick">(false);
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [focusField, setFocusField] = useState<string | null>(null);
@@ -240,12 +233,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   // a real shell or the lifecycle surface; no status code is inspected here.
   const shellState = shellLifecycle.state;
   const shell = shellState.kind === "ready" ? shellState.shell : undefined;
-  const acknowledgedTarget = publishReceipt?.examId === examId ? publishReceipt.target : null;
-  const publishedTarget = acknowledgedTarget ?? chrome.publishedTarget ?? null;
-  useEffect(() => {
-    setPublishReceipt(null);
-    setPublishOpen(false);
-  }, [examId]);
+  const publishedTarget = chrome.publishedTarget ?? null;
   // An author who ARRIVED here by choosing this exam in the Exam Library asked
   // to edit it, so a NO_DRAFT answer opens the draft for them instead of
   // stopping at the wall. The gesture is in-memory and one-shot
@@ -933,11 +921,11 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       if (destination.kind === "unresolved") return;
       setSelectedIds(new Set());
       if (destination.kind === "score-policy") {
-        // The converter lives with the release policy, not in the question
-        // column: leave the builder for its scoring section.
+        // The converter lives in Settings (Results & scoring), not in the
+        // question column: leave the builder for its section.
         void (async () => {
           if (await flushBeforeRouteChange()) {
-            navigate(`/sat/exams/${encodeURIComponent(examId)}/release?panel=scoring`);
+            navigate(`${examWorkspacePath(examId, "settings")}?panel=scoring`);
           }
         })();
         return;
@@ -995,22 +983,11 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       if (await flushBeforeRouteChange()) navigate(path);
     })();
   };
-  const openPublish = () => {
+  const openCreateRoom = () => {
+    // Unacknowledged edits are flushed first; the create-room hook re-checks the
+    // same barrier at submit, so this only avoids opening over a failed save.
     void (async () => {
-      if (await flushBeforeRouteChange()) setPublishOpen(true);
-    })();
-  };
-  const openCreateRoom = (target?: DeliveryTarget) => {
-    if (target) {
-      setCreateRoomTarget(target);
-      setCreateRoomOpen(true);
-      return;
-    }
-    void (async () => {
-      if (await flushBeforeRouteChange()) {
-        setCreateRoomTarget(null);
-        setCreateRoomOpen(true);
-      }
+      if (await flushBeforeRouteChange()) setCreateRoomOpen(true);
     })();
   };
   const createRoomFlow = createRoomOpen ? (
@@ -1018,20 +995,13 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       key="sat-create-room-flow"
       examId={examId}
       examTitle={examTitle}
-      pinnedTarget={createRoomTarget}
-      onClose={() => {
-        setCreateRoomOpen(false);
-        setCreateRoomTarget(null);
-      }}
+      onClose={() => setCreateRoomOpen(false)}
       onFixIssue={(issue) => {
         setCreateRoomOpen(false);
-        setCreateRoomTarget(null);
         void openIssue(issue);
       }}
-      onPublished={(target) => setPublishReceipt({ examId, target })}
       onRoomCreated={(link: AssessmentAccessLink) => {
         setCreateRoomOpen(false);
-        setCreateRoomTarget(null);
         const returnToDelivery = `${examWorkspacePath(examId, "delivery")}?${new URLSearchParams({ link: link.id })}`;
         if (chrome.showResponses) {
           navigate(`/sat/sessions/${encodeURIComponent(link.scheduleId)}`, { state: { from: returnToDelivery } });
@@ -1041,36 +1011,11 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       }}
     />
   ) : null;
-  const publishSheet = publishOpen ? (
-    <ExamPublishSheet
-      key="exam-publish-sheet"
-      examId={examId}
-      open
-      onClose={() => setPublishOpen(false)}
-      onOpenIssue={(issue) => void openIssue(issue)}
-      onOpenStudentAccess={(target) => {
-        // The standalone publish journey remains available, then continues into
-        // the same room form pinned to the confirmed immutable version.
-        setPublishOpen(false);
-        openCreateRoom(target ?? publishedTarget ?? undefined);
-      }}
-      onPublished={(target) => setPublishReceipt({ examId, target })}
-      onOpenSettings={() => {
-        setPublishOpen(false);
-        setSettingsOpen("publish");
-      }}
-      focusFallback={() => publishedRoomButtonRef.current}
-    />
-  ) : null;
   const settingsSheet = settingsOpen ? (
     <ExamSettingsSheet
       examId={examId}
       open
-      onClose={() => {
-        const returnToPublish = settingsOpen === "publish";
-        setSettingsOpen(false);
-        if (returnToPublish) openPublish();
-      }}
+      onClose={() => setSettingsOpen(false)}
     />
   ) : null;
   const recoverySurfaces = (
@@ -1113,12 +1058,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   // mutation installs the shell in cache so this component re-renders with
   // data, and never auto-loops on failure.
   if (!shell) {
-    const showPublishedReceipt = Boolean(
-      publishedTarget &&
-      (shellState.kind === "no-draft" || acknowledgedTarget) &&
-      shellState.kind !== "forbidden" &&
-      shellState.kind !== "exam-not-found"
-    );
+    const showPublishedReceipt = Boolean(publishedTarget && shellState.kind === "no-draft");
     let lifecycleContent: ReactNode;
     if (draftOnEntry.opening) {
       lifecycleContent = <SatAuthoringLoadingSurface label="Opening SAT workspace…" />;
@@ -1138,9 +1078,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
             },
           }}
           roomButtonRef={publishedRoomButtonRef}
-          {...(chrome.canCreateSession
-            ? { onCreateSession: () => openCreateRoom(publishedTarget) }
-            : {})}
+          {...(chrome.canCreateSession ? { onCreateSession: () => openCreateRoom() } : {})}
           onNavigate={(path) => navigate(path)}
         />
       );
@@ -1168,7 +1106,6 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
             </p>
           ) : null}
           {lifecycleContent}
-          {publishSheet}
           {settingsSheet}
         </div>
         {createRoomFlow}
@@ -1338,7 +1275,6 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
               }
               onPreview={() => goAfterFlush(`/sat/exams/${examId}/preview`)}
               previewDisabled={!shell}
-              {...(chrome.canPublish ? { onPublish: openPublish } : {})}
               {...(chrome.canCreateSession ? { onCreateSession: () => openCreateRoom() } : {})}
               issueCount={totalErrors}
               onOpenIssues={() => {
@@ -1611,7 +1547,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
               ...([-1,1] as const).map(direction=>({id:direction===-1?'up':'down',label:direction===-1?'Move question up':'Move question down',group:'Question' as const,disabledReason:!draft?'Select a question first':rowMutationBusy?'Another operation is running':!selectedModule.questions[selectedModuleIndex+direction]?'Already at module boundary':undefined,onSelect:()=>{const expected=selectedModule.questions.map(q=>q.examQuestionId),next=[...expected],i=selectedModuleIndex,j=i+direction;const from=next[i],to=next[j];if(!from||!to)return;next[i]=to;next[j]=from;void handleReorder(next,expected).catch(()=>undefined);}})),
               {id:'question-preview',label:'Preview question',group:'Question',onSelect:()=>setPreviewOpen(true),disabledReason:!draft?'Select a question first':undefined},
               {id:'preview',label:'Preview exam',group:'Exam',onSelect:()=>{void flushBeforeRouteChange().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/preview`);});}},
-              {id:'release',label:'Release exam',group:'Exam',onSelect:()=>{void flushBeforeRouteChange().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/release`);});}},
+              {id:'settings',label:'Exam settings',group:'Exam',onSelect:()=>{void flushBeforeRouteChange().then(ok=>{if(ok)navigate(examWorkspacePath(examId,'settings'));});}},
               {id:'overview',label:'Exam overview',group:'Exam',onSelect:()=>setWorkspaceMode('overview')},
               {id:'issues',label:'Review issues',group:'Exam',onSelect:()=>void openIssues()},
               {id:'navigator',label:'Open question navigator',group:'View',onSelect:()=>{setWorkspaceMode('build');if(compactViewport)setQuestionListOpen(true);else searchInputRef.current?.focus();}},
@@ -1692,7 +1628,6 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
           }}
           onConfirm={() => void handleLoadSampleExam()}
         />
-        {publishSheet}
         {settingsSheet}
       </div>
       {createRoomFlow}
@@ -1732,8 +1667,8 @@ function PublishedExamWorkspaceSurface({
       <ExamWorkspaceHeader
         examTitle={examTitle}
         lifecycle={{
-          label: `${versionLabel} published`,
-          detail: "Publish was confirmed for this version.",
+          label: "Ready to create rooms",
+          detail: `Latest room exam: ${versionLabel}`,
           tone: "info",
           state: "published_current",
         }}
@@ -1747,13 +1682,13 @@ function PublishedExamWorkspaceSurface({
       <main className="mx-auto flex w-full max-w-[1240px] flex-col gap-5 px-4 py-8 sm:px-6">
         <section className="authoring-surface max-w-2xl p-6 sm:p-8" aria-labelledby="published-receipt-title">
           <p role="status" aria-live="polite" className="text-sm font-semibold text-green-800">
-            {versionLabel} is published.
+            Your exam is saved and ready for rooms.
           </p>
           <h2 id="published-receipt-title" className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
             Create a room or continue editing
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            Create a room to give students access to {versionLabel}. Existing rooms keep the version they were created with.
+            A new room uses your latest saved exam. Existing rooms keep the version they were created with (currently {versionLabel}).
           </p>
           {canOpenDraft ? (
             <button

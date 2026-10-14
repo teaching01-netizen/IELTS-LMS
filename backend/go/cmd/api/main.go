@@ -48,6 +48,7 @@ import (
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/satrooms"
 	"example.com/ielts-proctoring/internal/satscoring"
 	"example.com/ielts-proctoring/internal/schedules"
 	"example.com/ielts-proctoring/internal/student"
@@ -89,6 +90,7 @@ type App struct {
 	Authoring     *authoring.Service
 	SatScoring    *satscoring.Service
 	AccessLinks   *accesslinks.Service
+	SatRooms      *satrooms.Service
 	SAT           *sat.Service
 	ACT           *act.Service
 	Delivery      *delivery.Service
@@ -279,6 +281,7 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.Authoring = svc.Authoring
 		app.SatScoring = svc.SatScoring
 		app.AccessLinks = svc.AccessLinks
+		app.SatRooms = svc.SatRooms
 		app.SAT = svc.SAT
 		app.ACT = svc.ACT
 		app.Release = svc.Release
@@ -619,6 +622,14 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Put("/exams/{examID}/sat-classroom-plan", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan", authorClassroomPlanHandler(app)))
 			r.With(adminLimit).Get("/exams/{examID}/sat-score-converter", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter", authorScoreConverterHandler(app)))
 			r.With(adminLimit).Put("/exams/{examID}/sat-score-converter", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter", authorScoreConverterHandler(app)))
+		})
+		// SAT one-action room creation: server-side release capture + room in
+		// one transaction, plus the per-actor receipt lookup used to recover a
+		// lost response.
+		r.With(limitTier(app, httpx.TierWrites, userKey())).Route("/sat", func(r chi.Router) {
+			r.With(adminLimit).Post("/exams/{id}/rooms", authorize("POST /api/v1/sat/exams/{id}/rooms", satRoomCreate(app)))
+			r.With(adminLimit).Get("/exam-config/defaults", authorize("GET /api/v1/sat/exam-config/defaults", satExamConfigDefaults(app)))
+			r.With(adminLimit).Get("/room-operations/{operationKey}", authorize("GET /api/v1/sat/room-operations/{operationKey}", satRoomOperationGet(app)))
 		})
 		// SAT delivery reads (the polled state view, module entry probes) must
 		// not spend the writes budget that answer saves and submits draw from.
