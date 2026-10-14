@@ -6,7 +6,10 @@ import type { AssessmentValidationIssue } from "../../contracts/assessment";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
 import { CollaborationHeaderCluster } from "../collaboration/CollaborationHeaderCluster";
 import { ExamPublishSheet } from "../publish/ExamPublishSheet";
-import { parseIssueLink } from "../release/releaseSelectors";
+import {
+  publishModuleDeepLink,
+  resolvePublishIssueDestination,
+} from "../release/releaseSelectors";
 import { ExamWorkspaceHeader } from "../shell/ExamWorkspaceHeader";
 import { deliveryDestination, examWorkspacePath, type ExamWorkspaceTab } from "../shell/examLifecycle";
 import { useExamWorkspaceChrome } from "../shell/useExamWorkspaceChrome";
@@ -43,11 +46,21 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
     if (tab !== "settings") go(examWorkspacePath(exam.id, tab));
   };
   const openIssue = (issue: AssessmentValidationIssue) => {
-    const { questionId, field } = parseIssueLink(issue.path);
-    if (!questionId && !field) return;
+    const destination = resolvePublishIssueDestination(issue, null);
+    if (destination.kind === "unresolved") return;
+    // Converter findings are fixed beside the release policy, not in the
+    // question column; timing/routing stay on this page.
+    if (destination.kind === "score-policy") {
+      go(`/sat/exams/${encodeURIComponent(exam.id)}/release?panel=scoring`);
+      return;
+    }
     const params = new URLSearchParams();
-    if (questionId) params.set("question", questionId);
-    if (field) params.set("field", field);
+    if (destination.kind === "question") {
+      params.set("question", destination.questionId);
+      if (destination.field) params.set("field", destination.field);
+    } else {
+      params.set("module", publishModuleDeepLink(destination));
+    }
     requestAuthoringDraftOnEntry(exam.id);
     go(`${examWorkspacePath(exam.id, "questions")}?${params.toString()}`);
   };

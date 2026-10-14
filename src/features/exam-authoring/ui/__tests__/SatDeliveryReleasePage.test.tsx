@@ -274,6 +274,59 @@ describe("SatDeliveryReleasePage", () => {
     expect(onIssueClick).toHaveBeenCalledWith(blockingIssue);
   });
 
+  it("names a module and a converter destination, and refuses one it cannot reach", () => {
+    const onIssueClick = vi.fn();
+    const moduleIssue: AssessmentValidationIssue = {
+      code: "sat.module.incomplete",
+      path: "reading-writing.rw-m1",
+      message: "Module 1 has 20 of 27 questions.",
+      blocking: true,
+    };
+    const converterIssue: AssessmentValidationIssue = {
+      code: "sat.converter.missing",
+      path: "scoringPolicy",
+      message: "Math needs a conversion table.",
+      blocking: true,
+    };
+    const unreachableIssue: AssessmentValidationIssue = {
+      code: "sat.module.pretest_count",
+      path: "unmapped",
+      message: "Pretest counts are unavailable.",
+      blocking: true,
+    };
+    render(
+      <SatDeliveryReleasePage
+        {...pageProps({
+          readiness: {
+            ...readyReport,
+            valid: false,
+            errors: [moduleIssue, converterIssue, unreachableIssue],
+          },
+          onIssueClick,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Module 1 has 20 of 27 questions/ }));
+    expect(onIssueClick).toHaveBeenCalledWith(moduleIssue);
+    fireEvent.click(screen.getByRole("button", { name: /Math needs a conversion table/ }));
+    expect(onIssueClick).toHaveBeenCalledWith(converterIssue);
+
+    // No destination: the row says so and cannot be pressed into nowhere.
+    const unreachable = screen.getByRole("button", { name: /Pretest counts are unavailable/ });
+    expect(unreachable).toBeDisabled();
+    expect(within(unreachable).getByText("No automatic fix")).toBeInTheDocument();
+  });
+
+  it("addresses the score policy section so a converter finding has a home", async () => {
+    const { rerender } = render(<SatDeliveryReleasePage {...pageProps()} />);
+    expect(document.getElementById("sat-release-scoring")).not.toBeNull();
+    expect(screen.getByRole("region", { name: "Score policy" })).toBeInTheDocument();
+
+    rerender(<SatDeliveryReleasePage {...pageProps({ focusScoringPanel: true })} />);
+    await waitFor(() => expect(document.getElementById("sat-release-scoring")).toHaveFocus());
+  });
+
   it("publishes through the confirmation dialog and preserves optional notes", async () => {
     const onPublish = vi.fn().mockResolvedValue(undefined);
     render(<SatDeliveryReleasePage {...pageProps({ onPublish })} />);

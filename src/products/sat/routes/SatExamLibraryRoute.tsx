@@ -14,10 +14,12 @@ import { SatSegmentedControl } from '../ui/SegmentedControl';
 import { useSatListParams, type SatLibraryTab } from '../ui/useSatListParams';
 import { useSatListReturn } from '../ui/useSatListReturn';
 import {
+  SAT_ROW_ACTION_CLASS,
+  SAT_ROW_PRIMARY_LINK_CLASS,
   SatContainer,
   SatEmptyState,
   SatList,
-  SatListRow,
+  SatListRowShell,
   SatListSkeleton,
   SatListToolbar,
   SatPageHeader,
@@ -39,8 +41,13 @@ function formatDate(value: string | null | undefined): string {
 
 const TAB_NOUN: Record<SatLibraryTab, string> = { active: 'active', drafts: 'draft', published: 'published', archived: 'archived' };
 
-/** One grid for the column labels and every row, so Exam / Status / Updated align. */
-const ROW_GRID = 'grid-cols-[minmax(0,1fr)_16px] gap-x-4 md:grid-cols-[minmax(0,1fr)_224px_120px_16px]';
+/**
+ * One grid for the column labels and every row, so Exam / Status / Updated
+ * align. The trailing column is wide enough for a published exam's explicit
+ * Edit control AND the chevron, and it is reserved on every row (and in the
+ * header) so a row with a control never shifts its neighbours' columns.
+ */
+const ROW_GRID = 'grid-cols-[minmax(0,1fr)_16px] gap-x-4 md:grid-cols-[minmax(0,1fr)_224px_120px_140px]';
 
 function libraryTabMatches(tab: SatLibraryTab, exam: ExamEntity): boolean {
   if (tab === 'archived') return exam.status === 'archived';
@@ -208,21 +215,45 @@ export function SatExamLibraryRoute() {
           {exams.map((exam, rowIndex) => {
             const status = statusLabel(exam);
             const tone = statusTone(exam);
+            // A published exam's job in this list is running the exam, not
+            // editing it: opening the row reaches Rooms WITHOUT arming a draft
+            // intent (publishing seals the draft). Editing stays available as
+            // its own explicit control beside the row link.
+            const hasPublishedVersion = Boolean(exam.currentPublishedVersionId);
+            const primaryPath = hasPublishedVersion
+              ? `/sat/exams/${exam.id}/access`
+              : `/sat/exams/${exam.id}`;
+            const openPrimary = () => {
+              // A published exam has no editable draft, so the edit gesture is
+              // what lets its workspace continue from the published version
+              // instead of stopping at "No editable draft". The shell READ stays
+              // a read: nothing here fires on a reload.
+              if (!hasPublishedVersion) requestAuthoringDraftOnEntry(exam.id);
+              openRecord(exam.id, primaryPath);
+            };
             return (
-              <SatListRow
+              <SatListRowShell
                 key={exam.id}
                 index={Math.min(rowIndex, 5)}
                 rowId={exam.id}
                 current={exam.id === lastOpenedId}
-                // Opening a row IS the author saying "work on this exam". A
-                // published exam has no editable draft (publishing seals it),
-                // so that gesture is what lets the workspace continue from the
-                // published version instead of stopping at "No editable draft".
-                // The shell READ stays a read: nothing here fires on a reload.
-                onOpen={() => {
-                  requestAuthoringDraftOnEntry(exam.id);
-                  openRecord(exam.id, '/sat/exams/' + exam.id);
-                }}
+                primary={
+                  <a
+                    href={primaryPath}
+                    aria-label={
+                      hasPublishedVersion
+                        ? `Open rooms for ${exam.title}`
+                        : `Edit ${exam.title}`
+                    }
+                    className={SAT_ROW_PRIMARY_LINK_CLASS}
+                    onClick={(event) => {
+                      // Modified clicks keep their native behavior (new tab).
+                      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                      event.preventDefault();
+                      openPrimary();
+                    }}
+                  />
+                }
               >
                 <span className={'grid w-full items-center py-3 ' + ROW_GRID}>
                   <span className="min-w-0">
@@ -231,9 +262,26 @@ export function SatExamLibraryRoute() {
                   </span>
                   <span className={SAT_ROW_STACK.status}><SatStatusPill tone={tone}>{status}</SatStatusPill></span>
                   <span className="hidden text-right text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:block">{formatDate(exam.updatedAt)}</span>
-                  <ArrowRight size={16} className={'sat-row-chevron shrink-0 text-slate-400 group-hover:text-slate-500 ' + SAT_ROW_STACK.chevron} aria-hidden="true" />
+                  <span className={'flex items-center justify-end gap-2 ' + SAT_ROW_STACK.chevron}>
+                    {hasPublishedVersion ? (
+                      <a
+                        href={`/sat/exams/${exam.id}`}
+                        aria-label={`Edit ${exam.title}`}
+                        className={`sat-btn sat-btn--secondary sat-press hidden min-h-9 px-3 md:inline-flex ${SAT_ROW_ACTION_CLASS}`}
+                        onClick={(event) => {
+                          if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                          event.preventDefault();
+                          requestAuthoringDraftOnEntry(exam.id);
+                          openRecord(exam.id, `/sat/exams/${exam.id}`);
+                        }}
+                      >
+                        Edit
+                      </a>
+                    ) : null}
+                    <ArrowRight size={16} className="sat-row-chevron shrink-0 text-slate-400 group-hover:text-slate-500" aria-hidden="true" />
+                  </span>
                 </span>
-              </SatListRow>
+              </SatListRowShell>
             );
           })}
         </SatList>

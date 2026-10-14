@@ -14,7 +14,10 @@ import {
 } from '../../../features/exam-authoring/ui/shell/examLifecycle';
 import { useExamWorkspaceChrome } from '../../../features/exam-authoring/ui/shell/useExamWorkspaceChrome';
 import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/api/authoringEntryIntent';
-import { parseIssueLink } from '../../../features/exam-authoring/ui/release/releaseSelectors';
+import {
+  publishModuleDeepLink,
+  resolvePublishIssueDestination,
+} from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import type { AssessmentValidationIssue } from '../../../features/exam-authoring/contracts/assessment';
 import { useOptionalAuthSession } from '../../../features/auth/api/authSession';
 import {
@@ -82,11 +85,21 @@ export function SatAccessRoute() {
   }
 
   const openIssue = (issue: AssessmentValidationIssue) => {
-    const { questionId, field } = parseIssueLink(issue.path);
-    if (!questionId && !field) return;
+    const destination = resolvePublishIssueDestination(issue, null);
+    if (destination.kind === 'unresolved') return;
+    // A converter finding belongs with the release policy; questions and modules
+    // belong in the builder, each with its own deep link.
+    if (destination.kind === 'score-policy') {
+      navigate(`/sat/exams/${encodeURIComponent(exam.id)}/release?panel=scoring`);
+      return;
+    }
     const params = new URLSearchParams();
-    if (questionId) params.set('question', questionId);
-    if (field) params.set('field', field);
+    if (destination.kind === 'question') {
+      params.set('question', destination.questionId);
+      if (destination.field) params.set('field', destination.field);
+    } else {
+      params.set('module', publishModuleDeepLink(destination));
+    }
     requestAuthoringDraftOnEntry(exam.id);
     navigate(`${examWorkspacePath(exam.id, 'questions')}?${params.toString()}`);
   };

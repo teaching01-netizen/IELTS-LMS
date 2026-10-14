@@ -3,6 +3,8 @@ import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw } from "lucide-rea
 import type { AssessmentValidationIssue, AssessmentValidationReport, SatPublishScope } from "../../contracts/assessment";
 import {
   getSATPublishBlockers,
+  publishIssueDestinationLabel,
+  resolvePublishIssueDestination,
   SAT_PUBLISH_READINESS_FAMILIES,
   readinessFamilyForIssue,
 } from "./releaseSelectors";
@@ -151,13 +153,19 @@ function IssueList({
       <p className="mb-2 text-xs font-semibold text-foreground">{title}</p>
       <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
         {visible.map((issue, index) => {
-          const questionIssue = issue.path.startsWith("examQuestion:");
+          // The label names where the click goes: a question, a module, or the
+          // scoring policy. A finding with no destination says so instead of
+          // being a press that closes the panel and stops.
+          const actionLabel = publishIssueDestinationLabel(
+            resolvePublishIssueDestination(issue),
+          );
           return (
             <button
               key={`${issue.code}::${issue.path}::${issue.message}::${index}`}
               type="button"
+              disabled={actionLabel === null}
               onClick={() => onIssueClick(issue)}
-              className="flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className="flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
             >
               <AlertTriangle
                 size={16}
@@ -167,7 +175,7 @@ function IssueList({
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-foreground">{issue.message}</span>
                 <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                  {questionIssue ? "Open question in Builder \u2192" : issue.path}
+                  {actionLabel ? `${actionLabel} \u2192` : "No automatic fix"}
                 </span>
               </span>
             </button>

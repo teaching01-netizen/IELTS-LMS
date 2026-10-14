@@ -173,6 +173,35 @@ describe("authoring selection adoption", () => {
     expect(currentSearch).toBe("");
   });
 
+  it("adopts a deep-linked MODULE through the same path and strips the link", () => {
+    const onQuestionAdopted = vi.fn();
+    const { result } = renderSelection({
+      shell: shell("version-1", [
+        module("module-1", [question("eq-1")]),
+        module("module-2", [question("eq-22")]),
+      ]),
+      onQuestionAdopted,
+      entries: ["/sat/exams/exam-1?module=reading-writing.module-2"],
+    });
+
+    // A publish finding about a module names no question: it opens the module
+    // (and its first question) instead of falling back to the first module.
+    expect(result.current.selectedModuleId).toBe("module-2");
+    expect(result.current.selectedExamQuestionId).toBe("eq-22");
+    expect(onQuestionAdopted).toHaveBeenCalledWith("eq-22");
+    expect(currentSearch).toBe("");
+  });
+
+  it("drops a module link this shell does not contain instead of guessing", () => {
+    const { result } = renderSelection({
+      shell: shell("version-1", [module("module-1", [question("eq-1")])]),
+      entries: ["/sat/exams/exam-1?module=reading-writing.gone"],
+    });
+
+    expect(result.current.selectedModuleId).toBe("module-1");
+    expect(currentSearch).toBe("");
+  });
+
   it("drops a deep link naming a question this shell does not contain", () => {
     const onQuestionAdopted = vi.fn();
     const onDeepLinkField = vi.fn();

@@ -100,7 +100,7 @@ export function AccessLinkSessionPanel({
         <div role="status" className="sat-banner-enter mb-4 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent-tint)] p-3">
           <p className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">Room created</p>
           <p className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-            Next: share the student link. Students wait in check-in until the proctor starts the exam. Copying is optional.
+            Next: share the student link. Check-in lets students enter, and the room shows how this sitting starts. Copying is optional.
           </p>
           {onDismissNextSteps ? (
             <button type="button" onClick={onDismissNextSteps} className="sat-btn sat-btn--quiet sat-press -ml-3 mt-1 px-3">

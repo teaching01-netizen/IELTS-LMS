@@ -32,7 +32,7 @@ export function DeliverySetupGuide({ versionNumber, groupCount, runningCount = 0
         ? `${finishedCount} ${finishedCount === 1 ? "room has" : "rooms have"} finished. View results or start from an earlier session.`
         : runningCount > 0
           ? `${runningCount} ${runningCount === 1 ? "room is" : "rooms are"} running. Open a room to monitor students.`
-          : "Select a room to copy its student link or show its QR code. Students wait in check-in until the proctor starts the exam. Copying does not confirm that the link was shared.",
+          : "Select a room to copy its student link or show its QR code. Students wait in check-in until the sitting starts. Copying does not confirm that the link was shared.",
       done: runningCount > 0 || finishedCount > 0,
     },
   ];

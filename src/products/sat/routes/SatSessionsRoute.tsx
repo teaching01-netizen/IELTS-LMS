@@ -55,9 +55,11 @@ const STATUS_TONE: Record<SessionStatus, { tone: SatStatusTone; pulse: boolean }
   Cancelled: { tone: 'cancelled', pulse: false },
 };
 
+// The start mode is resolved when a room is created (proctor or student code),
+// so this help never promises one of them before the room knows its own.
 const EMPTY_HINT: Record<SatListBucket, string> = {
-  upcoming: 'Prepared rooms wait here until a proctor starts the exam.',
-  live: 'Rooms appear here as soon as a proctor starts the exam.',
+  upcoming: 'Prepared rooms wait here until the exam starts.',
+  live: 'Rooms appear here while students are taking the exam.',
   finished: 'Finished rooms move here automatically.',
 };
 
@@ -101,7 +103,7 @@ export function SatSessionsRoute() {
     <SatContainer>
       <SatPageHeader
         title="Rooms"
-        description="Every room across exams. Open a room to share its student link, start the exam, and monitor it."
+        description="Every room across exams. Open a room to share its student link, see how the sitting starts, and monitor it."
         actions={session?.user.role === 'admin' ? (
           <SatButton variant="primary" onClick={() => setCreateOpen(true)} icon={<CalendarPlus size={16} aria-hidden="true" />}>Create room</SatButton>
         ) : undefined}

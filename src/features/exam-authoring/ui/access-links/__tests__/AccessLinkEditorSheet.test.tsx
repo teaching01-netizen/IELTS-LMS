@@ -226,6 +226,69 @@ describe("AccessLinkEditorSheet", () => {
     expect(onBackToPreviousStep).toHaveBeenCalledOnce();
   });
 
+  it("treats a session-type-only change as unsaved work and resets the mode on reopen", async () => {
+    const onClose = vi.fn();
+    const props = {
+      link: null,
+      providerKey: "sat",
+      members: [],
+      isSaving: false,
+      onClose,
+      onCreate: vi.fn().mockResolvedValue(undefined),
+      onUpdate: vi.fn().mockResolvedValue(undefined),
+    } as const;
+    const { rerender } = render(<AccessLinkEditorSheet open {...props} />);
+
+    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom_higher" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // A mode-only edit is real work: it must not be discarded silently.
+    expect(screen.getByRole("alertdialog", { name: "Discard room settings changes?" })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(onClose).toHaveBeenCalledOnce();
+
+    rerender(<AccessLinkEditorSheet open={false} {...props} />);
+    rerender(<AccessLinkEditorSheet open {...props} />);
+    expect(screen.getByLabelText("Session type")).toHaveValue("practice");
+  });
+
+  it("reviews the session type and sends its exact request mapping", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AccessLinkEditorSheet
+        open
+        link={null}
+        guidedCreation
+        providerKey="sat"
+        examTitle="Digital SAT"
+        targetVersionNumber={5}
+        members={[]}
+        isSaving={false}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onUpdate={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom" } });
+    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Adaptive Saturday" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    const summary = screen.getByRole("region", { name: "Summary" });
+    expect(within(summary).getByText("Classroom (adaptive Module 2)")).toBeInTheDocument();
+    // The starting instructions are deliberately neutral until the room exists.
+    expect(within(summary).getByText(/Starting instructions appear in the room/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ satSessionMode: "classroom" });
+    expect(onCreate.mock.calls[0]![0]).not.toHaveProperty("satRoutePolicy", "staff_selects");
+  });
+
   it("limits a new link to the sections in its pinned release", async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(

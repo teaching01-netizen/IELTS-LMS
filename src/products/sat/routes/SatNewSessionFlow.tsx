@@ -103,6 +103,23 @@ function NewSessionSetup({ exam, onClose, onCreated, onBackToExamChoice }: { exa
   const [prefill, setPrefill] = useState<AssessmentAccessLink | null>(null);
   const membersQuery = useAccessLinkMembers(prefill?.id ?? null);
   const version = overview.data?.currentPublishedVersion ?? null;
+  // The overview polls every ~30s and another author can publish meanwhile.
+  // One target is captured when setup begins and kept for the whole form, so a
+  // background refresh can never change the version this room will use nor
+  // reinitialize the editor over fields the author already filled in.
+  const [target, setTarget] = useState<{
+    id: string;
+    versionNumber: number;
+    publishScope: 'full' | 'reading-writing' | 'math';
+  } | null>(null);
+  useEffect(() => {
+    if (target || !version) return;
+    setTarget({
+      id: version.id,
+      versionNumber: version.versionNumber,
+      publishScope: version.publishScope ?? 'full',
+    });
+  }, [target, version]);
 
   if (overview.error && !overview.data) {
     return (
@@ -122,12 +139,14 @@ function NewSessionSetup({ exam, onClose, onCreated, onBackToExamChoice }: { exa
       </SatFormDialog>
     );
   }
-  if (!version) {
+  if (!version || !target) {
     return (
       <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
         <SatRoomSetupProgress current={2} total={5} label="Room details" description="Name the room and choose which SAT sections it will deliver." />
         <p role="status" className="px-6 py-6 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-          {overview.isLoading ? `Loading ${exam.title}…` : `${exam.title} has no published version. Publish it before creating a room.`}
+          {!version && !overview.isLoading
+            ? `${exam.title} has no published version. Publish it before creating a room.`
+            : `Loading ${exam.title}…`}
         </p>
         <div className="flex items-center justify-between gap-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-6 py-4">
           <SatButton variant="quiet" onClick={onClose}>Cancel</SatButton>
@@ -138,8 +157,9 @@ function NewSessionSetup({ exam, onClose, onCreated, onBackToExamChoice }: { exa
   }
 
   const create = async (request: CreateAssessmentAccessLinkRequest) => {
-    // Pinned to the version this setup was opened on, even if another author publishes meanwhile.
-    const created = await createMutation.mutateAsync({ ...request, publishedVersionId: version.id });
+    // Pinned to the version this setup was opened on, even if another author
+    // publishes (or the polling overview reports a newer release) meanwhile.
+    const created = await createMutation.mutateAsync({ ...request, publishedVersionId: target.id });
     onCreated(created.scheduleId);
   };
 
@@ -154,8 +174,8 @@ function NewSessionSetup({ exam, onClose, onCreated, onBackToExamChoice }: { exa
       prefill={prefill}
       providerKey="sat"
       examTitle={exam.title}
-      publishScope={version.publishScope}
-      targetVersionNumber={version.versionNumber}
+      publishScope={target.publishScope}
+      targetVersionNumber={target.versionNumber}
       members={(membersQuery.data ?? EMPTY_MEMBERS) as AccessLinkMemberInput[]}
       membersLoading={Boolean(prefill?.audienceType === 'selected_students' && membersQuery.isLoading)}
       membersError={prefill?.audienceType === 'selected_students' && membersQuery.error ? 'The student roster could not load. Retry before continuing.' : null}

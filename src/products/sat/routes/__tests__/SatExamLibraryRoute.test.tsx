@@ -50,8 +50,35 @@ describe('SatExamLibraryRoute', () => {
     renderRoute();
     expect(peekAuthoringDraftOnEntry('sat-1')).toBe(false);
 
-    fireEvent.click(screen.getByText('SAT Practice 06').closest('button') as HTMLElement);
+    // The row's own destination is a real link stretched over it; the visible
+    // title sits in a pointer-events-none span above it.
+    fireEvent.click(screen.getByRole('link', { name: 'Edit SAT Practice 06' }));
 
+    expect(peekAuthoringDraftOnEntry('sat-1')).toBe(true);
+  });
+
+  it('sends a published exam to its rooms, and only its Edit control arms a draft', () => {
+    const published = {
+      ...satExam,
+      status: 'published',
+      currentDraftVersionId: null,
+      currentPublishedVersionId: 'published-v2',
+      currentPublishedVersionNumber: 2,
+    };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [published], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute();
+
+    // The row's own destination is the operational room list, and reaching it
+    // never arms a draft-open intent.
+    const row = screen.getByRole('link', { name: 'Open rooms for SAT Practice 06' });
+    expect(row).toHaveAttribute('href', '/sat/exams/sat-1/access');
+    fireEvent.click(row);
+    expect(peekAuthoringDraftOnEntry('sat-1')).toBe(false);
+
+    // Edit is a real control beside the row link, not a control inside it.
+    const edit = screen.getByRole('link', { name: 'Edit SAT Practice 06' });
+    expect(row.contains(edit)).toBe(false);
+    fireEvent.click(edit);
     expect(peekAuthoringDraftOnEntry('sat-1')).toBe(true);
   });
 

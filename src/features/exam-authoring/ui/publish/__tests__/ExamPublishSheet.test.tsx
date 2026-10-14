@@ -156,15 +156,57 @@ describe("ExamPublishSheet", () => {
     await waitFor(() => expect(state.publish).toHaveBeenCalledWith("full", "Fixed Module 2"));
   });
 
-  it("lists blocking issues with a Fix action and refuses to publish", () => {
+  it("lists blocking issues with a destination-naming action and refuses to publish", () => {
     setHook({ readinessQuery: { data: report([blocker]), isFetching: false, error: null, refetch: state.refetchReadiness } });
     const { props } = renderSheet();
     expect(screen.getByText("1 issue to fix before publishing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish Full SAT" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Fix" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open question" }));
     expect(props.onOpenIssue).toHaveBeenCalledWith(blocker);
     expect(props.onClose).toHaveBeenCalledOnce();
     expect(state.publish).not.toHaveBeenCalled();
+  });
+
+  it("names the module and scoring destinations instead of a bare Fix", () => {
+    setHook({
+      readinessQuery: {
+        data: report([
+          { code: "sat.module.incomplete", path: "reading-writing.rw-m1", message: "rw-m1 has 20 of 27 questions.", blocking: true },
+          { code: "sat.converter.missing", path: "scoringPolicy", message: "Add a conversion table for Math.", blocking: true },
+        ]),
+        isFetching: false,
+        error: null,
+        refetch: state.refetchReadiness,
+      },
+    });
+    const { props } = renderSheet();
+    const moduleFix = screen.getByRole("button", { name: "Open module" });
+    fireEvent.click(moduleFix);
+    expect(props.onOpenIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "sat.module.incomplete", path: "reading-writing.rw-m1" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open score settings" }));
+    expect(props.onOpenIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "sat.converter.missing" }),
+    );
+  });
+
+  it("explains a finding it cannot navigate to rather than offering a dead action", () => {
+    setHook({
+      readinessQuery: {
+        data: report([
+          // A path with no destination, and the code family the sheet renders.
+          { code: "sat.module.incomplete", path: "overview", message: "Module counts are not loaded.", blocking: true },
+        ]),
+        isFetching: false,
+        error: null,
+        refetch: state.refetchReadiness,
+      },
+    });
+    renderSheet();
+    expect(screen.getByText(/not linked to an editable destination/)).toBeInTheDocument();
+    expect(screen.getByText("No automatic fix")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Open module|Open question|Open score settings/ })).not.toBeInTheDocument();
   });
 
   it("will not publish on stale checks and offers to re-run them", () => {

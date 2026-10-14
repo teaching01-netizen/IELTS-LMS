@@ -182,6 +182,32 @@ export function useAuthoringSelection({
         return;
       }
     }
+    // A publish finding about a MODULE (question count, pretest count) names no
+    // question at all: `<sectionKey>.<moduleKey>`. It is consumed here for the
+    // same reason the question link is — one place decides where the author is
+    // looking — and it is always stripped, even when the module is gone, so a
+    // stale link cannot re-fire on every render.
+    const deepModule = searchParams.get("module");
+    if (deepModule) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("module");
+      setSearchParams(next, { replace: true });
+      const [sectionKey, moduleKey] = deepModule.split(".");
+      const targetModule =
+        (sectionKey
+          ? shell.sections
+              .find((section) => section.sectionKey === sectionKey)
+              ?.modules.find((module) => module.moduleKey === moduleKey)
+          : undefined) ??
+        shell.sections
+          .flatMap((section) => section.modules)
+          .find((module) => module.moduleKey === moduleKey) ??
+        null;
+      if (targetModule) {
+        adoptQuestion(targetModule.id, targetModule.questions[0]?.examQuestionId ?? null);
+        return;
+      }
+    }
     // A selection pointing at a module this shell no longer contains (deleted,
     // or a different draft) falls back to the shell's first question. This is
     // the rule that keeps a stale module from rendering over another module's

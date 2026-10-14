@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { Settings2 } from "lucide-react";
 import { SatInlineError } from "@/src/products/sat/ui/SatPage";
 import type { ExamEntity } from "../../../types/domain";
@@ -39,6 +39,9 @@ import {
   type ExamWorkspaceTab,
 } from "./shell/examLifecycle";
 
+/** URL fragment/id the converter publish findings point at (`?panel=scoring`). */
+export const RELEASE_SCORING_PANEL_ID = "sat-release-scoring";
+
 export interface SatDeliveryReleasePageProps {
   exam: ExamEntity;
   shell: AssessmentAuthoringShell | null;
@@ -71,6 +74,11 @@ export interface SatDeliveryReleasePageProps {
   presenceSlot?: ReactNode;
   saveSlot?: ReactNode;
   collaborationSlot?: ReactNode;
+  /**
+   * `?panel=scoring` — the destination a converter publish finding resolves to.
+   * The route owns the URL; the page only scrolls its scoring section into view.
+   */
+  focusScoringPanel?: boolean;
 }
 
 export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
@@ -146,6 +154,16 @@ function ReleasePageBody(
   } = props;
   const publishScopeId = useId();
   const [showPublishDialog, setShowPublishDialog] = useState(false);
+  useEffect(() => {
+    if (!props.focusScoringPanel) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(RELEASE_SCORING_PANEL_ID);
+      // scrollIntoView is not implemented everywhere jsdom-like hosts render.
+      target?.scrollIntoView?.({ block: "start" });
+      target?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [props.focusScoringPanel]);
 
   const readinessFresh = isReadinessFresh(readiness, shell, publishScope);
   const blockers = getSATPublishBlockers(readiness, readinessFresh);
@@ -310,8 +328,17 @@ function ReleasePageBody(
               </button>
             </section>
 
-            <ScoreReportSettingPanel exam={exam} onSaved={props.onExamRefresh ?? (async () => undefined)} />
-            <ScoreConverterPanel examId={exam.id} canEdit={exam.canEdit} />
+            {/* One addressable home for exam-level and versioned score policy,
+                so a publish finding about the converter has somewhere to land. */}
+            <section
+              id={RELEASE_SCORING_PANEL_ID}
+              tabIndex={-1}
+              aria-label="Score policy"
+              className="space-y-6 outline-none"
+            >
+              <ScoreReportSettingPanel exam={exam} onSaved={props.onExamRefresh ?? (async () => undefined)} />
+              <ScoreConverterPanel examId={exam.id} canEdit={exam.canEdit} />
+            </section>
             <RuntimePolicyPanel />
           </div>
 

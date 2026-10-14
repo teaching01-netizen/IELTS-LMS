@@ -62,9 +62,8 @@ function LocationProbe() {
   return <p data-testid="location">{useLocation().pathname}</p>;
 }
 
-function renderRoute() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+function routeElement(client: QueryClient) {
+  return (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/sat/sessions']}>
         <Routes>
@@ -72,8 +71,16 @@ function renderRoute() {
           <Route path="/sat/sessions/:scheduleId" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+}
+
+function newClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+function renderRoute() {
+  return render(routeElement(newClient()));
 }
 
 /** Opens the unified setup for the (only) SAT exam: exam question first, then the shared session form. */
@@ -161,6 +168,33 @@ describe('SatSessionsRoute', () => {
       name: 'Saturday mock', publishedVersionId: 'v-9', audienceType: 'anyone', availabilityType: 'anytime', enabledSections: ['reading-writing'],
     });
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/sat/sessions/sched-new'));
+  });
+
+  it('keeps the version it captured when a background refresh reports a newer release', async () => {
+    const client = newClient();
+    const view = render(routeElement(client));
+    openSetup();
+    expect(screen.getByText('Version 9')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Saturday mock' } });
+
+    // Another author publishes Version 10 while this setup is being filled in.
+    useOverviewMock.mockReturnValue({
+      data: { currentPublishedVersion: { ...publishedVersion, id: 'v-10', versionNumber: 10 }, links: [] },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    view.rerender(routeElement(client));
+
+    // The captured target wins: neither the label nor the entered fields move.
+    expect(screen.getByText('Version 9')).toBeInTheDocument();
+    expect(screen.queryByText('Version 10')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
+
+    continueToReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    await waitFor(() => expect(createMutateMock).toHaveBeenCalledOnce());
+    expect(createMutateMock.mock.calls[0]![0]).toMatchObject({ publishedVersionId: 'v-9', name: 'Saturday mock' });
   });
 
   it('keeps the form and stays on the list when creation fails, so a retry cannot be lost', async () => {

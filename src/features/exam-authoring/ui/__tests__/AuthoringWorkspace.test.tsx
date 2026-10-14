@@ -360,7 +360,7 @@ describe("AuthoringWorkspace (spine-only)", () => {
     renderWorkspace();
     fireEvent.click(await screen.findByRole("button", { name: "Import questions" }));
     expect(screen.getByRole("menuitem", { name: /Add questions to this module/ })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Replace exam from workbook/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Import Excel workbook/ })).toBeInTheDocument();
   });
 
   it("hides Import from roles that cannot edit", async () => {

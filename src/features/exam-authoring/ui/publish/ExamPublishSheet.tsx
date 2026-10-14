@@ -19,7 +19,9 @@ import {
   isSATPublishReadinessIssue,
   isSATPublishReadinessValid,
   normalizePublishNotes,
+  publishIssueDestinationLabel,
   publishMediaIssueDiagnostic,
+  resolvePublishIssueDestination,
   satPublishScopeLabel,
   toUserFacingPublishError,
 } from "../release/releaseSelectors";
@@ -359,21 +361,39 @@ function PublishSheetBody({
                 {blockers.length} {blockers.length === 1 ? "issue" : "issues"} to fix before publishing
               </p>
               <ul className="mt-2 space-y-2">
-                {blockers.map((issue, index) => (
-                  <li key={`${issue.path}-${index}`} className="flex items-start justify-between gap-3 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] p-3 text-[14px]">
-                    <span className="min-w-0 leading-6 text-foreground">{issue.message}</span>
-                    <button
-                      type="button"
-                      className={`${BUTTON} sat-btn--secondary shrink-0`}
-                      onClick={() => {
-                        onClose();
-                        onOpenIssue(issue);
-                      }}
-                    >
-                      Fix
-                    </button>
-                  </li>
-                ))}
+                {blockers.map((issue, index) => {
+                  // Module and scoring findings have destinations too. An action
+                  // that cannot reach a destination is replaced by the reason,
+                  // never by a Fix button that closes the sheet and stops.
+                  const destination = resolvePublishIssueDestination(issue, shell);
+                  const actionLabel = publishIssueDestinationLabel(destination);
+                  return (
+                    <li key={`${issue.path}-${index}`} className="flex items-start justify-between gap-3 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] p-3 text-[14px]">
+                      <span className="min-w-0 leading-6 text-foreground">
+                        {issue.message}
+                        {!actionLabel ? (
+                          <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">
+                            {destination.kind === "unresolved" ? destination.reason : null}
+                          </span>
+                        ) : null}
+                      </span>
+                      {actionLabel ? (
+                        <button
+                          type="button"
+                          className={`${BUTTON} sat-btn--secondary shrink-0`}
+                          onClick={() => {
+                            onClose();
+                            onOpenIssue(issue);
+                          }}
+                        >
+                          {actionLabel}
+                        </button>
+                      ) : (
+                        <span className="shrink-0 text-[13px] text-muted-foreground">No automatic fix</span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}

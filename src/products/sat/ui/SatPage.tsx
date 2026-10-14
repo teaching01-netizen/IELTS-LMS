@@ -525,6 +525,64 @@ export function SatListRow({
 }
 
 /**
+ * A staff row whose controls are REAL siblings of each other.
+ *
+ * `SatListRow` wraps the entire row in a <button>, so a row that needs a
+ * second destination (a published exam's Rooms AND an explicit Edit) cannot
+ * use it without nesting one interactive control inside another. This shell
+ * keeps the same frame: the caller renders ONE primary link, stretched over
+ * the row, and any other control beside it in the content. The container
+ * itself is not interactive, so nothing is nested and the tab order is
+ * primary → actions.
+ *
+ * The content span ignores pointer events so the stretched primary link
+ * receives the click; a control that must stay clickable opts back in with
+ * `SAT_ROW_ACTION_CLASS`. Rows are focused programmatically (list return), so
+ * the shell carries `tabIndex={-1}` exactly as the button version did.
+ */
+export const SAT_ROW_PRIMARY_LINK_CLASS =
+  'absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-staff-accent,#0071e3)]';
+
+/** Re-enables pointer events for a control that sits above a row's primary link. */
+export const SAT_ROW_ACTION_CLASS = 'pointer-events-auto relative z-10';
+
+export function SatListRowShell({
+  primary,
+  children,
+  index,
+  rowId,
+  current = false,
+  disabled = false,
+}: {
+  /** The row's one primary destination, stretched over the whole row. */
+  primary?: ReactNode;
+  children: ReactNode;
+  /** Optional position for a capped stagger (first 6 rows). Omit for no entrance. */
+  index?: number;
+  /** Record id, so a page can return focus to the record it opened. */
+  rowId?: string;
+  /** The record the reviewer last opened from this list. */
+  current?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      tabIndex={-1}
+      aria-current={current ? 'true' : undefined}
+      data-sat-row-id={rowId}
+      style={index !== undefined ? ({ '--sat-row-index': index } as CSSProperties) : undefined}
+      className={
+        'sat-list-row group relative flex min-h-14 w-full items-center bg-[var(--sat-staff-surface,#fff)] px-4 focus-visible:outline-none aria-[current=true]:bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))]' +
+        (index !== undefined ? ' sat-row-enter' : '')
+      }
+    >
+      {disabled ? null : primary}
+      <span className="pointer-events-none relative min-w-0 flex-1">{children}</span>
+    </div>
+  );
+}
+
+/**
  * Column labels for a grouped list whose rows lay out on the same grid
  * (`gridClassName` is shared with the rows). Visual only: each row's button
  * already reads its full content, so the header stays out of the a11y tree.

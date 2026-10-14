@@ -8,6 +8,7 @@ import type {
   AssessmentReleaseLifecycleState,
   AssessmentReleaseState,
 } from "../../contracts/release";
+import { ACCESS_LINK_SECTION_KEYS } from "../../contracts/accessLinks";
 
 export type ReleaseHeroState =
   | "published"
@@ -313,6 +314,128 @@ export function parseIssueLink(path: string): IssueLink {
   const questionId = (match[1] ?? "").trim() || null;
   const field = (match[2] ?? "").trim() || null;
   return { questionId, field };
+}
+
+/** Where a publish check sends the author. */
+export type PublishIssueDestination =
+  | { kind: "question"; questionId: string; field: string | null }
+  | { kind: "module"; sectionKey: string; moduleKey: string }
+  | { kind: "score-policy" }
+  | { kind: "unresolved"; reason: string };
+
+/** The parts of the loaded shell the resolver reads; keeps it free of editor types. */
+export interface PublishDestinationShell {
+  sections: ReadonlyArray<{
+    sectionKey: string;
+    modules: ReadonlyArray<{ moduleKey: string }>;
+  }>;
+}
+
+/**
+ * Module findings are authored as `<sectionKey>.<moduleKey>` (and a missing
+ * module as `<sectionKey>.<role>`), never inside an `examQuestion:` path. The
+ * first segment must be a SAT section, so a bare question path that reached us
+ * unprefixed (for example `answer.options`) is never mistaken for a module.
+ */
+const MODULE_PATH = /^([a-z0-9][a-z0-9-]*)\.([a-z0-9][a-z0-9_-]*)$/;
+
+const UNRESOLVED_ISSUE_REASON =
+  "This check is not linked to an editable destination yet. Save your latest changes and run checks again; if it persists, report the check code above.";
+
+function shellContainsModule(
+  shell: PublishDestinationShell,
+  sectionKey: string,
+  moduleKey: string,
+): boolean {
+  const section = shell.sections.find((candidate) => candidate.sectionKey === sectionKey);
+  if (section) return section.modules.some((module) => module.moduleKey === moduleKey);
+  return shell.sections.some((candidate) =>
+    candidate.modules.some((module) => module.moduleKey === moduleKey),
+  );
+}
+
+/**
+ * A shell can only prove a module is ABSENT when it actually maps modules. A
+ * shell that carries none is an incomplete map, not evidence of a missing
+ * module, so the module path is trusted there instead of being refused.
+ */
+function shellMapsModules(shell: PublishDestinationShell): boolean {
+  return shell.sections.some((section) => section.modules.length > 0);
+}
+
+/**
+ * ONE resolver for every publish finding: question, module or scoring policy.
+ *
+ * The former handlers understood only `examQuestion:<id>:<field>` and returned
+ * without a destination for everything else, so pressing Fix on a module count
+ * or converter blocker closed the review and went nowhere. Every surface that
+ * offers recovery goes through here instead of re-parsing the path itself.
+ *
+ * A module path that the loaded shell does not contain is deliberately NOT a
+ * destination: selecting "the first module" for it would pretend the finding
+ * was fixed by a click that cannot fix it.
+ */
+export function resolvePublishIssueDestination(
+  issue: Pick<AssessmentValidationIssue, "path" | "code">,
+  shell?: PublishDestinationShell | null,
+): PublishIssueDestination {
+  const path = (issue.path ?? "").trim();
+  if (path.startsWith("examQuestion:")) {
+    const { questionId, field } = parseIssueLink(path);
+    if (questionId) return { kind: "question", questionId, field };
+    return { kind: "unresolved", reason: UNRESOLVED_ISSUE_REASON };
+  }
+  if (path === "scoringPolicy" || path.startsWith("scoringPolicy.")) {
+    return { kind: "score-policy" };
+  }
+  const moduleMatch = MODULE_PATH.exec(path);
+  if (moduleMatch) {
+    const sectionKey = moduleMatch[1]!;
+    const moduleKey = moduleMatch[2]!;
+    // Without a loaded shell the only proof that the first segment is a section
+    // rather than a leaked field path is the SAT section contract.
+    const knownSection = shell
+      ? shell.sections.some((candidate) => candidate.sectionKey === sectionKey)
+      : (ACCESS_LINK_SECTION_KEYS as readonly string[]).includes(sectionKey);
+    if (knownSection) {
+      if (shell && shellMapsModules(shell) && !shellContainsModule(shell, sectionKey, moduleKey)) {
+        return {
+          kind: "unresolved",
+          reason: `This check names the ${moduleKey} module in ${sectionKey}, which this draft does not contain. Save your changes and run checks again.`,
+        };
+      }
+      return { kind: "module", sectionKey, moduleKey };
+    }
+  }
+  return { kind: "unresolved", reason: UNRESOLVED_ISSUE_REASON };
+}
+
+/**
+ * Names the destination on the action itself, so Fix is never a mystery press.
+ * Null means there is nothing to open and the caller must explain why instead.
+ */
+export function publishIssueDestinationLabel(
+  destination: PublishIssueDestination,
+): string | null {
+  switch (destination.kind) {
+    case "question":
+      return "Open question";
+    case "module":
+      return "Open module";
+    case "score-policy":
+      return "Open score settings";
+    case "unresolved":
+    default:
+      return null;
+  }
+}
+
+/** The builder deep link for a module destination (`?module=<section>.<module>`). */
+export function publishModuleDeepLink(destination: {
+  sectionKey: string;
+  moduleKey: string;
+}): string {
+  return `${destination.sectionKey}.${destination.moduleKey}`;
 }
 
 export function normalizePublishNotes(notes: string | undefined): string | undefined {

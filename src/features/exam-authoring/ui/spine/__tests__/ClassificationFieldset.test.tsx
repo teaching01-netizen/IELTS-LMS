@@ -145,7 +145,9 @@ describe("ClassificationFieldset", () => {
     expect(screen.getByLabelText("Skill")).toBeInTheDocument();
     expect(screen.getByRole("radiogroup", { name: "Difficulty" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Tags")).not.toBeInTheDocument();
-    expect(screen.getByText(/required before this question can be published/i)).toBeInTheDocument();
+    // The SAT publish contract does not inspect metadata: the copy must say
+    // recommended, never required-to-publish.
+    expect(screen.getByText(/recommended, not required to publish/i)).toBeInTheDocument();
 
     rerender(<ClassificationFieldset fields="extra" question={questionWith({})} onChange={vi.fn()} issues={[]} />);
     expect(screen.getByLabelText("Tags")).toBeInTheDocument();

@@ -485,7 +485,7 @@ async function startSatAttempt(
   await roomSetup.getByRole("button", { name: /^Open now/ }).click();
   await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(roomSetup.getByRole("heading", { name: "Summary" })).toBeVisible();
-  await expect(roomSetup.getByText("The proctor starts the exam.", { exact: true })).toBeVisible();
+  await expect(roomSetup.getByText("Check-in lets students enter.", { exact: false })).toBeVisible();
   await roomSetup.getByRole("button", { name: "Create room", exact: true }).click();
 
   await expect(page).toHaveURL(/\/sat\/sessions\/[0-9a-f-]+$/i, { timeout: 30_000 });

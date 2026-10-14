@@ -1,5 +1,9 @@
 import { AlertCircle, ListChecks } from "lucide-react";
 import type { AssessmentValidationIssue } from "../contracts/assessment";
+import {
+  publishIssueDestinationLabel,
+  resolvePublishIssueDestination,
+} from "./release/releaseSelectors";
 
 // Presentational surfaces the SAT authoring workspace renders around the spine:
 // the issues pane and the empty/error editor states. None of them own state or
@@ -63,7 +67,11 @@ export function IssuesPane({
           </div>
         ) : issues.length ? (
           issues.map((issue, index) => {
-            const actionable = issue.path.startsWith("examQuestion:");
+            // A question, module or scoring finding all have somewhere to go;
+            // only a finding with no destination is inert, and it says so.
+            const destination = resolvePublishIssueDestination(issue);
+            const actionLabel = publishIssueDestinationLabel(destination);
+            const actionable = actionLabel !== null;
             return (
               <button
                 key={`${issue.code}-${issue.path}-${index}`}
@@ -84,7 +92,7 @@ export function IssuesPane({
                     {issue.message}
                   </span>
                   <span className="mt-1 block truncate text-xs text-slate-500">
-                    {actionable ? "Open question and field" : issue.path}
+                    {actionLabel ?? "No destination for this check"}
                   </span>
                 </span>
               </button>

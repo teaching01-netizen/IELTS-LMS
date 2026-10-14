@@ -3,7 +3,10 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import type { ExamEntity } from "../../../types/domain";
 import { requestAuthoringDraftOnEntry } from "../application/authoringEntryIntent";
 import type { AssessmentValidationIssue, SatPublishScope } from "../contracts/assessment";
-import { parseIssueLink } from "../ui/release/releaseSelectors";
+import {
+  publishModuleDeepLink,
+  resolvePublishIssueDestination,
+} from "../ui/release/releaseSelectors";
 import { SatDeliveryReleasePage } from "../ui/SatDeliveryReleasePage";
 import { CollaborationHeaderCluster } from "../ui/collaboration/CollaborationHeaderCluster";
 import { useSatPublish } from "../ui/publish/useSatPublish";
@@ -94,11 +97,23 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
   };
 
   const handleIssue = (issue: AssessmentValidationIssue) => {
-    const { questionId, field } = parseIssueLink(issue.path);
-    if (!questionId && !field) return;
+    const destination = resolvePublishIssueDestination(issue, shell);
+    if (destination.kind === "unresolved") return;
+    // The converter is fixed HERE, on the release policy, so the finding scrolls
+    // to its section instead of leaving the page.
+    if (destination.kind === "score-policy") {
+      const next = new URLSearchParams(searchParams);
+      next.set("panel", "scoring");
+      setSearchParams(next);
+      return;
+    }
     const params = new URLSearchParams();
-    if (questionId) params.set("question", questionId);
-    if (field) params.set("field", field);
+    if (destination.kind === "question") {
+      params.set("question", destination.questionId);
+      if (destination.field) params.set("field", destination.field);
+    } else {
+      params.set("module", publishModuleDeepLink(destination));
+    }
     openBuilder(exam.id, params.toString());
   };
 
@@ -162,6 +177,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       onExamRefresh={onExamRefresh}
       onPublish={handlePublish}
       onIssueClick={handleIssue}
+      focusScoringPanel={searchParams.get("panel") === "scoring"}
       collaborationSlot={<CollaborationHeaderCluster surface="release" />}
     />
   );

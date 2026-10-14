@@ -453,7 +453,7 @@ test.describe("SAT guided room setup", () => {
     await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
     await expect(page.getByText("SAT Practice 03 · Version 3", { exact: true }).last()).toBeVisible();
     await expect(page.getByText("October morning mock", { exact: true })).toBeVisible();
-    await expect(page.getByText("The proctor starts the exam.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Check-in lets students enter.", { exact: false })).toBeVisible();
     await expectNoSeriousAxeViolations(page, "SAT guided room setup review");
 
     await page.getByRole("button", { name: "Back" }).click();

@@ -80,7 +80,7 @@ interface AccessLinkEditorSheetProps {
 const SAT_ROOM_CREATION_STEPS = [
   { id: "details", label: "Room details", description: "Name the room and choose which SAT sections it will deliver." },
   { id: "audience", label: "Students", description: "Choose who may check in and how students identify themselves." },
-  { id: "check-in", label: "Check-in", description: "Set when students may enter. A proctor starts the exam." },
+  { id: "check-in", label: "Check-in", description: "Set when students may enter. Starting instructions appear in the room once it exists." },
   { id: "review", label: "Review", description: "Check the room setup before creating it." },
 ] as const;
 
@@ -157,6 +157,15 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const checkInSummary = availabilityType === "scheduled"
     ? `${formatLocalDateTime(opensAt)} to ${formatLocalDateTime(closesAt)} (${localTimeZone()})`
     : "Open now, until paused or revoked";
+  const sessionTypeSummary = SAT_SESSION_TYPE_LABELS[sessionType];
+  // The roster arrives as an array whose IDENTITY changes whenever the host
+  // re-renders (a poll, a version refresh), even when its content did not.
+  // Hydration keys on the content, so a background refresh can never wipe the
+  // fields the author already filled in.
+  const membersSignature = useMemo(
+    () => serializeAccessLinkMembers(props.members),
+    [props.members],
+  );
 
   const updateShared = (patch: Record<string, unknown>) => {
     if (!props.link || readOnly) return;
@@ -209,7 +218,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     const nextOpensAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.opensAt) : defaults.opensAt;
     const nextClosesAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.closesAt) : defaults.closesAt;
     const nextSections = editableAccessLinkSections(source?.enabledSections, link?.publishScope ?? props.publishScope ?? "full");
-    const nextMembersSource = serializeAccessLinkMembers(props.members);
+    const nextMembersSource = membersSignature;
+    // Session type is chosen per NEW room. Reopening the form starts from the
+    // default again instead of resurrecting a mode the author abandoned, and
+    // it participates in the dirty comparison so a mode-only edit is protected.
+    setSatSessionType("practice");
     setName(nextName);
     setAudienceType(nextAudienceType);
     setAudienceLabel(nextAudienceLabel);
@@ -235,10 +248,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       nextClosesAt,
       nextSections,
       nextMembersSource,
+      "practice",
     );
     hydratingRef.current = true;
     setIsDirty(false);
-  }, [defaults.closesAt, defaults.opensAt, props.link, props.members, props.open, props.prefill, props.publishScope]);
+  }, [defaults.closesAt, defaults.opensAt, membersSignature, props.link, props.open, props.prefill, props.publishScope]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -257,6 +271,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
         closesAt,
         sections,
         membersSource,
+        sessionType,
       ) !== initialSnapshotRef.current,
     );
   }, [
@@ -270,6 +285,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     opensAt,
     props.open,
     sections,
+    sessionType,
   ]);
 
   const validateName = (value: string): string | null => {
@@ -376,6 +392,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
             closesAt,
             sections,
             membersSource,
+            sessionType,
           );
           setIsDirty(false);
         })
@@ -403,6 +420,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     readOnly,
     sections,
     selfId,
+    sessionType,
     validateRoster,
     validateSections,
     validateWindow,
@@ -619,7 +637,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                   />
                 </Field>
                 {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this room. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div id="access-link-sections" className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[14px] leading-5 text-amber-800">{sectionsLocked ? "This room has no available sections and is fixed because a student has joined. Create a new room with an available section." : "This room’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[14px] leading-5 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
-                {isSat && !props.link ? <Field label="Session type" description="Classroom sessions let staff control Module 2. Forcing Module 2 skips the Module 1 score check. The exam's score report setting decides what students see when they finish."><select aria-label="Session type" value={sessionType} onChange={(event) => { setSatSessionType(event.target.value as SatSessionType); setIsDirty(true); }} className={inputClass}>{(Object.keys(SAT_SESSION_TYPE_LABELS) as SatSessionType[]).map((key) => <option key={key} value={key}>{SAT_SESSION_TYPE_LABELS[key]}</option>)}</select></Field> : null}
+                {isSat && !props.link ? <Field label="Session type" description="Classroom sessions let staff control Module 2. Forcing Module 2 skips the Module 1 score check. The exam's score report setting decides what students see when they finish."><select aria-label="Session type" value={sessionType} onChange={(event) => setSatSessionType(event.target.value as SatSessionType)} className={inputClass}>{(Object.keys(SAT_SESSION_TYPE_LABELS) as SatSessionType[]).map((key) => <option key={key} value={key}>{SAT_SESSION_TYPE_LABELS[key]}</option>)}</select></Field> : null}
                 </div>
                 <div hidden={isSteppedCreation && creationStep !== 1} className="space-y-5">
                 {isSat && !isSteppedCreation ? <GroupHeading id="access-link-group-audience" title="Who can join" /> : null}
@@ -653,7 +671,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                 </div>
                 <div hidden={isSteppedCreation && creationStep !== 2} className="space-y-5">
                 {isSat && !isSteppedCreation ? <GroupHeading id="access-link-group-checkin" title="Check-in settings" detail="Check-in decides whether students can enter. It never starts or pauses the exam." /> : null}
-                <Field label={isSat ? "Check-in window" : "Check-in"} description="Students can enter during this window. The proctor starts the exam.">
+                <Field label={isSat ? "Check-in window" : "Check-in"} description="Students can enter during this window. Starting instructions appear in the room once it exists.">
                   <div role="group" aria-label={isSat ? "Check-in window" : "Check-in"} className="grid grid-cols-2 gap-2">
                     <Choice active={availabilityType === "anytime"} onClick={() => { setAvailabilityType("anytime"); updateShared({ availabilityType: "anytime", opensAt: null, closesAt: null }); }} icon={<Link2 size={15} aria-hidden="true"/>} title="Open now" subtitle="Until paused or revoked" />
                     <Choice active={availabilityType === "scheduled"} onClick={() => { setAvailabilityType("scheduled"); updateShared({ availabilityType: "scheduled" }); }} icon={<Clock3 size={15} aria-hidden="true"/>} title="Scheduled" subtitle="Choose when it opens" />
@@ -682,8 +700,9 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                       <dd className="text-slate-900">{sectionsPlainText(sections)}</dd>
                       <dt className="font-medium text-slate-500">Check-in</dt>
                       <dd className="text-slate-900">{checkInSummary}</dd>
+                      {isSat && !props.link ? <><dt className="font-medium text-slate-500">Session type</dt><dd className="text-slate-900">{sessionTypeSummary}</dd></> : null}
                     </dl>
-                    <p className="mt-3 text-[14px] leading-5 text-slate-600">The proctor starts the exam.</p>
+                    <p className="mt-3 text-[14px] leading-5 text-slate-600">Check-in lets students enter. Starting instructions appear in the room once it is created.</p>
                   </section>
                 ) : null}
                 </div>
@@ -761,6 +780,7 @@ function editorSnapshot(
   closesAt: string,
   sections: readonly AccessLinkSectionKey[],
   membersSource: string,
+  sessionType: SatSessionType,
 ): string {
   return JSON.stringify([
     name,
@@ -772,6 +792,10 @@ function editorSnapshot(
     closesAt,
     accessLinkSectionRequest(sections),
     membersSource,
+    // Session type is a consequential mode choice: leaving it out of the
+    // snapshot let Cancel discard an edit to it silently and let a mode-only
+    // change look like "nothing changed".
+    sessionType,
   ]);
 }
 

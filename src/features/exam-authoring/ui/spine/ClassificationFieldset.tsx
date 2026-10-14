@@ -58,7 +58,7 @@ export function ClassificationFieldset({ question, onChange, issues, readOnly = 
       <p className="mb-4 text-xs leading-5 text-muted-foreground">
         {fields === "extra"
           ? "Optional labels for review and reuse."
-          : "Domain and Skill are required before this question can be published."}
+          : "Domain and Skill label this question for reporting. They are recommended, not required to publish \u2014 a question without them still publishes, but cannot be broken down by domain or skill in reports."}
       </p>
       <div className={fields === "core" ? "grid gap-4 md:grid-cols-3" : "space-y-4"}>
         {showCore ? (

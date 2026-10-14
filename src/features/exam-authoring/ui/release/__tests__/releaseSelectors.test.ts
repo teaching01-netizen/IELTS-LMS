@@ -26,7 +26,9 @@ import {
   isSATPublishReadinessValid,
   normalizePublishNotes,
   parseIssueLink,
+  publishIssueDestinationLabel,
   publishMediaIssueDiagnostic,
+  resolvePublishIssueDestination,
   secondsToMinutes,
   summarizeStaleReadiness,
   toUserFacingPublishError,
@@ -297,6 +299,74 @@ describe("parseIssueLink", () => {
     expect(parseIssueLink("")).toEqual({ questionId: null, field: null });
     expect(parseIssueLink("examQuestion::")).toEqual({ questionId: null, field: null });
     expect(parseIssueLink("examQuestion:q-1:")).toEqual({ questionId: "q-1", field: null });
+  });
+});
+
+describe("resolvePublishIssueDestination", () => {
+  const shell = {
+    sections: [
+      { sectionKey: "reading-writing", modules: [{ moduleKey: "rw-m1" }, { moduleKey: "rw-m2-lower" }] },
+      { sectionKey: "math", modules: [{ moduleKey: "math-m1" }] },
+    ],
+  };
+
+  it("keeps existing question paths compatible", () => {
+    expect(
+      resolvePublishIssueDestination({ code: "question.prompt.required", path: "examQuestion:q-1:prompt" }, shell),
+    ).toEqual({ kind: "question", questionId: "q-1", field: "prompt" });
+    expect(
+      resolvePublishIssueDestination({ code: "question.prompt.required", path: "examQuestion:q-1:" }, shell),
+    ).toEqual({ kind: "question", questionId: "q-1", field: null });
+  });
+
+  it("resolves a module path against the loaded shell", () => {
+    expect(
+      resolvePublishIssueDestination({ code: "sat.module.incomplete", path: "reading-writing.rw-m1" }, shell),
+    ).toEqual({ kind: "module", sectionKey: "reading-writing", moduleKey: "rw-m1" });
+  });
+
+  it("resolves the converter path to the scoring policy", () => {
+    expect(
+      resolvePublishIssueDestination({ code: "sat.converter.missing", path: "scoringPolicy" }, shell),
+    ).toEqual({ kind: "score-policy" });
+  });
+
+  it("refuses a module the loaded shell does not contain", () => {
+    const destination = resolvePublishIssueDestination(
+      { code: "sat.module.missing", path: "reading-writing.higher_branch" },
+      shell,
+    );
+    expect(destination.kind).toBe("unresolved");
+    expect(destination.kind === "unresolved" ? destination.reason : "").toMatch(/does not contain/);
+  });
+
+  it("trusts a module path when the shell maps no modules at all", () => {
+    const modulelessShell = {
+      sections: [{ sectionKey: "reading-writing", modules: [] }],
+    };
+    expect(
+      resolvePublishIssueDestination({ code: "sat.module.incomplete", path: "reading-writing.rw-m2-higher" }, modulelessShell),
+    ).toEqual({ kind: "module", sectionKey: "reading-writing", moduleKey: "rw-m2-higher" });
+  });
+
+  it("never mistakes an unprefixed question path for a module", () => {
+    for (const path of ["answer.options", "answer.correctOptionId", "questionType"]) {
+      expect(resolvePublishIssueDestination({ code: "sat.choice.count", path }, shell).kind).toBe("unresolved");
+      expect(resolvePublishIssueDestination({ code: "sat.choice.count", path }, null).kind).toBe("unresolved");
+    }
+  });
+
+  it("resolves a module without a shell when the section is a SAT section", () => {
+    expect(
+      resolvePublishIssueDestination({ code: "sat.module.incomplete", path: "math.math-m1" }, null),
+    ).toEqual({ kind: "module", sectionKey: "math", moduleKey: "math-m1" });
+  });
+
+  it("names the destination on the action, and none when there is none", () => {
+    expect(publishIssueDestinationLabel({ kind: "question", questionId: "q", field: null })).toBe("Open question");
+    expect(publishIssueDestinationLabel({ kind: "module", sectionKey: "math", moduleKey: "m" })).toBe("Open module");
+    expect(publishIssueDestinationLabel({ kind: "score-policy" })).toBe("Open score settings");
+    expect(publishIssueDestinationLabel({ kind: "unresolved", reason: "x" })).toBeNull();
   });
 });
 

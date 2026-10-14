@@ -48,6 +48,7 @@ import { WorkbookImportUndoBanner } from "./WorkbookImportUndoBanner";
 import { useOptionalAuthSession } from "../../auth/api/authSession";
 import { buildStaffDraftKey } from "../../../utils/staffDraftKey";
 import { AuthoringConfirmDialog, restoreAuthoringFocus } from "./authoringPrimitives";
+import { resolvePublishIssueDestination } from "./release/releaseSelectors";
 import {
   EditorSkeleton,
   IssuesPane,
@@ -919,25 +920,50 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
     [selectedModule, selectionAnchorRef, setSelectedIds]
   );
 
+  // ONE recovery path for every publish finding. The destination is resolved
+  // centrally (question / module / scoring policy) so a Fix action on a module
+  // count or converter blocker lands on the work instead of closing the review
+  // and going nowhere.
   const openIssue = useCallback(
     async (issue: AssessmentValidationIssue) => {
-      const match = issue.path.match(/^examQuestion:([^:]+):(.*)$/);
-      if (!match) return;
-      const [, questionId, fieldPath] = match;
-      const target = shell?.sections
-        .flatMap((section) =>
-          section.modules.map((module) => ({
-            moduleId: module.id,
-            question: module.questions.find((question) => question.examQuestionId === questionId),
-          }))
-        )
-        .find((candidate) => candidate.question);
-      if (!target?.question || !questionId) return;
-      setWorkspaceMode("build");
+      const destination = resolvePublishIssueDestination(issue, shell ?? null);
+      if (destination.kind === "unresolved") return;
       setSelectedIds(new Set());
-      if(await selectQuestion(questionId, target.moduleId))requestField(fieldPath??null);
+      if (destination.kind === "score-policy") {
+        // The converter lives with the release policy, not in the question
+        // column: leave the builder for its scoring section.
+        void (async () => {
+          if (await flushBeforeRouteChange()) {
+            navigate(`/sat/exams/${encodeURIComponent(examId)}/release?panel=scoring`);
+          }
+        })();
+        return;
+      }
+      setWorkspaceMode("build");
+      if (destination.kind === "question") {
+        const target = shell?.sections
+          .flatMap((section) =>
+            section.modules.map((module) => ({
+              moduleId: module.id,
+              question: module.questions.find(
+                (question) => question.examQuestionId === destination.questionId,
+              ),
+            }))
+          )
+          .find((candidate) => candidate.question);
+        if (!target?.question) return;
+        if (await selectQuestion(destination.questionId, target.moduleId)) {
+          requestField(destination.field ?? null);
+        }
+        return;
+      }
+      const targetModule = shell?.sections
+        .flatMap((section) => section.modules)
+        .find((module) => module.moduleKey === destination.moduleKey);
+      if (!targetModule) return;
+      await selectModule(targetModule.id);
     },
-    [selectQuestion, setSelectedIds, shell, requestField]
+    [examId, flushBeforeRouteChange, navigate, requestField, selectModule, selectQuestion, setSelectedIds, shell]
   );
 
   // Keyboard commands are a named surface, not a rule table buried in this
@@ -1264,7 +1290,10 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
                       },
                       {
                         id: "workbook-import",
-                        label: "Replace exam from workbook…",
+                        // Names the import, not a wholesale replacement: the
+                        // preview states exactly which modules and how many
+                        // questions change before anything is committed.
+                        label: "Import Excel workbook…",
                         onSelect: () => void openWorkbookImport(),
                       },
                     ],
