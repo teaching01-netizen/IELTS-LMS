@@ -18,12 +18,11 @@ func commitRequest() SatWorkbookCommitRequest {
 	for _, spec := range satWorkbookModules {
 		qs := make([]QuestionDraft, 0, spec.count)
 		for i := 0; i < spec.count; i++ {
-			pretest := i < 2
 			meta := validMetadata()
 			if spec.sectionKey == SectionMath {
 				meta = `{"sectionKey":"math","domain":"algebra","skill":"Linear Equations in One Variable","difficulty":"medium","tags":["demo"]}`
 			}
-			qs = append(qs, QuestionDraft{QuestionType: "single_choice", Stimulus: json.RawMessage(`{}`), Prompt: json.RawMessage(validPrompt()), Answer: json.RawMessage(validChoiceAnswer()), Rationale: json.RawMessage(`{}`), Metadata: json.RawMessage(meta), IsPretest: pretest})
+			qs = append(qs, QuestionDraft{QuestionType: "single_choice", Stimulus: json.RawMessage(`{}`), Prompt: json.RawMessage(validPrompt()), Answer: json.RawMessage(validChoiceAnswer()), Rationale: json.RawMessage(`{}`), Metadata: json.RawMessage(meta)})
 		}
 		mods = append(mods, SatWorkbookModuleDraft{ModuleKey: spec.key, SectionKey: spec.sectionKey, Questions: qs})
 	}

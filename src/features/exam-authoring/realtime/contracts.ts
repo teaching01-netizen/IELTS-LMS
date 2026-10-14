@@ -110,7 +110,6 @@ export const AUTHORING_CHANGED_FIELDS = [
   'accessibility',
   'displayOrder',
   'moduleId',
-  'isPretest',
   'questionType',
   'readiness',
   'deliverySettings',

@@ -19,16 +19,15 @@ import (
 type questionValidationRow struct {
 	examQuestionID, questionID, revisionID, sectionKey, questionType string
 	displayOrder, semanticRevision, revision                         int
-	isPretest                                                        bool
 	stimulus, prompt, answer, rationale, metadata                    string
 }
 
 type satBlueprintModuleSpec struct {
-	durationSeconds, questionCount, pretestCount int
-	tools                                        []string
+	durationSeconds, questionCount int
+	tools                          []string
 }
 
-// SATBlueprintOperational is the operational (scored, non-pretest) question
+// SATBlueprintOperational is the operational (scored) question
 // count of one module of a blueprint section; ok is false for an unknown
 // section. The global score-conversion editor seeds its default matrix sizes
 // from it - the lookup itself always matches the attempt's own counts.
@@ -38,14 +37,14 @@ func SATBlueprintOperational(sectionKey string) (operational int, ok bool) {
 	if !ok {
 		return 0, false
 	}
-	return spec.questionCount - spec.pretestCount, true
+	return spec.questionCount, true
 }
 
 func satBlueprintModule(sectionKey, moduleKey string) (satBlueprintModuleSpec, bool) {
 	spec := satBlueprintModuleSpec{}
 	switch sectionKey {
 	case SectionReadingWriting:
-		spec = satBlueprintModuleSpec{durationSeconds: 32 * 60, questionCount: 27, pretestCount: 2}
+		spec = satBlueprintModuleSpec{durationSeconds: 32 * 60, questionCount: 27}
 		switch moduleKey {
 		case "rw-m1", "rw-m2-lower", "rw-m2-higher":
 			return spec, true
@@ -53,7 +52,7 @@ func satBlueprintModule(sectionKey, moduleKey string) (satBlueprintModuleSpec, b
 			return satBlueprintModuleSpec{}, false
 		}
 	case SectionMath:
-		spec = satBlueprintModuleSpec{durationSeconds: 35 * 60, questionCount: 22, pretestCount: 2, tools: []string{"calculator", "reference_sheet"}}
+		spec = satBlueprintModuleSpec{durationSeconds: 35 * 60, questionCount: 22, tools: []string{"calculator", "reference_sheet"}}
 		switch moduleKey {
 		case "math-m1", "math-m2-lower", "math-m2-higher":
 			return spec, true
@@ -73,7 +72,7 @@ func loadQuestionValidationRows(ctx context.Context, q interface {
 }, moduleID string) ([]questionValidationRow, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT eq.id, eq.question_id, eq.question_revision_id, s.section_key,
-		       eq.display_order, eq.is_pretest, r.question_type,
+		       eq.display_order, r.question_type,
 		       r.semantic_revision, r.revision,
 		       CAST(r.stimulus AS CHAR), CAST(r.prompt AS CHAR),
 		       CAST(r.answer_definition AS CHAR), CAST(r.rationale AS CHAR),
@@ -93,7 +92,7 @@ func loadQuestionValidationRows(ctx context.Context, q interface {
 		var row questionValidationRow
 		if err := rows.Scan(
 			&row.examQuestionID, &row.questionID, &row.revisionID, &row.sectionKey,
-			&row.displayOrder, &row.isPretest, &row.questionType,
+			&row.displayOrder, &row.questionType,
 			&row.semanticRevision, &row.revision,
 			&row.stimulus, &row.prompt, &row.answer, &row.rationale, &row.metadata,
 		); err != nil {
@@ -149,7 +148,6 @@ func (row questionValidationRow) summary() QuestionSummary {
 		QuestionID:        row.questionID,
 		QuestionRevision:  row.revisionID,
 		DisplayOrder:      row.displayOrder,
-		IsPretest:         row.isPretest,
 		QuestionType:      row.questionType,
 		SemanticRevision:  row.semanticRevision,
 		Revision:          row.revision,

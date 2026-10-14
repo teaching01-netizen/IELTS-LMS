@@ -1,0 +1,971 @@
+# frontend verification transcript
+# repo HEAD: 160bf0ade938c75acfbf101480c32122f29a3cb5
+#
+# The post-fix run of the four focused suites follows verbatim. The PRE-FIX run
+# that reproduced the deep-link leak (R12) was executed before the fix and is
+# quoted here as observed; it is not a raw capture, because the run predates this
+# file. File: src/features/exam-authoring/ui/__tests__/useAuthoringSelection.test.tsx
+#   Test Files  1 failed (1)
+#   Tests       2 failed | 4 passed (6)
+#   AssertionError: expected '?question=eq-does-not-exist&field=prompt' to be ''
+#     at drops a deep link naming a question this shell does not contain
+#   AssertionError: expected '?field=prompt' to be ''
+#     at drops a stray field link that names no question
+# Both assertions are still present in the file and pass after the fix.
+
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/features/exam-authoring/ui/release/__tests__/releaseSelectors.test.ts (50 tests) 17ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringSelection.test.tsx (6 tests) 41ms
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > returns Back to the originating test and selected room
+[2026-10-14T05:04:49.039Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954288878-p11lc5syv',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > opens the controller explicitly in the SAT provider boundary
+[2026-10-14T05:04:49.218Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954289095-w41xl32fw',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > uses the prestart presentation with the complete projected run sheet
+[2026-10-14T05:04:49.288Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954289268-1jyhaseus',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > gives staff the student link and QR before the room starts
+[2026-10-14T05:04:49.322Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954289304-1t0euwty5',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+ ✓ src/products/sat/routes/__tests__/SatExamLibraryRoute.test.tsx (18 tests) 1006ms
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > keeps the student link in the header while live and drops it in review
+[2026-10-14T05:04:49.645Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954289564-wdiyqwzmn',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > starts a prestart room through the existing controller action
+[2026-10-14T05:04:49.774Z] [INFO] sat.session.action {
+  action: 'start',
+  scheduleId: 'sched-1',
+  latencyMs: 29,
+  outcome: 'success'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > starts a prestart room through the existing controller action
+[2026-10-14T05:04:49.774Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954289698-9yjczehs5',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatPhase02Copy.test.tsx > SAT Phase 02 copy contracts > rooms and room placeholders name their filter scope
+[2026-10-14T05:04:49.720Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954289691-gjzbysvmz',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+ ✓ src/products/sat/routes/__tests__/SatPhase02Copy.test.tsx (6 tests) 401ms
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > does not submit an already-open room confirmation after the room becomes stale
+[2026-10-14T05:04:49.938Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954289847-qv3copval',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > waiting room and status line > states check-in and exam run state separately, and puts the start review in the waiting room with its facts
+[2026-10-14T05:04:50.024Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954289974-t4mrwr4d3',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > waiting room and status line > reports check-in as paused without claiming the exam stopped
+[2026-10-14T05:04:50.072Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290060-wf2otra89',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > waiting room and status line > never guesses check-in for a viewer who cannot read the access setup
+[2026-10-14T05:04:50.137Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290102-jufq7te3h',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > names the section and the module clock for the room and for each student
+[2026-10-14T05:04:50.280Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290257-1cstuzwpl',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > shows no module clock for a student who has not started a module
+[2026-10-14T05:04:50.307Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290294-rejqtjv2e',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > keeps per-action pending isolated: one student action never freezes room controls
+[2026-10-14T05:04:50.427Z] [INFO] sat.session.action {
+  action: 'student-extend-5',
+  scheduleId: 'sched-1',
+  latencyMs: 37,
+  outcome: 'success'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > keeps per-action pending isolated: one student action never freezes room controls
+[2026-10-14T05:04:50.427Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290336-jlowgz1ud',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+ ✓ src/products/sat/routes/__tests__/scheduleValidation.test.ts (11 tests) 22ms
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > tones error banners as alerts and success banners as status
+[2026-10-14T05:04:50.478Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290459-9ht36yhw4',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+[2026-10-14T05:04:50.481Z] [ERROR] reload failed (Error) {
+  scope: 'sat.session.action.reload',
+  action: 'pause',
+  scheduleId: 'sched-1',
+  latencyMs: 9,
+  code: 'Error',
+  stack: 'Error: reload failed\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx:400:41\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:146:14\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:533:11\n' +
+    '    at runWithTimeout (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:39:7)\n' +
+    '    at runTest (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1056:17)\n' +
+    '    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)\n' +
+    '    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)\n' +
+    '    at runFiles (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1262:5)\n' +
+    '    at startTests (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1271:3)\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/vitest/dist/chunks/runBaseTests.3qpJUEJM.js:126:11'
+} Error: reload failed
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx:400:41
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:146:14
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:533:11
+    at runWithTimeout (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:39:7)
+    at runTest (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1056:17)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runFiles (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1262:5)
+    at startTests (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1271:3)
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/vitest/dist/chunks/runBaseTests.3qpJUEJM.js:126:11
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > moves through the roster with an arrow key from its single tab stop
+An update to SatSessionRoomRoster inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[2026-10-14T05:04:50.596Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290574-kelau5xac',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > opens the inspector as a modal when the room is too narrow to dock it, and restores focus to its roster trigger
+[2026-10-14T05:04:50.628Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290606-z626p7qlc',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+ ✓ src/products/sat/routes/__tests__/SatResultsRoutes.test.tsx (27 tests) 1647ms
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > keeps open alerts and student attention counts in the context bar
+[2026-10-14T05:04:50.686Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290674-5wxej4lcw',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > previews a warning with exact copy before sending
+[2026-10-14T05:04:50.730Z] [INFO] sat.session.action {
+  action: 'student-warn',
+  scheduleId: 'sched-1',
+  latencyMs: 11,
+  outcome: 'success'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > previews a warning with exact copy before sending
+[2026-10-14T05:04:50.730Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290694-m6ca4pxke',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > previews a time extension with remaining context before applying
+[2026-10-14T05:04:50.778Z] [INFO] sat.session.action {
+  action: 'student-extend-5',
+  scheduleId: 'sched-1',
+  latencyMs: 7,
+  outcome: 'success'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > previews a time extension with remaining context before applying
+[2026-10-14T05:04:50.778Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290754-v8k77y41w',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+ ✓ src/products/sat/routes/__tests__/SatAccessRoute.test.tsx (4 tests) 113ms
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > filters the roster to students needing attention
+[2026-10-14T05:04:50.858Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290804-2i8f7mke8',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > filters from the context attention count while keeping the inspector selected
+[2026-10-14T05:04:51.047Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954290971-gdr1gnelr',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > falls back to the first remaining student when the selected student leaves
+[2026-10-14T05:04:51.117Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291072-e99kuo3ml',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > does not present a zero-count attention filter as an action
+[2026-10-14T05:04:51.148Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291131-u0xsioixk',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > binds the terminate confirm to the student captured at open, even if selection moves
+[2026-10-14T05:04:51.224Z] [INFO] sat.session.action {
+  action: 'student-terminate',
+  scheduleId: 'sched-1',
+  latencyMs: 17,
+  outcome: 'success'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > binds the terminate confirm to the student captured at open, even if selection moves
+[2026-10-14T05:04:51.224Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291163-adskt76pu',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps the open publish sheet mounted while the draft shell is removed
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > shows an error instead of acting when the bound student left the roster
+[2026-10-14T05:04:51.294Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291266-5f42cmm2j',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > marks loaded room data stale and disables risky actions while reconnecting
+[2026-10-14T05:04:51.320Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291305-v5bvpwjit',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > renders the Overrun badge when the room runs beyond its window
+[2026-10-14T05:04:51.335Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291328-zmrrw3l6q',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > shows Reconnecting in the header while stale
+[2026-10-14T05:04:51.349Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291344-044dnf925',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > keeps timers on tabular-nums so 1s ticks do not shift layout
+[2026-10-14T05:04:51.363Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291359-h47bmnotu',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > combines search and attention filters with AND semantics
+[2026-10-14T05:04:51.390Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291372-38u7gk2cf',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > disables student menu items while stale
+[2026-10-14T05:04:51.416Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291404-wonf9vhbo',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > keeps banners on the entrance hook and confirms extend-room success copy
+[2026-10-14T05:04:51.459Z] [INFO] sat.session.action {
+  action: 'extend-5',
+  scheduleId: 'sched-1',
+  latencyMs: 10,
+  outcome: 'success'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > keeps banners on the entrance hook and confirms extend-room success copy
+[2026-10-14T05:04:51.459Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291426-lmkbltykr',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > refuses a time grant when the runtime revision has not arrived
+[2026-10-14T05:04:51.497Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291477-hbtgqrt0b',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > one clock across the room > reads the same section clock on the hero, the roster, the run sheet and the inspector
+[2026-10-14T05:04:51.514Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291507-y8ipwm73x',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > one clock across the room > keeps the roster row precise for the selected student instead of riding the 15s band
+[2026-10-14T05:04:51.529Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291523-r8aoh0d7w',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > room ops hierarchy (phase 04) > renders roster rows with at most two text lines
+[2026-10-14T05:04:51.549Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291542-wt2bdjlpa',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > room ops hierarchy (phase 04) > resolves dots to staff tokens, not slate literals
+[2026-10-14T05:04:51.564Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291558-zy3yem0ys',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > room ops hierarchy (phase 04) > keeps the hero clock and tabular timers after compress
+[2026-10-14T05:04:51.581Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291575-vhjhklery',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > room ops hierarchy (phase 04) > keeps selected-student inspector labels on the eyebrow floor
+[2026-10-14T05:04:51.601Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1791954291589-t5bnw1dw1',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:50:20
+
+ ✓ src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx (44 tests) 2819ms
+ ✓ src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx (20 tests) 2121ms
+   ✓ SatSessionsRoute > opens the same room settings the exam uses, pinned to the exam’s published version, then lands in the new room 324ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps the acknowledged version available after Done and pins room creation to it
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+[2026-10-14T05:04:51.583Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/assessment-authoring/exam-questions/eq-1/coedit-token',
+  requestId: 'req-1791954291509-wb1nsklif',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)\n' +
+    '    at Module.requestCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:102:22)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/usePromptCoediting.ts:96:23'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)
+    at Module.requestCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:102:22)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/usePromptCoediting.ts:96:23
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps unsaved work exportable when publication removes the draft shell
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > renders the shared exam header, tabs, and the module's question cards
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps the outline closed until asked, then shows the queue beside the cards
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens another question by choosing its card
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens another question by choosing its card
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-1"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > offers one Import menu with both import paths for authors
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+[2026-10-14T05:04:52.040Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/assessment-authoring/exam-questions/eq-1/coedit-token',
+  requestId: 'req-1791954292012-bnyt7frwq',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)\n' +
+    '    at Module.requestCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:102:22)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/usePromptCoediting.ts:96:23'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)
+    at Module.requestCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:102:22)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/usePromptCoediting.ts:96:23
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > hides Import from roles that cannot edit
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > adds a question after the active one with an order-protected placement
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > adds a question after the active one with an order-protected placement
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps the exam-level actions reachable in the header
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > edits settings in place from Quick settings, while the Settings tab is a real page
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > duplicates the explicit noncurrent row after exactly one dirty-draft flush
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > confirms deletion of another row without changing the active draft
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > stops row mutations when the dirty draft cannot flush
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps save inside editors and gives Shift+S precedence outside editors
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > guards settings shortcut in text and exposes command actions with Ctrl+K
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens the student preview sheet from the spine question view
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace conflict routing without a socket > never replaces a DIRTY editor from a refetch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace conflict routing without a socket > still replaces a CLEAN editor from a refetch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace conflict routing without a socket > reports a recovered device draft as a device fact, never as a conflict
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace question load state machine > renders the editor from a successful question response
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace question load state machine > renders the skeleton only while the question query has not answered
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace question load state machine > surfaces a failed request as a retryable load error
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace question load state machine > never leaves a successful response in the skeleton, even when it cannot be adopted
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx (26 tests) 2404ms
+   ✓ AuthoringWorkspace conflict routing without a socket > reports a recovered device draft as a device fact, never as a conflict 316ms
+
+ Test Files  10 passed (10)
+      Tests  212 passed (212)
+   Start at  12:04:46
+   Duration  7.58s (transform 4.42s, setup 2.62s, collect 11.78s, tests 10.59s, environment 6.34s, prepare 1.01s)
+
+FOCUSED_EXIT=0

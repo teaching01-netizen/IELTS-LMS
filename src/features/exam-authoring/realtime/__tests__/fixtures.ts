@@ -62,7 +62,6 @@ export function makeSummary(
     questionId: `q-${examQuestionId}`,
     questionRevisionId: `rev-${examQuestionId}`,
     displayOrder,
-    isPretest: false,
     questionType: "single_choice",
     semanticRevision: 1,
     revision: 1,
@@ -120,7 +119,6 @@ export function makeQuestionDetail(examQuestionId: string): AssessmentQuestionDe
     moduleKey: "rw-1",
     sectionKey: "rw",
     displayOrder: 0,
-    isPretest: false,
     question: {},
   } as unknown as AssessmentQuestionDetail;
 }

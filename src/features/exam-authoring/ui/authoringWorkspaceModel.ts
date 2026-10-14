@@ -13,10 +13,9 @@ export type QuestionWorkspaceScalar = {
   answer: QuestionRevision["answer"] | { kind: "single_choice"; options: Array<{ id: string }>; correctOptionId: string | null };
   metadata: QuestionRevision["metadata"];
   accessibility: QuestionRevision["accessibility"];
-  isPretest?: boolean;
 };
 
-export function questionWorkspaceScalar(question: QuestionRevision, isPretest?: boolean): QuestionWorkspaceScalar {
+export function questionWorkspaceScalar(question: QuestionRevision): QuestionWorkspaceScalar {
   const answer = question.answer.kind === "single_choice"
     ? {
         kind: "single_choice" as const,
@@ -29,7 +28,6 @@ export function questionWorkspaceScalar(question: QuestionRevision, isPretest?: 
     answer,
     metadata: question.metadata,
     accessibility: question.accessibility,
-    ...(isPretest === undefined ? {} : { isPretest }),
   };
 }
 

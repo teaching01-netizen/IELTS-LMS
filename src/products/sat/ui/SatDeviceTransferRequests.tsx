@@ -12,9 +12,6 @@ const POLL_MS = 10_000;
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 const formatTime = (value: string | null) => (value ? timeFormat.format(new Date(value)) : 'No answers saved yet');
 
-const chipClass =
-  'min-h-11 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] disabled:cursor-wait disabled:opacity-60';
-
 /**
  * Proctor review queue for SAT device changes. Approval binds the request to
  * the student's target browser and the current owner/lease; ownership moves
@@ -93,12 +90,12 @@ export function SatDeviceTransferRequests({
   if (items.length === 0 && !status) return null;
 
   return (
-    <section aria-labelledby={headingId} className="sat-banner-enter mx-auto w-full max-w-[1500px] px-4 pt-3" data-testid="sat-device-transfer-requests">
-      <div className="rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3.5 py-3">
-        <h2 id={headingId} className="flex items-center gap-1.5 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
-          <Smartphone size={14} aria-hidden="true" />
+    <section aria-labelledby={headingId} className="mt-3 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-3" data-testid="sat-device-transfer-requests">
+      <div>
+        <h3 id={headingId} className="flex items-center gap-1.5 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
+          <Smartphone size={16} aria-hidden="true" />
           Device change requests ({items.length})
-        </h2>
+        </h3>
         <p role="status" aria-live="polite" className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">
           {status}
         </p>
@@ -106,9 +103,9 @@ export function SatDeviceTransferRequests({
           {items.map((item) => {
             const open = reviewing === item.requestId;
             return (
-              <li key={item.requestId} className="rounded-xl bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3 py-2 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">
+              <li key={item.requestId} className="rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-3 py-2.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
+                  <div className="min-w-0 flex-1 basis-48">
                     <p className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
                       {item.candidateName} · {item.candidateId}
                     </p>
@@ -124,7 +121,7 @@ export function SatDeviceTransferRequests({
                   {item.state === 'pending' ? (
                     <button
                       type="button"
-                      className={`${chipClass} bg-[var(--sat-staff-surface,#fff)] text-[var(--sat-staff-text-primary,#1d1d1f)] ring-1 ring-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))]`}
+                      className="sat-btn sat-btn--secondary sat-press px-3"
                       aria-expanded={open}
                       onClick={() => {
                         setReviewing(open ? null : item.requestId);
@@ -137,7 +134,7 @@ export function SatDeviceTransferRequests({
                   ) : null}
                 </div>
                 {open ? (
-                  <div className="mt-2 space-y-2 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-2">
+                  <div className="mt-2.5 space-y-2.5 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-2.5">
                     <p>Confirm the student in person and that the new device is theirs. The exam clock keeps running.</p>
                     <label htmlFor={reasonId} className="block font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
                       Reason (optional)
@@ -146,7 +143,7 @@ export function SatDeviceTransferRequests({
                         value={reason}
                         maxLength={255}
                         onChange={(event) => setReason(event.target.value)}
-                        className="mt-1 min-h-11 w-full rounded-[10px] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] px-2 text-[16px] font-normal"
+                        className="mt-1 min-h-11 w-full rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] px-2.5 text-[16px] font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
                       />
                     </label>
                     <label htmlFor={ackId} className="flex items-start gap-2">
@@ -164,7 +161,7 @@ export function SatDeviceTransferRequests({
                         type="button"
                         disabled={busy || blocked || !acknowledged}
                         onClick={() => void decide(item, true)}
-                        className={`${chipClass} bg-[var(--sat-staff-text-primary,#1d1d1f)] text-white`}
+                        className="sat-btn sat-btn--primary sat-press px-3"
                       >
                         Approve device change
                       </button>
@@ -172,7 +169,7 @@ export function SatDeviceTransferRequests({
                         type="button"
                         disabled={busy || blocked}
                         onClick={() => void decide(item, false)}
-                        className={`${chipClass} bg-[var(--sat-staff-surface,#fff)] text-[var(--sat-staff-danger,#b42318)] ring-1 ring-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))]`}
+                        className="sat-btn sat-btn--danger-secondary sat-press px-3"
                       >
                         Deny
                       </button>

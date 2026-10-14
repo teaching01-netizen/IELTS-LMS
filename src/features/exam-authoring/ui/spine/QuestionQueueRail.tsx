@@ -5,7 +5,6 @@ import {
   Copy,
   MoveRight,
   Plus,
-  RotateCcw,
   Search,
   Trash2,
   X,
@@ -387,9 +386,8 @@ function QueueBulkToolbar(props: QuestionQueueRailProps & { selectedIds: string[
       <div className="mt-1.5 grid grid-cols-3 gap-1">{(["easy", "medium", "hard"] as Difficulty[]).map((value) => <button key={value} type="button" {...busyProps("bulk-difficulty-" + value)} onClick={() => patch("bulk-difficulty-" + value, { difficulty: value })} className="h-8 rounded bg-muted text-xs font-semibold capitalize text-muted-foreground hover:bg-muted/70 hover:text-foreground">{value}</button>)}</div>
       <div className="mt-1.5 flex gap-1.5"><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Replace tags…" aria-label="Bulk tags" className="h-8 min-w-0 flex-1 rounded bg-muted px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" /><button type="button" disabled={!tags.trim() || busy} onClick={() => patch("bulk-tags", { tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean) })} className="rounded px-2.5 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-30">Apply</button></div>
       {props.moveTargets.length ? <div className="mt-1.5 flex gap-1.5"><select value={moveTarget} disabled={busy} onChange={(event) => setMoveTarget(event.target.value)} aria-label="Move selected to module" className="h-8 min-w-0 flex-1 rounded bg-muted px-2 text-xs text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring">{props.moveTargets.map((target) => <option key={target.id} value={target.id}>{target.title}</option>)}</select><button type="button" {...busyProps("bulk-move")} disabled={!moveTarget || busy} onClick={() => run("bulk-move", { type: "move", destinationModuleId: moveTarget })} className="flex h-8 items-center gap-1 rounded px-2.5 text-xs font-semibold text-primary hover:bg-muted"><MoveRight size={11} aria-hidden="true" />Move</button></div> : null}
-      <div className="mt-1.5 grid grid-cols-3 gap-1">
+      <div className="mt-1.5 grid grid-cols-2 gap-1">
         <button type="button" {...busyProps("bulk-duplicate")} disabled={busy} onClick={() => run("bulk-duplicate", { type: "duplicate", destinationModuleId: props.module.id })} className="flex h-9 items-center justify-center gap-1 rounded text-xs font-semibold text-muted-foreground hover:bg-muted"><Copy size={11} aria-hidden="true" />Duplicate</button>
-        <button type="button" {...busyProps("bulk-pretest")} disabled={busy} onClick={() => run("bulk-pretest", { type: "set_pretest", value: true })} className="flex h-9 items-center justify-center gap-1 rounded text-xs font-semibold text-muted-foreground hover:bg-muted"><RotateCcw size={11} aria-hidden="true" />Pretest</button>
         <div className="relative"><button type="button" onClick={() => setDeleteOpen(true)} className="flex h-9 w-full items-center justify-center gap-1 rounded text-xs font-semibold text-destructive hover:bg-destructive/10"><Trash2 size={11} aria-hidden="true" />Delete</button><AuthoringConfirmDialog open={deleteOpen} title={`Delete ${props.selectedIds.length} questions?`} description="This removes the selected questions from the module." confirmLabel="Delete selected" destructive busy={deleteBusy} onCancel={() => setDeleteOpen(false)} onConfirm={async () => { if (deleteBusy) return; setDeleteBusy(true); try { await props.onBulkAction(props.selectedIds, { type: "delete" }); setDeleteOpen(false); } catch { /* Parent surfaces the failure; keep the confirmation available for retry. */ } finally { setDeleteBusy(false); } }} /></div>
       </div>
     </div>

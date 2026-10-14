@@ -160,8 +160,8 @@ not move the pin. -/
 theorem reachable_republish_state_keeps_the_first_version :
     (observe v2 (freeze (observe v1 emptyRoom))).target = some v1 := by decide
 
-/-- The executable trace, so the build log carries the states rather than only
-the theorem statements. -/
+-- The executable trace, so the build log carries the states rather than only
+-- the theorem statements. Shipped: the pin stays on v1. Legacy: it follows v2.
 #eval (runRoom emptyRoom republishTrace, runLegacyRoom emptyRoom legacyRepublishTrace)
 
 end Counterexamples

@@ -164,6 +164,9 @@ func init() {
 		// layer: org check + requireProctorAttemptScope, 404-collapse).
 		"GET /sessions/{scheduleID}/start-code":         {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /sessions/{scheduleID}/start-code/rotate": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		// SAT room entry details expose only the assigned room's join setup;
+		// the handler checks the room scope and withholds member codes/emails.
+		"GET /sessions/{scheduleID}/entry-info": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		// SAT Practice Classroom staff-selected Module 2 (handler: org +
 		// live proctor assignment, 404-collapse).
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/route": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},

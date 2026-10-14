@@ -1,0 +1,20 @@
+{
+  "repo_head": "160bf0ade938c75acfbf101480c32122f29a3cb5",
+  "branch": "feat/sat-bluebook-overlays-tools",
+  "tree": "working tree; useAuthoringSelection.ts, its test file and Counterexamples.lean are uncommitted",
+  "sha256": {
+    "Model.lean": "9e66df2206b4b13ad1b9684269c688214b36be6c9e9a4b8a7ea37116af8fa97f",
+    "Safety.lean": "d8c31d89502b54722015bfb5c8900d7c30fa4f52bf410ab467b0893e147222cd",
+    "Counterexamples.lean": "cdc8328ab78faae42b62415379409a9bd504180351a07ed6780408112d9fe73a",
+    "AxiomAudit.lean": "6375115f7b3b3e56994dea0b9f137317e928c7bf055963c1e062e9294aa7e18a",
+    "SatStaffRecoveryRouting.lean": "0b9015b62119ffee824d672de7cd9a3c77ac27afdfaf5b3bbde0e326c4c5457f",
+    "lakefile.lean": "5b8e5ede1438ca3d2953a4e95c0d3cd3ed1d75d924ffc2d8947bb8d534fd2bee",
+    "lean-toolchain": "55e97be96000b5e9e290c9e74482e5e317861499a5540353ce845471bded8cea",
+    "src/features/exam-authoring/ui/release/releaseSelectors.ts": "86d5874632df1024408fc9e4f481f4f8d4a5381d60d819a9df8062f9ac66acaf",
+    "src/features/exam-authoring/ui/useAuthoringSelection.ts": "c3a0957f2dd52a5efd6af47a49b551c45bb3419c424d05de0357424596f326d0",
+    "src/products/sat/routes/SatNewSessionFlow.tsx": "6749810307da8ed6cba679db1b581bf1956944529343cc7296726f48de582dbb",
+    "src/features/exam-authoring/ui/__tests__/useAuthoringSelection.test.tsx": "920e5fea6ea6de0914da687ecf2038279bcc6fccf897dd8279380266e492bf70",
+    "src/features/exam-authoring/ui/release/__tests__/releaseSelectors.test.ts": "7597ffa16659023a74ebba7428c3735d7a4826738a578e443c5900795e47ef2e",
+    "src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx": "561cf476d44dcf25b3c3dc2bd15d698b0dee80db5f6fadd2668d77c54f5555f4"
+  }
+}

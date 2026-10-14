@@ -17,13 +17,13 @@ export function ExamOverviewPane({ overview, isMutating, onSelectModule, onOpenI
             {overview.authored} of {overview.target} questions authored
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {overview.ready} ready · {overview.incomplete} need work · {overview.errors} with errors · {overview.pretest} pretest
+            {overview.ready} ready · {overview.incomplete} need work · {overview.errors} with errors
           </p>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Exam authoring progress" aria-valuenow={overview.progressPct} aria-valuemin={0} aria-valuemax={100}>
             <div className="h-full rounded-full bg-primary" style={{ width: overview.progressPct + "%" }} />
           </div>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            {overview.target} questions are authored across all six modules, but each candidate sees only {overview.deliveredPerCandidate} (base module + one branch per section). Pretest questions ride along inside those modules and do not add extra candidate time.
+            {overview.target} questions are authored across all six modules, but each candidate sees only {overview.deliveredPerCandidate} (base module + one branch per section).
           </p>
         </div>
         {overview.modules.map((stats) => (
@@ -46,9 +46,8 @@ function ModuleOverviewCard({ stats, disabled, onSelectModule, onOpenIssueModule
         </div>
         <button type="button" disabled={disabled} onClick={() => onSelectModule(module.id)} className="flex min-h-9 shrink-0 items-center rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-35">Open</button>
       </div>
-      <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-center">
         <div className="rounded-md bg-muted px-2 py-1.5"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Errors</dt><dd className="text-sm font-semibold tabular-nums text-foreground">{stats.errors}</dd></div>
-        <div className="rounded-md bg-muted px-2 py-1.5"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Pretest</dt><dd className="text-sm font-semibold tabular-nums text-foreground">{stats.pretest}</dd></div>
         <div className="rounded-md bg-muted px-2 py-1.5"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</dt><dd className="text-sm font-semibold text-foreground">{stats.complete ? "Complete" : stats.authored >= stats.target ? "Review" : "Building"}</dd></div>
       </dl>
       {stats.errors > 0 && onOpenIssueModule ? (

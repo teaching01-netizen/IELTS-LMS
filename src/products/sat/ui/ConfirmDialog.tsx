@@ -17,6 +17,7 @@ type SatConfirmDialogProps = {
   description: string;
   confirmLabel: string;
   destructive?: boolean;
+  restoreFocusTarget?: HTMLElement | null | undefined;
   onCancel: () => void;
   onConfirm: () => void;
 };
@@ -43,6 +44,7 @@ function StaticConfirmDialog({
   description,
   confirmLabel,
   destructive,
+  restoreFocusTarget,
   onCancel,
   onConfirm,
 }: Omit<SatConfirmDialogProps, 'open'>) {
@@ -57,7 +59,7 @@ function StaticConfirmDialog({
 
   useLayoutEffect(() => {
     const active = document.activeElement;
-    restoreFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    restoreFocusRef.current = restoreFocusTarget ?? (active instanceof HTMLElement && active !== document.body ? active : null);
     cancelRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onCancelRef.current();
@@ -69,7 +71,7 @@ function StaticConfirmDialog({
       restoreFocusRef.current = null;
       if (target?.isConnected) target.focus({ preventScroll: true });
     };
-  }, []);
+  }, [restoreFocusTarget]);
 
   return (
     <div className={OVERLAY_CLASS} style={{ zIndex: 110 }}>
@@ -105,6 +107,7 @@ export function SatConfirmDialog({
   description,
   confirmLabel,
   destructive = false,
+  restoreFocusTarget,
   onCancel,
   onConfirm,
 }: SatConfirmDialogProps) {
@@ -117,6 +120,7 @@ export function SatConfirmDialog({
         description={description}
         confirmLabel={confirmLabel}
         destructive={destructive}
+        restoreFocusTarget={restoreFocusTarget}
         onCancel={onCancel}
         onConfirm={onConfirm}
       />
@@ -130,7 +134,7 @@ export function SatConfirmDialog({
           className={CONFIRM_CLASS}
           onOpenAutoFocus={() => {
             const active = document.activeElement;
-            restoreFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+            restoreFocusRef.current = restoreFocusTarget ?? (active instanceof HTMLElement && active !== document.body ? active : null);
           }}
           onCloseAutoFocus={(event) => {
             const target = restoreFocusRef.current;

@@ -159,11 +159,6 @@ func TestSATSingleModulePreviewAndCommitHTTPMySQL(t *testing.T) {
 	if !preview.Valid || !preview.CommitReady || !reflect.DeepEqual(preview.TargetModuleKeys, []string{"rw-m1"}) || len(preview.Detected) != 1 || !preview.Detected[0].Ready || len(preview.Modules) != 1 {
 		t.Fatalf("single-module API preview contract mismatch: %+v", preview)
 	}
-	for _, question := range preview.Modules[0].Questions {
-		if question.IsPretest != nil {
-			t.Fatalf("blank source pretest must remain unknown, got %v", *question.IsPretest)
-		}
-	}
 
 	shell, err := h.authors.Shell(context.Background(), h.examID)
 	if err != nil {
@@ -286,11 +281,6 @@ func TestSATSingleModulePreservesOtherModulesAndUndoMySQL(t *testing.T) {
 			} else {
 				if len(module.Questions) != 27 {
 					t.Fatalf("target count %d", len(module.Questions))
-				}
-				for k, question := range module.Questions {
-					if question.IsPretest {
-						t.Fatalf("blank source pretest was converted to a flag at order %d", k+1)
-					}
 				}
 			}
 		}
@@ -454,13 +444,6 @@ func TestSATWorkbookRejectsTamperedRequestsMySQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := singleModuleRequest(preview, before, "invalid-"+uuid.NewString())
-	flipped := base
-	flipped.Modules = append([]authoring.SatWorkbookModuleDraft(nil), base.Modules...)
-	flipped.Modules[0].Questions = append([]authoring.QuestionDraft(nil), base.Modules[0].Questions...)
-	flipped.Modules[0].Questions[3].IsPretest = true
-	if _, err := h.authors.CommitSATWorkbook(context.Background(), h.examID, flipped, h.actor, authoring.WithOperationKey(base.OperationKey)); err == nil {
-		t.Fatal("commit accepted a pretest flag that did not match the registered preview")
-	}
 	changed := base
 	changed.Modules = append([]authoring.SatWorkbookModuleDraft(nil), base.Modules...)
 	changed.Modules[0].Questions = append([]authoring.QuestionDraft(nil), base.Modules[0].Questions...)
@@ -558,14 +541,8 @@ func TestSATFullWorkbookImportCompatibilityMySQL(t *testing.T) {
 	for _, section := range result.Sections {
 		for _, module := range section.Modules {
 			total += len(module.Questions)
-			pretests := 0
-			for _, question := range module.Questions {
-				if question.IsPretest {
-					pretests++
-				}
-			}
-			if pretests != 2 || len(module.Questions) != module.TargetQuestionCount {
-				t.Fatalf("full import module %s count=%d pretests=%d", module.ModuleKey, len(module.Questions), pretests)
+			if len(module.Questions) != module.TargetQuestionCount {
+				t.Fatalf("full import module %s count=%d", module.ModuleKey, len(module.Questions))
 			}
 		}
 	}

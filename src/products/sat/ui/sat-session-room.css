@@ -1,219 +1,46 @@
-/* SAT session room: roster, authoritative run sheet, and selected-student inspector. */
+/* SAT session room: pane layout, the room clock, the run sheet, and the
+ * inspector sheet. Component surfaces, type and states are Tailwind utilities
+ * on the room components (src/products/sat/ui/room); this file keeps only what
+ * is clearer as CSS: measured-width pane placement, scroll containers, the
+ * sticky stage line, run-sheet row geometry, motion, and forced colors. */
 .sat-room {
-  --room-rail: 280px;
-  --room-inspector: 350px;
   display: flex;
   min-height: 100dvh;
   flex-direction: column;
-  background: var(--sat-staff-canvas, #f5f7fa);
-  color: var(--sat-staff-text-primary, #17191d);
 }
 
-.sat-room__header {
-  position: sticky;
-  top: 0;
-  z-index: 40;
+/* The product's mobile header is sticky above the room on narrow viewports;
+ * the room header sticks beneath it instead of sliding under it. */
+@media (max-width: 767px) {
+  .sat-room__header {
+    top: calc(56px + env(safe-area-inset-top));
+  }
+}
+
+.sat-room__notices {
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  background: var(--sat-staff-glass-room, #fff);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 8px rgba(20, 27, 36, 0.025);
+  padding: 12px 16px 0;
 }
 
-.sat-room__header-inner {
-  display: flex;
-  min-height: 64px;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  padding: 8px 20px;
-}
-
-/* The title keeps a readable measure; when the actions do not fit beside it
- * they wrap to their own row instead of squeezing the room name. */
-.sat-room__title {
-  min-width: min(100%, 16rem);
-  flex: 1 1 16rem;
-}
-
-.sat-room__header-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-left: auto;
-}
-
-/* Room-wide controls sit in their own labelled group, set apart from the
- * navigation and sharing actions beside them. */
-.sat-room__header-actions .sat-room__controls {
-  border-left: 1px solid var(--sat-staff-border-strong, rgba(0, 0, 0, 0.09));
-  padding-left: 12px;
-}
-
-.sat-room__title h1 {
-  margin: 0;
-  overflow: hidden;
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 18px;
-  line-height: 24px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sat-room__cohort {
-  margin: 2px 0 0;
-  overflow: hidden;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 14px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sat-room__context {
-  display: flex;
-  min-height: 54px;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 22px;
-  border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-  padding: 10px 20px;
-  background: var(--sat-staff-surface, #fff);
-  font-size: 14px;
-}
-
-.sat-room__context-timing,
-.sat-room__context-counts,
-.sat-room__context-health {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-}
-
-.sat-room__context-timing p {
-  margin: 0;
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 14px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-
-.sat-room__context-health {
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-weight: 550;
-}
-
-.sat-room__context-counts {
-  gap: 6px;
-}
-
-.sat-room__context-health > span + span::before {
-  display: inline-block;
-  width: 3px;
-  height: 3px;
-  margin-right: 14px;
-  border-radius: 50%;
-  background: var(--sat-staff-border-strong, rgba(0, 0, 0, 0.2));
-  vertical-align: middle;
-  content: "";
-}
-
-/* Exam-day stat chips: the number is what staff scan for, the label explains it. */
-.sat-room__context-stat {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: baseline;
-  gap: 6px;
-  border: 0;
-  border-radius: 999px;
-  padding: 6px 11px;
-  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
-  color: var(--sat-staff-text-secondary, #515154);
-  font: inherit;
-  font-weight: 550;
-}
-
-.sat-room__context-stat strong {
-  color: var(--sat-staff-text-primary, #1d1d1f);
-  font-size: 14px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.sat-room__context-stat.is-zero strong {
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-}
-
-.sat-room__context-stat.is-warning,
-.sat-room__context-stat.is-warning strong {
-  color: var(--sat-staff-warning-text, #92400e);
-}
-
-.sat-room__context-stat.is-warning {
-  background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
-}
-
-button.sat-room__context-stat {
-  cursor: pointer;
-  transition: box-shadow 120ms ease-out;
-}
-
-button.sat-room__context-stat:hover {
-  box-shadow: inset 0 0 0 1px var(--sat-staff-warning-dot, #d97706);
-}
-
-button.sat-room__context-stat:focus-visible,
-.sat-room__inspector-close:focus-visible {
-  outline: 2px solid var(--sat-staff-accent-ring, rgba(0, 113, 227, 0.4));
-  outline-offset: 2px;
-}
-
-.sat-room__context-health > span:first-child {
-  color: var(--sat-staff-success-text, #067647);
-}
-
-.sat-room__context-health > span:first-child::before {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--sat-staff-success-dot, #059669);
-  content: "";
-}
-
-.sat-room__context-health > span:first-child.is-stale {
-  color: var(--sat-staff-warning-text, #92400e);
-}
-
-.sat-room__context-health > span:first-child.is-stale::before {
-  background: var(--sat-staff-warning-dot, #d97706);
-}
-
-.sat-room__context-overrun {
-  border: 1px solid var(--sat-staff-warning-dot, #d97706);
-  border-radius: 999px;
-  padding: 3px 8px;
-  background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
-  color: var(--sat-staff-warning-text, #92400e);
-  font-size: 14px;
-  font-weight: 650;
-}
-
+/* ── Panes ──────────────────────────────────────────────────────────────
+ * Placement follows data-room-layout, the width the room measured for itself
+ * in useSatRoomLayout (product sidebar and zoom already applied), not the
+ * viewport. The roster, context column and inspector are always the same
+ * elements in the same DOM order; only the grid moves them.
+ *
+ * - stack: context above a full-width roster; the inspector is a sheet
+ * - split: roster | context; the inspector is a sheet
+ * - wide:  roster | context | docked inspector */
 .sat-room__body {
   display: grid;
   min-width: 0;
+  align-items: start;
+  gap: 16px;
+  padding: 16px;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
+    "context"
     "roster"
-    "workspace"
     "inspector";
 }
 
@@ -222,206 +49,115 @@ button.sat-room__context-stat:focus-visible,
   display: flex;
   min-width: 0;
   flex-direction: column;
-  border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  background: #fff;
-}
-
-.sat-room__roster-head {
-  flex: 0 0 auto;
-  padding: 16px 16px 12px;
 }
 
 .sat-room__workspace {
-  grid-area: workspace;
+  grid-area: context;
+  position: relative;
+  display: flex;
   min-width: 0;
-  padding: 24px 16px;
-  background: var(--sat-staff-canvas, #f7f7f8);
+  flex-direction: column;
+  gap: 16px;
 }
 
 .sat-room__inspector {
   grid-area: inspector;
-  min-width: 0;
-  padding: 20px 16px 32px;
-  border-top: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  background: rgba(255, 255, 255, 0.94);
+}
+
+.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  align-items: stretch;
+  padding: 16px 20px 20px;
+  /* The student list is the principal pane: the context column takes about a
+   * third of the room, never narrower than a readable 300px. */
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 36%, 380px);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "roster context";
+}
+
+.sat-room[data-room-layout="wide"] .sat-room__body {
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 380px) minmax(340px, 380px);
+  grid-template-areas: "roster context inspector";
+}
+
+.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__roster {
+  height: 100%;
+  min-height: 0;
+}
+
+.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__roster [role="listbox"] {
+  scrollbar-gutter: stable;
+}
+
+/* The context column scrolls on its own; its cards keep their full height. */
+.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__workspace {
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--sat-staff-radius-card, 14px);
+}
+
+.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__workspace > * {
+  flex: 0 0 auto;
+}
+
+.sat-room[data-room-layout="wide"] .sat-room__inspector {
+  height: 100%;
+  min-height: 0;
 }
 
 .sat-room__inspector-panel {
+  height: 100%;
   min-width: 0;
-}
-
-.sat-room__inspector-dialog-overlay {
-  position: fixed;
-  z-index: 90;
-  inset: 0;
-  background: rgba(20, 27, 36, 0.22);
-  animation: sat-inspector-overlay-enter 150ms ease-out both;
-}
-
-.sat-room__inspector-dialog {
-  position: fixed;
-  z-index: 91;
-  inset-block: 0;
-  right: 0;
-  width: min(370px, calc(100vw - 16px));
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 22px 20px;
-  background: var(--sat-staff-surface, #fff);
-  box-shadow: -10px 0 28px rgba(20, 27, 36, 0.12);
-  animation: sat-inspector-enter 150ms ease-out both;
+  scrollbar-gutter: stable;
+  padding: 20px 20px 32px;
 }
 
-.sat-room__inspector-dialog.sat-product {
-  background: var(--sat-staff-surface, #fff);
+/* Stacked, the page itself scrolls: the roster grows to its rows. */
+.sat-room[data-room-layout="stack"] .sat-room__roster [role="listbox"] {
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
-.sat-room__inspector-close {
-  display: none;
+/* Narrow rooms: actions take their own full-width row and wrap from the start,
+ * so no control is pushed off the leading edge. */
+.sat-room[data-room-layout="stack"] .sat-room__header-actions {
+  width: 100%;
+  justify-content: flex-start;
+  margin-left: 0;
 }
 
-.sat-room__eyebrow {
-  margin: 0;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 14px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.sat-room__attention-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
-  color: var(--sat-staff-text-secondary, #515154);
-  white-space: nowrap;
-}
-
-button.sat-room__attention-filter:hover {
-  background: var(--sat-staff-fill-chip-hover, rgba(0, 0, 0, 0.07));
-}
-
-.sat-room__attention-filter.is-active {
-  background: #20252c;
-  color: #fff;
-}
-
-.sat-room__attention-filter.is-empty {
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-}
-
-.sat-room__attention-count {
-  min-width: 18px;
-  border-radius: 999px;
-  padding: 1px 5px;
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--sat-staff-warning-text, #92400e);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-.sat-room__attention-filter.is-active .sat-room__attention-count {
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
-}
-
-.sat-room__stage {
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-}
-
-.sat-room__stage h2 {
-  margin: 0;
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.sat-room__stage--review {
-  padding-bottom: 14px;
-}
-
-.sat-room__stage--review h2 {
-  font-size: 17px;
-}
-
-.sat-room__stage-slot {
-  margin: 6px 0 0;
-  color: var(--sat-staff-text-secondary, #515154);
-  font-size: 14px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.sat-room__stage-note {
-  max-width: 52ch;
-  margin: 6px 0 0;
-  color: var(--sat-staff-text-secondary, #515154);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.sat-room__stage-clock-caption {
-  margin: 6px 0 0;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.sat-room__clock {
-  margin: 0;
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 32px;
-  font-weight: 650;
-  line-height: 1;
-  letter-spacing: -0.035em;
-  font-variant-numeric: tabular-nums;
-}
-
-.sat-room__next-stage {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 10px;
-  margin: 10px 0 0;
-  color: var(--sat-staff-text-secondary, #515154);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.sat-room__next-stage span:first-child {
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.sat-room__next-stage span:last-child {
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
+/* ── Sticky stage line ─────────────────────────────────────────────────
+ * When the stage card scrolls out of the context column, this line keeps the
+ * stage and its clock in view. It takes no space while hidden. */
 .sat-room__sticky-context {
   position: sticky;
   top: 0;
   z-index: 20;
   display: none;
-  min-height: 44px;
+  height: 44px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  height: 44px;
-  margin: -24px -16px -44px;
-  border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-  padding: 0 16px;
-  background: #fff;
+  margin-bottom: -60px;
+  border: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+  border-radius: var(--sat-staff-radius-control, 10px);
+  padding: 0 14px;
+  background: var(--sat-staff-surface, #fff);
+  box-shadow: 0 4px 12px rgba(20, 27, 36, 0.06);
   color: var(--sat-staff-text-secondary, #515154);
   font-size: 14px;
   font-weight: 600;
@@ -429,13 +165,16 @@ button.sat-room__attention-filter:hover {
   visibility: hidden;
   transform: translateY(-4px);
   pointer-events: none;
-  transition: opacity 150ms ease-out, transform 150ms ease-out;
+  transition: opacity 150ms ease-out, transform 150ms ease-out, visibility 150ms;
 }
 
 .sat-room__sticky-context strong {
   flex: 0 0 auto;
-  color: var(--sat-staff-text-primary, #18181b);
-  font-variant-numeric: tabular-nums;
+  color: var(--sat-staff-text-primary, #1d1d1f);
+}
+
+.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__sticky-context {
+  display: flex;
 }
 
 .sat-room__sticky-context.is-visible {
@@ -444,24 +183,31 @@ button.sat-room__attention-filter:hover {
   transform: translateY(0);
 }
 
+/* The room's authoritative clock: the one large figure on the page. */
+.sat-room__clock {
+  margin: 0;
+  color: var(--sat-staff-text-primary, #1d1d1f);
+  font-size: 32px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Run sheet ─────────────────────────────────────────────────────────
+ * Rows reflow on the sheet's own width (it sits in a narrow column beside the
+ * roster), not on the viewport. */
 .sat-run-sheet {
-  padding: 18px;
+  container-type: inline-size;
+  padding: 12px 16px 16px;
 }
 
-.sat-run-sheet__heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 16px;
-}
-
-.sat-run-sheet__heading p,
-.sat-run-sheet__anchor {
-  margin: 4px 0 0;
+.sat-run-sheet__anchor,
+.sat-run-sheet__plan {
+  margin: 8px 0 0;
   color: var(--sat-staff-text-secondary, #515154);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
 .sat-run-sheet__anchor {
@@ -474,10 +220,6 @@ button.sat-room__attention-filter:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 8px;
-  margin: 8px 0 0;
-  color: var(--sat-staff-text-secondary, #515154);
-  font-size: 14px;
-  line-height: 1.5;
 }
 
 .sat-run-sheet__plan strong {
@@ -494,13 +236,14 @@ button.sat-room__attention-filter:hover {
 }
 
 .sat-run-sheet__rows {
-  margin-top: 16px;
+  margin-top: 12px;
+  border-top: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
 }
 
 .sat-run-sheet__row {
   position: relative;
   border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-  padding: 12px 8px;
+  padding: 10px 8px;
   color: var(--sat-staff-text-secondary, #515154);
 }
 
@@ -515,7 +258,7 @@ button.sat-room__attention-filter:hover {
     "label clock"
     "window status";
   align-items: baseline;
-  gap: 6px 12px;
+  gap: 4px 12px;
 }
 
 .sat-run-sheet__row-label {
@@ -526,9 +269,9 @@ button.sat-room__attention-filter:hover {
 }
 
 .sat-run-sheet__row-label strong {
-  color: var(--sat-staff-text-primary, #18181b);
+  color: var(--sat-staff-text-primary, #1d1d1f);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .sat-run-sheet__row-label > span,
@@ -543,7 +286,7 @@ button.sat-room__attention-filter:hover {
   min-width: 0;
   grid-area: window;
   gap: 2px;
-  color: var(--sat-staff-text-primary, #25282d);
+  color: var(--sat-staff-text-primary, #1d1d1f);
   font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
@@ -561,8 +304,7 @@ button.sat-room__attention-filter:hover {
 }
 
 .sat-run-sheet__row-clock .is-active {
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 14px;
+  color: var(--sat-staff-text-primary, #1d1d1f);
   font-weight: 700;
 }
 
@@ -570,8 +312,6 @@ button.sat-room__attention-filter:hover {
   color: var(--sat-staff-text-tertiary, #6e6e73);
   font-size: 14px;
   font-variant-numeric: normal;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
 .sat-run-sheet__status {
@@ -582,17 +322,12 @@ button.sat-room__attention-filter:hover {
 }
 
 .sat-run-sheet__row--section {
-  padding-top: 15px;
-}
-
-.sat-run-sheet__row--section .sat-run-sheet__row-label strong {
-  font-size: 14px;
-  font-weight: 700;
+  padding-top: 14px;
 }
 
 .sat-run-sheet__row--module {
-  margin-left: 14px;
-  padding-left: 14px;
+  margin-left: 12px;
+  padding-left: 12px;
 }
 
 .sat-run-sheet__row--module::before {
@@ -600,17 +335,12 @@ button.sat-room__attention-filter:hover {
   inset-block: 0;
   left: 0;
   width: 1px;
-  background: var(--sat-staff-border-strong, rgba(0, 0, 0, 0.12));
+  background: var(--sat-staff-border-strong, rgba(0, 0, 0, 0.09));
   content: "";
 }
 
 .sat-run-sheet__row--break {
   margin-top: 4px;
-  padding-left: 8px;
-}
-
-.sat-run-sheet__row--break .sat-run-sheet__row-label strong {
-  font-weight: 650;
 }
 
 .sat-run-sheet__row.is-done .sat-run-sheet__row-label strong,
@@ -622,6 +352,7 @@ button.sat-room__attention-filter:hover {
 
 .sat-run-sheet__row.is-current {
   border-radius: 6px;
+  background: var(--sat-staff-success-tint, rgba(5, 150, 105, 0.06));
   box-shadow: inset 2px 0 0 var(--sat-staff-success-dot, #059669);
 }
 
@@ -632,366 +363,23 @@ button.sat-room__attention-filter:hover {
 
 .sat-run-sheet__row[data-runtime-mismatch="true"] .sat-run-sheet__mismatch {
   color: var(--sat-staff-warning-text, #92400e);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .sat-run-sheet__adaptive-group {
-  margin: 10px 0 2px 14px;
+  margin: 10px 0 2px 12px;
   color: var(--sat-staff-text-secondary, #515154);
   font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
 .sat-run-sheet__adaptive-group span {
   margin-left: 6px;
   color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
+  font-weight: 400;
 }
 
-.sat-room__inspector-panel .sat-room__student-detail,
-.sat-room__inspector-dialog .sat-room__student-detail {
-  min-width: 0;
-}
-
-.sat-room__student-state,
-.sat-room__student-actions,
-.sat-room__student-attention {
-  margin-top: 20px;
-  border-top: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-  padding-top: 16px;
-}
-
-.sat-room__student-state-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px 12px;
-  margin: 14px 0 0;
-}
-
-.sat-room__student-state-grid > div {
-  min-width: 0;
-}
-
-.sat-room__student-state-grid dt {
-  margin-bottom: 5px;
-}
-
-.sat-room__student-state-grid dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.sat-room__student-state-grid dd.is-clock {
-  font-size: 18px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.025em;
-}
-
-.sat-room__student-attention-healthy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  color: var(--sat-staff-text-secondary, #515154);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.sat-room__student-attention-healthy span {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--sat-staff-success-dot, #059669);
-}
-
-.sat-room__student-attention-event {
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--sat-staff-warning-tint, rgba(217, 119, 6, 0.1));
-  color: var(--sat-staff-warning-text, #92400e);
-  font-size: 14px;
-}
-
-.sat-room__student-attention-event p {
-  margin: 0;
-}
-
-.sat-room__empty {
-  display: grid;
-  min-height: 240px;
-  place-items: center;
-  padding: 32px 18px;
-  text-align: center;
-}
-
-.sat-room__empty-icon {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  margin: 0 auto 14px;
-  place-items: center;
-  border-radius: 12px;
-  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  color: var(--sat-staff-text-secondary, #515154);
-}
-
-.sat-room__empty-title {
-  margin: 0 0 6px;
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.012em;
-}
-
-.sat-room__empty-text {
-  max-width: 34ch;
-  margin: 0 auto;
-  color: var(--sat-staff-text-secondary, #515154);
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.sat-room__empty-hint {
-  margin: 14px 0 0;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 14px;
-}
-
-.sat-room__student-detail {
-  animation: sat-student-detail-enter 150ms ease-out both;
-}
-
-@keyframes sat-student-detail-enter {
-  from { opacity: 0.72; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.sat-room__row {
-  position: relative;
-  display: grid;
-  width: 100%;
-  min-height: 56px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  border-radius: 8px;
-  padding: 8px 12px;
-  color: var(--sat-staff-text-secondary, #515154);
-  text-align: left;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
-}
-
-.sat-room__row:hover {
-  background: rgba(0, 0, 0, 0.03);
-}
-
-.sat-room__row[aria-selected="true"] {
-  background: #ecf5ff;
-  color: var(--sat-staff-text-primary, #17191d);
-}
-
-.sat-room__row[aria-selected="true"]::before {
-  position: absolute;
-  inset-block: 10px;
-  inset-inline-start: 3px;
-  width: 2px;
-  border-radius: 999px;
-  background: #006ee0;
-  content: "";
-}
-
-.sat-room__row-name {
-  margin: 0;
-  overflow: hidden;
-  color: var(--sat-staff-text-primary, #18181b);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sat-room__row-meta {
-  display: block;
-  margin: 2px 0 0;
-  overflow: hidden;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 14px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sat-room__row-time {
-  color: var(--sat-staff-text-secondary, #515154);
-  font-size: 14px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.sat-room__row-sub {
-  display: block;
-  margin: 2px 0 0;
-  color: var(--sat-staff-text-tertiary, #6e6e73);
-  font-size: 14px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Pane layout follows the width the room actually has (data-room-layout is
- * measured in useSatRoomLayout, after the product sidebar and zoom), not the
- * viewport. The inspector is docked only in `wide`; elsewhere it is a sheet. */
-.sat-room[data-room-layout="stack"] .sat-room__header-inner {
-  padding: 8px 12px;
-}
-
-.sat-room[data-room-layout="stack"] .sat-room__context {
-  align-items: flex-start;
-  padding: 12px 16px;
-}
-
-.sat-room[data-room-layout="stack"] .sat-room__context-timing {
-  width: 100%;
-}
-
-.sat-room[data-room-layout="stack"] .sat-room__context-health {
-  gap: 6px 10px;
-}
-
-.sat-room[data-room-layout="stack"] .sat-room__context-health > span + span::before {
-  margin-right: 10px;
-}
-
-.sat-room[data-room-layout="stack"] .sat-room__body {
-  align-items: start;
-}
-
-.sat-room[data-room-layout="stack"] :is(.sat-room__roster, .sat-room__workspace) {
-  overflow: visible;
-}
-
-.sat-room[data-room-layout="stack"] .sat-room__roster [role="listbox"] {
-  max-height: none;
-  flex: 0 0 auto;
-  overflow: visible;
-}
-
-.sat-room[data-room-layout="stack"] .sat-room__workspace {
-  padding: 24px 16px;
-}
-
-.sat-room[data-room-layout="stack"] .sat-room__sticky-context {
-  display: none;
-}
-
-.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) {
-  height: 100dvh;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__body {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-  grid-template-columns: minmax(300px, 320px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  grid-template-areas: "roster workspace";
-}
-
-.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__roster {
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  border-right: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  border-bottom: 0;
-}
-
-.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__roster [role="listbox"] {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-
-.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__workspace {
-  height: 100%;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding: 24px;
-}
-
-.sat-room:is([data-room-layout="split"], [data-room-layout="wide"]) .sat-room__sticky-context {
-  display: flex;
-  margin: -24px -24px -44px;
-  padding-inline: 24px;
-}
-
-.sat-room[data-room-layout="wide"] .sat-room__body {
-  grid-template-columns: minmax(300px, 320px) minmax(0, 1fr) minmax(340px, 380px);
-  grid-template-areas: "roster workspace inspector";
-}
-
-.sat-room[data-room-layout="wide"] .sat-room__inspector {
-  position: static;
-  display: block;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  padding: 0;
-  border-top: 0;
-  border-left: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
-  background: #fff;
-}
-
-.sat-room[data-room-layout="wide"] .sat-room__inspector-panel {
-  height: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding: 20px 20px 32px;
-}
-
-/* Docked, the inspector is always present and has no close control; as a
- * sheet it carries a 44px close button that returns focus to the roster. */
-.sat-room__inspector-dialog .sat-room__inspector-close {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  margin: -10px -10px 8px auto;
-  place-items: center;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--sat-staff-text-secondary, #515154);
-}
-
-.sat-room__inspector-dialog .sat-room__inspector-close:hover {
-  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
-}
-
-/* The product's mobile header is sticky above the room on narrow viewports;
- * the room header sticks beneath it instead of sliding under it. */
-@media (max-width: 767px) {
-  .sat-room__header {
-    top: calc(56px + env(safe-area-inset-top));
-  }
-}
-
-@media (min-width: 768px) {
+@container (min-width: 560px) {
   .sat-run-sheet__row-main {
     grid-template-columns: minmax(0, 1fr) minmax(140px, auto) minmax(88px, auto) auto;
     grid-template-areas: "label window clock status";
@@ -1003,11 +391,39 @@ button.sat-room__attention-filter:hover {
     justify-self: end;
     text-align: right;
   }
+}
 
-  .sat-run-sheet__row-status,
-  .sat-run-sheet__status {
-    justify-self: end;
-  }
+/* ── Inspector sheet (split and stack) ─────────────────────────────── */
+.sat-room__inspector-dialog-overlay {
+  position: fixed;
+  z-index: 90;
+  inset: 0;
+  background: rgba(20, 27, 36, 0.22);
+  animation: sat-inspector-overlay-enter 150ms ease-out both;
+}
+
+.sat-room__inspector-dialog {
+  position: fixed;
+  z-index: 91;
+  inset-block: 0;
+  right: 0;
+  width: min(380px, calc(100vw - 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+  padding: 20px;
+  background: var(--sat-staff-surface, #fff);
+  box-shadow: -12px 0 32px rgba(20, 27, 36, 0.1);
+  animation: sat-inspector-enter 150ms ease-out both;
+}
+
+.sat-room__student-detail {
+  animation: sat-student-detail-enter 150ms ease-out both;
+}
+
+@keyframes sat-student-detail-enter {
+  from { opacity: 0.72; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes sat-inspector-enter {
@@ -1044,12 +460,11 @@ button.sat-room__attention-filter:hover {
   }
 
   .sat-room__row[aria-selected="true"]::before,
-  .sat-room__student-attention-healthy span {
+  .sat-room__healthy-dot {
     background: Highlight;
   }
 
-  .sat-room__row svg,
-  .sat-room__context-health > span:first-child::before {
+  .sat-room__row svg {
     forced-color-adjust: auto;
   }
 
@@ -1063,23 +478,13 @@ button.sat-room__attention-filter:hover {
     border: 2px solid Mark;
   }
 
-  .sat-room__student-attention-event {
+  .sat-room__attention-event {
     border: 1px solid Mark;
     background: Canvas;
     color: CanvasText;
   }
-}
 
-/* Narrow rooms: actions take their own full-width row and wrap from the start,
- * so no control is pushed off the leading edge. */
-.sat-room[data-room-layout="stack"] .sat-room__header-actions {
-  width: 100%;
-  justify-content: flex-start;
-  margin-left: 0;
-}
-
-.sat-room[data-room-layout="stack"] .sat-room__header-actions .sat-room__controls {
-  flex-shrink: 1;
-  border-left: 0;
-  padding-left: 0;
+  .sat-room__sticky-context {
+    box-shadow: none;
+  }
 }

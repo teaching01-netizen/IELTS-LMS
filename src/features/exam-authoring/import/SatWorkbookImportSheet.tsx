@@ -249,10 +249,7 @@ export function SatWorkbookImportSheet({
           importId: preview.importId,
           expectedVersionId: shell.versionId,
           expectedVersionRevision: shell.versionRevision,
-          modules: preview.modules.map((module) => ({
-            ...module,
-            questions: module.questions.map((question) => ({ ...question, isPretest: question.isPretest === true })),
-          })),
+          modules: preview.modules,
           assets: stagedAssets,
           operationKey: commitKeyRef.current,
           targetModuleKeys: preview.targetModuleKeys,
@@ -488,8 +485,7 @@ export function SatWorkbookImportSheet({
                 ) : null}
                 {detected.length > 0 ? (
                   <p className="mt-1 px-1 text-xs leading-5 text-slate-600">
-                    The Pretest column isn’t checked here. Set exactly two pretests per module in
-                    the editor before publishing.
+                    Every question is scored. A Pretest column from an older template is ignored.
                     {preview.ignoredScaffoldRows ? ` ${preview.ignoredScaffoldRows} untouched template rows were ignored.` : ""}
                   </p>
                 ) : null}

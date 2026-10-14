@@ -34,7 +34,6 @@ const rawRowSchema = z.object({
   difficulty: z.string().max(50).default(""),
   tags: z.string().max(2_000).default(""),
   rationale: z.string().max(MAX_CELL_CHARS).default(""),
-  pretest: z.string().max(50).default(""),
 });
 
 type RawRow = z.infer<typeof rawRowSchema>;
@@ -56,7 +55,6 @@ const aliases: Record<ColumnKey, readonly string[]> = {
   difficulty: ["difficulty", "level"],
   tags: ["tags", "tag"],
   rationale: ["rationale", "explanation"],
-  pretest: ["pretest", "is pretest"],
 };
 
 function normalizeHeader(value: string): string {
@@ -129,14 +127,6 @@ function parseDifficulty(value: string): Difficulty | null {
   const normalized = value.trim().toLocaleLowerCase();
   if (!normalized) return "medium";
   if (normalized === "easy" || normalized === "medium" || normalized === "hard") return normalized;
-  return null;
-}
-
-function parseBoolean(value: string): boolean | null {
-  const normalized = value.trim().toLocaleLowerCase();
-  if (!normalized) return false;
-  if (["true", "yes", "y", "1"].includes(normalized)) return true;
-  if (["false", "no", "n", "0"].includes(normalized)) return false;
   return null;
 }
 
@@ -219,13 +209,6 @@ export function parseQuestionImport(input: string, sectionKey: string): Question
         field: "difficulty",
         message: "Difficulty must be Easy, Medium, or Hard.",
       });
-    const pretest = parseBoolean(value.pretest);
-    if (pretest === null)
-      rowIssues.push({
-        row: rowNumber,
-        field: "pretest",
-        message: "Pretest must be Yes/No, True/False, or 1/0.",
-      });
     const domain = value.domain || null;
     if (domain && !isSatDomain(sectionKey, domain))
       rowIssues.push({
@@ -305,7 +288,7 @@ export function parseQuestionImport(input: string, sectionKey: string): Question
         correctOptionId: ["A", "B", "C", "D"].includes(correct) ? correct : null,
       };
     }
-    if (rowIssues.length || !difficulty || pretest === null) {
+    if (rowIssues.length || !difficulty) {
       issues.push(...rowIssues);
       return;
     }
@@ -326,7 +309,6 @@ export function parseQuestionImport(input: string, sectionKey: string): Question
           .filter(Boolean),
       },
       accessibility: { longDescription: null },
-      isPretest: pretest,
     });
   });
   return { rowCount: dataRows.length, drafts, issues };

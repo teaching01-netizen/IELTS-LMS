@@ -203,17 +203,16 @@ describe("Go readiness parity", () => {
   it.each(SAT_BLUEPRINT)("matches the Go blueprint for $key", (section) => {
     const goSection = section.key === "math" ? "SectionMath" : "SectionReadingWriting";
     const match = new RegExp(
-      `case ${goSection}:\\s*spec = satBlueprintModuleSpec\\{durationSeconds: (\\d+) \\* 60, questionCount: (\\d+), pretestCount: (\\d+)(?:, tools: \\[\\]string\\{([^}]*)\\})?\\}\\s*switch moduleKey \\{\\s*case ([^:]+):`
+      `case ${goSection}:\\s*spec = satBlueprintModuleSpec\\{durationSeconds: (\\d+) \\* 60, questionCount: (\\d+)(?:, tools: \\[\\]string\\{([^}]*)\\})?\\}\\s*switch moduleKey \\{\\s*case ([^:]+):`
     ).exec(goFunction("satBlueprintModule"));
     expect(match).not.toBeNull();
-    const [, minutes, questionCount, pretestCount, tools = "", moduleKeys] = match!;
+    const [, minutes, questionCount, tools = "", moduleKeys] = match!;
     const quoted = (list: string) => [...list.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 
     expect(section.modules.map((module) => module.key)).toEqual(quoted(moduleKeys!));
     for (const module of section.modules) {
       expect(module.durationSeconds).toBe(Number(minutes) * 60);
       expect(module.questionCount).toBe(Number(questionCount));
-      expect(module.pretestCount).toBe(Number(pretestCount));
       expect(module.tools).toEqual(quoted(tools));
     }
   });

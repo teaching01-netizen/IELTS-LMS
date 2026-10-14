@@ -385,7 +385,6 @@ function readingWritingQuestion(moduleKey: string, index: number): BatchQuestion
     rationale: text(item.rationale),
     metadata: metadata("reading-writing", domain, skill, moduleKey, index),
     accessibility: { longDescription: null },
-    isPretest: index === 5 || index === 20,
   };
 }
 
@@ -683,7 +682,6 @@ function mathQuestion(moduleKey: string, index: number): BatchQuestionDraft {
     rationale: text(item.rationale),
     metadata: metadata("math", domain, skill, moduleKey, index),
     accessibility: { longDescription: null },
-    isPretest: index === 4 || index === 17,
   };
 }
 
@@ -697,9 +695,6 @@ export function buildCompleteSatSample(shell: AssessmentAuthoringShell): LoadSam
           ? readingWritingQuestion(module.moduleKey, index)
           : mathQuestion(module.moduleKey, index)
       );
-      const pretests = questions.filter((question) => question.isPretest).length;
-      if (pretests !== 2)
-        throw new Error(`${module.title} sample must contain exactly two pretest items.`);
       for (const question of questions) {
         const revision = {
           id: "sample",

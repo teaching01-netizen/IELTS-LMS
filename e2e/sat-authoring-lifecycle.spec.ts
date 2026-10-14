@@ -1,5 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { expectNoSeriousAxeViolations } from "./support/axeAudit";
+import type { CreateAssessmentAccessLinkRequest } from "../src/features/exam-authoring/contracts/accessLinks";
 
 /**
  * The authoring shell lifecycle, proven in a browser.
@@ -103,7 +104,6 @@ const READY_SHELL = {
               questionId: "q-1",
               questionRevisionId: "rev-1",
               displayOrder: 1,
-              isPretest: false,
               questionType: "single_choice",
               semanticRevision: 1,
               revision: 1,
@@ -130,7 +130,6 @@ const QUESTION_DETAIL = {
   moduleKey: "rw-1",
   sectionKey: "rw",
   displayOrder: 1,
-  isPretest: false,
   question: {
     id: "rev-1",
     questionId: "q-1",
@@ -162,7 +161,15 @@ interface Recording {
   postShell: number;
   getQuestion: number;
   readinessScopes: string[];
-  publishRequests: unknown[];
+  publishRequests: Array<{
+    publishScope?: string;
+    operationKey?: string;
+    expectedDraftVersionId?: string;
+    expectedDraftRevision?: number;
+    revision?: number;
+  }>;
+  createRequests: CreateAssessmentAccessLinkRequest[];
+  overviewReads: number;
   /** Requests the app made that this suite does not model, for diagnosis. */
   other: string[];
   consoleErrors: string[];
@@ -178,7 +185,19 @@ interface Recording {
  */
 async function installTransport(
   page: Page,
-  options: { missingExam?: boolean; readyDraft?: boolean; releaseWorkflow?: boolean } = {}
+  options: {
+    missingExam?: boolean;
+    readyDraft?: boolean;
+    releaseWorkflow?: boolean;
+    readyFullDraft?: boolean;
+    canEdit?: boolean;
+    canPublish?: boolean;
+    initiallyPublished?: boolean;
+    concurrentPublish?: boolean;
+    concurrentPublishScope?: string;
+    failPublishOnce?: boolean;
+    createOutcome?: "success" | "commit-then-timeout" | "not-committed-once";
+  } = {}
 ): Promise<Recording> {
   const recording: Recording = {
     getShell: 0,
@@ -186,6 +205,8 @@ async function installTransport(
     getQuestion: 0,
     readinessScopes: [],
     publishRequests: [],
+    createRequests: [],
+    overviewReads: 0,
     other: [],
     consoleErrors: [],
     pageErrors: [],
@@ -196,7 +217,16 @@ async function installTransport(
     versionNumber: number;
     publishScope: string;
     publishedAt: string;
-  } | null = null;
+  } | null = options.initiallyPublished ? {
+    id: "published-v1",
+    versionNumber: 1,
+    publishScope: "full",
+    publishedAt: "2026-10-10T04:00:00.000Z",
+  } : null;
+  let createdLink: Record<string, unknown> | null = null;
+  let publishFailureSpent = false;
+  let concurrentPublishSpent = false;
+  let createFailureSpent = false;
 
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -246,11 +276,18 @@ async function installTransport(
       body: JSON.stringify(publishedVersion
         ? {
             ...EXAM_METADATA,
+            ...(options.canEdit === undefined ? {} : { canEdit: options.canEdit }),
+            ...(options.canPublish === undefined ? {} : { canPublish: options.canPublish }),
             status: "published",
-            currentDraftVersionId: null,
+            currentDraftVersionId: draftOpened ? READY_SHELL.versionId : null,
             currentPublishedVersionId: publishedVersion.id,
           }
-        : EXAM_METADATA),
+        : {
+            ...EXAM_METADATA,
+            ...(options.canEdit === undefined ? {} : { canEdit: options.canEdit }),
+            ...(options.canPublish === undefined ? {} : { canPublish: options.canPublish }),
+            currentDraftVersionId: draftOpened ? READY_SHELL.versionId : null,
+          }),
     })
   );
   await page.route(`**/api/v1/assessment-release/exams/${EXAM_ID}`, (route) =>
@@ -261,17 +298,31 @@ async function installTransport(
       body: JSON.stringify(publishedVersion
         ? {
             ...RELEASE_METADATA,
-            state: "published_current",
+            state: draftOpened ? "unpublished_changes" : "published_current",
             currentPublishedVersion: {
               id: publishedVersion.id,
               versionNumber: publishedVersion.versionNumber,
-              revision: 1,
+              revision: publishedVersion.versionNumber,
               publishNotes: null,
               publishScope: publishedVersion.publishScope,
               publishedAt: publishedVersion.publishedAt,
             },
+            workingDraft: draftOpened ? {
+              id: READY_SHELL.versionId,
+              parentVersionId: publishedVersion.id,
+              versionNumber: publishedVersion.versionNumber + 1,
+              revision: READY_SHELL.versionRevision,
+            } : null,
           }
-        : RELEASE_METADATA),
+        : {
+            ...RELEASE_METADATA,
+            workingDraft: draftOpened ? {
+              id: READY_SHELL.versionId,
+              parentVersionId: null,
+              versionNumber: 1,
+              revision: READY_SHELL.versionRevision,
+            } : null,
+          }),
     })
   );
 
@@ -332,7 +383,7 @@ async function installTransport(
       const request = route.request().postDataJSON() as { publishScope?: string };
       const publishScope = request.publishScope ?? "full";
       recording.readinessScopes.push(publishScope);
-      const blocked = publishScope === "full";
+      const blocked = publishScope === "full" && !options.readyFullDraft;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -358,11 +409,39 @@ async function installTransport(
     });
 
     await page.route(`**/api/v1/exams/${EXAM_ID}/publish`, async (route) => {
-      recording.publishRequests.push(route.request().postDataJSON());
+      const request = route.request().postDataJSON() as { publishScope?: string; operationKey?: string };
+      recording.publishRequests.push(request);
+      if (options.concurrentPublish && !concurrentPublishSpent) {
+        concurrentPublishSpent = true;
+        publishedVersion = {
+          id: READY_SHELL.versionId,
+          versionNumber: (publishedVersion?.versionNumber ?? 0) + 1,
+          publishScope: options.concurrentPublishScope ?? request.publishScope ?? "full",
+          publishedAt: "2026-10-11T04:00:00.000Z",
+        };
+        draftOpened = false;
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          headers: { "x-csrf-token": "csrf-e2e-token" },
+          body: JSON.stringify({ code: "VERSION_ALREADY_PUBLISHED", message: "Another staff member published this version." }),
+        });
+        return;
+      }
+      if (options.failPublishOnce && !publishFailureSpent) {
+        publishFailureSpent = true;
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          headers: { "x-csrf-token": "csrf-e2e-token" },
+          body: JSON.stringify({ code: "PUBLISH_UNAVAILABLE", message: "Publishing failed." }),
+        });
+        return;
+      }
       publishedVersion = {
-        id: "published-v2",
-        versionNumber: 2,
-        publishScope: "reading-writing",
+        id: READY_SHELL.versionId,
+        versionNumber: (publishedVersion?.versionNumber ?? 0) + 1,
+        publishScope: request.publishScope ?? "full",
         publishedAt: "2026-10-11T04:00:00.000Z",
       };
       draftOpened = false;
@@ -373,24 +452,109 @@ async function installTransport(
         body: JSON.stringify({
           id: publishedVersion.id,
           examId: EXAM_ID,
-          versionNumber: 2,
+          versionNumber: publishedVersion.versionNumber,
           revision: 1,
           isDraft: false,
           isPublished: true,
           publishScope: publishedVersion.publishScope,
           createdAt: publishedVersion.publishedAt,
+          publishedAt: publishedVersion.publishedAt,
         }),
       });
     });
 
-    await page.route(`**/api/v1/assessment-access/exams/${EXAM_ID}/overview`, (route) =>
-      route.fulfill({
+    await page.route(`**/api/v1/assessment-access/exams/${EXAM_ID}/overview`, (route) => {
+      recording.overviewReads += 1;
+      return route.fulfill({
         status: 200,
         contentType: "application/json",
         headers: { "x-csrf-token": "csrf-e2e-token" },
-        body: JSON.stringify({ examId: EXAM_ID, links: [], total: 0 }),
-      })
-    );
+        body: JSON.stringify({
+          examId: EXAM_ID,
+          currentPublishedVersion: publishedVersion ? {
+            id: publishedVersion.id,
+            versionNumber: publishedVersion.versionNumber,
+            revision: publishedVersion.versionNumber,
+            publishNotes: null,
+            publishScope: publishedVersion.publishScope,
+            createdAt: publishedVersion.publishedAt,
+          } : null,
+          links: createdLink ? [createdLink] : [],
+          total: createdLink ? 1 : 0,
+        }),
+      });
+    });
+
+    await page.route(`**/api/v1/assessment-access/exams/${EXAM_ID}/links`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          headers: { "x-csrf-token": "csrf-e2e-token" },
+          body: JSON.stringify([]),
+        });
+        return;
+      }
+      const request = route.request().postDataJSON() as CreateAssessmentAccessLinkRequest;
+      recording.createRequests.push(request);
+      const effectivePublishedVersion = publishedVersion;
+      if (!effectivePublishedVersion) throw new Error("The room request arrived before a published version existed.");
+      const now = new Date().toISOString();
+      const responseLink = {
+        id: "access-link-1",
+        examId: EXAM_ID,
+        examTitle: "Digital SAT",
+        providerKey: "sat",
+        publishedVersionId: effectivePublishedVersion.id,
+        versionNumber: effectivePublishedVersion.versionNumber,
+        publishScope: effectivePublishedVersion.publishScope,
+        scheduleId: "schedule-1",
+        name: request.name,
+        enabledSections: request.enabledSections?.length ? request.enabledSections : null,
+        audienceType: request.audienceType,
+        audienceLabel: request.audienceLabel ?? null,
+        accessMode: request.accessMode,
+        availabilityType: request.availabilityType,
+        opensAt: request.opensAt ?? null,
+        closesAt: request.closesAt ?? null,
+        lifecycleState: "active",
+        status: "live",
+        selectedStudentCount: request.selectedStudents.length,
+        metrics: { registered: 0, started: 0, submitted: 0 },
+        isCurrentRelease: true,
+        hasParticipation: false,
+        revision: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (options.createOutcome === "commit-then-timeout") {
+        createdLink = responseLink;
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          headers: { "x-csrf-token": "csrf-e2e-token" },
+          body: JSON.stringify({ code: "NETWORK_UNCERTAIN", message: "The connection was interrupted." }),
+        });
+        return;
+      }
+      if (options.createOutcome === "not-committed-once" && !createFailureSpent) {
+        createFailureSpent = true;
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          headers: { "x-csrf-token": "csrf-e2e-token" },
+          body: JSON.stringify({ code: "CREATE_UNAVAILABLE", message: "The room was not created." }),
+        });
+        return;
+      }
+      createdLink = responseLink;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        headers: { "x-csrf-token": "csrf-e2e-token" },
+        body: JSON.stringify(responseLink),
+      });
+    });
   }
 
   return recording;
@@ -529,32 +693,236 @@ test.describe("SAT authoring shell lifecycle", () => {
     await expect(page.getByRole("button", { name: "Publish Reading & Writing" })).toBeEnabled();
     await page.getByRole("button", { name: "Publish Reading & Writing" }).click();
 
-    await expect(page.getByText("Version 2 published. Create a room to give students access.")).toBeVisible();
+    await expect(page.getByText("Version 1 published. Create a room to give students access.")).toBeVisible();
     await expect(page.getByRole("heading", { name: "No editable draft" })).toHaveCount(0);
     await expectNoSeriousAxeViolations(page, "SAT publish success sheet after draft sealing");
     expect(recording.publishRequests).toHaveLength(1);
     expect(recording.postShell).toBe(0);
 
     await page.getByRole("button", { name: "Done" }).click();
-    await expect(page.getByText("Version 2 is published.")).toBeVisible();
+    await expect(page.getByText("Version 1 is published.")).toBeVisible();
     const createRoom = page.getByRole("button", { name: "Create room" });
     await expect(createRoom).toBeFocused();
 
     // A reload drops the in-memory receipt. The published release read must
     // still render the usable view without converting a read into a draft POST.
     await page.reload();
-    await expect(page.getByText("Version 2 is published.")).toBeVisible();
+    await expect(page.getByText("Version 1 is published.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Edit exam" })).toBeVisible();
     expect(recording.postShell).toBe(0);
     await expectNoSeriousAxeViolations(page, "SAT published workspace after reload");
 
     await page.getByRole("button", { name: "Create room" }).click();
-    await expect(page).toHaveURL(
-      `/sat/exams/${EXAM_ID}/access?new=1&version=published-v2&versionNumber=2&scope=reading-writing`
-    );
+    const room = page.getByRole("dialog", { name: "Create room" });
+    await expect(room).toBeVisible();
+    await expect(room).toContainText("Room uses Version 1");
+    await room.getByLabel("Room name").fill("Published receipt room");
+    await room.getByRole("button", { name: "Create room", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access\\?link=access-link-1`), { timeout: 30_000 });
     expect(recording.publishRequests).toHaveLength(1);
+    expect(recording.createRequests).toHaveLength(1);
+    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
     expect(recording.postShell).toBe(0);
     expect(recording.consoleErrors).toEqual([]);
     expect(recording.pageErrors).toEqual([]);
+  });
+});
+
+async function openCreateRoom(page: Page) {
+  await page.goto(`/sat/exams/${EXAM_ID}`);
+  const createRoom = page.getByRole("button", { name: "Create room", exact: true }).first();
+  await expect(createRoom).toBeVisible({ timeout: 30_000 });
+  await createRoom.click();
+  const room = page.getByRole("dialog", { name: "Create room" });
+  await expect(room).toBeVisible({ timeout: 30_000 });
+  return room;
+}
+
+async function finishRoomCreation(page: Page, room: Locator, actionName: string) {
+  await room.getByLabel("Room name").fill("Saturday morning mock");
+  await room.getByRole("button", { name: actionName, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access\\?link=access-link-1`), { timeout: 30_000 });
+}
+
+test.describe("SAT Create room handoff", () => {
+  test("publishes a ready draft and creates the room from one sheet", async ({ page }) => {
+    const recording = await installTransport(page, {
+      readyDraft: true,
+      releaseWorkflow: true,
+      readyFullDraft: true,
+    });
+    const room = await openCreateRoom(page);
+    const fullSat = room.getByRole("radio", { name: "Full SAT" });
+    await expect(fullSat).not.toBeChecked();
+    await fullSat.check();
+    const action = room.getByRole("button", { name: "Publish & create room", exact: true });
+    await expect(action).toBeEnabled({ timeout: 30_000 });
+    await finishRoomCreation(page, room, "Publish & create room");
+
+    expect(recording.postShell).toBe(0);
+    expect(recording.publishRequests).toHaveLength(1);
+    expect(recording.publishRequests[0]?.publishScope).toBe("full");
+    expect(recording.createRequests).toHaveLength(1);
+    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
+  });
+
+  test("blocks an invalid full SAT and requires confirmation of the prepared section", async ({ page }) => {
+    const recording = await installTransport(page, { readyDraft: true, releaseWorkflow: true });
+    const room = await openCreateRoom(page);
+    await room.getByRole("radio", { name: "Full SAT" }).check();
+    await expect(room.getByText("Add the required Math module before publishing the full SAT.")).toBeVisible();
+    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeDisabled();
+
+    const readingWriting = room.getByRole("radio", { name: "Reading & Writing only" });
+    await readingWriting.check();
+    await expect(readingWriting).toBeChecked();
+    await expect(room.getByText("Add the required Math module before publishing the full SAT.")).toHaveCount(0);
+    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
+    await finishRoomCreation(page, room, "Publish & create room");
+
+    expect(recording.readinessScopes).toContain("full");
+    expect(recording.readinessScopes).toContain("reading-writing");
+    expect(recording.publishRequests).toHaveLength(1);
+    expect(recording.publishRequests[0]?.publishScope).toBe("reading-writing");
+    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
+  });
+
+  test("uses unpublished changes instead of the older published version", async ({ page }) => {
+    const recording = await installTransport(page, {
+      readyDraft: true,
+      releaseWorkflow: true,
+      readyFullDraft: true,
+      initiallyPublished: true,
+    });
+    const room = await openCreateRoom(page);
+    await expect(room).toContainText("Version 2 will be checked and published as a new version.");
+    await room.getByRole("radio", { name: "Full SAT" }).check();
+    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
+    await finishRoomCreation(page, room, "Publish & create room");
+
+    expect(recording.publishRequests).toHaveLength(1);
+    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
+    expect(recording.createRequests[0]?.publishedVersionId).not.toBe("published-v1");
+  });
+
+  test("creates from the current published version without requiring publish permission", async ({ page }) => {
+    const recording = await installTransport(page, {
+      releaseWorkflow: true,
+      initiallyPublished: true,
+      canPublish: false,
+    });
+    const room = await openCreateRoom(page);
+    await expect(room).toContainText("Room uses Version 1");
+    await expect(room.getByRole("button", { name: "Create room", exact: true })).toBeEnabled();
+    await finishRoomCreation(page, room, "Create room");
+
+    expect(recording.publishRequests).toHaveLength(0);
+    expect(recording.createRequests).toHaveLength(1);
+    expect(recording.createRequests[0]?.publishedVersionId).toBe("published-v1");
+  });
+
+  test("does not offer room creation to a staff member without edit permission", async ({ page }) => {
+    await installTransport(page, {
+      releaseWorkflow: true,
+      initiallyPublished: true,
+      canEdit: false,
+    });
+    await page.goto(`/sat/exams/${EXAM_ID}`);
+    await expect(page.getByRole("button", { name: "Create room", exact: true })).toHaveCount(0);
+  });
+
+  test("adopts the same exact draft and scope if another staff member publishes during setup", async ({ page }) => {
+    const recording = await installTransport(page, {
+      readyDraft: true,
+      releaseWorkflow: true,
+      readyFullDraft: true,
+      concurrentPublish: true,
+    });
+    const room = await openCreateRoom(page);
+    await room.getByRole("radio", { name: "Full SAT" }).check();
+    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
+    await finishRoomCreation(page, room, "Publish & create room");
+
+    expect(recording.publishRequests).toHaveLength(1);
+    expect(recording.createRequests).toHaveLength(1);
+    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
+  });
+
+  test("does not switch to a different scope published by another staff member", async ({ page }) => {
+    const recording = await installTransport(page, {
+      readyDraft: true,
+      releaseWorkflow: true,
+      readyFullDraft: true,
+      concurrentPublish: true,
+      concurrentPublishScope: "reading-writing",
+    });
+    const room = await openCreateRoom(page);
+    await room.getByRole("radio", { name: "Full SAT" }).check();
+    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
+    await room.getByLabel("Room name").fill("Saturday morning mock");
+    await room.getByRole("button", { name: "Publish & create room", exact: true }).click();
+
+    await expect(room.getByText("This draft was published with a different scope while you were setting up.")).toBeVisible({ timeout: 30_000 });
+    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeDisabled();
+    expect(recording.createRequests).toHaveLength(0);
+  });
+
+  test("reuses the same publish operation key after a transient publish failure", async ({ page }) => {
+    const recording = await installTransport(page, {
+      readyDraft: true,
+      releaseWorkflow: true,
+      readyFullDraft: true,
+      failPublishOnce: true,
+    });
+    const room = await openCreateRoom(page);
+    await room.getByRole("radio", { name: "Full SAT" }).check();
+    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
+    await room.getByLabel("Room name").fill("Saturday morning mock");
+    const action = room.getByRole("button", { name: "Publish & create room", exact: true });
+    await action.click();
+    await expect(room.getByRole("alert").last()).toBeVisible();
+    await action.click();
+    await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access\\?link=access-link-1`), { timeout: 30_000 });
+
+    expect(recording.publishRequests).toHaveLength(2);
+    expect(recording.publishRequests[0]?.operationKey).toBeTruthy();
+    expect(recording.publishRequests[1]?.operationKey).toBe(recording.publishRequests[0]?.operationKey);
+    expect(recording.createRequests).toHaveLength(1);
+  });
+
+  test("reconciles a committed room after a lost response without creating a duplicate", async ({ page }) => {
+    const recording = await installTransport(page, {
+      releaseWorkflow: true,
+      initiallyPublished: true,
+      createOutcome: "commit-then-timeout",
+    });
+    const room = await openCreateRoom(page);
+    await finishRoomCreation(page, room, "Create room");
+
+    expect(recording.createRequests).toHaveLength(1);
+    expect(recording.overviewReads).toBeGreaterThanOrEqual(2);
+    expect(recording.publishRequests).toHaveLength(0);
+  });
+
+  test("retries room creation only after the first uncertain attempt is confirmed absent", async ({ page }) => {
+    const recording = await installTransport(page, {
+      readyDraft: true,
+      releaseWorkflow: true,
+      readyFullDraft: true,
+      createOutcome: "not-committed-once",
+    });
+    const room = await openCreateRoom(page);
+    await room.getByRole("radio", { name: "Full SAT" }).check();
+    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
+    await room.getByLabel("Room name").fill("Saturday morning mock");
+    await room.getByRole("button", { name: "Publish & create room", exact: true }).click();
+    await expect(room.getByText("No room matching this setup was found. You can retry creation.")).toBeVisible({ timeout: 30_000 });
+    await expect(room.getByRole("button", { name: "Create room", exact: true })).toBeEnabled();
+    expect(recording.overviewReads).toBeGreaterThanOrEqual(4);
+    await room.getByRole("button", { name: "Create room", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access\\?link=access-link-1`), { timeout: 30_000 });
+
+    expect(recording.publishRequests).toHaveLength(1);
+    expect(recording.createRequests).toHaveLength(2);
   });
 });

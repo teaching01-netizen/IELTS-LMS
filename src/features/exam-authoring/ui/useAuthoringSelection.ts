@@ -158,31 +158,38 @@ export function useAuthoringSelection({
   // The deep link is an INPUT to the selection, not a second source of truth:
   // it is consumed once, the URL is cleaned, and normal selection rules apply
   // from then on. A link naming a question this shell does not contain is
-  // dropped rather than guessed at.
+  // dropped rather than guessed at — and dropped from the URL too, so it cannot
+  // sit there and adopt that question the moment a shell contains it again.
   useEffect(() => {
     if (!shell) return;
     const deepQuestionId = searchParams.get("question");
     const deepField = searchParams.get("field");
-    if (deepQuestionId) {
-      const target = shell.sections
-        .flatMap((section) =>
-          section.modules.map((module) => ({
-            module,
-            question: module.questions.find((item) => item.examQuestionId === deepQuestionId),
-          }))
-        )
-        .find((candidate) => candidate.question);
+    if (deepQuestionId || deepField !== null) {
+      const target = deepQuestionId
+        ? shell.sections
+            .flatMap((section) =>
+              section.modules.map((module) => ({
+                module,
+                question: module.questions.find((item) => item.examQuestionId === deepQuestionId),
+              }))
+            )
+            .find((candidate) => candidate.question)
+        : undefined;
       if (target?.question) {
         adoptQuestion(target.module.id, target.question.examQuestionId);
         onDeepLinkField?.(deepField);
-        const next = new URLSearchParams(searchParams);
-        next.delete("question");
-        next.delete("field");
-        setSearchParams(next, { replace: true });
-        return;
       }
+      // Consumed once whether or not this shell can honour it, exactly like the
+      // module link below: a question or field parameter this shell cannot
+      // resolve is dropped instead of lingering as a link that no longer means
+      // anything (or fires later).
+      const next = new URLSearchParams(searchParams);
+      next.delete("question");
+      next.delete("field");
+      setSearchParams(next, { replace: true });
+      if (target?.question) return;
     }
-    // A publish finding about a MODULE (question count, pretest count) names no
+    // A publish finding about a MODULE (question count) names no
     // question at all: `<sectionKey>.<moduleKey>`. It is consumed here for the
     // same reason the question link is — one place decides where the author is
     // looking — and it is always stripped, even when the module is gone, so a

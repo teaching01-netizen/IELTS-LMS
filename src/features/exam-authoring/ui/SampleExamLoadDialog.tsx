@@ -35,7 +35,7 @@ export function SampleExamLoadDialog({
           </span>
           <p className="text-[12px] leading-5 text-slate-500">
             This loads 147 original SAT-style questions: 81 Reading &amp; Writing and 66 Math,
-            including both adaptive branches and exactly two pretest items per module.
+            including both adaptive branches. Every question is scored.
           </p>
         </div>
         <div className="mt-4 rounded-[12px] bg-au-warning-tint px-3.5 py-3 text-[12px] leading-5 text-au-warning-text">

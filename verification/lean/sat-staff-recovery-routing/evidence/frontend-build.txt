@@ -1,0 +1,299 @@
+$ vite build
+vite v6.4.2 building for production...
+(node:61405) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+transforming...
+✓ 3735 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                               0.92 kB │ gzip:   0.52 kB
+dist/assets/KaTeX_Size3-Regular-CTq5MqoE.woff                 4.42 kB
+dist/assets/KaTeX_Size4-Regular-Dl5lxZxV.woff2                4.93 kB
+dist/assets/KaTeX_Size2-Regular-Dy4dx90m.woff2                5.21 kB
+dist/assets/KaTeX_Size1-Regular-mCD8mA8B.woff2                5.47 kB
+dist/assets/KaTeX_Size4-Regular-BF-4gkZK.woff                 5.98 kB
+dist/assets/KaTeX_Size2-Regular-oD1tc_U0.woff                 6.19 kB
+dist/assets/KaTeX_Size1-Regular-C195tn64.woff                 6.50 kB
+dist/assets/KaTeX_Caligraphic-Regular-Di6jR-x-.woff2          6.91 kB
+dist/assets/KaTeX_Caligraphic-Bold-Dq_IR9rO.woff2             6.91 kB
+dist/assets/KaTeX_Size3-Regular-DgpXs0kz.ttf                  7.59 kB
+dist/assets/KaTeX_Caligraphic-Regular-CTRA-rTL.woff           7.66 kB
+dist/assets/KaTeX_Caligraphic-Bold-BEiXGLvX.woff              7.72 kB
+dist/assets/KaTeX_Script-Regular-D3wIWfF6.woff2               9.64 kB
+dist/assets/KaTeX_SansSerif-Regular-DDBCnlJ7.woff2           10.34 kB
+dist/assets/KaTeX_Size4-Regular-DWFBv043.ttf                 10.36 kB
+dist/assets/KaTeX_Script-Regular-D5yQViql.woff               10.59 kB
+dist/assets/KaTeX_Fraktur-Regular-CTYiF6lA.woff2             11.32 kB
+dist/assets/KaTeX_Fraktur-Bold-CL6g_b3V.woff2                11.35 kB
+dist/assets/KaTeX_Size2-Regular-B7gKUWhC.ttf                 11.51 kB
+dist/assets/KaTeX_SansSerif-Italic-C3H0VqGB.woff2            12.03 kB
+dist/assets/KaTeX_SansSerif-Bold-D1sUS0GD.woff2              12.22 kB
+dist/assets/KaTeX_Size1-Regular-Dbsnue_I.ttf                 12.23 kB
+dist/assets/KaTeX_SansSerif-Regular-CS6fqUqJ.woff            12.32 kB
+dist/assets/KaTeX_Caligraphic-Regular-wX97UBjC.ttf           12.34 kB
+dist/assets/KaTeX_Caligraphic-Bold-ATXxdsX0.ttf              12.37 kB
+dist/assets/KaTeX_Fraktur-Regular-Dxdc4cR9.woff              13.21 kB
+dist/assets/KaTeX_Fraktur-Bold-BsDP51OF.woff                 13.30 kB
+dist/assets/KaTeX_Typewriter-Regular-CO6r4hn1.woff2          13.57 kB
+dist/assets/KaTeX_SansSerif-Italic-DN2j7dab.woff             14.11 kB
+dist/assets/KaTeX_SansSerif-Bold-DbIhKOiC.woff               14.41 kB
+dist/assets/KaTeX_Typewriter-Regular-C0xS9mPB.woff           16.03 kB
+dist/assets/KaTeX_Math-BoldItalic-CZnvNsCZ.woff2             16.40 kB
+dist/assets/KaTeX_Math-Italic-t53AETM-.woff2                 16.44 kB
+dist/assets/KaTeX_Script-Regular-C5JkGWo-.ttf                16.65 kB
+dist/assets/KaTeX_Main-BoldItalic-DxDJ3AOS.woff2             16.78 kB
+dist/assets/KaTeX_Main-Italic-NWA7e6Wa.woff2                 16.99 kB
+dist/assets/KaTeX_Math-BoldItalic-iY-2wyZ7.woff              18.67 kB
+dist/assets/KaTeX_Math-Italic-DA0__PXp.woff                  18.75 kB
+dist/assets/KaTeX_Main-BoldItalic-SpSLRI95.woff              19.41 kB
+dist/assets/KaTeX_SansSerif-Regular-BNo7hRIc.ttf             19.44 kB
+dist/assets/KaTeX_Fraktur-Regular-CB_wures.ttf               19.57 kB
+dist/assets/KaTeX_Fraktur-Bold-BdnERNNW.ttf                  19.58 kB
+dist/assets/KaTeX_Main-Italic-BMLOBm91.woff                  19.68 kB
+dist/assets/KaTeX_SansSerif-Italic-YYjJ1zSn.ttf              22.36 kB
+dist/assets/KaTeX_SansSerif-Bold-CFMepnvq.ttf                24.50 kB
+dist/assets/KaTeX_Main-Bold-Cx986IdX.woff2                   25.32 kB
+dist/assets/KaTeX_Main-Regular-B22Nviop.woff2                26.27 kB
+dist/assets/KaTeX_Typewriter-Regular-D3Ib7_Hf.ttf            27.56 kB
+dist/assets/KaTeX_AMS-Regular-BQhdFMY1.woff2                 28.08 kB
+dist/assets/KaTeX_Main-Bold-Jm3AIy58.woff                    29.91 kB
+dist/assets/KaTeX_Main-Regular-Dr94JaBh.woff                 30.77 kB
+dist/assets/KaTeX_Math-BoldItalic-B3XSjfu4.ttf               31.20 kB
+dist/assets/KaTeX_Math-Italic-flOr_0UB.ttf                   31.31 kB
+dist/assets/KaTeX_Main-BoldItalic-DzxPMmG6.ttf               32.97 kB
+dist/assets/KaTeX_AMS-Regular-DMm9YOAa.woff                  33.52 kB
+dist/assets/KaTeX_Main-Italic-3WenGoN9.ttf                   33.58 kB
+dist/assets/KaTeX_Main-Bold-waoOVXN0.ttf                     51.34 kB
+dist/assets/KaTeX_Main-Regular-ypZvNtVU.ttf                  53.58 kB
+dist/assets/KaTeX_AMS-Regular-DRggAlZN.ttf                   63.63 kB
+dist/.vite/manifest.json                                    117.27 kB │ gzip:  13.88 kB
+dist/assets/useStudentSelectionGesture-DTBeZdHt.css           3.14 kB │ gzip:   0.92 kB
+dist/assets/StudentAppWrapper-C0IKcZ5-.css                    3.61 kB │ gzip:   1.11 kB
+dist/assets/SatSessionRoomRoute-C7O-q8A4.css                 20.18 kB │ gzip:   3.84 kB
+dist/assets/StructuredContentRenderer-CEK31ho9.css           30.19 kB │ gzip:   8.08 kB
+dist/assets/SatAuthoringRoute-rAoxQ6ju.css                   37.37 kB │ gzip:  10.70 kB
+dist/assets/index-DI7qWMT9.css                              340.40 kB │ gzip:  55.40 kB
+dist/assets/uiConstants-DNxa5mQs.js                           0.13 kB │ gzip:   0.14 kB
+dist/assets/use-reduced-motion-Dw98JGKh.js                    0.14 kB │ gzip:   0.14 kB
+dist/assets/domain-wrPTxM68.js                                0.20 kB │ gzip:   0.14 kB
+dist/assets/insertedImages-Bap6ImsM.js                        0.21 kB │ gzip:   0.18 kB
+dist/assets/downloadBlob-1q04p4P6.js                          0.22 kB │ gzip:   0.19 kB
+dist/assets/satReturnPath-D4YlmRo9.js                         0.23 kB │ gzip:   0.15 kB
+dist/assets/authoringEntryIntent-BmVUA2iX.js                  0.27 kB │ gzip:   0.18 kB
+dist/assets/types-p6MO7XnJ.js                                 0.29 kB │ gzip:   0.18 kB
+dist/assets/minus-D6InhCjI.js                                 0.29 kB │ gzip:   0.24 kB
+dist/assets/check-DzypT5j_.js                                 0.29 kB │ gzip:   0.25 kB
+dist/assets/AdminContext-FUJp9HWk.js                          0.30 kB │ gzip:   0.22 kB
+dist/assets/chevron-up-CTMhCWnh.js                            0.30 kB │ gzip:   0.25 kB
+dist/assets/chevron-left-BVQo1xUq.js                          0.30 kB │ gzip:   0.25 kB
+dist/assets/loader-circle-NJP2_DKL.js                         0.31 kB │ gzip:   0.26 kB
+dist/assets/plus-DierieA0.js                                  0.33 kB │ gzip:   0.25 kB
+dist/assets/clock-ChorLJd4.js                                 0.34 kB │ gzip:   0.27 kB
+dist/assets/clock-3-C8tDdsrP.js                               0.34 kB │ gzip:   0.27 kB
+dist/assets/arrow-right-B2u9PwNd.js                           0.34 kB │ gzip:   0.27 kB
+dist/assets/circle-check-B5wyY2i_.js                          0.35 kB │ gzip:   0.27 kB
+dist/assets/user-round-DY_hNu7b.js                            0.35 kB │ gzip:   0.28 kB
+dist/assets/menu-l74H2jR6.js                                  0.36 kB │ gzip:   0.26 kB
+dist/assets/play-VUWG3eEM.js                                  0.36 kB │ gzip:   0.29 kB
+dist/assets/user-DB1QqLPK.js                                  0.36 kB │ gzip:   0.28 kB
+dist/assets/underline-BVnXCQPr.js                             0.36 kB │ gzip:   0.28 kB
+dist/assets/rotate-ccw-DWCCClGS.js                            0.37 kB │ gzip:   0.29 kB
+dist/assets/lock-DutY2v96.js                                  0.37 kB │ gzip:   0.29 kB
+dist/assets/circle-x-DsGEqLT-.js                              0.38 kB │ gzip:   0.28 kB
+dist/assets/pause-iOU383oW.js                                 0.38 kB │ gzip:   0.27 kB
+dist/assets/sigma-C8kh8FZ9.js                                 0.39 kB │ gzip:   0.29 kB
+dist/assets/ellipsis-8jaLLyQz.js                              0.39 kB │ gzip:   0.27 kB
+dist/assets/highlighter-Bks8cLY-.js                           0.39 kB │ gzip:   0.30 kB
+dist/assets/index-BxV5IfOx.js                                 0.40 kB │ gzip:   0.31 kB
+dist/assets/square-check-big-BRZG4UQ9.js                      0.40 kB │ gzip:   0.30 kB
+dist/assets/log-out-BMNyn9It.js                               0.40 kB │ gzip:   0.29 kB
+dist/assets/mic-Dm1V0sXl.js                                   0.40 kB │ gzip:   0.31 kB
+dist/assets/copy-D3vj8M5W.js                                  0.40 kB │ gzip:   0.31 kB
+dist/assets/download-BX5oCIIA.js                              0.41 kB │ gzip:   0.30 kB
+dist/assets/link-2-DgGjfi3l.js                                0.42 kB │ gzip:   0.31 kB
+dist/assets/circle-question-mark-Dcx25hlS.js                  0.42 kB │ gzip:   0.31 kB
+dist/assets/settings-2-BhkkntIZ.js                            0.42 kB │ gzip:   0.30 kB
+dist/assets/funnel-CiEVjJMl.js                                0.42 kB │ gzip:   0.31 kB
+dist/assets/chart-column-CQ7nBIh6.js                          0.42 kB │ gzip:   0.30 kB
+dist/assets/eye-5SXVokhH.js                                   0.42 kB │ gzip:   0.30 kB
+dist/assets/external-link-YjgsKxB0.js                         0.42 kB │ gzip:   0.31 kB
+dist/assets/flag-BRSUjK5X.js                                  0.43 kB │ gzip:   0.32 kB
+dist/assets/lock-keyhole-CUS1Da9U.js                          0.43 kB │ gzip:   0.32 kB
+dist/assets/calendar-D5cafQ6h.js                              0.43 kB │ gzip:   0.30 kB
+dist/assets/search-x-VyNl7N9v.js                              0.43 kB │ gzip:   0.31 kB
+dist/assets/shield-CXqO3Zj3.js                                0.44 kB │ gzip:   0.33 kB
+dist/assets/LoadingMark-B2dHHUYm.js                           0.44 kB │ gzip:   0.32 kB
+dist/assets/image-B1K4UC3y.js                                 0.44 kB │ gzip:   0.32 kB
+dist/assets/list-checks-ClBOP8De.js                           0.45 kB │ gzip:   0.29 kB
+dist/assets/pencil-DPFOlAFs.js                                0.45 kB │ gzip:   0.33 kB
+dist/assets/book-open-4-eFPOSz.js                             0.45 kB │ gzip:   0.31 kB
+dist/assets/bell-BwV0iI14.js                                  0.46 kB │ gzip:   0.34 kB
+dist/assets/list-CsbgekbO.js                                  0.48 kB │ gzip:   0.30 kB
+dist/assets/users-D6PMzU4n.js                                 0.48 kB │ gzip:   0.33 kB
+dist/assets/shield-check-CJcdMWq1.js                          0.49 kB │ gzip:   0.35 kB
+dist/assets/square-pen-CNDm7TDm.js                            0.49 kB │ gzip:   0.34 kB
+dist/assets/refresh-cw-DA0RE_ZR.js                            0.49 kB │ gzip:   0.33 kB
+dist/assets/save-Bxd3yl2r.js                                  0.50 kB │ gzip:   0.33 kB
+dist/assets/trash-2-DgFTbv1S.js                               0.50 kB │ gzip:   0.32 kB
+dist/assets/file-text-DvDrrcqG.js                             0.51 kB │ gzip:   0.32 kB
+dist/assets/share-2-BeNynzZz.js                               0.53 kB │ gzip:   0.33 kB
+dist/assets/logger-fQUqaRPW.js                                0.53 kB │ gzip:   0.30 kB
+dist/assets/calendar-plus-vqPB-Fpf.js                         0.54 kB │ gzip:   0.34 kB
+dist/assets/grip-vertical-CxJO7Vc2.js                         0.54 kB │ gzip:   0.30 kB
+dist/assets/radio-BpzxYH0W.js                                 0.55 kB │ gzip:   0.35 kB
+dist/assets/motion-D_IJs4vW.js                                0.55 kB │ gzip:   0.29 kB
+dist/assets/satSessionType-gen06GKV.js                        0.57 kB │ gzip:   0.24 kB
+dist/assets/layers-n29Kdq4l.js                                0.59 kB │ gzip:   0.34 kB
+dist/assets/sliders-horizontal-QafBL86Z.js                    0.60 kB │ gzip:   0.35 kB
+dist/assets/eye-off-B9dZ42N0.js                               0.60 kB │ gzip:   0.38 kB
+dist/assets/settings-CukwAwxr.js                              0.66 kB │ gzip:   0.36 kB
+dist/assets/react-oSjd-v3d.js                                 0.67 kB │ gzip:   0.42 kB
+dist/assets/undo-2-B-sBu5aR.js                                0.71 kB │ gzip:   0.35 kB
+dist/assets/map-pin-ByotYYjP.js                               0.79 kB │ gzip:   0.39 kB
+dist/assets/objectiveGradingSync-R5Kivocq.js                  0.85 kB │ gzip:   0.43 kB
+dist/assets/satTestTime-7SpsTTIr.js                           0.85 kB │ gzip:   0.44 kB
+dist/assets/skip-forward-Cx1umZui.js                          0.88 kB │ gzip:   0.40 kB
+dist/assets/sentenceCompletionAnswerPool-p8RkVnHf.js          0.92 kB │ gzip:   0.48 kB
+dist/assets/terminalState-B8oCWYVV.js                         0.92 kB │ gzip:   0.36 kB
+dist/assets/strikethrough-DT5hn9PD.js                         0.92 kB │ gzip:   0.44 kB
+dist/assets/useSatListParams-Cf57yBhv.js                      0.94 kB │ gzip:   0.53 kB
+dist/assets/Badge-DCz1RSEH.js                                 0.96 kB │ gzip:   0.57 kB
+dist/assets/examVisibilityIntegrity-DkdEygkl.js               0.99 kB │ gzip:   0.44 kB
+dist/assets/type-u_YgDt9J.js                                  1.02 kB │ gzip:   0.43 kB
+dist/assets/SatWorkspaceNav-FsgwdHPj.js                       1.02 kB │ gzip:   0.59 kB
+dist/assets/ConfirmModal-D5SdMO5z.js                          1.13 kB │ gzip:   0.61 kB
+dist/assets/SegmentedControl-Dww_V48X.js                      1.14 kB │ gzip:   0.63 kB
+dist/assets/git-commit-horizontal-B9S8n1T5.js                 1.15 kB │ gzip:   0.47 kB
+dist/assets/examQueries-DbJPBe36.js                           1.18 kB │ gzip:   0.60 kB
+dist/assets/SatPresenceSurface-DAGB5u9B.js                    1.24 kB │ gzip:   0.48 kB
+dist/assets/CollaborationHeaderCluster-DwrVHnAa.js            1.33 kB │ gzip:   0.73 kB
+dist/assets/HighlightSelectionDebugRoute-CQ9YXMDv.js          1.43 kB │ gzip:   0.79 kB
+dist/assets/examLifecycle-BtDlDiZl.js                         1.45 kB │ gzip:   0.71 kB
+dist/assets/satResumeLocator-C_KJkwqi.js                      1.49 kB │ gzip:   0.68 kB
+dist/assets/proctorQueries-5A2iJIl3.js                        1.54 kB │ gzip:   0.77 kB
+dist/assets/studentResponse-myobJLJf.js                       1.60 kB │ gzip:   0.75 kB
+dist/assets/Button-DZHL9K1s.js                                1.67 kB │ gzip:   0.80 kB
+dist/assets/SatAuthoringCollaborationBoundary-CaKEPYjV.js     1.80 kB │ gzip:   0.76 kB
+dist/assets/htmlText-CTSlWFy7.js                              1.80 kB │ gzip:   0.69 kB
+dist/assets/useSatListReturn-u7OS7nyY.js                      1.80 kB │ gzip:   0.89 kB
+dist/assets/useAuthoritativeDeadlineClock-ykjl7_ZS.js         2.05 kB │ gzip:   0.83 kB
+dist/assets/SatAuthoringStateSurfaces-B9LPNtaY.js             2.10 kB │ gzip:   0.85 kB
+dist/assets/IeltsStudentDeliveryBranch-BQo1Bydv.js            2.10 kB │ gzip:   1.03 kB
+dist/assets/index-CKOOEsHT.js                                 2.13 kB │ gzip:   0.95 kB
+dist/assets/assessmentAccessLinkQueries-Sjh5i6H3.js           2.14 kB │ gzip:   0.73 kB
+dist/assets/Toast-xp9wDyjR.js                                 2.15 kB │ gzip:   1.12 kB
+dist/assets/sheet-6o367zwp.js                                 2.27 kB │ gzip:   0.83 kB
+dist/assets/sanitizeHtml-dTe3jSCD.js                          2.33 kB │ gzip:   1.08 kB
+dist/assets/ExamSettingsSheet-CfIjg5X5.js                     2.34 kB │ gzip:   1.18 kB
+dist/assets/boldMarkdown-BLG7yGp5.js                          2.39 kB │ gzip:   1.12 kB
+dist/assets/useBuilderRouteController-rGHBm0m8.js             2.47 kB │ gzip:   0.95 kB
+dist/assets/assessmentAuthoringApi-M5kxabck.js                2.87 kB │ gzip:   0.88 kB
+dist/assets/SatAuthoringDebugRoute-DlCalNRr.js                2.91 kB │ gzip:   1.34 kB
+dist/assets/coeditSaveTruth-D0f5obPv.js                       2.95 kB │ gzip:   1.23 kB
+dist/assets/index-DbKyVX04.js                                 2.96 kB │ gzip:   1.21 kB
+dist/assets/text-align-start-D9m_e13J.js                      3.04 kB │ gzip:   0.85 kB
+dist/assets/durableDraftStore-OJ_z2ZCK.js                     3.10 kB │ gzip:   1.30 kB
+dist/assets/useMutation-DBss4r2J.js                           3.10 kB │ gzip:   1.28 kB
+dist/assets/BandScoreMatrix-DrDdkF35.js                       3.12 kB │ gzip:   1.38 kB
+dist/assets/authoringPrimitives-oeUYV5lz.js                   3.35 kB │ gzip:   1.31 kB
+dist/assets/SatAttemptDetailHeader-C1zUrzXh.js                3.44 kB │ gzip:   1.40 kB
+dist/assets/SatStateSurfaces-CqW4Wt6u.js                      3.52 kB │ gzip:   1.47 kB
+dist/assets/index-CCjCmikW.js                                 3.71 kB │ gzip:   1.63 kB
+dist/assets/accessLinkUi-BuvMdH6l.js                          3.81 kB │ gzip:   1.68 kB
+dist/assets/richContent-BYqDq3DU.js                           3.88 kB │ gzip:   1.65 kB
+dist/assets/SatExamResponsesRoute-Dk5X7zs1.js                 4.15 kB │ gzip:   1.98 kB
+dist/assets/SatWriterLockGate-CKm4xnF5.js                     4.16 kB │ gzip:   1.61 kB
+dist/assets/useLiveUpdates-BGy5mXtn.js                        4.23 kB │ gzip:   1.58 kB
+dist/assets/staffDraftKey-Cj8ciAC_.js                         4.29 kB │ gzip:   1.68 kB
+dist/assets/WritingChartPreview-vSlLKWbZ.js                   4.42 kB │ gzip:   1.64 kB
+dist/assets/usePromptCoediting-yA_kURDz.js                    4.47 kB │ gzip:   1.98 kB
+dist/assets/ConfirmDialog-7b2_ex1M.js                         4.95 kB │ gzip:   1.51 kB
+dist/assets/useStudentFocusedControlVisibility-BZEC1-Cj.js    4.95 kB │ gzip:   1.73 kB
+dist/assets/SatAttemptAnswersRoute-BCEmF00h.js                5.13 kB │ gzip:   2.21 kB
+dist/assets/useBuilderAutosave-Lm4ddm0T.js                    5.19 kB │ gzip:   1.99 kB
+dist/assets/SatControlFeedback-BmAC3_B0.js                    5.24 kB │ gzip:   1.96 kB
+dist/assets/index-B09JsBMQ.js                                 5.28 kB │ gzip:   2.02 kB
+dist/assets/ExamSettingsRoute-DQBMCszM.js                     5.46 kB │ gzip:   2.57 kB
+dist/assets/ProviderBuilderRoute-BjOPbTOS.js                  5.47 kB │ gzip:   2.32 kB
+dist/assets/QuestionRawTable-CxhkKzTI.js                      5.52 kB │ gzip:   1.84 kB
+dist/assets/Menu-NM2vutWA.js                                  5.59 kB │ gzip:   2.01 kB
+dist/assets/satDeviceTransferSurfaces-CCENkUTI.js             5.66 kB │ gzip:   2.03 kB
+dist/assets/SatAccessRoute-bD_3fE0w.js                        6.37 kB │ gzip:   2.90 kB
+dist/assets/previewRuntimeSessionService-Bp3zenhb.js          6.51 kB │ gzip:   2.69 kB
+dist/assets/examRepository-Cr-fBGef.js                        6.85 kB │ gzip:   1.89 kB
+dist/assets/StudentSessionRoute-Bhp5Sm82.js                   6.95 kB │ gzip:   2.87 kB
+dist/assets/examDeliveryService-CjF8dgdg.js                   7.58 kB │ gzip:   2.27 kB
+dist/assets/satCopy-CH9f2s5L.js                               7.91 kB │ gzip:   3.13 kB
+dist/assets/SatReviewPage-jLSKh_bo.js                         8.15 kB │ gzip:   2.43 kB
+dist/assets/SatAccessibilityDebugRoute-DAACGeA6.js            8.41 kB │ gzip:   3.53 kB
+dist/assets/SatScoreReport-0zwdF4bM.js                        9.19 kB │ gzip:   3.22 kB
+dist/assets/AdminRoot-BRAYM-cu.js                             9.54 kB │ gzip:   3.17 kB
+dist/assets/SatExamLibraryRoute-5ZVLpUop.js                   9.71 kB │ gzip:   3.97 kB
+dist/assets/SatRoot-Lj36kGpS.js                               9.86 kB │ gzip:   3.33 kB
+dist/assets/SatResultDetailRoute-y0sf_Awr.js                 10.35 kB │ gzip:   3.54 kB
+dist/assets/examDefaults-DPKnXRPX.js                         10.44 kB │ gzip:   3.07 kB
+dist/assets/sessionState-DVcLkwSY.js                         10.48 kB │ gzip:   3.74 kB
+dist/assets/useQuery-Bwd_dboU.js                             10.54 kB │ gzip:   3.77 kB
+dist/assets/releaseSelectors-Bw7wKOcx.js                     10.74 kB │ gzip:   3.77 kB
+dist/assets/satStudentResume-pBP9DwTT.js                     11.57 kB │ gzip:   4.01 kB
+dist/assets/ExamPublishSheet-DFoiL3t7.js                     12.30 kB │ gzip:   4.10 kB
+dist/assets/StudentTouchSelectionDiagnostics-aBQWouy6.js     12.63 kB │ gzip:   3.71 kB
+dist/assets/authoringQueryEffects-ChqPl9yY.js                12.69 kB │ gzip:   3.95 kB
+dist/assets/SatSessionsRoute-CkrbvlXf.js                     12.99 kB │ gzip:   4.84 kB
+dist/assets/authoringShellLifecycle-CTD7O3OQ.js              13.32 kB │ gzip:   4.62 kB
+dist/assets/questionBankService-DNw2NeID.js                  13.94 kB │ gzip:   3.63 kB
+dist/assets/examUtils-BrmSE3Ut.js                            15.47 kB │ gzip:   3.45 kB
+dist/assets/LibraryRoute-y_adMyCT.js                         15.58 kB │ gzip:   3.61 kB
+dist/assets/useExamWorkspaceChrome-C_Lppsi2.js               15.91 kB │ gzip:   5.03 kB
+dist/assets/useSatPublish-2SLdEa4m.js                        16.63 kB │ gzip:   6.22 kB
+dist/assets/StudentRegistrationRoute-BzBamKTW.js             16.79 kB │ gzip:   5.44 kB
+dist/assets/SchedulingRoute-DWF9OiV8.js                      17.45 kB │ gzip:   4.99 kB
+dist/assets/useProctorRouteController-NP6hOGhD.js            18.55 kB │ gzip:   6.48 kB
+dist/assets/StudentAccessLinkEntryRoute-Ddk19FcB.js          19.17 kB │ gzip:   6.44 kB
+dist/assets/sampleExam-Dr5hyinG.js                           19.84 kB │ gzip:   7.17 kB
+dist/assets/index-DAYOAK1t.js                                20.76 kB │ gzip:   6.38 kB
+dist/assets/AnswerHistoryRoute-DlJafFbL.js                   22.27 kB │ gzip:   5.81 kB
+dist/assets/ProviderPreviewRoute--RtBLAXP.js                 23.19 kB │ gzip:   7.73 kB
+dist/assets/csvExport-BfipQoVK.js                            23.94 kB │ gzip:   5.69 kB
+dist/assets/RichTextHighlighter-BRk8i42E.js                  23.96 kB │ gzip:   7.70 kB
+dist/assets/studentAttemptRepository-DVp_gBwV.js             24.05 kB │ gzip:   6.45 kB
+dist/assets/ExamAnswerKeyRoute-j5zizeGv.js                   24.09 kB │ gzip:   6.21 kB
+dist/assets/SettingsRoute-D00ZNcl8.js                        24.67 kB │ gzip:   4.56 kB
+dist/assets/examAdapterService-CodqhsT4.js                   24.99 kB │ gzip:   8.19 kB
+dist/assets/browser-WJc1YRw-.js                              25.78 kB │ gzip:  10.02 kB
+dist/assets/index-CZq7yynK.js                                25.83 kB │ gzip:   9.29 kB
+dist/assets/useStudentSessionRouteData-YGCzagMh.js           26.27 kB │ gzip:   8.27 kB
+dist/assets/utils-C8nBGPD0.js                                26.68 kB │ gzip:   8.39 kB
+dist/assets/ResultsRoute-Ddj9KIeq.js                         27.37 kB │ gzip:   7.92 kB
+dist/assets/SatResultsRoute-BeW4H-CP.js                      27.57 kB │ gzip:   8.85 kB
+dist/assets/purify.es-DedTAGkB.js                            29.05 kB │ gzip:  11.15 kB
+dist/assets/index-QifFPuU9.js                                31.70 kB │ gzip:  12.08 kB
+dist/assets/ExamVersionHistory-BxmphpaK.js                   31.98 kB │ gzip:   8.06 kB
+dist/assets/AccessLinkEditorSheet-DRJxrYtj.js                34.51 kB │ gzip:  10.68 kB
+dist/assets/examAuthoringFacade-BN5jfoa_.js                  42.28 kB │ gzip:  10.36 kB
+dist/assets/StudentLinksDashboard-DoaXXSb6.js                45.02 kB │ gzip:  13.40 kB
+dist/assets/SatScoreConversionRoute-DWqDfh7O.js              46.57 kB │ gzip:  14.92 kB
+dist/assets/StructuredContentRenderer-BcJds_0k.js            50.60 kB │ gzip:  16.81 kB
+dist/assets/ExamConfigRoute-CeMO1tL4.js                      53.49 kB │ gzip:  11.42 kB
+dist/assets/index-XZPqUO9x.js                                54.80 kB │ gzip:  18.93 kB
+dist/assets/useStudentSelectionGesture-DU8z7VsD.js           55.14 kB │ gzip:  16.19 kB
+dist/assets/ExamsRoute-CkY_bLqN.js                           55.62 kB │ gzip:  14.61 kB
+dist/assets/deviceFingerprinting-o6bSeGqL.js                 57.99 kB │ gzip:  14.02 kB
+dist/assets/SatSessionRoomRoute-BN2tSwew.js                  74.93 kB │ gzip:  21.56 kB
+dist/assets/ProviderReviewRoute-Dx_Zvt3P.js                  85.62 kB │ gzip:  21.37 kB
+dist/assets/ProctorRoot-DMuR5zRk.js                          94.54 kB │ gzip:  22.49 kB
+dist/assets/SatStudentDeliveryBranch-BtOJSzhC.js            100.35 kB │ gzip:  29.84 kB
+dist/assets/index.es-Xcojhr2X.js                            159.64 kB │ gzip:  53.38 kB
+dist/assets/html2canvas.esm-QH1iLAAe.js                     202.38 kB │ gzip:  47.71 kB
+dist/assets/SatReferenceSheetPanel-Buh4XhHI.js              255.30 kB │ gzip:  68.10 kB
+dist/assets/GradingRoute-aPaGWAB6.js                        261.81 kB │ gzip:  65.05 kB
+dist/assets/BuilderRoot-BZxEvp2t.js                         352.47 kB │ gzip:  78.35 kB
+dist/assets/StudentAppWrapper-DfwuVANF.js                   354.77 kB │ gzip:  96.09 kB
+dist/assets/useSatAuthoringCollaboration-B4TquLPE.js        355.92 kB │ gzip: 110.21 kB
+dist/assets/jspdf.es.min-B7WbixaX.js                        393.18 kB │ gzip: 128.35 kB
+dist/assets/SatAuthoringRoute-DlWN6Ekz.js                   398.96 kB │ gzip: 118.91 kB
+dist/assets/imageNode-CaP9lEHS.js                           562.74 kB │ gzip: 170.29 kB
+dist/assets/index-BAAI2mgA.js                               627.52 kB │ gzip: 191.66 kB
+dist/assets/mathlive.min-BosAORP5.js                        825.52 kB │ gzip: 226.68 kB
+✓ built in 17.69s
+BUILD_EXIT=0

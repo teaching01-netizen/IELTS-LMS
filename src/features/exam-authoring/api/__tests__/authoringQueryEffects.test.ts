@@ -196,7 +196,6 @@ describe("authoring effect vocabulary", () => {
       moduleKey: "rw-1",
       sectionKey: "rw",
       displayOrder: 0,
-      isPretest: false,
       question: {},
     } as unknown as AssessmentQuestionDetail;
 

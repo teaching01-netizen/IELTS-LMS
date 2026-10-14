@@ -109,7 +109,7 @@ function makeDraft(id: string, promptText: string): QuestionRevision {
 function makeSummary(examQuestionId: string, promptPreview: string): AssessmentQuestionSummary {
   return {
     examQuestionId, questionId: `q-${examQuestionId}`, questionRevisionId: `rev-${examQuestionId}`,
-    displayOrder: 0, isPretest: false, questionType: "single_choice", semanticRevision: 1, revision: 1,
+    displayOrder: 0, questionType: "single_choice", semanticRevision: 1, revision: 1,
     promptPreview, answerKeyPreview: "A", domain: null, skill: null, difficulty: "medium", tags: [],
     hasStimulus: false, contentComplexity: "plain",
     readiness: { status: "ready", blockingIssueCount: 0, warningCount: 0 },
@@ -136,8 +136,8 @@ function setupDefaults() {
   const first = makeDraft("rev-1", "First prompt");
   const second = makeDraft("rev-2", "Second prompt");
   const details: Record<string, AssessmentQuestionDetail> = {
-    "eq-1": { examQuestionId: "eq-1", moduleId: "mod-1", moduleKey: "rw-m1", sectionKey: "reading-writing", displayOrder: 0, isPretest: false, question: first },
-    "eq-2": { examQuestionId: "eq-2", moduleId: "mod-1", moduleKey: "rw-m1", sectionKey: "reading-writing", displayOrder: 1, isPretest: false, question: second },
+    "eq-1": { examQuestionId: "eq-1", moduleId: "mod-1", moduleKey: "rw-m1", sectionKey: "reading-writing", displayOrder: 0, question: first },
+    "eq-2": { examQuestionId: "eq-2", moduleId: "mod-1", moduleKey: "rw-m1", sectionKey: "reading-writing", displayOrder: 1, question: second },
   };
   harness.details = details;
   // The shell cache holds a lifecycle envelope: READY carries the shell.

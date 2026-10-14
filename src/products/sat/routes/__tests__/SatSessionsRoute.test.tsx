@@ -89,13 +89,8 @@ function openSetup() {
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 }
 
-function continueToCheckIn() {
-  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-}
-
+// Setup carries the check-in window too, so a single Continue reaches Review.
 function continueToReview() {
-  continueToCheckIn();
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 }
 
@@ -121,14 +116,14 @@ describe('SatSessionsRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     const progress = screen.getByRole('progressbar', { name: 'Room setup progress' });
     expect(progress).toHaveAttribute('aria-valuenow', '1');
-    expect(progress).toHaveAttribute('aria-valuemax', '5');
+    expect(progress).toHaveAttribute('aria-valuemax', '3');
     expect(screen.getByRole('option', { name: 'SAT Published' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'IELTS Published' })).not.toBeInTheDocument();
     expect(screen.getByText(/Students receive Reading & Writing only/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     const setupProgress = screen.getByRole('progressbar', { name: 'Room setup progress' });
     expect(setupProgress).toHaveAttribute('aria-valuenow', '2');
-    expect(setupProgress).toHaveAttribute('aria-valuemax', '5');
+    expect(setupProgress).toHaveAttribute('aria-valuemax', '3');
     expect(screen.getByText('Version 9')).toBeInTheDocument();
   });
 
@@ -205,8 +200,11 @@ describe('SatSessionsRoute', () => {
     continueToReview();
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('The room could not be created.');
-    expect(screen.getByLabelText('Room name')).toHaveValue('Saturday mock');
+    expect(screen.getByRole('dialog', { name: 'Create room' })).toBeInTheDocument();
+    expect(screen.getByText('Saturday mock')).toBeInTheDocument();
     expect(screen.queryByTestId('location')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByLabelText('Room name')).toHaveValue('Saturday mock');
   });
 
   it('explains an invalid check-in window without clearing the form', async () => {
@@ -214,7 +212,6 @@ describe('SatSessionsRoute', () => {
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
-    continueToCheckIn();
     fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2099-09-01T13:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2099-09-01T10:00' } });
@@ -228,7 +225,6 @@ describe('SatSessionsRoute', () => {
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
-    continueToCheckIn();
     fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2000-09-01T10:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2000-09-01T13:00' } });
@@ -241,7 +237,6 @@ describe('SatSessionsRoute', () => {
     renderRoute();
     openSetup();
     fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Morning SAT' } });
-    continueToCheckIn();
     fireEvent.click(screen.getByRole('button', { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText('Opens'), { target: { value: '2099-09-01T10:00' } });
     fireEvent.change(screen.getByLabelText('Closes'), { target: { value: '2099-09-01T10:10' } });

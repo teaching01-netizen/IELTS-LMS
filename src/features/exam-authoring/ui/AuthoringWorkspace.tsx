@@ -6,6 +6,7 @@ import type {
   AssessmentValidationIssue,
   QuestionRevision,
 } from "../contracts/assessment";
+import type { AssessmentAccessLink } from "../contracts/accessLinks";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import {
   useAssessmentValidation,
@@ -93,10 +94,11 @@ import { flashAuthoringField } from "./spine/TargetFlash";
 import { motion, useReducedMotion } from "motion/react";
 import { spineMotion } from "@/src/shared/motion";
 import { ExamWorkspaceHeader } from "./shell/ExamWorkspaceHeader";
-import { deliveryDestination, describeExamLifecycle, examWorkspacePath, type DeliveryTarget, type ExamLifecycleCopy, type ExamWorkspaceTab } from "./shell/examLifecycle";
+import { describeExamLifecycle, examWorkspacePath, type DeliveryTarget, type ExamLifecycleCopy, type ExamWorkspaceTab } from "./shell/examLifecycle";
 import { QuestionCardStack } from "./spine/QuestionCardStack";
 import { useOutlinePreference } from "./spine/useOutlinePreference";
 import { ExamPublishSheet } from "./publish/ExamPublishSheet";
+import { SatCreateRoomFlow } from "./publish/SatCreateRoomFlow";
 import { ExamSettingsSheet } from "./settings/ExamSettingsSheet";
 import { satListReturnTarget } from "@/src/products/sat/ui/useSatListReturn";
 
@@ -105,7 +107,7 @@ export interface AuthoringWorkspaceChrome {
   lifecycle: ExamLifecycleCopy;
   showResponses: boolean;
   canPublish: boolean;
-  /** A published version exists; the header offers "Create room". */
+  /** This staff member may create a room from the current version or draft. */
   canCreateSession?: boolean;
   /** Current release target, supplied by the authoritative release projection. */
   publishedTarget?: DeliveryTarget | null;
@@ -217,6 +219,8 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   const [outlineOpen, setOutlineOpenPreference] = useOutlinePreference();
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishReceipt, setPublishReceipt] = useState<{ examId: string; target: DeliveryTarget } | null>(null);
+  const [createRoomOpen, setCreateRoomOpen] = useState(false);
+  const [createRoomTarget, setCreateRoomTarget] = useState<DeliveryTarget | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
@@ -494,7 +498,6 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
     selectedExamQuestionId,
     baseQuestionExamQuestionId: questionQuery.data?.examQuestionId ?? null,
     baseQuestion,
-    isPretest: questionQuery.data?.isPretest,
     draft,
     draftRef,
     setDraft,
@@ -554,7 +557,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   });
 
   // The question command surface: create, import, duplicate, delete, reorder,
-  // bulk-change, set-pretest and save-and-advance. The mutations stay here
+  // bulk-change and save-and-advance. The mutations stay here
   // because this component is the composition root; the commands hook receives
   // them, so a test can drive the surface with fakes and no network.
   const {
@@ -567,7 +570,6 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
     saveAndNext: handleSaveAndNext,
     reorder: handleReorder,
     bulkAction: handleBulkAction,
-    setPretest: handlePretestChange,
     openIssues,
   } = useAuthoringQuestionCommands({
     identity: { examId, queryClient },
@@ -997,6 +999,47 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       if (await flushBeforeRouteChange()) setPublishOpen(true);
     })();
   };
+  const openCreateRoom = (target?: DeliveryTarget) => {
+    if (target) {
+      setCreateRoomTarget(target);
+      setCreateRoomOpen(true);
+      return;
+    }
+    void (async () => {
+      if (await flushBeforeRouteChange()) {
+        setCreateRoomTarget(null);
+        setCreateRoomOpen(true);
+      }
+    })();
+  };
+  const createRoomFlow = createRoomOpen ? (
+    <SatCreateRoomFlow
+      key="sat-create-room-flow"
+      examId={examId}
+      examTitle={examTitle}
+      pinnedTarget={createRoomTarget}
+      onClose={() => {
+        setCreateRoomOpen(false);
+        setCreateRoomTarget(null);
+      }}
+      onFixIssue={(issue) => {
+        setCreateRoomOpen(false);
+        setCreateRoomTarget(null);
+        void openIssue(issue);
+      }}
+      onPublished={(target) => setPublishReceipt({ examId, target })}
+      onRoomCreated={(link: AssessmentAccessLink) => {
+        setCreateRoomOpen(false);
+        setCreateRoomTarget(null);
+        const returnToDelivery = `${examWorkspacePath(examId, "delivery")}?${new URLSearchParams({ link: link.id })}`;
+        if (chrome.showResponses) {
+          navigate(`/sat/sessions/${encodeURIComponent(link.scheduleId)}`, { state: { from: returnToDelivery } });
+        } else {
+          navigate(returnToDelivery);
+        }
+      }}
+    />
+  ) : null;
   const publishSheet = publishOpen ? (
     <ExamPublishSheet
       key="exam-publish-sheet"
@@ -1005,11 +1048,10 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       onClose={() => setPublishOpen(false)}
       onOpenIssue={(issue) => void openIssue(issue)}
       onOpenStudentAccess={(target) => {
-        // Publish already flushed this tab's work before the server sealed the
-        // draft. A receipt handoff is a route transition, not another draft
-        // flush against a read-only collaboration room.
-        if (target) navigate(deliveryDestination(examId, target));
-        else goAfterFlush(deliveryDestination(examId));
+        // The standalone publish journey remains available, then continues into
+        // the same room form pinned to the confirmed immutable version.
+        setPublishOpen(false);
+        openCreateRoom(target ?? publishedTarget ?? undefined);
       }}
       onPublished={(target) => setPublishReceipt({ examId, target })}
       focusFallback={() => publishedRoomButtonRef.current}
@@ -1080,6 +1122,9 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
             },
           }}
           roomButtonRef={publishedRoomButtonRef}
+          {...(chrome.canCreateSession
+            ? { onCreateSession: () => openCreateRoom(publishedTarget) }
+            : {})}
           onNavigate={(path) => navigate(path)}
         />
       );
@@ -1098,16 +1143,19 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       );
     }
     return (
-      <div className="sat-product" data-authoring-workspace="lifecycle">
-        {recoverySurfaces}
-        {navigationError ? (
-          <p role="status" className="border-b px-5 py-2 text-center text-sm">
-            {navigationError}
-          </p>
-        ) : null}
-        {lifecycleContent}
-        {publishSheet}
-      </div>
+      <>
+        <div className="sat-product" data-authoring-workspace="lifecycle">
+          {recoverySurfaces}
+          {navigationError ? (
+            <p role="status" className="border-b px-5 py-2 text-center text-sm">
+              {navigationError}
+            </p>
+          ) : null}
+          {lifecycleContent}
+          {publishSheet}
+        </div>
+        {createRoomFlow}
+      </>
     );
   }
 
@@ -1235,6 +1283,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       );
     })();
     return (
+      <>
       <div
         className="sat-product"
         data-au-section={selectedSection?.sectionKey ?? "rw"}
@@ -1273,7 +1322,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
               onPreview={() => goAfterFlush(`/sat/exams/${examId}/preview`)}
               previewDisabled={!shell}
               {...(chrome.canPublish ? { onPublish: openPublish } : {})}
-              {...(chrome.canCreateSession ? { onCreateSession: () => goAfterFlush(deliveryDestination(examId)) } : {})}
+              {...(chrome.canCreateSession ? { onCreateSession: () => openCreateRoom() } : {})}
               issueCount={totalErrors}
               onOpenIssues={() => {
                 setQuestionListOpen(false);
@@ -1367,7 +1416,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
           queue={railVisible ? spineQueue : null}
           railWidth={rail.width}
           onRailWidthChange={rail.setWidth}
-          inspector={draft?<Inspector open={inspectorOpen&&(!inspectorModal||overlayStack.openSheet==='inspector')} modal={inspectorModal} question={draft} issues={selectedQuestionIssues} onChange={handleChange} onClose={closeInspector} readOnly={collaborationReadOnly} isPretest={sharedQuestionScalar?.isPretest ?? questionQuery.data?.isPretest} onPretestChange={selectedExamQuestionId && !collaborationReadOnly ? handlePretestChange : undefined}/>:undefined}
+          inspector={draft?<Inspector open={inspectorOpen&&(!inspectorModal||overlayStack.openSheet==='inspector')} modal={inspectorModal} question={draft} issues={selectedQuestionIssues} onChange={handleChange} onClose={closeInspector} readOnly={collaborationReadOnly}/>:undefined}
           banner={
             <>
               {recoverySurfaces}
@@ -1635,6 +1684,8 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
           />
         ) : null}
       </div>
+      {createRoomFlow}
+      </>
     );
   }
 }
@@ -1651,6 +1702,7 @@ function PublishedExamWorkspaceSurface({
   canOpenDraft,
   draftOpen,
   roomButtonRef,
+  onCreateSession,
   onNavigate,
 }: {
   examId: string;
@@ -1660,6 +1712,7 @@ function PublishedExamWorkspaceSurface({
   canOpenDraft: boolean;
   draftOpen: { isPending: boolean; error: unknown; open: () => void };
   roomButtonRef: { current: HTMLButtonElement | null };
+  onCreateSession?: () => void;
   onNavigate: (path: string) => void;
 }) {
   const versionLabel = `Version ${target.versionNumber}`;
@@ -1676,7 +1729,7 @@ function PublishedExamWorkspaceSurface({
         showResponses={showResponses}
         onSelectTab={(tab: ExamWorkspaceTab) => onNavigate(examWorkspacePath(examId, tab))}
         onBack={() => onNavigate(satListReturnTarget("/sat/exams").to)}
-        onCreateSession={() => onNavigate(deliveryDestination(examId, target))}
+        onCreateSession={onCreateSession}
         onCreateSessionRef={roomButtonRef}
       />
       <main className="mx-auto flex w-full max-w-[1240px] flex-col gap-5 px-4 py-8 sm:px-6">

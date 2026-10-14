@@ -66,7 +66,7 @@ func TestValidateDraftPlanOnlyRequiresDeliveredModules(t *testing.T) {
 			AddRow(SectionMath, "math-m2-higher", "Hard", 0, "mh").
 			AddRow(SectionMath, "math-m1", "M1 draft", 5, "m1"))
 	mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("mh").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer", "is_pretest"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer"}))
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"p"}))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 	if err != nil {
@@ -100,7 +100,7 @@ func converterJSON(t *testing.T, sections map[string]map[string]string, ops map[
 }
 
 // converterGate validates a Math draft under the plan with one operational
-// question per module (plus the two pretests) and the given scoring policy.
+// question per module and the given scoring policy.
 func converterGate(t *testing.T, plan, policy string) []Issue {
 	t.Helper()
 	db, mock, err := sqlmock.New()
@@ -123,10 +123,8 @@ func converterGate(t *testing.T, plan, policy string) []Issue {
 			continue
 		}
 		mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs(key).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer", "is_pretest"}).
-				AddRow(key+"-q", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D"), false).
-				AddRow(key+"-p1", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D"), true).
-				AddRow(key+"-p2", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D"), true))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer"}).
+				AddRow(key+"-q", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
 	}
 	policyRows := sqlmock.NewRows([]string{"p"})
 	if policy != "" {

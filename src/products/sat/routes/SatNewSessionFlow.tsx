@@ -52,7 +52,7 @@ export function SatNewSessionFlow({
   const selectedExam = exams.find((exam) => exam.id === selection) ?? null;
   return (
     <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
-      <SatRoomSetupProgress current={1} total={5} label="Choose an exam" description="Pick the published SAT exam this room will use." />
+      <SatRoomSetupProgress current={1} total={3} label="Choose an exam" description="Pick the published SAT exam this room will use." />
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -124,7 +124,7 @@ function NewSessionSetup({ exam, onClose, onCreated, onBackToExamChoice }: { exa
   if (overview.error && !overview.data) {
     return (
       <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
-        <SatRoomSetupProgress current={2} total={5} label="Room details" description="Name the room and choose which SAT sections it will deliver." />
+        <SatRoomSetupProgress current={2} total={3} label="Setup" description="Name the room, choose its sections, who may join, and when check-in opens." />
         <div className="px-6 py-5">
           <SatInlineError
             title="Room setup could not load"
@@ -142,7 +142,7 @@ function NewSessionSetup({ exam, onClose, onCreated, onBackToExamChoice }: { exa
   if (!version || !target) {
     return (
       <SatFormDialog open eyebrow="Digital SAT" title="Create room" onClose={onClose}>
-        <SatRoomSetupProgress current={2} total={5} label="Room details" description="Name the room and choose which SAT sections it will deliver." />
+        <SatRoomSetupProgress current={2} total={3} label="Setup" description="Name the room, choose its sections, who may join, and when check-in opens." />
         <p role="status" className="px-6 py-6 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
           {!version && !overview.isLoading
             ? `${exam.title} has no published version. Publish it before creating a room.`
@@ -169,7 +169,7 @@ function NewSessionSetup({ exam, onClose, onCreated, onBackToExamChoice }: { exa
       link={null}
       guidedCreation
       stepOffset={1}
-      totalSteps={5}
+      totalSteps={3}
       onBackToPreviousStep={onBackToExamChoice}
       prefill={prefill}
       providerKey="sat"

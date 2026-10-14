@@ -89,7 +89,7 @@ export interface ScoreConversionRevision {
 export interface ScoreConversionSettings {
   active: ScoreConversionRevision | null;
   drafts: ScoreConversionRevision[];
-  /** Blueprint operational (scored, non-pretest) question counts per module. */
+  /** Blueprint operational (scored) question counts per module. */
   blueprint: Partial<Record<SectionKey, { m1Operational: number; m2Operational: number }>>;
 }
 

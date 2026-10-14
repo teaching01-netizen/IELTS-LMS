@@ -150,12 +150,12 @@ describe("ExamSettingsPage", () => {
     // policy_config). The Higher-route field must still accept the RW
     // contract range instead of clamping every keystroke back to 1.
     renderPage();
-    expect(screen.getByText(/25 operational questions/)).toBeInTheDocument();
+    expect(screen.getByText(/27 operational questions/)).toBeInTheDocument();
     const threshold = screen.getByLabelText(/Higher route at/);
     fireEvent.change(threshold, { target: { value: "13" } });
     expect(threshold).toHaveValue(13);
     expect(screen.getByText("0–12")).toBeInTheDocument();
-    expect(screen.getByText("13–25")).toBeInTheDocument();
+    expect(screen.getByText("13–27")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Save section" }));
     await waitFor(() =>

@@ -41,7 +41,7 @@ export const SAT_PUBLISH_READINESS_FAMILIES = [
     label: "Answer choices",
     codes: ["sat.choice.count", "sat.choice.content.required", "sat.choice.id.duplicate", "sat.rw.question_type"],
   },
-  { id: "module-question-count", label: "Module question count", codes: ["sat.module.incomplete", "sat.module.missing", "sat.module.pretest_count"] },
+  { id: "module-question-count", label: "Module question count", codes: ["sat.module.incomplete", "sat.module.missing"] },
   {
     id: "correct-answers",
     label: "Correct answers",
@@ -514,21 +514,21 @@ export function secondsToMinutes(seconds: number): number {
 }
 
 /**
- * SAT blueprint operational counts (target minus pretest) per section.
- * Mirrors backend satBlueprintModule: RW 27-2=25, Math 22-2=20. A known
+ * SAT blueprint operational counts per section: every question is scored.
+ * Mirrors backend satBlueprintModule: RW 27, Math 22. A known
  * blueprint section always projects the stable provider contract even when
  * the draft is partially authored.
  */
 export const SAT_BLUEPRINT_OPERATIONAL: Record<string, number> = {
-  "reading-writing": 25,
-  math: 20,
+  "reading-writing": 27,
+  math: 22,
 };
 
 /**
  * Candidate-facing operational question count for one section: the bound the
  * Higher-route threshold edits against. Prefers the live shell when it is
  * usable (positive stored value), then the SAT blueprint contract, then
- * target-minus-authored-pretest on the base module, floored at 1. This keeps
+ * the base module target, floored at 1. This keeps
  * the release page functional on real rows, where policy_config is
  * threshold-only and operationalQuestionCount arrives as 0.
  */
@@ -539,7 +539,6 @@ export function operationalCountForSection(section: {
     moduleKey?: string;
     adaptiveRole: string;
     targetQuestionCount?: number;
-    questions?: Array<{ isPretest?: boolean } | null | undefined> | null | undefined;
   }>;
 }): number {
   const stored = section.routingPolicy?.operationalQuestionCount;
@@ -554,10 +553,7 @@ export function operationalCountForSection(section: {
   const target = typeof base?.targetQuestionCount === "number" && Number.isFinite(base.targetQuestionCount)
     ? base.targetQuestionCount
     : 0;
-  const pretest = Array.isArray(base?.questions)
-    ? base.questions.filter((question) => question?.isPretest === true).length
-    : 0;
-  const derived = Math.floor(target - pretest);
+  const derived = Math.floor(target);
   return derived >= 1 ? derived : 1;
 }
 

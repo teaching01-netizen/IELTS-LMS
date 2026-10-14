@@ -19,7 +19,6 @@ function module(id: string, title: string, authored: number, target = 27) {
       questionId: `${id}-base-${index}`,
       questionRevisionId: `${id}-revision-${index}`,
       displayOrder: index,
-      isPretest: false,
       questionType: "single_choice" as const,
       semanticRevision: 1,
       revision: 1,

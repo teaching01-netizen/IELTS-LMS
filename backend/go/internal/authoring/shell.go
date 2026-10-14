@@ -244,13 +244,7 @@ func deriveRoutingOperational(rp *RoutingPolicy, sectionKey string, mods []Modul
 		if m.ID != rp.BaseModuleID {
 			continue
 		}
-		pretest := 0
-		for _, qs := range m.Questions {
-			if qs.IsPretest {
-				pretest++
-			}
-		}
-		rp.OperationalCount = derivedOperationalCount(sectionKey, m.ModuleKey, m.TargetQuestionCount, pretest)
+		rp.OperationalCount = derivedOperationalCount(sectionKey, m.ModuleKey, m.TargetQuestionCount)
 		return
 	}
 	rp.OperationalCount = 1

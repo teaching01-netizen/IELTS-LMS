@@ -518,7 +518,8 @@ type draftPayload struct {
 	Rationale     json.RawMessage `json:"rationale"`
 	Metadata      json.RawMessage `json:"metadata"`
 	Accessibility json.RawMessage `json:"accessibility"`
-	IsPretest     bool            `json:"isPretest"`
+	// Accepted from clients that predate pretest removal; ignored.
+	IsPretest bool `json:"isPretest"`
 }
 
 // decodeDraftOptional decodes a question draft, accepting an empty body as
@@ -537,7 +538,6 @@ func decodeDraftOptional(r *http.Request) (authoring.QuestionDraft, error) {
 		Rationale:     req.Rationale,
 		Metadata:      req.Metadata,
 		Accessibility: req.Accessibility,
-		IsPretest:     req.IsPretest,
 	}, nil
 }
 
@@ -612,7 +612,6 @@ func authorBatchQuestionsHandler(app *App) http.HandlerFunc {
 				Rationale:     d.Rationale,
 				Metadata:      d.Metadata,
 				Accessibility: d.Accessibility,
-				IsPretest:     d.IsPretest,
 			})
 		}
 		operationKey := ""
@@ -685,7 +684,6 @@ func authorUpdateQuestionHandler(app *App) http.HandlerFunc {
 			Rationale:     req.Rationale,
 			Metadata:      req.Metadata,
 			Accessibility: req.Accessibility,
-			IsPretest:     req.IsPretest,
 		})
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -817,11 +815,12 @@ func authorBulkHandler(app *App) http.HandlerFunc {
 		var req struct {
 			QuestionIDs []string `json:"questionIds"`
 			Action      struct {
-				Type                string         `json:"type"`
-				DestinationModuleID *string        `json:"destinationModuleId"`
-				PretestValue        *bool          `json:"pretestValue"`
-				Value               *bool          `json:"value"`
-				Patch               map[string]any `json:"patch"`
+				Type                string  `json:"type"`
+				DestinationModuleID *string `json:"destinationModuleId"`
+				// pretestValue/value are accepted from older clients and ignored.
+				PretestValue *bool          `json:"pretestValue"`
+				Value        *bool          `json:"value"`
+				Patch        map[string]any `json:"patch"`
 			} `json:"action"`
 			ExpectedRevisions map[string]int `json:"expectedRevisions"`
 			OperationKey      *string        `json:"operationKey"`
@@ -841,13 +840,6 @@ func authorBulkHandler(app *App) http.HandlerFunc {
 		action := authoring.BulkAction{Type: req.Action.Type, Patch: req.Action.Patch}
 		if req.Action.DestinationModuleID != nil {
 			action.DestinationModuleID = *req.Action.DestinationModuleID
-		}
-		pretest := req.Action.PretestValue
-		if pretest == nil {
-			pretest = req.Action.Value
-		}
-		if pretest != nil {
-			action.PretestValue = *pretest
 		}
 		operationKey := ""
 		if req.OperationKey != nil {

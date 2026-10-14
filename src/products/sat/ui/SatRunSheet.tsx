@@ -1,6 +1,7 @@
 import { Fragment, useMemo } from 'react';
+import { ChevronDown } from 'lucide-react';
 import type { ExamPlanSection } from '../../../types/domain';
-import { SatEyebrow, SatSectionCard } from './SatPage';
+import { SatRoomSurface } from './room/SatRoomSurface';
 import {
   buildSatRunSheet,
   formatRunSheetClock,
@@ -57,6 +58,8 @@ export function SatRunSheet({
   now,
   timingModel,
   sheet: providedSheet,
+  open = true,
+  onOpenChange,
 }: {
   plan?: ExamPlanSection[] | null | undefined;
   runtime?: SatRunSheetRuntime | null | undefined;
@@ -66,6 +69,9 @@ export function SatRunSheet({
   timingModel?: string | null | undefined;
   /** Precomputed projection (the session room builds one for its header too). */
   sheet?: SatRunSheetModel | null | undefined;
+  /** Whether the rows are disclosed; the heading always shows. */
+  open?: boolean;
+  onOpenChange?: ((open: boolean) => void) | undefined;
 }) {
   const sheet = useMemo(
     () =>
@@ -90,38 +96,47 @@ export function SatRunSheet({
   const originalPlannedEndAt = originalPlannedFinishAt(sheet);
 
   return (
-    <SatSectionCard className="sat-run-sheet mt-4" labelledBy="sat-run-sheet-heading">
-      <div className="sat-run-sheet__heading">
-        <SatEyebrow id="sat-run-sheet-heading">Run sheet</SatEyebrow>
-        <p>Thailand time · {SAT_RUN_SHEET_TIME_ZONE_LABEL}</p>
-      </div>
-      {sheet.timingPlan ? (
-        <p className="sat-run-sheet__plan" data-sat-run-sheet-plan={sheet.timingPlan.model}>
-          <strong>{sheet.timingPlan.label}</strong>
-          <span>{sheet.timingPlan.note}</span>
-        </p>
-      ) : null}
-      <p className="sat-run-sheet__anchor">{anchorNote}</p>
-      {extensionMinutes > 0 || pausedSeconds > 0 ? (
-        <p className="sat-run-sheet__delta">
-          Original finish {formatRunSheetClock(originalPlannedEndAt)}
-          {extensionMinutes > 0 ? ` · +${extensionMinutes} min extension` : ''}
-          {pausedSeconds > 0 ? ` · ${formatPausedDuration(pausedSeconds)} paused` : ''}
-        </p>
-      ) : null}
+    <SatRoomSurface className="sat-run-sheet" aria-labelledby="sat-run-sheet-heading">
+      <details open={open} onToggle={(event) => onOpenChange?.(event.currentTarget.open)} className="group/sheet">
+        <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-[var(--sat-staff-radius-control,10px)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] [&::-webkit-details-marker]:hidden">
+          <span className="min-w-0">
+            <span id="sat-run-sheet-heading" className="block text-[16px] font-semibold leading-6 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">Run sheet</span>
+            <span className="block text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">Thailand time · {SAT_RUN_SHEET_TIME_ZONE_LABEL}</span>
+          </span>
+          <span aria-hidden="true" className="inline-flex items-center gap-1 text-[14px] font-medium text-[var(--sat-staff-accent-text-on-tint,#0067c9)]">
+            <span className="group-open/sheet:hidden">View full schedule</span>
+            <span className="hidden group-open/sheet:inline">Hide schedule</span>
+            <ChevronDown size={16} className="transition-transform duration-150 group-open/sheet:rotate-180 motion-reduce:transition-none" />
+          </span>
+        </summary>
+        {sheet.timingPlan ? (
+          <p className="sat-run-sheet__plan" data-sat-run-sheet-plan={sheet.timingPlan.model}>
+            <strong>{sheet.timingPlan.label}</strong>
+            <span>{sheet.timingPlan.note}</span>
+          </p>
+        ) : null}
+        <p className="sat-run-sheet__anchor">{anchorNote}</p>
+        {extensionMinutes > 0 || pausedSeconds > 0 ? (
+          <p className="sat-run-sheet__delta">
+            Original finish {formatRunSheetClock(originalPlannedEndAt)}
+            {extensionMinutes > 0 ? ` · +${extensionMinutes} min extension` : ''}
+            {pausedSeconds > 0 ? ` · ${formatPausedDuration(pausedSeconds)} paused` : ''}
+          </p>
+        ) : null}
 
-      <div className="sat-run-sheet__rows" role="list" aria-label="Run sheet stages">
-        {sheet.rows.map((row, index) => {
-          const adaptiveBranch = row.kind === 'module' && row.label.startsWith('Module 2 ·') && row.detail?.startsWith('Alternative branch');
-          const previous = sheet.rows[index - 1];
-          const adaptiveGroupStart = adaptiveBranch && !(previous?.kind === 'module' && previous.label.startsWith('Module 2 ·') && previous.detail?.startsWith('Alternative branch'));
-          return <Fragment key={row.id}>
-            {adaptiveGroupStart ? <div className="sat-run-sheet__adaptive-group" role="presentation">Module 2 · Adaptive <span>One branch per student</span></div> : null}
-            <RunSheetRow row={row} anchorAt={sheet.anchorAt} />
-          </Fragment>;
-        })}
-      </div>
-    </SatSectionCard>
+        <div className="sat-run-sheet__rows" role="list" aria-label="Run sheet stages">
+          {sheet.rows.map((row, index) => {
+            const adaptiveBranch = row.kind === 'module' && row.label.startsWith('Module 2 ·') && row.detail?.startsWith('Alternative branch');
+            const previous = sheet.rows[index - 1];
+            const adaptiveGroupStart = adaptiveBranch && !(previous?.kind === 'module' && previous.label.startsWith('Module 2 ·') && previous.detail?.startsWith('Alternative branch'));
+            return <Fragment key={row.id}>
+              {adaptiveGroupStart ? <div className="sat-run-sheet__adaptive-group" role="presentation">Module 2 · Adaptive <span>One branch per student</span></div> : null}
+              <RunSheetRow row={row} anchorAt={sheet.anchorAt} />
+            </Fragment>;
+          })}
+        </div>
+      </details>
+    </SatRoomSurface>
   );
 }
 

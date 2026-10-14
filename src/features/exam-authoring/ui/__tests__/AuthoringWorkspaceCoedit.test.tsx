@@ -295,7 +295,6 @@ function makeSummary(examQuestionId: string, promptPreview: string): AssessmentQ
     questionId: `q-${examQuestionId}`,
     questionRevisionId: `rev-${examQuestionId}`,
     displayOrder: 0,
-    isPretest: false,
     questionType: "single_choice",
     semanticRevision: 1,
     revision: 1,
@@ -387,7 +386,6 @@ function setupDefaults(): void {
       moduleKey: "rw-m1",
       sectionKey: "reading-writing",
       displayOrder: 0,
-      isPretest: false,
       question: makeDraft("rev-1", "First prompt"),
     },
   };
@@ -1356,7 +1354,6 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
         moduleKey: "rw-m1",
         sectionKey: "reading-writing",
         displayOrder: 0,
-        isPretest: false,
         question: makeDraft("rev-1", "First prompt"),
       };
       await act(async () => {

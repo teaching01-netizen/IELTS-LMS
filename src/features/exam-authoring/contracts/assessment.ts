@@ -135,7 +135,6 @@ export interface AssessmentQuestionSummary {
   questionId: string;
   questionRevisionId: string;
   displayOrder: number;
-  isPretest: boolean;
   questionType: QuestionKind;
   semanticRevision: number;
   revision: number;
@@ -251,7 +250,6 @@ export interface AssessmentQuestionDetail {
   moduleKey: string;
   sectionKey: string;
   displayOrder: number;
-  isPretest: boolean;
   question: QuestionRevision;
 }
 
@@ -355,7 +353,6 @@ export interface BulkMetadataPatch {
 export type BulkQuestionAction =
   | { type: "move"; destinationModuleId: string }
   | { type: "duplicate"; destinationModuleId: string }
-  | { type: "set_pretest"; value: boolean }
   | { type: "patch_metadata"; patch: BulkMetadataPatch }
   | { type: "delete" };
 
@@ -381,7 +378,6 @@ export interface BatchQuestionDraft {
   rationale: StructuredContent;
   metadata: QuestionMetadata;
   accessibility: AccessibilityMetadata;
-  isPretest: boolean;
 }
 
 export interface BatchCreateQuestionsRequest {
@@ -426,9 +422,7 @@ export interface SatWorkbookDetectedModule {
   ready: boolean;
 }
 
-export interface SatWorkbookPreviewQuestion extends Omit<BatchQuestionDraft, "isPretest"> {
-  isPretest?: boolean | null;
-}
+export type SatWorkbookPreviewQuestion = BatchQuestionDraft;
 
 export interface SatWorkbookPreviewModule extends Omit<SatWorkbookModuleDraft, "questions"> {
   questions: SatWorkbookPreviewQuestion[];

@@ -1,6 +1,7 @@
 import { useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { Dialog } from 'radix-ui';
+import { SatRoomSurface } from './room/SatRoomSurface';
 
 /**
  * The selected-student inspector. Docked beside the run sheet when the room is
@@ -22,20 +23,6 @@ export function SatSessionRoomInspector({
   children: ReactNode;
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const content = (
-    <>
-      <button
-        ref={closeButtonRef}
-        type="button"
-        className="sat-room__inspector-close"
-        aria-label="Close student inspector"
-        onClick={() => onOpenChange(false)}
-      >
-        <X size={17} aria-hidden="true" />
-      </button>
-      {children}
-    </>
-  );
 
   if (!docked) {
     return (
@@ -60,7 +47,18 @@ export function SatSessionRoomInspector({
           >
             <Dialog.Title className="sr-only">Selected student inspector</Dialog.Title>
             <Dialog.Description className="sr-only">Inspect the selected student's room, timing, and attention details.</Dialog.Description>
-            {content}
+            <div className="-mr-2 -mt-2 mb-1 flex justify-end">
+              <button
+                ref={closeButtonRef}
+                type="button"
+                className="sat-btn sat-btn--quiet sat-btn--icon sat-press"
+                aria-label="Close student inspector"
+                onClick={() => onOpenChange(false)}
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            {children}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -68,8 +66,8 @@ export function SatSessionRoomInspector({
   }
 
   return (
-    <aside className="sat-room__inspector" aria-label="Selected student inspector" data-inspector-open={open}>
-      <div className="sat-room__inspector-panel">{content}</div>
-    </aside>
+    <SatRoomSurface as="aside" className="sat-room__inspector overflow-hidden" aria-label="Selected student inspector" data-inspector-open={open}>
+      <div className="sat-room__inspector-panel">{children}</div>
+    </SatRoomSurface>
   );
 }

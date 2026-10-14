@@ -1,8 +1,7 @@
-import { AlertTriangle, MessageSquareWarning, Pause, Play, Timer } from 'lucide-react';
+import { AlertTriangle, ChevronRight, MessageSquareWarning, Pause, Play, Timer } from 'lucide-react';
 import type { StudentSession } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import { useAuthoritativeDeadlineClock, type ServerClockSnapshot } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
-import { SatEyebrow } from './SatPage';
 import { formatRunSheetRemaining, satModuleSlotLabel } from './sessionRunSheet';
 import { isSatAttemptLive, isSatBreakLive, isSatStageLive } from './satStage';
 
@@ -11,22 +10,15 @@ type StudentSessionWithModuleRole = StudentSession & {
   runtimeCurrentModuleRole?: StudentSession['runtimeModuleRole'];
 };
 
-/**
- * Why a student needs a proctor, in words: a pending device change, the most
- * recent integrity event, and proctor warnings. Null when nothing is open.
- */
-export function studentAttentionReason(student: StudentSession, deviceChangePending: boolean): string | null {
+/** Current, actionable reasons only; historical warnings and violations are not open work. */
+export function studentAttentionReason(
+  _student: StudentSession,
+  deviceChangePending: boolean,
+  currentIssues: readonly string[] = [],
+): string | null {
   const reasons: string[] = [];
   if (deviceChangePending) reasons.push('Device change pending');
-  const latest = student.violations.reduce<StudentSession['violations'][number] | null>(
-    (current, violation) => (!current || violation.timestamp > current.timestamp ? violation : current),
-    null,
-  );
-  if (latest) {
-    const more = student.violations.length - 1;
-    reasons.push(`Integrity: ${latest.type.replace(/_/g, ' ')}${more > 0 ? ` (+${more})` : ''}`);
-  }
-  if (student.warnings > 0) reasons.push(`${student.warnings} warning${student.warnings === 1 ? '' : 's'} sent`);
+  reasons.push(...currentIssues.map((issue) => issue.trim()).filter(Boolean));
   return reasons.length ? reasons.join(' · ') : null;
 }
 
@@ -81,15 +73,26 @@ export function SatRoomStudentRow({
     roomClock,
     coarse: running && !selected && fallbackSeconds > 300,
   });
+  const studentState = student.satStartState === 'waiting_for_code' ? 'Waiting for start code'
+    : student.satStartState === 'never_started' || student.status === 'terminated' ? 'Finished'
+      : student.status === 'paused' ? 'Paused'
+        : student.status === 'connecting' ? 'Disconnected'
+          : student.runtimeWaiting ? 'Waiting for next section'
+            : student.status === 'active' || student.status === 'warned' ? 'Working'
+              : 'Waiting';
   const rowMeta = [
     onBreak ? 'On break' : null,
     sectionLabelFor(runtime, student.runtimeCurrentSection ?? student.currentSection),
     onBreak ? null : satModuleSlotLabel(moduleRoleFor(student)),
-    student.satStartState === 'waiting_for_code' ? 'Waiting for code'
-      : student.satStartState === 'never_started' ? 'Never started'
-      : student.satStartState === 'started' ? student.status === 'idle' || student.status === 'terminated' ? 'Finished' : 'In progress'
-      : student.status,
+    studentState,
   ].filter(Boolean).join(' · ');
+
+  // Before the room starts nothing is counting, so the row reads identity and
+  // readiness only; afterwards the clock the student is on leads the right edge.
+  const showClock = runtime?.status !== 'not_started';
+  const time = student.satStartState === 'waiting_for_code' || student.satStartState === 'never_started'
+    ? '—'
+    : formatRunSheetRemaining(onBreak ? breakRemaining : moduleKnown ? moduleRemaining : remaining);
 
   return (
     <button
@@ -101,32 +104,38 @@ export function SatRoomStudentRow({
       aria-current={selected || undefined}
       tabIndex={-1}
       onClick={(event) => onSelect(event.currentTarget)}
-      className="sat-room__row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+      className="sat-room__row group relative grid min-h-16 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 border-b border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-4 py-2.5 text-left transition-colors duration-150 before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-r-full last:border-b-0 hover:bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] aria-selected:bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))] aria-selected:before:bg-[var(--sat-staff-accent,#0071e3)] motion-reduce:transition-none"
     >
       <span className="min-w-0">
-        <span className="flex items-center gap-2">
-          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${studentTone(student)}`} />
-          <span className="sat-room__row-name">{student.name}</span>
-          {attentionReason ? (
-            <AlertTriangle size={12} className="shrink-0 text-[var(--sat-staff-warning-dot,#d97706)]" aria-hidden="true" />
-          ) : null}
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 -translate-y-0.5 rounded-full ${studentTone(student)}`} />
+          <span className="min-w-0 break-words">
+            <span className="sat-room__row-name text-[16px] font-semibold leading-6 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{student.name}</span>
+            <span className="ml-2 hidden text-[14px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)] @md:inline">{student.studentId}</span>
+            {attentionReason ? (
+              <AlertTriangle size={14} className="ml-1.5 inline-block -translate-y-px align-baseline text-[var(--sat-staff-warning-dot,#d97706)]" aria-hidden="true" />
+            ) : null}
+          </span>
         </span>
-        <span className="sat-room__row-meta pl-3.5">{rowMeta}</span>
+        <span className="sat-room__row-meta block break-words pl-3.5 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{rowMeta}</span>
         {attentionReason ? (
-          <span className="sat-room__row-meta block pl-3.5 font-semibold text-[var(--sat-staff-warning-text,#92400e)]">{attentionReason}</span>
+          <span className="block break-words pl-3.5 text-[14px] font-medium leading-5 text-[var(--sat-staff-warning-text,#92400e)]">{attentionReason}</span>
         ) : null}
       </span>
-      <span className="text-right">
-        <span className="sat-room__row-time">
-          {student.satStartState === 'waiting_for_code' || student.satStartState === 'never_started' ? '—' : formatRunSheetRemaining(onBreak ? breakRemaining : moduleKnown ? moduleRemaining : remaining)}
-        </span>
-        {onBreak ? (
-          <span className="sat-room__row-sub">
-            {student.runtimeBreakState === 'active' ? 'Break clock' : 'Break entry'}
+      <span className="flex items-center gap-1.5">
+        {showClock ? (
+          <span className="text-right">
+            <span className="sat-room__row-time block text-[14px] font-semibold leading-5 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]">{time}</span>
+            {onBreak ? (
+              <span className="sat-room__row-sub block text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+                {student.runtimeBreakState === 'active' ? 'Break clock' : 'Break entry'}
+              </span>
+            ) : moduleKnown ? (
+              <span className="sat-room__row-sub block text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">Section clock {formatRunSheetRemaining(remaining)}</span>
+            ) : null}
           </span>
-        ) : moduleKnown ? (
-          <span className="sat-room__row-sub">Section clock {formatRunSheetRemaining(remaining)}</span>
         ) : null}
+        <ChevronRight size={16} aria-hidden="true" className="-mr-1 shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)] opacity-50 transition-opacity duration-150 group-hover:opacity-100 group-aria-selected:opacity-100" />
       </span>
     </button>
   );
@@ -214,67 +223,57 @@ export function StudentDetail({
       data-sat-room-student-variant={variant}
     >
       <div className="min-w-0">
-        <SatEyebrow>Student</SatEyebrow>
+        <p className="text-[14px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">Student</p>
         <h2
           id="sat-room-student-heading"
           data-sat-room-student-heading
           tabIndex={-1}
-          className="mt-1.5 truncate text-[20px] font-semibold leading-7 tracking-[-0.015em]"
+          className="mt-0.5 break-words text-[20px] font-semibold leading-7 tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none"
         >
           {student.name}
         </h2>
-        <p className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+        <p className="mt-0.5 break-all text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
           {student.studentId}{student.email ? ` · ${student.email}` : ''}
         </p>
       </div>
 
       {attentionFirst ? <StudentAttention student={student} count={attentionCount} /> : null}
 
-      <section className="sat-room__student-state" aria-label={variant === 'review' ? 'Exam state' : 'Current student state'}>
-        <h3 className="sat-room__eyebrow">{variant === 'review' ? 'Exam state' : 'Current'}</h3>
-        <dl className="sat-room__student-state-grid">
-          <div>
-            <dt className="sat-room__eyebrow">Current section</dt>
-            <dd>{sectionLabel ?? '—'}</dd>
-          </div>
-          <div>
-            <dt className="sat-room__eyebrow">Current module</dt>
-            <dd>{onBreak ? 'Break' : moduleSlot ?? student.currentSection ?? '—'}</dd>
-          </div>
-          <div>
-            <dt className="sat-room__eyebrow">{onBreak ? 'Break clock' : 'Module clock'}</dt>
-            <dd className="is-clock">
-              {onBreak
-                ? formatRunSheetRemaining(breakRemaining)
-                : moduleKnown
-                  ? formatRunSheetRemaining(moduleRemaining)
-                  : '—'}
-            </dd>
-          </div>
-          <div>
-            <dt className="sat-room__eyebrow">Section clock</dt>
-            <dd className="is-clock">{formatRunSheetRemaining(remaining)}</dd>
-          </div>
-          <div>
-            <dt className="sat-room__eyebrow">Attempt</dt>
-            <dd className="capitalize">{student.status}</dd>
-          </div>
+      <section className={DETAIL_SECTION} aria-label={variant === 'review' ? 'Exam state' : 'Current student state'}>
+        <h3 className={DETAIL_HEADING}>{variant === 'review' ? 'Exam state' : 'Current'}</h3>
+        <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-4">
+          <DetailFact label="Current section" value={sectionLabel ?? '—'} />
+          <DetailFact label="Current module" value={onBreak ? 'Break' : moduleSlot ?? student.currentSection ?? '—'} />
+          <DetailFact
+            label={onBreak ? 'Break clock' : 'Module clock'}
+            clock
+            value={onBreak
+              ? formatRunSheetRemaining(breakRemaining)
+              : moduleKnown
+                ? formatRunSheetRemaining(moduleRemaining)
+                : '—'}
+          />
+          <DetailFact label="Section clock" clock value={formatRunSheetRemaining(remaining)} />
+          <DetailFact label="Attempt" value={student.status} capitalize />
         </dl>
       </section>
 
       {/* Actions here affect only this student; room-wide controls live in the
           room header. Each label says what it does, and each consequential
-          action confirms with the student's name first. */}
-      <section className="sat-room__student-actions" aria-labelledby="sat-room-student-actions-heading">
-        <h3 id="sat-room-student-actions-heading" className="sat-room__eyebrow">Actions for this student</h3>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => onAddTime(5)} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press px-3"><Timer size={16} aria-hidden="true" />Add 5 minutes…</button>
-          <button type="button" onClick={onWarn} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press px-3"><MessageSquareWarning size={16} aria-hidden="true" />Send warning…</button>
-          <button type="button" onClick={student.status === 'paused' ? onResume : onPause} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press px-3">
+          action confirms with the student's name first. Ending the attempt is
+          set apart so it is never the button a proctor hits by habit. */}
+      <section className={DETAIL_SECTION} aria-labelledby="sat-room-student-actions-heading">
+        <h3 id="sat-room-student-actions-heading" className={DETAIL_HEADING}>Actions for this student</h3>
+        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-2">
+          <button type="button" onClick={student.status === 'paused' ? onResume : onPause} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press">
             {student.status === 'paused' ? <Play size={16} aria-hidden="true" /> : <Pause size={16} aria-hidden="true" />}
             {student.status === 'paused' ? 'Resume attempt' : 'Pause attempt'}
           </button>
-          <button type="button" onClick={onTerminate} disabled={actionDisabled} className="sat-btn sat-btn--danger-secondary sat-press px-3">End attempt…</button>
+          <button type="button" onClick={() => onAddTime(5)} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press"><Timer size={16} aria-hidden="true" />Add 5 minutes…</button>
+          <button type="button" onClick={onWarn} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press"><MessageSquareWarning size={16} aria-hidden="true" />Send warning…</button>
+        </div>
+        <div className="mt-3 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-3">
+          <button type="button" onClick={onTerminate} disabled={actionDisabled} className="sat-btn sat-btn--danger-secondary sat-press">End attempt…</button>
         </div>
       </section>
 
@@ -283,29 +282,41 @@ export function StudentDetail({
   );
 }
 
+const DETAIL_SECTION = 'mt-5 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-4';
+const DETAIL_HEADING = 'text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]';
+
+function DetailFact({ label, value, clock = false, capitalize = false }: { label: string; value: string; clock?: boolean; capitalize?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{label}</dt>
+      <dd className={`mt-0.5 [overflow-wrap:anywhere] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] ${clock ? 'text-[20px] leading-7 tracking-[-0.02em] tabular-nums' : 'text-[15px] leading-6'}${capitalize ? ' capitalize' : ''}`}>{value}</dd>
+    </div>
+  );
+}
+
 function StudentAttention({ student, count }: { student: StudentSession; count: number }) {
   return (
-    <section className="sat-room__student-attention" aria-label={`Attention ${count}`}>
-      <h3 className="sat-room__eyebrow">Attention{count > 0 ? ` · ${count}` : ''}</h3>
+    <section className={DETAIL_SECTION} aria-label={`Attention ${count}`}>
+      <h3 className={DETAIL_HEADING}>Attention{count > 0 ? ` · ${count}` : ''}</h3>
       {student.warnings === 0 && student.violations.length === 0 ? (
-        <div className="sat-room__student-attention-healthy">
-          <span aria-hidden="true" />
+        <p className="mt-2 flex items-center gap-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          <span aria-hidden="true" className="sat-room__healthy-dot h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--sat-staff-success-dot,#059669)]" />
           No current warnings or integrity events.
-        </div>
+        </p>
       ) : (
-        <div className="mt-3 space-y-2">
+        <ul className="mt-3 space-y-2">
           {student.warnings > 0 ? (
-            <div className="sat-room__student-attention-event">
+            <li className="sat-room__attention-event rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
               {student.warnings} proctor warning{student.warnings === 1 ? '' : 's'}
-            </div>
+            </li>
           ) : null}
           {student.violations.map((violation) => (
-            <div key={violation.id} className="sat-room__student-attention-event">
+            <li key={violation.id} className="sat-room__attention-event rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
               <p className="font-semibold capitalize">{violation.type.replace(/_/g, ' ')}</p>
-              <p className="mt-0.5 font-medium leading-5">{violation.description}</p>
-            </div>
+              <p className="mt-0.5">{violation.description}</p>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </section>
   );

@@ -11,6 +11,7 @@ import type {
 
 const harness = vi.hoisted(() => ({
   publishSheet: { nextInstance: 0 },
+  createRoomFlowProps: null as unknown,
   shellResult: { data: null as unknown, isLoading: false, error: null as unknown, refetch: vi.fn() },
   details: {} as Record<string, AssessmentQuestionDetail>,
   useAuthoringShell: vi.fn(),
@@ -117,6 +118,22 @@ vi.mock("../publish/ExamPublishSheet", async () => {
     },
   };
 });
+vi.mock("../publish/SatCreateRoomFlow", async () => {
+  const React = await import("react");
+  return {
+    SatCreateRoomFlow: (props: {
+      pinnedTarget?: { versionId: string; versionNumber: number; publishScope: "math" } | null;
+      onClose: () => void;
+    }) => {
+      harness.createRoomFlowProps = props;
+      return React.createElement(
+        "div",
+        { "data-testid": "sat-create-room-flow" },
+        React.createElement("button", { type: "button", onClick: props.onClose }, "Close room flow"),
+      );
+    },
+  };
+});
 import { SAVE_CONFLICT_COPY } from "../../realtime/connectionCopy";
 import { AuthoringWorkspace } from "../AuthoringWorkspace";
 
@@ -143,7 +160,7 @@ function makeDraft(id: string, promptText: string): QuestionRevision {
 function makeSummary(examQuestionId: string, promptPreview: string): AssessmentQuestionSummary {
   return {
     examQuestionId, questionId: `q-${examQuestionId}`, questionRevisionId: `rev-${examQuestionId}`,
-    displayOrder: 0, isPretest: false, questionType: "single_choice", semanticRevision: 1, revision: 1,
+    displayOrder: 0, questionType: "single_choice", semanticRevision: 1, revision: 1,
     promptPreview, answerKeyPreview: "A", domain: null, skill: null, difficulty: "medium", tags: [],
     hasStimulus: false, contentComplexity: "plain",
     readiness: { status: "ready", blockingIssueCount: 0, warningCount: 0 },
@@ -170,8 +187,8 @@ function setupDefaults() {
   const first = makeDraft("rev-1", "First prompt");
   const second = makeDraft("rev-2", "Second prompt");
   const details: Record<string, AssessmentQuestionDetail> = {
-    "eq-1": { examQuestionId: "eq-1", moduleId: "mod-1", moduleKey: "rw-m1", sectionKey: "reading-writing", displayOrder: 0, isPretest: false, question: first },
-    "eq-2": { examQuestionId: "eq-2", moduleId: "mod-1", moduleKey: "rw-m1", sectionKey: "reading-writing", displayOrder: 1, isPretest: false, question: second },
+    "eq-1": { examQuestionId: "eq-1", moduleId: "mod-1", moduleKey: "rw-m1", sectionKey: "reading-writing", displayOrder: 0, question: first },
+    "eq-2": { examQuestionId: "eq-2", moduleId: "mod-1", moduleKey: "rw-m1", sectionKey: "reading-writing", displayOrder: 1, question: second },
   };
   harness.details = details;
   // The shell cache holds a lifecycle envelope: READY carries the shell.
@@ -213,7 +230,7 @@ function setupDefaults() {
   (harness.api.getShell as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => Promise.resolve(shell));
 }
 
-function workspaceTree(queryClient: QueryClient, canPublish = false) {
+function workspaceTree(queryClient: QueryClient, canPublish = false, canCreateSession = false) {
   return (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
@@ -225,6 +242,7 @@ function workspaceTree(queryClient: QueryClient, canPublish = false) {
             lifecycle: { label: "Draft", detail: null, tone: "draft" },
             showResponses: false,
             canPublish,
+            canCreateSession,
           }}
         />
       </MemoryRouter>
@@ -274,7 +292,7 @@ describe("AuthoringWorkspace (spine-only)", () => {
   it("keeps the acknowledged version available after Done and pins room creation to it", async () => {
     harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
     const queryClient = renderWorkspaceClient();
-    const view = render(workspaceTree(queryClient, true));
+    const view = render(workspaceTree(queryClient, true, true));
     fireEvent.click(await screen.findByRole("button", { name: "Publish version" }));
     fireEvent.click(await screen.findByRole("button", { name: "Acknowledge publish" }));
 
@@ -282,17 +300,19 @@ describe("AuthoringWorkspace (spine-only)", () => {
       ...harness.shellResult,
       data: { state: "NO_DRAFT", shell: null },
     };
-    view.rerender(workspaceTree(queryClient, true));
+    view.rerender(workspaceTree(queryClient, true, true));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     expect(await screen.findByRole("heading", { name: "Create a room or continue editing" })).toBeInTheDocument();
     expect(screen.getByText("Version 9 is published.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    expect(await screen.findByTestId("sat-create-room-flow")).toBeInTheDocument();
+    expect(harness.createRoomFlowProps).toMatchObject({
+      pinnedTarget: { versionId: "published-9", versionNumber: 9, publishScope: "math" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close room flow" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit exam" }));
     expect(harness.ensureDraft.mutate).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
-    expect(await screen.findByTestId("location")).toHaveTextContent(
-      "/sat/exams/exam-1/access?new=1&version=published-9&versionNumber=9&scope=math"
-    );
   });
 
   it("keeps unsaved work exportable when publication removes the draft shell", async () => {
@@ -671,7 +691,6 @@ describe("AuthoringWorkspace question load state machine", () => {
         moduleKey: "rw-m1",
         sectionKey: "reading-writing",
         displayOrder: 0,
-        isPretest: false,
         question: makeDraft("rev-1", "First prompt"),
       },
     };

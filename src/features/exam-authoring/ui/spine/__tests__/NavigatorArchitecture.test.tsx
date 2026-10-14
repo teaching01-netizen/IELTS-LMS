@@ -9,7 +9,6 @@ function summary(id: string, index: number, status: "ready" | "incomplete" | "er
     questionId: id + "-base",
     questionRevisionId: id + "-rev",
     displayOrder: index,
-    isPretest: false,
     questionType: "single_choice" as const,
     semanticRevision: 1,
     revision: 1,

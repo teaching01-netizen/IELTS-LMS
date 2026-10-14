@@ -7,13 +7,14 @@ import { SatSessionRoomRoute } from '../SatSessionRoomRoute';
 import { examDeliveryService } from '../../../../features/proctor/infrastructure/proctorGateway';
 
 const controllerMock = vi.hoisted(() => vi.fn());
-const accessOverviewMock = vi.hoisted(() => vi.fn());
+const entryInfoMock = vi.hoisted(() => vi.fn());
 const roleMock = vi.hoisted(() => ({ role: undefined as string | undefined }));
+const proctorGetMock = vi.hoisted(() => vi.fn());
 // The real controller always reports `scheduleMetrics`; fixtures only list what they exercise.
 vi.mock('../../../../features/proctor/hooks/useProctorRouteController', () => ({
   useProctorRouteController: (...args: unknown[]) => ({ scheduleMetrics: {}, ...controllerMock(...args) }),
 }));
-vi.mock('../../../../features/exam-authoring/api/assessmentAccessLinkQueries', () => ({ useAccessDistributionOverview: accessOverviewMock }));
+vi.mock('../../api/satRoomEntryInfo', () => ({ useSatRoomEntryInfo: entryInfoMock }));
 vi.mock('../../../../features/auth/authSession', () => ({
   useAuthSession: () => ({ session: { user: { displayName: 'SAT Proctor', email: 'p@example.com', role: roleMock.role } } }),
 }));
@@ -23,7 +24,15 @@ vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => ({
     extendCurrentSection: vi.fn(),
     extendStudentAttempt: vi.fn(), warnStudent: vi.fn(), pauseStudentAttempt: vi.fn(), resumeStudentAttempt: vi.fn(), terminateStudentAttempt: vi.fn(),
   },
+  // Staff route queue reports disabled, so the panel stays hidden and raises no alert.
+  proctorGateway: { backendGet: (...args: unknown[]) => proctorGetMock(...args), backendPost: async () => undefined },
 }));
+vi.mock('../../../../features/proctor/api/deviceTransfers', () => ({
+  listDeviceTransfers: async () => [],
+  decideDeviceTransfer: async () => undefined,
+}));
+vi.mock('../../ui/SatStaffRoutePanel', () => ({ SatStaffRoutePanel: () => null }));
+vi.mock('../../ui/SatDeviceTransferRequests', () => ({ SatDeviceTransferRequests: () => null }));
 
 const schedule = {
   id: 'sched-1', examId: 'sat-1', providerKey: 'sat', examTitle: 'Practice Test 06', proctorDisplayName: 'Practice Test 06',
@@ -87,8 +96,9 @@ function TestSessionsProbe() {
 describe('SatSessionRoomRoute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    proctorGetMock.mockImplementation(async () => ({ enabled: false, items: [] }));
     roleMock.role = undefined;
-    accessOverviewMock.mockReturnValue({ data: undefined });
+    entryInfoMock.mockReturnValue({ data: { link: null, roster: [] }, isLoading: false, isError: false, refetch: vi.fn() });
     controllerMock.mockReturnValue({
       schedules: [schedule], runtimeSnapshots: [runtime], sessions: [student], alerts: [], error: null, isLoading: false,
       roomClock: resolvedRoomClock,
@@ -163,6 +173,7 @@ describe('SatSessionRoomRoute', () => {
   });
 
   it('gives staff the student link and QR before the room starts', async () => {
+    roleMock.role = 'admin';
     controllerMock.mockReturnValue({
       schedules: [schedule], runtimeSnapshots: [{ ...runtime, status: 'not_started', actualStartAt: null, currentSectionKey: null, sections: [] }], sessions: [], alerts: [], error: null, isLoading: false,
       reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
@@ -173,12 +184,11 @@ describe('SatSessionRoomRoute', () => {
     const url = window.location.origin + '/student/sched-1';
     const card = document.querySelector<HTMLElement>('[data-sat-room-student-link]');
     expect(card).toHaveTextContent(url);
-    expect(card).toHaveTextContent('No students have joined yet.');
     expect(await within(card as HTMLElement).findByAltText('QR code for Morning')).toHaveAttribute('src', 'data:image/png;base64,QR');
     // Empty roster and empty inspector both lead to the link instead of a dead end.
     expect(screen.getAllByRole('button', { name: 'Share student link' })).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Student link' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Share with students' }));
     const dialog = await screen.findByRole('dialog', { name: 'Share Morning with students' });
     expect(dialog).toHaveTextContent(url);
     expect(await within(dialog).findByRole('link', { name: 'Download QR' })).toHaveAttribute('download', 'morning-qr.png');
@@ -189,10 +199,11 @@ describe('SatSessionRoomRoute', () => {
     expect(presenter).toHaveTextContent('0Joined');
   });
 
-  it('keeps the student link in the header while live and drops it in review', () => {
+  it('keeps sharing available while live and drops it in review', () => {
+    roleMock.role = 'admin';
     const view = render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    expect(screen.getByRole('button', { name: 'Student link' })).toBeInTheDocument();
-    expect(document.querySelector('[data-sat-room-student-link]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Share with students' })).toBeInTheDocument();
+    expect(document.querySelector('[data-sat-room-student-link]')).toBeInTheDocument();
     view.unmount();
 
     controllerMock.mockReturnValue({
@@ -201,7 +212,7 @@ describe('SatSessionRoomRoute', () => {
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    expect(screen.queryByRole('button', { name: 'Student link' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Share with students' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Share student link' })).not.toBeInTheDocument();
   });
 
@@ -238,7 +249,8 @@ describe('SatSessionRoomRoute', () => {
     });
     const view = render(renderApp());
 
-    fireEvent.click(screen.getByRole('button', { name: 'End exam' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'End exam' }));
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
 
     controllerMock.mockReturnValue({
@@ -256,7 +268,11 @@ describe('SatSessionRoomRoute', () => {
 
   describe('waiting room and status line', () => {
     const prestartRuntime = { ...runtime, status: 'not_started', actualStartAt: null, currentSectionKey: null, sections: [] };
-    const accessLink = { id: 'link-1', scheduleId: 'sched-1', status: 'live', versionNumber: 3, enabledSections: null, publishScope: 'reading-writing' };
+    const accessLink = {
+      id: 'link-1', name: 'Morning class', versionNumber: 3, enabledSections: null,
+      publishScope: 'reading-writing', audienceType: 'cohort', audienceLabel: 'Morning',
+      accessMode: 'student_code', availabilityType: 'anytime', status: 'live', selectedStudentCount: 0,
+    };
     const renderRoom = () => render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     const prestartController = (overrides: Record<string, unknown> = {}) => controllerMock.mockReturnValue({
       schedules: [schedule], runtimeSnapshots: [prestartRuntime], sessions: [student], alerts: [], error: null, isLoading: false,
@@ -267,7 +283,7 @@ describe('SatSessionRoomRoute', () => {
 
     it('states check-in and exam run state separately, and puts the start review in the waiting room with its facts', () => {
       roleMock.role = 'admin';
-      accessOverviewMock.mockReturnValue({ data: { links: [accessLink] } });
+      entryInfoMock.mockReturnValue({ data: { link: accessLink, roster: [] }, isLoading: false, isError: false, refetch: vi.fn() });
       prestartController();
       renderRoom();
 
@@ -276,30 +292,82 @@ describe('SatSessionRoomRoute', () => {
       expect(waiting.getByRole('button', { name: 'Review and start exam' })).toBeEnabled();
       expect(waiting.getByText('Version 3')).toBeInTheDocument();
       expect(waiting.getByText('Reading & Writing')).toBeInTheDocument();
-      expect(waiting.getByText('Joined').nextSibling).toHaveTextContent('1');
-      expect(waiting.getByText('Ready').nextSibling).toHaveTextContent('1');
+      // Joined and ready counts are read once, in the room summary.
+      const counts = within(screen.getByRole('group', { name: 'Student counts' }));
+      expect(counts.getByText(/Joined/)).toHaveTextContent('1 Joined');
+      expect(counts.getByText(/Ready/)).toHaveTextContent('1 Ready');
       // The header no longer carries a competing Start control.
       expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
     });
 
     it('reports check-in as paused without claiming the exam stopped', () => {
       roleMock.role = 'admin';
-      accessOverviewMock.mockReturnValue({ data: { links: [{ ...accessLink, status: 'paused' }] } });
+      entryInfoMock.mockReturnValue({ data: { link: { ...accessLink, status: 'paused' }, roster: [] }, isLoading: false, isError: false, refetch: vi.fn() });
       prestartController({ runtimeSnapshots: [{ ...runtime }], schedules: [schedule] });
       renderRoom();
 
       expect(screen.getByTestId('sat-room-status-line')).toHaveTextContent('Check-in paused · Exam running');
     });
 
-    it('never guesses check-in for a viewer who cannot read the access setup', () => {
+    it('gives an assigned proctor the same canonical join setup as an admin', () => {
       roleMock.role = 'proctor';
+      entryInfoMock.mockReturnValue({ data: { link: accessLink, roster: [] }, isLoading: false, isError: false, refetch: vi.fn() });
       prestartController();
       renderRoom();
 
-      expect(screen.getByTestId('sat-room-status-line')).toHaveTextContent(/^Exam not started$/);
-      expect(accessOverviewMock).toHaveBeenCalledWith('sat-1', false);
+      expect(screen.getByTestId('sat-room-status-line')).toHaveTextContent('Check-in open · Exam not started');
+      expect(entryInfoMock).toHaveBeenCalledWith('sched-1', true);
+      expect(screen.getByText(/Student ID\/WCODE, name, and email\. The code identifies them but is not checked against a roster\./)).toBeInTheDocument();
       const waiting = within(screen.getByRole('region', { name: 'Waiting room' }));
-      expect(waiting.getByText('Not shown')).toBeInTheDocument();
+      expect(waiting.getByText('Version 3')).toBeInTheDocument();
+    });
+
+    it('automatically retrieves the shared start code in code-start rooms', async () => {
+      roleMock.role = 'proctor';
+      const codeView = {
+        code: '047218', generation: 2, cohortName: 'Morning', examTitle: 'Practice Test 06',
+        opensAt: '2026-08-30T02:00:00Z', closesAt: '2026-08-30T06:00:00Z', acceptingNewStarts: true,
+      };
+      proctorGetMock.mockImplementation(async (path: string) => path.endsWith('/start-code') ? codeView : { enabled: false, items: [] });
+      entryInfoMock.mockReturnValue({ data: { link: accessLink, roster: [] }, isLoading: false, isError: false, refetch: vi.fn() });
+      prestartController({ schedules: [{ ...schedule, satStartMode: 'access_code' }] });
+      renderRoom();
+
+      expect(await screen.findByLabelText('6-digit exam start code')).toHaveTextContent('047218');
+      expect(proctorGetMock).toHaveBeenCalledWith('/v1/proctor/sessions/sched-1/start-code');
+      expect(screen.getByText('After check-in, students enter the six-digit exam start code shown here.')).toBeInTheDocument();
+      // Code-start rooms have no room-wide start: each student's code starts their clock.
+      expect(screen.queryByRole('button', { name: 'Review and start exam' })).not.toBeInTheDocument();
+      expect(screen.getByText('Each student starts when they enter the exam start code.')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Share with students' }));
+      const shareDialog = await screen.findByRole('dialog', { name: 'Share Morning class with students' });
+      expect(within(shareDialog).getByText('047218')).toBeInTheDocument();
+      expect(within(shareDialog).getByText(/enter the six-digit exam start code shown here/)).toBeInTheDocument();
+      expect(within(shareDialog).queryByText(/wait until you start the exam/i)).not.toBeInTheDocument();
+    });
+
+    it('shows invited students who have not joined in a restricted room roster', () => {
+      roleMock.role = 'proctor';
+      entryInfoMock.mockReturnValue({
+        data: {
+          link: { ...accessLink, audienceType: 'selected_students', selectedStudentCount: 2 },
+          roster: [
+            { ordinal: 1, name: 'Ananda S.', state: 'working', attemptId: 'attempt-1' },
+            { ordinal: 2, name: 'Budi T.', state: 'not_joined', attemptId: null },
+          ],
+        },
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      });
+      prestartController();
+      renderRoom();
+
+      expect(screen.getByText('Listed students enter their assigned Student ID/WCODE. Any name or email included in the list must match.')).toBeInTheDocument();
+      const invited = within(screen.getByRole('region', { name: 'Invited students' }));
+      expect(invited.getByText('Budi T.')).toBeInTheDocument();
+      expect(invited.getByText('Invited · Not joined')).toBeInTheDocument();
+      expect(invited.queryByText('Ananda S.')).not.toBeInTheDocument();
     });
 
     it('hands a finished room to results the viewer can open', () => {
@@ -351,7 +419,7 @@ describe('SatSessionRoomRoute', () => {
     // The roster row: section label, module slot, then the candidate's module
     // clock beside the room's shared section clock.
     const row = screen.getByRole('option', { name: 'Open Ananda S.' });
-    expect(row).toHaveTextContent('Reading & Writing · Module 1 · active');
+    expect(row).toHaveTextContent('Reading & Writing · Module 1 · Working');
     expect(row.querySelector('.sat-room__row-time')?.textContent).toMatch(/^\d{1,2}:\d{2}$/);
     expect(row.querySelector('.sat-room__row-sub')?.textContent).toBe('Section clock 25:00');
 
@@ -479,10 +547,13 @@ describe('SatSessionRoomRoute', () => {
     expect(await screen.findByText(/Added 5 minutes for Ananda S/)).toBeInTheDocument();
   });
 
-  it('filters the roster to students needing attention', () => {
+  it('filters the roster to students with an open issue', () => {
     const flagged = { ...student, warnings: 1 };
     controllerMock.mockReturnValue({
-      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [flagged], alerts: [], error: null, isLoading: false,
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [flagged], alerts: [{
+        id: 'alert-1', severity: 'medium', type: 'connection_lost', studentName: 'Ananda S.', studentId: 'W2501',
+        timestamp: runtime.serverNow, message: 'Connection lost', isAcknowledged: false,
+      }], error: null, isLoading: false,
       reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
@@ -544,7 +615,10 @@ describe('SatSessionRoomRoute', () => {
     const clean = { ...student, id: 'attempt-2', studentId: 'W2502', name: 'Budi T.', email: 'b@example.com', warnings: 0, violations: [] as typeof student.violations };
     controllerMock.mockReset();
     controllerMock.mockReturnValue({
-      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [flagged, clean], alerts: [], error: null, isLoading: false,
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [flagged, clean], alerts: [{
+        id: 'alert-1', severity: 'medium', type: 'connection_lost', studentName: 'Ananda S.', studentId: 'W2501',
+        timestamp: runtime.serverNow, message: 'Connection lost', isAcknowledged: false,
+      }], error: null, isLoading: false,
       reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
@@ -671,15 +745,17 @@ describe('SatSessionRoomRoute', () => {
     expect(document.querySelector('.sat-room__row-time')).toBeInTheDocument();
     const css = readFileSync(resolve(__dirname, '../../ui/sat-session-room.css'), 'utf8');
     expect(css).toMatch(/\.sat-room__clock \{[^}]*font-variant-numeric: tabular-nums/);
-    expect(css).toMatch(/\.sat-room__row-time \{[^}]*font-variant-numeric: tabular-nums/);
   });
 
-  it('combines search and attention filters with AND semantics', () => {
+  it('filters to students with current open issues, not historical warnings', () => {
     const flagged = { ...student, warnings: 2 };
     const clean = { ...student, id: 'attempt-2', studentId: 'W2502', name: 'Budi T.', email: 'b@example.com', warnings: 0, violations: [] as string[] };
     controllerMock.mockReset();
     controllerMock.mockReturnValue({
-      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [flagged, clean], alerts: [], error: null, isLoading: false,
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [flagged, clean], alerts: [{
+        id: 'alert-1', severity: 'medium', type: 'connection_lost', studentName: 'Ananda S.', studentId: 'W2501',
+        timestamp: runtime.serverNow, message: 'Connection lost', isAcknowledged: false,
+      }], error: null, isLoading: false,
       reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
       handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
     });
@@ -710,7 +786,7 @@ describe('SatSessionRoomRoute', () => {
       handleExtendCurrentSection: vi.fn().mockResolvedValue(undefined), handleCompleteExam: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Add time' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes for the room' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes to Reading & Writing?');
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Add 5 minutes' }));
@@ -724,7 +800,7 @@ describe('SatSessionRoomRoute', () => {
       ...controllerMock(), runtimeSnapshots: [{ ...runtime, revision: undefined }],
     });
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Add time' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes for the room' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Refresh the room before adding time.');
@@ -813,7 +889,7 @@ describe('SatSessionRoomRoute', () => {
       expect(row.querySelectorAll('.sat-room__row-name, .sat-room__row-meta')).toHaveLength(2);
       expect(row.querySelector('.sat-room__row-meta')).not.toBeNull();
       expect(row).toHaveTextContent(/reading/);
-      expect(row).toHaveTextContent(/active/);
+      expect(row).toHaveTextContent(/Working/);
       expect(row.querySelector('.sat-room__row-time')).toBeInTheDocument();
     });
 
@@ -845,15 +921,6 @@ describe('SatSessionRoomRoute', () => {
       expect(css).toMatch(/\.sat-room__clock \{[^}]*font-variant-numeric: tabular-nums/);
       const row = screen.getByRole('option', { name: 'Open Ananda S.' });
       expect(row.querySelector('.sat-room__row-time')).toBeInTheDocument();
-    });
-
-    it('keeps selected-student inspector labels on the eyebrow floor', () => {
-      room();
-      const labels = document.querySelectorAll('.sat-room__inspector dt.sat-room__eyebrow');
-      expect(labels.length).toBeGreaterThan(0);
-      const css = readFileSync(resolve(__dirname, '../../ui/sat-session-room.css'), 'utf8');
-      expect(css).toMatch(/\.sat-room__eyebrow \{[^}]*text-transform: uppercase/);
-      expect(css).toMatch(/\.sat-room__student-state-grid dd \{[^}]*font-size: 13px/);
     });
   });
 });

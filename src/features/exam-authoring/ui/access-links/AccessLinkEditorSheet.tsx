@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { SAT_SESSION_TYPE_LABELS, SAT_SESSION_TYPE_REQUEST, type SatSessionType } from "../../contracts/satSessionType";
 import { Clock3, Link2, LockKeyhole, X } from "lucide-react";
 import {
@@ -67,6 +67,12 @@ interface AccessLinkEditorSheetProps {
   membersLoading?: boolean;
   membersError?: string | null;
   onRetryMembers?: () => void;
+  /** Optional flow controls, rendered above the room fields inside this sheet. */
+  contentBeforeFields?: ReactNode;
+  submitLabel?: string;
+  pendingLabel?: string;
+  submitDisabled?: boolean;
+  inputsDisabled?: boolean;
   onClose: () => void;
   onCreate: (request: CreateAssessmentAccessLinkRequest) => Promise<void>;
   /** Required to edit an existing session; a host that only creates sessions omits it. */
@@ -78,11 +84,12 @@ interface AccessLinkEditorSheetProps {
 }
 
 const SAT_ROOM_CREATION_STEPS = [
-  { id: "details", label: "Room details", description: "Name the room and choose which SAT sections it will deliver." },
-  { id: "audience", label: "Students", description: "Choose who may check in and how students identify themselves." },
-  { id: "check-in", label: "Check-in", description: "Set when students may enter. Starting instructions appear in the room once it exists." },
+  { id: "setup", label: "Setup", description: "Name the room, choose its sections, who may join, and when check-in opens." },
   { id: "review", label: "Review", description: "Check the room setup before creating it." },
 ] as const;
+
+/** The Module 2 routes a Classroom room can use. Standard practice has none. */
+const CLASSROOM_ROUTING: readonly SatSessionType[] = ["classroom", "classroom_lower", "classroom_higher", "classroom_staff"];
 
 function defaultScheduledWindow(): { opensAt: string; closesAt: string } {
   const start = new Date();
@@ -119,11 +126,13 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [discardAction, setDiscardAction] = useState<"close" | "previous">("close");
   const [creationStep, setCreationStep] = useState(0);
+  const [moreSettingsOpen, setMoreSettingsOpen] = useState(false);
+  const publishScopeRef = useRef(props.publishScope);
   const initialSnapshotRef = useRef("");
   const hydratingRef = useRef(false);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
-  const editorBodyRef = useRef<HTMLFieldSetElement | null>(null);
+  const editorBodyRef = useRef<HTMLDivElement | null>(null);
   const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const pendingStepFocusRef = useRef(false);
   const submittingRef = useRef(false);
@@ -145,6 +154,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   // that run or silently changes the sitting a registered student expected.
   const isSat = (props.link?.providerKey ?? props.providerKey) === "sat";
   const isSteppedCreation = isSat && !props.link && props.guidedCreation === true;
+  const isCreatingSat = isSat && !props.link;
   const activeCreationStep = SAT_ROOM_CREATION_STEPS[Math.min(creationStep, SAT_ROOM_CREATION_STEPS.length - 1)]!;
   const progressStep = creationStep + (props.stepOffset ?? 0) + 1;
   const progressTotal = props.totalSteps ?? SAT_ROOM_CREATION_STEPS.length;
@@ -166,6 +176,10 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     () => serializeAccessLinkMembers(props.members),
     [props.members],
   );
+
+  useEffect(() => {
+    publishScopeRef.current = props.publishScope;
+  }, [props.publishScope]);
 
   const updateShared = (patch: Record<string, unknown>) => {
     if (!props.link || readOnly) return;
@@ -217,7 +231,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     const nextAvailabilityType = link?.availabilityType ?? props.prefill?.availabilityType ?? "anytime";
     const nextOpensAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.opensAt) : defaults.opensAt;
     const nextClosesAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.closesAt) : defaults.closesAt;
-    const nextSections = editableAccessLinkSections(source?.enabledSections, link?.publishScope ?? props.publishScope ?? "full");
+    const nextSections = editableAccessLinkSections(source?.enabledSections, link?.publishScope ?? publishScopeRef.current ?? "full");
     const nextMembersSource = membersSignature;
     // Session type is chosen per NEW room. Reopening the form starts from the
     // default again instead of resurrecting a mode the author abandoned, and
@@ -238,6 +252,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     setSectionsError(null);
     setRosterError(null);
     setCreationStep(0);
+    setMoreSettingsOpen(false);
     initialSnapshotRef.current = editorSnapshot(
       nextName,
       nextAudienceType,
@@ -252,7 +267,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     );
     hydratingRef.current = true;
     setIsDirty(false);
-  }, [defaults.closesAt, defaults.opensAt, membersSignature, props.link, props.open, props.prefill, props.publishScope]);
+  }, [defaults.closesAt, defaults.opensAt, membersSignature, props.link, props.open, props.prefill]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -329,6 +344,16 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     if (first) return first.message;
     return null;
   }, []);
+
+  // Changing a draft's publish scope only trims the sections this room can
+  // deliver. Keep the room name and other setup choices intact.
+  useEffect(() => {
+    if (!isCreatingSat || !props.open) return;
+    setSections((current) => {
+      const retained = releaseSections.filter((key) => current.includes(key));
+      return retained.length > 0 ? retained : [...releaseSections];
+    });
+  }, [isCreatingSat, props.open, releaseSections]);
 
   const buildUpdateRequest = useCallback((): UpdateAssessmentAccessLinkRequest | null => {
     if (!props.link) return null;
@@ -488,35 +513,21 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     }
   };
 
+  // Setup is the only input step, so Continue checks every field it owns at once.
   const validateCreationStep = (): boolean => {
-    if (creationStep === 0) {
-      const nextNameError = validateName(name);
-      const nextSectionsError = validateSections(sections);
-      setNameError(nextNameError);
-      setSectionsError(nextSectionsError);
-      if (nextNameError || nextSectionsError) {
-        if (nextNameError) nameInputRef.current?.focus();
-        else document.querySelector<HTMLElement>("#access-link-sections button")?.focus();
-        return false;
-      }
-    }
-    if (creationStep === 1 && audienceType === "selected_students") {
-      const nextRosterError = validateRoster(membersSource);
-      setRosterError(nextRosterError);
-      if (nextRosterError) {
-        document.getElementById("roster-cell-0-0")?.focus();
-        return false;
-      }
-    }
-    if (creationStep === 2) {
-      const nextWindowError = validateWindow(availabilityType, opensAt, closesAt);
-      setWindowError(nextWindowError);
-      if (nextWindowError) {
-        document.getElementById("access-link-opens-at")?.focus();
-        return false;
-      }
-    }
-    return true;
+    const nextNameError = validateName(name);
+    const nextSectionsError = validateSections(sections);
+    const nextRosterError = audienceType === "selected_students" ? validateRoster(membersSource) : null;
+    const nextWindowError = validateWindow(availabilityType, opensAt, closesAt);
+    setNameError(nextNameError);
+    setSectionsError(nextSectionsError);
+    setRosterError(nextRosterError);
+    setWindowError(nextWindowError);
+    if (nextNameError) nameInputRef.current?.focus();
+    else if (nextSectionsError) document.querySelector<HTMLElement>("#access-link-sections button")?.focus();
+    else if (nextRosterError) document.getElementById("roster-cell-0-0")?.focus();
+    else if (nextWindowError) document.getElementById("access-link-opens-at")?.focus();
+    return !(nextNameError || nextSectionsError || nextRosterError || nextWindowError);
   };
 
   const moveCreationStep = (nextStep: number) => {
@@ -554,6 +565,76 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     props.onBackToPreviousStep();
   };
 
+  const roomNameField = (
+    <Field label="Room name" description="Use the name staff will recognize when sharing or monitoring this room." error={nameError} errorId="access-link-name-error">
+      <input
+        ref={nameInputRef}
+        value={name}
+        onChange={(event) => {
+          setName(event.target.value);
+          updateShared({ name: event.target.value });
+          if (nameError) setNameError(validateName(event.target.value));
+        }}
+        onBlur={() => setNameError(validateName(name))}
+        maxLength={160}
+        aria-label="Room name"
+        aria-invalid={nameError ? true : undefined}
+        aria-describedby={nameError ? "access-link-name-error" : undefined}
+        disabled={props.isSaving || props.inputsDisabled || readOnly || props.membersLoading || Boolean(props.membersError)}
+        className={inputClass}
+        placeholder="Saturday morning mock"
+      />
+    </Field>
+  );
+
+  // Shared by the flat form and the Setup step's "More settings" disclosure.
+  const classLabelField = (
+    <Field label="Class or group (optional)" description="A label for your own organization. It does not limit who can join.">
+      <input
+        aria-label="Class or group label"
+        value={audienceLabel}
+        maxLength={255}
+        onChange={(event) => {
+          const next = event.target.value;
+          setAudienceLabel(next);
+          if (audienceChoice === "listed") {
+            updateShared({ audienceLabel: next });
+            return;
+          }
+          const nextType = accessLinkAudienceTypeFor("anyone", next);
+          setAudienceType(nextType);
+          updateShared({ audienceLabel: next, audienceType: nextType });
+        }}
+        className={inputClass}
+        placeholder="SAT September · Saturday"
+      />
+    </Field>
+  );
+  const identificationField = (
+    <Field label="Student identification" description={audienceChoice === "listed" ? "Listed students must enter their listed student code. It is checked at check-in." : "Choose how students identify themselves. This identifies a student; it does not verify them."}>
+      <div className="authoring-segmented flex w-full rounded-xl p-1">
+        <Segment active={accessMode === "student_code"} onClick={() => { setAccessMode("student_code"); updateShared({ accessMode: "student_code" }); }}>Require student code</Segment>
+        <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
+      </div>
+    </Field>
+  );
+  // The visible choice is practice or classroom; the Classroom routes sit under More settings.
+  const sessionTypeField = (
+    <Field label="Session type" description="Classroom uses adaptive Module 2 routing unless you change it under More settings. The exam's score report setting decides what students see when they finish.">
+      <select aria-label="Session type" value={sessionType === "practice" ? "practice" : "classroom"} onChange={(event) => setSatSessionType(event.target.value as SatSessionType)} className={inputClass}>
+        <option value="practice">{SAT_SESSION_TYPE_LABELS.practice}</option>
+        <option value="classroom">{SAT_SESSION_TYPE_LABELS.classroom}</option>
+      </select>
+    </Field>
+  );
+  const module2RoutingField = sessionType === "practice" ? null : (
+    <Field label="Module 2 routing" description="Adaptive is the default. Forcing an easier or harder Module 2 skips the Module 1 score check. Teacher picks asks staff to choose each student's Module 2.">
+      <select aria-label="Module 2 routing" value={sessionType} onChange={(event) => setSatSessionType(event.target.value as SatSessionType)} className={inputClass}>
+        {CLASSROOM_ROUTING.map((key) => <option key={key} value={key}>{SAT_SESSION_TYPE_LABELS[key]}</option>)}
+      </select>
+    </Field>
+  );
+
   return (
     <Sheet
       open={props.open}
@@ -589,7 +670,10 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
             ) : null}
             {props.membersLoading ? <p role="status" className="px-5 py-3 text-sm text-slate-600">Loading student roster…</p> : null}
             {props.membersError ? <div role="alert" className="px-5 py-3 text-sm text-[var(--sat-staff-danger,#b42318)]">{props.membersError}<button type="button" onClick={props.onRetryMembers} className="min-h-11 px-3 font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry roster</button></div> : null}
-            <fieldset ref={editorBodyRef} disabled={props.isSaving || readOnly || props.membersLoading || Boolean(props.membersError)} data-coedit-read-only={readOnly ? "true" : undefined} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            <div ref={editorBodyRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+              {isCreatingSat && (!isSteppedCreation || creationStep === 0) ? <div className="mb-5">{roomNameField}</div> : null}
+              {props.contentBeforeFields ? <div className="mb-6">{props.contentBeforeFields}</div> : null}
+              <fieldset disabled={props.isSaving || props.inputsDisabled || readOnly || props.membersLoading || Boolean(props.membersError)} data-coedit-read-only={readOnly ? "true" : undefined}>
               <div className="space-y-5">
                 <div hidden={isSteppedCreation && creationStep !== 0} className="space-y-5">
                 {!props.link && !props.prefill && !isDirty && props.onReuseSetup && props.reuseOptions && props.reuseOptions.length > 0 ? (
@@ -615,31 +699,38 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                 ) : null}
                 {isSat && !isSteppedCreation ? <GroupHeading id="access-link-group-details" title="Room details" detail={`Pinned to Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}${summaryTest ? ` of ${summaryTest}` : ""}. Publishing a newer version never changes this room.`} /> : null}
                 {isSat && isSteppedCreation ? <p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">This room uses Version {props.targetVersionNumber ?? "being published"}{summaryTest ? ` of ${summaryTest}` : ""}. Publishing a newer version will not change it.</p> : null}
-                <Field label="Room name" description="Use the name staff will recognize when sharing or monitoring this room." error={nameError} errorId="access-link-name-error"><input ref={nameInputRef} value={name} onChange={(event) => { setName(event.target.value); updateShared({ name: event.target.value }); if (nameError) setNameError(validateName(event.target.value)); }} onBlur={() => setNameError(validateName(name))} maxLength={160} aria-label="Room name" aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? "access-link-name-error" : undefined} className={inputClass} placeholder="Saturday morning mock" /></Field>
-                <Field label="Class or group (optional)" description="A label for your own organization. It does not limit who can join.">
-                  <input
-                    aria-label="Class or group label"
-                    value={audienceLabel}
-                    maxLength={255}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      setAudienceLabel(next);
-                      if (audienceChoice === "listed") {
-                        updateShared({ audienceLabel: next });
-                        return;
-                      }
-                      const nextType = accessLinkAudienceTypeFor("anyone", next);
-                      setAudienceType(nextType);
-                      updateShared({ audienceLabel: next, audienceType: nextType });
-                    }}
-                    className={inputClass}
-                    placeholder="SAT September · Saturday"
-                  />
-                </Field>
-                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this room. Duplicate its setup to change the scope." : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`} error={sectionsError} errorId="access-link-sections-error"><div id="access-link-sections" className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{releaseSections.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div>{props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[14px] leading-5 text-amber-800">{sectionsLocked ? "This room has no available sections and is fixed because a student has joined. Create a new room with an available section." : "This room’s saved section is not available in its published version. Saving will update it to the available section."}</p> : null}<p className="mt-2 text-[14px] leading-5 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
-                {isSat && !props.link ? <Field label="Session type" description="Classroom sessions let staff control Module 2. Forcing Module 2 skips the Module 1 score check. The exam's score report setting decides what students see when they finish."><select aria-label="Session type" value={sessionType} onChange={(event) => setSatSessionType(event.target.value as SatSessionType)} className={inputClass}>{(Object.keys(SAT_SESSION_TYPE_LABELS) as SatSessionType[]).map((key) => <option key={key} value={key}>{SAT_SESSION_TYPE_LABELS[key]}</option>)}</select></Field> : null}
-                </div>
-                <div hidden={isSteppedCreation && creationStep !== 1} className="space-y-5">
+                {!isCreatingSat ? roomNameField : null}
+                {isCreatingSat ? sessionTypeField : classLabelField}
+                {isSat ? (
+                  <Field
+                    label="Sections"
+                    description={sectionsLocked
+                      ? "Sections are fixed once a student has joined this room. Duplicate its setup to change the scope."
+                      : `Choose from the sections enabled in Version ${props.link?.versionNumber ?? props.targetVersionNumber ?? "being published"}. The exam ends after the last section.`}
+                    error={sectionsError}
+                    errorId="access-link-sections-error"
+                  >
+                    <div id="access-link-sections" className={`grid gap-2 ${releaseSections.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+                      {releaseSections.map((key) => (
+                        <SectionToggle
+                          key={key}
+                          label={ACCESS_LINK_SECTION_LABELS[key]}
+                          active={sections.includes(key)}
+                          locked={sectionsLocked}
+                          onToggle={() => toggleSection(key)}
+                        />
+                      ))}
+                    </div>
+                    {props.link && effectiveAccessLinkSections(props.link.enabledSections, pinnedPublishScope).length === 0 ? (
+                      <p role="status" className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[14px] leading-5 text-amber-800">
+                        {sectionsLocked
+                          ? "This room has no available sections and is fixed because a student has joined. Create a new room with an available section."
+                          : "This room’s saved section is not available in its published version. Saving will update it to the available section."}
+                      </p>
+                    ) : null}
+                    <p className="mt-2 text-[14px] leading-5 text-slate-600">{sectionsSummary(sections, sectionsLocked)}</p>
+                  </Field>
+                ) : null}
                 {isSat && !isSteppedCreation ? <GroupHeading id="access-link-group-audience" title="Who can join" /> : null}
                 <Field label={isSat ? "Audience" : "Who can join?"} description={audienceChoice === "listed" ? "Only students on the list below are admitted. Anyone else is turned away at check-in." : "Anyone who has the room link can check in. A student code identifies a student; it is not checked against a roster."}>
                   <div role="group" aria-label={isSat ? "Audience" : "Who can join"} className="grid grid-cols-2 gap-2">
@@ -662,14 +753,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     <p role="status" aria-live="polite" className="mt-2 text-[14px] font-medium text-slate-500">{rosterSummary}</p>
                   </Field>
                 ) : null}
-                <Field label="Student identification" description={audienceChoice === "listed" ? "Listed students must enter their listed student code. It is checked at check-in." : "Choose how students identify themselves. This identifies a student; it does not verify them."}>
-                  <div className="authoring-segmented flex w-full rounded-xl p-1">
-                    <Segment active={accessMode === "student_code"} onClick={() => { setAccessMode("student_code"); updateShared({ accessMode: "student_code" }); }}>Require student code</Segment>
-                    <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
-                  </div>
-                </Field>
-                </div>
-                <div hidden={isSteppedCreation && creationStep !== 2} className="space-y-5">
+                {isCreatingSat ? null : identificationField}
                 {isSat && !isSteppedCreation ? <GroupHeading id="access-link-group-checkin" title="Check-in settings" detail="Check-in decides whether students can enter. It never starts or pauses the exam." /> : null}
                 <Field label={isSat ? "Check-in window" : "Check-in"} description="Students can enter during this window. Starting instructions appear in the room once it exists.">
                   <div role="group" aria-label={isSat ? "Check-in window" : "Check-in"} className="grid grid-cols-2 gap-2">
@@ -679,8 +763,22 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                   {availabilityType === "scheduled" ? <><div className="mt-2 grid grid-cols-2 gap-2"><label htmlFor="access-link-opens-at" className="text-[14px] font-medium text-slate-500">Opens<input id="access-link-opens-at" aria-label="Opens" type="datetime-local" value={opensAt} onChange={(event) => { setOpensAt(event.target.value); updateShared({ opensAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, event.target.value, closesAt)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label><label htmlFor="access-link-closes-at" className="text-[14px] font-medium text-slate-500">Closes<input id="access-link-closes-at" aria-label="Closes" type="datetime-local" value={closesAt} onChange={(event) => { setClosesAt(event.target.value); updateShared({ closesAt: localDateTimeToIso(event.target.value) }); if (windowError) setWindowError(validateWindow(availabilityType, opensAt, event.target.value)); }} onBlur={() => setWindowError(validateWindow(availabilityType, opensAt, closesAt))} aria-invalid={windowError ? true : undefined} aria-describedby={windowError ? "access-link-window-error" : undefined} className={`${inputClass} mt-1`} /></label></div>{windowError ? <p id="access-link-window-error" role="alert" className="mt-1.5 text-[14px] font-medium text-au-danger-text">{windowError}</p> : null}</> : <div className="mt-2 rounded-xl bg-au-surface px-3 py-3 text-[14px] leading-5 text-slate-500">Students can check in until you pause or revoke this room’s link. Pausing check-in does not stop students who are already taking the exam.</div>}
                   <p className="mt-2 text-[14px] leading-5 text-slate-500">{availabilityType === "scheduled" ? `Times use your local timezone (${localTimeZone()}). ` : ""}Opening check-in never starts the exam.</p>
                 </Field>
+                {isCreatingSat ? (
+                  <details
+                    open={moreSettingsOpen}
+                    onToggle={(event) => setMoreSettingsOpen(event.currentTarget.open)}
+                    className="border-t border-[var(--sat-staff-border-hairline)] pt-5"
+                  >
+                    <summary className="sat-press flex min-h-11 cursor-pointer items-center text-[14px] font-semibold text-[var(--sat-staff-accent,#0071e3)]">More settings</summary>
+                    <div className="mt-4 space-y-5">
+                      {classLabelField}
+                      {module2RoutingField}
+                      {identificationField}
+                    </div>
+                  </details>
+                ) : null}
                 </div>
-                <div hidden={isSteppedCreation && creationStep !== 3} className="space-y-5">
+                <div hidden={isSteppedCreation && creationStep !== 1} className="space-y-5">
                 {isSat ? (
                   <section aria-labelledby="access-link-summary-heading" className="rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-faint)] px-4 py-3">
                     <h2 id="access-link-summary-heading" className="mb-2 text-sm font-semibold text-slate-950">Summary</h2>
@@ -707,7 +805,8 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                 ) : null}
                 </div>
               </div>
-            </fieldset>
+              </fieldset>
+            </div>
             <footer className="border-t border-[var(--sat-staff-border-hairline)] bg-white px-6 py-4">
               {error ? <p role="alert" className="mb-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-tint)] px-3 py-2 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
               {isSteppedCreation ? (
@@ -725,14 +824,12 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                       >Continue</button>
                     ) : (
                       /* Keep the primary action's dimensions stable while it saves. */
-                      <button type="button" onClick={() => { if (!props.isSaving) void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError)} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? "Creating…" : "Create room"}</button>
+                      <button type="button" onClick={() => { if (!props.isSaving && !props.submitDisabled) void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError) || props.submitDisabled} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? props.pendingLabel ?? "Creating…" : props.submitLabel ?? "Create room"}</button>
                     )}
                   </div>
                 </div>
               ) : (
-                <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-btn sat-btn--quiet sat-press">Cancel</button>{/* The primary action keeps its own box while pending (min-w covers the
-                    longest label and the spinner) and stays enabled so the press is never
-                    cancelled by focus loss; the handler and aria-disabled own the guard. */}<button type="button" onClick={() => { if (props.isSaving) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError)} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? "Saving…" : readOnly ? "View only" : props.link ? "Save changes" : "Create room"}</button></div>
+                <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-btn sat-btn--quiet sat-press">Cancel</button>{/* Keep the primary action's box stable while pending; the handler also guards repeat presses. */}<button type="button" onClick={() => { if (props.isSaving || props.submitDisabled) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError) || props.submitDisabled} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? props.pendingLabel ?? (props.link ? "Saving…" : "Creating…") : readOnly ? "View only" : props.submitLabel ?? (props.link ? "Save changes" : "Create room")}</button></div>
               )}
             </footer>
       </SheetContent>

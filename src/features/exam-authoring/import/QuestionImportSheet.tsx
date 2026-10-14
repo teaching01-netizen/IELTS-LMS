@@ -156,7 +156,7 @@ export function QuestionImportSheet({
           />
           <p className="mt-2 text-xs leading-4 text-slate-600">
             Supported headers include Prompt, Stimulus, A–D, Correct, Response Type, Accepted
-            Responses, Domain, Skill, Difficulty, Tags, Rationale, and Pretest.
+            Responses, Domain, Skill, Difficulty, Tags, and Rationale.
           </p>
         </div>
         <section aria-label="Import review" className="min-h-0 overflow-y-auto p-4">

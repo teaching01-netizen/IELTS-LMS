@@ -296,16 +296,15 @@ func (s *Service) clonePublishedSATToDraftTx(ctx context.Context, q tx.Tx, examI
 		stimulus, prompt, answer, rationale          string
 		metadata, accessibility                      string
 		displayOrder                                 int
-		isPretest                                    bool
 	}
-	qRows, err := q.QueryContext(ctx, "SELECT m.id, qr.id, eq.question_id, (SELECT MAX(r2.semantic_revision) FROM assessment_question_revisions r2 WHERE r2.question_id = eq.question_id), qr.question_type, CAST(qr.stimulus AS CHAR), CAST(qr.prompt AS CHAR), CAST(qr.answer_definition AS CHAR), CAST(qr.rationale AS CHAR), CAST(qr.metadata AS CHAR), CAST(qr.accessibility AS CHAR), eq.display_order, eq.is_pretest FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE s.exam_version_id = ? ORDER BY s.display_order, m.display_order, eq.display_order, eq.id", publishedVersionID)
+	qRows, err := q.QueryContext(ctx, "SELECT m.id, qr.id, eq.question_id, (SELECT MAX(r2.semantic_revision) FROM assessment_question_revisions r2 WHERE r2.question_id = eq.question_id), qr.question_type, CAST(qr.stimulus AS CHAR), CAST(qr.prompt AS CHAR), CAST(qr.answer_definition AS CHAR), CAST(qr.rationale AS CHAR), CAST(qr.metadata AS CHAR), CAST(qr.accessibility AS CHAR), eq.display_order FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE s.exam_version_id = ? ORDER BY s.display_order, m.display_order, eq.display_order, eq.id", publishedVersionID)
 	if err != nil {
 		return "", err
 	}
 	questions := []questionCloneRow{}
 	for qRows.Next() {
 		var qr questionCloneRow
-		if err := qRows.Scan(&qr.sourceModuleID, &qr.sourceRevisionID, &qr.questionID, &qr.maxSemantic, &qr.questionType, &qr.stimulus, &qr.prompt, &qr.answer, &qr.rationale, &qr.metadata, &qr.accessibility, &qr.displayOrder, &qr.isPretest); err != nil {
+		if err := qRows.Scan(&qr.sourceModuleID, &qr.sourceRevisionID, &qr.questionID, &qr.maxSemantic, &qr.questionType, &qr.stimulus, &qr.prompt, &qr.answer, &qr.rationale, &qr.metadata, &qr.accessibility, &qr.displayOrder); err != nil {
 			qRows.Close()
 			return "", err
 		}
@@ -335,7 +334,7 @@ func (s *Service) clonePublishedSATToDraftTx(ctx context.Context, q tx.Tx, examI
 		if !ok {
 			return "", validationError("A published SAT question references an unknown module.")
 		}
-		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest) VALUES (?, ?, ?, ?, ?, ?)", uuid.NewString(), newModuleID, src.questionID, newRevisionID, src.displayOrder, src.isPretest); err != nil {
+		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order) VALUES (?, ?, ?, ?, ?)", uuid.NewString(), newModuleID, src.questionID, newRevisionID, src.displayOrder); err != nil {
 			return "", err
 		}
 	}

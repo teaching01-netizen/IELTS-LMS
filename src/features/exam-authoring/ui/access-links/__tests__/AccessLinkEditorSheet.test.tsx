@@ -139,7 +139,7 @@ describe("AccessLinkEditorSheet", () => {
     expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
   });
 
-  it("guides SAT room creation through validated steps and preserves values when moving back", async () => {
+  it("guides SAT room creation through setup and review, and preserves values when moving back", async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(
       <AccessLinkEditorSheet
@@ -159,7 +159,7 @@ describe("AccessLinkEditorSheet", () => {
 
     const progress = screen.getByRole("progressbar", { name: "Room setup progress" });
     expect(progress).toHaveAttribute("aria-valuenow", "1");
-    expect(progress).toHaveAttribute("aria-valuemax", "4");
+    expect(progress).toHaveAttribute("aria-valuemax", "2");
     expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create room" })).not.toBeInTheDocument();
 
@@ -169,19 +169,14 @@ describe("AccessLinkEditorSheet", () => {
     expect(onCreate).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday mock" } });
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "2"));
     expect(screen.getByRole("group", { name: "Audience" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "3"));
     expect(screen.getByRole("group", { name: "Check-in window" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Scheduled/ }));
     fireEvent.change(screen.getByLabelText("Opens"), { target: { value: "2099-09-01T10:00" } });
     fireEvent.change(screen.getByLabelText("Closes"), { target: { value: "2099-09-01T13:00" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "4"));
+    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "2"));
     const summary = screen.getByRole("region", { name: "Summary" });
     expect(within(summary).getByText("Digital SAT · Version 5")).toBeInTheDocument();
     expect(within(summary).getByText("Saturday mock")).toBeInTheDocument();
@@ -194,9 +189,7 @@ describe("AccessLinkEditorSheet", () => {
     expect(onCreate).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "3"));
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "2"));
+    await waitFor(() => expect(progress).toHaveAttribute("aria-valuenow", "1"));
     expect(screen.getByLabelText("Room name")).toHaveValue("Saturday mock");
     expect(screen.queryByRole("region", { name: "Summary" })).not.toBeInTheDocument();
   });
@@ -239,7 +232,7 @@ describe("AccessLinkEditorSheet", () => {
     } as const;
     const { rerender } = render(<AccessLinkEditorSheet open {...props} />);
 
-    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom_higher" } });
+    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     // A mode-only edit is real work: it must not be discarded silently.
@@ -275,8 +268,6 @@ describe("AccessLinkEditorSheet", () => {
     fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom" } });
     fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Adaptive Saturday" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
     const summary = screen.getByRole("region", { name: "Summary" });
     expect(within(summary).getByText("Classroom (adaptive Module 2)")).toBeInTheDocument();
@@ -287,6 +278,41 @@ describe("AccessLinkEditorSheet", () => {
     await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
     expect(onCreate.mock.calls[0]![0]).toMatchObject({ satSessionMode: "classroom" });
     expect(onCreate.mock.calls[0]![0]).not.toHaveProperty("satRoutePolicy", "staff_selects");
+  });
+
+  it("keeps Module 2 routing under More settings and sends the chosen route", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AccessLinkEditorSheet
+        open
+        link={null}
+        guidedCreation
+        providerKey="sat"
+        examTitle="Digital SAT"
+        targetVersionNumber={5}
+        members={[]}
+        isSaving={false}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onUpdate={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    // Standard practice has no routing choice at all.
+    expect(screen.queryByLabelText("Module 2 routing")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom" } });
+    const moreSettings = screen.getByText("More settings").closest("details");
+    expect(moreSettings).not.toBeNull();
+    expect(within(moreSettings!).getByLabelText("Module 2 routing")).toHaveValue("classroom");
+    fireEvent.change(within(moreSettings!).getByLabelText("Module 2 routing"), { target: { value: "classroom_higher" } });
+    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Harder Saturday" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    const summary = await screen.findByRole("region", { name: "Summary" });
+    expect(within(summary).getByText("Classroom (everyone gets harder Module 2)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ satSessionMode: "classroom", satRoutePolicy: "force_higher" });
   });
 
   it("limits a new link to the sections in its pinned release", async () => {

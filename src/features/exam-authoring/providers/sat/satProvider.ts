@@ -12,7 +12,6 @@ export interface SatBlueprintModule {
   title: string;
   durationSeconds: number;
   questionCount: number;
-  pretestCount: number;
   adaptiveRole: "base" | "lower_branch" | "higher_branch";
   tools: Array<"calculator" | "reference_sheet">;
 }
@@ -35,7 +34,6 @@ export const SAT_BLUEPRINT: SatBlueprintSection[] = [
         title: "Module 1",
         durationSeconds: 1920,
         questionCount: 27,
-        pretestCount: 2,
         adaptiveRole: "base",
         tools: [],
       },
@@ -44,7 +42,6 @@ export const SAT_BLUEPRINT: SatBlueprintSection[] = [
         title: "Module 2 — Lower",
         durationSeconds: 1920,
         questionCount: 27,
-        pretestCount: 2,
         adaptiveRole: "lower_branch",
         tools: [],
       },
@@ -53,7 +50,6 @@ export const SAT_BLUEPRINT: SatBlueprintSection[] = [
         title: "Module 2 — Higher",
         durationSeconds: 1920,
         questionCount: 27,
-        pretestCount: 2,
         adaptiveRole: "higher_branch",
         tools: [],
       },
@@ -69,7 +65,6 @@ export const SAT_BLUEPRINT: SatBlueprintSection[] = [
         title: "Module 1",
         durationSeconds: 2100,
         questionCount: 22,
-        pretestCount: 2,
         adaptiveRole: "base",
         tools: ["calculator", "reference_sheet"],
       },
@@ -78,7 +73,6 @@ export const SAT_BLUEPRINT: SatBlueprintSection[] = [
         title: "Module 2 — Lower",
         durationSeconds: 2100,
         questionCount: 22,
-        pretestCount: 2,
         adaptiveRole: "lower_branch",
         tools: ["calculator", "reference_sheet"],
       },
@@ -87,7 +81,6 @@ export const SAT_BLUEPRINT: SatBlueprintSection[] = [
         title: "Module 2 — Higher",
         durationSeconds: 2100,
         questionCount: 22,
-        pretestCount: 2,
         adaptiveRole: "higher_branch",
         tools: ["calculator", "reference_sheet"],
       },

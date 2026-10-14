@@ -521,19 +521,6 @@ func (s *Service) replaceSATDraftOpKey(ctx context.Context, examID, expectedVers
 					return workbookValidationError(issues, target.ModuleKey, index)
 				}
 			}
-			// Workbook imports do not require pretests; publication enforces
-			// exactly two per module. Sample loads keep the strict check.
-			if importRequest == nil {
-				pretestCount := 0
-				for _, question := range request.Questions {
-					if question.IsPretest {
-						pretestCount++
-					}
-				}
-				if pretestCount != spec.pretestCount {
-					return validationError(fmt.Sprintf("%s requires exactly %d pretest questions.", target.ModuleKey, spec.pretestCount))
-				}
-			}
 			requestByTarget[target.ID] = request
 		}
 		if len(usedRequests) != len(requests) {
@@ -812,7 +799,7 @@ func insertSATQuestionTx(ctx context.Context, q tx.Tx, actorID, moduleID string,
 		revisionID, questionID, draft.QuestionType, nonEmptyJSON(draft.Stimulus), nonEmptyJSON(draft.Prompt), nonEmptyJSON(draft.Answer), nonEmptyJSON(draft.Rationale), nonEmptyJSON(draft.Metadata), nonEmptyJSON(draft.Accessibility), actorID); err != nil {
 		return err
 	}
-	_, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))", examQuestionID, moduleID, questionID, revisionID, displayOrder, draft.IsPretest)
+	_, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))", examQuestionID, moduleID, questionID, revisionID, displayOrder)
 	return err
 }
 
@@ -1182,7 +1169,7 @@ func cloneCheckpointQuestions(ctx context.Context, q tx.Tx, versionID, actorID s
 		qr.question_type, CAST(qr.stimulus AS CHAR), CAST(qr.prompt AS CHAR),
 		CAST(qr.answer_definition AS CHAR), CAST(qr.rationale AS CHAR),
 		CAST(qr.metadata AS CHAR), CAST(qr.accessibility AS CHAR),
-		eq.display_order, eq.is_pretest
+		eq.display_order
 		FROM assessment_exam_questions eq
 		JOIN assessment_modules m ON m.id = eq.module_id
 		JOIN assessment_sections s ON s.id = m.section_id
@@ -1199,12 +1186,11 @@ func cloneCheckpointQuestions(ctx context.Context, q tx.Tx, versionID, actorID s
 		stimulus, prompt, answer, rationale            string
 		metadata, accessibility                        string
 		displayOrder                                   int
-		isPretest                                      bool
 	}
 	sources := []sourceQuestion{}
 	for rows.Next() {
 		var source sourceQuestion
-		if err := rows.Scan(&source.moduleID, &source.revisionID, &source.questionID, &source.maxSemantic, &source.questionType, &source.stimulus, &source.prompt, &source.answer, &source.rationale, &source.metadata, &source.accessibility, &source.displayOrder, &source.isPretest); err != nil {
+		if err := rows.Scan(&source.moduleID, &source.revisionID, &source.questionID, &source.maxSemantic, &source.questionType, &source.stimulus, &source.prompt, &source.answer, &source.rationale, &source.metadata, &source.accessibility, &source.displayOrder); err != nil {
 			return err
 		}
 		sources = append(sources, source)
@@ -1234,7 +1220,7 @@ func cloneCheckpointQuestions(ctx context.Context, q tx.Tx, versionID, actorID s
 		if !ok {
 			return validationError("A SAT question references an unknown module.")
 		}
-		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest) VALUES (?, ?, ?, ?, ?, ?)", uuid.NewString(), newModuleID, source.questionID, newRevisionID, source.displayOrder, source.isPretest); err != nil {
+		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order) VALUES (?, ?, ?, ?, ?)", uuid.NewString(), newModuleID, source.questionID, newRevisionID, source.displayOrder); err != nil {
 			return err
 		}
 	}

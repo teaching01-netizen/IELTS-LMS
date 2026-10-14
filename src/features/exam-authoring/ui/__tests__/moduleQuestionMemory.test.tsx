@@ -17,7 +17,6 @@ function summary(examQuestionId: string, questionId = `${examQuestionId}-base`):
     questionId,
     questionRevisionId: `${questionId}-rev`,
     displayOrder: 0,
-    isPretest: false,
     questionType: "single_choice",
     semanticRevision: 1,
     revision: 1,

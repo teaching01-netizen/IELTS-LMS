@@ -9,7 +9,6 @@ function summary(id: string, index: number, promptPreview: string): AssessmentQu
     questionId: `${id}-base`,
     questionRevisionId: `${id}-rev`,
     displayOrder: index,
-    isPretest: false,
     questionType: "single_choice",
     semanticRevision: 1,
     revision: 1,

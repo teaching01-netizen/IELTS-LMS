@@ -5,7 +5,7 @@
 //
 //   - `workspace`   the exam-level room. Its Y.Doc carries the question's rich
 //                   roots AND the scalar record (questionType, answer,
-//                   metadata, accessibility, isPretest), and the service
+//                   metadata, accessibility), and the service
 //                   materializes all of them. It owns every field.
 //   - `prompt-room` the question-scoped v1 room. It owns the prompt ONLY, which
 //                   is why every other field still travels over the partial

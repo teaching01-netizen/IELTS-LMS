@@ -135,17 +135,12 @@ func (s *Service) UpdateDeliverySettings(ctx context.Context, examID, sectionID 
 			return validationError("Higher-route threshold must be between 1 and the operational question count.")
 		}
 		{
-			// Upper bound mirrors the Rust blueprint derivation
-			// (target_question_count - pretest_count).max(1) against the live base module.
+			// Upper bound: every question in the live base module is scored.
 			var targetCount int
 			if err := q.QueryRowContext(ctx, "SELECT target_question_count FROM assessment_modules WHERE id = ?", baseID).Scan(&targetCount); err != nil {
 				return err
 			}
-			var pretestCount int
-			if err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM assessment_exam_questions WHERE module_id = ? AND is_pretest = TRUE", baseID).Scan(&pretestCount); err != nil {
-				return err
-			}
-			operational := targetCount - pretestCount
+			operational := targetCount
 			if operational < 1 {
 				operational = 1
 			}

@@ -44,7 +44,6 @@ describe("complete SAT sample fixture", () => {
     expect(request.modules.reduce((sum, module) => sum + module.questions.length, 0)).toBe(147);
     expect(JSON.stringify(request).length).toBeLessThan(500_000);
     for (const module of request.modules) {
-      expect(module.questions.filter((question) => question.isPretest)).toHaveLength(2);
       for (const question of module.questions) {
         expect(plainTextFromContent(question.prompt)).not.toBe("");
         expect(plainTextFromContent(question.rationale)).not.toBe("");

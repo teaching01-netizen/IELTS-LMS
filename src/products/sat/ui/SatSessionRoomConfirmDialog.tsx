@@ -14,10 +14,12 @@ export function SatSessionRoomConfirmDialog({
   confirm,
   onCancel,
   onConfirm,
+  restoreFocusTarget,
 }: {
   confirm: SatSessionRoomConfirmation | null;
   onCancel: () => void;
   onConfirm: () => void;
+  restoreFocusTarget?: HTMLElement | null | undefined;
 }) {
   if (!confirm) return null;
 
@@ -61,6 +63,7 @@ export function SatSessionRoomConfirmDialog({
             ? 'Send warning'
             : `Add ${confirm.minutes} minutes`}
       destructive={confirm.kind === 'terminate' || confirm.kind === 'complete'}
+      restoreFocusTarget={restoreFocusTarget}
       onCancel={onCancel}
       onConfirm={onConfirm}
     />

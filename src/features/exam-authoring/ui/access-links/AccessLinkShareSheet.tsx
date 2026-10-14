@@ -37,6 +37,10 @@ export interface StudentShareDialogProps {
   audience?: string | null;
   /** "Check-in open", "Check-in opens later"…; omitted when unknown. */
   checkIn?: string | null;
+  /** Room-specific student identification and start instructions. */
+  studentInstructions?: string | null;
+  /** Authorized shared SAT start code, when this room uses code start. */
+  startCode?: string | null;
   /** False when check-in is not open right now, so the copy never promises entry. */
   checkInOpen?: boolean;
   sectionCopy?: string | null;
@@ -47,7 +51,7 @@ export interface StudentShareDialogProps {
 }
 
 /** "Share with students": the one sharing surface for a room, from the exam's Rooms tab or the room itself. */
-export function StudentShareDialog({ open, url, roomName, examTitle, versionNumber, audience, checkIn, checkInOpen = true, sectionCopy, blockedMessage, onClose, onPresent }: StudentShareDialogProps) {
+export function StudentShareDialog({ open, url, roomName, examTitle, versionNumber, audience, checkIn, checkInOpen = true, sectionCopy, studentInstructions, startCode, blockedMessage, onClose, onPresent }: StudentShareDialogProps) {
   const { active: copied, trigger: confirmCopied, clear: clearCopied } = useTransientFlag(1800);
   const [copyError, setCopyError] = useState<string | null>(null);
   const { dataUrl, error: qrError } = useQrCodeDataUrl(open && !blockedMessage ? url : null, 640);
@@ -62,6 +66,7 @@ export function StudentShareDialog({ open, url, roomName, examTitle, versionNumb
     }
   };
   const fileName = `${roomName.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "room"}-qr.png`;
+  const checkInCopy = checkInOpen ? "Students can check in now." : "Students can check in once check-in opens.";
   return (
     <AuthoringDialog
       open={open}
@@ -87,7 +92,12 @@ export function StudentShareDialog({ open, url, roomName, examTitle, versionNumb
           </dl>
         ) : null}
         {blockedMessage ? <p role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-[14px] leading-5 text-amber-900">{blockedMessage}</p> : <>
-          <p className="text-[14px] leading-5 text-slate-600">{checkInOpen ? "Students can check in now. They wait until you start the exam." : "Students can check in once check-in opens. They wait until you start the exam."}</p>
+          <p className="text-[14px] leading-5 text-slate-600">{studentInstructions ? checkInCopy : `${checkInCopy} They wait until you start the exam.`}</p>
+          {studentInstructions ? <p className="mt-2 rounded-xl bg-au-fill px-3 py-2.5 text-[14px] leading-5 text-slate-700">{studentInstructions}</p> : null}
+          {startCode ? <div className="mt-2 rounded-xl border border-au-separator px-3 py-2.5">
+            <p className="text-[14px] font-medium text-slate-500">Exam start code · enter after check-in</p>
+            <p className="mt-1 font-mono text-2xl font-semibold tracking-[0.2em] text-slate-950">{startCode}</p>
+          </div> : null}
           <div className="mx-auto mt-4 flex h-52 w-52 items-center justify-center rounded-[18px] bg-au-fill p-3">{dataUrl ? <img src={dataUrl} alt={`QR code for ${roomName}`} className="h-full w-full" /> : <span role="status" className="px-4 text-center text-[14px] text-slate-500">{qrError ?? "Generating QR code…"}</span>}</div>
           <div className="mt-4 rounded-xl bg-au-fill px-3 py-2.5"><p className="break-all font-mono text-[14px] leading-5 text-slate-600 select-all">{url}</p></div>
           <button type="button" onClick={() => void copy()} className="sat-btn sat-btn--primary sat-btn--block sat-press mt-4">{copied ? <Check size={15} aria-hidden="true"/> : <Copy size={15} aria-hidden="true"/>}<span aria-live="polite">{copied ? "Copied" : "Copy link"}</span></button>

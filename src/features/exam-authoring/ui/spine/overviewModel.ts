@@ -15,7 +15,6 @@ export interface ModuleOverviewStats {
   ready: number;
   incomplete: number;
   errors: number;
-  pretest: number;
   complete: boolean;
 }
 
@@ -26,7 +25,6 @@ export interface ExamOverviewStats {
   ready: number;
   incomplete: number;
   errors: number;
-  pretest: number;
   /** Questions one candidate actually sees: base + one branch per section. */
   deliveredPerCandidate: number;
   progressPct: number;
@@ -36,7 +34,7 @@ const KNOWN_BASE_KEYS = new Set(["rw-m1", "math-m1"]);
 
 /**
  * Six-module overview derivation (WS6): per-module authored/target +
- * readiness split + pretest count from the shell already in memory — no new
+ * readiness split from the shell already in memory — no new
  * fetch, so the overview can never disagree with the queue rail.
  */
 export function buildExamOverview(sections: AssessmentSectionShell[]): ExamOverviewStats {
@@ -46,7 +44,6 @@ export function buildExamOverview(sections: AssessmentSectionShell[]): ExamOverv
   let ready = 0;
   let incomplete = 0;
   let errors = 0;
-  let pretest = 0;
   for (const section of sections) {
     for (const module of section.modules) {
       const counts: Record<QuestionReadinessStatus, number> = {
@@ -54,10 +51,8 @@ export function buildExamOverview(sections: AssessmentSectionShell[]): ExamOverv
         incomplete: 0,
         error: 0,
       };
-      let modulePretest = 0;
       for (const question of module.questions) {
         counts[question.readiness.status] += 1;
-        if (question.isPretest) modulePretest += 1;
       }
       const moduleAuthored = module.questions.length;
       authored += moduleAuthored;
@@ -65,7 +60,6 @@ export function buildExamOverview(sections: AssessmentSectionShell[]): ExamOverv
       ready += counts.ready;
       incomplete += counts.incomplete;
       errors += counts.error;
-      pretest += modulePretest;
       modules.push({
         sectionId: section.id,
         sectionTitle: section.title,
@@ -76,7 +70,6 @@ export function buildExamOverview(sections: AssessmentSectionShell[]): ExamOverv
         ready: counts.ready,
         incomplete: counts.incomplete,
         errors: counts.error,
-        pretest: modulePretest,
         complete:
           moduleAuthored === module.targetQuestionCount &&
           counts.error === 0 &&
@@ -91,7 +84,6 @@ export function buildExamOverview(sections: AssessmentSectionShell[]): ExamOverv
     ready,
     incomplete,
     errors,
-    pretest,
     deliveredPerCandidate: deliveredPerCandidate(sections),
     progressPct: target > 0 ? Math.min(100, Math.round((authored / target) * 100)) : 0,
   };

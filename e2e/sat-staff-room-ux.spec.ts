@@ -102,6 +102,41 @@ const STUDENT = {
   examId: SCHEDULE.examId,
   examName: SCHEDULE.examTitle,
 };
+const ENTRY_LINK = {
+  id: "link-ux-1",
+  name: "Morning room",
+  versionNumber: 3,
+  publishScope: "full",
+  enabledSections: null,
+  audienceType: "cohort",
+  audienceLabel: "Morning room",
+  accessMode: "student_code",
+  availabilityType: "anytime",
+  status: "live",
+  selectedStudentCount: 0,
+};
+const START_CODE_VIEW = {
+  scheduleId: SCHEDULE.id,
+  cohortName: SCHEDULE.cohortName,
+  examTitle: SCHEDULE.examTitle,
+  code: "135790",
+  generation: 1,
+  opensAt: "2026-10-11T02:00:00.000Z",
+  closesAt: "2026-10-11T06:00:00.000Z",
+  status: "active",
+  acceptingNewStarts: true,
+  serverNow: NOW,
+};
+
+interface RoomTransportOptions {
+  satStartMode?: "proctor" | "access_code";
+  student?: Partial<typeof STUDENT>;
+  alerts?: Record<string, unknown>[];
+  expectedRoster?: Record<string, unknown>[];
+  deviceTransfers?: Record<string, unknown>[];
+  routeQueue?: { enabled: boolean; items: Record<string, unknown>[] };
+  routeQueueFailures?: number;
+}
 
 const SETUP_EXAM = {
   id: "sat-room-setup-exam",
@@ -134,7 +169,19 @@ const SETUP_PUBLISHED_VERSION = {
   createdAt: NOW,
 };
 
-async function installRoomTransport(page: Page): Promise<void> {
+async function installRoomTransport(page: Page, options: RoomTransportOptions = {}) {
+  const schedule = { ...SCHEDULE, satStartMode: options.satStartMode ?? "proctor" };
+  const student = { ...STUDENT, ...options.student };
+  const alerts = options.alerts ?? [];
+  const expectedRoster = options.expectedRoster ?? [];
+  const deviceTransfers = options.deviceTransfers ?? [];
+  let routeQueue = options.routeQueue ?? { enabled: false, items: [] };
+  let routeQueueFailuresRemaining = options.routeQueueFailures ?? 0;
+  let currentStartCode = START_CODE_VIEW.code;
+  let startCodeGeneration = START_CODE_VIEW.generation;
+  const routeAssignments: unknown[] = [];
+  const codeRotations: unknown[] = [];
+
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -155,7 +202,7 @@ async function installRoomTransport(page: Page): Promise<void> {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ success: true, data: [{ schedule: SCHEDULE, runtime: RUNTIME, studentCount: 1, activeCount: 1, joinReadyCount: 1, joinTotalCount: 1, degradedLiveMode: false }] }),
+        body: JSON.stringify({ success: true, data: [{ schedule, runtime: RUNTIME, studentCount: 1, activeCount: 1, joinReadyCount: 1, joinTotalCount: 1, degradedLiveMode: false }] }),
       });
       return;
     }
@@ -165,17 +212,75 @@ async function installRoomTransport(page: Page): Promise<void> {
         contentType: "application/json",
         body: JSON.stringify({
           success: true,
-          data: { schedule: SCHEDULE, runtime: RUNTIME, sessions: [STUDENT], alerts: [], auditLogs: [], notes: [], presence: [], violationRules: [], degradedLiveMode: false },
+          data: { schedule, runtime: RUNTIME, sessions: [student], alerts, auditLogs: [], notes: [], presence: [], violationRules: [], degradedLiveMode: false },
         }),
       });
       return;
     }
+    if (url.pathname.endsWith("/entry-info")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            link: { ...ENTRY_LINK, audienceType: expectedRoster.length ? "selected_students" : ENTRY_LINK.audienceType, selectedStudentCount: expectedRoster.length },
+            roster: expectedRoster,
+          },
+        }),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/start-code/rotate") && route.request().method() === "POST") {
+      codeRotations.push(route.request().postDataJSON());
+      startCodeGeneration += 1;
+      currentStartCode = "246802";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: { ...START_CODE_VIEW, code: currentStartCode, generation: startCodeGeneration } }),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/start-code")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: { ...START_CODE_VIEW, code: currentStartCode, generation: startCodeGeneration } }),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/route-queue")) {
+      if (routeQueueFailuresRemaining > 0) {
+        routeQueueFailuresRemaining -= 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ success: false, error: { code: "UNAVAILABLE", message: "Module 2 queue is temporarily unavailable." } }),
+        });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: routeQueue }) });
+      return;
+    }
+    if (/\/attempts\/[^/]+\/route$/.test(url.pathname) && route.request().method() === "POST") {
+      routeAssignments.push(route.request().postDataJSON());
+      routeQueue = { enabled: true, items: [] };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: {} }) });
+      return;
+    }
     if (url.pathname.endsWith("/device-transfers")) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: [] }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: { items: deviceTransfers } }) });
       return;
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: {} }) });
   });
+
+  return {
+    routeAssignments,
+    codeRotations,
+    recoverRouteQueue: () => { routeQueueFailuresRemaining = 0; },
+  };
 }
 
 async function installGuidedRoomSetupTransport(page: Page) {
@@ -382,10 +487,23 @@ test.describe("SAT staff live-room UX", () => {
       await page.goto("/sat/sessions/sched-ux-1");
 
       await expect(page.getByRole("heading", { level: 1, name: "Morning room" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Student joining" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Share with students" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Exam start code" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Pause exam" })).toBeVisible();
       await expect(page.getByRole("region", { name: "Students" })).toBeVisible();
       await expect(page.getByRole("option", { name: /Open Ananda S\./ })).toBeVisible();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      const horizontalOverflow = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        offenders: Array.from(document.querySelectorAll<HTMLElement>('body *'))
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return { tag: element.tagName, className: String(element.className), left: Math.round(rect.left), right: Math.round(rect.right), width: Math.round(rect.width) };
+          })
+          .filter((element) => element.width > 0 && (element.left < -1 || element.right > window.innerWidth + 1))
+          .slice(0, 12),
+      }));
+      expect(horizontalOverflow.scrollWidth, JSON.stringify(horizontalOverflow)).toBeLessThanOrEqual(width);
       await expectNoSeriousAxeViolations(page, `SAT live room at ${width} CSS px`);
     });
   }
@@ -394,22 +512,26 @@ test.describe("SAT staff live-room UX", () => {
     await installRoomTransport(page);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/sat/sessions/sched-ux-1");
-    await expect(page.getByRole("button", { name: "End exam" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "More" })).toBeVisible();
 
     await page.keyboard.press("Tab");
     await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(page.locator("#sat-main")).toBeFocused();
 
-    let foundEndExam = false;
+    let foundMore = false;
     for (let index = 0; index < 40; index += 1) {
-      if (await page.evaluate(() => document.activeElement?.textContent?.trim() === "End exam")) {
-        foundEndExam = true;
+      if (await page.evaluate(() => document.activeElement?.getAttribute("aria-label") === "More")) {
+        foundMore = true;
         break;
       }
       await page.keyboard.press("Tab");
     }
-    expect(foundEndExam).toBe(true);
+    expect(foundMore).toBe(true);
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menuitem", { name: "Add 5 minutes for the room" })).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(page.getByRole("menuitem", { name: "End exam" })).toBeFocused();
     await page.keyboard.press("Enter");
 
     const confirmation = page.getByRole("alertdialog");
@@ -419,7 +541,113 @@ test.describe("SAT staff live-room UX", () => {
     await expectNoSeriousAxeViolations(page, "SAT live-room confirmation");
     await page.keyboard.press("Escape");
     await expect(confirmation).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "End exam" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "More" })).toBeFocused();
+  });
+
+  test("shows the shared code and correct start instructions, then rotates the code", async ({ page }) => {
+    const recording = await installRoomTransport(page, { satStartMode: "access_code" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/sat/sessions/sched-ux-1");
+
+    await expect(page.getByRole("region", { name: "Exam start code" })).toContainText("135790");
+    await expect(page.getByText("After check-in, students enter the six-digit exam start code shown here.")).toBeVisible();
+    await page.getByRole("button", { name: "Rotate code" }).click();
+    await page.getByRole("button", { name: "Replace code" }).click();
+    await expect(page.getByLabel("6-digit exam start code")).toHaveText("246802");
+    expect(recording.codeRotations).toEqual([{ expectedGeneration: 1 }]);
+
+    await page.getByRole("button", { name: "Share with students" }).click();
+    const share = page.getByRole("dialog", { name: "Share Morning room with students" });
+    await expect(share).toContainText("246802");
+    await expect(share).toContainText("enter the six-digit exam start code shown here");
+    await expect(share).not.toContainText("They wait until you start the exam.");
+    await expect(share.getByRole("button", { name: "Copy link" })).toBeVisible();
+    await expect(share.getByRole("button", { name: "Present QR" })).toBeVisible();
+  });
+
+  test("keeps a listed student visible after check-in is rejected", async ({ page }) => {
+    await installRoomTransport(page, {
+      expectedRoster: [{ ordinal: 1, name: "Budi T.", state: "not_joined", attemptId: null }],
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/sat/sessions/sched-ux-1");
+    const invited = page.getByRole("region", { name: "Invited students" });
+    await expect(invited).toContainText("Budi T.");
+    await expect(invited).toContainText("Invited · Not joined");
+
+    const studentPage = await page.context().newPage();
+    await studentPage.route("**/api/v1/auth/session", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: null }),
+    }));
+    await studentPage.route("**/api/v1/public/access-links/link-ux-1", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "link-ux-1", scheduleId: SCHEDULE.id, examTitle: SCHEDULE.examTitle, providerKey: "sat", versionNumber: 3,
+        publishScope: "full", name: "Morning room", enabledSections: null, audienceType: "selected_students",
+        audienceLabel: "Morning room", accessMode: "student_code", availabilityType: "anytime", opensAt: null, closesAt: null, status: "live",
+      }),
+    }));
+    await studentPage.route("**/api/v1/auth/student/entry", (route) => route.fulfill({
+      status: 403,
+      contentType: "application/json",
+      body: JSON.stringify({ success: false, error: { code: "ACCESS_LINK_STUDENT_NOT_ALLOWED", message: "This student is not on the list." } }),
+    }));
+    await studentPage.goto("/join/link-ux-1");
+    await expect(studentPage.getByRole("heading", { name: "Exam Check-in" })).toBeVisible();
+    await studentPage.getByLabel("Student ID/WCODE").fill("W250999");
+    await studentPage.getByLabel("Full name").fill("Budi T.");
+    await studentPage.getByLabel("Email").fill("budi@example.test");
+    await studentPage.getByRole("button", { name: "Continue" }).click();
+    await expect(studentPage.getByText("This student is not on the list.")).toBeVisible();
+    await expect(invited).toContainText("Invited · Not joined");
+    await studentPage.close();
+  });
+
+  test("groups disconnects and device changes in Needs attention", async ({ page }) => {
+    await installRoomTransport(page, {
+      student: { status: "connecting" },
+      alerts: [{
+        id: "alert-ux-1", severity: "high", type: "NETWORK_DISCONNECTED", studentName: "Ananda S.", studentId: "student-ux-1",
+        timestamp: NOW, message: "Connection lost", isAcknowledged: false,
+      }],
+      deviceTransfers: [{
+        requestId: "transfer-ux-1", attemptId: STUDENT.attemptId, scheduleId: SCHEDULE.id, state: "pending", policyStage: "post_start",
+        reasonCode: "DEVICE_CHANGED", requestedAt: NOW, expiresAt: "2026-10-11T02:15:00.000Z", approvalKind: null, approvalExpiresAt: null,
+        candidateId: STUDENT.studentId, candidateName: STUDENT.studentName, lastServerSaveAt: NOW,
+      }],
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/sat/sessions/sched-ux-1");
+
+    const attention = page.getByRole("region", { name: "Needs attention" });
+    await expect(attention).toContainText("Connection lost");
+    await expect(attention).toContainText("Device change requests (1)");
+    await expect(page.getByRole("option", { name: /Open Ananda S\./ })).toContainText("Disconnected");
+    await expectNoSeriousAxeViolations(page, "SAT room with unresolved student issues");
+  });
+
+  test("retries a failed Module 2 queue and saves the proctor's choice", async ({ page }) => {
+    const recording = await installRoomTransport(page, {
+      routeQueue: {
+        enabled: true,
+        items: [{ attemptId: STUDENT.attemptId, studentName: STUDENT.studentName, sectionKey: "reading-writing", rawCorrect: 12, total: 27 }],
+      },
+      routeQueueFailures: 50,
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/sat/sessions/sched-ux-1");
+
+    const attention = page.getByRole("region", { name: "Needs attention" });
+    await expect(attention.getByRole("alert")).toContainText("Module 2 assignments could not load.");
+    recording.recoverRouteQueue();
+    await attention.getByRole("button", { name: "Retry" }).click();
+    await expect(attention.getByRole("button", { name: "Harder Module 2" })).toBeVisible();
+    await attention.getByRole("button", { name: "Harder Module 2" }).click();
+    await expect(attention.getByRole("status")).toContainText("Module 2 choice saved for Ananda S.");
+    expect(recording.routeAssignments).toEqual([{ sectionKey: "reading-writing", route: "higher" }]);
   });
 });
 

@@ -12,7 +12,7 @@ describe('SatStudentLinkCard', () => {
   it('copies the room entry URL it is given and confirms it', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
-    render(<SatStudentLinkCard url={url} cohortName="Morning" joinedCount={0} onOpenShare={vi.fn()} onPresent={vi.fn()} />);
+    render(<SatStudentLinkCard url={url} cohortName="Morning" onOpenShare={vi.fn()} onPresent={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
 
@@ -22,7 +22,7 @@ describe('SatStudentLinkCard', () => {
 
   it('shows the copy failure instead of claiming success', async () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: vi.fn().mockRejectedValue(new Error('Clipboard blocked.')) } });
-    render(<SatStudentLinkCard url={url} cohortName="Morning" joinedCount={0} onOpenShare={vi.fn()} onPresent={vi.fn()} />);
+    render(<SatStudentLinkCard url={url} cohortName="Morning" onOpenShare={vi.fn()} onPresent={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
 

@@ -1,0 +1,1389 @@
+$ eslint .
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/.generated/touch-investigation/run.ts
+  12:30  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  13:26  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  20:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  22:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  67:82  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/coedit-live/coedit-live.live.ts
+   22:7  warning  'API' is assigned a value but never used. Allowed unused vars must match /^_/u                         @typescript-eslint/no-unused-vars
+   35:1  warning  Unused eslint-disable directive (no problems were reported from '@typescript-eslint/no-var-requires')
+   43:3  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+  179:3  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/exam-builder-full-cycle.spec.ts
+   10:16  warning  'waitForAuthSession' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+   39:16  warning  'createNewExam' is defined but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+  120:16  warning  'configureBasicInfoTab' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  133:16  warning  'configureModulesTab' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  180:16  warning  'configureStandardsTab' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  210:16  warning  'configureTimingTab' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  231:16  warning  'configureSecurityTab' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+  266:16  warning  'addReadingPassage' is defined but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+  275:18  warning  Unexpected any. Specify a different type                                                  @typescript-eslint/no-explicit-any
+  278:17  warning  Unexpected any. Specify a different type                                                  @typescript-eslint/no-explicit-any
+  460:16  warning  'addListeningPart' is defined but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+  466:13  warning  Unexpected any. Specify a different type                                                  @typescript-eslint/no-explicit-any
+  614:16  warning  'configureWritingTasks' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  627:16  warning  'publishAndScheduleExam' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  661:16  warning  'scheduleExamInAdmin' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  690:10  warning  'generatePassageContent' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/frontend-performance.spec.ts
+    3:3   warning  'ADMIN_STORAGE_STATE_PATH' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+    5:3   warning  'STUDENT_STORAGE_STATE_PATH' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   14:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+   28:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+   42:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+   57:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+   72:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+   79:19  warning  'key' is assigned a value but never used. Allowed unused vars must match /^_/u                @typescript-eslint/no-unused-vars
+   91:32  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+   97:27  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  121:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  166:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  171:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  225:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  240:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  249:61  warning  'request' is defined but never used. Allowed unused args must match /^_/u                     @typescript-eslint/no-unused-vars
+  254:63  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  261:44  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  283:11  warning  'isNowVisible' is assigned a value but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+  292:63  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  319:53  warning  'page' is defined but never used. Allowed unused args must match /^_/u                        @typescript-eslint/no-unused-vars
+  327:52  warning  'page' is defined but never used. Allowed unused args must match /^_/u                        @typescript-eslint/no-unused-vars
+  346:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  356:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+  370:25  warning  Unexpected any. Specify a different type                                                      @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/playtest-sat-authoring.spec.ts
+  66:9  warning  'workspace' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/prod-load/00-control-plane.spec.ts
+  132:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  134:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  171:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/prod-load/10-student-shard.spec.ts
+  45:70  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/prod-load/live-multi-user-runner.ts
+  3:25  warning  'Browser' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/student-durability.spec.ts
+  64:7  warning  'GATE_COPY_NEEDLE' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  65:7  warning  'GATE_COPY_KEPT' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/student-ipad-layout.spec.ts
+  39:16  warning  'expectCompactReadingChromeVisible' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/student-security.spec.ts
+  48:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  53:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/support/prodBootstrap.ts
+  142:33  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  191:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  273:55  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/support/studentUi.ts
+  18:16  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  59:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/e2e/telemetry-verification.spec.ts
+  164:71  warning  'page' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  263:55  warning  'page' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  385:32  warning  Unexpected any. Specify a different type                                @typescript-eslint/no-explicit-any
+  391:27  warning  Unexpected any. Specify a different type                                @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/load-runner/e2e/prod-load/live-multi-user-runner.ts
+    3:25  warning  'Browser' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  145:10  warning  'isSubmissionId' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/services/authoring-coedit/src/lifecycleControl.ts
+  509:16  warning  'error' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/services/authoring-coedit/src/telemetry.ts
+  199:3  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/app/monitoring/performanceMonitor.ts
+  154:21  warning  The ref value 'renderTimes.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'renderTimes.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+  165:3   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+  234:14  warning  'error' is defined but never used                                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/app/performance/lazyLoad.tsx
+   6:48  warning  'useRef' is defined but never used. Allowed unused vars must match /^_/u                        @typescript-eslint/no-unused-vars
+  78:7   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/app/performance/memoize.ts
+   16:10  warning  React Hook useMemo received a function whose dependencies are unknown. Pass an inline function instead                                                 react-hooks/exhaustive-deps
+   27:10  warning  React Hook useCallback received a function whose dependencies are unknown. Pass an inline function instead                                             react-hooks/exhaustive-deps
+   98:16  warning  React Hook useMemo has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+  171:14  warning  React Hook useMemo has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+  182:65  warning  React Hook useMemo has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+  193:66  warning  React Hook useMemo has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+  204:57  warning  React Hook useMemo has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+  216:94  warning  React Hook useMemo has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+  240:57  warning  React Hook useMemo has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+  250:10  warning  React Hook useMemo received a function whose dependencies are unknown. Pass an inline function instead                                                 react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/app/performance/performanceTracker.ts
+  238:8  warning  React Hook React.useEffect has an unnecessary dependency: 'componentName'. Either exclude it or remove the dependency array. Outer scope values like 'componentName' aren't valid dependencies because mutating them doesn't re-render the component  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/ActScienceQuestionBuilderPane.tsx
+   81:5   warning  Non-interactive elements should not be assigned mouse or keyboard event listeners   jsx-a11y/no-noninteractive-element-interactions
+  316:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  322:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  359:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  365:19  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  415:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  437:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  568:29  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/ActScienceWorkspace.tsx
+  196:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  199:11  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/CommandPalette.tsx
+  159:13  warning  The autoFocus prop should not be used, as it can reduce usability and accessibility for users  jsx-a11y/no-autofocus
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/PromptTemplateLibrary.tsx
+  116:11  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+  142:15  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+  195:13  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/QuestionBuilderPane.tsx
+  203:9   warning  'handleAddQuestionFromBank' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+  755:10  warning  Unused eslint-disable directive (no problems were reported from 'jsx-a11y/no-static-element-interactions')
+  756:9   warning  Non-interactive elements should not be assigned mouse or keyboard event listeners                           jsx-a11y/no-noninteractive-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/StimulusImageEditor.tsx
+  236:15  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  237:15  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  310:13  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  312:15  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  327:13  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  329:15  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  343:13  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  345:15  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  388:13  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  411:13  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  411:13  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners                                                                                                                  jsx-a11y/no-noninteractive-element-interactions
+  427:15  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  440:13  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  440:13  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/StimulusPane.tsx
+   772:13  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener  jsx-a11y/click-events-have-key-events
+   899:23  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners               jsx-a11y/no-noninteractive-element-interactions
+  1046:15  warning  Form label must have ALL of the following types of associated control: nesting, id              jsx-a11y/label-has-for
+  1047:15  warning  A control must be associated with a text label                                                  jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/WritingTaskPanel.tsx
+    2:10  warning  'ExamState' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+   18:3   warning  'onEditTask' is defined but never used. Allowed unused args must match /^_/u        @typescript-eslint/no-unused-vars
+  221:23  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  221:23  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  222:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  230:23  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  230:23  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  243:25  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  243:25  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  244:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  252:25  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  252:25  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  253:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  263:25  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  263:25  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  264:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  273:25  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  273:25  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  274:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  283:25  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  283:25  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  284:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/AdminExams.tsx
+     3:67   warning  'Archive' is defined but never used. Allowed unused vars must match /^_/u                      @typescript-eslint/no-unused-vars
+     3:122  warning  'FlaskConical' is defined but never used. Allowed unused vars must match /^_/u                 @typescript-eslint/no-unused-vars
+     3:183  warning  'Download' is defined but never used. Allowed unused vars must match /^_/u                     @typescript-eslint/no-unused-vars
+    45:3    warning  'onGoToConfig' is defined but never used. Allowed unused args must match /^_/u                 @typescript-eslint/no-unused-vars
+    46:3    warning  'onGoToReview' is defined but never used. Allowed unused args must match /^_/u                 @typescript-eslint/no-unused-vars
+    52:11   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+   131:3    warning  'onGoToConfig' is defined but never used. Allowed unused args must match /^_/u                 @typescript-eslint/no-unused-vars
+   132:3    warning  'onGoToReview' is defined but never used. Allowed unused args must match /^_/u                 @typescript-eslint/no-unused-vars
+   137:9    warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+   663:13   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+   815:17   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+   816:19   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+   881:17   warning  A form label must be associated with a control                                                 jsx-a11y/label-has-associated-control
+   881:17   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+   882:17   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+   888:19   warning  The autoFocus prop should not be used, as it can reduce usability and accessibility for users  jsx-a11y/no-autofocus
+   895:19   warning  A form label must be associated with a control                                                 jsx-a11y/label-has-associated-control
+   895:19   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+   926:17   warning  A form label must be associated with a control                                                 jsx-a11y/label-has-associated-control
+   926:17   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+   960:17   warning  A form label must be associated with a control                                                 jsx-a11y/label-has-associated-control
+   960:17   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+   982:17   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+   983:19   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+   996:21   warning  A form label must be associated with a control                                                 jsx-a11y/label-has-associated-control
+   996:21   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+  1009:23   warning  A form label must be associated with a control                                                 jsx-a11y/label-has-associated-control
+  1009:23   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+  1010:23   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+  1018:23   warning  A form label must be associated with a control                                                 jsx-a11y/label-has-associated-control
+  1018:23   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+  1019:23   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+  1071:17   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+  1074:17   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+  1080:19   warning  The autoFocus prop should not be used, as it can reduce usability and accessibility for users  jsx-a11y/no-autofocus
+  1200:17   warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+  1203:17   warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+  1209:19   warning  The autoFocus prop should not be used, as it can reduce usability and accessibility for users  jsx-a11y/no-autofocus
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/AdminScheduling.tsx
+  113:6   warning  React Hook useEffect has a missing dependency: 'openCreateModal'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  368:19  warning  Form label must have ALL of the following types of associated control: nesting, id                                  jsx-a11y/label-has-for
+  413:17  warning  Form label must have ALL of the following types of associated control: nesting, id                                  jsx-a11y/label-has-for
+  429:19  warning  Form label must have ALL of the following types of associated control: nesting, id                                  jsx-a11y/label-has-for
+  447:19  warning  Form label must have ALL of the following types of associated control: nesting, id                                  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/AdminSettings.tsx
+  122:19  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  122:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  123:19  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  131:19  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  131:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  132:19  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  160:29  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  169:25  warning  A form label must have accessible text                                              jsx-a11y/label-has-associated-control
+  169:25  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  170:27  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  183:29  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  183:29  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  186:31  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  200:31  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  200:31  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  244:23  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  244:23  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  267:31  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  280:31  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  324:31  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  337:31  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  388:31  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  391:29  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  411:31  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  414:29  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  449:29  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  464:35  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  475:35  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  499:39  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  512:35  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  536:21  warning  A form label must have accessible text                                              jsx-a11y/label-has-associated-control
+  536:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  541:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  548:21  warning  A form label must have accessible text                                              jsx-a11y/label-has-associated-control
+  548:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  553:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  560:21  warning  A form label must have accessible text                                              jsx-a11y/label-has-associated-control
+  560:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  565:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  578:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  626:25  warning  A form label must have accessible text                                              jsx-a11y/label-has-associated-control
+  626:25  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  627:27  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/ExamBulkActionBar.tsx
+  46:9  warning  'confirmingDelete' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/ExamFiltersPanel.tsx
+   31:11  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   31:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   34:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   35:17  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+   55:11  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   55:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   58:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   59:17  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+   79:11  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   79:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   82:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   83:17  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  103:11  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  103:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/ExamSettingsDrawer.tsx
+    53:3   warning  'onRepublishVersion' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+   433:23  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   433:23  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   434:23  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   442:23  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   442:23  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   454:21  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   454:21  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   455:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   464:21  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   464:21  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   465:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   473:21  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   473:21  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   474:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   502:29  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   509:27  warning  A form label must have accessible text                                                jsx-a11y/label-has-associated-control
+   509:27  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   510:29  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   524:33  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   527:33  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   558:33  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   558:33  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   559:33  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   567:33  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   567:33  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   568:33  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   580:33  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   580:33  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   610:35  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   623:35  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   623:35  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   626:35  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   672:23  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   732:25  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   732:25  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   744:25  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   744:25  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   766:19  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   766:19  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   808:27  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   855:17  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   958:29  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   970:29  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   970:29  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   971:29  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   980:29  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   980:29  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+   981:29  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+   990:29  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+   990:29  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1002:35  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+  1002:35  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1003:35  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1015:35  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+  1015:35  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1016:35  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1037:35  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+  1037:35  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1038:35  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1088:35  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+  1088:35  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1089:35  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1101:35  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+  1101:35  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1102:35  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1114:35  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+  1114:35  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1115:35  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1175:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1187:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1199:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1211:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1224:23  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1245:21  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+  1245:21  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1320:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1335:19  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1353:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1365:21  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1372:19  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1400:23  warning  A form label must have accessible text                                                jsx-a11y/label-has-associated-control
+  1400:23  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1401:25  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1561:25  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1562:27  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1573:31  warning  A form label must be associated with a control                                        jsx-a11y/label-has-associated-control
+  1573:31  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1576:31  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1610:25  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+  1815:15  warning  Form label must have ALL of the following types of associated control: nesting, id    jsx-a11y/label-has-for
+  1816:15  warning  A control must be associated with a text label                                        jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/ExamVersionHistory.tsx
+    5:44  warning  'getVersionStatusColor' is defined but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+    5:67  warning  'getVersionStatusLabel' is defined but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+   41:37  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+   42:11  warning  'isCurrentPublished' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   53:36  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+   62:17  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+   72:40  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+   87:9   warning  'hasChildren' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+   92:41  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+   95:11  warning  'isLastChild' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  305:19  warning  'children' is assigned a value but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+  534:17  warning  A form label must be associated with a control                                                 jsx-a11y/label-has-associated-control
+  534:17  warning  Form label must have ALL of the following types of associated control: nesting, id             jsx-a11y/label-has-for
+  535:17  warning  A control must be associated with a text label                                                 jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/GradingSessionList.tsx
+  398:23  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/ObjectiveOverridesPanel.tsx
+  569:23  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  589:29  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  601:31  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  602:33  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  613:23  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  615:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  626:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  628:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  636:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  638:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  647:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  649:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  658:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  660:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/ScheduleSessionModal.tsx
+  177:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  226:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  244:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  266:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  284:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/StudentReviewWorkspace.tsx
+   114:10  warning  'summaryError' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                     @typescript-eslint/no-unused-vars
+   118:10  warning  'writingError' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                     @typescript-eslint/no-unused-vars
+   119:10  warning  'draftError' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                       @typescript-eslint/no-unused-vars
+   759:6   warning  React Hook useCallback has a missing dependency: 'getWritingTaskSubmission'. Either include it or remove the dependency array                               react-hooks/exhaustive-deps
+   782:6   warning  React Hook useCallback has missing dependencies: 'getSectionSubmission' and 'getWritingTaskSubmission'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  1181:25  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1182:25  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1185:21  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1187:23  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1188:23  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1423:17  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                          jsx-a11y/label-has-for
+  1424:19  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1659:21  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                          jsx-a11y/label-has-for
+  1662:21  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1674:21  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1690:15  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1705:15  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1723:19  warning  A form label must be associated with a control                                                                                                              jsx-a11y/label-has-associated-control
+  1723:19  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                          jsx-a11y/label-has-for
+  1724:19  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1746:19  warning  A form label must be associated with a control                                                                                                              jsx-a11y/label-has-associated-control
+  1746:19  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                          jsx-a11y/label-has-for
+  1747:19  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1769:19  warning  A form label must be associated with a control                                                                                                              jsx-a11y/label-has-associated-control
+  1769:19  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                          jsx-a11y/label-has-for
+  1770:19  warning  A control must be associated with a text label                                                                                                              jsx-a11y/control-has-associated-label
+  1918:11  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                          jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/WritingAnnotationCanvas.tsx
+  450:11  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  456:11  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  462:11  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  468:11  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  497:7   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  511:13  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  517:15  warning  The autoFocus prop should not be used, as it can reduce usability and accessibility for users                                                                                                      jsx-a11y/no-autofocus
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/WritingAnnotationCanvasLegacy.tsx
+   71:6    warning  React Hook useEffect has missing dependencies: 'annotations', 'drawings', and 'historyIndex'. Either include them or remove the dependency array                                                   react-hooks/exhaustive-deps
+  300:101  warning  Unexpected any. Specify a different type                                                                                                                                                           @typescript-eslint/no-explicit-any
+  364:11   warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  370:11   warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  376:11   warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  382:11   warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  411:7    warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  425:13   warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  431:15   warning  The autoFocus prop should not be used, as it can reduce usability and accessibility for users                                                                                                      jsx-a11y/no-autofocus
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/admin/gradingReviewUtils.ts
+   27:10  warning  'htmlToPlainText' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  749:10  warning  'getQuestionColumnLabel' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/answer-history/AnswerHistoryPage.tsx
+  275:9   warning  The 'checkpoints' logical expression could make the dependencies of useMemo Hook (at line 335) change on every render. To fix this, wrap the initialization of 'checkpoints' in its own useMemo() Hook  react-hooks/exhaustive-deps
+  458:13  warning  A control must be associated with a text label                                                                                                                                                          jsx-a11y/control-has-associated-label
+  476:23  warning  A control must be associated with a text label                                                                                                                                                          jsx-a11y/control-has-associated-label
+  625:17  warning  A control must be associated with a text label                                                                                                                                                          jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/ClassificationBlock.tsx
+   82:9   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   82:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   83:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  100:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  106:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  123:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  130:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/ClozeBlock.tsx
+  162:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  162:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  185:17  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  228:27  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/DiagramLabelingBlock.tsx
+   26:3   warning  'errors' is assigned a value but never used. Allowed unused args must match /^_/u   @typescript-eslint/no-unused-vars
+   89:9   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   89:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   90:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  101:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  102:11  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  121:9   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  121:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  122:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  131:15  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners   jsx-a11y/no-noninteractive-element-interactions
+  169:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/FlowChartBlock.tsx
+   69:9   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   69:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   70:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+   87:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   94:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  102:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/InsertedImagesEditor.tsx
+  193:21  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  193:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  201:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  225:21  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  225:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  228:21  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  241:23  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners   jsx-a11y/no-noninteractive-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/MapLabelingBlock.tsx
+  121:11  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  122:13  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  140:11  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  140:11  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  144:15  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  158:10  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  158:10  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  167:14  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners                                                                                                                  jsx-a11y/no-noninteractive-element-interactions
+  196:13  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  240:21  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  240:21  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  241:21  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  251:21  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  251:21  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  252:21  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  262:23  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  262:23  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  263:23  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  273:23  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  273:23  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  274:23  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/MatchingBlock.tsx
+  125:23  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/MatchingFeaturesBlock.tsx
+   91:9   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   91:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   92:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  109:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  115:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  139:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  146:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/MultiSelectMCQBlock.tsx
+  102:11  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  102:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  103:11  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  143:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  151:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  152:17  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/NoteCompletionBlock.tsx
+  141:9   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  141:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  142:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  159:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  178:19  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  178:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  179:19  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  193:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/SentenceCompletionBlock.tsx
+  259:9   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  259:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  262:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  280:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  324:21  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  351:19  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  351:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  354:19  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  368:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/ShortAnswerBlock.tsx
+  107:9   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  107:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  110:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  128:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  171:19  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  171:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  174:19  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  184:19  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  184:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/SingleMCQBlock.tsx
+  182:9   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  182:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  185:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  204:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  245:19  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  245:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  248:19  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  263:21  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  263:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  290:29  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/blocks/TFNGBlock.tsx
+  135:17  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+  142:19  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+  143:21  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+  153:21  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+  154:23  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/builder/LayoutContainer.tsx
+  1:17  warning  'useState' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  1:27  warning  'useEffect' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  3:10  warning  'ChevronLeft' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  3:23  warning  'ChevronRight' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/builder/PassageLibrary.tsx
+   19:47  warning  'onClose' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  144:13  warning  A control must be associated with a text label                             jsx-a11y/control-has-associated-label
+  172:11  warning  A control must be associated with a text label                             jsx-a11y/control-has-associated-label
+  179:11  warning  A control must be associated with a text label                             jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/builder/QuestionDetailModal.tsx
+   19:20  warning  'User' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                             @typescript-eslint/no-unused-vars
+  109:5   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  109:5   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  110:7   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  110:7   warning  Non-interactive elements should not be assigned mouse or keyboard event listeners                                                                                                                  jsx-a11y/no-noninteractive-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/builder/SubAnswerTreeEditor.tsx
+  171:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  183:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  184:11  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  235:11  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  235:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  236:11  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  367:9   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  368:11  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/listening/ListeningPartListSidebar.tsx
+  151:5   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  151:5   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  164:7   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  176:17  warning  The autoFocus prop should not be used, as it can reduce usability and accessibility for users                                                                                                      jsx-a11y/no-autofocus
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/passage/PassageListSidebar.tsx
+  127:5  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  127:5  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  141:7  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/passage/PassageMetadataEditor.tsx
+   73:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   73:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  100:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  100:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  112:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  112:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  124:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  124:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  161:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  161:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  174:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  174:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  187:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  187:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/proctor/AlertPanel.tsx
+   12:3   warning  'CheckSquare' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                      @typescript-eslint/no-unused-vars
+  201:17  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  201:17  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  217:17  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  217:17  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  239:17  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  239:17  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  242:17  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  303:11  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  316:9   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  316:9   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  323:9   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  323:9   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  331:9   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  331:9   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  361:19  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/proctor/AuditLogPanel.tsx
+  262:13  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  286:17  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  286:17  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  319:17  warning  A form label must be associated with a control                                                                                                                                                     jsx-a11y/label-has-associated-control
+  319:17  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                                 jsx-a11y/label-has-for
+  322:17  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  345:9   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  345:9   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  352:9   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  352:9   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  359:9   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  359:9   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  383:37  warning  'index' is defined but never used. Allowed unused args must match /^_/u                                                                                                                            @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/proctor/PresenceIndicator.tsx
+  2:10  warning  'Clock' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/proctor/ProctorApp.tsx
+  264:11  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  264:11  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/proctor/ProctorDashboard.tsx
+  269:11  warning  'actor' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/proctor/SessionNotesPanel.tsx
+    6:3   warning  'Filter' is defined but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+  211:15  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  211:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  245:15  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  245:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  248:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/proctor/ViolationRulePanel.tsx
+   12:3   warning  'ChevronDown' is defined but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+   13:3   warning  'ChevronUp' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  250:15  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  250:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  267:17  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  267:17  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  283:17  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  283:17  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  301:15  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  301:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  315:15  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  315:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  339:15  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  339:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/proctor/hooks/useStudentFilters.ts
+  115:13  warning  Unexpected lexical declaration in case block  no-case-declarations
+  121:13  warning  Unexpected lexical declaration in case block  no-case-declarations
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/questionbank/QuestionBankLibrary.tsx
+    2:38  warning  'Plus' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                             @typescript-eslint/no-unused-vars
+  269:5   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  269:5   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  314:5   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  314:5   warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/scoring/BandScoreMatrix.tsx
+  83:17  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+  84:19  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/scoring/GradingRubricPanel.tsx
+   99:19  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+  150:21  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/FormattedText.tsx
+  40:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/HighlightableSurface.tsx
+  35:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  57:30  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/ProtectedExamSelect.tsx
+  247:5   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+  339:13  warning  The attribute aria-selected is not supported by the role button. This role is implicit on the element button  jsx-a11y/role-supports-aria-props
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/ProtectedInput.tsx
+  122:6  warning  React Hook useEffect has a missing dependency: 'flushAnswerDurabilityNow'. Either include it or remove the dependency array                           react-hooks/exhaustive-deps
+  349:6  warning  React Hook useEffect has missing dependencies: 'getResolvedSessionId' and 'getResolvedStudentId'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  411:6  warning  React Hook useEffect has missing dependencies: 'getResolvedSessionId' and 'getResolvedStudentId'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/QuestionRenderer.tsx
+   268:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   276:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+   405:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   572:17  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   575:19  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  1074:21  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/StudentExamPhaseRenderer.tsx
+  8:10  warning  'useStudentRuntime' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/StudentReading.tsx
+  117:9  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  117:9  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/StudentScience.tsx
+  271:9  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  271:9  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/StudentSplitPaneResizer.tsx
+  326:5  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners  jsx-a11y/no-noninteractive-element-interactions
+  336:7  warning  `tabIndex` should only be declared on interactive elements                         jsx-a11y/no-noninteractive-tabindex
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/StudentWritingPanes.tsx
+  71:11  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners  jsx-a11y/no-noninteractive-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/StudentZoomableMedia.tsx
+  131:6   warning  React Hook useEffect has a missing dependency: 'handleClose'. Either include it or remove the dependency array                                                                                     react-hooks/exhaustive-deps
+  168:6   warning  React Hook useEffect has a missing dependency: 'recomputeFitScale'. Either include it or remove the dependency array                                                                               react-hooks/exhaustive-deps
+  245:13  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners                                                                                                                  jsx-a11y/no-noninteractive-element-interactions
+  272:9   warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  272:9   warning  Non-interactive elements should not be assigned mouse or keyboard event listeners                                                                                                                  jsx-a11y/no-noninteractive-element-interactions
+  281:11  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  281:11  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  346:19  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners                                                                                                                  jsx-a11y/no-noninteractive-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/TableCompletionSlotCell.tsx
+  48:5  warning  A control must be associated with a text label  jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/__tests__/StudentKeyboardOnlyPath.test.tsx
+  74:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/highlightV2Persistence.tsx
+  76:5  warning  React Hook useMemo has a missing dependency: 'clearHighlights'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/layout/studentCapabilities.ts
+  5:3  warning  'getStudentLayoutMode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/providers/StudentAttemptProvider.tsx
+    54:3   warning  'useStudentRuntime' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+   875:6   warning  React Hook useCallback has unnecessary dependencies: 'persistenceEnabled', 'setRuntimeAttemptSyncState', 'setStorageDurabilityBlocking', and 'syncAttemptState'. Either exclude them or remove the dependency array                                                                              react-hooks/exhaustive-deps
+  1133:54  warning  The ref value 'objectiveFlushTimeoutRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'objectiveFlushTimeoutRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+  1136:52  warning  The ref value 'writingFlushTimeoutRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'writingFlushTimeoutRef.current' to a variable inside the effect, and use that variable in the cleanup function      react-hooks/exhaustive-deps
+  1350:45  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                         @typescript-eslint/no-explicit-any
+  1399:5   warning  React Hook useCallback has an unnecessary dependency: 'applyPatch'. Either exclude it or remove the dependency array                                                                                                                                                                             react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/providers/StudentKeyboardProvider.tsx
+  14:10  warning  'useStudentRuntime' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/providers/StudentNetworkProvider.tsx
+  24:10  warning  'useStudentRuntime' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/providers/StudentProctoringProvider.tsx
+  19:10  warning  'useStudentRuntime' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/providers/StudentRuntimeProvider.tsx
+  1151:5  warning  React Hook useMemo has a missing dependency: 'runtimeState'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/useSplitPaneResize.ts
+  485:5  warning  React Hook useCallback has a missing dependency: 'maxMaterialRatio'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  607:6  warning  React Hook useMemo has a missing dependency: 'renderedRatio'. Either include it or remove the dependency array         react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/student/useStudentSubmissionOrchestration.ts
+  97:33  warning  The ref value 'cancellationControllerRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'cancellationControllerRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/ui/FormInput.tsx
+  48:9  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  53:7  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/ui/Input.tsx
+  39:9  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/ui/Select.tsx
+  44:9  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/ui/StatusBadge.tsx
+  2:57  warning  'Edit' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/ui/Textarea.tsx
+  42:9  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/workspaces/ListeningWorkspace.tsx
+  265:7   warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  265:7   warning  Media elements such as <audio> and <video> must have a <track> for captions                                                                                                                        jsx-a11y/media-has-caption
+  396:17  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  396:17  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  431:19  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  468:17  warning  Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  468:17  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  487:23  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+  501:21  warning  A control must be associated with a text label                                                                                                                                                     jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/workspaces/SpeakingWorkspace.tsx
+   87:27  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  108:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  128:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  155:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  173:25  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  220:27  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  241:21  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  241:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  243:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  272:21  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  272:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  274:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  329:17  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  344:17  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/components/workspaces/WritingWorkspace.tsx
+  260:21  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  260:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  360:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  421:27  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  462:29  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  482:27  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  530:27  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  530:27  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  547:27  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  547:27  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  548:27  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  561:27  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  561:27  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  562:27  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  581:21  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  581:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  583:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  635:21  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  635:21  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  637:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  697:23  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  697:23  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  698:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  726:23  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  726:23  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  727:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  755:23  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  755:23  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  756:23  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  920:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/constants/examDefaults.ts
+  15:3  warning  'WritingTaskType' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/auth/ActivateAccountPage.tsx
+   76:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   79:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+   90:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   93:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  105:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  108:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/auth/LoginPage.tsx
+  140:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  143:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  155:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  158:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/auth/PasswordResetCompletePage.tsx
+  70:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  73:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  85:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  88:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/auth/PasswordResetRequestPage.tsx
+  62:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  65:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/auth/authSession.tsx
+  222:18  warning  'retryError' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/components/BasicInfoTab.tsx
+   68:15  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   68:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   69:15  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+   77:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   91:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+   91:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+   92:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  101:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  101:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  102:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  110:13  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  110:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  111:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/components/ModulesTab.tsx
+    2:38  warning  'Trash2' is defined but never used. Allowed unused vars must match /^_/u                      @typescript-eslint/no-unused-vars
+   61:9   warning  'removeWritingTask' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   95:21  warning  A control must be associated with a text label                                                jsx-a11y/control-has-associated-label
+  102:19  warning  A form label must have accessible text                                                        jsx-a11y/label-has-associated-control
+  102:19  warning  Form label must have ALL of the following types of associated control: nesting, id            jsx-a11y/label-has-for
+  103:21  warning  A control must be associated with a text label                                                jsx-a11y/control-has-associated-label
+  117:25  warning  Form label must have ALL of the following types of associated control: nesting, id            jsx-a11y/label-has-for
+  128:25  warning  A control must be associated with a text label                                                jsx-a11y/control-has-associated-label
+  169:25  warning  A form label must be associated with a control                                                jsx-a11y/label-has-associated-control
+  169:25  warning  Form label must have ALL of the following types of associated control: nesting, id            jsx-a11y/label-has-for
+  170:25  warning  A control must be associated with a text label                                                jsx-a11y/control-has-associated-label
+  178:25  warning  A form label must be associated with a control                                                jsx-a11y/label-has-associated-control
+  178:25  warning  Form label must have ALL of the following types of associated control: nesting, id            jsx-a11y/label-has-for
+  179:25  warning  A control must be associated with a text label                                                jsx-a11y/control-has-associated-label
+  191:25  warning  A form label must be associated with a control                                                jsx-a11y/label-has-associated-control
+  191:25  warning  Form label must have ALL of the following types of associated control: nesting, id            jsx-a11y/label-has-for
+  221:27  warning  Form label must have ALL of the following types of associated control: nesting, id            jsx-a11y/label-has-for
+  236:27  warning  A form label must be associated with a control                                                jsx-a11y/label-has-associated-control
+  236:27  warning  Form label must have ALL of the following types of associated control: nesting, id            jsx-a11y/label-has-for
+  239:27  warning  A control must be associated with a text label                                                jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/components/PublishActions.tsx
+   46:3   warning  'onNavigateToConfig' is defined but never used. Allowed unused args must match /^_/u   @typescript-eslint/no-unused-vars
+   47:3   warning  'onNavigateToBuilder' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  386:13  warning  A form label must be associated with a control                                         jsx-a11y/label-has-associated-control
+  386:13  warning  Form label must have ALL of the following types of associated control: nesting, id     jsx-a11y/label-has-for
+  493:11  warning  A form label must be associated with a control                                         jsx-a11y/label-has-associated-control
+  493:11  warning  Form label must have ALL of the following types of associated control: nesting, id     jsx-a11y/label-has-for
+  557:13  warning  A form label must be associated with a control                                         jsx-a11y/label-has-associated-control
+  557:13  warning  Form label must have ALL of the following types of associated control: nesting, id     jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/components/PublishConfirmationModal.tsx
+    4:15  warning  'PublishReadiness' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   37:3   warning  'exam' is defined but never used. Allowed unused args must match /^_/u              @typescript-eslint/no-unused-vars
+  217:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/components/SecurityTab.tsx
+   70:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+   85:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  103:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  115:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  122:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  150:15  warning  A form label must have accessible text                                              jsx-a11y/label-has-associated-control
+  150:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  151:17  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/components/StandardsTab.tsx
+  226:15  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  286:17  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  286:17  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  298:17  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  298:17  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  320:11  warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  320:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  362:19  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  409:9   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/components/TimingTab.tsx
+   15:9   warning  The 'sectionKeys' conditional could make the dependencies of useMemo Hook (at line 52) change on every render. To fix this, wrap the initialization of 'sectionKeys' in its own useMemo() Hook  react-hooks/exhaustive-deps
+  204:13  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  206:15  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  262:21  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  275:21  warning  A form label must be associated with a control                                                                                                                                                  jsx-a11y/label-has-associated-control
+  275:21  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  276:21  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  286:21  warning  A form label must be associated with a control                                                                                                                                                  jsx-a11y/label-has-associated-control
+  286:21  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  287:21  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  297:21  warning  A form label must be associated with a control                                                                                                                                                  jsx-a11y/label-has-associated-control
+  297:21  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  309:27  warning  A form label must be associated with a control                                                                                                                                                  jsx-a11y/label-has-associated-control
+  309:27  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  310:27  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  322:27  warning  A form label must be associated with a control                                                                                                                                                  jsx-a11y/label-has-associated-control
+  322:27  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  323:27  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  344:27  warning  A form label must be associated with a control                                                                                                                                                  jsx-a11y/label-has-associated-control
+  344:27  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  345:27  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  395:27  warning  A form label must be associated with a control                                                                                                                                                  jsx-a11y/label-has-associated-control
+  395:27  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  396:27  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  408:27  warning  A form label must be associated with a control                                                                                                                                                  jsx-a11y/label-has-associated-control
+  408:27  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  409:27  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  421:27  warning  A form label must be associated with a control                                                                                                                                                  jsx-a11y/label-has-associated-control
+  421:27  warning  Form label must have ALL of the following types of associated control: nesting, id                                                                                                              jsx-a11y/label-has-for
+  422:27  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  503:13  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  516:13  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  529:13  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  542:13  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+  555:15  warning  A control must be associated with a text label                                                                                                                                                  jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/components/ValidationSummary.tsx
+  147:9  warning  The element ul has an implicit role of list. Defining this explicitly is redundant and should be avoided  jsx-a11y/no-redundant-roles
+  169:9  warning  The element ul has an implicit role of list. Defining this explicitly is redundant and should be avoided  jsx-a11y/no-redundant-roles
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/routes/BuilderRoot.tsx
+  193:5  warning  'exam' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                        @typescript-eslint/no-unused-vars
+  196:5  warning  'handleArchive' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                               @typescript-eslint/no-unused-vars
+  197:5  warning  'handleOpenScheduling' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                        @typescript-eslint/no-unused-vars
+  198:5  warning  'handlePublish' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                               @typescript-eslint/no-unused-vars
+  200:5  warning  'handleSaveDraft' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                             @typescript-eslint/no-unused-vars
+  201:5  warning  'handleSchedulePublish' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                       @typescript-eslint/no-unused-vars
+  202:5  warning  'handleUnpublish' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                             @typescript-eslint/no-unused-vars
+  353:6  warning  React Hook useEffect has a missing dependency: 'updateBuilderState'. Either include it or remove the dependency array                                                                                  react-hooks/exhaustive-deps
+  411:9  warning  The 'saveDraftNow' function makes the dependencies of useMemo Hook (at line 767) change on every render. To fix this, wrap the definition of 'saveDraftNow' in its own useCallback() Hook              react-hooks/exhaustive-deps
+  434:9  warning  The 'updateBuilderState' function makes the dependencies of useMemo Hook (at line 767) change on every render. To fix this, wrap the definition of 'updateBuilderState' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  450:9  warning  The 'handleUndo' function makes the dependencies of useMemo Hook (at line 767) change on every render. To fix this, wrap the definition of 'handleUndo' in its own useCallback() Hook                  react-hooks/exhaustive-deps
+  466:9  warning  The 'handleRedo' function makes the dependencies of useMemo Hook (at line 767) change on every render. To fix this, wrap the definition of 'handleRedo' in its own useCallback() Hook                  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/routes/ExamAnswerKeyRoute.tsx
+   17:6    warning  'SaveStatus' is defined but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+  240:15   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  240:15   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  252:15   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  252:15   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  395:70   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  412:85   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  413:30   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  417:11   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  417:11   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  420:116  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  434:75   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  451:79   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  454:34   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  462:120  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  471:79   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  474:34   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  482:116  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  491:94   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  494:30   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  511:48   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  511:75   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  512:86   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  515:11   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  515:11   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  522:31   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  533:85   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  536:11   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  536:11   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  537:11   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  549:47   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  549:73   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  552:25   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  553:22   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  559:32   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  560:15   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  561:17   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  581:54   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  581:83   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  582:21   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  583:44   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  583:80   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  584:47   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  586:43   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  592:32   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  593:15   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  594:17   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  609:71   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  612:31   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  616:11   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  616:11   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  617:11   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  629:71   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  632:30   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  636:11   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  636:11   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  637:11   warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+  652:50   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  652:79   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  653:44   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  653:68   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  657:11   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  657:11   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  676:47   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  676:73   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  677:47   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  677:74   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  681:11   warning  A form label must be associated with a control                                      jsx-a11y/label-has-associated-control
+  681:11   warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  711:44   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  712:24   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  715:84   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  728:49   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  732:31   warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/routes/ExamPreviewRoute.tsx
+  269:9  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/services/previewRuntimeSessionService.ts
+  188:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  340:23  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/utils/answerKeyOverview.ts
+  360:30  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  360:53  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  366:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  369:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  378:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  381:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  391:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  393:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  400:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  402:33  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  410:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  412:33  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  420:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  422:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  427:42  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  437:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  439:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  444:42  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  473:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  475:29  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/builder/utils/builderStateRecovery.ts
+  1:26  warning  'ModuleType' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/content-library/ui/Library/Library.tsx
+  47:9  warning  'showSkeleton' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/import/QuestionImportSheet.tsx
+  118:13  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/editorBinding.ts
+  140:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  140:59  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  143:50  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  143:60  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/release/ClassroomPlanField.tsx
+  29:7  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/spine/CommandPalette.tsx
+  14:328  warning  The autoFocus prop should not be used, as it can reduce usability and accessibility for users  jsx-a11y/no-autofocus
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/spine/QuestionCardStack.tsx
+  187:9  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners  jsx-a11y/no-noninteractive-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/spine/QuestionQueueRail.tsx
+  242:7  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/spine/RailResizer.tsx
+  62:5  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners                                   jsx-a11y/no-noninteractive-element-interactions
+  69:7  warning  `tabIndex` should only be declared on interactive elements                                                          jsx-a11y/no-noninteractive-tabindex
+  72:7  warning  Unused eslint-disable directive (no problems were reported from 'jsx-a11y/no-noninteractive-element-interactions')
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-rendering/RichStructuredContentRenderer.tsx
+    1:1   warning  Unused eslint-disable directive (no problems were reported from 'jsx-a11y/no-noninteractive-element-interactions')
+  286:65  warning  The ref value 'loadGeneration.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'loadGeneration.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-rendering/answers/SingleChoiceAnswer.tsx
+  25:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  31:13  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student-delivery/hooks/useSatExamController.ts
+    36:3  warning  'calculatorWorkspaceKey' is defined but never used. Allowed unused vars must match /^_/u                          @typescript-eslint/no-unused-vars
+    37:3  warning  'clearCalculatorWorkspace' is defined but never used. Allowed unused vars must match /^_/u                        @typescript-eslint/no-unused-vars
+   819:6  warning  React Hook useEffect has a missing dependency: 'candidateId'. Either include it or remove the dependency array    react-hooks/exhaustive-deps
+  1262:5  warning  React Hook useCallback has a missing dependency: 'candidateId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student-delivery/hooks/useSatResponsePersistence.ts
+  372:28  warning  The ref value 'evidenceUploadsRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'evidenceUploadsRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student-delivery/ui/annotations/useSatAnnotationSelection.ts
+  150:26  warning  The ref value 'ownedTouchPointers.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'ownedTouchPointers.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student-delivery/ui/tools/__tests__/SatCalculatorGestures.test.tsx
+  42:33  warning  Elements with the ARIA role "radio" must have the following attributes defined: aria-checked  jsx-a11y/role-has-required-aria-props
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student-delivery/ui/transitions/SatStartCodeScreen.tsx
+  113:11  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  116:11  warning  A control must be associated with a text label                                      jsx-a11y/control-has-associated-label
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/application/exam-session/studentExamStoreFactory.ts
+  106:33  warning  'get' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/hooks/exam-session/StudentExamSessionProvider.tsx
+  79:6  warning  React Hook useEffect has a missing dependency: 'seed'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/student/hooks/useStudentSessionRouteData.ts
+  670:5  warning  React Hook useCallback has a missing dependency: 'studentRealtimeTransport'. Either include it or remove the dependency array                              react-hooks/exhaustive-deps
+  739:5  warning  React Hook useCallback has missing dependencies: 'attemptSnapshot?.id' and 'studentRealtimeTransport'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/routes/SatResultDetailRoute.tsx
+  103:9  warning  The 'questions' conditional could make the dependencies of useMemo Hook (at line 112) change on every render. To fix this, wrap the initialization of 'questions' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatPage.tsx
+  324:7  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+  466:7  warning  Form label must have ALL of the following types of associated control: nesting, id  jsx-a11y/label-has-for
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/examAdapterService.ts
+   8:3  warning  'ClassificationBlock' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+  16:3  warning  'FlowChartBlock' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  18:3  warning  'MatchingBlock' is defined but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  19:3  warning  'MatchingFeaturesBlock' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/examDeliveryService.ts
+  283:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  284:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  310:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  311:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  444:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  445:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  472:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  473:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  502:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  503:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  535:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  571:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/examLifecycleService.ts
+    20:3   warning  'StatusTransition' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   150:40  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+   219:47  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+   228:49  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+   391:49  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+   645:52  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  1543:47  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  1561:28  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+  1858:52  warning  Unexpected any. Specify a different type                                            @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/examRepository.ts
+  142:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  148:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  287:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  292:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  303:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  321:41  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  334:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  350:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  364:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  442:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  443:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  479:38  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  492:38  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  517:38  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/gradingService.ts
+  604:5  warning  'teacherName' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  605:5  warning  'reason' is defined but never used. Allowed unused args must match /^_/u       @typescript-eslint/no-unused-vars
+  777:5  warning  'teacherName' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  778:5  warning  'reason' is defined but never used. Allowed unused args must match /^_/u       @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/studentAttemptRepository.ts
+   5:29  warning  'clearAttemptCredentialFromAdapter' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  16:3   warning  'StudentFinalAnswerPatch' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+  22:3   warning  'mergeStudentAttemptRecovery' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  29:3   warning  'emitStudentObservabilityMetric' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  30:3   warning  'withStudentObservabilityDimensions' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/hooks/useAsyncPolling.ts
+  118:6  warning  React Hook useEffect has a missing dependency: 'resolveIntervalMs'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/test/studentAnswerLoss.browser-probe.tsx
+  18:314  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  20:12   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/test/studentAnswerLoss.browser-runner.ts
+   8:17   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  12:67   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  12:104  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  15:39   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  17:39   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  19:71   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  19:108  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  23:315  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  26:39   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  29:276  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  29:313  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  31:229  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  34:172  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/utils/examUtils.ts
+  33:3  warning  'ClassificationItem' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  34:3  warning  'MatchingFeature' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+
+✖ 1071 problems (0 errors, 1071 warnings)
+  0 errors and 10 warnings potentially fixable with the `--fix` option.
+
+LINT_EXIT=0

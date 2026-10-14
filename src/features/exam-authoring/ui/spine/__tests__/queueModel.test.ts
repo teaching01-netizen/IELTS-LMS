@@ -14,7 +14,6 @@ function summary(overrides: Partial<AssessmentQuestionSummary> & { examQuestionI
     questionId: `${overrides.examQuestionId}-base`,
     questionRevisionId: `${overrides.examQuestionId}-rev`,
     displayOrder: 0,
-    isPretest: false,
     questionType: "single_choice",
     semanticRevision: 1,
     revision: 1,

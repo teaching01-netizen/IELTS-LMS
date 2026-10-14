@@ -289,9 +289,9 @@ describe("SatDeliveryReleasePage", () => {
       blocking: true,
     };
     const unreachableIssue: AssessmentValidationIssue = {
-      code: "sat.module.pretest_count",
+      code: "sat.module.missing",
       path: "unmapped",
-      message: "Pretest counts are unavailable.",
+      message: "Module state is unavailable.",
       blocking: true,
     };
     render(
@@ -313,7 +313,7 @@ describe("SatDeliveryReleasePage", () => {
     expect(onIssueClick).toHaveBeenCalledWith(converterIssue);
 
     // No destination: the row says so and cannot be pressed into nowhere.
-    const unreachable = screen.getByRole("button", { name: /Pretest counts are unavailable/ });
+    const unreachable = screen.getByRole("button", { name: /Module state is unavailable/ });
     expect(unreachable).toBeDisabled();
     expect(within(unreachable).getByText("No automatic fix")).toBeInTheDocument();
   });

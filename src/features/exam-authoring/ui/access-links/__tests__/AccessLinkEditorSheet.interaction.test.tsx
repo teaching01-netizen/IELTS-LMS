@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccessLinkEditorSheet } from "../AccessLinkEditorSheet";
 
@@ -14,7 +14,7 @@ beforeEach(() => {
 });
 
 /**
- * AT-21/01 — pressing Save is the highest-stakes press on this page (it writes
+ * AT-21/01 — pressing Create is the highest-stakes press on this page (it writes
  * a student-facing link), so the pressed control must survive its own work:
  * focus stays on it, its box does not change size, the double fire is refused,
  * and the pending state is announced through aria-busy rather than by yanking
@@ -54,7 +54,8 @@ describe("AccessLinkEditorSheet interaction contract", () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     const { unmount } = renderSheet({ onCreate });
     fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday Class" } });
-    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom_higher" } });
+    fireEvent.change(screen.getByLabelText("Session type"), { target: { value: "classroom" } });
+    fireEvent.change(screen.getByLabelText("Module 2 routing"), { target: { value: "classroom_higher" } });
     fireEvent.click(screen.getByRole("button", { name: "Create room" }));
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
     expect(onCreate).toHaveBeenLastCalledWith(
@@ -72,9 +73,9 @@ describe("AccessLinkEditorSheet interaction contract", () => {
     expect(sent).not.toHaveProperty("satRoutePolicy");
   });
 
-  it("AT-21: an in-flight save is announced, keeps focus, and refuses a second fire", async () => {
-    let resolveSave: (() => void) | undefined;
-    const onCreate = vi.fn(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
+  it("AT-21: an in-flight create is announced, keeps focus, and refuses a second fire", async () => {
+    let resolveCreate: (() => void) | undefined;
+    const onCreate = vi.fn(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
     const { rerender, props } = renderSheet({ onCreate });
 
     fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Saturday Class — September" } });
@@ -85,20 +86,20 @@ describe("AccessLinkEditorSheet interaction contract", () => {
 
     // The parent flips isSaving while the request is in flight.
     rerender(<AccessLinkEditorSheet {...props} isSaving />);
-    const pendingSave = screen.getByRole("button", { name: /Saving/ });
-    expect(pendingSave).toHaveAttribute("aria-busy", "true");
+    const pendingCreate = screen.getByRole("button", { name: /Creating/ });
+    expect(pendingCreate).toHaveAttribute("aria-busy", "true");
     // Pressed through the pending window: the control stays present, focused,
     // and the same size (min-w covers the longest label plus the spinner).
-    expect(pendingSave).not.toBeDisabled();
-    expect(document.activeElement).toBe(pendingSave);
-    expect(pendingSave.className).toContain("min-w-[8.5rem]");
-    expect(pendingSave.className).toContain("sat-press");
+    expect(pendingCreate).not.toBeDisabled();
+    expect(document.activeElement).toBe(pendingCreate);
+    expect(pendingCreate.className).toContain("min-w-[8.5rem]");
+    expect(pendingCreate.className).toContain("sat-press");
 
-    fireEvent.click(pendingSave);
-    fireEvent.click(pendingSave);
+    fireEvent.click(pendingCreate);
+    fireEvent.click(pendingCreate);
     expect(onCreate).toHaveBeenCalledTimes(1);
 
-    resolveSave?.();
+    await act(async () => { resolveCreate?.(); });
   });
 
   it("AT-21: a read-only link disables the save rather than faking a press", () => {

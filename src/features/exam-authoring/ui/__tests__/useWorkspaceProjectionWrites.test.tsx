@@ -160,7 +160,6 @@ function Harness(props: HarnessProps) {
     selectedExamQuestionId: "eq-1",
     baseQuestionExamQuestionId: "eq-1",
     baseQuestion: props.baseQuestion,
-    isPretest: false,
     draft,
     draftRef,
     setDraft,

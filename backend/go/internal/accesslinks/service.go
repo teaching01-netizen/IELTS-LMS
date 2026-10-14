@@ -200,6 +200,35 @@ type Overview struct {
 	Links                   []AccessLink             `json:"links"`
 }
 
+// SessionEntryInfo is the schedule-scoped, staff-safe view used by the SAT
+// room. It deliberately omits student codes and email addresses from the
+// restricted roster.
+type SessionEntryInfo struct {
+	Link   *SessionEntryLink       `json:"link"`
+	Roster []SessionEntryRosterRow `json:"roster"`
+}
+
+type SessionEntryLink struct {
+	ID                   string                     `json:"id"`
+	Name                 string                     `json:"name"`
+	VersionNumber        int32                      `json:"versionNumber"`
+	PublishScope         examdomain.SATPublishScope `json:"publishScope"`
+	EnabledSections      []string                   `json:"enabledSections"`
+	AudienceType         AudienceType               `json:"audienceType"`
+	AudienceLabel        *string                    `json:"audienceLabel"`
+	AccessMode           Mode                       `json:"accessMode"`
+	AvailabilityType     AvailabilityType           `json:"availabilityType"`
+	Status               Status                     `json:"status"`
+	SelectedStudentCount int64                      `json:"selectedStudentCount"`
+}
+
+type SessionEntryRosterRow struct {
+	Ordinal   int     `json:"ordinal"`
+	Name      string  `json:"name"`
+	State     string  `json:"state"`
+	AttemptID *string `json:"attemptId"`
+}
+
 // AccessLink mirrors AssessmentAccessLink.
 type AccessLink struct {
 	ID                 string                     `json:"id"`
@@ -1375,6 +1404,78 @@ func (s *Service) ListMembers(ctx context.Context, linkID string) ([]Member, err
 		return nil
 	})
 	return out, err
+}
+
+// SessionEntryInfo returns the one access-link configuration attached to a
+// schedule and, for roster-restricted rooms, the admitted students' current
+// entry state. Student codes and email addresses stay inside this service.
+func (s *Service) SessionEntryInfo(ctx context.Context, scheduleID string) (SessionEntryInfo, error) {
+	info := SessionEntryInfo{Roster: []SessionEntryRosterRow{}}
+	link, err := scanAccessLink(s.db.QueryRowContext(ctx, linkSelectSQL()+" WHERE l.schedule_id = ?", scheduleID))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return info, nil
+		}
+		return info, err
+	}
+	info.Link = &SessionEntryLink{
+		ID: link.ID, Name: link.Name, VersionNumber: link.VersionNumber,
+		PublishScope: link.PublishScope, EnabledSections: link.EnabledSections,
+		AudienceType: link.AudienceType, AudienceLabel: link.AudienceLabel,
+		AccessMode: link.AccessMode, AvailabilityType: link.AvailabilityType,
+		Status: link.Status, SelectedStudentCount: link.SelectedStudentCount,
+	}
+	if link.AudienceType != AudienceSelectedStudents {
+		return info, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT COALESCE(NULLIF(m.student_name, ''), NULLIF(r.student_name, ''), ''),
+		       r.id, r.access_state, a.id, a.phase, a.proctor_status, a.submitted_at
+		FROM assessment_access_link_members m
+		LEFT JOIN schedule_registrations r
+		  ON r.schedule_id = ? AND r.wcode = m.student_code
+		LEFT JOIN student_attempts a ON a.registration_id = r.id
+		WHERE m.link_id = ?
+		ORDER BY m.student_code`, link.ScheduleID, link.ID)
+	if err != nil {
+		return info, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var registrationID, accessState, attemptID, phase, proctorStatus sql.NullString
+		var submittedAt sql.NullTime
+		if err := rows.Scan(&name, &registrationID, &accessState, &attemptID, &phase, &proctorStatus, &submittedAt); err != nil {
+			return info, err
+		}
+		ordinal := len(info.Roster) + 1
+		name = strings.TrimSpace(name)
+		if name == "" {
+			name = fmt.Sprintf("Invited student %d", ordinal)
+		}
+		state := "not_joined"
+		switch {
+		case registrationID.Valid && (accessState.String == "submitted" || submittedAt.Valid || phase.String == "post-exam" || proctorStatus.String == "terminated"):
+			state = "finished"
+		case registrationID.Valid && phase.String == "exam":
+			state = "working"
+		case registrationID.Valid:
+			state = "waiting"
+		}
+		var attempt *string
+		if attemptID.Valid {
+			value := attemptID.String
+			attempt = &value
+		}
+		info.Roster = append(info.Roster, SessionEntryRosterRow{
+			Ordinal: ordinal, Name: name, State: state, AttemptID: attempt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return info, err
+	}
+	return info, nil
 }
 
 // Activity mirrors activity(): the latest 50 join/start/submit events for

@@ -261,10 +261,11 @@ describe('roster attention and ordering', () => {
   } as StudentSession;
   const lowTime: StudentSession = { ...student, id: 'attempt-3', name: 'Citra W.', runtimeModuleRemainingSeconds: 60 };
 
-  it('names the reason a student needs attention, newest integrity event first', () => {
+  it('counts current help requests and ignores historical warnings and violations', () => {
     expect(studentAttentionReason(student, false)).toBeNull();
     expect(studentAttentionReason(student, true)).toBe('Device change pending');
-    expect(studentAttentionReason(flagged, false)).toBe('Integrity: fullscreen exit (+1) · 1 warning sent');
+    expect(studentAttentionReason(flagged, false)).toBeNull();
+    expect(studentAttentionReason(flagged, false, ['Connection lost'])).toBe('Connection lost');
   });
 
   it('sorts by name, by attention, and by the clock the row shows', () => {

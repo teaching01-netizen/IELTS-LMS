@@ -678,8 +678,8 @@ func TestEquivalenceRoutingConfigParsing(t *testing.T) {
 	if policy.MinimumCorrectForHigher != 0 {
 		t.Fatalf("absent threshold key must stay 0, got %+v", policy)
 	}
-	if policy.OperationalCount != 20 {
-		t.Fatalf("operational count must derive from the SAT math blueprint (20), got %+v", policy)
+	if policy.OperationalCount != 22 {
+		t.Fatalf("operational count must derive from the SAT math blueprint (22), got %+v", policy)
 	}
 	if policy.Revision != 2 {
 		t.Fatalf("routing revision = %d, want 2", policy.Revision)

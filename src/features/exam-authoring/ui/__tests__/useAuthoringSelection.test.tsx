@@ -32,7 +32,6 @@ function question(examQuestionId: string, displayOrder = 1): AssessmentQuestionS
     questionId: `question-${examQuestionId}`,
     questionRevisionId: `revision-${examQuestionId}`,
     displayOrder,
-    isPretest: false,
     questionType: "single_choice",
     semanticRevision: 1,
     revision: 1,
@@ -215,5 +214,23 @@ describe("authoring selection adoption", () => {
     expect(onQuestionAdopted).toHaveBeenCalledWith("eq-1");
     expect(result.current.selectedExamQuestionId).toBe("eq-1");
     expect(onDeepLinkField).not.toHaveBeenCalled();
+    // Consumed and dropped, exactly like the module link above: a stale
+    // `?question=` must not sit in the URL waiting for a shell that contains
+    // it again, and it must not survive as a link that no longer means
+    // anything to whoever copies the address bar.
+    expect(currentSearch).toBe("");
+  });
+
+  it("drops a stray field link that names no question", () => {
+    const onDeepLinkField = vi.fn();
+    const { result } = renderSelection({
+      shell: shell("version-1", [module("module-1", [question("eq-1")])]),
+      onDeepLinkField,
+      entries: ["/sat/exams/exam-1?field=prompt"],
+    });
+
+    expect(result.current.selectedExamQuestionId).toBe("eq-1");
+    expect(onDeepLinkField).not.toHaveBeenCalled();
+    expect(currentSearch).toBe("");
   });
 });

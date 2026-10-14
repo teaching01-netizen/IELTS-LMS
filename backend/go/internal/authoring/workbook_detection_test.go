@@ -144,7 +144,7 @@ func TestParseSATWorkbookReportsAnIncompleteDetectedModule(t *testing.T) {
 func TestParseSATWorkbookNeverDiscardsAuthoredContentInAnotherModule(t *testing.T) {
 	// Touching one cell of an otherwise-untouched module makes it part of the
 	// import, where it must be complete; it is never silently dropped.
-	for _, column := range []string{"C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R"} {
+	for _, column := range []string{"C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "P", "Q", "R"} {
 		t.Run(column, func(t *testing.T) {
 			book, err := excelize.OpenReader(bytes.NewReader(moduleSheetBytes(t, []string{"rw-m1"}, true)))
 			if err != nil {
@@ -207,12 +207,9 @@ func TestParseSATWorkbookIgnoresPretestColumn(t *testing.T) {
 	if !preview.Valid || hasWorkbookIssue(preview.Issues, "Pretest") {
 		t.Fatalf("pretest column was validated: %+v", preview.Issues)
 	}
-	first, second, third := preview.Modules[0].Questions[0], preview.Modules[0].Questions[1], preview.Modules[0].Questions[2]
-	if first.IsPretest != nil || first.QuestionDraft.IsPretest || third.IsPretest != nil {
-		t.Fatal("an unrecognised or blank pretest must be Unknown and import as not-pretest")
-	}
-	if second.IsPretest == nil || !*second.IsPretest || !second.QuestionDraft.IsPretest {
-		t.Fatal("a Yes pretest must carry through")
+	raw, _ := json.Marshal(preview)
+	if strings.Contains(string(raw), "isPretest") {
+		t.Fatalf("legacy pretest values must not reach the preview: %s", raw)
 	}
 }
 
@@ -231,17 +228,6 @@ func TestParseSATWorkbookDoesNotRequireAPretestColumn(t *testing.T) {
 	}
 	if !preview.Valid {
 		t.Fatalf("a workbook without a Pretest column must import: %+v", preview.Issues)
-	}
-}
-
-func TestPretestCellIsInformationalOnTheWire(t *testing.T) {
-	preview, err := ParseSATWorkbook(moduleSheetBytes(t, []string{"rw-m1"}, false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := json.Marshal(preview)
-	if !strings.Contains(string(raw), `"isPretest":null`) {
-		t.Fatalf("Unknown pretest must serialise as null: %s", raw)
 	}
 }
 

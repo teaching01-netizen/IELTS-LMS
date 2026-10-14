@@ -459,9 +459,7 @@ describe("operationalCountForSection", () => {
     moduleKey: "rw-m1",
     adaptiveRole: "base" as const,
     targetQuestionCount: 27,
-    questions: Array.from({ length: 27 }, (_, index) => ({
-      isPretest: index >= 25,
-    })),
+    questions: Array.from({ length: 27 }, () => ({})),
     ...overrides,
   });
   it("uses the live stored count when it is positive", () => {
@@ -475,14 +473,14 @@ describe("operationalCountForSection", () => {
   });
   it("falls back to the SAT blueprint on threshold-only rows (the stuck-at-1 repro)", () => {
     // Real policy_config is threshold-only, so the shell arrives with
-    // operationalQuestionCount: 0 — the page must still offer RW 25.
+    // operationalQuestionCount: 0 — the page must still offer RW 27.
     expect(
       operationalCountForSection({
         sectionKey: "reading-writing",
         routingPolicy: { operationalQuestionCount: 0 },
         modules: [baseModule()],
       }),
-    ).toBe(25);
+    ).toBe(27);
     expect(
       operationalCountForSection({
         sectionKey: "math",
@@ -491,15 +489,13 @@ describe("operationalCountForSection", () => {
           baseModule({
             moduleKey: "math-m1",
             targetQuestionCount: 22,
-            questions: Array.from({ length: 22 }, (_, index) => ({
-              isPretest: index >= 20,
-            })),
+            questions: Array.from({ length: 22 }, () => ({})),
           }),
         ],
       }),
-    ).toBe(20);
+    ).toBe(22);
   });
-  it("derives target-minus-pretest for non-blueprint sections and floors at 1", () => {
+  it("derives the target for non-blueprint sections and floors at 1", () => {
     expect(
       operationalCountForSection({
         sectionKey: "custom",
@@ -509,11 +505,11 @@ describe("operationalCountForSection", () => {
             moduleKey: "custom-m1",
             adaptiveRole: "base",
             targetQuestionCount: 10,
-            questions: [{ isPretest: false }, { isPretest: true }],
+            questions: [{}, {}],
           },
         ],
       }),
-    ).toBe(9);
+    ).toBe(10);
     expect(operationalCountForSection({ sectionKey: "custom", routingPolicy: null, modules: [] })).toBe(1);
   });
 });

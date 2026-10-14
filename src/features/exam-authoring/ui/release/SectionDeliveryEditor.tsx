@@ -138,9 +138,9 @@ function SectionDeliveryEditorInner({
     routing?.revision,
   ]);
 
-  // Derived bound (stored value -> SAT blueprint -> target-minus-pretest),
+  // Derived bound (stored value -> SAT blueprint -> base target),
   // so threshold-only policy rows (the real DB shape) still edit against
-  // the provider contract (RW 25 / Math 20) instead of clamping to 1.
+  // the provider contract (RW 27 / Math 22) instead of clamping to 1.
   const operationalCount = operationalCountForSection(section);
   const structureValid = Boolean(base && lower && higher && routing);
   const dirty =

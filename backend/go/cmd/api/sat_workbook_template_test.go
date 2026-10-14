@@ -70,7 +70,7 @@ func TestSATWorkbookTemplateRoundTripsThroughImporter(t *testing.T) {
 			if got, _ := book.GetCellValue("Questions", fmt.Sprintf("B%d", row)); got != fmt.Sprint(order) {
 				t.Errorf("Questions!B%d = %q, want %d", row, got, order)
 			}
-			for cell, want := range map[string]string{"E": "Multiple Choice", "N": "Medium", "O": "No"} {
+			for cell, want := range map[string]string{"E": "Multiple Choice", "N": "Medium", "O": ""} {
 				if got, _ := book.GetCellValue("Questions", fmt.Sprintf("%s%d", cell, row)); got != want {
 					t.Errorf("Questions!%s%d = %q, want %q", cell, row, got, want)
 				}
@@ -99,14 +99,14 @@ func TestSATWorkbookTemplateRoundTripsThroughImporter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Questions validations: %v", err)
 	}
-	if len(validations) != 7 {
-		t.Fatalf("Questions validation count = %d, want 7", len(validations))
+	if len(validations) != 6 {
+		t.Fatalf("Questions validation count = %d, want 6", len(validations))
 	}
 	validationByRange := make(map[string]string, len(validations))
 	for _, validation := range validations {
 		validationByRange[validation.Sqref] = validation.Formula1
 	}
-	for _, ref := range []string{"A2:A148", "E2:E148", "J2:J148", "L2:L148", "M2:M148", "N2:N148", "O2:O148"} {
+	for _, ref := range []string{"A2:A148", "E2:E148", "J2:J148", "L2:L148", "M2:M148", "N2:N148"} {
 		if _, ok := validationByRange[ref]; !ok {
 			t.Errorf("Questions data validation missing range %s", ref)
 		}
@@ -163,7 +163,7 @@ func TestSATWorkbookTemplateRoundTripsThroughImporter(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"COLUMN / FIELD", "Accepted Responses", "Module 2 — Higher", "Central Ideas and Details",
-		"Student Response", "Pretest is optional and not checked at import", "NOT IMPORT READY", "50,000 Unicode characters",
+		"Student Response", "NOT IMPORT READY", "50,000 Unicode characters",
 		"![asset_key]", "Inline math:", "Display math:", "level-2 and level-3 headings",
 		"token-to-key matches",
 	} {
@@ -180,7 +180,7 @@ func TestSATWorkbookTemplateRoundTripsThroughImporter(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"Never invent missing questions", "source-to-module/order traceability map",
-		"publishing requires exactly two pretests per module", "NOT IMPORT READY", "personal or student information",
+		"NOT IMPORT READY", "personal or student information",
 		"human must review the workbook against the supplied sources",
 	} {
 		if !strings.Contains(prompt, expected) {

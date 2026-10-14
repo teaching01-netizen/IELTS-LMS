@@ -32,6 +32,7 @@ vi.mock('../../../../features/exam-authoring/api/examAuthoringFacade', () => ({
 
 const useSummariesMock = vi.hoisted(() => vi.fn());
 const useAccessOverviewMock = vi.hoisted(() => vi.fn());
+const useRoomEntryInfoMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/proctor/api/proctorQueries', () => ({
   proctorKeys: { sessions: (provider?: string) => ['proctor', 'sessions', provider ?? 'all'] },
   useProctorSessionSummaries: useSummariesMock,
@@ -39,6 +40,7 @@ vi.mock('../../../../features/proctor/api/proctorQueries', () => ({
 vi.mock('../../../../features/exam-authoring/api/assessmentAccessLinkQueries', () => ({
   useAccessDistributionOverview: useAccessOverviewMock,
 }));
+vi.mock('../../api/satRoomEntryInfo', () => ({ useSatRoomEntryInfo: useRoomEntryInfoMock }));
 vi.mock('../../../../features/proctor/application/proctorFacade', () => ({
   proctorFacade: { isPreviewRuntimeCohortName: () => false },
 }));
@@ -281,6 +283,7 @@ describe('SAT Phase 02 copy contracts', () => {
     createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
     useSummariesMock.mockReturnValue({ data: [sessionSummary], isLoading: false, error: null, refetch: vi.fn() });
     useAccessOverviewMock.mockReturnValue({ data: undefined });
+    useRoomEntryInfoMock.mockReturnValue({ data: undefined, isError: false });
     controllerMock.mockReturnValue({
       schedules: [roomSchedule],
       runtimeSnapshots: [roomRuntime],

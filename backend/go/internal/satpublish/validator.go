@@ -1,5 +1,5 @@
 // Package satpublish owns the SAT publish-content contract: question content,
-// configured module counts, exactly two pretests, section question types, and
+// configured module counts, section question types, and
 // required adaptive module presence.
 package satpublish
 
@@ -26,7 +26,6 @@ type Question struct {
 	QuestionType   string
 	Prompt         string
 	Answer         string
-	IsPretest      bool
 }
 
 type Module struct {
@@ -50,7 +49,7 @@ func issue(code, path, message string) Issue {
 
 // ValidateQuestion is the SAT publish validator for one question. It does
 // not inspect metadata, stimulus, rationale, accessibility, rich-content
-// schema, timing, routing, or pretest placement.
+// schema, timing, or routing.
 func ValidateQuestion(question Question) []Issue {
 	issues := make([]Issue, 0)
 	if !hasVisibleContent(question.Prompt) {
@@ -75,19 +74,10 @@ func ValidateQuestion(question Question) []Issue {
 	return issues
 }
 
-// ValidateModule applies the question and pretest count rules and prefixes
+// ValidateModule applies the question and module count rules and prefixes
 // question findings with the exam-question identity used by the release deep-link.
 func ValidateModule(module Module) []Issue {
 	issues := make([]Issue, 0)
-	pretests := 0
-	for _, question := range module.Questions {
-		if question.IsPretest {
-			pretests++
-		}
-	}
-	if pretests != 2 {
-		issues = append(issues, issue("sat.module.pretest_count", modulePath(module), fmt.Sprintf("%s requires exactly 2 designated pretest questions; found %d.", module.ModuleKey, pretests)))
-	}
 	if len(module.Questions) != module.TargetQuestionCount {
 		label := strings.TrimSpace(module.Title)
 		if label == "" {
@@ -204,7 +194,7 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 		present[moduleRow.sectionKey+"/"+role] = true
 		questionRows, err := q.QueryContext(ctx, `
 			SELECT eq.id, r.question_type,
-			       CAST(r.prompt AS CHAR), CAST(r.answer_definition AS CHAR), eq.is_pretest
+			       CAST(r.prompt AS CHAR), CAST(r.answer_definition AS CHAR)
 			FROM assessment_exam_questions eq
 			JOIN assessment_question_revisions r ON r.id = eq.question_revision_id
 			WHERE eq.module_id = ?
@@ -215,7 +205,7 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 		questions := make([]Question, 0)
 		for questionRows.Next() {
 			var question Question
-			if err := questionRows.Scan(&question.ExamQuestionID, &question.QuestionType, &question.Prompt, &question.Answer, &question.IsPretest); err != nil {
+			if err := questionRows.Scan(&question.ExamQuestionID, &question.QuestionType, &question.Prompt, &question.Answer); err != nil {
 				questionRows.Close()
 				return nil, err
 			}
@@ -226,11 +216,8 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 			return nil, err
 		}
 		questionRows.Close()
-		for _, question := range questions {
-			if !question.IsPretest {
-				operational[moduleRow.sectionKey+"/"+role]++
-			}
-		}
+		// Every question in a new release is scored.
+		operational[moduleRow.sectionKey+"/"+role] += len(questions)
 
 		issues = append(issues, ValidateModule(Module{
 			SectionKey:          moduleRow.sectionKey,

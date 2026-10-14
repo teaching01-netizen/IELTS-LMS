@@ -227,7 +227,7 @@ func newSATAdvanceFixture(t *testing.T) *satAdvanceFixture {
 }
 
 // buildSectionAdvanceSample generates a full-size, publish-valid SAT sample:
-// every module carries exactly its blueprint target count with two pretests.
+// every module carries exactly its blueprint target count.
 // Minimal but valid content (visible prompt, four-option single-choice
 // answer, matching section metadata) through the real LoadSampleExam path,
 // mirroring the frontend buildCompleteSatSample.
@@ -271,7 +271,6 @@ func buildSectionAdvanceSample(shell authoring.Shell) []authoring.SampleExamModu
 					Rationale:     empty,
 					Metadata:      metadata,
 					Accessibility: json.RawMessage(`{}`),
-					IsPretest:     i < 2,
 				})
 			}
 			modules = append(modules, authoring.SampleExamModuleDraft{

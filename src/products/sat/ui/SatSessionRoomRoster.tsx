@@ -2,8 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StudentSession } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import type { ServerClockSnapshot } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
+import type { SatRoomExpectedStudent } from '../api/satRoomEntryInfo';
 import { SatSearchField, SatToolbarSelect } from './SatPage';
 import { SatRoomStudentRow } from './SatSessionRoomStudents';
+import { SatRoomSurface } from './room/SatRoomSurface';
+
+const FILTER_CHIP = 'inline-flex min-h-11 items-center gap-2 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
 
 type AttentionFilter = 'all' | 'needs';
 export type SatRosterSort = 'name' | 'attention' | 'time';
@@ -20,7 +24,7 @@ function remainingSeconds(student: StudentSession): number {
 }
 
 function attentionWeight(student: StudentSession, reasons: ReadonlyMap<string, string>): number {
-  return (reasons.has(student.id) ? 1 : 0) + student.warnings + student.violations.length;
+  return reasons.has(student.id) ? 1 : 0;
 }
 
 export function sortRoster(students: StudentSession[], sort: SatRosterSort, reasons: ReadonlyMap<string, string>): StudentSession[] {
@@ -35,6 +39,7 @@ export function sortRoster(students: StudentSession[], sort: SatRosterSort, reas
 
 export function SatSessionRoomRoster({
   students,
+  expectedStudents = [],
   visibleStudents,
   selectedStudent,
   runtime,
@@ -51,6 +56,7 @@ export function SatSessionRoomRoster({
   onShareLink,
 }: {
   students: StudentSession[];
+  expectedStudents?: readonly SatRoomExpectedStudent[];
   visibleStudents: StudentSession[];
   selectedStudent: StudentSession | null;
   runtime: ExamSessionRuntime;
@@ -91,11 +97,24 @@ export function SatSessionRoomRoster({
   }, [ordered]);
 
   const activeStudent = ordered.find((student) => student.id === selectedStudent?.id) ?? null;
+  const joinedAttemptIds = new Set(students.map((student) => student.id));
+  const needle = search.trim().toLocaleLowerCase();
+  const visibleExpectedStudents = attentionFilter === 'all'
+    ? expectedStudents.filter((student) => (!student.attemptId || !joinedAttemptIds.has(student.attemptId))
+      && (!needle || student.name.toLocaleLowerCase().includes(needle)))
+    : [];
+
+  const filtered = needle !== '' || attentionFilter === 'needs';
 
   return (
-    <section className="sat-room__roster" aria-label="Students">
-      <div className="sat-room__roster-head">
-        <p className="sat-room__eyebrow">Students</p>
+    <SatRoomSurface aria-label="Students" className="sat-room__roster overflow-hidden">
+      <div className="shrink-0 border-b border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-4 pb-3 pt-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h2 className="text-[16px] font-semibold leading-6 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">Students</h2>
+          {filtered && students.length ? (
+            <span className="text-[14px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]" aria-live="polite">Showing {ordered.length} of {students.length}</span>
+          ) : null}
+        </div>
         <div className="mt-3">
           <SatSearchField
             id="sat-room-student-search"
@@ -106,13 +125,13 @@ export function SatSessionRoomRoster({
             widthClassName="w-full"
           />
         </div>
-        <div className="mt-3 flex flex-wrap items-end justify-between gap-2">
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Roster filter">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Roster filter">
             <button
               type="button"
               aria-pressed={attentionFilter === 'all'}
               onClick={() => onAttentionFilterChange('all')}
-              className={`min-h-11 rounded-full px-3 text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))]'}`}
+              className={`${FILTER_CHIP} ${attentionFilter === 'all' ? 'bg-[var(--sat-staff-fill-active,rgba(0,0,0,0.065))] text-[var(--sat-staff-text-primary,#1d1d1f)]' : 'text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))]'}`}
             >
               All
             </button>
@@ -122,15 +141,15 @@ export function SatSessionRoomRoster({
                 aria-label={`Filter roster to students needing attention, ${attentionCount}`}
                 aria-pressed={attentionFilter === 'needs'}
                 onClick={() => onAttentionFilterChange(attentionFilter === 'needs' ? 'all' : 'needs')}
-                className={`sat-room__attention-filter min-h-11 rounded-full px-3 text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'needs' ? 'is-active' : ''}`}
+                className={`${FILTER_CHIP} text-[var(--sat-staff-warning-text,#92400e)] ${attentionFilter === 'needs' ? 'bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))]' : 'hover:bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))]'}`}
               >
                 <span>Needs attention</span>
-                <span className="sat-room__attention-count">{attentionCount}</span>
+                <span className="sat-room__attention-count tabular-nums">{attentionCount}</span>
               </button>
             ) : (
-              <span className="sat-room__attention-filter is-empty min-h-11 rounded-full px-3 text-[14px] font-semibold">
+              <span className={`${FILTER_CHIP} text-[var(--sat-staff-text-tertiary,#6e6e73)]`}>
                 <span>Needs attention</span>
-                <span className="sat-room__attention-count">0</span>
+                <span className="sat-room__attention-count tabular-nums">0</span>
               </span>
             )}
           </div>
@@ -164,7 +183,7 @@ export function SatSessionRoomRoster({
             nextRow.focus();
           }
         }}
-        className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+        className="@container min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
       >
         {ordered.length ? ordered.map((student) => (
           <SatRoomStudentRow
@@ -181,21 +200,29 @@ export function SatSessionRoomRoster({
             <p className="text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">
               {students.length ? 'No matching students.' : 'No students have joined yet.'}
             </p>
-            <p className="mt-1.5 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+            <p className="mx-auto mt-1 max-w-[36ch] text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
               {students.length ? 'Change the search or the filter.' : 'Students appear here the moment they open their exam link.'}
             </p>
             {!students.length && onShareLink ? (
-              <button
-                type="button"
-                onClick={onShareLink}
-                className="mt-4 min-h-11 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-accent,#0071e3)] px-3.5 text-[14px] font-semibold text-white hover:bg-[var(--sat-staff-accent-hover,#0077ed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
-              >
+              <button type="button" onClick={onShareLink} className="sat-btn sat-btn--secondary sat-press mt-4 px-3.5">
                 Share student link
               </button>
             ) : null}
           </div>
         )}
       </div>
-    </section>
+      {visibleExpectedStudents.length ? <section aria-label="Invited students" className="shrink-0 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-4 py-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Expected students</h3>
+          <span className="text-[14px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">{visibleExpectedStudents.length} not in room</span>
+        </div>
+        <ul className="mt-1 max-h-56 divide-y divide-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] overflow-y-auto">
+          {visibleExpectedStudents.map((student) => <li key={student.ordinal} className="flex min-h-11 items-center justify-between gap-3 py-2 text-[14px]">
+            <span className="min-w-0 break-words font-medium text-[var(--sat-staff-text-primary,#1d1d1f)]">{student.name}</span>
+            <span className="shrink-0 text-right text-[var(--sat-staff-text-tertiary,#6e6e73)]">{student.state === 'not_joined' ? 'Invited · Not joined' : student.state === 'waiting' ? 'Waiting' : student.state === 'working' ? 'Working' : 'Finished'}</span>
+          </li>)}
+        </ul>
+      </section> : null}
+    </SatRoomSurface>
   );
 }

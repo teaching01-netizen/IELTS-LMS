@@ -410,7 +410,6 @@ func (s *Service) coeditWorkspaceStore(ctx context.Context, req CoeditStoreReque
 // ignored here.
 type workspaceQuestionProjection struct {
 	questionType       *string
-	isPretest          *bool
 	answer             json.RawMessage
 	answerPresent      bool
 	metadata           json.RawMessage
@@ -429,7 +428,6 @@ type workspaceQuestionProjection struct {
 type workspaceQuestionRow struct {
 	examQuestionID, moduleID, questionID, revisionID, questionType string
 	revision                                                       int
-	isPretest                                                      bool
 	stimulus, prompt, answer, rationale, metadata, accessibility   json.RawMessage
 }
 
@@ -519,10 +517,6 @@ func (s *Service) materializeWorkspaceTx(
 				changedFields = appendUniqueString(changedFields, "answer")
 			}
 		}
-		if projection.isPretest != nil && row.isPretest != *projection.isPretest {
-			next.isPretest = *projection.isPretest
-			changedFields = appendUniqueString(changedFields, "isPretest")
-		}
 		if len(changedFields) == 0 {
 			continue
 		}
@@ -539,12 +533,6 @@ func (s *Service) materializeWorkspaceTx(
 			nonEmptyJSON(next.answer), nonEmptyJSON(next.rationale), nonEmptyJSON(next.metadata),
 			nonEmptyJSON(next.accessibility), nullableActor(actorID), next.revisionID); err != nil {
 			return false, err
-		}
-		if projection.isPretest != nil && row.isPretest != *projection.isPretest {
-			if _, err := q.ExecContext(ctx, `UPDATE assessment_exam_questions
- SET is_pretest = ?, updated_at = NOW(6) WHERE id = ?`, next.isPretest, examQuestionID); err != nil {
-				return false, err
-			}
 		}
 
 		if s.eventsOn() && strings.TrimSpace(actorID) != "" {
@@ -576,7 +564,6 @@ func loadWorkspaceQuestionTx(ctx context.Context, q tx.Tx, examQuestionID, draft
 	var row workspaceQuestionRow
 	err := q.QueryRowContext(ctx, `SELECT eq.id, eq.module_id, eq.question_id,
        eq.question_revision_id, r.revision, r.question_type,
-       eq.is_pretest,
        CAST(r.stimulus AS CHAR), CAST(r.prompt AS CHAR),
        CAST(r.answer_definition AS CHAR), CAST(r.rationale AS CHAR),
        CAST(r.metadata AS CHAR), CAST(r.accessibility AS CHAR)
@@ -589,7 +576,7 @@ func loadWorkspaceQuestionTx(ctx context.Context, q tx.Tx, examQuestionID, draft
    AND v.is_draft = TRUE AND v.is_published = FALSE
  FOR UPDATE`, examQuestionID, draftVersionID).Scan(
 		&row.examQuestionID, &row.moduleID, &row.questionID, &row.revisionID,
-		&row.revision, &row.questionType, &row.isPretest, rawScanner(&row.stimulus), rawScanner(&row.prompt),
+		&row.revision, &row.questionType, rawScanner(&row.stimulus), rawScanner(&row.prompt),
 		rawScanner(&row.answer), rawScanner(&row.rationale), rawScanner(&row.metadata),
 		rawScanner(&row.accessibility),
 	)
@@ -656,12 +643,6 @@ func applyWorkspaceQuestionMapValue(projection *workspaceQuestionProjection, fie
 		return nil
 	}
 	switch field {
-	case "isPretest":
-		var isPretest bool
-		if err := json.Unmarshal(raw, &isPretest); err != nil {
-			return authoringcoedit.New(authoringcoedit.CodeOversized, "SAT pretest setting is invalid.")
-		}
-		projection.isPretest = &isPretest
 	case "questionType":
 		var questionType string
 		if err := json.Unmarshal(raw, &questionType); err != nil || strings.TrimSpace(questionType) == "" {

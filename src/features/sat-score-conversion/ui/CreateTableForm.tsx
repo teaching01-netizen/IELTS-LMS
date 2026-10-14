@@ -28,7 +28,7 @@ export function CreateTableForm({ section, topology, defaults, disabled, onCreat
       <h3 className="text-[16px] font-semibold">No table for this route yet</h3>
       <p className="mt-1 max-w-xl text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
         {SECTION_LABEL[section]}, {TOPOLOGY_LABEL[topology]}. Until a table exists, results on this route show raw scores only. The size must equal the number of scored
-        (non-pretest) questions students answer in each module; a table of another size is never used.
+        questions students answer in each module; a table of another size is never used.
       </p>
       <div className="mt-4 flex flex-wrap items-end gap-3">
         {standalone ? null : (

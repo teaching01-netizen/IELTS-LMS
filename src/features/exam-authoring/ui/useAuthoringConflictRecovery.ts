@@ -482,14 +482,7 @@ export function useAuthoringConflictRecovery({
       return;
     }
     const path = `question/${recovered.questionId}`;
-    const currentScalar = snapshot.values[`${path}/scalar`];
-    const isPretest = isQuestionWorkspaceScalar(currentScalar)
-      ? currentScalar.isPretest
-      : questionQuery.data?.isPretest;
-    workspaceCollaboration.setValue(
-      `${path}/scalar`,
-      questionWorkspaceScalar(recovered.draft, isPretest)
-    );
+    workspaceCollaboration.setValue(`${path}/scalar`, questionWorkspaceScalar(recovered.draft));
     workspaceCollaboration.setRichField(`${path}/prompt`, recovered.draft.prompt);
     workspaceCollaboration.setRichField(`${path}/stimulus`, recovered.draft.stimulus);
     workspaceCollaboration.setRichField(`${path}/rationale`, recovered.draft.rationale);
@@ -506,7 +499,6 @@ export function useAuthoringConflictRecovery({
     deviceRecovery,
     workspaceCollaboration,
     selectedExamQuestionId,
-    questionQuery.data?.isPretest,
     setDraft,
     acknowledgeServerRevision,
     setNotice,

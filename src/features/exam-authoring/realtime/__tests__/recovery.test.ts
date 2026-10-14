@@ -13,7 +13,6 @@ function summary(examQuestionId: string, displayOrder: number): AssessmentQuesti
     questionId: `q-${examQuestionId}`,
     questionRevisionId: `rev-${examQuestionId}`,
     displayOrder,
-    isPretest: false,
     questionType: "single_choice",
     semanticRevision: 1,
     revision: 1,
@@ -65,7 +64,7 @@ function shellWith(ids: string[]): AssessmentAuthoringShell {
 }
 
 function detail(examQuestionId: string): AssessmentQuestionDetail {
-  return { examQuestionId, moduleId: "mod-1", moduleKey: "rw-1", sectionKey: "rw", displayOrder: 0, isPretest: false, question: {} } as unknown as AssessmentQuestionDetail;
+  return { examQuestionId, moduleId: "mod-1", moduleKey: "rw-1", sectionKey: "rw", displayOrder: 0, question: {} } as unknown as AssessmentQuestionDetail;
 }
 
 interface Harness {

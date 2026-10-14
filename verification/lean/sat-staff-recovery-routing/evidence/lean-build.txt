@@ -1,0 +1,380 @@
+# SAT staff recovery routing — Lean build transcript
+# toolchain: leanprover/lean4:v4.19.0
+# command: lake build SatStaffRecoveryRouting Model Safety Counterexamples AxiomAudit
+
+ℹ [4/7] Replayed Counterexamples
+info: ././././Counterexamples.lean:165:0: ({ observed := some { id := 2, number := 4 },
+   target := some { id := 1, number := 3 },
+   sent := some { id := 1, number := 3 },
+   firstObserved := some { id := 1, number := 3 } },
+ { observed := some { id := 2, number := 4 },
+   target := some { id := 2, number := 4 },
+   sent := some { id := 2, number := 4 },
+   firstObserved := some { id := 1, number := 3 } })
+ℹ [6/7] Replayed AxiomAudit
+info: ././././AxiomAudit.lean:12:0: SatStaffRecoveryRouting.bool_eq_false_of_not (b : Bool) (h : ¬b = true) : b = false
+info: ././././AxiomAudit.lean:13:0: 'SatStaffRecoveryRouting.bool_eq_false_of_not' does not depend on any axioms
+info: ././././AxiomAudit.lean:16:0: SatStaffRecoveryRouting.Routing.parseQuestion_id_ne_nil (p id : SatStaffRecoveryRouting.Chars)
+  (f : Option SatStaffRecoveryRouting.Chars) (h : SatStaffRecoveryRouting.parseQuestion p = some (id, f)) : id ≠ []
+info: ././././AxiomAudit.lean:17:0: SatStaffRecoveryRouting.Routing.question_destination_has_id (p : SatStaffRecoveryRouting.Chars)
+  (sh : Option SatStaffRecoveryRouting.Shell) (id : SatStaffRecoveryRouting.Chars)
+  (f : Option SatStaffRecoveryRouting.Chars)
+  (h : SatStaffRecoveryRouting.resolve p sh = SatStaffRecoveryRouting.Destination.question id f) : id ≠ []
+info: ././././AxiomAudit.lean:18:0: SatStaffRecoveryRouting.Routing.module_destination_requires_known_section (p : SatStaffRecoveryRouting.Chars)
+  (sh : Option SatStaffRecoveryRouting.Shell) (sec mod : SatStaffRecoveryRouting.Chars)
+  (h : SatStaffRecoveryRouting.resolve p sh = SatStaffRecoveryRouting.Destination.module sec mod) :
+  SatStaffRecoveryRouting.knownSection sh sec = true
+info: ././././AxiomAudit.lean:19:0: SatStaffRecoveryRouting.Routing.module_destination_is_not_denied_by_the_shell (p : SatStaffRecoveryRouting.Chars)
+  (sh : Option SatStaffRecoveryRouting.Shell) (sec mod : SatStaffRecoveryRouting.Chars)
+  (h : SatStaffRecoveryRouting.resolve p sh = SatStaffRecoveryRouting.Destination.module sec mod) :
+  SatStaffRecoveryRouting.shellDeniesModule sh sec mod = false
+info: ././././AxiomAudit.lean:20:0: SatStaffRecoveryRouting.Routing.module_destination_is_honourable (p : SatStaffRecoveryRouting.Chars)
+  (sh : Option SatStaffRecoveryRouting.Shell) (sec mod : SatStaffRecoveryRouting.Chars)
+  (h : SatStaffRecoveryRouting.resolve p sh = SatStaffRecoveryRouting.Destination.module sec mod) :
+  SatStaffRecoveryRouting.knownSection sh sec = true ∧ SatStaffRecoveryRouting.shellDeniesModule sh sec mod = false
+info: ././././AxiomAudit.lean:21:0: SatStaffRecoveryRouting.Routing.module_path_resolves_to_that_module (p : SatStaffRecoveryRouting.Chars)
+  (sh : Option SatStaffRecoveryRouting.Shell) (sec mod : SatStaffRecoveryRouting.Chars)
+  (hpre : SatStaffRecoveryRouting.hasPrefix SatStaffRecoveryRouting.examQuestionPrefix p = false)
+  (hscore :
+    ¬(p = SatStaffRecoveryRouting.scoringPolicyKey ∨
+        SatStaffRecoveryRouting.hasPrefix (SatStaffRecoveryRouting.scoringPolicyKey ++ ['.']) p = true))
+  (hparts : SatStaffRecoveryRouting.moduleParts p = some (sec, mod))
+  (hsec : SatStaffRecoveryRouting.knownSection sh sec = true)
+  (hdeny : SatStaffRecoveryRouting.shellDeniesModule sh sec mod = false) :
+  SatStaffRecoveryRouting.resolve p sh = SatStaffRecoveryRouting.Destination.module sec mod
+info: ././././AxiomAudit.lean:22:0: SatStaffRecoveryRouting.Routing.denied_module_is_refused_not_guessed (p : SatStaffRecoveryRouting.Chars)
+  (sh : Option SatStaffRecoveryRouting.Shell) (sec mod : SatStaffRecoveryRouting.Chars)
+  (hpre : SatStaffRecoveryRouting.hasPrefix SatStaffRecoveryRouting.examQuestionPrefix p = false)
+  (hscore :
+    ¬(p = SatStaffRecoveryRouting.scoringPolicyKey ∨
+        SatStaffRecoveryRouting.hasPrefix (SatStaffRecoveryRouting.scoringPolicyKey ++ ['.']) p = true))
+  (hparts : SatStaffRecoveryRouting.moduleParts p = some (sec, mod))
+  (hsec : SatStaffRecoveryRouting.knownSection sh sec = true)
+  (hdeny : SatStaffRecoveryRouting.shellDeniesModule sh sec mod = true) :
+  SatStaffRecoveryRouting.resolve p sh =
+    SatStaffRecoveryRouting.Destination.unresolved SatStaffRecoveryRouting.unresolvedModuleMissing
+info: ././././AxiomAudit.lean:23:0: SatStaffRecoveryRouting.Routing.label_none_is_unresolved (d : SatStaffRecoveryRouting.Destination)
+  (h : SatStaffRecoveryRouting.destinationLabel d = none) : ∃ r, d = SatStaffRecoveryRouting.Destination.unresolved r
+info: ././././AxiomAudit.lean:24:0: SatStaffRecoveryRouting.Routing.actionable_destination_has_a_label (d : SatStaffRecoveryRouting.Destination)
+  (h : ∀ (r : String), d ≠ SatStaffRecoveryRouting.Destination.unresolved r) :
+  ∃ s, SatStaffRecoveryRouting.destinationLabel d = some s
+info: ././././AxiomAudit.lean:25:0: 'SatStaffRecoveryRouting.Routing.parseQuestion_id_ne_nil' does not depend on any axioms
+info: ././././AxiomAudit.lean:26:0: 'SatStaffRecoveryRouting.Routing.question_destination_has_id' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:27:0: 'SatStaffRecoveryRouting.Routing.module_destination_requires_known_section' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:28:0: 'SatStaffRecoveryRouting.Routing.module_destination_is_not_denied_by_the_shell' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:29:0: 'SatStaffRecoveryRouting.Routing.module_destination_is_honourable' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:30:0: 'SatStaffRecoveryRouting.Routing.module_path_resolves_to_that_module' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:31:0: 'SatStaffRecoveryRouting.Routing.denied_module_is_refused_not_guessed' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:32:0: 'SatStaffRecoveryRouting.Routing.label_none_is_unresolved' does not depend on any axioms
+info: ././././AxiomAudit.lean:33:0: 'SatStaffRecoveryRouting.Routing.actionable_destination_has_a_label' does not depend on any axioms
+info: ././././AxiomAudit.lean:36:0: SatStaffRecoveryRouting.Routing.resolve_module_finding :
+  SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathModuleRW (some SatStaffRecoveryRouting.fullShell) =
+    SatStaffRecoveryRouting.Destination.module SatStaffRecoveryRouting.readingWriting SatStaffRecoveryRouting.rwM1
+info: ././././AxiomAudit.lean:37:0: SatStaffRecoveryRouting.Routing.resolve_module_finding_without_a_module_map :
+  SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathModuleRW (some SatStaffRecoveryRouting.modulelessShell) =
+    SatStaffRecoveryRouting.Destination.module SatStaffRecoveryRouting.readingWriting SatStaffRecoveryRouting.rwM1
+info: ././././AxiomAudit.lean:38:0: SatStaffRecoveryRouting.Routing.resolve_module_finding_without_a_shell :
+  SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathModuleRW none =
+    SatStaffRecoveryRouting.Destination.module SatStaffRecoveryRouting.readingWriting SatStaffRecoveryRouting.rwM1
+info: ././././AxiomAudit.lean:39:0: SatStaffRecoveryRouting.Routing.resolve_missing_module_is_refused :
+  SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathModuleMissing (some SatStaffRecoveryRouting.fullShell) =
+    SatStaffRecoveryRouting.Destination.unresolved SatStaffRecoveryRouting.unresolvedModuleMissing
+info: ././././AxiomAudit.lean:40:0: SatStaffRecoveryRouting.Routing.resolve_leaked_field_path_is_refused :
+  SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathLeakedField (some SatStaffRecoveryRouting.fullShell) =
+    SatStaffRecoveryRouting.Destination.unresolved SatStaffRecoveryRouting.unresolvedUnlinked
+info: ././././AxiomAudit.lean:41:0: SatStaffRecoveryRouting.Routing.resolve_leaked_field_path_without_a_shell_is_refused :
+  SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathLeakedField none =
+    SatStaffRecoveryRouting.Destination.unresolved SatStaffRecoveryRouting.unresolvedUnlinked
+info: ././././AxiomAudit.lean:42:0: SatStaffRecoveryRouting.Routing.resolve_question_link :
+  SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathQuestionLink (some SatStaffRecoveryRouting.fullShell) =
+    SatStaffRecoveryRouting.Destination.question SatStaffRecoveryRouting.qId (some SatStaffRecoveryRouting.fldPrompt)
+info: ././././AxiomAudit.lean:43:0: SatStaffRecoveryRouting.Routing.resolve_scoring_policy :
+  SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathScoringPolicy (some SatStaffRecoveryRouting.fullShell) =
+    SatStaffRecoveryRouting.Destination.scorePolicy
+info: ././././AxiomAudit.lean:44:0: SatStaffRecoveryRouting.Routing.resolve_scoring_policy_subsection :
+  SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathScoringPolicySub
+      (some SatStaffRecoveryRouting.fullShell) =
+    SatStaffRecoveryRouting.Destination.scorePolicy
+info: ././././AxiomAudit.lean:45:0: SatStaffRecoveryRouting.Routing.resolve_unrecognised_path_is_refused :
+  SatStaffRecoveryRouting.resolve ['n', 'o', 'p', 'e'] (some SatStaffRecoveryRouting.fullShell) =
+    SatStaffRecoveryRouting.Destination.unresolved SatStaffRecoveryRouting.unresolvedUnlinked
+info: ././././AxiomAudit.lean:46:0: SatStaffRecoveryRouting.Routing.labels_match_the_destinations :
+  SatStaffRecoveryRouting.destinationLabel
+        (SatStaffRecoveryRouting.Destination.module SatStaffRecoveryRouting.readingWriting
+          SatStaffRecoveryRouting.rwM1) =
+      some "Open module" ∧
+    SatStaffRecoveryRouting.destinationLabel
+        (SatStaffRecoveryRouting.Destination.unresolved SatStaffRecoveryRouting.unresolvedUnlinked) =
+      none
+info: ././././AxiomAudit.lean:47:0: 'SatStaffRecoveryRouting.Routing.resolve_module_finding' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:48:0: 'SatStaffRecoveryRouting.Routing.resolve_module_finding_without_a_module_map' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:49:0: 'SatStaffRecoveryRouting.Routing.resolve_module_finding_without_a_shell' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:50:0: 'SatStaffRecoveryRouting.Routing.resolve_missing_module_is_refused' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:51:0: 'SatStaffRecoveryRouting.Routing.resolve_leaked_field_path_is_refused' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:52:0: 'SatStaffRecoveryRouting.Routing.resolve_leaked_field_path_without_a_shell_is_refused' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:53:0: 'SatStaffRecoveryRouting.Routing.resolve_question_link' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:54:0: 'SatStaffRecoveryRouting.Routing.resolve_scoring_policy' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:55:0: 'SatStaffRecoveryRouting.Routing.resolve_scoring_policy_subsection' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:56:0: 'SatStaffRecoveryRouting.Routing.resolve_unrecognised_path_is_refused' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:57:0: 'SatStaffRecoveryRouting.Routing.labels_match_the_destinations' does not depend on any axioms
+info: ././././AxiomAudit.lean:60:0: SatStaffRecoveryRouting.DeepLink.consume_clears_pending (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) : (SatStaffRecoveryRouting.consume sh e).pendingModuleLink = none
+info: ././././AxiomAudit.lean:61:0: SatStaffRecoveryRouting.DeepLink.consume_settled (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) : SatStaffRecoveryRouting.Settled sh (SatStaffRecoveryRouting.consume sh e)
+info: ././././AxiomAudit.lean:62:0: SatStaffRecoveryRouting.DeepLink.consume_idempotent (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) :
+  SatStaffRecoveryRouting.consume sh (SatStaffRecoveryRouting.consume sh e) = SatStaffRecoveryRouting.consume sh e
+info: ././././AxiomAudit.lean:63:0: SatStaffRecoveryRouting.DeepLink.consume_of_settled_no_link (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) (hp : e.pendingModuleLink = none) (hs : SatStaffRecoveryRouting.Settled sh e) :
+  SatStaffRecoveryRouting.consume sh e = e
+info: ././././AxiomAudit.lean:64:0: SatStaffRecoveryRouting.DeepLink.consume_of_no_pending (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) (h : e.pendingModuleLink = none) :
+  SatStaffRecoveryRouting.consume sh e = SatStaffRecoveryRouting.fallback sh e
+info: ././././AxiomAudit.lean:65:0: SatStaffRecoveryRouting.DeepLink.fallback_of_settled (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) (h : SatStaffRecoveryRouting.Settled sh e) :
+  SatStaffRecoveryRouting.fallback sh e = e
+info: ././././AxiomAudit.lean:66:0: SatStaffRecoveryRouting.DeepLink.fallback_settled (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) : SatStaffRecoveryRouting.Settled sh (SatStaffRecoveryRouting.fallback sh e)
+info: ././././AxiomAudit.lean:67:0: SatStaffRecoveryRouting.DeepLink.settled_of_pending_change (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) (p : Option SatStaffRecoveryRouting.Chars)
+  (h : SatStaffRecoveryRouting.Settled sh e) :
+  SatStaffRecoveryRouting.Settled sh
+    { pendingModuleLink := p, selModule := e.selModule, selQuestion := e.selQuestion, linkInjected := e.linkInjected,
+      linkAdopted := e.linkAdopted }
+info: ././././AxiomAudit.lean:68:0: SatStaffRecoveryRouting.DeepLink.adoption_requires_a_resolvable_link (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) (h : (SatStaffRecoveryRouting.consume sh e).linkAdopted ≠ e.linkAdopted) :
+  ∃ raw, e.pendingModuleLink = some raw ∧ (SatStaffRecoveryRouting.moduleForKey sh raw).isSome = true
+info: ././././AxiomAudit.lean:69:0: SatStaffRecoveryRouting.DeepLink.stale_link_is_consumed_without_adopting (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) (raw : SatStaffRecoveryRouting.Chars) (hs : SatStaffRecoveryRouting.Settled sh e)
+  (h : SatStaffRecoveryRouting.moduleForKey sh raw = none) :
+  SatStaffRecoveryRouting.consume sh
+      { pendingModuleLink := some raw, selModule := e.selModule, selQuestion := e.selQuestion,
+        linkInjected := e.linkInjected, linkAdopted := e.linkAdopted } =
+    { pendingModuleLink := none, selModule := e.selModule, selQuestion := e.selQuestion, linkInjected := e.linkInjected,
+      linkAdopted := e.linkAdopted }
+info: ././././AxiomAudit.lean:70:0: SatStaffRecoveryRouting.DeepLink.found_link_selects_its_own_module (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) (raw : SatStaffRecoveryRouting.Chars) (m : SatStaffRecoveryRouting.ShellModule)
+  (h : SatStaffRecoveryRouting.moduleForKey sh raw = some m) :
+  (SatStaffRecoveryRouting.consume sh
+        { pendingModuleLink := some raw, selModule := e.selModule, selQuestion := e.selQuestion,
+          linkInjected := e.linkInjected, linkAdopted := e.linkAdopted }).selModule =
+    some m.id
+info: ././././AxiomAudit.lean:71:0: SatStaffRecoveryRouting.DeepLink.module_link_opens_the_named_module :
+  (SatStaffRecoveryRouting.consume SatStaffRecoveryRouting.studentShell
+          (SatStaffRecoveryRouting.inject SatStaffRecoveryRouting.linkRW2Higher
+            SatStaffRecoveryRouting.emptyEditor)).selModule =
+      some 2 ∧
+    (SatStaffRecoveryRouting.consume SatStaffRecoveryRouting.studentShell
+            (SatStaffRecoveryRouting.inject SatStaffRecoveryRouting.linkRW2Higher
+              SatStaffRecoveryRouting.emptyEditor)).linkAdopted =
+        1 ∧
+      (SatStaffRecoveryRouting.consume SatStaffRecoveryRouting.studentShell
+            (SatStaffRecoveryRouting.inject SatStaffRecoveryRouting.linkRW2Higher
+              SatStaffRecoveryRouting.emptyEditor)).pendingModuleLink =
+        none
+info: ././././AxiomAudit.lean:72:0: SatStaffRecoveryRouting.DeepLink.link_pressed_twice_adopts_once :
+  (SatStaffRecoveryRouting.consume SatStaffRecoveryRouting.studentShell
+        (SatStaffRecoveryRouting.consume SatStaffRecoveryRouting.studentShell
+          (SatStaffRecoveryRouting.inject SatStaffRecoveryRouting.linkRW2Higher
+            SatStaffRecoveryRouting.emptyEditor))).linkAdopted =
+    1
+info: ././././AxiomAudit.lean:73:0: 'SatStaffRecoveryRouting.DeepLink.consume_clears_pending' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:74:0: 'SatStaffRecoveryRouting.DeepLink.consume_settled' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:75:0: 'SatStaffRecoveryRouting.DeepLink.consume_idempotent' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:76:0: 'SatStaffRecoveryRouting.DeepLink.consume_of_settled_no_link' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:77:0: 'SatStaffRecoveryRouting.DeepLink.consume_of_no_pending' does not depend on any axioms
+info: ././././AxiomAudit.lean:78:0: 'SatStaffRecoveryRouting.DeepLink.fallback_of_settled' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:79:0: 'SatStaffRecoveryRouting.DeepLink.fallback_settled' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:80:0: 'SatStaffRecoveryRouting.DeepLink.settled_of_pending_change' does not depend on any axioms
+info: ././././AxiomAudit.lean:81:0: 'SatStaffRecoveryRouting.DeepLink.adoption_requires_a_resolvable_link' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:82:0: 'SatStaffRecoveryRouting.DeepLink.stale_link_is_consumed_without_adopting' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:83:0: 'SatStaffRecoveryRouting.DeepLink.found_link_selects_its_own_module' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:84:0: 'SatStaffRecoveryRouting.DeepLink.module_link_opens_the_named_module' does not depend on any axioms
+info: ././././AxiomAudit.lean:85:0: 'SatStaffRecoveryRouting.DeepLink.link_pressed_twice_adopts_once' does not depend on any axioms
+info: ././././AxiomAudit.lean:88:0: SatStaffRecoveryRouting.DeepLink.account_weaken (e : SatStaffRecoveryRouting.Editor)
+  (h : SatStaffRecoveryRouting.AdoptionAccount e) : e.linkAdopted ≤ e.linkInjected
+info: ././././AxiomAudit.lean:89:0: SatStaffRecoveryRouting.DeepLink.fallback_account (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) (h : SatStaffRecoveryRouting.AdoptionAccount e) :
+  SatStaffRecoveryRouting.AdoptionAccount (SatStaffRecoveryRouting.fallback sh e)
+info: ././././AxiomAudit.lean:90:0: SatStaffRecoveryRouting.DeepLink.consume_account (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) (h : SatStaffRecoveryRouting.AdoptionAccount e) :
+  SatStaffRecoveryRouting.AdoptionAccount (SatStaffRecoveryRouting.consume sh e)
+info: ././././AxiomAudit.lean:91:0: SatStaffRecoveryRouting.DeepLink.inject_account (raw : SatStaffRecoveryRouting.Chars)
+  (e : SatStaffRecoveryRouting.Editor) (h : SatStaffRecoveryRouting.AdoptionAccount e) :
+  SatStaffRecoveryRouting.AdoptionAccount (SatStaffRecoveryRouting.inject raw e)
+info: ././././AxiomAudit.lean:92:0: SatStaffRecoveryRouting.DeepLink.reachable_adoption_account {sh : SatStaffRecoveryRouting.ModuleShell}
+  {e : SatStaffRecoveryRouting.Editor} (h : SatStaffRecoveryRouting.EditorReach sh e) :
+  SatStaffRecoveryRouting.AdoptionAccount e
+info: ././././AxiomAudit.lean:93:0: SatStaffRecoveryRouting.DeepLink.reachable_adoptions_le_injections {sh : SatStaffRecoveryRouting.ModuleShell}
+  {e : SatStaffRecoveryRouting.Editor} (h : SatStaffRecoveryRouting.EditorReach sh e) : e.linkAdopted ≤ e.linkInjected
+info: ././././AxiomAudit.lean:94:0: SatStaffRecoveryRouting.DeepLink.editorInit_adopted_le (e : SatStaffRecoveryRouting.Editor)
+  (h : SatStaffRecoveryRouting.editorInit e) : e.linkAdopted ≤ e.linkInjected
+info: ././././AxiomAudit.lean:95:0: 'SatStaffRecoveryRouting.DeepLink.account_weaken' does not depend on any axioms
+info: ././././AxiomAudit.lean:96:0: 'SatStaffRecoveryRouting.DeepLink.fallback_account' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:97:0: 'SatStaffRecoveryRouting.DeepLink.consume_account' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:98:0: 'SatStaffRecoveryRouting.DeepLink.inject_account' does not depend on any axioms
+info: ././././AxiomAudit.lean:99:0: 'SatStaffRecoveryRouting.DeepLink.reachable_adoption_account' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:100:0: 'SatStaffRecoveryRouting.DeepLink.reachable_adoptions_le_injections' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:101:0: 'SatStaffRecoveryRouting.DeepLink.editorInit_adopted_le' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:104:0: SatStaffRecoveryRouting.DeepLink.moduleById_isSome_of_mem {sh : SatStaffRecoveryRouting.ModuleShell}
+  {m : SatStaffRecoveryRouting.ShellModule} : m ∈ sh → (SatStaffRecoveryRouting.moduleById sh m.id).isSome = true
+info: ././././AxiomAudit.lean:105:0: SatStaffRecoveryRouting.DeepLink.selectionExists_of_mem {sh : SatStaffRecoveryRouting.ModuleShell}
+  {m : SatStaffRecoveryRouting.ShellModule} (h : m ∈ sh) : SatStaffRecoveryRouting.selectionExists sh (some m.id) = true
+info: ././././AxiomAudit.lean:106:0: SatStaffRecoveryRouting.DeepLink.moduleInSection_mem {sh : SatStaffRecoveryRouting.ModuleShell}
+  {sec mod : SatStaffRecoveryRouting.Chars} {m : SatStaffRecoveryRouting.ShellModule}
+  (h : SatStaffRecoveryRouting.moduleInSection sh sec mod = some m) : m ∈ sh
+info: ././././AxiomAudit.lean:107:0: SatStaffRecoveryRouting.DeepLink.moduleByKey_mem {sh : SatStaffRecoveryRouting.ModuleShell}
+  {mod : SatStaffRecoveryRouting.Chars} {m : SatStaffRecoveryRouting.ShellModule}
+  (h : SatStaffRecoveryRouting.moduleByKey sh mod = some m) : m ∈ sh
+info: ././././AxiomAudit.lean:108:0: SatStaffRecoveryRouting.DeepLink.moduleForKey_mem {sh : SatStaffRecoveryRouting.ModuleShell}
+  {raw : SatStaffRecoveryRouting.Chars} {m : SatStaffRecoveryRouting.ShellModule}
+  (h : SatStaffRecoveryRouting.moduleForKey sh raw = some m) : m ∈ sh
+info: ././././AxiomAudit.lean:109:0: SatStaffRecoveryRouting.DeepLink.fallback_pending (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) : (SatStaffRecoveryRouting.fallback sh e).pendingModuleLink = e.pendingModuleLink
+info: ././././AxiomAudit.lean:110:0: SatStaffRecoveryRouting.DeepLink.fallback_injected (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) : (SatStaffRecoveryRouting.fallback sh e).linkInjected = e.linkInjected
+info: ././././AxiomAudit.lean:111:0: SatStaffRecoveryRouting.DeepLink.fallback_adopted (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) : (SatStaffRecoveryRouting.fallback sh e).linkAdopted = e.linkAdopted
+info: ././././AxiomAudit.lean:112:0: SatStaffRecoveryRouting.DeepLink.consume_injected_unchanged (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) : (SatStaffRecoveryRouting.consume sh e).linkInjected = e.linkInjected
+info: ././././AxiomAudit.lean:113:0: SatStaffRecoveryRouting.DeepLink.consume_adopted_le (sh : SatStaffRecoveryRouting.ModuleShell)
+  (e : SatStaffRecoveryRouting.Editor) : (SatStaffRecoveryRouting.consume sh e).linkAdopted ≤ e.linkAdopted + 1
+info: ././././AxiomAudit.lean:114:0: SatStaffRecoveryRouting.DeepLink.update_with_current_values (e : SatStaffRecoveryRouting.Editor)
+  (h2 : e.selModule = none) (h3 : e.selQuestion = none) :
+  { pendingModuleLink := e.pendingModuleLink, selModule := none, selQuestion := none, linkInjected := e.linkInjected,
+      linkAdopted := e.linkAdopted } =
+    e
+info: ././././AxiomAudit.lean:115:0: SatStaffRecoveryRouting.DeepLink.empty_shell_settles_and_a_real_shell_does_not :
+  SatStaffRecoveryRouting.Settled [] SatStaffRecoveryRouting.emptyEditor ∧
+    ¬SatStaffRecoveryRouting.Settled SatStaffRecoveryRouting.studentShell SatStaffRecoveryRouting.emptyEditor
+info: ././././AxiomAudit.lean:116:0: 'SatStaffRecoveryRouting.DeepLink.moduleById_isSome_of_mem' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:117:0: 'SatStaffRecoveryRouting.DeepLink.selectionExists_of_mem' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:118:0: 'SatStaffRecoveryRouting.DeepLink.moduleInSection_mem' does not depend on any axioms
+info: ././././AxiomAudit.lean:119:0: 'SatStaffRecoveryRouting.DeepLink.moduleByKey_mem' does not depend on any axioms
+info: ././././AxiomAudit.lean:120:0: 'SatStaffRecoveryRouting.DeepLink.moduleForKey_mem' does not depend on any axioms
+info: ././././AxiomAudit.lean:121:0: 'SatStaffRecoveryRouting.DeepLink.fallback_pending' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:122:0: 'SatStaffRecoveryRouting.DeepLink.fallback_injected' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:123:0: 'SatStaffRecoveryRouting.DeepLink.fallback_adopted' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:124:0: 'SatStaffRecoveryRouting.DeepLink.consume_injected_unchanged' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:125:0: 'SatStaffRecoveryRouting.DeepLink.consume_adopted_le' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:126:0: 'SatStaffRecoveryRouting.DeepLink.update_with_current_values' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:127:0: 'SatStaffRecoveryRouting.DeepLink.empty_shell_settles_and_a_real_shell_does_not' does not depend on any axioms
+info: ././././AxiomAudit.lean:130:0: SatStaffRecoveryRouting.Pinning.capture_of_set_target (r : SatStaffRecoveryRouting.Room)
+  (v : SatStaffRecoveryRouting.Version) (h : r.target = some v) : (SatStaffRecoveryRouting.freeze r).target = some v
+info: ././././AxiomAudit.lean:131:0: SatStaffRecoveryRouting.Pinning.capture_twice_is_capture_once (r : SatStaffRecoveryRouting.Room) :
+  (SatStaffRecoveryRouting.freeze (SatStaffRecoveryRouting.freeze r)).target = (SatStaffRecoveryRouting.freeze r).target
+info: ././././AxiomAudit.lean:132:0: SatStaffRecoveryRouting.Pinning.capture_takes_the_observed_version (r : SatStaffRecoveryRouting.Room)
+  (v : SatStaffRecoveryRouting.Version) (ht : r.target = none) (ho : r.observed = some v) :
+  (SatStaffRecoveryRouting.freeze r).target = some v
+info: ././././AxiomAudit.lean:133:0: SatStaffRecoveryRouting.Pinning.create_ignores_a_later_snapshot (r : SatStaffRecoveryRouting.Room)
+  (w : SatStaffRecoveryRouting.Version) :
+  (SatStaffRecoveryRouting.createRoom (SatStaffRecoveryRouting.observe w (SatStaffRecoveryRouting.freeze r))).sent =
+    (SatStaffRecoveryRouting.freeze r).target
+info: ././././AxiomAudit.lean:134:0: SatStaffRecoveryRouting.Pinning.create_sends_the_target (r : SatStaffRecoveryRouting.Room) :
+  (SatStaffRecoveryRouting.createRoom r).sent = r.target
+info: ././././AxiomAudit.lean:135:0: SatStaffRecoveryRouting.Pinning.first_snapshot_flow_pin (r : SatStaffRecoveryRouting.Room)
+  (v : SatStaffRecoveryRouting.Version) (ht : r.target = none) (ho : r.observed = some v) :
+  (SatStaffRecoveryRouting.freeze r).target = some v ∧
+    (SatStaffRecoveryRouting.freeze (SatStaffRecoveryRouting.observe v (SatStaffRecoveryRouting.freeze r))).target =
+      some v
+info: ././././AxiomAudit.lean:136:0: SatStaffRecoveryRouting.Pinning.observe_does_not_touch_the_target (v : SatStaffRecoveryRouting.Version)
+  (r : SatStaffRecoveryRouting.Room) : (SatStaffRecoveryRouting.observe v r).target = r.target
+info: ././././AxiomAudit.lean:137:0: SatStaffRecoveryRouting.Pinning.reopen_repins_the_current_version (r : SatStaffRecoveryRouting.Room)
+  (v : SatStaffRecoveryRouting.Version) :
+  (SatStaffRecoveryRouting.freeze (SatStaffRecoveryRouting.observe v (SatStaffRecoveryRouting.reopen r))).target =
+    some v
+info: ././././AxiomAudit.lean:138:0: SatStaffRecoveryRouting.Pinning.same_flow_actions_never_move_the_pin (r : SatStaffRecoveryRouting.Room)
+  (a : SatStaffRecoveryRouting.RoomAction) (v : SatStaffRecoveryRouting.Version)
+  (hnot : a ≠ SatStaffRecoveryRouting.RoomAction.reopenFlow) (h : r.target = some v) :
+  (SatStaffRecoveryRouting.roomStep r a).target = some v
+info: ././././AxiomAudit.lean:139:0: SatStaffRecoveryRouting.Pinning.roomStep_preserves_sent_implies_target {r : SatStaffRecoveryRouting.Room}
+  (a : SatStaffRecoveryRouting.RoomAction)
+  (ih : ∀ (v : SatStaffRecoveryRouting.Version), r.sent = some v → r.target = some v)
+  (v : SatStaffRecoveryRouting.Version) :
+  (SatStaffRecoveryRouting.roomStep r a).sent = some v → (SatStaffRecoveryRouting.roomStep r a).target = some v
+info: ././././AxiomAudit.lean:140:0: SatStaffRecoveryRouting.Pinning.reachable_sent_is_the_pinned_target {r : SatStaffRecoveryRouting.Room}
+  (h : SatStaffRecoveryRouting.RoomReach r) (v : SatStaffRecoveryRouting.Version) : r.sent = some v → r.target = some v
+info: ././././AxiomAudit.lean:141:0: 'SatStaffRecoveryRouting.Pinning.capture_of_set_target' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:142:0: 'SatStaffRecoveryRouting.Pinning.capture_twice_is_capture_once' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:143:0: 'SatStaffRecoveryRouting.Pinning.capture_takes_the_observed_version' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:144:0: 'SatStaffRecoveryRouting.Pinning.create_ignores_a_later_snapshot' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:145:0: 'SatStaffRecoveryRouting.Pinning.create_sends_the_target' does not depend on any axioms
+info: ././././AxiomAudit.lean:146:0: 'SatStaffRecoveryRouting.Pinning.first_snapshot_flow_pin' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:147:0: 'SatStaffRecoveryRouting.Pinning.observe_does_not_touch_the_target' does not depend on any axioms
+info: ././././AxiomAudit.lean:148:0: 'SatStaffRecoveryRouting.Pinning.reopen_repins_the_current_version' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:149:0: 'SatStaffRecoveryRouting.Pinning.same_flow_actions_never_move_the_pin' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:150:0: 'SatStaffRecoveryRouting.Pinning.roomStep_preserves_sent_implies_target' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:151:0: 'SatStaffRecoveryRouting.Pinning.reachable_sent_is_the_pinned_target' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:154:0: SatStaffRecoveryRouting.Counterexamples.legacy_handler_dead_ends_on_a_module_finding :
+  SatStaffRecoveryRouting.Counterexamples.resolveLegacy SatStaffRecoveryRouting.pathModuleRW = none ∧
+    SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathModuleRW (some SatStaffRecoveryRouting.fullShell) =
+      SatStaffRecoveryRouting.Destination.module SatStaffRecoveryRouting.readingWriting SatStaffRecoveryRouting.rwM1
+info: ././././AxiomAudit.lean:155:0: SatStaffRecoveryRouting.Counterexamples.routing_by_regex_alone_misroutes_a_field_path :
+  SatStaffRecoveryRouting.Counterexamples.resolveRegexOnly SatStaffRecoveryRouting.pathLeakedField =
+      SatStaffRecoveryRouting.Destination.module SatStaffRecoveryRouting.Counterexamples.answerWord
+        SatStaffRecoveryRouting.Counterexamples.optionsWord ∧
+    SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathLeakedField (some SatStaffRecoveryRouting.fullShell) =
+      SatStaffRecoveryRouting.Destination.unresolved SatStaffRecoveryRouting.unresolvedUnlinked
+info: ././././AxiomAudit.lean:156:0: SatStaffRecoveryRouting.Counterexamples.guessing_the_first_module_misroutes :
+  SatStaffRecoveryRouting.Counterexamples.resolveFirstModule SatStaffRecoveryRouting.pathModuleMissing
+        SatStaffRecoveryRouting.fullShell =
+      SatStaffRecoveryRouting.Destination.module SatStaffRecoveryRouting.readingWriting SatStaffRecoveryRouting.rwM1 ∧
+    SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathModuleMissing (some SatStaffRecoveryRouting.fullShell) =
+      SatStaffRecoveryRouting.Destination.unresolved SatStaffRecoveryRouting.unresolvedModuleMissing
+info: ././././AxiomAudit.lean:157:0: SatStaffRecoveryRouting.Counterexamples.refusing_unmapped_modules_dead_ends :
+  SatStaffRecoveryRouting.Counterexamples.resolveRefusingUnmapped SatStaffRecoveryRouting.pathModuleRW
+        SatStaffRecoveryRouting.modulelessShell =
+      SatStaffRecoveryRouting.Destination.unresolved SatStaffRecoveryRouting.unresolvedModuleMissing ∧
+    SatStaffRecoveryRouting.resolve SatStaffRecoveryRouting.pathModuleRW
+        (some SatStaffRecoveryRouting.modulelessShell) =
+      SatStaffRecoveryRouting.Destination.module SatStaffRecoveryRouting.readingWriting SatStaffRecoveryRouting.rwM1
+info: ././././AxiomAudit.lean:158:0: SatStaffRecoveryRouting.Counterexamples.ignoring_the_link_opens_the_first_module_instead :
+  (SatStaffRecoveryRouting.Counterexamples.consumeIgnoringTheLink SatStaffRecoveryRouting.studentShell
+          (SatStaffRecoveryRouting.inject SatStaffRecoveryRouting.linkRW2Higher
+            SatStaffRecoveryRouting.emptyEditor)).selModule =
+      some 1 ∧
+    (SatStaffRecoveryRouting.consume SatStaffRecoveryRouting.studentShell
+          (SatStaffRecoveryRouting.inject SatStaffRecoveryRouting.linkRW2Higher
+            SatStaffRecoveryRouting.emptyEditor)).selModule =
+      some 2
+info: ././././AxiomAudit.lean:159:0: SatStaffRecoveryRouting.Counterexamples.the_shipped_pin_survives_a_republish :
+  (SatStaffRecoveryRouting.Counterexamples.runRoom SatStaffRecoveryRouting.Counterexamples.emptyRoom
+          SatStaffRecoveryRouting.Counterexamples.republishTrace).target =
+      some SatStaffRecoveryRouting.Counterexamples.v1 ∧
+    (SatStaffRecoveryRouting.Counterexamples.runRoom SatStaffRecoveryRouting.Counterexamples.emptyRoom
+          SatStaffRecoveryRouting.Counterexamples.republishTrace).sent =
+      some SatStaffRecoveryRouting.Counterexamples.v1
+info: ././././AxiomAudit.lean:160:0: SatStaffRecoveryRouting.Counterexamples.recomputing_the_target_from_every_poll_moves_the_pin :
+  (SatStaffRecoveryRouting.Counterexamples.runLegacyRoom SatStaffRecoveryRouting.Counterexamples.emptyRoom
+          SatStaffRecoveryRouting.Counterexamples.legacyRepublishTrace).target =
+      some SatStaffRecoveryRouting.Counterexamples.v2 ∧
+    (SatStaffRecoveryRouting.Counterexamples.runLegacyRoom SatStaffRecoveryRouting.Counterexamples.emptyRoom
+          SatStaffRecoveryRouting.Counterexamples.legacyRepublishTrace).sent =
+      some SatStaffRecoveryRouting.Counterexamples.v2
+info: ././././AxiomAudit.lean:161:0: SatStaffRecoveryRouting.Counterexamples.editor_link_trace_is_reachable :
+  SatStaffRecoveryRouting.EditorReach SatStaffRecoveryRouting.studentShell
+    (SatStaffRecoveryRouting.consume SatStaffRecoveryRouting.studentShell
+      (SatStaffRecoveryRouting.inject SatStaffRecoveryRouting.linkRW2Higher SatStaffRecoveryRouting.emptyEditor))
+info: ././././AxiomAudit.lean:162:0: SatStaffRecoveryRouting.Counterexamples.room_republish_trace_is_reachable :
+  SatStaffRecoveryRouting.RoomReach
+    (SatStaffRecoveryRouting.Counterexamples.runRoom SatStaffRecoveryRouting.Counterexamples.emptyRoom
+      SatStaffRecoveryRouting.Counterexamples.republishTrace)
+info: ././././AxiomAudit.lean:163:0: SatStaffRecoveryRouting.Counterexamples.reachable_republish_state_keeps_the_first_version :
+  (SatStaffRecoveryRouting.observe SatStaffRecoveryRouting.Counterexamples.v2
+        (SatStaffRecoveryRouting.freeze
+          (SatStaffRecoveryRouting.observe SatStaffRecoveryRouting.Counterexamples.v1
+            SatStaffRecoveryRouting.Counterexamples.emptyRoom))).target =
+    some SatStaffRecoveryRouting.Counterexamples.v1
+info: ././././AxiomAudit.lean:164:0: 'SatStaffRecoveryRouting.Counterexamples.legacy_handler_dead_ends_on_a_module_finding' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:165:0: 'SatStaffRecoveryRouting.Counterexamples.routing_by_regex_alone_misroutes_a_field_path' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:166:0: 'SatStaffRecoveryRouting.Counterexamples.guessing_the_first_module_misroutes' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:167:0: 'SatStaffRecoveryRouting.Counterexamples.refusing_unmapped_modules_dead_ends' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:168:0: 'SatStaffRecoveryRouting.Counterexamples.ignoring_the_link_opens_the_first_module_instead' does not depend on any axioms
+info: ././././AxiomAudit.lean:169:0: 'SatStaffRecoveryRouting.Counterexamples.the_shipped_pin_survives_a_republish' does not depend on any axioms
+info: ././././AxiomAudit.lean:170:0: 'SatStaffRecoveryRouting.Counterexamples.recomputing_the_target_from_every_poll_moves_the_pin' does not depend on any axioms
+info: ././././AxiomAudit.lean:171:0: 'SatStaffRecoveryRouting.Counterexamples.editor_link_trace_is_reachable' does not depend on any axioms
+info: ././././AxiomAudit.lean:172:0: 'SatStaffRecoveryRouting.Counterexamples.room_republish_trace_is_reachable' does not depend on any axioms
+info: ././././AxiomAudit.lean:173:0: 'SatStaffRecoveryRouting.Counterexamples.reachable_republish_state_keeps_the_first_version' does not depend on any axioms
+Build completed successfully.
+
+exit status: 0

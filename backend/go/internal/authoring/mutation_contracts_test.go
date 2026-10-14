@@ -35,8 +35,8 @@ func expectQuestionDraft(mock sqlmock.Sqlmock, id string) {
 	expectModuleDraft(mock, "mod-1")
 }
 func detailRows(id string, revision int) *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "module_id", "module_key", "section_key", "display_order", "is_pretest", "revision_id", "question_id", "semantic_revision", "revision", "state", "question_type", "stimulus", "prompt", "answer", "rationale", "metadata", "accessibility"}).
-		AddRow(id, "mod-1", "rw-m1", SectionReadingWriting, 1, false, "rev-1", "q-1", 1, revision, "draft", "single_choice", emptyContent(), validPrompt(), validChoiceAnswer(), emptyContent(), validMetadata(), `{"longDescription":null}`)
+	return sqlmock.NewRows([]string{"id", "module_id", "module_key", "section_key", "display_order", "revision_id", "question_id", "semantic_revision", "revision", "state", "question_type", "stimulus", "prompt", "answer", "rationale", "metadata", "accessibility"}).
+		AddRow(id, "mod-1", "rw-m1", SectionReadingWriting, 1, "rev-1", "q-1", 1, revision, "draft", "single_choice", emptyContent(), validPrompt(), validChoiceAnswer(), emptyContent(), validMetadata(), `{"longDescription":null}`)
 }
 
 func TestSaveRevisionReturnsEditorContractAndAdvancesRevision(t *testing.T) {
@@ -153,7 +153,7 @@ func TestDuplicateRejectsOverCapacityBeforeCopy(t *testing.T) {
 	svc, mock := contractService(t)
 	begin(mock)
 	expectQuestionDraft(mock, "eq-1")
-	mock.ExpectQuery("SELECT module_id, question_id, question_revision_id, display_order, is_pretest").WithArgs("eq-1").WillReturnRows(sqlmock.NewRows([]string{"module", "question", "revision", "order", "pretest"}).AddRow("mod-1", "original-q", "original-rev", 0, false))
+	mock.ExpectQuery("SELECT module_id, question_id, question_revision_id, display_order FROM").WithArgs("eq-1").WillReturnRows(sqlmock.NewRows([]string{"module", "question", "revision", "order"}).AddRow("mod-1", "original-q", "original-rev", 0))
 	mock.ExpectQuery("SELECT target_question_count FROM assessment_modules WHERE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"target_question_count"}).AddRow(27))
 	mock.ExpectQuery("SELECT COUNT").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(27))
 	mock.ExpectRollback()
@@ -225,7 +225,7 @@ func TestDuplicateHonorsInsertionAnchorAndCopiesContent(t *testing.T) {
 	svc, mock := contractService(t)
 	begin(mock)
 	expectQuestionDraft(mock, "eq-1")
-	mock.ExpectQuery("SELECT module_id, question_id, question_revision_id, display_order, is_pretest").WithArgs("eq-1").WillReturnRows(sqlmock.NewRows([]string{"module", "question", "revision", "order", "pretest"}).AddRow("mod-1", "original-q", "original-rev", 0, false))
+	mock.ExpectQuery("SELECT module_id, question_id, question_revision_id, display_order FROM").WithArgs("eq-1").WillReturnRows(sqlmock.NewRows([]string{"module", "question", "revision", "order"}).AddRow("mod-1", "original-q", "original-rev", 0))
 	// Duplicate is an insert: capacity fence runs before the copy (27-cap
 	// module currently holding 2 questions).
 	mock.ExpectQuery("SELECT target_question_count FROM assessment_modules WHERE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"target_question_count"}).AddRow(27))
@@ -235,7 +235,7 @@ func TestDuplicateHonorsInsertionAnchorAndCopiesContent(t *testing.T) {
 	mock.ExpectExec("UPDATE assessment_exam_questions SET display_order = display_order \\+ 1.*ORDER BY display_order DESC").WithArgs("mod-1", 1).WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectExec("INSERT INTO assessment_questions").WithArgs(sqlmock.AnyArg(), "actor", "original-rev").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO assessment_question_revisions").WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "actor", "original-rev").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("INSERT INTO assessment_exam_questions").WithArgs(sqlmock.AnyArg(), "mod-1", sqlmock.AnyArg(), sqlmock.AnyArg(), 1, false).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO assessment_exam_questions").WithArgs(sqlmock.AnyArg(), "mod-1", sqlmock.AnyArg(), sqlmock.AnyArg(), 1).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(questionDetailQuery)).WillReturnRows(detailRows("copy", 0))
 	mock.ExpectCommit()
 	anchor := "eq-1"

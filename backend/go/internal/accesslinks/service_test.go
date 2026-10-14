@@ -3,6 +3,7 @@ package accesslinks
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -382,5 +383,60 @@ func TestParseEnumsRejectUnknown(t *testing.T) {
 	}
 	if _, err := ParseLifecycleState("archived"); codeOf(err) != apperrors.CodeBadRequest {
 		t.Fatalf("expected BAD_REQUEST on lifecycle, got %v", err)
+	}
+}
+
+func TestSessionEntryInfoReturnsRestrictedRosterWithoutStudentSecrets(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := svc(db)
+	now := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(linkSelectSQL() + " WHERE l.schedule_id = ?")).WithArgs("sched-1").WillReturnRows(sqlmock.NewRows([]string{
+		"id", "exam_id", "exam_title", "provider_key", "published_version_id", "version_number", "publish_scope", "schedule_id", "name", "enabled_sections",
+		"audience_type", "audience_label", "access_mode", "availability_type", "opens_at", "closes_at", "lifecycle_state", "revision", "created_at", "updated_at",
+		"selected_student_count", "registered_count", "started_count", "submitted_count", "is_current_release", "has_participation",
+	}).AddRow(
+		"link-1", "exam-1", "SAT Mock", "sat", "ver-1", 3, "full", "sched-1", "Morning", nil,
+		"selected_students", nil, "student_code", "scheduled", now.Add(-time.Hour), now.Add(time.Hour), "active", 1, now, now,
+		4, 3, 2, 1, 1, 1,
+	))
+	mock.ExpectQuery("FROM assessment_access_link_members m").WithArgs("sched-1", "link-1").WillReturnRows(
+		sqlmock.NewRows([]string{"student_name", "registration_id", "access_state", "attempt_id", "phase", "proctor_status", "submitted_at"}).
+			AddRow("Invited A", nil, nil, nil, nil, nil, nil).
+			AddRow("Waiting B", "reg-2", "checked_in", nil, nil, nil, nil).
+			AddRow("Working C", "reg-3", "checked_in", "attempt-3", "exam", "active", nil).
+			AddRow("Finished D", "reg-4", "submitted", "attempt-4", "post-exam", "idle", now),
+	)
+
+	got, err := s.SessionEntryInfo(context.Background(), "sched-1")
+	if err != nil {
+		t.Fatalf("SessionEntryInfo must succeed: %v", err)
+	}
+	if got.Link == nil || got.Link.AudienceType != AudienceSelectedStudents {
+		t.Fatalf("expected the selected-student link, got %#v", got.Link)
+	}
+	wantStates := []string{"not_joined", "waiting", "working", "finished"}
+	if len(got.Roster) != len(wantStates) {
+		t.Fatalf("got %d roster rows, want %d", len(got.Roster), len(wantStates))
+	}
+	for i, want := range wantStates {
+		if got.Roster[i].State != want {
+			t.Errorf("roster row %d state = %q, want %q", i+1, got.Roster[i].State, want)
+		}
+	}
+	serialized, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal safe entry info: %v", err)
+	}
+	for _, secret := range []string{"STUDENT-CODE", "student@example.test"} {
+		if strings.Contains(string(serialized), secret) {
+			t.Errorf("entry info exposed %q", secret)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

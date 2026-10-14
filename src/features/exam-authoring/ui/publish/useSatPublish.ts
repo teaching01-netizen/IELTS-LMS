@@ -17,6 +17,13 @@ import {
 import { isSATPublishReadinessValid, publishMediaIssueDiagnostic } from "../release/releaseSelectors";
 import type { DeliveryTarget } from "../shell/examLifecycle";
 
+export interface SatPublishOptions {
+  /** Pins a task flow to the exact draft it showed when setup began. */
+  expectedDraft?: { versionId: string; versionRevision: number };
+  /** Reused across retries of this same publish confirmation. */
+  operationKey?: string;
+}
+
 /**
  * The ONE owner of publishing an SAT exam: committed-draft reads, readiness
  * freshness, collaboration flush, and the retry-safe publish call. Both the
@@ -58,7 +65,11 @@ export function useSatPublish(exam: ExamEntity, onExamRefresh: () => Promise<unk
     shouldCheckReadiness
   );
 
-  const publish = async (scope: SatPublishScope, publishNotes?: string): Promise<DeliveryTarget> => {
+  const publish = async (
+    scope: SatPublishScope,
+    publishNotes?: string,
+    options: SatPublishOptions = {},
+  ): Promise<DeliveryTarget> => {
     if (!shell) throw new Error("The SAT draft is not loaded.");
     // Before anything else: prove this tab's room content is durable. Publish
     // seals whatever MySQL holds, so an unconfirmed prompt/image edit must be
@@ -84,6 +95,13 @@ export function useSatPublish(exam: ExamEntity, onExamRefresh: () => Promise<unk
       );
     }
     const committedShell = committed.shell;
+    if (
+      options.expectedDraft &&
+      (committedShell.versionId !== options.expectedDraft.versionId ||
+        committedShell.versionRevision !== options.expectedDraft.versionRevision)
+    ) {
+      throw new Error("The draft changed while this room was being set up. Close Create room and reopen it to review the latest draft.");
+    }
     if (typeof exam.revision !== "number" || !Number.isInteger(exam.revision)) {
       throw new Error(
         "The latest exam revision is unavailable. Refresh the release page before publishing."
@@ -103,15 +121,15 @@ export function useSatPublish(exam: ExamEntity, onExamRefresh: () => Promise<unk
     }
 
     const trimmedNotes = (publishNotes ?? "").trim();
-    // Fresh key for this confirmation. Automatic retries are disabled; a later
-    // user attempt is a new operation, not a replay of a lost response.
+    // The create-room coordinator reuses its key when a publish response is
+    // uncertain. Standalone publish confirmations get a fresh operation key.
     const publishedVersion = await publishMutation.mutateAsync({
       revision: exam.revision,
       expectedDraftVersionId: committedShell.versionId,
       expectedDraftRevision: committedShell.versionRevision,
       publishScope: scope,
       ...(trimmedNotes ? { publishNotes: trimmedNotes.slice(0, 1000) } : {}),
-      operationKey: crypto.randomUUID(),
+      operationKey: options.operationKey?.trim() || crypto.randomUUID(),
     });
     const target = publishedVersionToDeliveryTarget(publishedVersion, exam.id, scope);
     // Refreshes reconcile projections in the background. Neither a rejected

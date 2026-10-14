@@ -17,7 +17,7 @@ describe("workspace seed frames", () => {
       documentName: ROOM,
       root: "scalar",
       path: "question/q-1/scalar",
-      value: { isPretest: false, questionType: "single_choice" },
+      value: { questionType: "single_choice" },
       sourceQuestionRevision: 7,
     });
     expect(frame.type).toBe("coedit.seed");
@@ -94,7 +94,7 @@ describe("workspace seed frames", () => {
         documentName: "coedit:v1:prompt-1",
         root: "scalar",
         path: "question/q-1/scalar",
-        value: { isPretest: false },
+        value: { questionType: "single_choice" },
       }),
     ).toContain("workspace room");
     // And a valid proposal has nothing to refuse.

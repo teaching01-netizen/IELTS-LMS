@@ -19,7 +19,7 @@ import { DropdownMenu } from 'radix-ui';
 export type SatMenuItem = {
   id: string;
   label: string;
-  onSelect: () => void;
+  onSelect: (trigger: HTMLButtonElement | null) => void;
   disabled?: boolean;
   destructive?: boolean;
   /** Marks the active workspace/choice with a trailing check glyph. */
@@ -212,7 +212,7 @@ function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align =
                 className="sat-menu-item"
                 onClick={() => {
                   closeMenu(true);
-                  item.onSelect();
+                  item.onSelect(triggerRef.current);
                 }}
               >
                 <ItemFace item={item} />
@@ -226,12 +226,13 @@ function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align =
 }
 
 export function SatMenu(props: SatMenuProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
   if (!supportsNativeMenu()) return <StaticMenu {...props} />;
   const { label, items, triggerContent, icon: Icon, compact, align = 'start', width, triggerClassName, portalContainer } = props;
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button type="button" aria-label={label} className={`group ${triggerClassName ?? (compact ? COMPACT_TRIGGER_CLASS : WORKSPACE_TRIGGER_CLASS)}`}>
+        <button ref={triggerRef} type="button" aria-label={label} className={`group ${triggerClassName ?? (compact ? COMPACT_TRIGGER_CLASS : WORKSPACE_TRIGGER_CLASS)}`}>
           {triggerContent ?? (
             <>
               {Icon ? <Icon size={16} aria-hidden="true" /> : null}
@@ -260,7 +261,7 @@ export function SatMenu(props: SatMenuProps) {
                 aria-current={item.current ? 'true' : undefined}
                 className="sat-menu-item"
                 onSelect={() => {
-                  item.onSelect();
+                  item.onSelect(triggerRef.current);
                 }}
               >
                 <ItemFace item={item} />

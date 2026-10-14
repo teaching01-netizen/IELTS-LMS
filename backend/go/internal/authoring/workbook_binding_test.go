@@ -60,13 +60,13 @@ func TestWorkbookCommitCanonicalisesTargetsWithoutMutatingCaller(t *testing.T) {
 	}
 }
 
-func TestWorkbookCommitAllowsAnyPretestCount(t *testing.T) {
+func TestWorkbookCommitIgnoresLegacyPretestFlags(t *testing.T) {
 	r := oneModuleCommitRequest()
 	for i := range r.Modules[0].Questions {
-		r.Modules[0].Questions[i].IsPretest = false
+		r.Modules[0].Questions[i].LegacyIsPretest = i%3 == 0
 	}
 	if _, _, err := prepareWorkbookCommit(r); err != nil {
-		t.Fatalf("pretests must not be validated at import: %v", err)
+		t.Fatalf("legacy pretest flags must be ignored at import: %v", err)
 	}
 }
 
@@ -87,12 +87,6 @@ func TestWorkbookContentDigestBindsContentAndTargets(t *testing.T) {
 	if first != reformatted {
 		t.Fatal("JSON formatting changed the checked-content digest")
 	}
-	r.Modules[0].Questions[0].IsPretest = !r.Modules[0].Questions[0].IsPretest
-	_, flipped, _ := prepareWorkbookCommit(r)
-	if first == flipped {
-		t.Fatal("changed pretest flag did not change content binding")
-	}
-	r.Modules[0].Questions[0].IsPretest = !r.Modules[0].Questions[0].IsPretest
 	r.Modules[0].Questions[0].Prompt = json.RawMessage(`{"version":1,"nodes":[{"type":"paragraph","text":"Altered checked content"}]}`)
 	_, changed, err := prepareWorkbookCommit(r)
 	if err != nil {

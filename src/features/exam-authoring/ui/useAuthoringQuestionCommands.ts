@@ -22,7 +22,7 @@ import type { WorkspaceMode } from "./useAuthoringKeyboard";
 
 /**
  * The question command surface: create, import, duplicate, delete, reorder,
- * bulk-change, set-pretest, and save-and-advance.
+ * bulk-change, and save-and-advance.
  *
  * WHY THIS EXISTS
  * ---------------
@@ -198,7 +198,6 @@ export interface AuthoringQuestionCommands {
     action: BulkQuestionAction,
     expectedRevisions?: Record<string, number>
   ) => Promise<void>;
-  setPretest: (isPretest: boolean) => void;
   openIssues: () => Promise<void>;
 }
 
@@ -604,27 +603,6 @@ export function useAuthoringQuestionCommands(
     ]
   );
 
-  const setPretest = useCallback(
-    (isPretest: boolean) => {
-      if (!selectedExamQuestionId) return;
-      if (workspaceCollaboration) {
-        const path = `question/${selectedExamQuestionId}/scalar`;
-        const current = workspaceCollaboration.workspaceSnapshot.values[path];
-        const scalar = isQuestionWorkspaceScalar(current)
-          ? { ...current, isPretest }
-          : draft
-            ? questionWorkspaceScalar(draft, isPretest)
-            : null;
-        if (scalar) workspaceCollaboration.setValue(path, scalar);
-        return;
-      }
-      void bulkAction([selectedExamQuestionId], { type: "set_pretest", value: isPretest }).catch(
-        () => undefined
-      );
-    },
-    [bulkAction, draft, selectedExamQuestionId, workspaceCollaboration]
-  );
-
   const openIssues = useCallback(async () => {
     if (!(await flushBeforeNavigation())) return;
     setWorkspaceMode("issues");
@@ -647,7 +625,6 @@ export function useAuthoringQuestionCommands(
     saveAndNext,
     reorder,
     bulkAction,
-    setPretest,
     openIssues,
   };
 }

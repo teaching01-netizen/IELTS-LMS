@@ -3,6 +3,7 @@ package satpublish
 import (
 	"context"
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -116,7 +117,6 @@ func TestValidateModuleUsesConfiguredTarget(t *testing.T) {
 			QuestionType:   "single_choice",
 			Prompt:         content("Prompt"),
 			Answer:         choiceAnswer("A", "A", "B", "C", "D"),
-			IsPretest:      index < 2,
 		}
 	}
 	if issues := ValidateModule(Module{SectionKey: "math", ModuleKey: "math-m1", Title: "Math Module", TargetQuestionCount: 20, Questions: questions}); len(issues) != 0 {
@@ -136,14 +136,12 @@ func TestValidateModuleRestrictsStudentProducedResponseToMath(t *testing.T) {
 		QuestionType:   "student_produced_response",
 		Prompt:         content("Solve for x."),
 		Answer:         `{"kind":"student_produced_response","acceptedResponses":["12"]}`,
-		IsPretest:      true,
 	}
 	mcq := Question{
 		ExamQuestionID: "eq-mcq",
 		QuestionType:   "single_choice",
 		Prompt:         content("Prompt"),
 		Answer:         choiceAnswer("A", "A", "B", "C", "D"),
-		IsPretest:      true,
 	}
 	module := func(section string, questions ...Question) Module {
 		return Module{SectionKey: section, ModuleKey: section + "-m1", TargetQuestionCount: len(questions), Questions: questions}
@@ -158,16 +156,41 @@ func TestValidateModuleRestrictsStudentProducedResponseToMath(t *testing.T) {
 	}
 }
 
-func TestValidateModuleRequiresExactlyTwoPretests(t *testing.T) {
-	for _, count := range []int{0, 1, 2, 3} {
-		questions := make([]Question, 4)
+// Full-size modules publish without any pretest designation.
+func TestValidateModuleFullSizeWithoutPretests(t *testing.T) {
+	for section, count := range map[string]int{SectionReadingWriting: 27, SectionMath: 22} {
+		questions := make([]Question, count)
 		for i := range questions {
-			questions[i] = Question{ExamQuestionID: string(rune('a' + i)), QuestionType: "single_choice", Prompt: content("Prompt"), Answer: choiceAnswer("A", "A", "B", "C", "D"), IsPretest: i < count}
+			questions[i] = Question{ExamQuestionID: strconv.Itoa(i), QuestionType: "single_choice", Prompt: content("Prompt"), Answer: choiceAnswer("A", "A", "B", "C", "D")}
 		}
-		issues := ValidateModule(Module{SectionKey: SectionMath, ModuleKey: "math-m1", TargetQuestionCount: 4, Questions: questions})
-		if hasCode(issues, "sat.module.pretest_count") != (count != 2) {
-			t.Fatalf("pretest count %d: %+v", count, issues)
+		if issues := ValidateModule(Module{SectionKey: section, ModuleKey: section + "-m1", TargetQuestionCount: count, Questions: questions}); len(issues) != 0 {
+			t.Fatalf("%s full module: %+v", section, issues)
 		}
+	}
+}
+
+// Every question counts toward the converter's operational total.
+func TestValidateDraftCountsEveryQuestionAsOperational(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(`{"math":"m2_hard"}`))
+	mock.ExpectQuery("SELECT s.section_key, m.module_key").WithArgs("draft", SectionMath).
+		WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key", "title", "target", "id"}).AddRow(SectionMath, "math-m2-higher", "Hard", 2, "mh"))
+	mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("mh").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer"}).
+			AddRow("q1", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")).
+			AddRow("q2", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
+	policy := converterJSON(t, map[string]map[string]string{"math": {"m2_higher_only": "s"}}, map[string]int{"s": 2})
+	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"p"}).AddRow(policy))
+	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("a 2-question table must cover a 2-question module: %+v", issues)
 	}
 }
 
@@ -181,9 +204,9 @@ func TestValidateDraftRequiresAllThreeModulesInSelectedSection(t *testing.T) {
 	mock.ExpectQuery("SELECT s.section_key, m.module_key").WithArgs("draft", SectionReadingWriting).
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key", "title", "target", "id"}).AddRow(SectionReadingWriting, "rw-m1", "RW1", 2, "rw1"))
 	mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("rw1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer", "is_pretest"}).
-			AddRow("q1", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D"), true).
-			AddRow("q2", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D"), true))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer"}).
+			AddRow("q1", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")).
+			AddRow("q2", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"p"}))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeReadingWriting)
 	if err != nil {

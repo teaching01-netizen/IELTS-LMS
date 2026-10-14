@@ -31,7 +31,6 @@ const draft: BatchQuestionDraft = {
     tags: [],
   },
   accessibility: { longDescription: null },
-  isPretest: false,
 };
 
 const shell: AssessmentAuthoringShell = {
@@ -417,7 +416,7 @@ describe("SAT workbook import sheet", () => {
       rowCount: 27,
       targetModuleKeys: ["rw-m1"],
       detected: detectedModules(["rw-m1"]),
-      modules: [{ moduleKey: "rw-m1", sectionKey: "reading-writing", questions: Array.from({ length: 27 }, () => ({ ...draft, isPretest: null })) }],
+      modules: [{ moduleKey: "rw-m1", sectionKey: "reading-writing", questions: Array.from({ length: 27 }, () => draft) }],
     };
     const preview = vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockResolvedValue(singlePreview);
     const commit = vi.spyOn(assessmentAuthoringApi, "commitSatWorkbook").mockResolvedValue({ shell, undo: { importId: "import-1", available: true } });
@@ -447,8 +446,8 @@ describe("SAT workbook import sheet", () => {
     expect(request.targetModuleKeys).toEqual(["rw-m1"]);
     expect(request.modules).toHaveLength(1);
     expect(request).not.toHaveProperty("pretestResolution");
-    // Unknown pretests are never silently turned into pretest flags.
-    expect(request.modules[0].questions.every((question) => question.isPretest === false)).toBe(true);
+    // The commit carries no pretest field.
+    expect(request.modules[0].questions.every((question) => !("isPretest" in question))).toBe(true);
   });
 
   it("imports several detected modules together", async () => {
@@ -458,7 +457,7 @@ describe("SAT workbook import sheet", () => {
       questionCount: 49,
       targetModuleKeys: keys,
       detected: detectedModules(keys),
-      modules: keys.map((moduleKey) => ({ moduleKey, sectionKey: "x", questions: [{ ...draft, isPretest: true }] })),
+      modules: keys.map((moduleKey) => ({ moduleKey, sectionKey: "x", questions: [draft] })),
     });
     const commit = vi.spyOn(assessmentAuthoringApi, "commitSatWorkbook").mockResolvedValue({ shell, undo: { importId: "import-1", available: true } });
     render(<SatWorkbookImportSheet open examId="exam-1" shell={shell} existingQuestionCount={0} onClose={vi.fn()} onCommitted={vi.fn()} />);
@@ -470,8 +469,6 @@ describe("SAT workbook import sheet", () => {
     fireEvent.click(action);
     await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
     expect(commit.mock.calls[0][1]).toMatchObject({ targetModuleKeys: keys });
-    // A Yes in the workbook's Pretest column carries through.
-    expect(commit.mock.calls[0][1].modules[0].questions[0].isPretest).toBe(true);
   });
 
   it("names the detected module that needs attention and blocks the whole import", async () => {
@@ -536,7 +533,7 @@ describe("SAT workbook import sheet", () => {
       questionCount: 27,
       targetModuleKeys: ["rw-m1"],
       detected: detectedModules(["rw-m1"]),
-      modules: [{ moduleKey: "rw-m1", sectionKey: "reading-writing", questions: Array.from({ length: 27 }, (_, i) => ({ ...draft, isPretest: i === 7 || i === 18 })) }],
+      modules: [{ moduleKey: "rw-m1", sectionKey: "reading-writing", questions: Array.from({ length: 27 }, (_, i) => ({ ...draft })) }],
     };
     vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockResolvedValue(singlePreview);
     const commit = vi.spyOn(assessmentAuthoringApi, "commitSatWorkbook").mockRejectedValueOnce(new Error("Response lost")).mockResolvedValueOnce({ shell, undo: { importId: "import-1", available: true } });

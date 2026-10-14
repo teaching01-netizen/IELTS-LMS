@@ -57,12 +57,8 @@ type SatWorkbookDetectedModule struct {
 	Ready         bool   `json:"ready"`
 }
 
-// Preview pretests are informational: Yes/No cells are carried through, any
-// other value is Unknown and imports as not-pretest. Pretest counts are
-// enforced at publication, not at import.
 type SatWorkbookQuestionPreview struct {
 	QuestionDraft
-	IsPretest *bool `json:"isPretest"`
 }
 
 type SatWorkbookPreviewModule struct {
@@ -160,9 +156,11 @@ var workbookHeaderAliases = map[string]string{
 	"domain":             "domain",
 	"skill":              "skill",
 	"difficulty":         "difficulty",
-	"pretest":            "pretest",
-	"rationale":          "rationale",
-	"tags":               "tags",
+	// Legacy workbooks may carry a Pretest column; it is recognized only so
+	// untouched scaffold rows still match, and its values are ignored.
+	"pretest":   "pretest",
+	"rationale": "rationale",
+	"tags":      "tags",
 }
 
 var workbookAssetKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -380,12 +378,6 @@ func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
 		if difficulty != "easy" && difficulty != "medium" && difficulty != "hard" {
 			issues = append(issues, satWorkbookIssue(excelRow, "Difficulty", "Difficulty must be Easy, Medium, or Hard."))
 		}
-		pretest, pretestOK := parseWorkbookBool(value("pretest"))
-		var previewPretest *bool
-		if pretestOK {
-			previewPretest = &pretest
-		}
-
 		prompt := compileWorkbookContent(promptText, assetAlt, assetCaption)
 		stimulus := compileWorkbookContent(strings.TrimSpace(value("stimulus")), assetAlt, assetCaption)
 		rationale := compileWorkbookContent(strings.TrimSpace(value("rationale")), assetAlt, assetCaption)
@@ -404,7 +396,6 @@ func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
 			Rationale:     rationale,
 			Metadata:      metadata,
 			Accessibility: accessibility,
-			IsPretest:     pretest,
 		}
 		for _, issue := range validateSATQuestion(spec.sectionKey, questionType, string(stimulus), string(prompt), string(answer), string(rationale), string(metadata)) {
 			if issue.Blocking {
@@ -416,7 +407,7 @@ func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
 		if !orderOK || !domainOK || !skillOK || !difficultyOK || strings.TrimSpace(promptText) == "" {
 			continue
 		}
-		parsed[spec.key] = append(parsed[spec.key], workbookQuestion{order: order, draft: draft, pretest: previewPretest})
+		parsed[spec.key] = append(parsed[spec.key], workbookQuestion{order: order, draft: draft})
 	}
 	questionIssuesTo := len(issues)
 
@@ -430,7 +421,7 @@ func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
 		sort.SliceStable(items, func(i, j int) bool { return items[i].order < items[j].order })
 		questions := make([]SatWorkbookQuestionPreview, 0, len(items))
 		for _, item := range items {
-			questions = append(questions, SatWorkbookQuestionPreview{QuestionDraft: item.draft, IsPretest: item.pretest})
+			questions = append(questions, SatWorkbookQuestionPreview{QuestionDraft: item.draft})
 		}
 		if len(questions) != spec.count {
 			issue := satWorkbookIssue(0, "Module", fmt.Sprintf("%s requires exactly %d questions; found %d.", spec.label, spec.count, len(questions)))
@@ -511,7 +502,7 @@ func workbookUntouchedScaffold(row []string, columns map[string]int, spec satWor
 		return false
 	}
 	allowed := map[int]string{}
-	for field, expected := range map[string]string{"responseType": "Multiple Choice", "difficulty": "Medium", "pretest": "No"} {
+	for field, expected := range map[string]string{"responseType": "Multiple Choice", "difficulty": "Medium"} {
 		column, present := columns[field]
 		if !present || strings.TrimSpace(workbookCell(row, column)) != expected {
 			return false
@@ -519,6 +510,9 @@ func workbookUntouchedScaffold(row []string, columns map[string]int, spec satWor
 		allowed[column] = expected
 	}
 	allowed[columns["module"]], allowed[orderColumn] = spec.label, "order"
+	if column, present := columns["pretest"]; present {
+		allowed[column] = "ignored"
+	}
 	for column, cell := range row {
 		if _, scaffold := allowed[column]; !scaffold && strings.TrimSpace(cell) != "" {
 			return false
@@ -571,9 +565,8 @@ func scanSATWorkbookPictures(book *excelize.File, issues *[]SatWorkbookIssue) er
 }
 
 type workbookQuestion struct {
-	order   int
-	draft   QuestionDraft
-	pretest *bool
+	order int
+	draft QuestionDraft
 }
 
 func emptySATWorkbookPreview(assets []SatWorkbookAsset, issues []SatWorkbookIssue) SatWorkbookPreview {
@@ -629,17 +622,6 @@ func workbookColumnName(column int) string {
 func parseWorkbookOrder(raw string, max int) (int, bool) {
 	value, err := strconv.Atoi(strings.TrimSpace(raw))
 	return value, err == nil && value >= 1 && value <= max
-}
-
-func parseWorkbookBool(raw string) (bool, bool) {
-	switch normalizeWorkbookValue(raw) {
-	case "yes", "y", "true", "1":
-		return true, true
-	case "no", "n", "false", "0":
-		return false, true
-	default:
-		return false, false
-	}
 }
 
 func resolveWorkbookDomain(section, raw string) (string, bool) {

@@ -13,7 +13,6 @@ function summary(id: string, overrides: Partial<AssessmentQuestionSummary> = {})
     questionId: `q-${id}`,
     questionRevisionId: `rev-${id}`,
     displayOrder: 0,
-    isPretest: false,
     questionType: "single_choice",
     semanticRevision: 1,
     revision: 1,

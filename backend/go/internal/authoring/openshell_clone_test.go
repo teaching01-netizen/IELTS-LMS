@@ -193,9 +193,9 @@ func TestOpenShellClonePreservesPublishedQuestionContent(t *testing.T) {
 		if next.QuestionID != source.QuestionID {
 			t.Fatalf("%s: question id = %q, want %q", where, next.QuestionID, source.QuestionID)
 		}
-		if next.ModuleKey != source.ModuleKey || next.DisplayOrder != source.DisplayOrder || next.IsPretest != source.IsPretest {
-			t.Fatalf("%s: placement shape changed: module=%q order=%d pretest=%v (source module=%q order=%d pretest=%v)",
-				where, next.ModuleKey, next.DisplayOrder, next.IsPretest, source.ModuleKey, source.DisplayOrder, source.IsPretest)
+		if next.ModuleKey != source.ModuleKey || next.DisplayOrder != source.DisplayOrder || next.IsPretest {
+			t.Fatalf("%s: placement shape changed: module=%q order=%d pretest=%v (source module=%q order=%d); clones are always scored",
+				where, next.ModuleKey, next.DisplayOrder, next.IsPretest, source.ModuleKey, source.DisplayOrder)
 		}
 		// Advanced: a new semantic revision of the same question, back in draft.
 		attempt := seenPerQuestion[source.QuestionID]

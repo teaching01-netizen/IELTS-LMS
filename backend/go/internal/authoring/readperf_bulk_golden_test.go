@@ -89,7 +89,7 @@ func readPerfBulkModuleRows(mock sqlmock.Sqlmock, rows [][]driver.Value) {
 func readPerfBulkQuestionRows(mock sqlmock.Sqlmock, rows [][]driver.Value) {
 	expect := sqlmock.NewRows([]string{
 		"module_id", "id", "question_id", "question_revision_id", "section_key",
-		"display_order", "is_pretest", "question_type",
+		"display_order", "question_type",
 		"semantic_revision", "revision",
 		"stimulus", "prompt", "answer_definition", "rationale", "metadata",
 	})
@@ -154,16 +154,16 @@ func TestGoldenShellBulkProjection(t *testing.T) {
 
 	// One questions statement for the whole version, prefixed with module_id.
 	readPerfBulkQuestionRows(mock, [][]driver.Value{
-		{"mod-rw-1", "eq-1", "q-1", "rev-1", "reading-writing", 0, false, "single_choice", 1, 4,
+		{"mod-rw-1", "eq-1", "q-1", "rev-1", "reading-writing", 0, "single_choice", 1, 4,
 			readPerfStimulus("Seeded rich stimulus"), readPerfPrompt("Which choice is best?"),
 			readPerfSingleChoiceAnswer("B"), readPerfPrompt("Because B is correct."),
 			readPerfGoldenMetadata("reading-writing", "information-and-ideas", "Central Ideas and Details")},
-		{"mod-rw-1", "eq-2", "q-2", "rev-2", "reading-writing", 1, true, "single_choice", 1, 0,
+		{"mod-rw-1", "eq-2", "q-2", "rev-2", "reading-writing", 1, "single_choice", 1, 0,
 			readPerfEmptyStimulus(), readPerfPrompt("Which choice is second?"),
 			readPerfSingleChoiceAnswer("A"), readPerfPrompt("Because A is correct."),
 			readPerfGoldenMetadata("reading-writing", "craft-and-structure", "Words in Context")},
 		// mod-rw-2 has no questions: the assembler must emit [] not null.
-		{"mod-math-1", "eq-3", "q-3", "rev-3", "math", 0, false, "student_produced_response", 2, 0,
+		{"mod-math-1", "eq-3", "q-3", "rev-3", "math", 0, "student_produced_response", 2, 0,
 			readPerfEmptyStimulus(), readPerfPrompt("Solve for x."),
 			readPerfSPRAnswer("3"), readPerfPrompt("Divide both sides."),
 			readPerfGoldenMetadata("math", "algebra", "Linear Equations in One Variable")},
@@ -360,7 +360,7 @@ func TestGoldenShellBulkStatementBudget(t *testing.T) {
 		{"sec-rw", "rp-sec-rw", "mod-rw-1", "mod-rw-2", "mod-rw-3", "practice_threshold", readPerfBulkRoutingJSON, 2},
 	})
 	readPerfBulkQuestionRows(mock, [][]driver.Value{
-		{"mod-rw-1", "eq-1", "q-1", "rev-1", "reading-writing", 0, false, "single_choice", 1, 0,
+		{"mod-rw-1", "eq-1", "q-1", "rev-1", "reading-writing", 0, "single_choice", 1, 0,
 			readPerfEmptyStimulus(), readPerfPrompt("Q?"),
 			readPerfSingleChoiceAnswer("A"), readPerfPrompt("A."),
 			readPerfGoldenMetadata("reading-writing", "information-and-ideas", "Central Ideas and Details")},
@@ -458,14 +458,14 @@ func TestGoldenShellBulkPolicyConfigParsingGolden(t *testing.T) {
 	if policy == nil {
 		t.Fatal("routing policy missing")
 	}
-	if policy.MinimumCorrectForHigher != 13 || policy.OperationalCount != 25 {
+	if policy.MinimumCorrectForHigher != 13 || policy.OperationalCount != 27 {
 		t.Fatalf("policy projection drifted: %+v", policy)
 	}
 	encoded, err := json.Marshal(policy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "{\"id\":\"rp-sec-rw\",\"baseModuleId\":\"mod-rw-1\",\"lowerModuleId\":\"mod-rw-2\",\"higherModuleId\":\"mod-rw-3\",\"policyKey\":\"practice_threshold\",\"minimumCorrectForHigher\":13,\"operationalQuestionCount\":25,\"revision\":2}"
+	want := "{\"id\":\"rp-sec-rw\",\"baseModuleId\":\"mod-rw-1\",\"lowerModuleId\":\"mod-rw-2\",\"higherModuleId\":\"mod-rw-3\",\"policyKey\":\"practice_threshold\",\"minimumCorrectForHigher\":13,\"operationalQuestionCount\":27,\"revision\":2}"
 	if string(encoded) != want {
 		t.Fatalf("policy JSON drifted.\n got: %s\nwant: %s", encoded, want)
 	}

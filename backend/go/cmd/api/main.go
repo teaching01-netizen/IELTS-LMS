@@ -738,6 +738,7 @@ func BuildRouter(app *App) http.Handler {
 			// org or assigned proctor; never polled, never in roster payloads.
 			authzRoute(r, "GET", "/sessions/{scheduleID}/start-code", proctorStartCodeRevealHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/start-code/rotate", proctorStartCodeRotateHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}/entry-info", proctorSessionEntryInfoHandler(app))
 			// SAT Practice Classroom: staff assign Module 2 under staff_selects.
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/route", proctorAssignRouteHandler(app))
 			authzRoute(r, "GET", "/sessions/{scheduleID}/route-queue", proctorStaffRouteQueueHandler(app))

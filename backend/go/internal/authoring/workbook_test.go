@@ -22,17 +22,6 @@ func TestParseSATWorkbookCompleteContract(t *testing.T) {
 	if preview.QuestionCount != 147 || len(preview.Modules) != 6 {
 		t.Fatalf("unexpected workbook shape: questions=%d modules=%d", preview.QuestionCount, len(preview.Modules))
 	}
-	for _, module := range preview.Modules {
-		pretests := 0
-		for _, question := range module.Questions {
-			if question.IsPretest != nil && *question.IsPretest {
-				pretests++
-			}
-		}
-		if pretests != 2 {
-			t.Errorf("module %s has %d pretests", module.ModuleKey, pretests)
-		}
-	}
 
 	var prompt map[string]any
 	if err := json.Unmarshal(preview.Modules[0].Questions[0].Prompt, &prompt); err != nil {

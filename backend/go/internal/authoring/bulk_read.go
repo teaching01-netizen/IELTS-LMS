@@ -143,7 +143,6 @@ type bulkQuestionRow struct {
 	revisionID     string
 	sectionKey     string
 	displayOrder   int
-	isPretest      bool
 	questionType   string
 	semanticRev    int
 	revision       int
@@ -166,7 +165,6 @@ func (r bulkQuestionRow) asValidationRow() questionValidationRow {
 		displayOrder:     r.displayOrder,
 		semanticRevision: r.semanticRev,
 		revision:         r.revision,
-		isPretest:        r.isPretest,
 		questionType:     r.questionType,
 		stimulus:         r.stimulus,
 		prompt:           r.prompt,
@@ -276,7 +274,7 @@ func loadBulkRouting(ctx context.Context, q queryRowContexter, versionID string)
 func loadBulkQuestionRows(ctx context.Context, q queryRowContexter, versionID string) ([]bulkQuestionRow, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT eq.module_id, eq.id, eq.question_id, eq.question_revision_id, s.section_key,
-		       eq.display_order, eq.is_pretest, r.question_type,
+		       eq.display_order, r.question_type,
 		       r.semantic_revision, r.revision,
 		       CAST(r.stimulus AS CHAR), CAST(r.prompt AS CHAR),
 		       CAST(r.answer_definition AS CHAR), CAST(r.rationale AS CHAR),
@@ -295,7 +293,7 @@ func loadBulkQuestionRows(ctx context.Context, q queryRowContexter, versionID st
 	for rows.Next() {
 		var r bulkQuestionRow
 		if err := rows.Scan(&r.moduleID, &r.examQuestionID, &r.questionID, &r.revisionID, &r.sectionKey,
-			&r.displayOrder, &r.isPretest, &r.questionType, &r.semanticRev, &r.revision,
+			&r.displayOrder, &r.questionType, &r.semanticRev, &r.revision,
 			&r.stimulus, &r.prompt, &r.answer, &r.rationale, &r.metadata); err != nil {
 			return nil, err
 		}
@@ -340,26 +338,21 @@ func moduleToolPolicy(m bulkModuleRow) json.RawMessage {
 //     writers persist threshold-only JSON (sat_initialization.go,
 //     UpdateDeliverySettings) and the key is absent on every real row, so
 //     reading it projected 0 and the release page clamped to 1 (stuck-at-1).
-//     operational = base module target_question_count - authored pretest
-//     placements in the base module, floored at 1 — the same derivation the
+//     operational = base module target_question_count, floored at 1 —
+//     the same derivation the
 //     UpdateDeliverySettings upper-bound check and readiness gate use.
 //
 // derivedOperationalCount is the candidate-facing operational question count
-// for one section: base module target minus pretest, floored at 1. The SAT
-// blueprint (questionCount - pretestCount) wins when the base module is a
-// known blueprint module, so a partially-authored draft still projects the
-// stable provider contract (RW 25, Math 20) — exactly the bound the
-// UpdateDeliverySettings upper-bound check and the readiness gate enforce.
-// Otherwise it falls back to target minus authored pretest placements.
-// authoredPretest is the live pretest placement count in the base module.
-func derivedOperationalCount(sectionKey, baseModuleKey string, targetCount, authoredPretest int) int {
+// for one section: base module target, floored at 1. The SAT blueprint
+// question count wins when the base module is a known blueprint module, so a
+// partially-authored draft still projects the stable provider contract
+// (RW 27, Math 22) — exactly the bound the UpdateDeliverySettings upper-bound
+// check and the readiness gate enforce.
+func derivedOperationalCount(sectionKey, baseModuleKey string, targetCount int) int {
 	if spec, ok := satBlueprintModule(sectionKey, baseModuleKey); ok {
-		if operational := spec.questionCount - spec.pretestCount; operational >= 1 {
-			return operational
-		}
-		return 1
+		return spec.questionCount
 	}
-	if operational := targetCount - authoredPretest; operational >= 1 {
+	if operational := targetCount; operational >= 1 {
 		return operational
 	}
 	return 1
@@ -433,7 +426,7 @@ func assembleShellTree(identity shellIdentity, sections []bulkSectionRow, module
 	for _, s := range seeds {
 		mods := modulesBySection[s.sectionID]
 		var sectionKey, baseKey string
-		target, pretest := 0, 0
+		target := 0
 		for _, section := range sections {
 			if section.id == s.sectionID {
 				sectionKey = section.sectionKey
@@ -443,15 +436,10 @@ func assembleShellTree(identity shellIdentity, sections []bulkSectionRow, module
 		for _, m := range mods {
 			if m.ID == s.rp.BaseModuleID {
 				baseKey, target = m.ModuleKey, m.TargetQuestionCount
-				for _, q := range questionsByModule[m.ID] {
-					if q.IsPretest {
-						pretest++
-					}
-				}
 				break
 			}
 		}
-		s.rp.OperationalCount = derivedOperationalCount(sectionKey, baseKey, target, pretest)
+		s.rp.OperationalCount = derivedOperationalCount(sectionKey, baseKey, target)
 		routingBySection[s.sectionID] = s.rp
 	}
 

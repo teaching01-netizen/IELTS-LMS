@@ -128,7 +128,6 @@ const (
 	FieldAccessibility    ChangedField = "accessibility"
 	FieldDisplayOrder     ChangedField = "displayOrder"
 	FieldModuleID         ChangedField = "moduleId"
-	FieldIsPretest        ChangedField = "isPretest"
 	FieldQuestionType     ChangedField = "questionType"
 	FieldReadiness        ChangedField = "readiness"
 	FieldDeliverySettings ChangedField = "deliverySettings"
@@ -140,7 +139,7 @@ var KnownChangedFields = map[string]struct{}{
 	"prompt": {}, "stimulus": {}, "answer": {}, "rationale": {},
 	"metadata.domain": {}, "metadata.skill": {}, "metadata.difficulty": {},
 	"metadata.tags": {}, "accessibility": {}, "displayOrder": {},
-	"moduleId": {}, "isPretest": {}, "questionType": {}, "readiness": {},
+	"moduleId": {}, "questionType": {}, "readiness": {},
 	"deliverySettings": {}, "draftRevision": {},
 }
 

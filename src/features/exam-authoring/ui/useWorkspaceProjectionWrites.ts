@@ -69,7 +69,6 @@ export interface WorkspaceProjectionWritesInput {
   baseQuestionExamQuestionId: string | null;
   /** The HTTP question: the seed only, never the source of truth. */
   baseQuestion: QuestionRevision | null;
-  isPretest: boolean | undefined;
   draft: QuestionRevision | null;
   /** The last draft the editors rendered, for change detection. */
   draftRef: { current: QuestionRevision | null };
@@ -203,7 +202,6 @@ export function useWorkspaceProjectionWrites(
     selectedExamQuestionId,
     baseQuestionExamQuestionId,
     baseQuestion,
-    isPretest,
     draft,
     draftRef,
     setDraft,
@@ -216,7 +214,11 @@ export function useWorkspaceProjectionWrites(
   const sharedQuestionScalar = useMemo(() => {
     if (!workspaceCollaboration || !workspaceQuestionPath) return null;
     const value = workspaceCollaboration.workspaceSnapshot.values[`${workspaceQuestionPath}/scalar`];
-    return isQuestionWorkspaceScalar(value) ? value : null;
+    if (!isQuestionWorkspaceScalar(value)) return null;
+    // Rooms written before pretest removal may still carry isPretest; keep
+    // only the scalar fields so it compares equal to the local projection.
+    const { questionType, answer, metadata, accessibility } = value;
+    return { questionType, answer, metadata, accessibility };
   }, [workspaceCollaboration, workspaceQuestionPath]);
   const sharedQuestionScalarJson = useMemo(
     () => (sharedQuestionScalar ? JSON.stringify(sharedQuestionScalar) : null),
@@ -406,7 +408,7 @@ export function useWorkspaceProjectionWrites(
     const revision = baseQuestion.revision;
     workspaceCollaboration.seedValue(
       `${workspaceQuestionPath}/scalar`,
-      questionWorkspaceScalar(baseQuestion, isPretest),
+      questionWorkspaceScalar(baseQuestion),
       revision,
     );
     workspaceCollaboration.seedRichField(`${workspaceQuestionPath}/prompt`, baseQuestion.prompt, revision);
@@ -424,7 +426,6 @@ export function useWorkspaceProjectionWrites(
   }, [
     baseQuestion,
     baseQuestionExamQuestionId,
-    isPretest,
     // An explicit retry re-proposes every still-empty root. The service keys a
     // seed by its content, so this is idempotent: a proposal that already
     // applied is refused as a duplicate rather than applied twice.
@@ -443,7 +444,7 @@ export function useWorkspaceProjectionWrites(
     if (!hydrated) return;
     if (!draft || !sharedQuestionScalar || !sharedQuestionScalarJson) return;
     const localWrite = localWorkspaceScalarRef.current;
-    const currentScalarJson = JSON.stringify(questionWorkspaceScalar(draft, sharedQuestionScalar.isPretest));
+    const currentScalarJson = JSON.stringify(questionWorkspaceScalar(draft));
     if (
       localWrite?.questionId === selectedExamQuestionId &&
       localWrite.json === currentScalarJson
@@ -454,7 +455,7 @@ export function useWorkspaceProjectionWrites(
     if (currentScalarJson === sharedQuestionScalarJson) return;
     setDraft((current) => {
       if (!current || current.id !== draft.id) return current;
-      if (JSON.stringify(questionWorkspaceScalar(current, sharedQuestionScalar.isPretest)) === sharedQuestionScalarJson) return current;
+      if (JSON.stringify(questionWorkspaceScalar(current)) === sharedQuestionScalarJson) return current;
       return applyQuestionWorkspaceScalar(current, sharedQuestionScalar);
     });
   }, [draft, hydrated, selectedExamQuestionId, setDraft, sharedQuestionScalar, sharedQuestionScalarJson]);
@@ -490,14 +491,11 @@ export function useWorkspaceProjectionWrites(
       const currentShared = workspaceCollaboration.workspaceSnapshot.values[
         `question/${selectedExamQuestionId}/scalar`
       ];
-      const currentSharedIsPretest = isQuestionWorkspaceScalar(currentShared)
-        ? currentShared.isPretest
-        : isPretest;
-      const scalar = questionWorkspaceScalar(question, currentSharedIsPretest);
+      const scalar = questionWorkspaceScalar(question);
       const json = JSON.stringify(scalar);
       const previous = draftRef.current;
       const previousScalarJson = previous
-        ? JSON.stringify(questionWorkspaceScalar(previous, currentSharedIsPretest))
+        ? JSON.stringify(questionWorkspaceScalar(previous))
         : null;
       // Rich-editor projections call the same question-level callback for
       // remote updates. Only a genuine scalar change may write the scalar root;
@@ -512,7 +510,7 @@ export function useWorkspaceProjectionWrites(
       }
       return true;
     },
-    [draftRef, hydrated, isPretest, selectedExamQuestionId, workspaceCollaboration],
+    [draftRef, hydrated, selectedExamQuestionId, workspaceCollaboration],
   );
 
   const handleLocalRichChange = useCallback(

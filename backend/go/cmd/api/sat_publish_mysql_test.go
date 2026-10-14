@@ -94,7 +94,6 @@ func newSATPublishFixture(t *testing.T, customTarget bool) *satPublishFixture {
 			if customTarget && index == numericModuleIndex && questionIndex == 1 {
 				draft = validSATPublishSPR()
 			}
-			draft.IsPretest = questionIndex < 2
 			created, err := h.authors.CreateQuestion(ctx, modules[index].id, h.actor, draft)
 			if err != nil {
 				t.Fatalf("create valid SAT question in %s.%s: %v", modules[index].sectionKey, modules[index].moduleKey, err)
@@ -206,7 +205,6 @@ func makeSATDraftPublishable(t *testing.T, ctx context.Context, db *sql.DB, auth
 		}
 		for questionIndex := 0; questionIndex < 2; questionIndex++ {
 			draft := validSATPublishQuestion()
-			draft.IsPretest = true // every module needs exactly two designated pretests
 			created, err := authors.CreateQuestion(ctx, modules[index].id, actorID, draft)
 			if err != nil {
 				t.Fatalf("create valid SAT question in %s.%s: %v", modules[index].sectionKey, modules[index].moduleKey, err)
@@ -470,19 +468,30 @@ func TestSATPublishScopeIgnoresExcludedIssuesAndPersistsScopeMySQL(t *testing.T)
 	}
 }
 
-func TestSATPublishRejectsInvalidPretestCountsMySQL(t *testing.T) {
-	for _, count := range []int{0, 1} {
-		t.Run(fmt.Sprintf("%d designated", count), func(t *testing.T) {
-			f := newSATPublishFixture(t, false)
-			module := f.modules[0]
-			for index, questionID := range module.questions {
-				isPretest := index < count
-				if _, err := f.h.db.ExecContext(context.Background(), "UPDATE assessment_exam_questions SET is_pretest = ? WHERE id = ?", isPretest, questionID); err != nil {
-					t.Fatal(err)
-				}
-			}
-			assertSATPublishRejected(t, f, "sat.module.pretest_count", module.sectionKey+"."+module.moduleKey)
-		})
+// Legacy draft pretest flags are cleared inside the publish transaction, so
+// every question in the new release is scored.
+func TestSATPublishSealsLegacyPretestFlagsAsScoredMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	ctx := context.Background()
+	for _, module := range f.modules {
+		if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_exam_questions SET is_pretest = TRUE WHERE id = ?", module.questions[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	published, err := f.h.exams.Publish(ctx, f.h.examID, f.h.actor, f.publishRequest())
+	if err != nil {
+		t.Fatalf("publish with legacy pretest flags: %v", err)
+	}
+	var flagged int
+	if err := f.h.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM assessment_exam_questions eq
+		JOIN assessment_modules m ON m.id = eq.module_id
+		JOIN assessment_sections s ON s.id = m.section_id
+		WHERE s.exam_version_id = ? AND eq.is_pretest = TRUE`, published.ID).Scan(&flagged); err != nil {
+		t.Fatal(err)
+	}
+	if flagged != 0 {
+		t.Fatalf("published version kept %d pretest flags", flagged)
 	}
 }
 
@@ -908,7 +917,6 @@ func TestSATPublishAfterLegacyImageReplacementMySQL(t *testing.T) {
 		QuestionType: "single_choice",
 		Prompt:       json.RawMessage(legacyImagePrompt(replacementAssetID, "Supply demand graph")),
 		Answer:       validSATPublishQuestion().Answer,
-		IsPretest:    true,
 	}); err != nil {
 		t.Fatalf("commit the replacement author save: %v", err)
 	}
@@ -983,7 +991,7 @@ func TestSATPublishConflictsWhenDraftChangesDuringMediaCheckMySQL(t *testing.T) 
 func TestSATPublishRequiresCompleteConverterMySQL(t *testing.T) {
 	f := newSATPublishFixture(t, false)
 	ctx := context.Background()
-	// One operational question per module beside the two pretests.
+	// Every question is operational: each module now holds three.
 	for _, module := range f.modules {
 		if _, err := f.h.db.ExecContext(ctx, "UPDATE assessment_modules SET target_question_count = 3 WHERE id = ?", module.id); err != nil {
 			t.Fatal(err)
@@ -1019,7 +1027,7 @@ func TestSATPublishRequiresCompleteConverterMySQL(t *testing.T) {
 		raw, err := json.Marshal(map[string]any{
 			"converterVersion": "classroom-v1", "scoreType": "estimated_sat", "calibrationSource": "staff_approved",
 			"sections": map[string]any{"reading-writing": map[string]string{"full_lower": "full", "full_higher": "full"}, "math": math},
-			"tables":   map[string]any{"full": table(2)},
+			"tables":   map[string]any{"full": table(3)},
 		})
 		if err != nil {
 			t.Fatal(err)

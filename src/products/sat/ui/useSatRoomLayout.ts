@@ -4,12 +4,12 @@ import { useLayoutEffect, useState } from 'react';
  * Live-room pane layout, chosen from the width the room actually has (the
  * product sidebar and browser zoom already subtracted), not the viewport:
  *
- * - `wide`  roster | run sheet | docked student inspector
- * - `split` roster | run sheet; the inspector opens as a side sheet
- * - `stack` roster then run sheet; the inspector opens as a sheet
+ * - `wide`  students | room context | docked student inspector
+ * - `split` students | room context; the inspector opens as a side sheet
+ * - `stack` room context above the students; the inspector opens as a sheet
  *
- * Thresholds keep every pane readable: roster 300–320px, run sheet ≥ 460px
- * (≥ 580px beside a docked inspector), inspector 340–380px.
+ * Thresholds keep every pane readable: the student list keeps ≥ 380px beside
+ * a 320–380px context column, and ≥ 480px when the 340–380px inspector docks.
  */
 export type SatRoomLayout = 'wide' | 'split' | 'stack';
 

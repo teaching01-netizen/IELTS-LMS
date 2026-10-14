@@ -14,7 +14,7 @@ export interface ExamShellNavigation {
   onBack: () => void;
   onPreview: () => void;
   onPublish?: (() => void) | undefined;
-  /** Opens session setup for the current published version; absent when the viewer cannot create sessions. */
+  /** Opens the room workflow; absent when this staff member cannot create rooms. */
   onCreateSession?: (() => void) | undefined;
   /** Opens the in-place settings sheet; the Settings tab itself is always the page. */
   onQuickSettings?: (() => void) | undefined;
@@ -41,7 +41,7 @@ export interface ExamWorkspaceHeaderProps {
   onPreview?: (() => void) | undefined;
   previewDisabled?: boolean;
   onPublish?: (() => void) | undefined;
-  /** Primary action once a version is published: prepare a sitting. */
+  /** Primary task action for staff who can create a room. */
   onCreateSession?: (() => void) | undefined;
   /** Optional focus target for hosts that must restore focus after a sheet closes. */
   onCreateSessionRef?: Ref<HTMLButtonElement> | undefined;
@@ -87,8 +87,8 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
     publishDisabledReason, publishLabel = "Publish version", issueCount = 0, onOpenIssues,
     importItems, menuItems, contextLine,
   } = props;
-  // A draft with changes leads with Publish; once a version is current the next step is a session.
-  const createIsPrimary = lifecycle.tone !== "changes" && lifecycle.tone !== "draft";
+  // Room creation is the staff task; publishing remains available as a separate action.
+  const createIsPrimary = Boolean(onCreateSession);
   const tabs: ExamWorkspaceTab[] = showResponses
     ? ["questions", "delivery", "responses", "settings"]
     : ["questions", "delivery", "settings"];

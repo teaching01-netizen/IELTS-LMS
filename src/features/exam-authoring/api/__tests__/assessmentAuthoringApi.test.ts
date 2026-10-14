@@ -44,7 +44,6 @@ describe("assessmentAuthoringApi question contracts", () => {
       rationale: {},
       metadata: { sectionKey: "reading-writing", domain: null, skill: null, difficulty: "medium", tags: [] },
       accessibility: { longDescription: null },
-      isPretest: false,
     };
     const result = await assessmentAuthoringApi.batchCreateQuestions("mod-1", { questions: [draft] });
     expect(backendPost).toHaveBeenCalledWith(
@@ -116,17 +115,17 @@ describe("assessmentAuthoringApi question contracts", () => {
     );
   });
 
-  it("bulks with value + expectedRevisions and reads the result shape", async () => {
+  it("bulks with expectedRevisions and reads the result shape", async () => {
     const resultPayload = { affectedQuestionIds: ["eq-1"], createdQuestionIds: [], updatedQuestions: [] };
     backendPost.mockResolvedValue(resultPayload);
     const result = await assessmentAuthoringApi.bulkQuestions({
       questionIds: ["eq-1"],
-      action: { type: "set_pretest", value: true } as any,
+      action: { type: "delete" },
       expectedRevisions: { "eq-1": 2 },
     });
     expect(backendPost).toHaveBeenCalledWith("/v1/assessment-authoring/questions/bulk", {
       questionIds: ["eq-1"],
-      action: { type: "set_pretest", value: true },
+      action: { type: "delete" },
       expectedRevisions: { "eq-1": 2 },
     }, undefined);
     expect(result).toEqual(resultPayload);

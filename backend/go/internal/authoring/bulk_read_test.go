@@ -203,8 +203,8 @@ func TestAssembleShellTreePolicyConfigParsing(t *testing.T) {
 			if policy.MinimumCorrectForHigher != testCase.wantThreshold {
 				t.Fatalf("minimumCorrectForHigher = %d, want %d", policy.MinimumCorrectForHigher, testCase.wantThreshold)
 			}
-			if policy.OperationalCount != 20 {
-				t.Fatalf("operationalQuestionCount = %d, want 20 (SAT math blueprint)", policy.OperationalCount)
+			if policy.OperationalCount != 22 {
+				t.Fatalf("operationalQuestionCount = %d, want 22 (SAT math blueprint)", policy.OperationalCount)
 			}
 			if policy.Revision != 4 || policy.ID != "rp-1" || policy.PolicyKey != "practice_threshold" {
 				t.Fatalf("policy scalar fields drifted: %+v", policy)
@@ -214,8 +214,8 @@ func TestAssembleShellTreePolicyConfigParsing(t *testing.T) {
 }
 
 // TestAssembleShellTreeOperational Derivation pins the fallback when the
-// base module is not a known blueprint module: target minus authored pretest
-// in the base module, floored at 1.
+// base module is not a known blueprint module: the base module target,
+// floored at 1.
 func TestAssembleShellTreeOperationalDerivation(t *testing.T) {
 	identity := shellIdentity{providerKey: "sat", versionID: "v-1"}
 	sections := []bulkSectionRow{{id: "sec-a", sectionKey: "custom", title: "C", displayOrder: 0}}
@@ -231,14 +231,14 @@ func TestAssembleShellTreeOperationalDerivation(t *testing.T) {
 		revision:     1,
 	}}
 	questions := []bulkQuestionRow{
-		{moduleID: "mod-a1", examQuestionID: "eq-1", questionID: "q-1", revisionID: "rev-1", sectionKey: "custom", displayOrder: 0, isPretest: false},
-		{moduleID: "mod-a1", examQuestionID: "eq-2", questionID: "q-2", revisionID: "rev-2", sectionKey: "custom", displayOrder: 1, isPretest: true},
-		{moduleID: "mod-a1", examQuestionID: "eq-3", questionID: "q-3", revisionID: "rev-3", sectionKey: "custom", displayOrder: 2, isPretest: true},
+		{moduleID: "mod-a1", examQuestionID: "eq-1", questionID: "q-1", revisionID: "rev-1", sectionKey: "custom", displayOrder: 0},
+		{moduleID: "mod-a1", examQuestionID: "eq-2", questionID: "q-2", revisionID: "rev-2", sectionKey: "custom", displayOrder: 1},
+		{moduleID: "mod-a1", examQuestionID: "eq-3", questionID: "q-3", revisionID: "rev-3", sectionKey: "custom", displayOrder: 2},
 	}
 	shell := assembleShellTree(identity, sections, modules, routing, questions, "exam-9")
-	// target 10 - 2 authored pretest = 8 (row.summary() preserves isPretest).
-	if got := shell.Sections[0].RoutingPolicy.OperationalCount; got != 8 {
-		t.Fatalf("operationalQuestionCount = %d, want 8 (10 target - 2 pretest)", got)
+	// Every authored question is operational: target 10.
+	if got := shell.Sections[0].RoutingPolicy.OperationalCount; got != 10 {
+		t.Fatalf("operationalQuestionCount = %d, want 10", got)
 	}
 
 	// Missing base module never projects 0 (the release page would clamp to 1).

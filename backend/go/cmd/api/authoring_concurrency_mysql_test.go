@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -153,7 +154,7 @@ func TestAuthoringBulkRollbackMySQL(t *testing.T) {
 	}
 	_, err = h.authors.BulkQuestions(ctx,
 		[]string{first.ExamQuestionID, second.ExamQuestionID},
-		authoring.BulkAction{Type: "set_pretest", PretestValue: true},
+		authoring.BulkAction{Type: "patch_metadata", Patch: map[string]any{"tags": []any{"bulk-rollback-probe"}}},
 		h.actor,
 		map[string]int{first.ExamQuestionID: first.Question.Revision, second.ExamQuestionID: second.Question.Revision + 1000},
 	)
@@ -165,8 +166,8 @@ func TestAuthoringBulkRollbackMySQL(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.IsPretest {
-			t.Fatalf("bulk rollback leaked a pretest flip on %s", id)
+		if strings.Contains(string(got.Question.Metadata), "bulk-rollback-probe") {
+			t.Fatalf("bulk rollback leaked a metadata patch on %s", id)
 		}
 	}
 }

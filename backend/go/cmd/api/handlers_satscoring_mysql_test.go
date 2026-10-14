@@ -67,13 +67,13 @@ func TestSATScoreConversionHandlersMySQL(t *testing.T) {
 	}
 
 	// Settings: blueprint operational counts come from the authoring blueprint
-	// (27 - 2 pretest, 22 - 2 pretest), not from the doc's 28x28 / 23x23.
+	// (27 and 22, every question scored), not from the doc's 28x28 / 23x23.
 	status, settings := call("GET", "/settings", nil, nil)
 	if status != 200 || settings["active"] != nil {
 		t.Fatalf("settings = %d %+v", status, settings)
 	}
 	bp := settings["blueprint"].(map[string]any)
-	if bp["reading-writing"].(map[string]any)["m1Operational"] != float64(25) || bp["math"].(map[string]any)["m2Operational"] != float64(20) {
+	if bp["reading-writing"].(map[string]any)["m1Operational"] != float64(27) || bp["math"].(map[string]any)["m2Operational"] != float64(22) {
 		t.Fatalf("blueprint = %+v", bp)
 	}
 

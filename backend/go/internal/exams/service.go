@@ -926,6 +926,11 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 			}
 		}
 		if provider == ProviderSAT {
+			// New releases score every question. Clear legacy pretest flags on
+			// the locked draft so the sealed rows match what was validated.
+			if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id SET eq.is_pretest = FALSE WHERE s.exam_version_id = ? AND eq.is_pretest = TRUE", draftID); err != nil {
+				return err
+			}
 			issues, err := satpublish.ValidateDraftForScope(ctx, q, draftID, requestedScope)
 			if err != nil {
 				return err

@@ -62,7 +62,6 @@ type QuestionSummary struct {
 	QuestionID        string                   `json:"questionId"`
 	QuestionRevision  string                   `json:"questionRevisionId"`
 	DisplayOrder      int                      `json:"displayOrder"`
-	IsPretest         bool                     `json:"isPretest"`
 	QuestionType      string                   `json:"questionType"`
 	SemanticRevision  int                      `json:"semanticRevision"`
 	Revision          int                      `json:"revision"`
@@ -112,7 +111,6 @@ type QuestionDetail struct {
 	ModuleKey      string                 `json:"moduleKey"`
 	SectionKey     string                 `json:"sectionKey"`
 	DisplayOrder   int                    `json:"displayOrder"`
-	IsPretest      bool                   `json:"isPretest"`
 	Question       QuestionRevisionDetail `json:"question"`
 }
 
@@ -168,7 +166,9 @@ type QuestionDraft struct {
 	Rationale     json.RawMessage `json:"rationale"`
 	Metadata      json.RawMessage `json:"metadata"`
 	Accessibility json.RawMessage `json:"accessibility"`
-	IsPretest     bool            `json:"isPretest"`
+	// LegacyIsPretest is accepted from clients that predate pretest removal
+	// and ignored: every question in a new release is scored.
+	LegacyIsPretest bool `json:"isPretest,omitempty"`
 }
 
 // SampleExamModuleDraft identifies the destination module for a complete
@@ -201,11 +201,10 @@ type DeliverySettingsRequest struct {
 	ExpectedRoutingRevision int
 }
 
-// BulkAction is move|duplicate|set_pretest|patch_metadata|delete.
+// BulkAction is move|duplicate|patch_metadata|delete.
 type BulkAction struct {
 	Type                string
 	DestinationModuleID string
-	PretestValue        bool
 	Patch               map[string]any
 }
 

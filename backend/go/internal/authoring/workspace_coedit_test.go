@@ -25,9 +25,6 @@ func TestParseWorkspaceQuestionProjectionSupportsRichAndScalarRoots(t *testing.T
 	if projection == nil || projection.questionType == nil || *projection.questionType != "single_choice" {
 		t.Fatalf("expected the question scalar projection, got %+v", projection)
 	}
-	if projection.isPretest == nil || !*projection.isPretest {
-		t.Fatalf("expected isPretest to be projected, got %+v", projection.isPretest)
-	}
 	if !projection.promptPresent || len(projection.choices) != 1 {
 		t.Fatalf("expected prompt and one choice rich root, got %+v", projection)
 	}

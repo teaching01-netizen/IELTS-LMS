@@ -17,7 +17,11 @@ function SatAuthoringWorkspaceHost({ examId, examTitle }: { examId: string; exam
     <AuthoringWorkspace
       examId={examId}
       examTitle={examTitle}
-      chrome={{ ...chrome, canPublish: Boolean(exam?.canPublish) }}
+      chrome={{
+        ...chrome,
+        canPublish: Boolean(exam?.canPublish),
+        canCreateSession: Boolean(exam?.canEdit),
+      }}
     />
   );
 }

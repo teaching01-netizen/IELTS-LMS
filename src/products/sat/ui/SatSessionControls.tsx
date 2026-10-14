@@ -1,13 +1,12 @@
-import { BarChart3, Pause, Play, Timer } from 'lucide-react';
+import { BarChart3, MoreHorizontal, Pause, Play, Timer } from 'lucide-react';
 import { SatMenu, type SatMenuItem } from './Menu';
 
 /**
  * Room-wide controls, grouped and labelled "Room controls" so they never read
  * as actions on the selected student. One primary per state: Resume exam while
  * paused, View responses once the room is finished (Start exam lives in the
- * waiting room beside the readiness it depends on). While running, Pause and
- * Add time stay secondary; End exam is a destructive entry point whose
- * confirmation states the room-wide consequence.
+ * waiting room beside the readiness it depends on). Less frequent time and
+ * end controls live under More.
  */
 export function SatSessionControls({
   runtimeStatus,
@@ -25,16 +24,17 @@ export function SatSessionControls({
   onPause: () => void;
   onResume: () => void;
   onExtend: (minutes: number) => void;
-  onComplete: () => void;
+  onComplete: (trigger: HTMLElement | null) => void;
   /** Present once the room is finished or cancelled. */
   onViewResponses?: (() => void) | undefined;
 }) {
   const active = runtimeStatus === 'live' || runtimeStatus === 'paused';
   const pauseBusy = pendingActions.has('pause');
   const resumeBusy = pendingActions.has('resume');
-  const extendItems: SatMenuItem[] = [
-    { id: 'extend-5', label: 'Add 5 minutes for the room', disabled: blocked || pendingActions.has('extend-5'), onSelect: () => onExtend(5) },
-    { id: 'extend-10', label: 'Add 10 minutes for the room', disabled: blocked || pendingActions.has('extend-10'), onSelect: () => onExtend(10) },
+  const moreItems: SatMenuItem[] = [
+    { id: 'extend-5', label: 'Add 5 minutes for the room', icon: Timer, disabled: blocked || pendingActions.has('extend-5'), onSelect: () => onExtend(5) },
+    { id: 'extend-10', label: 'Add 10 minutes for the room', icon: Timer, disabled: blocked || pendingActions.has('extend-10'), onSelect: () => onExtend(10) },
+    { id: 'end-exam', label: 'End exam', destructive: true, separatorBefore: true, disabled: blocked, onSelect: onComplete },
   ];
 
   if (!active && !onViewResponses) return null;
@@ -74,19 +74,14 @@ export function SatSessionControls({
         </button>
       ) : null}
       {active ? (
-        <>
-          <SatMenu
-            label="Add time"
-            align="end"
-            width={232}
-            items={extendItems}
-            triggerClassName="sat-btn sat-btn--secondary sat-press group"
-            triggerContent={<><Timer size={16} aria-hidden="true" /><span>Add time</span></>}
-          />
-          <button type="button" onClick={onComplete} disabled={blocked} className="sat-btn sat-btn--danger-secondary sat-press">
-            End exam
-          </button>
-        </>
+        <SatMenu
+          label="More"
+          align="end"
+          width={232}
+          items={moreItems}
+          triggerClassName="sat-btn sat-btn--quiet sat-press group"
+          triggerContent={<><MoreHorizontal size={16} aria-hidden="true" /><span>More</span></>}
+        />
       ) : null}
     </div>
   );

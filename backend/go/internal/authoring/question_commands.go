@@ -96,7 +96,7 @@ func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, 
 		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_question_revisions (id, question_id, semantic_revision, state, question_type, stimulus, prompt, answer_definition, rationale, metadata, accessibility, revision, created_by, created_at, updated_at) VALUES (?, ?, 1, 'draft', ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW(6), NOW(6))", revisionID, questionID, draft.QuestionType, nonEmptyJSON(draft.Stimulus), nonEmptyJSON(draft.Prompt), nonEmptyJSON(draft.Answer), nonEmptyJSON(draft.Rationale), nonEmptyJSON(draft.Metadata), nonEmptyJSON(draft.Accessibility), actorID); err != nil {
 			return err
 		}
-		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(6), NOW(6))", examQuestionID, moduleID, questionID, revisionID, order, draft.IsPretest); err != nil {
+		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(6), NOW(6))", examQuestionID, moduleID, questionID, revisionID, order); err != nil {
 			return err
 		}
 		// Re-read the row so the response carries the server revision ids,
@@ -153,8 +153,7 @@ func isEmptyQuestionDraft(draft QuestionDraft) bool {
 		len(bytes.TrimSpace(draft.Answer)) == 0 &&
 		len(bytes.TrimSpace(draft.Rationale)) == 0 &&
 		len(bytes.TrimSpace(draft.Metadata)) == 0 &&
-		len(bytes.TrimSpace(draft.Accessibility)) == 0 &&
-		!draft.IsPretest
+		len(bytes.TrimSpace(draft.Accessibility)) == 0
 }
 
 // defaultSATQuestionDraft synthesizes the blank editor draft for a section.
@@ -277,14 +276,14 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 			if _, err := q.ExecContext(ctx, "INSERT INTO assessment_question_revisions (id, question_id, semantic_revision, state, question_type, stimulus, prompt, answer_definition, rationale, metadata, accessibility, revision, created_by, created_at, updated_at) VALUES (?, ?, 1, 'draft', ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW(6), NOW(6))", revisionID, questionID, d.QuestionType, nonEmptyJSON(d.Stimulus), nonEmptyJSON(d.Prompt), nonEmptyJSON(d.Answer), nonEmptyJSON(d.Rationale), nonEmptyJSON(d.Metadata), nonEmptyJSON(d.Accessibility), actorID); err != nil {
 				return err
 			}
-			if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(6), NOW(6))", examQuestionID, moduleID, questionID, revisionID, order, d.IsPretest); err != nil {
+			if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(6), NOW(6))", examQuestionID, moduleID, questionID, revisionID, order); err != nil {
 				return err
 			}
 			_ = sectionKey
 			_ = moduleKey
 			out = append(out, (questionValidationRow{
 				examQuestionID: examQuestionID, questionID: questionID, revisionID: revisionID,
-				sectionKey: sectionKey, displayOrder: order, isPretest: d.IsPretest,
+				sectionKey: sectionKey, displayOrder: order,
 				semanticRevision: 1, questionType: d.QuestionType,
 				stimulus: string(nonEmptyJSON(d.Stimulus)), prompt: string(nonEmptyJSON(d.Prompt)), answer: string(nonEmptyJSON(d.Answer)),
 				rationale: string(nonEmptyJSON(d.Rationale)), metadata: string(nonEmptyJSON(d.Metadata)),
@@ -325,7 +324,7 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 	return out, nil
 }
 
-const questionDetailQuery = "SELECT eq.id, eq.module_id, m.module_key, s.section_key, eq.display_order, eq.is_pretest, eq.question_revision_id, eq.question_id, r.semantic_revision, r.revision, r.state, r.question_type, CAST(r.stimulus AS CHAR), CAST(r.prompt AS CHAR), CAST(r.answer_definition AS CHAR), CAST(r.rationale AS CHAR), CAST(r.metadata AS CHAR), CAST(r.accessibility AS CHAR) FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN assessment_question_revisions r ON r.id = eq.question_revision_id WHERE eq.id = ?"
+const questionDetailQuery = "SELECT eq.id, eq.module_id, m.module_key, s.section_key, eq.display_order, eq.question_revision_id, eq.question_id, r.semantic_revision, r.revision, r.state, r.question_type, CAST(r.stimulus AS CHAR), CAST(r.prompt AS CHAR), CAST(r.answer_definition AS CHAR), CAST(r.rationale AS CHAR), CAST(r.metadata AS CHAR), CAST(r.accessibility AS CHAR) FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN assessment_question_revisions r ON r.id = eq.question_revision_id WHERE eq.id = ?"
 
 // ListQuestions returns one provider-validated summary per question in a
 // module (mirrors the Rust summaries() projection).
@@ -355,15 +354,13 @@ func (s *Service) GetQuestion(ctx context.Context, examQuestionID string) (Quest
 
 func scanQuestionDetail(row *sql.Row) (QuestionDetail, error) {
 	var d QuestionDetail
-	var isPretest bool
-	err := row.Scan(&d.ExamQuestionID, &d.ModuleID, &d.ModuleKey, &d.SectionKey, &d.DisplayOrder, &isPretest, &d.Question.ID, &d.Question.QuestionID, &d.Question.SemanticRevision, &d.Question.Revision, &d.Question.State, &d.Question.QuestionType, rawScanner(&d.Question.Stimulus), rawScanner(&d.Question.Prompt), rawScanner(&d.Question.Answer), rawScanner(&d.Question.Rationale), rawScanner(&d.Question.Metadata), rawScanner(&d.Question.Accessibility))
+	err := row.Scan(&d.ExamQuestionID, &d.ModuleID, &d.ModuleKey, &d.SectionKey, &d.DisplayOrder, &d.Question.ID, &d.Question.QuestionID, &d.Question.SemanticRevision, &d.Question.Revision, &d.Question.State, &d.Question.QuestionType, rawScanner(&d.Question.Stimulus), rawScanner(&d.Question.Prompt), rawScanner(&d.Question.Answer), rawScanner(&d.Question.Rationale), rawScanner(&d.Question.Metadata), rawScanner(&d.Question.Accessibility))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return QuestionDetail{}, notFoundError("Question not found.")
 		}
 		return QuestionDetail{}, err
 	}
-	d.IsPretest = isPretest
 	return d, nil
 }
 
@@ -397,7 +394,7 @@ func (s *Service) UpdateQuestion(ctx context.Context, examQuestionID, actorID st
 		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_question_revisions (id, question_id, semantic_revision, state, question_type, stimulus, prompt, answer_definition, rationale, metadata, accessibility, revision, created_by, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW(6), NOW(6))", newRevisionID, questionID, semanticRev+1, orDefault(draft.QuestionType, "single_choice"), nonEmptyJSON(draft.Stimulus), nonEmptyJSON(draft.Prompt), nonEmptyJSON(draft.Answer), nonEmptyJSON(draft.Rationale), nonEmptyJSON(draft.Metadata), nonEmptyJSON(draft.Accessibility), actorID); err != nil {
 			return err
 		}
-		if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions SET question_revision_id = ?, is_pretest = ?, updated_at = NOW(6) WHERE id = ?", newRevisionID, draft.IsPretest, examQuestionID); err != nil {
+		if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions SET question_revision_id = ?, updated_at = NOW(6) WHERE id = ?", newRevisionID, examQuestionID); err != nil {
 			return err
 		}
 		_ = revisionID
@@ -422,7 +419,7 @@ func (s *Service) UpdateQuestion(ctx context.Context, examQuestionID, actorID st
 					QuestionID:     strPtr(questionID),
 					ModuleID:       strPtr(detail.ModuleID),
 				},
-				ChangedFields: authoringrealtime.NewChangedFields("prompt", "stimulus", "answer", "rationale", "metadata.domain", "metadata.skill", "metadata.difficulty", "metadata.tags", "accessibility", "isPretest", "questionType"),
+				ChangedFields: authoringrealtime.NewChangedFields("prompt", "stimulus", "answer", "rationale", "metadata.domain", "metadata.skill", "metadata.difficulty", "metadata.tags", "accessibility", "questionType"),
 			}); err != nil {
 				return err
 			}
@@ -609,8 +606,7 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 		// SELECT ... FOR UPDATE on the source row serializes duplicate vs edit.
 		var srcModule, questionID, revisionID string
 		var order int
-		var pretest bool
-		if err := q.QueryRowContext(ctx, "SELECT module_id, question_id, question_revision_id, display_order, is_pretest FROM assessment_exam_questions WHERE id = ? FOR UPDATE", examQuestionID).Scan(&srcModule, &questionID, &revisionID, &order, &pretest); err != nil {
+		if err := q.QueryRowContext(ctx, "SELECT module_id, question_id, question_revision_id, display_order FROM assessment_exam_questions WHERE id = ? FOR UPDATE", examQuestionID).Scan(&srcModule, &questionID, &revisionID, &order); err != nil {
 			if err == sql.ErrNoRows {
 				return notFoundError("Question not found.")
 			}
@@ -657,7 +653,7 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 			return err
 		}
 		newID := uuid.NewString()
-		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(6), NOW(6))", newID, dest, questionID, revisionID, newOrder, pretest); err != nil {
+		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(6), NOW(6))", newID, dest, questionID, revisionID, newOrder); err != nil {
 			return err
 		}
 		_ = order
@@ -719,14 +715,14 @@ func (s *Service) ExamQuestionIDForRevision(ctx context.Context, revisionID stri
 	return examQuestionID, nil
 }
 
-// BulkQuestions applies one move|duplicate|set_pretest|patch_metadata|delete
+// BulkQuestions applies one move|duplicate|patch_metadata|delete
 // action to many questions under module locks (mirrors bulk_questions).
 func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, action BulkAction, actorID string, expectedRevisions map[string]int, opts ...OperationOption) (BulkResult, error) {
 	if len(questionIDs) == 0 {
 		return BulkResult{}, validationError("At least one question id is required.")
 	}
 	switch action.Type {
-	case "move", "duplicate", "set_pretest", "patch_metadata", "delete":
+	case "move", "duplicate", "patch_metadata", "delete":
 	default:
 		return BulkResult{}, validationError(fmt.Sprintf("Unknown bulk action %q.", action.Type))
 	}
@@ -860,8 +856,7 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 					dest = action.DestinationModuleID
 				}
 				var questionID, revisionID string
-				var pretest bool
-				if err := q.QueryRowContext(ctx, "SELECT question_id, question_revision_id, is_pretest FROM assessment_exam_questions WHERE id = ?", id).Scan(&questionID, &revisionID, &pretest); err != nil {
+				if err := q.QueryRowContext(ctx, "SELECT question_id, question_revision_id FROM assessment_exam_questions WHERE id = ?", id).Scan(&questionID, &revisionID); err != nil {
 					return err
 				}
 				questionID, revisionID, err := cloneQuestionContent(ctx, q, revisionID, actorID)
@@ -869,15 +864,11 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 					return err
 				}
 				newID := uuid.NewString()
-				if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(display_order), -1) + 1 FROM (SELECT display_order FROM assessment_exam_questions WHERE module_id = ?) AS m), ?, NOW(6), NOW(6))", newID, dest, questionID, revisionID, dest, pretest); err != nil {
+				if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, created_at, updated_at) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(display_order), -1) + 1 FROM (SELECT display_order FROM assessment_exam_questions WHERE module_id = ?) AS m), NOW(6), NOW(6))", newID, dest, questionID, revisionID, dest); err != nil {
 					return err
 				}
 				result.CreatedQuestionIDs = append(result.CreatedQuestionIDs, newID)
 				affectedModules[dest] = true
-			case "set_pretest":
-				if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions SET is_pretest = ?, updated_at = NOW(6) WHERE id = ?", action.PretestValue, id); err != nil {
-					return err
-				}
 			case "patch_metadata":
 				if len(action.Patch) == 0 {
 					return validationError("Metadata patch must not be empty.")
@@ -921,7 +912,7 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 					return err
 				}
 			}
-			if action.Type == "set_pretest" || action.Type == "move" {
+			if action.Type == "move" {
 				if _, err := q.ExecContext(ctx, "UPDATE assessment_question_revisions r JOIN assessment_exam_questions eq ON eq.question_revision_id = r.id SET r.revision = r.revision + 1 WHERE eq.id = ?", id); err != nil {
 					return err
 				}
@@ -968,7 +959,7 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 				if err != nil {
 					return err
 				}
-				changed := []string{"displayOrder", "moduleId", "isPretest", "metadata.domain", "metadata.skill", "metadata.difficulty", "metadata.tags"}
+				changed := []string{"displayOrder", "moduleId", "metadata.domain", "metadata.skill", "metadata.difficulty", "metadata.tags"}
 				if err := s.appendAuthoringEventTx(ctx, q, emission, "bulk", scope, authoringrealtime.EventInput{
 					Kind:                    authoringrealtime.KindQuestionBulkChanged,
 					ActorID:                 actorID,

@@ -127,17 +127,17 @@ func TestGoldenShellProjection(t *testing.T) {
 		{"sec-rw", "rp-sec-rw", "mod-rw-1", "mod-rw-2", "mod-rw-3", "practice_threshold", readPerfBulkRoutingJSON, 2},
 	})
 	readPerfBulkQuestionRows(mock, [][]driver.Value{
-		{"mod-rw-1", "eq-1", "q-1", "rev-1", "reading-writing", 0, false, "single_choice", 1, 4,
+		{"mod-rw-1", "eq-1", "q-1", "rev-1", "reading-writing", 0, "single_choice", 1, 4,
 			readPerfStimulus("Seeded rich stimulus"), readPerfPrompt("Which choice is best?"),
 			readPerfSingleChoiceAnswer("B"), readPerfPrompt("Because B is correct."),
 			readPerfGoldenMetadata("reading-writing", "information-and-ideas", "Central Ideas and Details")},
-		{"mod-rw-1", "eq-2", "q-2", "rev-2", "reading-writing", 1, true, "single_choice", 1, 0,
+		{"mod-rw-1", "eq-2", "q-2", "rev-2", "reading-writing", 1, "single_choice", 1, 0,
 			readPerfEmptyStimulus(), readPerfPrompt("Which choice is second?"),
 			readPerfSingleChoiceAnswer("A"), readPerfPrompt("Because A is correct."),
 			readPerfGoldenMetadata("reading-writing", "craft-and-structure", "Words in Context")},
 		// mod-rw-2 has no questions: the assembler must emit [] not null.
 		// sec-math has no routing row: routingPolicy:null.
-		{"mod-math-1", "eq-3", "q-3", "rev-3", "math", 0, false, "student_produced_response", 2, 0,
+		{"mod-math-1", "eq-3", "q-3", "rev-3", "math", 0, "student_produced_response", 2, 0,
 			readPerfEmptyStimulus(), readPerfPrompt("Solve for x."),
 			readPerfSPRAnswer("3"), readPerfPrompt("Divide both sides."),
 			readPerfGoldenMetadata("math", "algebra", "Linear Equations in One Variable")},
@@ -166,17 +166,17 @@ func TestGoldenShellProjection(t *testing.T) {
 func readPerfGoldenShellJSON() string {
 	return `{"examId":"exam-1","providerKey":"sat","versionId":"draft-v1","versionRevision":7,"sections":[` +
 		`{"id":"sec-rw","sectionKey":"reading-writing","title":"Reading \u0026 Writing","displayOrder":0,"durationSeconds":3840,"breakAfterSeconds":600,"revision":0,` +
-		`"routingPolicy":{"id":"rp-sec-rw","baseModuleId":"mod-rw-1","lowerModuleId":"mod-rw-2","higherModuleId":"mod-rw-3","policyKey":"practice_threshold","minimumCorrectForHigher":13,"operationalQuestionCount":25,"revision":2},` +
+		`"routingPolicy":{"id":"rp-sec-rw","baseModuleId":"mod-rw-1","lowerModuleId":"mod-rw-2","higherModuleId":"mod-rw-3","policyKey":"practice_threshold","minimumCorrectForHigher":13,"operationalQuestionCount":27,"revision":2},` +
 		`"modules":[` +
 		`{"id":"mod-rw-1","moduleKey":"rw-m1","title":"Module 1","displayOrder":0,"durationSeconds":1920,"targetQuestionCount":27,"adaptiveRole":"base","toolPolicy":{"calculator":false,"reference_sheet":false},"revision":0,"questions":[` +
-		`{"examQuestionId":"eq-1","questionId":"q-1","questionRevisionId":"rev-1","displayOrder":0,"isPretest":false,"questionType":"single_choice","semanticRevision":1,"revision":4,"promptPreview":"Which choice is best?","answerKeyPreview":"B","domain":"information-and-ideas","skill":"Central Ideas and Details","difficulty":"medium","tags":["baseline"],"hasStimulus":true,"contentComplexity":"rich","readiness":{"status":"ready","blockingIssueCount":0,"warningCount":0}},` +
-		`{"examQuestionId":"eq-2","questionId":"q-2","questionRevisionId":"rev-2","displayOrder":1,"isPretest":true,"questionType":"single_choice","semanticRevision":1,"revision":0,"promptPreview":"Which choice is second?","answerKeyPreview":"A","domain":"craft-and-structure","skill":"Words in Context","difficulty":"medium","tags":["baseline"],"hasStimulus":false,"contentComplexity":"plain","readiness":{"status":"ready","blockingIssueCount":0,"warningCount":0}}` +
+		`{"examQuestionId":"eq-1","questionId":"q-1","questionRevisionId":"rev-1","displayOrder":0,"questionType":"single_choice","semanticRevision":1,"revision":4,"promptPreview":"Which choice is best?","answerKeyPreview":"B","domain":"information-and-ideas","skill":"Central Ideas and Details","difficulty":"medium","tags":["baseline"],"hasStimulus":true,"contentComplexity":"rich","readiness":{"status":"ready","blockingIssueCount":0,"warningCount":0}},` +
+		`{"examQuestionId":"eq-2","questionId":"q-2","questionRevisionId":"rev-2","displayOrder":1,"questionType":"single_choice","semanticRevision":1,"revision":0,"promptPreview":"Which choice is second?","answerKeyPreview":"A","domain":"craft-and-structure","skill":"Words in Context","difficulty":"medium","tags":["baseline"],"hasStimulus":false,"contentComplexity":"plain","readiness":{"status":"ready","blockingIssueCount":0,"warningCount":0}}` +
 		`]},` +
 		`{"id":"mod-rw-2","moduleKey":"rw-m2-lower","title":"Module 2 - Lower","displayOrder":1,"durationSeconds":1920,"targetQuestionCount":27,"adaptiveRole":"lower_branch","toolPolicy":{},"revision":0,"questions":[]}` +
 		`]},` +
 		`{"id":"sec-math","sectionKey":"math","title":"Math","displayOrder":1,"durationSeconds":4200,"breakAfterSeconds":0,"revision":0,"routingPolicy":null,"modules":[` +
 		`{"id":"mod-math-1","moduleKey":"math-m1","title":"Module 1","displayOrder":0,"durationSeconds":2100,"targetQuestionCount":22,"adaptiveRole":"base","toolPolicy":["calculator","reference_sheet"],"revision":0,"questions":[` +
-		`{"examQuestionId":"eq-3","questionId":"q-3","questionRevisionId":"rev-3","displayOrder":0,"isPretest":false,"questionType":"student_produced_response","semanticRevision":2,"revision":0,"promptPreview":"Solve for x.","answerKeyPreview":"3","domain":"algebra","skill":"Linear Equations in One Variable","difficulty":"medium","tags":["baseline"],"hasStimulus":false,"contentComplexity":"plain","readiness":{"status":"ready","blockingIssueCount":0,"warningCount":0}}` +
+		`{"examQuestionId":"eq-3","questionId":"q-3","questionRevisionId":"rev-3","displayOrder":0,"questionType":"student_produced_response","semanticRevision":2,"revision":0,"promptPreview":"Solve for x.","answerKeyPreview":"3","domain":"algebra","skill":"Linear Equations in One Variable","difficulty":"medium","tags":["baseline"],"hasStimulus":false,"contentComplexity":"plain","readiness":{"status":"ready","blockingIssueCount":0,"warningCount":0}}` +
 		`]}]}]}`
 }
 

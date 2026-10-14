@@ -1,0 +1,12 @@
+# kernel-evaluated counterexample traces
+# toolchain: leanprover/lean4:v4.19.0
+# command: lake env lean Counterexamples.lean
+
+({ observed := some { id := 2, number := 4 },
+   target := some { id := 1, number := 3 },
+   sent := some { id := 1, number := 3 },
+   firstObserved := some { id := 1, number := 3 } },
+ { observed := some { id := 2, number := 4 },
+   target := some { id := 2, number := 4 },
+   sent := some { id := 2, number := 4 },
+   firstObserved := some { id := 1, number := 3 } })
