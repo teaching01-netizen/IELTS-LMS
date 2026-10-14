@@ -26,6 +26,15 @@ const MODULE_LABELS: Record<string, string> = {
   "math-m2-higher": "Math · Module 2 — Higher",
 };
 
+const IMPORT_SCOPES: ReadonlyArray<{ value: SatWorkbookImportOptions["mode"]; label: string; hint: string }> = [
+  { value: "full", label: "Complete SAT", hint: "All six modules" },
+  { value: "single_module", label: "Single module", hint: "One module only" },
+];
+
+function moduleTargetCount(moduleKey: string): number {
+  return moduleKey.startsWith("rw-") ? 27 : 22;
+}
+
 interface SatWorkbookImportSheetProps {
   open: boolean;
   examId: string;
@@ -237,12 +246,34 @@ export function SatWorkbookImportSheet({
   else if (!preview.valid) importDisabledReason = "Fix the workbook issues, then choose the file again.";
   else if (!stagingComplete) importDisabledReason = "Workbook visuals must finish securing first.";
   else if (singleModule && (pretestOrders.length !== 2 || !designationSource || !pretestsConfirmed)) {
-    importDisabledReason = "Pretest assignments are unresolved. Choose exactly two questions and confirm their designation source.";
+    importDisabledReason = "Pretest assignments are unresolved. Import remains blocked.";
   }
   else if (replacesContent && !replaceConfirmed) {
     importDisabledReason = "Confirm the replacement to continue.";
   }
   const canCommit = importDisabledReason === null && !busy;
+  const pretestNextStep = !singleModule
+    ? null
+    : pretestOrders.length < 2
+      ? `Select ${2 - pretestOrders.length} more question${pretestOrders.length === 1 ? "" : "s"}.`
+      : pretestOrders.length > 2
+        ? `Deselect ${pretestOrders.length - 2} question${pretestOrders.length === 3 ? "" : "s"}; exactly two are required.`
+        : !designationSource
+          ? "Choose how the pair was established."
+          : !pretestsConfirmed
+            ? "Confirm the designation below."
+            : null;
+  const togglePretest = (order: number) => {
+    setPretestOrders((orders) =>
+      orders.includes(order) ? orders.filter((n) => n !== order) : [...orders, order].sort((a, b) => a - b)
+    );
+    setPretestsConfirmed(false);
+    const target = preview?.modules[0];
+    if (target) {
+      setSelectedModuleKey(target.moduleKey);
+      setSelectedQuestionIndex(order - 1);
+    }
+  };
 
   const commit = async () => {
     if (!preview?.valid || !canCommit || commitInFlightRef.current) return;
@@ -329,25 +360,50 @@ export function SatWorkbookImportSheet({
               <div className="min-h-0 overflow-y-auto border-b border-au-separator p-4 sm:p-5 lg:border-b-0 lg:border-r">
                 {shell.singleModuleImportEnabled ? (
                   <div className="mb-4 space-y-3 text-xs text-slate-700">
-                    <label htmlFor="sat-workbook-import-scope" className="block font-semibold">
-                      Import scope
-                      <select id="sat-workbook-import-scope" aria-label="Import scope" value={mode} disabled={busy || failedStep === "commit"}
-                        onChange={(event) => { clearInspection(); setMode(event.target.value as SatWorkbookImportOptions["mode"]); setTargetModuleKey(""); }}
-                        className="mt-1 min-h-11 w-full rounded-[9px] bg-au-fill px-3 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
-                        <option value="full">Complete SAT — all six modules</option>
-                        <option value="single_module">Single module</option>
-                      </select>
-                    </label>
+                    <fieldset disabled={busy || failedStep === "commit"}>
+                      <legend className="font-semibold">Import scope</legend>
+                      <div className="mt-1 grid grid-cols-2 gap-1 rounded-[11px] bg-au-fill p-1">
+                        {IMPORT_SCOPES.map((scope) => {
+                          const active = mode === scope.value;
+                          return (
+                            <label
+                              key={scope.value}
+                              className={`flex min-h-11 cursor-pointer flex-col items-center justify-center rounded-[9px] px-2 py-1 text-center transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-au-accent has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 ${
+                                active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="sat-workbook-import-scope"
+                                value={scope.value}
+                                checked={active}
+                                onChange={() => { clearInspection(); setMode(scope.value); setTargetModuleKey(""); }}
+                                className="sr-only"
+                              />
+                              <span className="font-semibold">{scope.label}</span>
+                              <span className="text-[11px] font-normal text-slate-600">{scope.hint}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
                     {singleModule ? (
-                      <label htmlFor="sat-workbook-target-module" className="block font-semibold">
-                        Target module
-                        <select id="sat-workbook-target-module" aria-label="Target module" value={targetModuleKey} disabled={busy || failedStep === "commit"}
-                          onChange={(event) => { clearInspection(); setTargetModuleKey(event.target.value); }}
-                          className="mt-1 min-h-11 w-full rounded-[9px] bg-au-fill px-3 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
-                          <option value="">Choose the destination module</option>
-                          {Object.entries(MODULE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                        </select>
-                      </label>
+                      <div>
+                        <label htmlFor="sat-workbook-target-module" className="block font-semibold">
+                          Target module
+                          <select id="sat-workbook-target-module" aria-label="Target module" aria-describedby="sat-workbook-target-hint" value={targetModuleKey} disabled={busy || failedStep === "commit"}
+                            onChange={(event) => { clearInspection(); setTargetModuleKey(event.target.value); }}
+                            className="mt-1 min-h-11 w-full rounded-[9px] bg-au-fill px-3 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
+                            <option value="">Choose the destination module</option>
+                            {Object.entries(MODULE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                          </select>
+                        </label>
+                        <p id="sat-workbook-target-hint" className="mt-1 leading-5 text-slate-600">
+                          {targetModuleKey
+                            ? `Expects ${questionsLabel(moduleTargetCount(targetModuleKey))}; the draft has ${beforeCountByModule.get(targetModuleKey) ?? 0} here now. Other modules, routing and scoring stay unchanged.`
+                            : "Choose where these questions belong before choosing the workbook. Rows for other modules that still hold untouched template defaults are ignored."}
+                        </p>
+                      </div>
                     ) : null}
                   </div>
                 ) : null}
@@ -439,26 +495,58 @@ export function SatWorkbookImportSheet({
                       <Metric label="Issues" value={preview.issues.length} bad={!preview.valid} />
                     </div>
                     {singleModule && preview.valid ? (
-                      <fieldset disabled={busy || failedStep === "commit"} className="mt-4 rounded-xl bg-au-fill p-3">
-                        <legend className="px-1 text-sm font-semibold text-slate-800">Pretest designation</legend>
-                        <p aria-live="polite" className="text-xs font-semibold text-slate-700">{pretestOrders.length} of 2 selected</p>
-                        <p className="mt-1 text-xs leading-5 text-slate-600">Unknown is the workbook's unresolved designation. Verify the source or deliberately designate two pretests for a custom practice test. No pair is generated automatically.</p>
-                        <div className="mt-2 grid grid-cols-3 gap-1">
+                      <fieldset disabled={busy || failedStep === "commit"} aria-describedby="sat-pretest-status" className="mt-4 rounded-xl bg-au-fill p-3">
+                        <legend className="sr-only">Pretest designation</legend>
+                        <div className="flex items-center justify-between gap-2">
+                          <p aria-hidden="true" className="text-sm font-semibold text-slate-800">Pretest designation</p>
+                          <span aria-live="polite" className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${pretestOrders.length === 2 ? "bg-au-accent-tint text-au-accent" : "bg-au-surface text-slate-700"}`}>
+                            {pretestOrders.length} of 2 selected
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-slate-600">
+                          Unknown means the workbook does not say. Verify the source, or deliberately designate two for a custom practice test. No pair is generated automatically.
+                        </p>
+                        <div className="mt-2 grid grid-cols-6 gap-1">
                           {preview.modules[0]?.questions.map((question, index) => {
                             const order = index + 1;
                             const selected = pretestOrders.includes(order);
+                            const status = question.isPretest == null ? "Unknown" : question.isPretest ? "Yes" : "No";
                             return (
-                              <label key={order} htmlFor={`sat-pretest-${order}`} className="flex min-h-11 items-center gap-2 rounded-lg bg-au-surface px-2 text-xs text-slate-700">
-                                <input id={`sat-pretest-${order}`} type="checkbox" checked={selected} aria-label={`Designate question ${order} as pretest`}
+                              <label
+                                key={order}
+                                htmlFor={`sat-pretest-${order}`}
+                                className={`flex min-h-11 cursor-pointer flex-col items-center justify-center rounded-lg px-1 py-1 text-center transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-au-accent has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40 ${
+                                  selected ? "bg-au-accent text-white" : "bg-au-surface text-slate-800 hover:bg-au-accent-tint"
+                                }`}
+                              >
+                                <input
+                                  id={`sat-pretest-${order}`}
+                                  type="checkbox"
+                                  checked={selected}
+                                  aria-label={`Designate question ${order} as pretest`}
+                                  aria-describedby={`sat-pretest-${order}-status`}
                                   disabled={!selected && pretestOrders.length >= 2}
-                                  onChange={() => { setPretestOrders((orders) => selected ? orders.filter((n) => n !== order) : [...orders, order].sort((a, b) => a-b)); setPretestsConfirmed(false); }}
-                                  className="h-4 w-4 shrink-0 accent-[var(--au-accent,#2563eb)]" />
-                                <span>{order}<span className="block text-xs text-slate-600">{question.isPretest == null ? "Unknown" : question.isPretest ? "Yes" : "No"}</span></span>
+                                  onChange={() => togglePretest(order)}
+                                  className="sr-only"
+                                />
+                                <span className="text-[13px] font-semibold tabular-nums">{order}</span>
+                                <span id={`sat-pretest-${order}-status`} className={`text-[11px] leading-3 ${selected ? "text-white/85" : status === "Unknown" ? "text-slate-500" : "text-slate-700"}`}>
+                                  {selected ? <>Pretest<span className="sr-only">, workbook: {status}</span></> : status}
+                                </span>
                               </label>
                             );
                           })}
                         </div>
-                        <label htmlFor="sat-pretest-source" className="mt-3 block text-xs font-semibold text-slate-700">
+                        {pretestOrders.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => { setPretestOrders([]); setPretestsConfirmed(false); }}
+                            className="mt-1 min-h-11 rounded-[9px] px-2 text-xs font-semibold text-au-accent hover:bg-au-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+                          >
+                            Clear selection
+                          </button>
+                        ) : null}
+                        <label htmlFor="sat-pretest-source" className="mt-2 block text-xs font-semibold text-slate-700">
                           Pretest designation source
                           <select id="sat-pretest-source" aria-label="Pretest designation source" value={designationSource}
                             onChange={(event) => { setDesignationSource(event.target.value as SatWorkbookPretestResolution["designationSource"] | ""); setPretestsConfirmed(false); }}
@@ -471,8 +559,25 @@ export function SatWorkbookImportSheet({
                         <label htmlFor="sat-pretest-confirmation" className="mt-2 flex min-h-11 items-start gap-2 text-xs leading-5 text-slate-700">
                           <input id="sat-pretest-confirmation" type="checkbox" aria-labelledby="sat-pretest-confirmation-label" checked={pretestsConfirmed} disabled={!designationSource || pretestOrders.length !== 2}
                             onChange={(event) => setPretestsConfirmed(event.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-[var(--au-accent,#2563eb)]" />
-                          <span id="sat-pretest-confirmation-label">I confirm these two pretests {designationSource === "staff_defined" ? "are staff-defined for this practice test." : "were verified against the source."}</span>
+                          <span id="sat-pretest-confirmation-label">
+                            I confirm {pretestOrders.length === 2 ? `questions ${pretestOrders[0]} and ${pretestOrders[1]}` : "these two pretests"}{" "}
+                            {designationSource === "staff_defined" ? "are staff-defined for this practice test." : "were verified against the source."}
+                          </span>
                         </label>
+                        <div
+                          id="sat-pretest-status"
+                          role="status"
+                          className={`mt-2 flex gap-2 rounded-[10px] px-3 py-2.5 text-xs leading-5 ${pretestNextStep ? "bg-au-warning-tint text-au-warning-text" : "bg-au-success-tint text-au-success-text"}`}
+                        >
+                          {pretestNextStep ? <AlertCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" /> : <CheckCircle2 size={14} className="mt-0.5 shrink-0" aria-hidden="true" />}
+                          <span>
+                            {pretestNextStep ? (
+                              <><strong>Pretest assignments are unresolved. Import remains blocked.</strong> {pretestNextStep}</>
+                            ) : (
+                              <>Pretests confirmed: questions {pretestOrders[0]} and {pretestOrders[1]} ({designationSource === "staff_defined" ? "staff-defined" : "source-verified"}). The server re-checks this pair on import.</>
+                            )}
+                          </span>
+                        </div>
                         {preview.ignoredScaffoldRows ? <p className="mt-2 text-xs leading-5 text-slate-600">{preview.ignoredScaffoldRows} untouched template rows from other modules were ignored.</p> : null}
                       </fieldset>
                     ) : null}
@@ -497,7 +602,7 @@ export function SatWorkbookImportSheet({
                         <tbody>
                           {preview.modules.map((module) => {
                             const selected = module.moduleKey === selectedModuleKey;
-                            const target = module.moduleKey.startsWith("rw-") ? 27 : 22;
+                            const target = moduleTargetCount(module.moduleKey);
                             return (
                               <tr key={module.moduleKey}>
                                 <td colSpan={1} className="p-0">
