@@ -131,6 +131,9 @@ const SatAccessRoute = lazy(() =>
 const SatExamResponsesRoute = lazy(() =>
   import("../../products/sat/routes/SatExamResponsesRoute").then((module) => ({ default: module.SatExamResponsesRoute }))
 );
+const SatScoreConversionRoute = lazy(() =>
+  import("../../products/sat/routes/SatScoreConversionRoute").then((module) => ({ default: module.SatScoreConversionRoute }))
+);
 const ExamSettingsRoute = lazy(() =>
   import("../../features/exam-authoring/routes/ExamSettingsRoute").then((module) => ({ default: module.ExamSettingsRoute }))
 );
@@ -385,6 +388,13 @@ const baseRoutes = [
             element: withAuth(
               <Suspense fallback={<SatRouteLoadingFallback />}><SatResultDetailRoute /></Suspense>,
               ["admin", "grader", "proctor"]
+            ),
+          },
+          {
+            path: "score-conversion",
+            element: withAuth(
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatScoreConversionRoute /></Suspense>,
+              ["admin"]
             ),
           },
           {

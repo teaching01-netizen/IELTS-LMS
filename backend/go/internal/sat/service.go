@@ -20,6 +20,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satscoring"
 	"example.com/ielts-proctoring/internal/terminalization"
 )
 
@@ -691,7 +692,15 @@ func LoadResultForAttempt(ctx context.Context, db resultQueryer, attemptID strin
 	if db == nil || strings.TrimSpace(attemptID) == "" {
 		return nil, nil
 	}
-	return loadResult(ctx, db, "attempt_id = ?", attemptID, false, true)
+	res, err := loadResult(ctx, db, "attempt_id = ?", attemptID, false, true)
+	if res != nil && err == nil {
+		// The estimated score is resolved against the active global policy at
+		// read time (docs/scoreconverimplement.md): a policy change reaches every
+		// released result, past and future. The caller's release gates still
+		// decide what the reader may see.
+		satscoring.Overlay(ctx, db, res.ScorePayload)
+	}
+	return res, err
 }
 
 type resultQueryer interface {

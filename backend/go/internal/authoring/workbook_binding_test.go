@@ -6,56 +6,53 @@ import (
 	"testing"
 )
 
-func singleCommitRequest() SatWorkbookCommitRequest {
+func oneModuleCommitRequest() SatWorkbookCommitRequest {
 	r := commitRequest()
-	r.Mode, r.TargetModuleKey = "single_module", "rw-m1"
+	r.TargetModuleKeys = []string{"rw-m1"}
 	r.Modules = r.Modules[:1]
 	r.OperationKey = "single-operation"
-	r.PretestResolution = &SatWorkbookPretestResolution{SelectedOrders: []int{19, 8}, DesignationSource: "staff_defined", Confirmed: true}
 	return r
 }
 
-func TestSingleModuleResolutionRequiresExplicitDistinctInRangePair(t *testing.T) {
-	for _, resolution := range []*SatWorkbookPretestResolution{
-		nil,
-		{SelectedOrders: []int{8}, DesignationSource: "staff_defined", Confirmed: true},
-		{SelectedOrders: []int{8, 8}, DesignationSource: "staff_defined", Confirmed: true},
-		{SelectedOrders: []int{8, 19, 20}, DesignationSource: "staff_defined", Confirmed: true},
-		{SelectedOrders: []int{0, 19}, DesignationSource: "staff_defined", Confirmed: true},
-		{SelectedOrders: []int{8, 28}, DesignationSource: "staff_defined", Confirmed: true},
-		{SelectedOrders: []int{8, 19}, DesignationSource: "", Confirmed: true},
-		{SelectedOrders: []int{8, 19}, DesignationSource: "official_guess", Confirmed: true},
-		{SelectedOrders: []int{8, 19}, DesignationSource: "staff_defined"},
-	} {
-		r := singleCommitRequest()
-		r.PretestResolution = resolution
-		if _, _, err := prepareSingleModuleCommit(r); err == nil {
-			t.Fatalf("invalid resolution accepted: %+v", resolution)
-		}
+func TestWorkbookCommitMustMatchDetectedModulesExactly(t *testing.T) {
+	missing := oneModuleCommitRequest()
+	missing.TargetModuleKeys = []string{"rw-m1", "rw-m2-lower"}
+	if _, _, err := prepareWorkbookCommit(missing); err == nil {
+		t.Fatal("a target module with no content was accepted")
+	}
+	extra := commitRequest()
+	extra.TargetModuleKeys = []string{"rw-m1"}
+	if _, _, err := prepareWorkbookCommit(extra); err == nil {
+		t.Fatal("content for an undetected module was accepted")
+	}
+	wrong := oneModuleCommitRequest()
+	wrong.TargetModuleKeys = []string{"math-m1"}
+	if _, _, err := prepareWorkbookCommit(wrong); err == nil {
+		t.Fatal("content for a different module than targeted was accepted")
+	}
+	none := oneModuleCommitRequest()
+	none.TargetModuleKeys = nil
+	if _, _, err := prepareWorkbookCommit(none); err == nil {
+		t.Fatal("a commit with no target modules was accepted")
+	}
+	short := oneModuleCommitRequest()
+	short.Modules[0].Questions = short.Modules[0].Questions[:26]
+	if _, _, err := prepareWorkbookCommit(short); err == nil {
+		t.Fatal("incomplete module accepted")
 	}
 }
 
-func TestSingleModuleResolutionMaterializesExactlyTwoWithoutMutatingCaller(t *testing.T) {
-	r := singleCommitRequest()
+func TestWorkbookCommitCanonicalisesTargetsWithoutMutatingCaller(t *testing.T) {
+	r := commitRequest()
+	r.TargetModuleKeys = []string{"math-m1", "rw-m1"}
+	r.Modules = []SatWorkbookModuleDraft{r.Modules[0], r.Modules[3]}
 	original, _ := json.Marshal(r)
-	prepared, _, err := prepareSingleModuleCommit(r)
+	prepared, digest, err := prepareWorkbookCommit(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(prepared.PretestResolution.SelectedOrders, []int{8, 19}) {
-		t.Fatal("pair not canonicalized")
-	}
-	count := 0
-	for i, q := range prepared.Modules[0].Questions {
-		if q.IsPretest {
-			count++
-		}
-		if q.IsPretest != (i == 7 || i == 18) {
-			t.Fatalf("wrong flag at order %d", i+1)
-		}
-	}
-	if count != 2 {
-		t.Fatalf("got %d flags", count)
+	if !reflect.DeepEqual(prepared.TargetModuleKeys, []string{"rw-m1", "math-m1"}) || digest == "" {
+		t.Fatalf("targets not canonicalised: %v", prepared.TargetModuleKeys)
 	}
 	after, _ := json.Marshal(r)
 	if string(after) != string(original) {
@@ -63,9 +60,19 @@ func TestSingleModuleResolutionMaterializesExactlyTwoWithoutMutatingCaller(t *te
 	}
 }
 
-func TestSingleModuleContentDigestCanonicalJSONAndPretestSeparation(t *testing.T) {
-	r := singleCommitRequest()
-	_, first, err := prepareSingleModuleCommit(r)
+func TestWorkbookCommitAllowsAnyPretestCount(t *testing.T) {
+	r := oneModuleCommitRequest()
+	for i := range r.Modules[0].Questions {
+		r.Modules[0].Questions[i].IsPretest = false
+	}
+	if _, _, err := prepareWorkbookCommit(r); err != nil {
+		t.Fatalf("pretests must not be validated at import: %v", err)
+	}
+}
+
+func TestWorkbookContentDigestBindsContentAndTargets(t *testing.T) {
+	r := oneModuleCommitRequest()
+	_, first, err := prepareWorkbookCommit(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,16 +80,21 @@ func TestSingleModuleContentDigestCanonicalJSONAndPretestSeparation(t *testing.T
 	json.Unmarshal(r.Modules[0].Questions[0].Prompt, &object)
 	raw, _ := json.MarshalIndent(object, "", "  ")
 	r.Modules[0].Questions[0].Prompt = raw
-	r.PretestResolution.SelectedOrders = []int{1, 2}
-	_, reordered, err := prepareSingleModuleCommit(r)
+	_, reformatted, err := prepareWorkbookCommit(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first != reordered {
-		t.Fatal("format or explicit pretest decision changed checked-content digest")
+	if first != reformatted {
+		t.Fatal("JSON formatting changed the checked-content digest")
 	}
+	r.Modules[0].Questions[0].IsPretest = !r.Modules[0].Questions[0].IsPretest
+	_, flipped, _ := prepareWorkbookCommit(r)
+	if first == flipped {
+		t.Fatal("changed pretest flag did not change content binding")
+	}
+	r.Modules[0].Questions[0].IsPretest = !r.Modules[0].Questions[0].IsPretest
 	r.Modules[0].Questions[0].Prompt = json.RawMessage(`{"version":1,"nodes":[{"type":"paragraph","text":"Altered checked content"}]}`)
-	_, changed, err := prepareSingleModuleCommit(r)
+	_, changed, err := prepareWorkbookCommit(r)
 	if err != nil {
 		t.Fatal(err)
 	}

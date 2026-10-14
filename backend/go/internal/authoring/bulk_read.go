@@ -577,7 +577,6 @@ func (s *Service) bulkShell(ctx context.Context, examID string) (ShellResult, er
 		if err != nil {
 			return err
 		}
-		loaded.SingleModuleImportEnabled = s.singleModuleImportsEnabled && loaded.ProviderKey == "sat"
 		result = ShellResult{State: ShellStateReady, Shell: &loaded}
 		return nil
 	}); err != nil {

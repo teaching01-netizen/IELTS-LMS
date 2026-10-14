@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"sort"
+	"fmt"
 )
 
 // Canonical JSON preserves numeric tokens and sorts object keys, including
@@ -29,15 +29,13 @@ func canonicalWorkbookFingerprint(value any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func workbookContentDigest(target string, modules []SatWorkbookModuleDraft) (string, error) {
+func workbookContentDigest(targets []string, modules []SatWorkbookModuleDraft) (string, error) {
 	content := make([]SatWorkbookModuleDraft, len(modules))
 	for i, module := range modules {
 		content[i] = module
 		content[i].Questions = append([]QuestionDraft(nil), module.Questions...)
 		for j := range content[i].Questions {
 			question := &content[i].Questions[j]
-			// Pretest resolution is an explicit separate decision, not content.
-			question.IsPretest = false
 			metadata, err := normalizeSATQuestionMetadata(question.Metadata)
 			if err != nil {
 				return "", err
@@ -46,9 +44,9 @@ func workbookContentDigest(target string, modules []SatWorkbookModuleDraft) (str
 		}
 	}
 	hash, err := canonicalWorkbookFingerprint(struct {
-		Target  string                   `json:"target"`
+		Targets []string                 `json:"targets"`
 		Modules []SatWorkbookModuleDraft `json:"modules"`
-	}{target, content})
+	}{targets, content})
 	if err != nil {
 		return "", err
 	}
@@ -66,34 +64,26 @@ func previewWorkbookModules(preview SatWorkbookPreview) []SatWorkbookModuleDraft
 	return modules
 }
 
-func prepareSingleModuleCommit(request SatWorkbookCommitRequest) (SatWorkbookCommitRequest, string, error) {
-	opts, err := normalizeSATWorkbookOptions(SatWorkbookImportOptions{Mode: request.Mode, TargetModuleKey: request.TargetModuleKey})
+func prepareWorkbookCommit(request SatWorkbookCommitRequest) (SatWorkbookCommitRequest, string, error) {
+	targets, err := canonicalWorkbookTargets(request.TargetModuleKeys)
 	if err != nil {
 		return request, "", validationError(err.Error())
 	}
-	if opts.Mode != "single_module" || len(request.Modules) != 1 || request.Modules[0].ModuleKey != opts.TargetModuleKey {
-		return request, "", validationError("A single-module import must contain only its selected module.")
+	if len(request.Modules) != len(targets) {
+		return request, "", validationError("An import must contain exactly its detected modules.")
 	}
-	spec := workbookModuleByLabel[opts.TargetModuleKey]
-	if request.Modules[0].SectionKey != spec.sectionKey || len(request.Modules[0].Questions) != spec.count {
-		return request, "", validationError("The selected module must have its complete question count and matching section.")
+	// Modules are sent in template order, matching the canonical target list.
+	modules := append([]SatWorkbookModuleDraft(nil), request.Modules...)
+	for i, key := range targets {
+		spec := workbookModuleByLabel[key]
+		if modules[i].ModuleKey != key {
+			return request, "", validationError("An import must contain exactly its detected modules.")
+		}
+		if modules[i].SectionKey != spec.sectionKey || len(modules[i].Questions) != spec.count {
+			return request, "", validationError(fmt.Sprintf("%s must have its complete question count and matching section.", spec.label))
+		}
 	}
-	resolution := request.PretestResolution
-	if resolution == nil || !resolution.Confirmed || (resolution.DesignationSource != "source_verified" && resolution.DesignationSource != "staff_defined") || len(resolution.SelectedOrders) != 2 {
-		return request, "", validationError("Explicitly confirm exactly two pretest orders and their designation source before importing.")
-	}
-	selected := append([]int(nil), resolution.SelectedOrders...)
-	sort.Ints(selected)
-	if selected[0] < 1 || selected[1] > spec.count || selected[0] == selected[1] {
-		return request, "", validationError("Choose two distinct pretest orders within the selected module.")
-	}
-	request.Mode, request.TargetModuleKey = opts.Mode, opts.TargetModuleKey
-	request.PretestResolution = &SatWorkbookPretestResolution{SelectedOrders: selected, DesignationSource: resolution.DesignationSource, Confirmed: true}
-	request.Modules = append([]SatWorkbookModuleDraft(nil), request.Modules...)
-	request.Modules[0].Questions = append([]QuestionDraft(nil), request.Modules[0].Questions...)
-	for i := range request.Modules[0].Questions {
-		request.Modules[0].Questions[i].IsPretest = i+1 == selected[0] || i+1 == selected[1]
-	}
-	digest, err := workbookContentDigest(opts.TargetModuleKey, request.Modules)
+	request.TargetModuleKeys, request.Modules = targets, modules
+	digest, err := workbookContentDigest(targets, modules)
 	return request, digest, err
 }

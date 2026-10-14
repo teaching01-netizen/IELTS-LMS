@@ -28,6 +28,19 @@ type satBlueprintModuleSpec struct {
 	tools                                        []string
 }
 
+// SATBlueprintOperational is the operational (scored, non-pretest) question
+// count of one module of a blueprint section; ok is false for an unknown
+// section. The global score-conversion editor seeds its default matrix sizes
+// from it - the lookup itself always matches the attempt's own counts.
+func SATBlueprintOperational(sectionKey string) (operational int, ok bool) {
+	moduleKey := map[string]string{SectionReadingWriting: "rw-m1", SectionMath: "math-m1"}[sectionKey]
+	spec, ok := satBlueprintModule(sectionKey, moduleKey)
+	if !ok {
+		return 0, false
+	}
+	return spec.questionCount - spec.pretestCount, true
+}
+
 func satBlueprintModule(sectionKey, moduleKey string) (satBlueprintModuleSpec, bool) {
 	spec := satBlueprintModuleSpec{}
 	switch sectionKey {

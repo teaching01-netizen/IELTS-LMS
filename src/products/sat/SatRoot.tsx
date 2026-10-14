@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo, type ReactNode } from 'react';
 import { MotionConfig, motion, useReducedMotion } from 'motion/react';
-import { BarChart3, BookOpen, LogOut, Radio, UserRound } from 'lucide-react';
+import { BarChart3, BookOpen, LogOut, Radio, Sigma, UserRound } from 'lucide-react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthSession } from '../../features/auth/authSession';
 import { SatMenu, type SatMenuItem } from './ui/Menu';
@@ -28,11 +28,15 @@ function navForRole(role: string | undefined): SatNavItem[] {
       { label: 'Responses', path: '/sat/results', icon: BarChart3 },
     ];
   }
-  return [
+  const items: SatNavItem[] = [
     { label: 'Exams', path: '/sat/exams', icon: BookOpen },
     { label: 'Rooms', path: '/sat/sessions', icon: Radio },
     { label: 'Responses', path: '/sat/results', icon: BarChart3 },
   ];
+  // Score conversion is an admin-only policy surface (the route guard allows
+  // only `admin`), so no other role is ever offered the link.
+  if (role === 'admin') items.push({ label: 'Score Conversion', path: '/sat/score-conversion', icon: Sigma });
+  return items;
 }
 
 function ieltsLanding(role: string | undefined): string {

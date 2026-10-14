@@ -36,15 +36,13 @@ The Go runner applies `backend/go/migrations/*.sql` in filename order. This is t
   for create/duplicate/batch/bulk/workbook-commit/publish. 7-day TTL swept by
   `maintenance.RunRetention` (authoringOpKeyRows). Re-runnable.
 
-## Single-module SAT workbook import rollout
+## SAT workbook import rollout
 
-`0082_sat_single_module_import.sql` adds the checked-content sidecar and
-exam-lifetime replay receipt for single-module SAT imports. Apply the migration
-before deploying code that can enable `SAT_SINGLE_MODULE_IMPORT_ENABLED`. Keep
-that flag false while API instances are mixed-version; enable it only after all
-instances understand the sidecar. The existing full-workbook path does not use
-the new table. Deleting an exam cascades its import receipts with the exam's
-authoring data.
+`0082_sat_workbook_import_scope.sql` adds the module-scope, checked-content
+digest and exam-lifetime replay receipt used by every SAT workbook import. An
+import replaces only the modules detected in the sheet. The migration must be
+applied before any API instance runs code that imports workbooks. Deleting an
+exam cascades its import receipts with the exam's authoring data.
 
 ## SAT Classroom route-policy fence
 
@@ -63,6 +61,19 @@ module outside the plan, including a legacy M1 seed for standalone M2. Apply
 0086 before creating classroom sessions; the existing creation gate still
 needs to remain closed while serving binaries are mixed-version. MySQL only
 (TiDB skips triggers).
+
+## Global SAT score conversion
+
+`0087_sat_score_conversion.sql` adds the global conversion policy
+(`sat_score_conversion_revisions`, the singleton `sat_score_conversion_active`
+pointer, and the append-only `sat_score_conversion_audit`). It is additive:
+nothing existing changes and a binary that predates it ignores it. Apply it
+before any API instance runs code that reads the pointer (the runtime schema
+guard refuses to boot without the three tables). Published revisions are
+immutable (application guard plus MySQL-only triggers). With no active revision
+the read path leaves stored legacy scores untouched; the first publish makes
+the policy apply to every released SAT result, past and future. Activate the
+first revision only after the whole fleet runs the binary that reads it.
 
 ## Ledger truth
 

@@ -11,9 +11,20 @@ const (
 	MSATAdmissionTotal             = "sat_admission_total"
 	MSATTransferTotal              = "sat_device_transfer_total"
 	MSATCompatSaveRefused          = "sat_compat_save_refused_total"
+	// Global SAT score conversion (docs/scoreconverimplement.md). Overlay status
+	// is the closed vocabulary converted|unavailable|no_policy|integrity|error;
+	// publish outcome is published|already_active|stale_base|invalid|conflict.
+	// Any nonzero integrity count means a published revision's stored content no
+	// longer matches its checksum and scores are being withheld.
+	MSATScoreConversionOverlayTotal = "sat_score_conversion_overlay_total"
+	MSATScoreConversionPublishTotal = "sat_score_conversion_publish_total"
+	MSATScoreConversionActiveRev    = "sat_score_conversion_active_revision"
 )
 
 var metricHelpText = map[string]string{
+	MSATScoreConversionOverlayTotal: "Total SAT result score-conversion overlays by status (converted, unavailable, no_policy, integrity, error).",
+	MSATScoreConversionPublishTotal: "Total SAT score-conversion publish attempts by outcome.",
+	MSATScoreConversionActiveRev:    "Revision number of the active global SAT score-conversion policy (0 = none).",
 	MHTTPRequestsTotal:              "Total HTTP requests by method, route, and status class.",
 	MHTTPRequestDur:                 "HTTP request duration in seconds.",
 	MHTTPInFlight:                   "Current number of in-flight HTTP requests.",
@@ -416,6 +427,9 @@ const (
 // above AND append it here (the test fails otherwise).
 func Names() []string {
 	return []string{
+		MSATScoreConversionOverlayTotal,
+		MSATScoreConversionPublishTotal,
+		MSATScoreConversionActiveRev,
 		MHTTPRequestsTotal,
 		MHTTPRequestDur,
 		MHTTPInFlight,

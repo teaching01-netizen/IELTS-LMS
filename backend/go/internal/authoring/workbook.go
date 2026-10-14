@@ -35,6 +35,8 @@ type SatWorkbookIssue struct {
 	Field    string `json:"field"`
 	Message  string `json:"message"`
 	Blocking bool   `json:"blocking"`
+	// ModuleKey attributes the issue to a detected module when known.
+	ModuleKey string `json:"moduleKey,omitempty"`
 }
 
 // SatWorkbookModuleDraft is the complete content for one SAT module.
@@ -44,13 +46,20 @@ type SatWorkbookModuleDraft struct {
 	Questions  []QuestionDraft `json:"questions"`
 }
 
-type SatWorkbookImportOptions struct {
-	Mode            string `json:"mode"`
-	TargetModuleKey string `json:"targetModuleKey"`
+// SatWorkbookDetectedModule reports one module found in the sheet and whether
+// its rows are complete and valid enough to import.
+type SatWorkbookDetectedModule struct {
+	ModuleKey     string `json:"moduleKey"`
+	SectionKey    string `json:"sectionKey"`
+	Label         string `json:"label"`
+	QuestionCount int    `json:"questionCount"`
+	ExpectedCount int    `json:"expectedCount"`
+	Ready         bool   `json:"ready"`
 }
 
-// Preview pretests are nullable; unresolved source designations never become
-// Boolean scoring flags until the explicitly confirmed commit resolution.
+// Preview pretests are informational: Yes/No cells are carried through, any
+// other value is Unknown and imports as not-pretest. Pretest counts are
+// enforced at publication, not at import.
 type SatWorkbookQuestionPreview struct {
 	QuestionDraft
 	IsPretest *bool `json:"isPretest"`
@@ -77,18 +86,20 @@ type SatWorkbookAsset struct {
 
 // SatWorkbookPreview is the renderer-ready result of parsing a workbook.
 type SatWorkbookPreview struct {
-	ImportID            string                     `json:"importId"`
-	TemplateVersion     string                     `json:"templateVersion"`
-	RowCount            int                        `json:"rowCount"`
-	QuestionCount       int                        `json:"questionCount"`
-	Valid               bool                       `json:"valid"`
-	Modules             []SatWorkbookPreviewModule `json:"modules"`
-	Assets              []SatWorkbookAsset         `json:"assets"`
-	Issues              []SatWorkbookIssue         `json:"issues"`
-	Mode                string                     `json:"mode,omitempty"`
-	TargetModuleKey     string                     `json:"targetModuleKey,omitempty"`
-	CommitReady         bool                       `json:"commitReady"`
-	IgnoredScaffoldRows int                        `json:"ignoredScaffoldRows,omitempty"`
+	ImportID        string                     `json:"importId"`
+	TemplateVersion string                     `json:"templateVersion"`
+	RowCount        int                        `json:"rowCount"`
+	QuestionCount   int                        `json:"questionCount"`
+	Valid           bool                       `json:"valid"`
+	Modules         []SatWorkbookPreviewModule `json:"modules"`
+	Assets          []SatWorkbookAsset         `json:"assets"`
+	Issues          []SatWorkbookIssue         `json:"issues"`
+	// TargetModuleKeys are the modules detected in the sheet, in template
+	// order. A commit replaces exactly these and leaves every other module alone.
+	TargetModuleKeys    []string                    `json:"targetModuleKeys"`
+	Detected            []SatWorkbookDetectedModule `json:"detected"`
+	CommitReady         bool                        `json:"commitReady"`
+	IgnoredScaffoldRows int                         `json:"ignoredScaffoldRows,omitempty"`
 }
 
 // SatWorkbookStagedAsset binds a checked workbook key to a finalized media
@@ -102,21 +113,13 @@ type SatWorkbookStagedAsset struct {
 // OperationKey makes a lost-response commit retry replay instead of
 // replacing the draft a second time.
 type SatWorkbookCommitRequest struct {
-	ImportID                string                        `json:"importId"`
-	ExpectedVersionID       string                        `json:"expectedVersionId"`
-	ExpectedVersionRevision int                           `json:"expectedVersionRevision"`
-	Modules                 []SatWorkbookModuleDraft      `json:"modules"`
-	Assets                  []SatWorkbookStagedAsset      `json:"assets"`
-	OperationKey            string                        `json:"operationKey"`
-	Mode                    string                        `json:"mode"`
-	TargetModuleKey         string                        `json:"targetModuleKey"`
-	PretestResolution       *SatWorkbookPretestResolution `json:"pretestResolution"`
-}
-
-type SatWorkbookPretestResolution struct {
-	SelectedOrders    []int  `json:"selectedOrders"`
-	DesignationSource string `json:"designationSource"`
-	Confirmed         bool   `json:"confirmed"`
+	ImportID                string                   `json:"importId"`
+	ExpectedVersionID       string                   `json:"expectedVersionId"`
+	ExpectedVersionRevision int                      `json:"expectedVersionRevision"`
+	Modules                 []SatWorkbookModuleDraft `json:"modules"`
+	Assets                  []SatWorkbookStagedAsset `json:"assets"`
+	OperationKey            string                   `json:"operationKey"`
+	TargetModuleKeys        []string                 `json:"targetModuleKeys"`
 }
 
 type satWorkbookModuleSpec struct {
@@ -197,19 +200,7 @@ func guardSATWorkbookArchive(data []byte) error {
 // ParseSATWorkbook parses the Questions and Assets contract emitted by the
 // template endpoint. Excel content is converted to the structured-content
 // shape used by the authoring editor and student renderer.
-func ParseSATWorkbook(data []byte, options ...SatWorkbookImportOptions) (SatWorkbookPreview, error) {
-	opts := SatWorkbookImportOptions{}
-	if len(options) > 1 {
-		return SatWorkbookPreview{}, &WorkbookError{Message: "Choose one SAT import scope."}
-	}
-	if len(options) == 1 {
-		opts = options[0]
-	}
-	opts, err := normalizeSATWorkbookOptions(opts)
-	if err != nil {
-		return SatWorkbookPreview{}, err
-	}
-	single := opts.Mode == "single_module"
+func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
 	if len(data) > MaxSATWorkbookBytes {
 		return SatWorkbookPreview{}, &WorkbookError{TooLarge: true, Message: "SAT workbooks must be 12 MB or smaller."}
 	}
@@ -267,7 +258,7 @@ func ParseSATWorkbook(data []byte, options ...SatWorkbookImportOptions) (SatWork
 			columns[canonical] = index
 		}
 	}
-	for _, required := range []string{"module", "order", "prompt", "responseType", "domain", "skill", "difficulty", "pretest"} {
+	for _, required := range []string{"module", "order", "prompt", "responseType", "domain", "skill", "difficulty"} {
 		if _, ok := columns[required]; !ok {
 			issues = append(issues, satWorkbookIssue(1, required, fmt.Sprintf("Missing required column %q.", required)))
 		}
@@ -282,6 +273,33 @@ func ParseSATWorkbook(data []byte, options ...SatWorkbookImportOptions) (SatWork
 		issues = append(issues, satWorkbookIssue(maxSATWorkbookRows+2, "file", "A SAT workbook can contain at most 200 question rows."))
 		questionRows = questionRows[:maxSATWorkbookRows]
 	}
+	lookupModule := func(row []string) (satWorkbookModuleSpec, bool) {
+		column, present := columns["module"]
+		if !present {
+			return satWorkbookModuleSpec{}, false
+		}
+		spec, ok := workbookModuleByLabel[normalizeWorkbookValue(workbookCell(row, column))]
+		return spec, ok
+	}
+	// A module is "in the sheet" once any of its rows holds more than the
+	// template's untouched defaults. Untouched modules are ignored, never
+	// validated and never replaced.
+	touched := make(map[string]bool, len(satWorkbookModules))
+	for _, row := range questionRows {
+		if workbookRowBlank(row) {
+			continue
+		}
+		if spec, ok := lookupModule(row); ok && !workbookUntouchedScaffold(row, columns, spec) {
+			touched[spec.key] = true
+		}
+	}
+	if len(touched) == 0 {
+		issues = append(issues, satWorkbookIssue(0, "file", "No SAT questions were found. Fill in the rows of at least one module in the template."))
+	}
+	rowModule := make(map[int]string, len(questionRows))
+	// Only issues raised while parsing Questions rows carry a Questions row
+	// number; asset, picture and file issues use other sheets' coordinates.
+	questionIssuesFrom := len(issues)
 	for rowIndex, row := range questionRows {
 		excelRow := rowIndex + 2
 		if workbookRowBlank(row) {
@@ -318,13 +336,10 @@ func ParseSATWorkbook(data []byte, options ...SatWorkbookImportOptions) (SatWork
 			issues = append(issues, satWorkbookIssue(excelRow, "Module", "Choose one of the six SAT modules from the template."))
 			continue
 		}
-		if single && spec.key != opts.TargetModuleKey {
+		rowModule[excelRow] = spec.key
+		if !touched[spec.key] {
 			rowCount--
-			if workbookUntouchedScaffold(row, columns, spec) {
-				ignoredScaffoldRows++
-			} else {
-				issues = append(issues, satWorkbookIssue(excelRow, "Module", "This row contains content or modified scaffolding outside the selected module. Remove it or choose a complete SAT import."))
-			}
+			ignoredScaffoldRows++
 			continue
 		}
 		if orders[spec.key] == nil {
@@ -370,12 +385,6 @@ func ParseSATWorkbook(data []byte, options ...SatWorkbookImportOptions) (SatWork
 		if pretestOK {
 			previewPretest = &pretest
 		}
-		if single && strings.TrimSpace(value("pretest")) == "" {
-			pretestOK = true
-		}
-		if !pretestOK {
-			issues = append(issues, satWorkbookIssue(excelRow, "Pretest", "Pretest must be Yes or No."))
-		}
 
 		prompt := compileWorkbookContent(promptText, assetAlt, assetCaption)
 		stimulus := compileWorkbookContent(strings.TrimSpace(value("stimulus")), assetAlt, assetCaption)
@@ -404,34 +413,48 @@ func ParseSATWorkbook(data []byte, options ...SatWorkbookImportOptions) (SatWork
 		}
 		difficultyOK := difficulty == "easy" || difficulty == "medium" || difficulty == "hard"
 		skillOK := satSkillValid(domain, skill)
-		if !orderOK || !pretestOK || !domainOK || !skillOK || !difficultyOK || strings.TrimSpace(promptText) == "" {
+		if !orderOK || !domainOK || !skillOK || !difficultyOK || strings.TrimSpace(promptText) == "" {
 			continue
 		}
 		parsed[spec.key] = append(parsed[spec.key], workbookQuestion{order: order, draft: draft, pretest: previewPretest})
 	}
+	questionIssuesTo := len(issues)
 
-	modules := make([]SatWorkbookPreviewModule, 0, len(satWorkbookModules))
+	modules := make([]SatWorkbookPreviewModule, 0, len(touched))
+	targets := make([]string, 0, len(touched))
 	for _, spec := range satWorkbookModules {
-		if single && spec.key != opts.TargetModuleKey {
+		if !touched[spec.key] {
 			continue
 		}
 		items := parsed[spec.key]
 		sort.SliceStable(items, func(i, j int) bool { return items[i].order < items[j].order })
-		pretests := 0
 		questions := make([]SatWorkbookQuestionPreview, 0, len(items))
 		for _, item := range items {
-			if item.draft.IsPretest {
-				pretests++
-			}
 			questions = append(questions, SatWorkbookQuestionPreview{QuestionDraft: item.draft, IsPretest: item.pretest})
 		}
 		if len(questions) != spec.count {
-			issues = append(issues, satWorkbookIssue(0, "Module", fmt.Sprintf("%s requires exactly %d questions; found %d.", spec.label, spec.count, len(questions))))
-		}
-		if !single && pretests != 2 {
-			issues = append(issues, satWorkbookIssue(0, "Pretest", fmt.Sprintf("%s requires exactly 2 pretest questions; found %d.", spec.label, pretests)))
+			issue := satWorkbookIssue(0, "Module", fmt.Sprintf("%s requires exactly %d questions; found %d.", spec.label, spec.count, len(questions)))
+			issue.ModuleKey = spec.key
+			issues = append(issues, issue)
 		}
 		modules = append(modules, SatWorkbookPreviewModule{ModuleKey: spec.key, SectionKey: spec.sectionKey, Questions: questions})
+		targets = append(targets, spec.key)
+	}
+	for i := questionIssuesFrom; i < questionIssuesTo; i++ {
+		if issues[i].ModuleKey == "" {
+			issues[i].ModuleKey = rowModule[issues[i].Row]
+		}
+	}
+	detected := make([]SatWorkbookDetectedModule, 0, len(modules))
+	for _, module := range modules {
+		spec := workbookModuleByLabel[module.ModuleKey]
+		ready := len(module.Questions) == spec.count
+		for _, issue := range issues {
+			if issue.Blocking && issue.ModuleKey == module.ModuleKey {
+				ready = false
+			}
+		}
+		detected = append(detected, SatWorkbookDetectedModule{ModuleKey: spec.key, SectionKey: spec.sectionKey, Label: spec.label, QuestionCount: len(module.Questions), ExpectedCount: spec.count, Ready: ready})
 	}
 	valid := true
 	for _, issue := range issues {
@@ -449,33 +472,35 @@ func ParseSATWorkbook(data []byte, options ...SatWorkbookImportOptions) (SatWork
 		Modules:             modules,
 		Assets:              assets,
 		Issues:              issues,
-		CommitReady:         valid && !single,
+		CommitReady:         valid,
 		IgnoredScaffoldRows: ignoredScaffoldRows,
-	}
-	if single {
-		preview.Mode, preview.TargetModuleKey = opts.Mode, opts.TargetModuleKey
+		TargetModuleKeys:    targets,
+		Detected:            detected,
 	}
 	return preview, nil
 }
 
-func normalizeSATWorkbookOptions(opts SatWorkbookImportOptions) (SatWorkbookImportOptions, error) {
-	opts.Mode = strings.ToLower(strings.TrimSpace(opts.Mode))
-	opts.TargetModuleKey = strings.TrimSpace(opts.TargetModuleKey)
-	if opts.Mode == "" {
-		opts.Mode = "full"
+// canonicalWorkbookTargets validates a target list against the template and
+// returns it distinct and in template order.
+func canonicalWorkbookTargets(keys []string) ([]string, error) {
+	wanted := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		wanted[strings.TrimSpace(key)] = true
 	}
-	if opts.Mode == "full" && opts.TargetModuleKey == "" {
-		return opts, nil
-	}
-	if opts.Mode == "single_module" {
-		for _, spec := range satWorkbookModules {
-			if spec.key == opts.TargetModuleKey {
-				return opts, nil
-			}
+	ordered := make([]string, 0, len(wanted))
+	for _, spec := range satWorkbookModules {
+		if wanted[spec.key] {
+			ordered = append(ordered, spec.key)
+			delete(wanted, spec.key)
 		}
 	}
-	return opts, &WorkbookError{Message: "Choose full import, or single_module with one known target module key."}
+	if len(ordered) == 0 || len(wanted) != 0 {
+		return nil, &WorkbookError{Message: "Choose one or more known SAT modules to import."}
+	}
+	return ordered, nil
 }
+
+func workbookModuleKeysJoined(keys []string) string { return strings.Join(keys, ",") }
 
 func workbookUntouchedScaffold(row []string, columns map[string]int, spec satWorkbookModuleSpec) bool {
 	orderColumn, present := columns["order"]

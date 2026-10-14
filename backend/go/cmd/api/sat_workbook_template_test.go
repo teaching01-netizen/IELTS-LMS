@@ -163,7 +163,7 @@ func TestSATWorkbookTemplateRoundTripsThroughImporter(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"COLUMN / FIELD", "Accepted Responses", "Module 2 — Higher", "Central Ideas and Details",
-		"Student Response", "Exactly TWO Pretest Yes", "NOT IMPORT READY", "50,000 Unicode characters",
+		"Student Response", "Pretest is optional and not checked at import", "NOT IMPORT READY", "50,000 Unicode characters",
 		"![asset_key]", "Inline math:", "Display math:", "level-2 and level-3 headings",
 		"token-to-key matches",
 	} {
@@ -180,7 +180,7 @@ func TestSATWorkbookTemplateRoundTripsThroughImporter(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"Never invent missing questions", "source-to-module/order traceability map",
-		"exactly two Yes values in Pretest", "NOT IMPORT READY", "personal or student information",
+		"publishing requires exactly two pretests per module", "NOT IMPORT READY", "personal or student information",
 		"human must review the workbook against the supplied sources",
 	} {
 		if !strings.Contains(prompt, expected) {
@@ -194,8 +194,8 @@ func TestSATWorkbookTemplateRoundTripsThroughImporter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generated workbook could not be parsed: %v", err)
 	}
-	if preview.RowCount != 147 || preview.TemplateVersion != "2" {
-		t.Fatalf("template preview = rows %d, version %q; want 147, 2", preview.RowCount, preview.TemplateVersion)
+	if preview.RowCount != 0 || len(preview.Detected) != 0 || preview.TemplateVersion != "2" {
+		t.Fatalf("blank template preview = rows %d, detected %d, version %q; want 0 rows, no modules, version 2", preview.RowCount, len(preview.Detected), preview.TemplateVersion)
 	}
 	if preview.Valid {
 		t.Fatal("blank template must not be importable")

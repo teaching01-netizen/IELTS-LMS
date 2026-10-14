@@ -34,6 +34,7 @@ import (
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/satscoring"
 	"example.com/ielts-proctoring/internal/satstartcode"
 	"example.com/ielts-proctoring/internal/schedules"
 	"example.com/ielts-proctoring/internal/student"
@@ -55,6 +56,7 @@ type Services struct {
 	Library       *library.Service
 	AnswerHistory *answerhistory.Service
 	Authoring     *authoring.Service
+	SatScoring    *satscoring.Service
 	AccessLinks   *accesslinks.Service
 	SAT           *sat.Service
 	ACT           *act.Service
@@ -113,6 +115,7 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	s.Proctor = proctor.NewService(s.Tx, pool, s.Terminal, nil, assign).SetOutboxExecOnly(cfg.OutboxExecOnly)
 	s.Grading = grading.NewService(pool, s.Tx)
 	s.Results = results.NewService(pool)
+	s.SatScoring = satscoring.NewService(pool, s.Tx)
 	s.Media = media.NewServiceWithRemoteFetcher(
 		pool,
 		s.Tx,

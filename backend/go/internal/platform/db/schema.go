@@ -30,6 +30,11 @@ var RequiredTables = []string{
 	"sat_start_code_reservations",
 	// 0081 replaces the generation-wide claim lock with fixed independently claimable capacity.
 	"sat_start_code_reservation_slots",
+	// Global SAT score conversion (0087): every SAT result read resolves its
+	// estimated score against the active revision pointer.
+	"sat_score_conversion_revisions",
+	"sat_score_conversion_active",
+	"sat_score_conversion_audit",
 }
 
 // RequiredColumns: 19 durability-critical columns from the Rust

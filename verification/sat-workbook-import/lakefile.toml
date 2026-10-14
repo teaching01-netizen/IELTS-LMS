@@ -1,0 +1,5 @@
+name = "sat_workbook_import"
+defaultTargets = ["SatWorkbookImport"]
+
+[[lean_lib]]
+name = "SatWorkbookImport"

@@ -222,7 +222,6 @@ export interface AssessmentAuthoringShell {
   versionId: string;
   versionRevision: number;
   sections: AssessmentSectionShell[];
-  singleModuleImportEnabled?: boolean;
 }
 
 /**
@@ -407,6 +406,8 @@ export interface SatWorkbookIssue {
   field: string;
   message: string;
   blocking: boolean;
+  /** The detected module this issue belongs to, when known. */
+  moduleKey?: string;
 }
 
 export interface SatWorkbookModuleDraft {
@@ -415,9 +416,14 @@ export interface SatWorkbookModuleDraft {
   questions: BatchQuestionDraft[];
 }
 
-export interface SatWorkbookImportOptions {
-  mode: "full" | "single_module";
-  targetModuleKey?: string;
+export interface SatWorkbookDetectedModule {
+  moduleKey: string;
+  sectionKey: string;
+  label: string;
+  questionCount: number;
+  expectedCount: number;
+  /** Complete and valid: this module can be imported. */
+  ready: boolean;
 }
 
 export interface SatWorkbookPreviewQuestion extends Omit<BatchQuestionDraft, "isPretest"> {
@@ -428,11 +434,7 @@ export interface SatWorkbookPreviewModule extends Omit<SatWorkbookModuleDraft, "
   questions: SatWorkbookPreviewQuestion[];
 }
 
-export interface SatWorkbookPretestResolution {
-  selectedOrders: number[];
-  designationSource: "source_verified" | "staff_defined";
-  confirmed: boolean;
-}
+
 
 export interface SatWorkbookAsset {
   key: string;
@@ -459,8 +461,9 @@ export interface SatWorkbookPreview {
   modules: SatWorkbookPreviewModule[];
   assets: SatWorkbookAsset[];
   issues: SatWorkbookIssue[];
-  mode?: "full" | "single_module";
-  targetModuleKey?: string;
+  /** Modules found in the sheet, in template order. An import replaces exactly these. */
+  targetModuleKeys: string[];
+  detected: SatWorkbookDetectedModule[];
   commitReady?: boolean;
   ignoredScaffoldRows?: number;
 }
@@ -473,9 +476,7 @@ export interface SatWorkbookCommitRequest {
   assets: SatWorkbookStagedAsset[];
   /** Retry-safety key: same key + identical content replays; reuse with different content is a 409. */
   operationKey?: string;
-  mode?: "full" | "single_module";
-  targetModuleKey?: string;
-  pretestResolution?: SatWorkbookPretestResolution;
+  targetModuleKeys: string[];
 }
 
 export interface SatWorkbookUndoState {

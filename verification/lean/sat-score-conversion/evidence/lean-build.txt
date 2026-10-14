@@ -1,0 +1,30 @@
+✔ [2/7] Built Model
+✔ [3/7] Built Safety
+✔ [4/7] Built Counterexamples
+✔ [5/7] Built SatScoreConversion
+ℹ [6/7] Built AxiomAudit
+info: ././././AxiomAudit.lean:6:0: 'SatScoreConversion.resolve_sound' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:7:0: 'SatScoreConversion.resolve_none_of_no_table' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:8:0: 'SatScoreConversion.publishable_resolves' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:9:0: 'SatScoreConversion.Init.inv' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:10:0: 'SatScoreConversion.Inv.step' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:11:0: 'SatScoreConversion.Reach.inv' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:12:0: 'SatScoreConversion.published_immutable' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:13:0: 'SatScoreConversion.active_is_latest' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:14:0: 'SatScoreConversion.no_fork' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:15:0: 'SatScoreConversion.published_is_publishable' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:16:0: 'SatScoreConversion.save_requires_current_version' does not depend on any axioms
+info: ././././AxiomAudit.lean:17:0: 'SatScoreConversion.publish_requires_active_base' does not depend on any axioms
+info: ././././AxiomAudit.lean:18:0: 'SatScoreConversion.retry_after_commit' does not depend on any axioms
+info: ././././AxiomAudit.lean:19:0: 'SatScoreConversion.result_raw_immutable' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:20:0: 'SatScoreConversion.display_withheld' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:21:0: 'SatScoreConversion.display_released_only' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:22:0: 'SatScoreConversion.display_after_publish' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:23:0: 'SatScoreConversion.display_depends_on_raw_only' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:24:0: 'SatScoreConversion.display_no_invention' depends on axioms: [propext, Quot.sound]
+info: ././././AxiomAudit.lean:25:0: 'SatScoreConversion.display_without_policy' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:26:0: 'SatScoreConversion.naive_publish_forks' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:27:0: 'SatScoreConversion.superseded_publish_is_rejected' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././AxiomAudit.lean:28:0: 'SatScoreConversion.witness_legacy_before_publish' depends on axioms: [propext]
+info: ././././AxiomAudit.lean:29:0: 'SatScoreConversion.witness_display_changes' depends on axioms: [propext, Quot.sound]
+Build completed successfully.

@@ -412,7 +412,7 @@ func authorPreviewImportHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodePayloadTooLarge, "SAT workbooks must be 12 MB or smaller."))
 			return
 		}
-		preview, err := authoring.ParseSATWorkbook(data, authoring.SatWorkbookImportOptions{Mode: r.FormValue("mode"), TargetModuleKey: r.FormValue("targetModuleKey")})
+		preview, err := authoring.ParseSATWorkbook(data)
 		if err != nil {
 			var workbookErr *authoring.WorkbookError
 			if errors.As(err, &workbookErr) && workbookErr.TooLarge {

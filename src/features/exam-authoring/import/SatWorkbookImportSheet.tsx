@@ -5,8 +5,6 @@ import type {
   QuestionRevision,
   SatWorkbookCommitResult,
   SatWorkbookCommitRequest,
-  SatWorkbookImportOptions,
-  SatWorkbookPretestResolution,
   SatWorkbookPreviewModule,
   SatWorkbookPreviewQuestion,
   SatWorkbookPreview,
@@ -26,14 +24,7 @@ const MODULE_LABELS: Record<string, string> = {
   "math-m2-higher": "Math · Module 2 — Higher",
 };
 
-const IMPORT_SCOPES: ReadonlyArray<{ value: SatWorkbookImportOptions["mode"]; label: string; hint: string }> = [
-  { value: "full", label: "Complete SAT", hint: "All six modules" },
-  { value: "single_module", label: "Single module", hint: "One module only" },
-];
-
-function moduleTargetCount(moduleKey: string): number {
-  return moduleKey.startsWith("rw-") ? 27 : 22;
-}
+const ALL_MODULE_KEYS = Object.keys(MODULE_LABELS);
 
 interface SatWorkbookImportSheetProps {
   open: boolean;
@@ -57,6 +48,10 @@ function questionsLabel(count: number): string {
   return `${count} ${count === 1 ? "question" : "questions"}`;
 }
 
+function moduleLabel(moduleKey: string): string {
+  return MODULE_LABELS[moduleKey] ?? moduleKey;
+}
+
 export function SatWorkbookImportSheet({
   open,
   examId,
@@ -74,11 +69,6 @@ export function SatWorkbookImportSheet({
   const commitKeyRef = useRef<string | null>(null);
   const inspectionRef = useRef(0);
   const commitRequestRef = useRef<SatWorkbookCommitRequest | null>(null);
-  const [mode, setMode] = useState<SatWorkbookImportOptions["mode"]>("full");
-  const [targetModuleKey, setTargetModuleKey] = useState("");
-  const [pretestOrders, setPretestOrders] = useState<number[]>([]);
-  const [designationSource, setDesignationSource] = useState<SatWorkbookPretestResolution["designationSource"] | "">("");
-  const [pretestsConfirmed, setPretestsConfirmed] = useState(false);
   const [activity, setActivity] = useState<Activity>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<SatWorkbookPreview | null>(null);
@@ -90,7 +80,6 @@ export function SatWorkbookImportSheet({
   const [selectedModuleKey, setSelectedModuleKey] = useState<string | null>(null);
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState(0);
   const busy = activity !== "idle";
-  const singleModule = mode === "single_module";
 
   const clearInspection = useCallback(() => {
     inspectionRef.current += 1;
@@ -106,15 +95,10 @@ export function SatWorkbookImportSheet({
     setReplaceConfirmed(false);
     setSelectedModuleKey(null);
     setSelectedQuestionIndex(0);
-    setPretestOrders([]);
-    setDesignationSource("");
-    setPretestsConfirmed(false);
   }, []);
 
   useEffect(() => {
     clearInspection();
-    setMode("full");
-    setTargetModuleKey("");
     return () => { inspectionRef.current += 1; };
   }, [open, examId, clearInspection]);
 
@@ -130,8 +114,13 @@ export function SatWorkbookImportSheet({
     return counts;
   }, [shell]);
 
-  const replacementCount = singleModule ? (beforeCountByModule.get(targetModuleKey) ?? 0) : existingQuestionCount;
+  const detected = useMemo(() => preview?.detected ?? [], [preview]);
+  const replacesWholeDraft = detected.length === ALL_MODULE_KEYS.length;
+  const replacementCount = replacesWholeDraft
+    ? existingQuestionCount
+    : detected.reduce((sum, module) => sum + (beforeCountByModule.get(module.moduleKey) ?? 0), 0);
   const replacesContent = replacementCount > 0;
+  const untouchedKeys = ALL_MODULE_KEYS.filter((key) => !detected.some((module) => module.moduleKey === key));
 
   const selectedModule = useMemo(
     () =>
@@ -170,10 +159,6 @@ export function SatWorkbookImportSheet({
     if (commitInFlightRef.current) return;
     clearInspection();
     const generation = inspectionRef.current;
-    if (singleModule && !targetModuleKey) {
-      setError("Choose the target module before checking the workbook.");
-      return;
-    }
     if (!nextFile.name.toLowerCase().endsWith(".xlsx")) {
       setError("Choose an .xlsx SAT workbook.");
       return;
@@ -192,13 +177,8 @@ export function SatWorkbookImportSheet({
     setStagedAssets([]);
     setSelectedModuleKey(null);
     try {
-      const nextPreview = singleModule
-        ? await assessmentAuthoringApi.previewSatWorkbook(examId, nextFile, { mode, targetModuleKey })
-        : await assessmentAuthoringApi.previewSatWorkbook(examId, nextFile);
+      const nextPreview = await assessmentAuthoringApi.previewSatWorkbook(examId, nextFile);
       if (generation !== inspectionRef.current) return;
-      if (singleModule && (nextPreview.mode !== "single_module" || nextPreview.targetModuleKey !== targetModuleKey)) {
-        throw new Error("The server did not check the selected module. Refresh and check the workbook again.");
-      }
       // New workbook, new commit identity: the previous key must never leak
       // across workbooks, or a retry could replay the wrong replacement.
       commitKeyRef.current = nextPreview.valid ? crypto.randomUUID() : null;
@@ -207,7 +187,6 @@ export function SatWorkbookImportSheet({
       const firstModule = nextPreview.modules.find((module) => module.questions.length > 0) ?? null;
       setSelectedModuleKey(firstModule?.moduleKey ?? null);
       setSelectedQuestionIndex(0);
-      setPretestOrders(nextPreview.modules[0]?.questions.flatMap((question, index) => question.isPretest === true ? [index + 1] : []) ?? []);
       if (nextPreview.valid && nextPreview.assets.length > 0) {
         await stageAssets(nextPreview, generation);
         return;
@@ -241,39 +220,20 @@ export function SatWorkbookImportSheet({
   };
 
   const stagingComplete = preview ? stagedAssets.length === preview.assets.length : false;
+  const needsAttentionCount = detected.filter((module) => !module.ready).length;
   let importDisabledReason: string | null = null;
   if (!preview) importDisabledReason = "Choose a workbook to check before importing.";
-  else if (!preview.valid) importDisabledReason = "Fix the workbook issues, then choose the file again.";
-  else if (!stagingComplete) importDisabledReason = "Workbook visuals must finish securing first.";
-  else if (singleModule && (pretestOrders.length !== 2 || !designationSource || !pretestsConfirmed)) {
-    importDisabledReason = "Pretest assignments are unresolved. Import remains blocked.";
+  else if (detected.length === 0) importDisabledReason = "No module with questions was found in this workbook.";
+  else if (!preview.valid) {
+    importDisabledReason = needsAttentionCount === 0
+      ? "Fix the workbook issues listed under Needs attention, then choose the file again."
+      : `Fix the ${needsAttentionCount === 1 ? "module" : "modules"} marked Needs attention, then choose the file again.`;
   }
+  else if (!stagingComplete) importDisabledReason = "Workbook visuals must finish securing first.";
   else if (replacesContent && !replaceConfirmed) {
     importDisabledReason = "Confirm the replacement to continue.";
   }
   const canCommit = importDisabledReason === null && !busy;
-  const pretestNextStep = !singleModule
-    ? null
-    : pretestOrders.length < 2
-      ? `Select ${2 - pretestOrders.length} more question${pretestOrders.length === 1 ? "" : "s"}.`
-      : pretestOrders.length > 2
-        ? `Deselect ${pretestOrders.length - 2} question${pretestOrders.length === 3 ? "" : "s"}; exactly two are required.`
-        : !designationSource
-          ? "Choose how the pair was established."
-          : !pretestsConfirmed
-            ? "Confirm the designation below."
-            : null;
-  const togglePretest = (order: number) => {
-    setPretestOrders((orders) =>
-      orders.includes(order) ? orders.filter((n) => n !== order) : [...orders, order].sort((a, b) => a - b)
-    );
-    setPretestsConfirmed(false);
-    const target = preview?.modules[0];
-    if (target) {
-      setSelectedModuleKey(target.moduleKey);
-      setSelectedQuestionIndex(order - 1);
-    }
-  };
 
   const commit = async () => {
     if (!preview?.valid || !canCommit || commitInFlightRef.current) return;
@@ -286,16 +246,16 @@ export function SatWorkbookImportSheet({
       if (!commitKeyRef.current) commitKeyRef.current = crypto.randomUUID();
       if (!commitRequestRef.current) {
         const request: SatWorkbookCommitRequest = {
-        importId: preview.importId,
-        expectedVersionId: shell.versionId,
-        expectedVersionRevision: shell.versionRevision,
-        modules: preview.modules.map((module) => ({ ...module, questions: module.questions.map((question, index) => ({ ...question, isPretest: singleModule ? pretestOrders.includes(index + 1) : question.isPretest === true })) })),
-        assets: stagedAssets,
-        operationKey: commitKeyRef.current,
-        ...(singleModule ? {
-          mode, targetModuleKey,
-          pretestResolution: { selectedOrders: [...pretestOrders].sort((a, b) => a - b), designationSource: designationSource as SatWorkbookPretestResolution["designationSource"], confirmed: pretestsConfirmed },
-        } : {}),
+          importId: preview.importId,
+          expectedVersionId: shell.versionId,
+          expectedVersionRevision: shell.versionRevision,
+          modules: preview.modules.map((module) => ({
+            ...module,
+            questions: module.questions.map((question) => ({ ...question, isPretest: question.isPretest === true })),
+          })),
+          assets: stagedAssets,
+          operationKey: commitKeyRef.current,
+          targetModuleKeys: preview.targetModuleKeys,
         };
         commitRequestRef.current = JSON.parse(JSON.stringify(request)) as SatWorkbookCommitRequest;
       }
@@ -321,8 +281,9 @@ export function SatWorkbookImportSheet({
   const importLabel = !preview?.valid
     ? "Import workbook"
     : replacesContent
-      ? `Replace ${singleModule ? "module" : "draft"} with ${questionsLabel(preview.questionCount)}`
+      ? `Replace ${replacesWholeDraft ? "draft" : detected.length === 1 ? "module" : "modules"} with ${questionsLabel(preview.questionCount)}`
       : `Import ${questionsLabel(preview.questionCount)}`;
+  const detectedLabels = detected.map((module) => moduleLabel(module.moduleKey)).join(", ");
 
   return (
     <AuthoringDialog
@@ -333,440 +294,343 @@ export function SatWorkbookImportSheet({
       showHeader={false}
       contentClassName="authoring-dialog-content--workbook au-elevation-sheet flex max-h-[94vh] max-w-[1320px] flex-col overflow-hidden rounded-[20px] p-0"
     >
-            <header className="flex shrink-0 items-start justify-between gap-3 border-b border-au-separator px-5 py-4 sm:px-6">
-              <div>
-                <h2 className="text-base font-semibold tracking-[-0.02em] text-slate-950">
-                  Import SAT from Excel
-                </h2>
-                <p className="mt-1 text-xs leading-5 text-slate-600">
-                  {singleModule ? "Import only the selected module after confirming two pretests. Other modules, routing and scoring settings stay unchanged. A stale draft conflicts; you can undo until the next edit or publication." : <>One workbook replaces the complete six-module draft pinned to the revision you
-                  inspected. If another author saves first, the import conflicts instead of
-                  overwriting. Published versions are untouched. After the import you can undo it
-                  until you edit further or publish. Nothing changes until you confirm.</>}
-                </p>
+      <header className="flex shrink-0 items-start justify-between gap-3 border-b border-au-separator px-5 py-4 sm:px-6">
+        <div>
+          <h2 className="text-base font-semibold tracking-[-0.02em] text-slate-950">
+            Import SAT from Excel
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-slate-600">
+            Upload one workbook. We detect which modules it contains and import only those; every
+            other module, routing and scoring settings stay as they are. If another author saves
+            first, the import conflicts instead of overwriting. Published versions are untouched.
+            After the import you can undo it until you edit further or publish. Nothing changes
+            until you confirm.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onClose}
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-slate-600 hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-35"
+          aria-label="Close SAT workbook import"
+        >
+          <X size={16} aria-hidden="true" />
+        </button>
+      </header>
+
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[430px_minmax(0,1fr)]">
+        <div className="min-h-0 overflow-y-auto border-b border-au-separator p-4 sm:p-5 lg:border-b-0 lg:border-r">
+          <DropTarget
+            file={file}
+            checking={busy}
+            onChoose={() => fileInputRef.current?.click()}
+            onDrop={(nextFile) => void inspectFile(nextFile)}
+          />
+          <input
+            ref={fileInputRef}
+            className="sr-only"
+            type="file"
+            disabled={activity === "importing"}
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            aria-label="Choose SAT Excel workbook"
+            onChange={(event) => {
+              const nextFile = event.currentTarget.files?.[0];
+              if (nextFile) void inspectFile(nextFile);
+              event.currentTarget.value = "";
+            }}
+          />
+
+          <button
+            type="button"
+            onClick={() => void downloadTemplate()}
+            aria-describedby="sat-workbook-template-hint"
+            className="authoring-interactive mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-[11px] text-xs font-semibold text-au-accent hover:bg-au-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+          >
+            <Download size={14} aria-hidden="true" />
+            Download SAT Excel template
+          </button>
+          <p
+            id="sat-workbook-template-hint"
+            className="mt-1 px-2 text-center text-xs leading-4 text-slate-600"
+          >
+            Includes a copyable AI prompt, authoring guide, and import checklist. Fill in any
+            modules you have; leave the rest untouched.
+          </p>
+
+          {error ? (
+            <div
+              ref={errorRef}
+              tabIndex={-1}
+              role="alert"
+              className="mt-3 rounded-xl bg-au-danger-tint px-3 py-2.5 text-xs leading-5 text-au-danger-text outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+            >
+              <div className="flex gap-2">
+                <AlertCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span>{error}</span>
               </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={onClose}
-                className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-slate-600 hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-35"
-                aria-label="Close SAT workbook import"
-              >
-                <X size={16} aria-hidden="true" />
-              </button>
-            </header>
-
-            <div className="grid min-h-0 flex-1 lg:grid-cols-[430px_minmax(0,1fr)]">
-              <div className="min-h-0 overflow-y-auto border-b border-au-separator p-4 sm:p-5 lg:border-b-0 lg:border-r">
-                {shell.singleModuleImportEnabled ? (
-                  <div className="mb-4 space-y-3 text-xs text-slate-700">
-                    <fieldset disabled={busy || failedStep === "commit"}>
-                      <legend className="font-semibold">Import scope</legend>
-                      <div className="mt-1 grid grid-cols-2 gap-1 rounded-[11px] bg-au-fill p-1">
-                        {IMPORT_SCOPES.map((scope) => {
-                          const active = mode === scope.value;
-                          return (
-                            <label
-                              key={scope.value}
-                              className={`flex min-h-11 cursor-pointer flex-col items-center justify-center rounded-[9px] px-2 py-1 text-center transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-au-accent has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 ${
-                                active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-600 hover:text-slate-900"
-                              }`}
-                            >
-                              <input
-                                type="radio"
-                                name="sat-workbook-import-scope"
-                                value={scope.value}
-                                checked={active}
-                                onChange={() => { clearInspection(); setMode(scope.value); setTargetModuleKey(""); }}
-                                className="sr-only"
-                              />
-                              <span className="font-semibold">{scope.label}</span>
-                              <span className="text-[11px] font-normal text-slate-600">{scope.hint}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </fieldset>
-                    {singleModule ? (
-                      <div>
-                        <label htmlFor="sat-workbook-target-module" className="block font-semibold">
-                          Target module
-                          <select id="sat-workbook-target-module" aria-label="Target module" aria-describedby="sat-workbook-target-hint" value={targetModuleKey} disabled={busy || failedStep === "commit"}
-                            onChange={(event) => { clearInspection(); setTargetModuleKey(event.target.value); }}
-                            className="mt-1 min-h-11 w-full rounded-[9px] bg-au-fill px-3 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
-                            <option value="">Choose the destination module</option>
-                            {Object.entries(MODULE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                          </select>
-                        </label>
-                        <p id="sat-workbook-target-hint" className="mt-1 leading-5 text-slate-600">
-                          {targetModuleKey
-                            ? `Expects ${questionsLabel(moduleTargetCount(targetModuleKey))}; the draft has ${beforeCountByModule.get(targetModuleKey) ?? 0} here now. Other modules, routing and scoring stay unchanged.`
-                            : "Choose where these questions belong before choosing the workbook. Rows for other modules that still hold untouched template defaults are ignored."}
-                        </p>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                <DropTarget
-                  file={file}
-                  checking={busy || (singleModule && !targetModuleKey)}
-                  onChoose={() => fileInputRef.current?.click()}
-                  onDrop={(nextFile) => void inspectFile(nextFile)}
-                />
-                <input
-                  ref={fileInputRef}
-                  className="sr-only"
-                  type="file"
-                  disabled={activity === "importing" || (singleModule && !targetModuleKey)}
-                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  aria-label="Choose SAT Excel workbook"
-                  onChange={(event) => {
-                    const nextFile = event.currentTarget.files?.[0];
-                    if (nextFile) void inspectFile(nextFile);
-                    event.currentTarget.value = "";
-                  }}
-                />
-
+              {failedStep ? (
                 <button
                   type="button"
-                  onClick={() => void downloadTemplate()}
-                  aria-describedby="sat-workbook-template-hint"
-                  className="authoring-interactive mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-[11px] text-xs font-semibold text-au-accent hover:bg-au-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+                  disabled={busy}
+                  onClick={retryFailedStep}
+                  className="authoring-interactive mt-2 min-h-11 rounded-[10px] bg-au-surface px-3 text-xs font-semibold text-au-danger-text ring-1 ring-au-danger-text/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-40"
                 >
-                  <Download size={14} aria-hidden="true" />
-                  Download SAT Excel template
+                  {FAILED_STEP_RETRY_LABEL[failedStep]}
                 </button>
-                <p
-                  id="sat-workbook-template-hint"
-                  className="mt-1 px-2 text-center text-xs leading-4 text-slate-600"
-                >
-                  Includes a copyable AI prompt, authoring guide, and import checklist.
+              ) : null}
+            </div>
+          ) : null}
+
+          {file ? (
+            <ol aria-label="Import progress" className="mt-3 space-y-1 text-xs">
+              <ProgressStep
+                label="Check workbook"
+                state={stepState("check", activity, failedStep, Boolean(preview))}
+              />
+              {preview && preview.assets.length > 0 ? (
+                <ProgressStep
+                  label={`Secure ${preview.assets.length} workbook visual${preview.assets.length === 1 ? "" : "s"}`}
+                  state={stepState("stage", activity, failedStep, stagingComplete)}
+                />
+              ) : null}
+              <ProgressStep
+                label={detected.length === 1 ? "Import the module" : detected.length > 1 ? "Import the modules" : "Import"}
+                state={stepState("commit", activity, failedStep, false)}
+              />
+            </ol>
+          ) : null}
+
+          {preview ? (
+            <>
+              <div className="mt-4 grid grid-cols-4 gap-2">
+                <Metric label="Questions" value={preview.questionCount} />
+                <Metric label="Modules" value={detected.length} />
+                <Metric label="Visuals" value={preview.assets.length} />
+                <Metric label="Issues" value={preview.issues.length} bad={!preview.valid} />
+              </div>
+
+              <div className="mt-4">
+                <p className="px-1 text-xs font-semibold text-slate-600">
+                  {detected.length === 0 ? "Found in your workbook" : `Found in your workbook · ${detected.filter((module) => module.ready).length} of ${detected.length} ready`}
                 </p>
-
-                {error ? (
-                  <div
-                    ref={errorRef}
-                    tabIndex={-1}
-                    role="alert"
-                    className="mt-3 rounded-xl bg-au-danger-tint px-3 py-2.5 text-xs leading-5 text-au-danger-text outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
-                  >
-                    <div className="flex gap-2">
-                      <AlertCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-                      <span>{error}</span>
-                    </div>
-                    {failedStep ? (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={retryFailedStep}
-                        className="authoring-interactive mt-2 min-h-11 rounded-[10px] bg-au-surface px-3 text-xs font-semibold text-au-danger-text ring-1 ring-au-danger-text/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-40"
-                      >
-                        {FAILED_STEP_RETRY_LABEL[failedStep]}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {file ? (
-                  <ol aria-label="Import progress" className="mt-3 space-y-1 text-xs">
-                    <ProgressStep
-                      label="Check workbook"
-                      state={stepState("check", activity, failedStep, Boolean(preview))}
-                    />
-                    {preview && preview.assets.length > 0 ? (
-                      <ProgressStep
-                        label={`Secure ${preview.assets.length} workbook visual${preview.assets.length === 1 ? "" : "s"}`}
-                        state={stepState("stage", activity, failedStep, stagingComplete)}
-                      />
-                    ) : null}
-                    <ProgressStep
-                      label={singleModule ? "Import the selected module" : "Replace the draft"}
-                      state={stepState("commit", activity, failedStep, false)}
-                    />
-                  </ol>
-                ) : null}
-
-                {preview ? (
-                  <>
-                    <div className="mt-4 grid grid-cols-4 gap-2">
-                      <Metric label="Questions" value={preview.questionCount} />
-                      <Metric label="Modules" value={preview.modules.length} />
-                      <Metric label="Visuals" value={preview.assets.length} />
-                      <Metric label="Issues" value={preview.issues.length} bad={!preview.valid} />
-                    </div>
-                    {singleModule && preview.valid ? (
-                      <fieldset disabled={busy || failedStep === "commit"} aria-describedby="sat-pretest-status" className="mt-4 rounded-xl bg-au-fill p-3">
-                        <legend className="sr-only">Pretest designation</legend>
-                        <div className="flex items-center justify-between gap-2">
-                          <p aria-hidden="true" className="text-sm font-semibold text-slate-800">Pretest designation</p>
-                          <span aria-live="polite" className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${pretestOrders.length === 2 ? "bg-au-accent-tint text-au-accent" : "bg-au-surface text-slate-700"}`}>
-                            {pretestOrders.length} of 2 selected
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-slate-600">
-                          Unknown means the workbook does not say. Verify the source, or deliberately designate two for a custom practice test. No pair is generated automatically.
-                        </p>
-                        <div className="mt-2 grid grid-cols-6 gap-1">
-                          {preview.modules[0]?.questions.map((question, index) => {
-                            const order = index + 1;
-                            const selected = pretestOrders.includes(order);
-                            const status = question.isPretest == null ? "Unknown" : question.isPretest ? "Yes" : "No";
-                            return (
-                              <label
-                                key={order}
-                                htmlFor={`sat-pretest-${order}`}
-                                className={`flex min-h-11 cursor-pointer flex-col items-center justify-center rounded-lg px-1 py-1 text-center transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-au-accent has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40 ${
-                                  selected ? "bg-au-accent text-white" : "bg-au-surface text-slate-800 hover:bg-au-accent-tint"
+                {detected.length === 0 ? (
+                  <p className="mt-1 rounded-[10px] bg-au-warning-tint px-3 py-2 text-xs leading-5 text-au-warning-text">
+                    No module with questions was found. Fill in the rows of at least one module in
+                    the template, then choose the file again.
+                  </p>
+                ) : (
+                  <table className="mt-1 w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-slate-600">
+                        <th scope="col" className="px-2.5 py-1 font-semibold">
+                          Module
+                        </th>
+                        <th scope="col" className="px-2 py-1 text-right font-semibold">
+                          Now
+                        </th>
+                        <th scope="col" className="px-2 py-1 text-right font-semibold">
+                          After
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detected.map((module) => {
+                        const selected = module.moduleKey === selectedModuleKey;
+                        const issueCount = preview.issues.filter((issue) => issue.moduleKey === module.moduleKey).length;
+                        return (
+                          <tr key={module.moduleKey}>
+                            <td className="p-0">
+                              <button
+                                type="button"
+                                aria-label={`Preview ${moduleLabel(module.moduleKey)}`}
+                                aria-pressed={selected}
+                                onClick={() => {
+                                  setSelectedModuleKey(module.moduleKey);
+                                  setSelectedQuestionIndex(0);
+                                }}
+                                className={`flex min-h-11 w-full flex-col justify-center rounded-[10px] px-2.5 py-1 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent ${
+                                  selected
+                                    ? "bg-au-accent-tint-strong text-au-accent"
+                                    : "text-slate-700 hover:bg-au-fill"
                                 }`}
                               >
-                                <input
-                                  id={`sat-pretest-${order}`}
-                                  type="checkbox"
-                                  checked={selected}
-                                  aria-label={`Designate question ${order} as pretest`}
-                                  aria-describedby={`sat-pretest-${order}-status`}
-                                  disabled={!selected && pretestOrders.length >= 2}
-                                  onChange={() => togglePretest(order)}
-                                  className="sr-only"
-                                />
-                                <span className="text-[13px] font-semibold tabular-nums">{order}</span>
-                                <span id={`sat-pretest-${order}-status`} className={`text-[11px] leading-3 ${selected ? "text-white/85" : status === "Unknown" ? "text-slate-500" : "text-slate-700"}`}>
-                                  {selected ? <>Pretest<span className="sr-only">, workbook: {status}</span></> : status}
+                                <span className="truncate font-semibold">{moduleLabel(module.moduleKey)}</span>
+                                <span
+                                  className={`flex items-center gap-1 text-[11px] font-medium ${module.ready ? "text-au-success-text" : "text-au-warning-text"}`}
+                                >
+                                  {module.ready ? (
+                                    <CheckCircle2 size={11} aria-hidden="true" />
+                                  ) : (
+                                    <AlertCircle size={11} aria-hidden="true" />
+                                  )}
+                                  {module.ready
+                                    ? "Ready to import"
+                                    : `Needs attention · ${issueCount} ${issueCount === 1 ? "issue" : "issues"}`}
                                 </span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                        {pretestOrders.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => { setPretestOrders([]); setPretestsConfirmed(false); }}
-                            className="mt-1 min-h-11 rounded-[9px] px-2 text-xs font-semibold text-au-accent hover:bg-au-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
-                          >
-                            Clear selection
-                          </button>
-                        ) : null}
-                        <label htmlFor="sat-pretest-source" className="mt-2 block text-xs font-semibold text-slate-700">
-                          Pretest designation source
-                          <select id="sat-pretest-source" aria-label="Pretest designation source" value={designationSource}
-                            onChange={(event) => { setDesignationSource(event.target.value as SatWorkbookPretestResolution["designationSource"] | ""); setPretestsConfirmed(false); }}
-                            className="mt-1 min-h-11 w-full rounded-lg bg-au-surface px-2 outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
-                            <option value="">Choose how the pair was established</option>
-                            <option value="source_verified">Verified against the source</option>
-                            <option value="staff_defined">Staff-defined for a practice test</option>
-                          </select>
-                        </label>
-                        <label htmlFor="sat-pretest-confirmation" className="mt-2 flex min-h-11 items-start gap-2 text-xs leading-5 text-slate-700">
-                          <input id="sat-pretest-confirmation" type="checkbox" aria-labelledby="sat-pretest-confirmation-label" checked={pretestsConfirmed} disabled={!designationSource || pretestOrders.length !== 2}
-                            onChange={(event) => setPretestsConfirmed(event.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-[var(--au-accent,#2563eb)]" />
-                          <span id="sat-pretest-confirmation-label">
-                            I confirm {pretestOrders.length === 2 ? `questions ${pretestOrders[0]} and ${pretestOrders[1]}` : "these two pretests"}{" "}
-                            {designationSource === "staff_defined" ? "are staff-defined for this practice test." : "were verified against the source."}
-                          </span>
-                        </label>
-                        <div
-                          id="sat-pretest-status"
-                          role="status"
-                          className={`mt-2 flex gap-2 rounded-[10px] px-3 py-2.5 text-xs leading-5 ${pretestNextStep ? "bg-au-warning-tint text-au-warning-text" : "bg-au-success-tint text-au-success-text"}`}
-                        >
-                          {pretestNextStep ? <AlertCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" /> : <CheckCircle2 size={14} className="mt-0.5 shrink-0" aria-hidden="true" />}
-                          <span>
-                            {pretestNextStep ? (
-                              <><strong>Pretest assignments are unresolved. Import remains blocked.</strong> {pretestNextStep}</>
-                            ) : (
-                              <>Pretests confirmed: questions {pretestOrders[0]} and {pretestOrders[1]} ({designationSource === "staff_defined" ? "staff-defined" : "source-verified"}). The server re-checks this pair on import.</>
-                            )}
-                          </span>
-                        </div>
-                        {preview.ignoredScaffoldRows ? <p className="mt-2 text-xs leading-5 text-slate-600">{preview.ignoredScaffoldRows} untouched template rows from other modules were ignored.</p> : null}
-                      </fieldset>
-                    ) : null}
-                    <div className="mt-4">
-                      <p className="px-1 text-xs font-semibold text-slate-600">
-                        Before and after, by module
-                      </p>
-                      <table className="mt-1 w-full text-xs">
-                        <thead>
-                          <tr className="text-left text-slate-600">
-                            <th scope="col" className="px-2.5 py-1 font-semibold">
-                              Module
-                            </th>
-                            <th scope="col" className="px-2 py-1 text-right font-semibold">
-                              Now
-                            </th>
-                            <th scope="col" className="px-2 py-1 text-right font-semibold">
-                              After
-                            </th>
+                              </button>
+                            </td>
+                            <td className="px-2 text-right tabular-nums text-slate-600">
+                              {beforeCountByModule.get(module.moduleKey) ?? 0}
+                            </td>
+                            <td className="px-2 text-right font-semibold tabular-nums text-slate-900">
+                              {module.questionCount}/{module.expectedCount}
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {preview.modules.map((module) => {
-                            const selected = module.moduleKey === selectedModuleKey;
-                            const target = moduleTargetCount(module.moduleKey);
-                            return (
-                              <tr key={module.moduleKey}>
-                                <td colSpan={1} className="p-0">
-                                  <button
-                                    type="button"
-                                    aria-label={`Preview ${MODULE_LABELS[module.moduleKey] ?? module.moduleKey}`}
-                                    aria-pressed={selected}
-                                    onClick={() => {
-                                      setSelectedModuleKey(module.moduleKey);
-                                      setSelectedQuestionIndex(0);
-                                    }}
-                                    className={`flex min-h-11 w-full items-center rounded-[10px] px-2.5 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent ${
-                                      selected
-                                        ? "bg-au-accent-tint-strong text-au-accent"
-                                        : "text-slate-700 hover:bg-au-fill"
-                                    }`}
-                                  >
-                                    <span className="truncate font-semibold">
-                                      {MODULE_LABELS[module.moduleKey] ?? module.moduleKey}
-                                    </span>
-                                  </button>
-                                </td>
-                                <td className="px-2 text-right tabular-nums text-slate-600">
-                                  {beforeCountByModule.get(module.moduleKey) ?? 0}
-                                </td>
-                                <td className="px-2 text-right font-semibold tabular-nums text-slate-900">
-                                  {module.questions.length}/{target}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {preview.issues.length ? (
-                      <div className="mt-4">
-                        <p className="px-1 text-xs font-semibold text-slate-600">Needs attention</p>
-                        <div className="mt-1.5 space-y-1.5">
-                          {preview.issues.slice(0, 60).map((issue, index) => (
-                            <div
-                              key={`${issue.row}-${issue.field}-${index}`}
-                              className="rounded-[10px] bg-au-warning-tint px-3 py-2 text-xs leading-4 text-au-warning-text"
-                            >
-                              <strong>
-                                {issue.row > 0 ? `Questions · Row ${issue.row} · ` : ""}
-                                {issue.field}
-                              </strong>
-                              <br />
-                              {issue.message}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : stagingComplete && activity !== "staging" ? (
-                      <div className="mt-4 flex items-center gap-2 rounded-xl bg-au-success-tint px-3 py-2.5 text-xs font-medium text-au-success-text">
-                        <CheckCircle2 size={15} aria-hidden="true" />
-                        {singleModule ? "Module content checked" : "Complete SAT ready to import"}
-                      </div>
-                    ) : null}
-                  </>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+                {detected.length > 0 && untouchedKeys.length > 0 ? (
+                  <p className="mt-2 px-1 text-xs leading-5 text-slate-600">
+                    Not in your workbook, left unchanged: {untouchedKeys.map(moduleLabel).join(", ")}.
+                  </p>
+                ) : null}
+                {detected.length > 0 ? (
+                  <p className="mt-1 px-1 text-xs leading-5 text-slate-600">
+                    The Pretest column isn’t checked here. Set exactly two pretests per module in
+                    the editor before publishing.
+                    {preview.ignoredScaffoldRows ? ` ${preview.ignoredScaffoldRows} untouched template rows were ignored.` : ""}
+                  </p>
                 ) : null}
               </div>
 
-              <div className="flex min-h-[420px] min-w-0 flex-col bg-au-fill">
-                {selectedModule && selectedQuestion ? (
-                  <>
-                    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-au-separator px-4 py-3 authoring-glass sm:px-5">
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-semibold text-slate-800">
-                          {MODULE_LABELS[selectedModule.moduleKey] ?? selectedModule.moduleKey}
-                        </p>
-                        <p className="mt-0.5 text-xs text-slate-600">Actual student renderer</p>
-                      </div>
-                      <select
-                        aria-label="Preview workbook question"
-                        value={selectedQuestionIndex}
-                        onChange={(event) => setSelectedQuestionIndex(Number(event.target.value))}
-                        className="min-h-11 rounded-[9px] border-0 bg-au-fill px-3 text-xs font-semibold text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+              {preview.issues.length ? (
+                <div className="mt-4">
+                  <p className="px-1 text-xs font-semibold text-slate-600">Needs attention</p>
+                  <div className="mt-1.5 space-y-1.5">
+                    {preview.issues.slice(0, 60).map((issue, index) => (
+                      <div
+                        key={`${issue.row}-${issue.field}-${index}`}
+                        className="rounded-[10px] bg-au-warning-tint px-3 py-2 text-xs leading-4 text-au-warning-text"
                       >
-                        {selectedModule.questions.map((_, index) => (
-                          <option key={index} value={index}>
-                            Question {index + 1}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
-                      <div className="mx-auto max-w-[760px]">
-                        <ExamQuestionRenderer question={selectedQuestion} disabled />
+                        <strong>
+                          {issue.moduleKey ? `${moduleLabel(issue.moduleKey)} · ` : ""}
+                          {issue.row > 0 ? `Questions · Row ${issue.row} · ` : ""}
+                          {issue.field}
+                        </strong>
+                        <br />
+                        {issue.message}
                       </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex flex-1 items-center justify-center p-8 text-center">
-                    <div className="max-w-sm">
-                      <FileSpreadsheet size={30} className="mx-auto text-slate-400" aria-hidden="true" />
-                      <p className="mt-3 text-sm font-semibold text-slate-700">
-                        Your SAT appears here before import
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-slate-600">
-                        Tables, LaTeX math, code blocks, formatting, choices, and adaptive-module
-                        placement render with the same components students use.
-                      </p>
-                    </div>
+                    ))}
                   </div>
-                )}
-              </div>
-            </div>
-
-            <footer className="shrink-0 border-t border-au-separator px-5 py-3 sm:px-6">
-              {replacesContent && preview?.valid ? (
-                <label htmlFor="sat-workbook-replacement-confirmation" className="mb-3 flex min-h-11 items-start gap-3 rounded-[12px] bg-au-warning-tint px-3 py-2.5 text-xs leading-5 text-au-warning-text">
-                  <input
-                    id="sat-workbook-replacement-confirmation"
-                    type="checkbox"
-                    aria-labelledby="sat-workbook-replacement-confirmation-label"
-                    checked={replaceConfirmed}
-                    disabled={busy}
-                    onChange={(event) => setReplaceConfirmed(event.target.checked)}
-                    className="mt-1 h-4 w-4 shrink-0 accent-[var(--au-accent,#2563eb)]"
-                  />
-                  <span id="sat-workbook-replacement-confirmation-label">
-                    {singleModule ? <>I understand this replaces the {questionsLabel(replacementCount)} in {MODULE_LABELS[targetModuleKey]} with {questionsLabel(preview.questionCount)}. The other five modules stay unchanged. I can undo until I edit or publish.</> : <>I understand this replaces all {questionsLabel(existingQuestionCount)} in the
-                    current draft with the {questionsLabel(preview.questionCount)} from this
-                    workbook. Published versions are untouched, and I can undo until I edit or
-                    publish.</>}
-                  </span>
-                </label>
+                </div>
+              ) : stagingComplete && activity !== "staging" && detected.length > 0 ? (
+                <div className="mt-4 flex items-center gap-2 rounded-xl bg-au-success-tint px-3 py-2.5 text-xs font-medium text-au-success-text">
+                  <CheckCircle2 size={15} aria-hidden="true" />
+                  {detected.length === 1 ? "Module checked and ready to import" : `All ${detected.length} modules checked and ready to import`}
+                </div>
               ) : null}
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p
-                  id="sat-workbook-import-hint"
-                  aria-live="polite"
-                  className="max-w-xl text-xs leading-4 text-slate-600"
+            </>
+          ) : null}
+        </div>
+
+        <div className="flex min-h-[420px] min-w-0 flex-col bg-au-fill">
+          {selectedModule && selectedQuestion ? (
+            <>
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-au-separator px-4 py-3 authoring-glass sm:px-5">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-slate-800">
+                    {moduleLabel(selectedModule.moduleKey)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-600">Actual student renderer</p>
+                </div>
+                <select
+                  aria-label="Preview workbook question"
+                  value={selectedQuestionIndex}
+                  onChange={(event) => setSelectedQuestionIndex(Number(event.target.value))}
+                  className="min-h-11 rounded-[9px] border-0 bg-au-fill px-3 text-xs font-semibold text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
                 >
-                  {activity === "importing"
-                    ? "Importing… keep this window open."
-                    : importDisabledReason ?? (singleModule ? `${questionsLabel(preview?.questionCount ?? 0)} will be imported into ${MODULE_LABELS[targetModuleKey]}. Other modules stay unchanged.` :
-                      (replacesContent
-                        ? `${questionsLabel(existingQuestionCount)} in the current draft will be replaced.`
-                        : "Import creates the complete draft atomically; a failed import changes nothing."))}
-                </p>
-                <div className="ml-auto flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={onClose}
-                    className="min-h-11 rounded-full px-4 text-xs font-semibold text-slate-600 hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-35"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canCommit}
-                    aria-describedby="sat-workbook-import-hint"
-                    onClick={() => void commit()}
-                    className="authoring-interactive min-h-11 rounded-[11px] bg-au-accent px-4 text-sm font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    {activity === "importing" ? "Importing…" : importLabel}
-                  </button>
+                  {selectedModule.questions.map((_, index) => (
+                    <option key={index} value={index}>
+                      Question {index + 1}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+                <div className="mx-auto max-w-[760px]">
+                  <ExamQuestionRenderer question={selectedQuestion} disabled />
                 </div>
               </div>
-            </footer>
+            </>
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-8 text-center">
+              <div className="max-w-sm">
+                <FileSpreadsheet size={30} className="mx-auto text-slate-400" aria-hidden="true" />
+                <p className="mt-3 text-sm font-semibold text-slate-700">
+                  Your SAT appears here before import
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">
+                  Tables, LaTeX math, code blocks, formatting, choices, and adaptive-module
+                  placement render with the same components students use.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <footer className="shrink-0 border-t border-au-separator px-5 py-3 sm:px-6">
+        {replacesContent && preview?.valid ? (
+          <label htmlFor="sat-workbook-replacement-confirmation" className="mb-3 flex min-h-11 items-start gap-3 rounded-[12px] bg-au-warning-tint px-3 py-2.5 text-xs leading-5 text-au-warning-text">
+            <input
+              id="sat-workbook-replacement-confirmation"
+              type="checkbox"
+              aria-labelledby="sat-workbook-replacement-confirmation-label"
+              checked={replaceConfirmed}
+              disabled={busy}
+              onChange={(event) => setReplaceConfirmed(event.target.checked)}
+              className="mt-1 h-4 w-4 shrink-0 accent-[var(--au-accent,#2563eb)]"
+            />
+            <span id="sat-workbook-replacement-confirmation-label">
+              {replacesWholeDraft ? (
+                <>I understand this replaces all {questionsLabel(existingQuestionCount)} in the
+                current draft with the {questionsLabel(preview.questionCount)} from this
+                workbook. Published versions are untouched, and I can undo until I edit or
+                publish.</>
+              ) : (
+                <>I understand this replaces the {questionsLabel(replacementCount)} currently in {detectedLabels} with{" "}
+                {questionsLabel(preview.questionCount)}. Other modules stay unchanged. I can undo until I edit or publish.</>
+              )}
+            </span>
+          </label>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p
+            id="sat-workbook-import-hint"
+            aria-live="polite"
+            className="max-w-xl text-xs leading-4 text-slate-600"
+          >
+            {activity === "importing"
+              ? "Importing… keep this window open."
+              : importDisabledReason ?? (replacesWholeDraft
+                ? replacesContent
+                  ? `${questionsLabel(existingQuestionCount)} in the current draft will be replaced.`
+                  : "Import creates the complete draft atomically; a failed import changes nothing."
+                : `${questionsLabel(preview?.questionCount ?? 0)} will be imported into ${detectedLabels}. Other modules stay unchanged.`)}
+          </p>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onClose}
+              className="min-h-11 rounded-full px-4 text-xs font-semibold text-slate-600 hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-35"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!canCommit}
+              aria-describedby="sat-workbook-import-hint"
+              onClick={() => void commit()}
+              className="authoring-interactive min-h-11 rounded-[11px] bg-au-accent px-4 text-sm font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              {activity === "importing" ? "Importing…" : importLabel}
+            </button>
+          </div>
+        </div>
+      </footer>
     </AuthoringDialog>
   );
 }

@@ -122,7 +122,6 @@ func TestSATWorkbookParserRejectsHostileCompletedFixtures(t *testing.T) {
 	}{
 		{name: "missing prompt", cell: "C2", value: ""},
 		{name: "duplicate order", cell: "B3", value: "1"},
-		{name: "wrong pretest count", cell: "O2", value: "No"},
 		{name: "section-invalid domain", cell: "L2", value: "Algebra"},
 		{name: "student response in reading writing", cell: "E2", value: "Student Response"},
 		{name: "formula in Questions", cell: "C2", value: "=1+1", formula: true},

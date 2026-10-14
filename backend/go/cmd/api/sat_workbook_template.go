@@ -79,7 +79,7 @@ var satWorkbookGuideFields = [][3]string{
 	{"Domain", "SAT content domain for the question's section.", "Required; use the exact section-specific label in TAXONOMY."},
 	{"Skill", "Skill assessed by the question.", "Required; use a skill listed under the selected Domain in TAXONOMY."},
 	{"Difficulty", "Easy, Medium, or Hard.", "Required; the prefilled Medium is a placeholder until verified."},
-	{"Pretest", "Whether this question is designated as pretest.", "Yes or No; exactly two Yes values per module. Prefilled No values are placeholders, not source facts."},
+	{"Pretest", "Optional. Whether this question is a pretest.", "Not checked at import and may be left blank. Set exactly two per module in the editor before publishing; never infer them from the prefilled No values."},
 	{"Rationale", "Internal answer explanation or scoring rationale.", "Optional; not part of the student-visible prompt."},
 	{"Tags", "Optional labels for source traceability.", "Use source/page/question identifiers; do not include personal or student information."},
 }
@@ -104,9 +104,9 @@ Math · Module 1 (22)
 Math · Module 2 — Lower (22)
 Math · Module 2 — Higher (22)
 
-Order is unique and consecutive within each module. Module 2 Lower and Module 2 Higher are alternative adaptive branches; both modules still require their own authored questions. Every module requires exactly two Yes values in Pretest. The prefilled Medium difficulty and No pretest values are placeholders, not verified facts. Ask the exam owner when difficulty or pretest designation is not available from an authorized source.
+Order is unique and consecutive within each module. Module 2 Lower and Module 2 Higher are alternative adaptive branches; both modules still require their own authored questions. The workbook may contain any subset of the six modules: a module whose rows are all still the untouched template defaults is ignored, and every module you do fill in must be complete. The Pretest column is optional and is not checked at import; publishing requires exactly two pretests per module. The prefilled Medium difficulty and No pretest values are placeholders, not verified facts. Ask the exam owner when difficulty is not available from an authorized source.
 
-Required values include Module, Order, Prompt, Response Type, valid section-specific Domain and Skill, Difficulty, Pretest, and the matching answer data. Reading & Writing supports Multiple Choice only. Math supports Multiple Choice or Student Response.
+Required values include Module, Order, Prompt, Response Type, valid section-specific Domain and Skill, Difficulty, and the matching answer data. Pretest is optional. Reading & Writing supports Multiple Choice only. Math supports Multiple Choice or Student Response.
 
 For Multiple Choice, preserve all four choices in A–D and enter the verified correct choice letter in Correct. Leave Accepted Responses blank. For Student Response, use Math only; leave A–D and Correct blank, and enter one or more verified accepted numeric responses separated by commas or semicolons. Do not invent tolerance or equivalent answers.
 
@@ -122,7 +122,7 @@ For each figure, add one actual PNG, JPEG, GIF, or WebP image to Assets column D
 WORKFLOW AND FINAL CHECK
 Inspect all source files first. Build a source-to-module/order traceability map, then transcribe. Compare every question, answer choice, punctuation mark, equation, answer key, module, pretest label, and image against the source. Do not rely on OCR or your own answer solving as proof.
 
-Check all 147 rows, all six module counts, unique order, exactly two pretests per module, response shapes, taxonomy pairs, image references, image anchors, and formulas. Questions cells must not contain formulas. Keep the workbook within the limits in the Guide.
+Check every row of each module you completed, each module's question count, unique order, response shapes, taxonomy pairs, image references, image anchors, and formulas. Questions cells must not contain formulas. Keep the workbook within the limits in the Guide.
 
 Return the completed .xlsx with a concise QA report: checked question count, module counts, source mapping, image count, unresolved fields, and source/key inconsistencies. State NOT IMPORT READY if any blocking information is missing. The application's preview checks workbook structure; it does not prove transcription accuracy. A human must review the workbook against the supplied sources before import.`
 
@@ -267,15 +267,15 @@ func satWorkbookGuideSheet() string {
 		{"ASSET RULES", "Use unique keys up to 80 characters with letters, numbers, period, underscore, or hyphen.", "Supported image types: PNG, JPEG, GIF, and WebP. Do not use external URLs."},
 		{"ASSET RULES", "Place one image per asset row in Assets column D.", "Pictures on Questions, Guide, or AI Instructions are rejected."},
 		{"IMPORT LIMITS", "Workbook <=12 MiB; at most 200 question rows; cell text <=50,000 Unicode characters.", "At most 48 images, <=10 MiB each, <=30 MiB combined; archive <=80 MiB uncompressed."},
-		{"VALIDATION", "Exactly 147 nonblank question rows, six modules, and unique Order values 1..27 or 1..22.", "Reading & Writing: 27 × 3; Math: 22 × 3."},
-		{"VALIDATION", "Exactly TWO Pretest Yes values in each module (12 total).", "Never infer pretest labels from the placeholder No values."},
+		{"VALIDATION", "Every module you fill in must be complete: 27 questions (Reading & Writing) or 22 (Math) with unique Order values 1..27 or 1..22.", "Modules left as untouched template defaults are ignored and keep their current draft content."},
+		{"VALIDATION", "Pretest is optional and not checked at import.", "Publishing requires exactly two pretests per module; set them in the editor. Never infer pretest labels from the placeholder No values."},
 		{"VALIDATION", "Reading & Writing uses Multiple Choice. Math uses Multiple Choice or Student Response.", "Multiple Choice requires A–D and one verified Correct letter."},
 		{"VALIDATION", "Math Student Response requires accepted numeric answers separated by comma or semicolon.", "Leave choices and Correct blank for Student Response."},
 		{"VALIDATION", "Domain and Skill must be a valid pair from TAXONOMY; Difficulty is Easy, Medium, or Hard.", "Required values must be supported by an authorized source or confirmed by a human."},
 		{"VALIDATION", "Questions must contain values, not formulas.", "The server preview checks workbook structure, not whether transcription matches the source."},
 		{"VALIDATION", "If required information is missing, report the exact blocker and mark the file NOT IMPORT READY.", "Do not fill gaps by guessing."},
 		{"QA CHECKLIST", "Check every question against the source, including punctuation, choices, and math symbols.", "Compare each answer against the supplied answer key; flag contradictions."},
-		{"QA CHECKLIST", "Verify all module counts, order values, taxonomy pairs, and two pretests per module.", "Prefilled Medium and No are not verified answers."},
+		{"QA CHECKLIST", "Verify the module counts, order values, and taxonomy pairs of every module you completed.", "Prefilled Medium and No are not verified answers."},
 		{"QA CHECKLIST", "Match every image token to its embedded Assets row and check the rendered preview.", "Preview checks image placement, but not token-to-key matches or source transcription fidelity."},
 		{"COLUMN / FIELD", "EXACT MEANING", "REQUIRED / GUIDANCE"},
 	}
@@ -284,7 +284,7 @@ func satWorkbookGuideSheet() string {
 	}
 	rows = append(rows, []string{"MODULE MAP", "EXACT LABEL", "MODULE KEY / SECTION / REQUIRED COUNT"})
 	for _, module := range satWorkbookModules {
-		rows = append(rows, []string{"MODULE MAP", module.label, fmt.Sprintf("%s / %s / %d questions / 2 pretest Yes", module.key, module.section, module.count)})
+		rows = append(rows, []string{"MODULE MAP", module.label, fmt.Sprintf("%s / %s / %d questions", module.key, module.section, module.count)})
 	}
 	rows = append(rows, []string{"TAXONOMY", "SECTION", "DOMAIN", "ALLOWED SKILL"})
 	for _, group := range satWorkbookTaxonomy {
@@ -299,7 +299,7 @@ func satWorkbookGuideSheet() string {
 		[]string{"QA · 03", "Required values and answer shape", "No empty Prompt, invalid taxonomy, missing MCQ choice/key, or missing Student Response answer."},
 		[]string{"QA · 04", "Every question compared with source", "Proofread exact wording, punctuation, equations, and answer choices."},
 		[]string{"QA · 05", "Correct answers checked", "Compare with the supplied answer key or obtain human sign-off."},
-		[]string{"QA · 06", "Exactly two Yes pretests per module", "Do not infer from defaults."},
+		[]string{"QA · 06", "Pretests are set before publishing", "Not checked at import; exactly two per module are required to publish. Do not infer from defaults."},
 		[]string{"QA · 07", "Every image reference has an embedded asset", "Check its key, meaningful Alt Text, and Assets column D anchor."},
 		[]string{"QA · 08", "Questions have no formulas", "Cells contain values only."},
 		[]string{"QA · 09", "Limits satisfied", "Workbook and images stay within the stated upload and archive limits."},
@@ -329,7 +329,7 @@ func satWorkbookInstructionsSheet() string {
 		{"R05", "Choices", "Multiple Choice uses A–D and Correct A/B/C/D from the supplied answer key."},
 		{"R06", "Student Response", "Math only; leave choices and Correct blank; list verified accepted numeric responses."},
 		{"R07", "Adaptive modules", "Module 2 Lower and Higher are alternative branches; both require authored questions."},
-		{"R08", "Pretest", "Exactly two Yes per module; do not infer labels from the prefilled No values."},
+		{"R08", "Pretest", "Optional at import; set exactly two per module before publishing. Do not infer labels from the prefilled No values."},
 		{"R09", "Taxonomy", "Use only a valid section, Domain, and Skill pairing from the Guide."},
 		{"R10", "Figures", "Embed every image in Assets column D and match every image token to its Asset Key."},
 		{"R11", "Privacy", "Do not put personal or student information in the workbook or Tags."},

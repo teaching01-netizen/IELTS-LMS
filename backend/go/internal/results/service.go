@@ -20,6 +20,7 @@ import (
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
+	"example.com/ielts-proctoring/internal/satscoring"
 )
 
 // Outcome statuses owned by assessment_results (see 0044 lineage).
@@ -854,6 +855,12 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 	var payloadVal any
 	if payload.Valid {
 		_ = json.Unmarshal([]byte(payload.String), &payloadVal)
+	}
+	// Staff see the estimated score of the active global policy (resolved at
+	// read time from the persisted module scores), not the value frozen when
+	// the result was sealed.
+	if payloadMap, ok := payloadVal.(map[string]any); ok {
+		satscoring.Overlay(ctx, s.db, payloadMap)
 	}
 	sections, err := s.satSections(ctx, id)
 	if err != nil {

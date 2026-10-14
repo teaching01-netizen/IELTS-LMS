@@ -46,13 +46,29 @@ function renderRoot(role: 'admin' | 'builder' | 'proctor' | 'grader' = 'admin') 
 describe('SatRoot', () => {
   beforeEach(() => authMock.mockReset());
 
-  it('keeps the SAT workspace to three primary admin destinations', () => {
+  it('keeps the SAT workspace to the admin destinations: three primary ones plus the global Score Conversion policy', () => {
     renderRoot('admin');
     expect(screen.getAllByText('Exams').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Rooms').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Responses').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Score Conversion').length).toBeGreaterThan(0);
     expect(screen.queryByText('Grading')).not.toBeInTheDocument();
     expect(screen.queryByText('Dashboard')).not.toBeInTheDocument();
+  });
+
+  it('offers Score Conversion only to admins', () => {
+    for (const role of ['builder', 'proctor', 'grader'] as const) {
+      const { unmount } = renderRoot(role);
+      expect(screen.queryByText('Score Conversion')).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('links Score Conversion to its page for admins', () => {
+    renderRoot('admin');
+    const links = screen.getAllByRole('link', { name: /Score Conversion/ });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) expect(link).toHaveAttribute('href', '/sat/score-conversion');
   });
 
   it('switches back to the IELTS workspace instead of mixing providers in SAT navigation', () => {

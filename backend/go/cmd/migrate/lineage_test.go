@@ -77,11 +77,11 @@ func migDir(t *testing.T) string {
 // SAT import (0082) and the classroom route policy (0083) bump 81->83. The
 // route-policy fence trigger (0084) bumps 83->84. The per-exam SAT score
 // report switch (0085) bumps 84->85. The classroom plan write fence (0086)
-// bumps 85->86. Any other
+// bumps 85->86. Global SAT score conversion (0087) bumps 86->87. Any other
 // count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 86
-	pinnedMigrationMax   = 86
+	pinnedMigrationFiles = 87
+	pinnedMigrationMax   = 87
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

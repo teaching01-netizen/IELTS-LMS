@@ -393,10 +393,10 @@ type Config struct {
 	// gate, docs/sat_newmode.md 10): keep it off until every instance runs
 	// classroom-aware code. Started classroom attempts are never affected.
 	SATClassroomEnabled bool
-	MasterKeyEnabled          bool
-	MasterKeyUsername         string
-	MasterKeyPassword         string
-	PrometheusEnabled         bool
+	MasterKeyEnabled    bool
+	MasterKeyUsername   string
+	MasterKeyPassword   string
+	PrometheusEnabled   bool
 	// MetricsPublic gates /metrics exposure (WS-10a): false (default) =
 	// private, bearer-token required; true = public (no auth). Fail closed:
 	// an empty MetricsToken with MetricsPublic=false denies every scrape.
@@ -564,8 +564,7 @@ type Config struct {
 	// event rows on the durable live-update bus (AUTHORING_REALTIME_EVENTS,
 	// default off). Off = byte-identical legacy authoring behavior: no bus
 	// INSERT and no extra read. Rollback = unset/off.
-	AuthoringRealtimeEvents      bool
-	SATSingleModuleImportEnabled bool
+	AuthoringRealtimeEvents bool
 	// AuthoringRealtimeDelivery gates the Phase 03 SAT authoring realtime
 	// WebSocket delivery (AUTHORING_REALTIME_DELIVERY, default off). Off =
 	// subscriptions are refused as subscription_forbidden; HTTP authoring is
@@ -936,7 +935,6 @@ func Load() Config {
 		WSCapSchedule:                    wsCapFromEnv("WS_CAP_SCHEDULE", DefaultWSCapSchedule),
 		LiveBusSink:                      parseLiveBusSink(os.Getenv("LIVE_BUS_SINK")),
 		AuthoringRealtimeEvents:          getenvBool("AUTHORING_REALTIME_EVENTS", false),
-		SATSingleModuleImportEnabled:     getenvBool("SAT_SINGLE_MODULE_IMPORT_ENABLED", false),
 		AuthoringRealtimeDelivery:        getenvBool("AUTHORING_REALTIME_DELIVERY", false),
 		AuthoringRealtimePresence:        getenvBool("AUTHORING_REALTIME_PRESENCE", false),
 		AuthoringRealtimeConflictCompare: getenvBool("AUTHORING_REALTIME_CONFLICT_COMPARE", false),

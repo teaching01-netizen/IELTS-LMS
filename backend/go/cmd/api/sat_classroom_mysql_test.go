@@ -505,7 +505,9 @@ func TestSATClassroomConvertedScoreMySQL(t *testing.T) {
 		if r.TotalScaled != nil {
 			t.Fatalf("one section must not produce a 400–1600 total: %s", payload)
 		}
-		// A later converter edit never rewrites a released result.
+		// A later converter edit never rewrites the STORED result row (the audit
+		// evidence). What readers display is resolved against the active global
+		// policy at read time (TestSATGlobalScoreConversionIsRetroactiveMySQL).
 		ctx := context.Background()
 		if _, err := f.db.ExecContext(ctx, "UPDATE assessment_scoring_policies SET policy_config = ? WHERE exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ?)", converter("classroom-v2", "full_higher", 6), f.attemptID); err != nil {
 			t.Fatal(err)

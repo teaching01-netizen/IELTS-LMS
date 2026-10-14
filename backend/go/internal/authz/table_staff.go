@@ -10,6 +10,8 @@ func init() {
 	graderRead := []string{RoleAdmin, RoleAdminObserver, RoleGrader}
 	resultsRW := []string{RoleAdmin, RoleGrader, RoleProctor}
 	resultsRead := []string{RoleAdmin, RoleAdminObserver, RoleGrader, RoleProctor}
+	scoreConversionRead := []string{RoleAdmin, RoleAdminObserver}
+	scoreConversionWrite := []string{RoleAdmin}
 	mediaWrite := []string{RoleAdmin, RoleBuilder, RoleProctor, RoleGrader, RoleStudent}
 	for k, v := range map[string]Policy{
 		// "GET /" is shared by exams-list (readStaff), schedules-list
@@ -234,9 +236,19 @@ func init() {
 		"GET /sat/attempts/{attemptID}/answered-exam": {MinRoles: resultsRead},
 		"GET /sat/export/rawdata":                     {MinRoles: resultsRead},
 		"GET /sat/{resultID}":                         {MinRoles: resultsRead},
-		"GET /act-science":                            {MinRoles: resultsRW},
-		"GET /act-science/{attemptID}":                {MinRoles: resultsRW},
-		"GET /{resultID}/events":                      {MinRoles: resultsRW},
+		// Global SAT score conversion: admin_observer may read, only admin writes.
+		"GET /settings":                {MinRoles: scoreConversionRead},
+		"GET /revisions":               {MinRoles: scoreConversionRead},
+		"GET /revisions/{id}":          {MinRoles: scoreConversionRead},
+		"POST /drafts":                 {MinRoles: scoreConversionWrite},
+		"PUT /drafts/{id}":             {MinRoles: scoreConversionWrite},
+		"POST /drafts/{id}/validate":   {MinRoles: scoreConversionWrite},
+		"POST /lookup-preview":         {MinRoles: scoreConversionWrite},
+		"POST /drafts/{id}/impact":     {MinRoles: scoreConversionWrite},
+		"POST /drafts/{id}/publish":    {MinRoles: scoreConversionWrite},
+		"GET /act-science":             {MinRoles: resultsRW},
+		"GET /act-science/{attemptID}": {MinRoles: resultsRW},
+		"GET /{resultID}/events":       {MinRoles: resultsRW},
 		// resultsGetHandler: any authenticated session may call;
 		// students see only their own result (handler SelfOnly-ish
 		// switch denies observer/builder there).

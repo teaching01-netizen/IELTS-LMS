@@ -27,20 +27,98 @@ func commitRequest() SatWorkbookCommitRequest {
 		}
 		mods = append(mods, SatWorkbookModuleDraft{ModuleKey: spec.key, SectionKey: spec.sectionKey, Questions: qs})
 	}
-	return SatWorkbookCommitRequest{ImportID: "imp-1", ExpectedVersionID: "v-1", ExpectedVersionRevision: 3, Modules: mods}
+	keys := make([]string, 0, len(satWorkbookModules))
+	for _, spec := range satWorkbookModules {
+		keys = append(keys, spec.key)
+	}
+	return SatWorkbookCommitRequest{ImportID: "imp-1", ExpectedVersionID: "v-1", ExpectedVersionRevision: 3, Modules: mods, TargetModuleKeys: keys}
 }
 
+func commitDigest() string {
+	_, digest, err := prepareWorkbookCommit(commitRequest())
+	if err != nil {
+		panic(err)
+	}
+	return digest
+}
+
+// A first-time import finds no stored receipt for its operation key.
+func expectReceiptMiss(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery("FROM sat_workbook_import_scopes").WithArgs("actor", "exam-1", "wb-key").
+		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "result_json"}))
+}
+
+// The receipt lookup must sit between the exam-row lock and the revision
+// check: sqlmock enforces this order, so reordering it fails these tests.
 func expectReplaceGates(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("SELECT provider_key, current_draft_version_id FROM exam_entities").WithArgs("exam-1").
 		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id"}).AddRow("sat", "v-1"))
+	expectReceiptMiss(mock)
 	mock.ExpectQuery("SELECT revision FROM exam_versions").WithArgs("v-1", "exam-1").
 		WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(3))
+}
+
+func commitFingerprint(req SatWorkbookCommitRequest) string {
+	prepared, _, err := prepareWorkbookCommit(req)
+	if err != nil {
+		panic(err)
+	}
+	fp, err := canonicalWorkbookFingerprint(map[string]any{"import": prepared.ImportID, "version": prepared.ExpectedVersionID, "rev": prepared.ExpectedVersionRevision, "modules": prepared.Modules, "assets": prepared.Assets, "targets": prepared.TargetModuleKeys})
+	if err != nil {
+		panic(err)
+	}
+	return fp
+}
+
+// A retry whose ledger row was purged but whose receipt survives replays the
+// stored result under the exam lock, even though the draft revision has since
+// moved on: no revision/draft/question query and no write may follow.
+func TestWorkbookCommitReplaysFromReceiptWithoutTouchingDraft(t *testing.T) {
+	svc, mock := contractService(t)
+	req := commitRequest()
+	stored, err := json.Marshal(CommitResult{Shell: Shell{ExamID: "exam-1", VersionID: "v-1", VersionRevision: 9}, Undo: UndoState{ImportID: "imp-1", Available: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	begin(mock)
+	mock.ExpectExec("INSERT IGNORE INTO authoring_operation_keys").WithArgs("actor", "workbook:exam-1", "wb-key", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT provider_key, current_draft_version_id FROM exam_entities").WithArgs("exam-1").
+		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id"}).AddRow("sat", "v-1"))
+	mock.ExpectQuery("FROM sat_workbook_import_scopes").WithArgs("actor", "exam-1", "wb-key").
+		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "result_json"}).AddRow(commitFingerprint(req), string(stored)))
+	mock.ExpectExec("UPDATE authoring_operation_keys SET result_json").WithArgs(sqlmock.AnyArg(), "actor", "workbook:exam-1", "wb-key").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	got, err := svc.CommitSATWorkbook(context.Background(), "exam-1", req, "actor", WithOperationKey("wb-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Shell.VersionRevision != 9 {
+		t.Fatalf("receipt result not replayed: %+v", got.Shell)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The same key bound to different content is refused from the receipt too.
+func TestWorkbookCommitRejectsReceiptKeyReuseWithDifferentPayload(t *testing.T) {
+	svc, mock := contractService(t)
+	begin(mock)
+	mock.ExpectExec("INSERT IGNORE INTO authoring_operation_keys").WithArgs("actor", "workbook:exam-1", "wb-key", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT provider_key, current_draft_version_id FROM exam_entities").WithArgs("exam-1").
+		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id"}).AddRow("sat", "v-1"))
+	mock.ExpectQuery("FROM sat_workbook_import_scopes").WithArgs("actor", "exam-1", "wb-key").
+		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "result_json"}).AddRow("another-fingerprint", `{}`))
+	mock.ExpectRollback()
+	if _, err := svc.CommitSATWorkbook(context.Background(), "exam-1", commitRequest(), "actor", WithOperationKey("wb-key")); codeOf(err) != apperrors.CodeConflict {
+		t.Fatalf("wanted receipt key-reuse conflict, got %v", err)
+	}
 }
 
 func expectReplaceBody(mock sqlmock.Sqlmock) {
 
 	mock.ExpectQuery("SELECT expected_version_id, expected_version_revision").WithArgs("imp-1", "exam-1").
-		WillReturnRows(sqlmock.NewRows([]string{"expected_version_id", "expected_version_revision", "asset_manifest", "created_by", "target_module_key", "content_digest"}).AddRow("v-1", 3, `[]`, "actor", nil, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"expected_version_id", "expected_version_revision", "asset_manifest", "created_by", "target_module_key", "content_digest"}).AddRow("v-1", 3, `[]`, "actor", workbookModuleKeysJoined(commitRequest().TargetModuleKeys), commitDigest()))
 	targetCols := []string{"id", "section_key", "module_key", "target_question_count"}
 	targetRows := sqlmock.NewRows(targetCols)
 	for i, spec := range satWorkbookModules {
@@ -105,6 +183,7 @@ func TestWorkbookCommitReplaysSameKeyWithoutSecondReplace(t *testing.T) {
 	expectReplaceBody(mock)
 	expectShellRead(mock)
 	mock.ExpectExec("UPDATE authoring_operation_keys SET result_json").WithArgs(sqlmock.AnyArg(), "actor", "workbook:exam-1", "wb-key").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE sat_workbook_import_scopes SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	first, err := svc.CommitSATWorkbook(context.Background(), "exam-1", req, "actor", WithOperationKey("wb-key"))
 	if err != nil {
@@ -136,7 +215,7 @@ func TestWorkbookCommitInFlightKeyAsksForRetry(t *testing.T) {
 	svc, mock := contractService(t)
 	begin(mock)
 	mock.ExpectExec("INSERT IGNORE INTO authoring_operation_keys").WithArgs("actor", "workbook:exam-1", "wb-key", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
-	fp, err := operationFingerprint(map[string]any{"import": "imp-1", "version": "v-1", "rev": 3, "modules": commitRequest().Modules, "assets": commitRequest().Assets})
+	fp, err := canonicalWorkbookFingerprint(map[string]any{"import": "imp-1", "version": "v-1", "rev": 3, "modules": commitRequest().Modules, "assets": commitRequest().Assets, "targets": commitRequest().TargetModuleKeys})
 	if err != nil {
 		t.Fatal(err)
 	}

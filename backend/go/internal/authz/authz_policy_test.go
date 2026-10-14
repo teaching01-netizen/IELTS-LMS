@@ -8,6 +8,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -133,6 +134,8 @@ var expectedAnnotated = []string{
 	"GET /results/{resultID}/events",
 	"GET /dashboard", "GET /analytics", "POST /export",
 	"GET /sat", "GET /sat/access-groups", "GET /sat/attempts", "GET /sat/attempts/{attemptID}/answers", "GET /sat/attempts/{attemptID}/answered-exam", "GET /sat/export/rawdata", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
+	// Global SAT score conversion (docs/scoreconverimplement.md).
+	"GET /settings", "GET /revisions", "GET /revisions/{id}", "POST /drafts", "PUT /drafts/{id}", "POST /drafts/{id}/validate", "POST /lookup-preview", "POST /drafts/{id}/impact", "POST /drafts/{id}/publish",
 	"GET /{resultID}/events", "GET /{resultID}",
 	"POST /uploads", "POST /import-url", "PUT /uploads/{assetID}", "POST /uploads/{assetID}/complete",
 	"GET /assets/{assetID}", "GET /{assetID}/content", "GET /{assetID}",
@@ -408,5 +411,38 @@ func TestDenyClosedOnRemovedEntry(t *testing.T) {
 	}
 	if code := serve(t, mutant, key, "PATCH", "/x", RoleAdmin, true); code != http.StatusForbidden {
 		t.Errorf("mutant: admin on removed %q = %d, want 403 (deny-closed)", key, code)
+	}
+}
+
+// TestSATScoreConversionRoleMatrix pins who may touch the global conversion
+// policy: admin and admin_observer read it, only admin writes, publishes or
+// restores it; every other role (including students and anonymous callers) is
+// refused before any handler runs.
+func TestSATScoreConversionRoleMatrix(t *testing.T) {
+	reads := []string{"GET /settings", "GET /revisions", "GET /revisions/{id}"}
+	writes := []string{"POST /drafts", "PUT /drafts/{id}", "POST /drafts/{id}/validate", "POST /lookup-preview", "POST /drafts/{id}/impact", "POST /drafts/{id}/publish"}
+	allow := func(key string, roles ...string) {
+		t.Helper()
+		method, path, _ := strings.Cut(key, " ")
+		for _, role := range AllRoles {
+			want := http.StatusForbidden
+			for _, r := range roles {
+				if r == role {
+					want = http.StatusNoContent
+				}
+			}
+			if got := serve(t, Table, key, method, "/sat-score-conversion"+path, role, true); got != want {
+				t.Errorf("%s as %s = %d, want %d", key, role, got, want)
+			}
+		}
+		if got := serve(t, Table, key, method, "/sat-score-conversion"+path, "", false); got != http.StatusUnauthorized {
+			t.Errorf("%s anonymous = %d, want 401", key, got)
+		}
+	}
+	for _, key := range reads {
+		allow(key, RoleAdmin, RoleAdminObserver)
+	}
+	for _, key := range writes {
+		allow(key, RoleAdmin)
 	}
 }

@@ -23,7 +23,6 @@ import type {
   SatWorkbookCommitRequest,
   SatWorkbookCommitResult,
   SatWorkbookPreview,
-  SatWorkbookImportOptions,
   SatWorkbookUndoState,
   PublishedAssessmentVersion,
   PublishAssessmentRequest,
@@ -96,13 +95,9 @@ export const assessmentAuthoringApi = {
     return response.blob();
   },
 
-  previewSatWorkbook(examId: string, file: File, options?: SatWorkbookImportOptions): Promise<SatWorkbookPreview> {
+  previewSatWorkbook(examId: string, file: File): Promise<SatWorkbookPreview> {
     const form = new FormData();
     form.append("file", file, file.name);
-    if (options) {
-      form.append("mode", options.mode);
-      if (options.targetModuleKey) form.append("targetModuleKey", options.targetModuleKey);
-    }
     return backendPost<SatWorkbookPreview, FormData>(
       `/v1/assessment-authoring/exams/${examId}/sat-workbook-preview`,
       form,

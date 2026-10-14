@@ -48,6 +48,7 @@ import (
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/satscoring"
 	"example.com/ielts-proctoring/internal/schedules"
 	"example.com/ielts-proctoring/internal/student"
 	"example.com/ielts-proctoring/internal/terminalization"
@@ -86,6 +87,7 @@ type App struct {
 	Library       *library.Service
 	AnswerHistory *answerhistory.Service
 	Authoring     *authoring.Service
+	SatScoring    *satscoring.Service
 	AccessLinks   *accesslinks.Service
 	SAT           *sat.Service
 	ACT           *act.Service
@@ -275,6 +277,7 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.Library = svc.Library
 		app.AnswerHistory = svc.AnswerHistory
 		app.Authoring = svc.Authoring
+		app.SatScoring = svc.SatScoring
 		app.AccessLinks = svc.AccessLinks
 		app.SAT = svc.SAT
 		app.ACT = svc.ACT
@@ -290,7 +293,6 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		}
 		if app.Authoring != nil {
 			app.Authoring.SetCoeditEnabled(cfg.AuthoringRealtimeCoediting)
-			app.Authoring.SetSingleModuleImportsEnabled(cfg.SATSingleModuleImportEnabled)
 		}
 	}
 	wireCoedit(app, cfg)
@@ -806,6 +808,20 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/act-science/{attemptID}", resultsACTScienceDetailHandler(app))
 			authzRoute(r, "GET", "/{resultID}/events", resultsEventsHandler(app))
 			authzRoute(r, "GET", "/{resultID}", resultsGetHandler(app))
+		})
+		// Global SAT score conversion (docs/scoreconverimplement.md). Reads are
+		// admin/admin_observer and writes admin only (authz table); the group
+		// is low-traffic, so one writes-tier limiter covers it.
+		r.With(limitTier(app, httpx.TierWrites, userKey())).With(adminLimit).Route("/sat-score-conversion", func(r chi.Router) {
+			authzRoute(r, "GET", "/settings", satScoringSettingsHandler(app))
+			authzRoute(r, "GET", "/revisions", satScoringRevisionsHandler(app))
+			authzRoute(r, "GET", "/revisions/{id}", satScoringRevisionHandler(app))
+			authzRoute(r, "POST", "/drafts", satScoringCreateDraftHandler(app))
+			authzRoute(r, "PUT", "/drafts/{id}", satScoringSaveDraftHandler(app))
+			authzRoute(r, "POST", "/drafts/{id}/validate", satScoringValidateHandler(app))
+			authzRoute(r, "POST", "/lookup-preview", satScoringLookupHandler(app))
+			authzRoute(r, "POST", "/drafts/{id}/impact", satScoringImpactHandler(app))
+			authzRoute(r, "POST", "/drafts/{id}/publish", satScoringPublishHandler(app))
 		})
 		r.With(adminLimit).Route("/media", func(r chi.Router) {
 			// Only uploads are writes. The reads stay out of this group: a

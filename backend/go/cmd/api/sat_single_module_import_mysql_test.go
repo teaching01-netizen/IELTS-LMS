@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,7 +25,7 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-func singleModuleWorkbookFixture(t *testing.T, target string) []byte {
+func singleModuleWorkbookFixture(t *testing.T, targets ...string) []byte {
 	t.Helper()
 	data, err := buildSATWorkbookTemplate()
 	if err != nil {
@@ -38,7 +39,7 @@ func singleModuleWorkbookFixture(t *testing.T, target string) []byte {
 	row := 2
 	for _, spec := range satWorkbookModules {
 		for order := 1; order <= spec.count; order++ {
-			if spec.key == target {
+			if slices.Contains(targets, spec.key) {
 				domain, skill := "Information and Ideas", "Central Ideas and Details"
 				if spec.section == "Math" {
 					domain, skill = "Algebra", "Linear Equations in One Variable"
@@ -59,9 +60,9 @@ func singleModuleWorkbookFixture(t *testing.T, target string) []byte {
 	return buffer.Bytes()
 }
 
-func singleModulePreviewFixture(t *testing.T, target string) authoring.SatWorkbookPreview {
+func singleModulePreviewFixture(t *testing.T, targets ...string) authoring.SatWorkbookPreview {
 	t.Helper()
-	preview, err := authoring.ParseSATWorkbook(singleModuleWorkbookFixture(t, target), authoring.SatWorkbookImportOptions{Mode: "single_module", TargetModuleKey: target})
+	preview, err := authoring.ParseSATWorkbook(singleModuleWorkbookFixture(t, targets...))
 	if err != nil || !preview.Valid {
 		t.Fatalf("fixture preview err=%v issues=%+v", err, preview.Issues)
 	}
@@ -119,13 +120,11 @@ func singleModuleRequest(preview authoring.SatWorkbookPreview, shell authoring.S
 		modules[i] = authoring.SatWorkbookModuleDraft{ModuleKey: module.ModuleKey, SectionKey: module.SectionKey, Questions: questions}
 	}
 	return authoring.SatWorkbookCommitRequest{ImportID: preview.ImportID, ExpectedVersionID: shell.VersionID, ExpectedVersionRevision: shell.VersionRevision,
-		Mode: "single_module", TargetModuleKey: preview.TargetModuleKey, Modules: modules, OperationKey: key,
-		PretestResolution: &authoring.SatWorkbookPretestResolution{SelectedOrders: []int{8, 19}, DesignationSource: "staff_defined", Confirmed: true}}
+		TargetModuleKeys: preview.TargetModuleKeys, Modules: modules, OperationKey: key}
 }
 
 func TestSATSingleModulePreviewAndCommitHTTPMySQL(t *testing.T) {
 	h := newConcurrencyHarness(t)
-	h.authors.SetSingleModuleImportsEnabled(true)
 	app := &App{DB: h.db, Exams: h.exams, Authoring: h.authors}
 	workbook := singleModuleWorkbookFixture(t, "rw-m1")
 
@@ -136,12 +135,6 @@ func TestSATSingleModulePreviewAndCommitHTTPMySQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := file.Write(workbook); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.WriteField("mode", "single_module"); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.WriteField("targetModuleKey", "rw-m1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -163,7 +156,7 @@ func TestSATSingleModulePreviewAndCommitHTTPMySQL(t *testing.T) {
 	if err := json.Unmarshal(previewResponse.Body.Bytes(), &preview); err != nil {
 		t.Fatal(err)
 	}
-	if !preview.Valid || preview.CommitReady || preview.Mode != "single_module" || preview.TargetModuleKey != "rw-m1" || len(preview.Modules) != 1 {
+	if !preview.Valid || !preview.CommitReady || !reflect.DeepEqual(preview.TargetModuleKeys, []string{"rw-m1"}) || len(preview.Detected) != 1 || !preview.Detected[0].Ready || len(preview.Modules) != 1 {
 		t.Fatalf("single-module API preview contract mismatch: %+v", preview)
 	}
 	for _, question := range preview.Modules[0].Questions {
@@ -268,7 +261,6 @@ func sameLogicalRouting(left, right *authoring.RoutingPolicy) bool {
 
 func TestSATSingleModulePreservesOtherModulesAndUndoMySQL(t *testing.T) {
 	h := newConcurrencyHarness(t)
-	h.authors.SetSingleModuleImportsEnabled(true)
 	before := seedNonTargetModules(t, h, "rw-m1")
 	preview := singleModulePreviewFixture(t, "rw-m1")
 	if err := h.authors.RegisterSATWorkbookPreview(context.Background(), h.examID, h.actor, preview); err != nil {
@@ -296,8 +288,8 @@ func TestSATSingleModulePreservesOtherModulesAndUndoMySQL(t *testing.T) {
 					t.Fatalf("target count %d", len(module.Questions))
 				}
 				for k, question := range module.Questions {
-					if question.IsPretest != (k == 7 || k == 18) {
-						t.Fatalf("wrong pretest order %d", k+1)
+					if question.IsPretest {
+						t.Fatalf("blank source pretest was converted to a flag at order %d", k+1)
 					}
 				}
 			}
@@ -324,8 +316,7 @@ func TestSATSingleModulePreservesOtherModulesAndUndoMySQL(t *testing.T) {
 			}
 		}
 	}
-	// Receipt survives undo, preview expiry, flag rollback and ledger cleanup.
-	h.authors.SetSingleModuleImportsEnabled(false)
+	// Receipt survives undo, preview expiry and ledger cleanup.
 	if _, err := h.db.Exec("DELETE FROM authoring_operation_keys WHERE actor_id = ? AND scope = ?", h.actor, "workbook:"+h.examID); err != nil {
 		t.Fatal(err)
 	}
@@ -346,15 +337,57 @@ func TestSATSingleModulePreservesOtherModulesAndUndoMySQL(t *testing.T) {
 	}
 }
 
+func TestSATMultipleModulesImportReplacesOnlySelectedMySQL(t *testing.T) {
+	h := newConcurrencyHarness(t)
+	before := seedNonTargetModules(t, h, "rw-m1") // every module except rw-m1 already has content
+	targets := []string{"rw-m1", "math-m1"}
+	preview := singleModulePreviewFixture(t, targets...)
+	if err := h.authors.RegisterSATWorkbookPreview(context.Background(), h.examID, h.actor, preview); err != nil {
+		t.Fatal(err)
+	}
+	request := singleModuleRequest(preview, before, "multi-"+uuid.NewString())
+	result, err := h.authors.CommitSATWorkbook(context.Background(), h.examID, request, h.actor, authoring.WithOperationKey(request.OperationKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, section := range result.Shell.Sections {
+		for j, module := range section.Modules {
+			if !slices.Contains(targets, module.ModuleKey) {
+				if !sameLogicalModule(module, before.Sections[i].Modules[j]) {
+					t.Fatalf("non-target %s changed", module.ModuleKey)
+				}
+				continue
+			}
+			want := 27
+			if module.ModuleKey == "math-m1" {
+				want = 22
+			}
+			if len(module.Questions) != want {
+				t.Fatalf("%s has %d questions, want %d", module.ModuleKey, len(module.Questions), want)
+			}
+		}
+	}
+	restored, err := h.authors.UndoSATWorkbook(context.Background(), h.examID, preview.ImportID, h.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, section := range restored.Sections {
+		for j, module := range section.Modules {
+			if !sameLogicalModule(module, before.Sections[i].Modules[j]) {
+				t.Fatalf("undo did not restore %s", module.ModuleKey)
+			}
+		}
+	}
+}
+
 func TestSATSingleModuleTwoInstanceRaceMySQL(t *testing.T) {
 	h := newConcurrencyHarness(t)
-	h.authors.SetSingleModuleImportsEnabled(true)
 	otherDB, err := sql.Open("mysql", os.Getenv("TEST_MYSQL_DSN"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer otherDB.Close()
-	other := authoring.NewService(otherDB, tx.NewRunner(otherDB)).SetSingleModuleImportsEnabled(true)
+	other := authoring.NewService(otherDB, tx.NewRunner(otherDB))
 	shell, err := h.authors.Shell(context.Background(), h.examID)
 	if err != nil {
 		t.Fatal(err)
@@ -410,13 +443,9 @@ func TestSATSingleModuleTwoInstanceRaceMySQL(t *testing.T) {
 	}
 }
 
-func TestSATSingleModuleRejectsDisabledAndTamperedRequestsMySQL(t *testing.T) {
+func TestSATWorkbookRejectsTamperedRequestsMySQL(t *testing.T) {
 	h := newConcurrencyHarness(t)
 	preview := singleModulePreviewFixture(t, "rw-m1")
-	if err := h.authors.RegisterSATWorkbookPreview(context.Background(), h.examID, h.actor, preview); err == nil {
-		t.Fatal("preview registration succeeded while the feature flag was off")
-	}
-	h.authors.SetSingleModuleImportsEnabled(true)
 	if err := h.authors.RegisterSATWorkbookPreview(context.Background(), h.examID, h.actor, preview); err != nil {
 		t.Fatal(err)
 	}
@@ -425,10 +454,12 @@ func TestSATSingleModuleRejectsDisabledAndTamperedRequestsMySQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := singleModuleRequest(preview, before, "invalid-"+uuid.NewString())
-	missingResolution := base
-	missingResolution.PretestResolution = nil
-	if _, err := h.authors.CommitSATWorkbook(context.Background(), h.examID, missingResolution, h.actor, authoring.WithOperationKey(base.OperationKey)); err == nil {
-		t.Fatal("commit without an explicit pretest resolution succeeded")
+	flipped := base
+	flipped.Modules = append([]authoring.SatWorkbookModuleDraft(nil), base.Modules...)
+	flipped.Modules[0].Questions = append([]authoring.QuestionDraft(nil), base.Modules[0].Questions...)
+	flipped.Modules[0].Questions[3].IsPretest = true
+	if _, err := h.authors.CommitSATWorkbook(context.Background(), h.examID, flipped, h.actor, authoring.WithOperationKey(base.OperationKey)); err == nil {
+		t.Fatal("commit accepted a pretest flag that did not match the registered preview")
 	}
 	changed := base
 	changed.Modules = append([]authoring.SatWorkbookModuleDraft(nil), base.Modules...)
@@ -448,7 +479,6 @@ func TestSATSingleModuleRejectsDisabledAndTamperedRequestsMySQL(t *testing.T) {
 
 func TestSATSingleModuleTransactionRollsBackLateReceiptFailureMySQL(t *testing.T) {
 	h := newConcurrencyHarness(t)
-	h.authors.SetSingleModuleImportsEnabled(true)
 	before := seedNonTargetModules(t, h, "rw-m1")
 	preview := singleModulePreviewFixture(t, "rw-m1")
 	if err := h.authors.RegisterSATWorkbookPreview(context.Background(), h.examID, h.actor, preview); err != nil {
@@ -456,7 +486,7 @@ func TestSATSingleModuleTransactionRollsBackLateReceiptFailureMySQL(t *testing.T
 	}
 	request := singleModuleRequest(preview, before, "rollback-"+uuid.NewString())
 	trigger := "fail_receipt_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	if _, err := h.db.Exec("CREATE TRIGGER " + trigger + " BEFORE UPDATE ON sat_single_module_imports FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected receipt failure'"); err != nil {
+	if _, err := h.db.Exec("CREATE TRIGGER " + trigger + " BEFORE UPDATE ON sat_workbook_import_scopes FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected receipt failure'"); err != nil {
 		t.Fatalf("create rollback trigger: %v", err)
 	}
 	defer func() {
@@ -516,7 +546,7 @@ func TestSATFullWorkbookImportCompatibilityMySQL(t *testing.T) {
 		}
 		modules[i] = authoring.SatWorkbookModuleDraft{ModuleKey: module.ModuleKey, SectionKey: module.SectionKey, Questions: questions}
 	}
-	request := authoring.SatWorkbookCommitRequest{ImportID: preview.ImportID, ExpectedVersionID: shell.VersionID, ExpectedVersionRevision: shell.VersionRevision, Modules: modules}
+	request := authoring.SatWorkbookCommitRequest{ImportID: preview.ImportID, ExpectedVersionID: shell.VersionID, ExpectedVersionRevision: shell.VersionRevision, Modules: modules, TargetModuleKeys: preview.TargetModuleKeys}
 	if _, err := h.authors.CommitSATWorkbook(context.Background(), h.examID, request, h.actor, authoring.WithOperationKey("full-"+uuid.NewString())); err != nil {
 		t.Fatal(err)
 	}

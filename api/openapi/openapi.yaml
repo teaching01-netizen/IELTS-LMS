@@ -19,6 +19,7 @@ tags:
   - name: proctor
   - name: grading
   - name: results
+  - name: score-conversion
   - name: sat
   - name: act
 paths:
@@ -4493,6 +4494,236 @@ paths:
               schema: { $ref: "#/components/schemas/ResultSummary" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /sat-score-conversion/settings:
+    get:
+      tags: [sat, score-conversion]
+      summary: Active global SAT score-conversion policy, open drafts and blueprint question counts
+      description: Admin and admin_observer. `active` is null until the first publish.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Settings
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATScoreConversionSettings" }
+        "403": { $ref: "#/components/responses/Error" }
+  /sat-score-conversion/revisions:
+    get:
+      tags: [sat, score-conversion]
+      summary: Published revisions, newest first (content omitted)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Revisions
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revisions]
+                properties:
+                  revisions:
+                    type: array
+                    items: { $ref: "#/components/schemas/SATScoreConversionRevision" }
+        "403": { $ref: "#/components/responses/Error" }
+  /sat-score-conversion/revisions/{id}:
+    get:
+      tags: [sat, score-conversion]
+      summary: One revision (draft or published) with content
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Revision
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATScoreConversionRevision" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /sat-score-conversion/drafts:
+    post:
+      tags: [sat, score-conversion]
+      summary: Create a draft from a revision (default the active one); also restores an old revision as a new draft
+      description: Admin only. The draft is based on the currently active revision.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fromRevisionId: { type: string }
+              additionalProperties: false
+      responses:
+        "201":
+          description: Draft
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATScoreConversionRevision" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /sat-score-conversion/drafts/{id}:
+    put:
+      tags: [sat, score-conversion]
+      summary: Save a draft under an optimistic lock (incomplete cells allowed)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: If-Match
+          in: header
+          required: true
+          description: The draft `version` the edit was based on.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { $ref: "#/components/schemas/SATScoreConversionContent" }
+                calibrationSource: { type: string, maxLength: 500 }
+                note: { type: string, maxLength: 1000 }
+              additionalProperties: false
+      responses:
+        "200":
+          description: Saved draft (version incremented)
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATScoreConversionRevision" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "412": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "428": { $ref: "#/components/responses/Error" }
+  /sat-score-conversion/drafts/{id}/validate:
+    post:
+      tags: [sat, score-conversion]
+      summary: Cell-level errors (block publish) and warnings (never auto-fixed)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Validation result
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATScoreConversionValidation" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /sat-score-conversion/lookup-preview:
+    post:
+      tags: [sat, score-conversion]
+      summary: Preview one lookup against a stored draft or revision
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [section, topology, m1]
+              properties:
+                draftId: { type: string }
+                revisionId: { type: string }
+                section: { type: string, enum: [reading-writing, math] }
+                topology: { type: string, enum: [full_lower, full_higher, m2_lower_only, m2_higher_only] }
+                m1: { type: integer }
+                m2: { type: integer }
+                m1Operational: { type: integer }
+                m2Operational: { type: integer }
+              additionalProperties: false
+      responses:
+        "200":
+          description: Lookup
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATScoreConversionLookup" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /sat-score-conversion/drafts/{id}/impact:
+    post:
+      tags: [sat, score-conversion]
+      summary: Old-versus-new report over every released SAT result (bounded histogram; reads only)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Impact report
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATScoreConversionImpact" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /sat-score-conversion/drafts/{id}/publish:
+    post:
+      tags: [sat, score-conversion]
+      summary: Activate a draft atomically; every released SAT result then resolves against it
+      description: >-
+        409 STALE_BASE when another revision was published after the draft was
+        created; 409 REVISION_SUPERSEDED for a published-but-inactive revision;
+        422 with `details.errors` for validation failures. Re-publishing the
+        active revision returns 200 with `alreadyActive: true`.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Published
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, alreadyActive]
+                properties:
+                  revision: { $ref: "#/components/schemas/SATScoreConversionRevision" }
+                  alreadyActive: { type: boolean }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     cookieAuth:
@@ -4570,6 +4801,160 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    SATScoreConversionScore:
+      type: object
+      required: [low, high]
+      properties:
+        low: { type: integer, minimum: 200, maximum: 800 }
+        high: { type: integer, minimum: 200, maximum: 800 }
+    SATScoreConversionContent:
+      type: object
+      description: >-
+        Both subjects. A full topology resolves through a matrix indexed
+        cells[module1Correct][module2Correct]; a standalone Module 2 through its
+        own 1D table. Dimensions must equal the attempt's operational counts.
+        Null cells are legal only in drafts.
+      required: [schemaVersion, sections]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        sections:
+          type: object
+          additionalProperties:
+            type: object
+            required: [tables, assign]
+            properties:
+              tables:
+                type: object
+                additionalProperties:
+                  type: object
+                  required: [kind]
+                  properties:
+                    kind: { type: string, enum: [matrix, module2] }
+                    m1Operational: { type: integer }
+                    m2Operational: { type: integer }
+                    operational: { type: integer }
+                    cells:
+                      type: array
+                      items:
+                        type: array
+                        items: { type: integer, nullable: true }
+                    scores:
+                      type: array
+                      items:
+                        nullable: true
+                        oneOf:
+                          - { type: integer }
+                          - { $ref: "#/components/schemas/SATScoreConversionScore" }
+              assign:
+                type: object
+                description: topology (full_lower, full_higher, m2_lower_only, m2_higher_only) to table ids
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+    SATScoreConversionRevision:
+      type: object
+      required: [id, status, version, calibrationSource, note, createdBy, createdAt, updatedAt, active]
+      properties:
+        id: { type: string }
+        revisionNumber: { type: integer, nullable: true }
+        status: { type: string, enum: [draft, published] }
+        baseRevisionId: { type: string, nullable: true }
+        content: { $ref: "#/components/schemas/SATScoreConversionContent" }
+        contentSha256: { type: string, nullable: true }
+        calibrationSource: { type: string }
+        note: { type: string }
+        restoredFromId: { type: string, nullable: true }
+        version: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        publishedAt: { type: string, format: date-time, nullable: true }
+        publishedBy: { type: string, nullable: true }
+        active: { type: boolean }
+    SATScoreConversionSettings:
+      type: object
+      required: [drafts, blueprint]
+      properties:
+        active:
+          nullable: true
+          allOf:
+            - { $ref: "#/components/schemas/SATScoreConversionRevision" }
+        drafts:
+          type: array
+          items: { $ref: "#/components/schemas/SATScoreConversionRevision" }
+        blueprint:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              m1Operational: { type: integer }
+              m2Operational: { type: integer }
+    SATScoreConversionIssue:
+      type: object
+      required: [code, path, message]
+      properties:
+        code: { type: string }
+        path: { type: string, example: "sections.math.tables.t1.cells[3][4]" }
+        message: { type: string }
+        section: { type: string }
+        tableId: { type: string }
+        row: { type: integer }
+        col: { type: integer }
+    SATScoreConversionValidation:
+      type: object
+      required: [valid, errors, warnings]
+      properties:
+        valid: { type: boolean }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/SATScoreConversionIssue" }
+        warnings:
+          type: array
+          items: { $ref: "#/components/schemas/SATScoreConversionIssue" }
+    SATScoreConversionLookup:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [converted, unavailable] }
+        scaled: { $ref: "#/components/schemas/SATScoreConversionScore" }
+        reason: { type: string }
+    SATScoreConversionImpact:
+      type: object
+      required: [draftId, generatedAt, resultsConsidered, sections, topChanges]
+      properties:
+        draftId: { type: string }
+        activeRevisionId: { type: string, nullable: true }
+        generatedAt: { type: string, format: date-time }
+        resultsConsidered: { type: integer }
+        sections:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              considered: { type: integer }
+              changed: { type: integer }
+              unchanged: { type: integer }
+              becomesUnavailable: { type: integer }
+              becomesAvailable: { type: integer }
+              minDelta: { type: integer, nullable: true }
+              maxDelta: { type: integer, nullable: true }
+        topChanges:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            properties:
+              section: { type: string }
+              topology: { type: string }
+              m1: { type: integer }
+              m2: { type: integer, nullable: true }
+              count: { type: integer }
+              oldScore:
+                nullable: true
+                allOf: [{ $ref: "#/components/schemas/SATScoreConversionScore" }]
+              newScore:
+                nullable: true
+                allOf: [{ $ref: "#/components/schemas/SATScoreConversionScore" }]
     ErrorEnvelope:
       type: object
       required: [code, message, requestId]
@@ -4619,6 +5004,11 @@ components:
               TRANSFER_APPROVAL_REQUIRED,
               TRANSFER_EXPIRED,
               TRANSFER_CONFLICT,
+              STALE_BASE,
+              PRECONDITION_FAILED,
+              PRECONDITION_REQUIRED,
+              NOT_A_DRAFT,
+              REVISION_SUPERSEDED,
             ]
         message: { type: string }
         details:
