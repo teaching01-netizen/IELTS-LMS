@@ -1,0 +1,7 @@
+=== RUN   TestSatConfigDefaultsMatchBlueprint
+--- PASS: TestSatConfigDefaultsMatchBlueprint (0.00s)
+=== RUN   TestSatRoomsClassroomDisabledRollsBackMySQL
+    sat_rooms_mysql_test.go:264: TEST_MYSQL_DSN not set; requires isolated MySQL
+--- SKIP: TestSatRoomsClassroomDisabledRollsBackMySQL (0.00s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/api	0.401s

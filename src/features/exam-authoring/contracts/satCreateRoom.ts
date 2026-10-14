@@ -49,7 +49,8 @@ export type SatRoomErrorCode =
   | "ROOM_INVALID"
   | "OPERATION_KEY_CONFLICT"
   | "OPERATION_NOT_FOUND"
-  | "EXAM_SCOPE_UNAVAILABLE";
+  | "EXAM_SCOPE_UNAVAILABLE"
+  | "SAT_CLASSROOM_DISABLED";
 
 /**
  * The flow's lifecycle. One discriminated union instead of parallel booleans:

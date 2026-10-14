@@ -38,6 +38,8 @@ export interface SatConfigDefaults {
   preset: "standard_sat";
   config: SatExamConfig;
   limits: SatConfigLimits;
+  /** Effective server-side rollout gate for creating new SAT Classroom rooms. */
+  classroomCreationEnabled: boolean;
 }
 
 export type SatConfigFieldErrors = Partial<Record<`${SatConfigSectionKey}.${keyof SatSectionConfig}`, string>>;

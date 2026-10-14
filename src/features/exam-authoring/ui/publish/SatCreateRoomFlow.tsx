@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useExamQuery } from "../../api/examQueries";
+import { useSatExamConfigDefaults } from "../../api/satExamConfigApi";
 import { clearSatRoomDraft, peekSatRoomDraft, stashSatRoomDraft } from "../../application/satRoomDraftStore";
 import { useCreateSatRoom } from "./useCreateSatRoom";
 import type {
@@ -42,6 +43,7 @@ interface SatCreateRoomFlowProps {
 export function SatCreateRoomFlow(props: SatCreateRoomFlowProps) {
   const room = useCreateSatRoom(props.examId);
   const examQuery = useExamQuery(props.examId);
+  const satDefaultsQuery = useSatExamConfigDefaults();
   const online = useReleaseOnline();
   // Read once per mount: an author who left to fix an exam issue returns to the
   // form they had filled in. A duplicate setup never mixes with a restored one.
@@ -49,6 +51,13 @@ export function SatCreateRoomFlow(props: SatCreateRoomFlowProps) {
   const lastFieldsRef = useRef<SatRoomFields | null>(null);
   const state = room.state;
   const canEdit = examQuery.data ? examQuery.data.canEdit : true;
+  const classroomAvailability = room.classroomDisabledByServer
+    ? "disabled"
+    : satDefaultsQuery.isFetching
+      ? "checking"
+      : satDefaultsQuery.isSuccess
+        ? satDefaultsQuery.data.classroomCreationEnabled ? "enabled" : "disabled"
+        : "unknown";
 
   const complete = (receipt: SatRoomReceipt) => {
     clearSatRoomDraft(props.examId);
@@ -113,6 +122,7 @@ export function SatCreateRoomFlow(props: SatCreateRoomFlowProps) {
       prefill={props.prefill ?? null}
       restoreDraft={restoreDraft}
       providerKey="sat"
+      classroomAvailability={classroomAvailability}
       examTitle={props.examTitle}
       publishScope="full"
       versionSummary={VERSION_SUMMARY}

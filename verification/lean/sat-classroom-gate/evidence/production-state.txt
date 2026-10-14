@@ -1,0 +1,17 @@
+Production environment evidence
+Captured: 2026-10-14 18:16:08 UTC (2026-10-15 01:16:08 Asia/Bangkok)
+
+Local API/database verification
+- TEST_MYSQL_DSN: unset.
+- TestSatRoomsClassroomDisabledRollsBackMySQL: skipped; it did not run against a database.
+- The config and unit tests passed locally; see go-unit.txt and go-api-gate.txt.
+
+Railway and production database
+- Railway CLI: unavailable in this workspace.
+- Railway API instance IDs, build SHAs, per-instance SAT_CLASSROOM_ENABLED values, and rollout state: not accessible from this workspace; UNKNOWN.
+- Production DB product/version, migration ledger, 0084/0086 fence definitions, and trigger/equivalent enforcement: not accessible from this workspace; UNKNOWN.
+- Whether the deployed API fleet is uniformly Classroom-aware: UNKNOWN.
+- Whether the current Railway gate is false: UNKNOWN. No production variable or deployment was read or changed during this review.
+
+Release decision
+This evidence does not authorize enabling SAT_CLASSROOM_ENABLED. Verify every listed production fact in PRODUCTION_TEST_PLAN.md first; keep Classroom creation disabled until those checks pass.

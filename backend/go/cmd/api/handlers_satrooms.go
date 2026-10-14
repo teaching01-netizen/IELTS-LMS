@@ -150,6 +150,6 @@ func satExamConfigDefaults(_ *App) http.HandlerFunc {
 		if requireRole(w, r, auth.RoleAdmin, auth.RoleBuilder) == nil {
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, exams.SATConfigDefaultsPayload())
+		httpx.WriteJSON(w, http.StatusOK, exams.SATConfigDefaultsPayload(exams.SATClassroomCreationEnabled()))
 	}
 }

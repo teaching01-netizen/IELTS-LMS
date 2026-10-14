@@ -1,0 +1,83 @@
+SatClassroomGate.empty_safe (enabled : InstanceId → Bool) : StoreSafe (Store.empty enabled)
+SatClassroomGate.handle_preserves_safe (store : Store) (target : InstanceId) (request : Request)
+  (safe : StoreSafe store) : StoreSafe (handle store target request).fst
+SatClassroomGate.reachable_safe {store : Store} (reachable : Reachable store) : StoreSafe store
+SatClassroomGate.reachable_at_most_one_room_per_operation {store : Store} (reachable : Reachable store)
+  (key : OperationKey) : store.roomEffects key ≤ 1
+SatClassroomGate.disabled_instance_refuses_new_classroom (store : Store) (target : InstanceId) (request : Request)
+  (fresh : store.receipts request.key = none) (disabled : store.classroomEnabled target = false)
+  (classroom : request.payload.session = Session.classroom) :
+  handle store target request = (store, Reply.classroomDisabled)
+SatClassroomGate.disabled_gate_allows_practice (store : Store) (target : InstanceId) (request : Request)
+  (safe : StoreSafe store) (fresh : store.receipts request.key = none)
+  (disabled : store.classroomEnabled target = false) (practice : request.payload.session = Session.practice) :
+  (handle store target request).snd = Reply.created { payload := request.payload, roomId := store.totalRooms } ∧
+    (handle store target request).fst.roomEffects request.key = 1
+SatClassroomGate.same_key_same_body_replays (store : Store) (target : InstanceId) (request : Request)
+  (receipt : Receipt) (stored : store.receipts request.key = some receipt)
+  (sameBody : receipt.payload = request.payload) : handle store target request = (store, Reply.replayed receipt)
+SatClassroomGate.classroom_requires_enabled_capability (availability : Availability) :
+  maySubmit Session.classroom availability = true ↔ availability = Availability.enabled
+SatClassroomGate.blocked_restored_classroom_cannot_begin (client : ClientState) (request : Request)
+  (selected : client.selected = Session.classroom) (unavailable : client.availability ≠ Availability.enabled) :
+  client.beginSubmit request = client
+SatClassroomGate.begin_submit_preserves_selected_session (client : ClientState) (request : Request) :
+  (client.beginSubmit request).selected = client.selected
+SatClassroomGate.practice_usable_for_every_capability (availability : Availability) :
+  maySubmit Session.practice availability = true
+SatClassroomGate.refresh_preserves_restored_form (client : ClientState) (availability : Availability) :
+  (client.refreshAvailability availability).selected = client.selected ∧
+    (client.refreshAvailability availability).draft = client.draft
+SatClassroomGate.disabled_refusal_clears_pending_and_preserves_form (client : ClientState) :
+  (client.receive ClientResponse.satClassroomDisabled).pending = none ∧
+    (client.receive ClientResponse.satClassroomDisabled).draft = client.draft ∧
+      (client.receive ClientResponse.satClassroomDisabled).selected = client.selected ∧
+        (client.receive ClientResponse.satClassroomDisabled).availability = Availability.disabled ∧
+          (client.receive ClientResponse.satClassroomDisabled).status = ClientStatus.rejected
+SatClassroomGate.definitive_refusal_disables_classroom_but_keeps_practice (client : ClientState) :
+  maySubmit Session.classroom (client.receive ClientResponse.satClassroomDisabled).availability = false ∧
+    maySubmit Session.practice (client.receive ClientResponse.satClassroomDisabled).availability = true
+SatClassroomGate.generic_5xx_retains_the_same_pending_attempt (client : ClientState) :
+  (client.receive ClientResponse.generic5xx).pending = client.pending ∧
+    (client.receive ClientResponse.generic5xx).draft = client.draft ∧
+      (client.receive ClientResponse.generic5xx).status = ClientStatus.unknown
+SatClassroomGate.lost_ack_same_key_replays_once :
+  let request := sampleRequest 1;
+  let first := handle (Store.empty allEnabled) 0 request;
+  let second := handle first.fst 0 request;
+  (∃ receipt, first.snd = Reply.created receipt ∧ second.snd = Reply.replayed receipt) ∧
+    second.fst.roomEffects request.key = 1
+SatClassroomGate.mixed_instance_configuration_is_not_global :
+  let acceptedRequest := sampleRequest 2;
+  let refusedRequest := sampleRequest 3;
+  let store := Store.empty partiallyEnabled;
+  let accepted := handle store 0 acceptedRequest;
+  let refused := handle accepted.fst 1 refusedRequest;
+  (∃ receipt, accepted.snd = Reply.created receipt) ∧
+    refused.snd = Reply.classroomDisabled ∧ refused.fst.roomEffects acceptedRequest.key = 1
+SatClassroomGate.clearing_generic_5xx_key_can_duplicate_rooms :
+  let firstRequest := sampleRequest 3 Session.practice;
+  let secondRequest := sampleRequest 4 Session.practice;
+  let first := handle (Store.empty fun x => false) 0 firstRequest;
+  let second := handle first.fst 0 secondRequest;
+  first.fst.roomEffects firstRequest.key = 1 ∧
+    second.fst.roomEffects firstRequest.key = 1 ∧
+      second.fst.roomEffects secondRequest.key = 1 ∧ second.fst.totalRooms = 2
+'SatClassroomGate.empty_safe' does not depend on any axioms
+'SatClassroomGate.handle_preserves_safe' depends on axioms: [propext]
+'SatClassroomGate.reachable_safe' depends on axioms: [propext]
+'SatClassroomGate.reachable_at_most_one_room_per_operation' depends on axioms: [propext]
+'SatClassroomGate.disabled_instance_refuses_new_classroom' depends on axioms: [propext]
+'SatClassroomGate.disabled_gate_allows_practice' depends on axioms: [propext]
+'SatClassroomGate.same_key_same_body_replays' depends on axioms: [propext]
+'SatClassroomGate.classroom_requires_enabled_capability' depends on axioms: [propext]
+'SatClassroomGate.blocked_restored_classroom_cannot_begin' depends on axioms: [propext]
+'SatClassroomGate.begin_submit_preserves_selected_session' depends on axioms: [propext]
+'SatClassroomGate.practice_usable_for_every_capability' does not depend on any axioms
+'SatClassroomGate.refresh_preserves_restored_form' does not depend on any axioms
+'SatClassroomGate.disabled_refusal_clears_pending_and_preserves_form' depends on axioms: [propext]
+'SatClassroomGate.definitive_refusal_disables_classroom_but_keeps_practice' depends on axioms: [propext]
+'SatClassroomGate.generic_5xx_retains_the_same_pending_attempt' depends on axioms: [propext]
+'SatClassroomGate.lost_ack_same_key_replays_once' depends on axioms: [propext, Quot.sound]
+'SatClassroomGate.mixed_instance_configuration_is_not_global' depends on axioms: [propext, Quot.sound]
+'SatClassroomGate.clearing_generic_5xx_key_can_duplicate_rooms' depends on axioms: [propext, Quot.sound]

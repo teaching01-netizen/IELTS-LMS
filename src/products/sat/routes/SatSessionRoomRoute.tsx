@@ -22,7 +22,7 @@ import { SatStudentLinkPresent } from '../ui/SatStudentLink';
 import { SatRoomNeedsAttention } from '../ui/SatRoomNeedsAttention';
 import { StudentShareDialog } from '../../../features/exam-authoring/ui/access-links/AccessLinkShareSheet';
 import { describeAccessLinkAudience, formatAccessLinkStatus, roomEntryUrl } from '../../../features/exam-authoring/ui/access-links/accessLinkUi';
-import { buildSatRunSheet, formatRunSheetRemaining, satRunSheetCurrentRows, satRunSheetTimingPlan } from '../ui/sessionRunSheet';
+import { buildSatRunSheet, formatRunSheetClockWithSeconds, formatRunSheetRemaining, satRunSheetCurrentRows, satRunSheetTimingPlan } from '../ui/sessionRunSheet';
 import { isSatStageLive } from '../ui/satStage';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { ACCESS_LINK_SECTION_LABELS, effectiveAccessLinkSections } from '../../../features/exam-authoring/contracts/accessLinks';
@@ -201,7 +201,7 @@ export function SatSessionRoomRoute() {
   const openAlerts = controller.alerts.filter((alert) => !alert.isAcknowledged).length;
   const isStale = Boolean(controller.error);
   const lastUpdatedLabel = controller.lastSuccessfulRefreshAt
-    ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(new Date(controller.lastSuccessfulRefreshAt))
+    ? `${formatRunSheetClockWithSeconds(controller.lastSuccessfulRefreshAt)} ICT`
     : 'unknown';
 
   useEffect(() => {

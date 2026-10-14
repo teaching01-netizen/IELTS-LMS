@@ -27,6 +27,13 @@ export function formatTestTimeLine(value: string | null | undefined): string {
   const parts = formatTestTime(value);
   return parts ? `${parts.day} · ${parts.time}` : 'Unavailable';
 }
+
+/** 24-hour clock with seconds in the viewer's timezone, e.g. "09:03:41". */
+export function formatTestClock(value: number | string | null | undefined): string {
+  const date = typeof value === 'number' ? new Date(value) : parseInstant(value);
+  if (!date || Number.isNaN(date.getTime())) return 'Unavailable';
+  return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(date);
+}
 /** Calendar-day key in the viewer timezone, used to detect multi-day access groups. */
 export function testDayKey(value: string | null | undefined): string | null {
   const date = parseInstant(value);

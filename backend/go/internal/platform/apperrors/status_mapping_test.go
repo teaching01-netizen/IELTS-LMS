@@ -26,6 +26,7 @@ func TestStatusForMapsEveryCode(t *testing.T) {
 		{CodeRateLimitExceeded, http.StatusTooManyRequests},
 		{CodePayloadTooLarge, http.StatusRequestEntityTooLarge},
 		{CodeServiceUnavailable, http.StatusServiceUnavailable},
+		{CodeSATClassroomDisabled, http.StatusServiceUnavailable},
 		{CodeInternal, http.StatusInternalServerError},
 		{CodeCSRF, http.StatusForbidden},
 		{CodeSessionExpired, http.StatusUnauthorized},

@@ -2980,6 +2980,12 @@ button:not(:disabled):active > .sat-annotation-press {
   --sat-staff-info-dot: #0071e3;
   --sat-staff-neutral-dot: #6e6e73;
   --sat-staff-neutral-text: var(--sat-secondary-label);
+  --sat-staff-danger-dot: #d92d20;
+  /* Status pill outlines: a faint ring of the pill's own ink. */
+  --sat-staff-success-border: color-mix(in srgb, var(--sat-staff-success-text) 20%, transparent);
+  --sat-staff-warning-border: color-mix(in srgb, var(--sat-staff-warning-text) 22%, transparent);
+  --sat-staff-info-border: color-mix(in srgb, var(--sat-staff-accent) 22%, transparent);
+  --sat-staff-danger-border: color-mix(in srgb, var(--sat-staff-danger) 20%, transparent);
   --sat-staff-form-error: #dc2626;
   /* Focus ring. */
   --sat-staff-focus-color: var(--sat-accent);
@@ -2987,14 +2993,14 @@ button:not(:disabled):active > .sat-annotation-press {
   --sat-staff-focus-width: 3px;
   --sat-staff-focus-offset: 2px;
   --sat-staff-focus-offset-tight: 1px;
-  /* Radii: one per role. */
+  /* Radii: one per role (6-8 controls, 12-16 surfaces, 20-28 dialogs). */
   --sat-staff-radius-chip: 999px;
-  --sat-staff-radius-control-sm: 8px;
-  --sat-staff-radius-control: 10px;
-  --sat-staff-radius-input: 12px;
-  --sat-staff-radius-menu: 13px;
-  --sat-staff-radius-card: 14px;
-  --sat-staff-radius-dialog: 18px;
+  --sat-staff-radius-control-sm: 6px;
+  --sat-staff-radius-control: 8px;
+  --sat-staff-radius-input: 8px;
+  --sat-staff-radius-menu: 12px;
+  --sat-staff-radius-card: 16px;
+  --sat-staff-radius-dialog: 24px;
   --authoring-sheet: var(--sat-surface);
   --authoring-hairline: var(--sat-separator);
   --au-elevation-menu: var(--sat-menu-elevation);
@@ -3248,10 +3254,10 @@ button:not(:disabled):active > .sat-annotation-press {
     0 0 0 0.5px rgba(0, 0, 0, 0.045),
     0 2px 6px rgba(0, 0, 0, 0.028),
     0 24px 68px rgba(0, 0, 0, 0.085);
-  /* Shadows are reserved for floating menus and dialogs; staff cards and rows
-   * separate with hairline borders on solid surfaces. */
-  --sat-staff-shadow-card: none;
-  --sat-staff-shadow-card-soft: none;
+  /* Surfaces lift off the canvas with a hairline plus a barely-there ambient
+   * shadow; real depth stays reserved for floating menus and dialogs. */
+  --sat-staff-shadow-card: var(--au-elevation-card);
+  --sat-staff-shadow-card-soft: var(--au-elevation-card);
   --sat-staff-shadow-row-press: none;
   --sat-staff-shadow-menu: var(--sat-menu-elevation);
   --sat-staff-shadow-dialog: var(--sat-dialog-elevation);
@@ -3300,7 +3306,7 @@ button:not(:disabled):active > .sat-annotation-press {
  * weight and glyph, never color alone. */
 .sat-menu {
   overflow: hidden;
-  border-radius: 13px;
+  border-radius: var(--sat-staff-radius-menu, 12px);
   border: 1px solid var(--color-au-separator);
   background: var(--color-au-surface);
   padding: 5px;
@@ -3774,6 +3780,12 @@ button:not(:disabled):active > .sat-annotation-press {
 .sat-btn[aria-busy="true"] {
   cursor: progress;
 }
+/* The label carries its own trailing glyph (e.g. "Next →") on the same line. */
+.sat-btn__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 /* Pending keeps the button's box: the spinner takes the icon's slot, or sits
  * over a label that stays in place (still the accessible name). */
 .sat-btn__label[data-pending-hidden] {
@@ -3868,8 +3880,9 @@ textarea.sat-input {
 .sat-table-surface {
   overflow-x: auto;
   border: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
-  border-radius: var(--sat-staff-radius-card, 14px);
+  border-radius: var(--sat-staff-radius-card, 16px);
   background: var(--sat-staff-surface-solid-fallback, #fff);
+  box-shadow: var(--sat-staff-shadow-card, none);
 }
 .sat-table {
   width: 100%;

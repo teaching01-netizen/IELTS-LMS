@@ -2770,7 +2770,8 @@ paths:
         transaction. operationKey makes a lost-response retry replay the original
         room (200); the same key with a different body is OPERATION_KEY_CONFLICT.
         Errors carry details.issues (EXAM_NOT_READY) and details.currentExamRevision
-        (EXAM_REVISION_CHANGED).
+        (EXAM_REVISION_CHANGED). A disabled Classroom rollout returns
+        SAT_CLASSROOM_DISABLED (503) before a room is committed.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - name: examId
@@ -2814,10 +2815,11 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /sat/exam-config/defaults:
     get:
       tags: [exams]
-      summary: Blueprint-derived SAT exam configuration defaults and limits
+      summary: Blueprint-derived SAT exam configuration defaults, limits and capabilities
       parameters:
         - $ref: "#/components/parameters/RequestId"
       responses:
@@ -2827,7 +2829,12 @@ paths:
             X-Request-Id: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                type: object
+                properties:
+                  classroomCreationEnabled:
+                    type: boolean
+                    description: Whether the API currently accepts new SAT Classroom rooms.
         "403": { $ref: "#/components/responses/Error" }
   /sat/room-operations/{operationKey}:
     get:

@@ -6,11 +6,11 @@ import {
   listDeviceTransfers,
   type ProctorDeviceTransfer,
 } from '../../../features/proctor/api/deviceTransfers';
+import { formatRunSheetClock } from './sessionRunSheet';
 
 const POLL_MS = 10_000;
 
-const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-const formatTime = (value: string | null) => (value ? timeFormat.format(new Date(value)) : 'No answers saved yet');
+const formatTime = (value: string | null) => (value ? `${formatRunSheetClock(value)} ICT` : null);
 
 /**
  * Proctor review queue for SAT device changes. Approval binds the request to
@@ -41,6 +41,7 @@ export function SatDeviceTransferRequests({
   const headingId = useId();
   const ackId = useId();
   const reasonId = useId();
+  const approveHintId = useId();
 
   const refresh = useCallback(async () => {
     try {
@@ -103,19 +104,20 @@ export function SatDeviceTransferRequests({
           {items.map((item) => {
             const open = reviewing === item.requestId;
             return (
-              <li key={item.requestId} className="rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-3 py-2.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+              <li key={item.requestId} className="rounded-[var(--sat-staff-radius-control,8px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-3 py-2.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0 flex-1 basis-48">
                     <p className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
                       {item.candidateName} · {item.candidateId}
                     </p>
                     <p>
-                      {item.policyStage === 'pre_start' ? 'Before the exam started' : 'Exam in progress'} · requested {formatTime(item.requestedAt)} · last server save {formatTime(item.lastServerSaveAt)}
+                      {item.policyStage === 'pre_start' ? 'Before the exam started' : 'Exam in progress'} · requested {formatTime(item.requestedAt) ?? 'time unknown'}
                     </p>
-                    <p>
+                    <p>Last saved to server: {formatTime(item.lastServerSaveAt) ?? 'no answers saved yet'}</p>
+                    <p className={item.state === 'approved' ? 'font-medium text-[var(--sat-staff-success-text,#067647)]' : undefined}>
                       {item.state === 'approved'
-                        ? `Approved — waiting for the new device (until ${formatTime(item.approvalExpiresAt)})`
-                        : `Expires ${formatTime(item.expiresAt)}`}
+                        ? `Approved, waiting for the new device until ${formatTime(item.approvalExpiresAt) ?? 'the approval expires'}`
+                        : `Request expires ${formatTime(item.expiresAt) ?? 'soon'}`}
                     </p>
                   </div>
                   {item.state === 'pending' ? (
@@ -143,7 +145,7 @@ export function SatDeviceTransferRequests({
                         value={reason}
                         maxLength={255}
                         onChange={(event) => setReason(event.target.value)}
-                        className="mt-1 min-h-11 w-full rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] bg-[var(--sat-staff-surface,#fff)] px-2.5 text-[16px] font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+                        className="sat-input mt-1 font-normal"
                       />
                     </label>
                     <label htmlFor={ackId} className="flex items-start gap-2">
@@ -160,6 +162,7 @@ export function SatDeviceTransferRequests({
                       <button
                         type="button"
                         disabled={busy || blocked || !acknowledged}
+                        aria-describedby={!acknowledged || blocked ? approveHintId : undefined}
                         onClick={() => void decide(item, true)}
                         className="sat-btn sat-btn--primary sat-press px-3"
                       >
@@ -171,9 +174,14 @@ export function SatDeviceTransferRequests({
                         onClick={() => void decide(item, false)}
                         className="sat-btn sat-btn--danger-secondary sat-press px-3"
                       >
-                        Deny
+                        Deny device change
                       </button>
                     </div>
+                    {blocked || !acknowledged ? (
+                      <p id={approveHintId} className="text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+                        {blocked ? 'Decisions are paused until the room reconnects.' : 'Tick the confirmation above to approve.'}
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
               </li>

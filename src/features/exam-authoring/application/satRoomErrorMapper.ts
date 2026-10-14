@@ -15,6 +15,7 @@ export type SatRoomFailure =
   | { kind: "invalid"; message: string }
   | { kind: "forbidden"; message: string }
   | { kind: "rejected"; message: string }
+  | { kind: "classroom-disabled"; message: string }
   | { kind: "unknown"; message: string };
 
 const COPY: Record<SatRoomErrorCode, string> = {
@@ -24,6 +25,7 @@ const COPY: Record<SatRoomErrorCode, string> = {
   OPERATION_KEY_CONFLICT: "This request was already used for a different room. Try again.",
   OPERATION_NOT_FOUND: "No room was created by that attempt.",
   EXAM_SCOPE_UNAVAILABLE: "The saved exam does not include the sections this room needs. Edit the exam once, then create the room.",
+  SAT_CLASSROOM_DISABLED: "SAT Classroom sessions are not enabled on this server. No room was created; choose Practice or try again later.",
 };
 
 function numberOrNull(value: unknown): number | null {
@@ -66,6 +68,9 @@ export function classifySatRoomError(error: unknown): SatRoomFailure {
   }
   if (code === "EXAM_SCOPE_UNAVAILABLE") {
     return { kind: "rejected", message: COPY.EXAM_SCOPE_UNAVAILABLE };
+  }
+  if (code === "SAT_CLASSROOM_DISABLED") {
+    return { kind: "classroom-disabled", message: COPY.SAT_CLASSROOM_DISABLED };
   }
   if (code === "OPERATION_KEY_CONFLICT") {
     return { kind: "unknown", message: "This key belongs to a different request. Check the original room's status before creating another room." };

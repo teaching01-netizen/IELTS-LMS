@@ -59,11 +59,19 @@ func TestSatExamConfigAtCreateMySQL(t *testing.T) {
 }
 
 func TestSatConfigDefaultsMatchBlueprint(t *testing.T) {
-	d := exams.SATConfigDefaultsPayload()
-	if err := d.Config.Validate(); err != nil {
-		t.Fatalf("defaults must validate: %v", err)
-	}
-	if d.Config.Sections["math"].Module1Minutes != 35 || d.Config.Sections["reading-writing"].Module1Minutes != 32 {
-		t.Fatalf("defaults drifted from blueprint: %+v", d.Config.Sections)
+	wasEnabled := exams.SATClassroomCreationEnabled()
+	t.Cleanup(func() { exams.SetClassroomCreationEnabled(wasEnabled) })
+	for _, classroomEnabled := range []bool{false, true} {
+		exams.SetClassroomCreationEnabled(classroomEnabled)
+		d := exams.SATConfigDefaultsPayload(exams.SATClassroomCreationEnabled())
+		if err := d.Config.Validate(); err != nil {
+			t.Fatalf("defaults must validate: %v", err)
+		}
+		if d.Config.Sections["math"].Module1Minutes != 35 || d.Config.Sections["reading-writing"].Module1Minutes != 32 {
+			t.Fatalf("defaults drifted from blueprint: %+v", d.Config.Sections)
+		}
+		if d.ClassroomCreationEnabled != classroomEnabled {
+			t.Fatalf("classroomCreationEnabled=%v, want %v", d.ClassroomCreationEnabled, classroomEnabled)
+		}
 	}
 }

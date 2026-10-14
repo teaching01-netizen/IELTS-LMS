@@ -85,11 +85,17 @@ type RoutePolicyExecer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-var classroomCreationDisabled atomic.Bool
+// A zero-value atomic.Bool is false, so the creation gate fails closed until
+// startup explicitly applies SAT_CLASSROOM_ENABLED.
+var classroomCreationEnabled atomic.Bool
 
 // SetClassroomCreationEnabled is the rollout gate for NEW classroom sessions.
-// The zero value is enabled; the API binary sets it from SAT_CLASSROOM_ENABLED.
-func SetClassroomCreationEnabled(enabled bool) { classroomCreationDisabled.Store(!enabled) }
+// The API binary sets it from SAT_CLASSROOM_ENABLED, which defaults to false.
+func SetClassroomCreationEnabled(enabled bool) { classroomCreationEnabled.Store(enabled) }
+
+// SATClassroomCreationEnabled reports the effective rollout gate used by room
+// creation. Capability responses use the same atomic value as the write path.
+func SATClassroomCreationEnabled() bool { return classroomCreationEnabled.Load() }
 
 // PersistSATSession validates and stores the classroom configuration on a
 // schedule. Standard practice is the column default, so it writes nothing. A forced
@@ -114,8 +120,8 @@ func PersistSATSession(ctx context.Context, q RoutePolicyExecer, scheduleID, pro
 		}
 		return nil
 	}
-	if classroomCreationDisabled.Load() {
-		return apperrors.New(apperrors.CodeServiceUnavailable, "SAT Classroom sessions are not enabled yet.")
+	if !classroomCreationEnabled.Load() {
+		return apperrors.New(apperrors.CodeSATClassroomDisabled, "SAT Classroom sessions are not enabled yet.")
 	}
 	if providerKey != "sat" {
 		return apperrors.New(apperrors.CodeValidation, "Classroom mode applies to SAT sessions only.")

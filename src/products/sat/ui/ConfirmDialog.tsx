@@ -198,7 +198,7 @@ function StaticFormDialog({ eyebrow, title, onClose, children }: Omit<SatFormDia
       <div role="dialog" aria-modal="true" aria-labelledby={titleId} className={FORM_CLASS}>
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
           <div>
-            <p className="text-[14px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
+            <p className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{eyebrow}</p>
             <h2 id={titleId} className="mt-1 text-[18px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
           </div>
           <button type="button" onClick={onClose} className={CLOSE_BUTTON_CLASS} aria-label="Close">
@@ -223,7 +223,7 @@ export function SatFormDialog({ open, eyebrow, title, onClose, children }: SatFo
         <Dialog.Content className={FORM_CLASS}>
           <div className="flex items-center justify-between px-5 pb-2 pt-4">
             <div>
-              <p className="text-[14px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{eyebrow}</p>
+              <p className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{eyebrow}</p>
               <Dialog.Title asChild>
                 <h2 className="mt-1 text-[18px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
               </Dialog.Title>

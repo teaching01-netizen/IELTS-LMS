@@ -42,9 +42,10 @@ type SATConfigLimits struct {
 
 // SATConfigDefaults is the response of the defaults endpoint.
 type SATConfigDefaults struct {
-	Preset string          `json:"preset"`
-	Config SATExamConfig   `json:"config"`
-	Limits SATConfigLimits `json:"limits"`
+	Preset                   string          `json:"preset"`
+	Config                   SATExamConfig   `json:"config"`
+	Limits                   SATConfigLimits `json:"limits"`
+	ClassroomCreationEnabled bool            `json:"classroomCreationEnabled"`
 }
 
 const (
@@ -76,8 +77,9 @@ func DefaultSATExamConfig() SATExamConfig {
 	return cfg
 }
 
-// SATConfigDefaultsPayload is DefaultSATExamConfig plus its limits.
-func SATConfigDefaultsPayload() SATConfigDefaults {
+// SATConfigDefaultsPayload is DefaultSATExamConfig plus its limits and the
+// effective SAT Classroom creation capability.
+func SATConfigDefaultsPayload(classroomCreationEnabled bool) SATConfigDefaults {
 	limits := SATConfigLimits{
 		MinModuleMinutes:     satMinModuleMinutes,
 		MaxModuleMinutes:     satMaxModuleMinutes,
@@ -87,7 +89,12 @@ func SATConfigDefaultsPayload() SATConfigDefaults {
 	for _, section := range satInitialBlueprint {
 		limits.OperationalQuestions[section.key] = section.modules[0].questionCount
 	}
-	return SATConfigDefaults{Preset: "standard_sat", Config: DefaultSATExamConfig(), Limits: limits}
+	return SATConfigDefaults{
+		Preset:                   "standard_sat",
+		Config:                   DefaultSATExamConfig(),
+		Limits:                   limits,
+		ClassroomCreationEnabled: classroomCreationEnabled,
+	}
 }
 
 // satDefaultThreshold mirrors the long-standing default: half of the operational

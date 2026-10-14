@@ -44,6 +44,7 @@ export function useCreateSatRoom(examId: string) {
   const [restored] = useState(() => {
     try { return scope ? readSatRoomAttempt(scope) : null; } catch { return null; }
   });
+  const classroomDisabledByServerRef = useRef<{ identity: string; disabled: boolean }>({ identity, disabled: false });
   const collaboration = useSatAuthoringCollaboration();
   const shellLifecycle = useAuthoringShellLifecycle(examId);
   const examQuery = useExamQuery(examId);
@@ -64,6 +65,7 @@ export function useCreateSatRoom(examId: string) {
   // operation state must still belong to the correct actor and exam.
   if (identityRef.current !== identity) {
     identityRef.current = identity;
+    classroomDisabledByServerRef.current = { identity, disabled: false };
     let previous: PendingSatRoomAttempt | null = null;
     try { previous = scope ? readSatRoomAttempt(scope) : null; } catch { /* POST fails closed if storage is unavailable. */ }
     pendingRef.current = previous;
@@ -106,6 +108,9 @@ export function useCreateSatRoom(examId: string) {
     } catch (error) {
       const failure = classifySatRoomError(error);
       if (identityRef.current !== identity) return null;
+      if (failure.kind === "classroom-disabled") {
+        classroomDisabledByServerRef.current = { identity, disabled: true };
+      }
       if (failure.kind === "unknown" || (resolving && failure.kind === "forbidden")) {
         setState({ status: "unknown", operationKey: attempt.request.operationKey, message: failure.message });
         return null;
@@ -231,6 +236,7 @@ export function useCreateSatRoom(examId: string) {
     /** True while the server owns an operation whose outcome the client does not know. */
     hasUnresolvedAttempt: state.status === "unknown",
     canRetryUnknown: pendingRef.current?.request != null,
+    classroomDisabledByServer: classroomDisabledByServerRef.current.identity === identity && classroomDisabledByServerRef.current.disabled,
     isBusy: state.status === "syncing" || state.status === "creating",
   };
 }

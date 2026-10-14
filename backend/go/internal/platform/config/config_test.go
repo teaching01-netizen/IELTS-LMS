@@ -6,12 +6,16 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("TRUSTED_PROXIES", "")
+	t.Setenv("SAT_CLASSROOM_ENABLED", "")
 	c := Load()
 	if c.APIPort != 4000 {
 		t.Fatalf("default port = %d", c.APIPort)
 	}
 	if c.BackgroundMode != BackgroundContinuous {
 		t.Fatalf("default mode = %q", c.BackgroundMode)
+	}
+	if c.SATClassroomEnabled {
+		t.Fatal("SAT Classroom creation must default to disabled")
 	}
 	// NOTE (round 74): V2-only is structural now (no rollout flag); the
 	// creation gate (schedules.ProtocolVersionV2) + engine reject (!=2) own it.

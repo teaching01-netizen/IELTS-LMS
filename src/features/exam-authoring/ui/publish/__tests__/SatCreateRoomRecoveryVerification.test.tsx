@@ -79,6 +79,23 @@ describe("SAT room recovery verification regressions", () => {
     view.unmount();
   });
 
+  it("clears recovery state after the definitive Classroom-disabled refusal", async () => {
+    mocks.create
+      .mockRejectedValueOnce(new ApiError({ code: "SAT_CLASSROOM_DISABLED", status: 503, message: "Classroom disabled" }))
+      .mockResolvedValueOnce({ room: { id: "practice-room" }, version: { createdNow: false } });
+    const view = mount();
+
+    await act(async () => { await view.result.current.submit({ ...fields, satSessionMode: "classroom" }); });
+    expect(view.result.current.hasUnresolvedAttempt).toBe(false);
+    expect(view.result.current.state.status).toBe("failed");
+    expect(sessionStorage.length).toBe(0);
+
+    await act(async () => { await view.result.current.submit(fields); });
+    expect(mocks.create).toHaveBeenCalledTimes(2);
+    expect(mocks.create.mock.calls[1]![1].operationKey).not.toBe(mocks.create.mock.calls[0]![1].operationKey);
+    view.unmount();
+  });
+
   it("keeps an in-progress 409 ambiguous and replays the identical request", async () => {
     mocks.create.mockRejectedValue(new ApiError({ code: "OPERATION_IN_PROGRESS", status: 409, message: "Still running" }));
     const view = mount();

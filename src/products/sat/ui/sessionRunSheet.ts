@@ -253,6 +253,14 @@ const clockFormatter = new Intl.DateTimeFormat("en-GB", {
   hour12: false,
 });
 
+const clockSecondsFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: SAT_RUN_SHEET_TIME_ZONE,
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
 const dayFormatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: SAT_RUN_SHEET_TIME_ZONE,
   weekday: "short",
@@ -291,6 +299,13 @@ export function formatRunSheetClock(value: string | null | undefined): string {
   const ms = parseInstant(value);
   if (ms === null) return "—";
   return clockFormatter.format(new Date(ms));
+}
+
+/** Bangkok clock time with seconds, e.g. `09:04:07`, for freshness stamps. */
+export function formatRunSheetClockWithSeconds(value: string | number | null | undefined): string {
+  const ms = typeof value === "number" ? (Number.isFinite(value) ? value : null) : parseInstant(value);
+  if (ms === null) return "—";
+  return clockSecondsFormatter.format(new Date(ms));
 }
 
 /** Elapsed session duration; null when either instant is absent or invalid. */

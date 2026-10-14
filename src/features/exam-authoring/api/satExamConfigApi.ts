@@ -14,7 +14,10 @@ export function useSatExamConfigDefaults(enabled = true) {
     queryKey: ["sat", "exam-config", "defaults"] as const,
     queryFn: () => satExamConfigApi.defaults(),
     enabled,
-    // Blueprint constants: stable for the life of a deployment.
+    // Defaults are stable, but the response also carries a runtime capability.
     staleTime: 60 * 60 * 1000,
+    // Room creation mounts this query when its form opens, so a rollout change
+    // is reflected without waiting for the cached blueprint defaults to expire.
+    refetchOnMount: "always",
   });
 }

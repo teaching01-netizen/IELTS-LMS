@@ -110,6 +110,9 @@ const (
 	// CodeExamScopeUnavailable: the saved release does not cover the sections
 	// the room asks for and there is no working draft to seal.
 	CodeExamScopeUnavailable Code = "EXAM_SCOPE_UNAVAILABLE"
+	// CodeSATClassroomDisabled: the SAT Classroom rollout gate definitively
+	// refused this room creation before any room or operation receipt committed.
+	CodeSATClassroomDisabled Code = "SAT_CLASSROOM_DISABLED"
 )
 
 // Error is a typed application error with a stable code.
@@ -159,7 +162,7 @@ func statusFor(c Code) int {
 		return http.StatusTooManyRequests
 	case CodePayloadTooLarge:
 		return http.StatusRequestEntityTooLarge
-	case CodeServiceUnavailable, CodeRecoveryFailed:
+	case CodeServiceUnavailable, CodeRecoveryFailed, CodeSATClassroomDisabled:
 		return http.StatusServiceUnavailable
 	case CodeStudentWSRetired:
 		return http.StatusGone

@@ -47,6 +47,8 @@ interface AccessLinkEditorSheetProps {
    * resolves at submit time (SAT one-action create): e.g. "the latest saved exam".
    */
   versionSummary?: string | undefined;
+  /** Current server capability for the new-room Classroom choice. Omit only for legacy hosts. */
+  classroomAvailability?: "checking" | "enabled" | "disabled" | "unknown";
   /** The test's title, shown in the SAT pre-submit summary. An existing link carries its own. */
   examTitle?: string | null;
   /**
@@ -90,6 +92,7 @@ interface AccessLinkEditorSheetProps {
 
 /** The Module 2 routes a Classroom room can use. Standard practice has none. */
 const CLASSROOM_ROUTING: readonly SatSessionType[] = ["classroom", "classroom_lower", "classroom_higher", "classroom_staff"];
+type ClassroomAvailability = "checking" | "enabled" | "disabled" | "unknown";
 
 function defaultScheduledWindow(): { opensAt: string; closesAt: string } {
   const start = new Date();
@@ -149,6 +152,8 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   // that run or silently changes the sitting a registered student expected.
   const isSat = (props.link?.providerKey ?? props.providerKey) === "sat";
   const isCreatingSat = isSat && !props.link;
+  const classroomChoiceDisabled = props.classroomAvailability !== undefined && props.classroomAvailability !== "enabled";
+  const classroomSelectionBlocked = isCreatingSat && sessionType !== "practice" && classroomChoiceDisabled;
   const audienceChoice = accessLinkAudienceChoice(audienceType);
   const pinnedPublishScope = props.link?.publishScope ?? props.publishScope ?? "full";
   const releaseSections = useMemo(() => availableAccessLinkSections(pinnedPublishScope), [pinnedPublishScope]);
@@ -449,6 +454,10 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const submit = async () => {
     if (submittingRef.current || props.isSaving || props.membersLoading || props.membersError) return;
     if (readOnly) return;
+    if (classroomSelectionBlocked) {
+      setError(classroomUnavailableMessage(props.classroomAvailability));
+      return;
+    }
     setError(null);
     if (!validateAllAndFocus()) return;
     const normalizedName = name.trim();
@@ -588,8 +597,20 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     <Field label="Session type" description="The exam's score report setting decides what students see when they finish.">
       <div role="group" aria-label="Session type" className="grid grid-cols-2 gap-2">
         <Choice active={!isClassroom} onClick={() => setSatSessionType("practice")} icon={<Timer size={15} aria-hidden="true" />} title="Practice" subtitle="Standard SAT timing and routing" />
-        <Choice active={isClassroom} onClick={() => { if (!isClassroom) setSatSessionType("classroom"); }} icon={<GraduationCap size={15} aria-hidden="true" />} title="Classroom" subtitle="Teacher-led, with Module 2 options" />
+        <Choice
+          active={isClassroom}
+          disabled={classroomChoiceDisabled}
+          onClick={() => { if (!isClassroom && !classroomChoiceDisabled) setSatSessionType("classroom"); }}
+          icon={<GraduationCap size={15} aria-hidden="true" />}
+          title="Classroom"
+          subtitle={classroomAvailabilitySubtitle(props.classroomAvailability)}
+        />
       </div>
+      {classroomChoiceDisabled ? (
+        <p role="status" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          {classroomUnavailableMessage(props.classroomAvailability)} Practice remains available.
+        </p>
+      ) : null}
       {isClassroom ? (
         <div className="mt-3">
           <p className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">Module 2 routing</p>
@@ -752,7 +773,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
             </div>
             <footer className="border-t border-[var(--sat-staff-border-hairline)] bg-white px-6 py-4">
               {error ? <p role="alert" className="mb-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-tint)] px-3 py-2 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}
-                <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-btn sat-btn--quiet sat-press">Cancel</button>{/* Keep the primary action's box stable while pending; the handler also guards repeat presses. */}<button type="button" onClick={() => { if (props.isSaving || props.submitDisabled) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError) || props.submitDisabled} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? props.pendingLabel ?? (props.link ? "Saving…" : "Creating…") : readOnly ? "View only" : props.submitLabel ?? (props.link ? "Save changes" : "Create room")}</button></div>
+                <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-btn sat-btn--quiet sat-press">Cancel</button>{/* Keep the primary action's box stable while pending; the handler also guards repeat presses. */}<button type="button" onClick={() => { if (props.isSaving || props.submitDisabled || classroomSelectionBlocked) return; void submit(); }} disabled={readOnly || props.membersLoading || Boolean(props.membersError) || props.submitDisabled || classroomSelectionBlocked} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-btn sat-btn--primary sat-press min-w-[8.5rem]">{props.isSaving ? <span aria-hidden="true" className="sat-btn__spinner" /> : null}{props.isSaving ? props.pendingLabel ?? (props.link ? "Saving…" : "Creating…") : readOnly ? "View only" : props.submitLabel ?? (props.link ? "Save changes" : "Create room")}</button></div>
             </footer>
       </SheetContent>
       <AuthoringConfirmDialog
@@ -823,7 +844,25 @@ function GroupHeading({ id, title, detail }: { id: string; title: string; detail
   );
 }
 function Field({ label, description, error, errorId, children }: { label: string; description?: string; error?: string | null; errorId?: string; children: React.ReactNode }) { return <section><div className="mb-2"><h3 className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">{label}</h3>{description ? <p className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{description}</p> : null}</div>{children}{error ? <p id={errorId} role="alert" className="mt-1.5 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}</section>; }
-function Choice({ active, onClick, icon, title, subtitle }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string }) { return <button type="button" aria-pressed={active} onClick={onClick} className={`sat-press sat-press-fill min-h-[72px] rounded-[var(--sat-staff-radius-control,10px)] border p-3 text-left ${active ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)] text-[var(--sat-staff-text-primary,#1d1d1f)]" : "border-[var(--sat-staff-border-strong)] bg-white text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-faint)]"}`}><span className="flex items-center gap-1.5 text-[14px] font-semibold leading-5"><span aria-hidden="true" className={active ? "text-[var(--sat-staff-accent,#0071e3)]" : "text-[var(--sat-staff-text-tertiary,#6e6e73)]"}>{icon}</span>{title}</span><span className="mt-1 block text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{subtitle}</span></button>; }
+function Choice({ active, disabled, onClick, icon, title, subtitle }: { active: boolean; disabled?: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string }) { return <button type="button" disabled={disabled} aria-pressed={active} onClick={onClick} className={`sat-press sat-press-fill min-h-[72px] rounded-[var(--sat-staff-radius-control,10px)] border p-3 text-left ${active ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)] text-[var(--sat-staff-text-primary,#1d1d1f)]" : "border-[var(--sat-staff-border-strong)] bg-white text-[var(--sat-staff-text-primary,#1d1d1f)] hover:bg-[var(--sat-staff-fill-faint)]"} disabled:cursor-not-allowed disabled:opacity-50`}><span className="flex items-center gap-1.5 text-[14px] font-semibold leading-5"><span aria-hidden="true" className={active ? "text-[var(--sat-staff-accent,#0071e3)]" : "text-[var(--sat-staff-text-tertiary,#6e6e73)]"}>{icon}</span>{title}</span><span className="mt-1 block text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{subtitle}</span></button>; }
+
+function classroomAvailabilitySubtitle(availability: ClassroomAvailability | undefined): string {
+  switch (availability) {
+    case "checking": return "Checking availability…";
+    case "disabled": return "Unavailable on this server.";
+    case "unknown": return "Availability could not be checked.";
+    default: return "Teacher-led, with Module 2 options";
+  }
+}
+
+function classroomUnavailableMessage(availability: ClassroomAvailability | undefined): string {
+  switch (availability) {
+    case "checking": return "Checking SAT Classroom availability.";
+    case "disabled": return "SAT Classroom sessions are not enabled on this server.";
+    case "unknown": return "SAT Classroom availability could not be checked.";
+    default: return "SAT Classroom sessions are unavailable.";
+  }
+}
 /**
  * One section toggle. A locked toggle stays visible (so the scope is legible)
  * but disabled, mirroring how a revoked link's editor is presented.

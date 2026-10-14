@@ -1,0 +1,8 @@
+Repository snapshot
+Captured: 2026-10-14 18:16:08 UTC (2026-10-15 01:16:08 Asia/Bangkok)
+Repository: /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+HEAD: 5727547d421c442df206119ba1c559cad099adf6
+Branch: feat/sat-bluebook-overlays-tools
+Working tree: dirty at verification start and remains dirty; the tree contains the SAT Classroom gate implementation and other existing user edits. No clean baseline is available to attribute every changed file to this review.
+
+The proof and source hashes are recorded separately in source-sha256.txt.

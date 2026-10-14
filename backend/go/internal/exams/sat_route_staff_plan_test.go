@@ -14,6 +14,9 @@ import (
 // staff_selects session on a plan-shaped section would route the student at
 // Module 1 close with no staff decision, so creation must refuse it.
 func TestPersistSATSessionStaffSelectsRejectsPlanShape(t *testing.T) {
+	SetClassroomCreationEnabled(true)
+	t.Cleanup(func() { SetClassroomCreationEnabled(false) })
+
 	ctx := context.Background()
 	newDB := func(t *testing.T) (sqlmock.Sqlmock, RoutePolicyExecer) {
 		db, mock, err := sqlmock.New()

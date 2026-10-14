@@ -29,6 +29,7 @@ const defaultsMock = vi.hoisted(() => ({
       showClassroomScoreReport: false,
     },
     limits: { minModuleMinutes: 1, maxModuleMinutes: 600, maxBreakMinutes: 240, operationalQuestions: { 'reading-writing': 27, math: 22 } },
+    classroomCreationEnabled: true,
   },
 }));
 vi.mock('../../../../features/exam-authoring/api/satExamConfigApi', () => ({

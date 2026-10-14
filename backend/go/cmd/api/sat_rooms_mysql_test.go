@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/accesslinks"
+	"example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/satrooms"
@@ -254,6 +255,43 @@ func TestSatRoomsNotReadyWritesNothingMySQL(t *testing.T) {
 	}
 	if h.count(t, "SELECT COUNT(*) FROM exam_schedules WHERE exam_id = ?", h.examID) != 0 {
 		t.Fatal("a rejected operation must not leave a schedule")
+	}
+}
+
+// A disabled Classroom refusal must roll back the whole one-action room
+// transaction, including a release seal attempted earlier in that transaction.
+func TestSatRoomsClassroomDisabledRollsBackMySQL(t *testing.T) {
+	f := newSATPublishFixture(t, false)
+	h := newSatRoomsHarness(f.h)
+	ctx := context.Background()
+	wasEnabled := exams.SATClassroomCreationEnabled()
+	t.Cleanup(func() { exams.SetClassroomCreationEnabled(wasEnabled) })
+	exams.SetClassroomCreationEnabled(false)
+
+	classroom := satRoomRequest(t, h, uuid.NewString(), "Classroom is disabled")
+	classroom.Room.SatSessionMode = "classroom"
+	if _, err := h.rooms.CreateRoom(ctx, h.actor, h.examID, classroom); satRoomCode(t, err) != apperrors.CodeSATClassroomDisabled {
+		t.Fatalf("disabled Classroom creation must return SAT_CLASSROOM_DISABLED, got %v", err)
+	}
+	if h.roomCount(t) != 0 || h.publishedCount(t) != 0 ||
+		h.count(t, "SELECT COUNT(*) FROM exam_schedules WHERE exam_id = ?", h.examID) != 0 ||
+		h.count(t, "SELECT COUNT(*) FROM sat_room_operations WHERE actor_id = ? AND operation_key = ?", h.actor, classroom.OperationKey) != 0 {
+		t.Fatal("disabled Classroom refusal left a room, release, schedule, or operation receipt")
+	}
+	var draftID, publishedID sql.NullString
+	if err := h.db.QueryRow("SELECT current_draft_version_id, current_published_version_id FROM exam_entities WHERE id = ?", h.examID).Scan(&draftID, &publishedID); err != nil {
+		t.Fatal(err)
+	}
+	if !draftID.Valid || publishedID.Valid {
+		t.Fatalf("disabled Classroom refusal must preserve the draft and publish nothing: draft=%v published=%v", draftID, publishedID)
+	}
+
+	practice := satRoomRequest(t, h, uuid.NewString(), "Practice still works")
+	if _, err := h.rooms.CreateRoom(ctx, h.actor, h.examID, practice); err != nil {
+		t.Fatalf("the gate must not block Practice creation: %v", err)
+	}
+	if h.roomCount(t) != 1 {
+		t.Fatalf("Practice creation should add exactly one room, got %d", h.roomCount(t))
 	}
 }
 

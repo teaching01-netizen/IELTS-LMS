@@ -353,19 +353,19 @@ export type SatStatusTone =
   | 'pending';
 
 const TONE_PILL_CLASS: Record<SatStatusTone, string> = {
-  published: 'border-emerald-700/20 bg-[var(--sat-staff-success-tint,rgba(5,150,105,0.1))] text-[var(--sat-staff-success-text,#067647)]',
-  live: 'border-emerald-700/20 bg-[var(--sat-staff-success-tint,rgba(5,150,105,0.1))] text-[var(--sat-staff-success-text,#067647)]',
-  changes: 'border-amber-700/25 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] text-[var(--sat-staff-warning-text,#92400e)]',
-  paused: 'border-amber-700/25 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] text-[var(--sat-staff-warning-text,#92400e)]',
-  info: 'border-[var(--sat-staff-accent,#0071e3)]/25 bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))] text-[var(--sat-staff-info-text,#0067c9)]',
-  ready: 'border-[var(--sat-staff-accent,#0071e3)]/25 bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))] text-[var(--sat-staff-info-text,#0067c9)]',
-  invalidated: 'border-red-700/20 bg-[var(--sat-staff-danger-tint,rgba(217,45,32,0.08))] text-[var(--sat-staff-danger,#b42318)]',
+  published: 'border-[var(--sat-staff-success-border)] bg-[var(--sat-staff-success-tint,rgba(5,150,105,0.1))] text-[var(--sat-staff-success-text,#067647)]',
+  live: 'border-[var(--sat-staff-success-border)] bg-[var(--sat-staff-success-tint,rgba(5,150,105,0.1))] text-[var(--sat-staff-success-text,#067647)]',
+  changes: 'border-[var(--sat-staff-warning-border)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] text-[var(--sat-staff-warning-text,#92400e)]',
+  paused: 'border-[var(--sat-staff-warning-border)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] text-[var(--sat-staff-warning-text,#92400e)]',
+  info: 'border-[var(--sat-staff-info-border)] bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))] text-[var(--sat-staff-info-text,#0067c9)]',
+  ready: 'border-[var(--sat-staff-info-border)] bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))] text-[var(--sat-staff-info-text,#0067c9)]',
+  invalidated: 'border-[var(--sat-staff-danger-border)] bg-[var(--sat-staff-danger-tint,rgba(217,45,32,0.08))] text-[var(--sat-staff-danger,#b42318)]',
   draft: 'border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-neutral-text,#515154)]',
   archived: 'border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-neutral-text,#515154)]',
   finished: 'border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-neutral-text,#515154)]',
   cancelled: 'border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-neutral-text,#515154)]',
   neutral: 'border-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-neutral-text,#515154)]',
-  pending: 'border-amber-700/25 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] text-[var(--sat-staff-warning-text,#92400e)]',
+  pending: 'border-[var(--sat-staff-warning-border)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] text-[var(--sat-staff-warning-text,#92400e)]',
 };
 
 /**
@@ -389,7 +389,7 @@ const TONE_DOT_CLASS: Record<SatStatusTone, string> = {
   paused: 'bg-[var(--sat-staff-warning-dot,#d97706)]',
   info: 'bg-[var(--sat-staff-info-dot,#0071e3)]',
   ready: 'bg-[var(--sat-staff-info-dot,#0071e3)]',
-  invalidated: 'bg-red-500',
+  invalidated: 'bg-[var(--sat-staff-danger-dot,#d92d20)]',
   draft: 'bg-[var(--sat-staff-neutral-dot,#6e6e73)]',
   archived: 'bg-[var(--sat-staff-neutral-dot,#6e6e73)]',
   finished: 'bg-[var(--sat-staff-neutral-dot,#6e6e73)]',
@@ -423,7 +423,7 @@ export function SatStatusPill({
 export function SatList({ children, variant = 'grouped' }: { children: ReactNode; variant?: 'grouped' | 'cards' }) {
   if (variant === 'cards') return <div className="mt-4 space-y-2">{children}</div>;
   return (
-    <div className="mt-3 divide-y divide-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] overflow-hidden rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)]">
+    <div className="mt-3 divide-y divide-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] overflow-hidden rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] shadow-[var(--sat-staff-shadow-card,none)]">
       {children}
     </div>
   );
@@ -662,7 +662,7 @@ export function SatStatStrip({ stats, label = 'Summary' }: { stats: SatStat[]; l
           'min-w-0 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3.5 py-3 text-left shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]';
         const body = (
           <>
-            <p className="truncate text-[14px] font-semibold uppercase tracking-[0.12em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.label}</p>
+            <p className="truncate text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{stat.label}</p>
             <p className="mt-1 truncate text-[22px] font-semibold tabular-nums tracking-[-0.03em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{stat.value}</p>
             {stat.hint ? <p className="mt-0.5 truncate text-[14px] text-[var(--sat-staff-text-tertiary,#6e6e73)]">{stat.hint}</p> : null}
           </>
@@ -778,7 +778,7 @@ export function SatEyebrow({
   children: ReactNode;
 }) {
   return (
-    <p id={id} className={'text-[14px] font-semibold uppercase tracking-[0.14em] text-[var(--sat-staff-text-tertiary,#6e6e73)]' + (className ? ' ' + className : '')}>
+    <p id={id} className={'text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]' + (className ? ' ' + className : '')}>
       {children}
     </p>
   );

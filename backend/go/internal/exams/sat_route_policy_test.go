@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"example.com/ielts-proctoring/internal/platform/apperrors"
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
@@ -49,6 +50,9 @@ func TestParseSATSession(t *testing.T) {
 }
 
 func TestPersistSATSession(t *testing.T) {
+	SetClassroomCreationEnabled(true)
+	t.Cleanup(func() { SetClassroomCreationEnabled(false) })
+
 	newDB := func(t *testing.T) (RoutePolicyExecer, sqlmock.Sqlmock) {
 		db, mock, err := sqlmock.New()
 		if err != nil {
@@ -108,12 +112,16 @@ func TestPersistSATSession(t *testing.T) {
 	t.Run("rollout gate blocks new classroom sessions only", func(t *testing.T) {
 		SetClassroomCreationEnabled(false)
 		t.Cleanup(func() { SetClassroomCreationEnabled(true) })
+		if SATClassroomCreationEnabled() {
+			t.Fatal("capability must report the effective disabled gate")
+		}
 		db, mock := newDB(t)
-		mock.ExpectQuery("sat_classroom_plan").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 		err := PersistSATSession(ctx, db, "s1", "sat", "v1", SATSession{Classroom: true, Route: SATRouteStaffSelects}, nil)
-		if err == nil || !strings.Contains(err.Error(), "not enabled") {
+		appErr, ok := apperrors.As(err)
+		if !ok || appErr.Code != apperrors.CodeSATClassroomDisabled || !strings.Contains(err.Error(), "not enabled") {
 			t.Fatalf("classroom creation must be gated, got %v", err)
 		}
+		mock.ExpectQuery("sat_classroom_plan").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 		if err := PersistSATSession(ctx, db, "s1", "sat", "v1", SATSession{}, nil); err != nil {
 			t.Fatalf("practice sessions must be unaffected: %v", err)
 		}

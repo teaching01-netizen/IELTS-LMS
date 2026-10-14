@@ -399,8 +399,9 @@ func TestSATClassroomGateOffStillFinishesStartedAttemptsMySQL(t *testing.T) {
 	if _, err := db.ExecContext(ctx, "UPDATE exam_schedules SET sat_session_mode = 'classroom', sat_route_policy = 'staff_selects' WHERE id = ?", schedule); err != nil {
 		t.Fatal(err)
 	}
+	wasEnabled := exams.SATClassroomCreationEnabled()
 	exams.SetClassroomCreationEnabled(false)
-	t.Cleanup(func() { exams.SetClassroomCreationEnabled(true) })
+	t.Cleanup(func() { exams.SetClassroomCreationEnabled(wasEnabled) })
 	if err := exams.PersistSATSession(ctx, db, schedule, "sat", "v", exams.SATSession{Classroom: true, Route: exams.SATRouteStaffSelects}, nil); err == nil {
 		t.Fatal("a closed gate must refuse new classroom sessions")
 	}

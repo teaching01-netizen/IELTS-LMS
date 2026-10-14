@@ -13,6 +13,12 @@ import { AccessColumnHeader, ExamColumnHeader, SatAccessGroupRow, SatAttemptTabl
 import { localDayStartIso, viewerTimeZoneLabel } from './satTestTime';
 
 const PAGE_SIZE = 50;
+
+/** A yyyy-mm-dd filter day in the same form the rows use ("Sun, 11 Oct 2026"). */
+function dayChipLabel(day: string): string {
+  const start = localDayStartIso(day);
+  return start ? formatDate(start) : day;
+}
 type AttemptStatus = NonNullable<SatAttemptFilters['status']>;
 const STATUS_OPTIONS: Array<{ value: AttemptStatus; label: string }> = [
   { value: 'all', label: 'All' },
@@ -201,8 +207,8 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
     const activeFilterChips: ActiveFilterChip[] = [
       ...(search.trim() ? [{ id: 'q', label: `Search: ${search.trim()}`, onRemove: () => updateParams({ q: null }) }] : []),
       ...(status !== 'all' ? [{ id: 'status', label: `Status: ${STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status}`, onRemove: () => updateParams({ status: null }) }] : []),
-      ...(fromDay ? [{ id: 'from', label: `From ${fromDay}`, onRemove: () => updateParams({ from: null }) }] : []),
-      ...(toDay ? [{ id: 'to', label: `To ${toDay}`, onRemove: () => updateParams({ to: null }) }] : []),
+      ...(fromDay ? [{ id: 'from', label: `From ${dayChipLabel(fromDay)}`, onRemove: () => updateParams({ from: null }) }] : []),
+      ...(toDay ? [{ id: 'to', label: `To ${dayChipLabel(toDay)}`, onRemove: () => updateParams({ to: null }) }] : []),
     ];
     const previous = inspectedIndex > 0 ? visibleAttempts[inspectedIndex - 1] : undefined;
     const next = inspectedIndex >= 0 ? visibleAttempts[inspectedIndex + 1] : undefined;

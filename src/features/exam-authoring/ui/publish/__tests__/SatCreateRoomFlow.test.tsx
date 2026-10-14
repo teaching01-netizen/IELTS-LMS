@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   operation: vi.fn(),
   refreshShell: vi.fn(),
   refetchExam: vi.fn(),
+  classroomIsFetching: false,
+  classroomIsSuccess: true,
+  classroomCreationEnabled: true,
 }));
 
 vi.mock("../../../api/satCreateRoomApi", () => ({
@@ -21,6 +24,13 @@ vi.mock("../../../api/examQueries", async (importOriginal) => {
     useExamQuery: () => ({ data: { id: "exam-1", canEdit: true, revision: 18 }, refetch: mocks.refetchExam }),
   };
 });
+vi.mock("../../../api/satExamConfigApi", () => ({
+  useSatExamConfigDefaults: () => ({
+    isFetching: mocks.classroomIsFetching,
+    isSuccess: mocks.classroomIsSuccess,
+    data: { classroomCreationEnabled: mocks.classroomCreationEnabled },
+  }),
+}));
 vi.mock("../../../application/authoringShellLifecycle", () => ({
   useAuthoringShellLifecycle: () => ({ refresh: mocks.refreshShell }),
 }));
@@ -29,7 +39,7 @@ vi.mock("../../../realtime/coedit", async (importOriginal) => {
   return { ...actual, useSatAuthoringCollaboration: () => null };
 });
 
-import { clearSatRoomDraft } from "../../../application/satRoomDraftStore";
+import { clearSatRoomDraft, stashSatRoomDraft } from "../../../application/satRoomDraftStore";
 import { SatCreateRoomFlow } from "../SatCreateRoomFlow";
 
 const receipt = {
@@ -65,6 +75,9 @@ beforeEach(() => {
   mocks.operation.mockReset();
   mocks.refreshShell.mockReset();
   mocks.refetchExam.mockReset();
+  mocks.classroomIsFetching = false;
+  mocks.classroomIsSuccess = true;
+  mocks.classroomCreationEnabled = true;
   mocks.refreshShell.mockResolvedValue({ kind: "ready", shell: { versionId: "draft-3", versionRevision: 4 } });
   mocks.refetchExam.mockResolvedValue({ data: { id: "exam-1", canEdit: true, revision: 18 } });
 });
@@ -103,6 +116,77 @@ describe("SatCreateRoomFlow", () => {
     const request = mocks.create.mock.calls[0]![1];
     expect(request.expectedDraftVersionId).toBe("");
     expect(request).not.toHaveProperty("expectedDraftRevision");
+  });
+
+  it("keeps Practice usable and disables Classroom when the server gate is off", async () => {
+    mocks.classroomCreationEnabled = false;
+    mocks.create.mockResolvedValue(receipt);
+    const { props } = renderFlow();
+    const classroom = screen.getByRole("button", { name: /Classroom/ });
+    expect(classroom).toBeDisabled();
+    expect(screen.getByText(/Practice remains available/)).toBeInTheDocument();
+
+    fillName("Practice while Classroom is disabled");
+    expect(screen.getByRole("button", { name: /Practice/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    await waitFor(() => expect(props.onRoomCreated).toHaveBeenCalled());
+    expect(mocks.create.mock.calls[0]![1].room).not.toHaveProperty("satSessionMode");
+  });
+
+  it("preserves a restored Classroom selection but blocks creation until Practice is selected", async () => {
+    mocks.classroomCreationEnabled = false;
+    stashSatRoomDraft("exam-1", {
+      name: "Restored Classroom room",
+      audienceType: "anyone",
+      accessMode: "student_code",
+      availabilityType: "anytime",
+      selectedStudents: [],
+      satSessionMode: "classroom",
+      satRoutePolicy: "staff_selects",
+    });
+    renderFlow();
+
+    expect(await screen.findByLabelText("Room name")).toHaveValue("Restored Classroom room");
+    const classroom = screen.getByRole("button", { name: /Classroom/ });
+    expect(classroom).toBeDisabled();
+    expect(classroom).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Create room" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Practice/ }));
+    expect(screen.getByRole("button", { name: "Create room" })).toBeEnabled();
+  });
+
+  it("fails closed when the Classroom capability cannot be checked", () => {
+    mocks.classroomIsSuccess = false;
+    renderFlow();
+    expect(screen.getByRole("button", { name: /Classroom/ })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(/availability could not be checked/i);
+    expect(screen.getByRole("button", { name: /Practice/ })).toBeEnabled();
+  });
+
+  it("locks Classroom after a definitive POST refusal while preserving the selected form for Practice", async () => {
+    mocks.create
+      .mockRejectedValueOnce(new ApiError({ code: "SAT_CLASSROOM_DISABLED", message: "disabled", status: 503 }))
+      .mockResolvedValueOnce(receipt);
+    const { props } = renderFlow();
+    fillName("Keep my room details");
+    fireEvent.click(screen.getByRole("button", { name: /Classroom/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+
+    expect(await screen.findAllByText(/No room was created; choose Practice or try again later/)).not.toHaveLength(0);
+    const classroom = screen.getByRole("button", { name: /Classroom/ });
+    expect(classroom).toBeDisabled();
+    expect(classroom).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Room name")).toHaveValue("Keep my room details");
+    expect(screen.getByRole("button", { name: "Create room" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Practice/ })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Practice/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    await waitFor(() => expect(props.onRoomCreated).toHaveBeenCalled());
+    expect(mocks.create).toHaveBeenCalledTimes(2);
+    expect(mocks.create.mock.calls[1]![1].operationKey).not.toBe(mocks.create.mock.calls[0]![1].operationKey);
+    expect(mocks.create.mock.calls[1]![1].room).not.toHaveProperty("satSessionMode");
   });
 
   it("keeps the form open on EXAM_NOT_READY, lists every issue with a Fix link, and restores the form afterwards", async () => {

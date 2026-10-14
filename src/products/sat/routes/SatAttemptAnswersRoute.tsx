@@ -5,6 +5,7 @@ import { QuestionRawTable } from '../../../components/results/QuestionRawTable';
 import { SatButton, SatPageError, SatPageLoading, SatSectionCard, type SatStatusTone } from '../ui/SatPage';
 import { SatAttemptDetailHeader } from '../ui/SatAttemptDetailHeader';
 import { isExamResponsesPath } from './satReturnPath';
+import { formatTestClock } from './satTestTime';
 
 function formatSavedAt(value: string | null): string {
   if (!value) return 'No server save yet';
@@ -69,7 +70,7 @@ export function SatAttemptAnswersContent({ attemptId, onBack, embedded = false }
       <p className="mt-1 text-[24px] font-semibold leading-8 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]">{detail.savedAnswerCount} {detail.savedAnswerCount === 1 ? 'answer' : 'answers'}</p>
       <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Last save: {formatSavedAt(detail.lastSavedAt)}{detail.responseRevision !== null ? ` · Revision ${detail.responseRevision}` : ' · Legacy attempt'}</p>
       <p className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Only answers accepted by the server appear here. A score is not available for this attempt.</p>
-      <p role="status" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{query.isFetching ? 'Checking for newer answers…' : `Checks every 15 seconds while visible${query.dataUpdatedAt ? ` · Last checked ${new Date(query.dataUpdatedAt).toLocaleTimeString()}` : ''}`}</p>
+      <p role="status" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{query.isFetching ? 'Checking for newer answers…' : `Checks every 15 seconds while visible${query.dataUpdatedAt ? ` · Last checked ${formatTestClock(query.dataUpdatedAt)}` : ''}`}</p>
       {query.error ? <p className="mt-2 text-[14px] font-medium leading-5 text-[var(--sat-staff-warning-text,#92400e)]" role="alert">Could not check for newer answers. Showing the last successful check; try again or wait for the next check.</p> : null}
       <SatButton variant="secondary" onClick={() => void query.refetch()} pending={query.isFetching} icon={<RefreshCw size={16} aria-hidden="true" />} className="mt-3">{query.isFetching ? 'Checking…' : 'Check now'}</SatButton>
     </div>

@@ -1,0 +1,3 @@
+ok  	example.com/ielts-proctoring/internal/exams	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/apperrors	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/config	(cached)
