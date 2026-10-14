@@ -103,7 +103,13 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
   };
 
   const updateParams = (changes: Record<string, string | null>, keepPage = false) => {
-    const next = new URLSearchParams(searchParams);
+    // setSearchParams closes over the params from the last render. Read the URL
+    // so quick successive filter changes preserve the params just committed.
+    // MemoryRouter tests have no matching browser URL, so use router state there.
+    const currentSearch = typeof window !== 'undefined' && window.location.pathname === location.pathname
+      ? window.location.search
+      : location.search;
+    const next = new URLSearchParams(currentSearch);
     for (const [key, value] of Object.entries(changes)) {
       if (value) next.set(key, value); else next.delete(key);
     }
@@ -222,10 +228,10 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
         </SatListToolbar>
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <label htmlFor="sat-results-from" className="flex flex-col gap-1.5 text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">Test date from
-            <input id="sat-results-from" type="date" className="sat-input w-auto" value={fromDay} max={toDay || undefined} onChange={(event) => updateParams({ from: event.target.value || null, attempt: null })} />
+            <input id="sat-results-from" aria-label="Test date from" type="date" className="sat-input w-auto" value={fromDay} max={toDay || undefined} onChange={(event) => updateParams({ from: event.target.value || null, attempt: null })} />
           </label>
           <label htmlFor="sat-results-to" className="flex flex-col gap-1.5 text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">Test date to
-            <input id="sat-results-to" type="date" className="sat-input w-auto" value={toDay} min={fromDay || undefined} onChange={(event) => updateParams({ to: event.target.value || null, attempt: null })} />
+            <input id="sat-results-to" aria-label="Test date to" type="date" className="sat-input w-auto" value={toDay} min={fromDay || undefined} onChange={(event) => updateParams({ to: event.target.value || null, attempt: null })} />
           </label>
           <p className="pb-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Times shown in {viewerTimeZoneLabel()}.</p>
         </div>
@@ -236,8 +242,8 @@ export function SatResultsContent({ lockedExamId, basePath, emptyState }: SatRes
         <nav aria-label="Attempt pages" className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
           <span aria-live="polite" className="tabular-nums">{rangeStart}–{rangeEnd} of {total} {hasFilters ? 'matching attempts' : 'attempts'}</span>
           <div className="flex gap-2">
-            <SatButton variant="secondary" disabled={offset === 0 || attemptsQuery.isFetching} onClick={() => updateParams({ offset: offset > PAGE_SIZE ? String(offset - PAGE_SIZE) : null, attempt: null }, true)} icon={<ArrowLeft size={16} aria-hidden="true" />}>Previous</SatButton>
-            <SatButton variant="secondary" disabled={!page?.hasMore || attemptsQuery.isFetching} onClick={() => updateParams({ offset: String(offset + PAGE_SIZE), attempt: null }, true)}>Next<ArrowRight size={16} aria-hidden="true" /></SatButton>
+            <SatButton variant="secondary" aria-label="Previous attempt page" disabled={offset === 0 || attemptsQuery.isFetching} onClick={() => updateParams({ offset: offset > PAGE_SIZE ? String(offset - PAGE_SIZE) : null, attempt: null }, true)} icon={<ArrowLeft size={16} aria-hidden="true" />}>Previous</SatButton>
+            <SatButton variant="secondary" aria-label="Next attempt page" disabled={!page?.hasMore || attemptsQuery.isFetching} onClick={() => updateParams({ offset: String(offset + PAGE_SIZE), attempt: null }, true)}>Next<ArrowRight size={16} aria-hidden="true" /></SatButton>
           </div>
         </nav>
         <SatAttemptInspector

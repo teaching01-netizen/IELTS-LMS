@@ -44,14 +44,16 @@ type adaptiveBranch struct {
 }
 
 type adaptiveExam struct {
-	t          *testing.T
-	db         *sql.DB
-	owner      string
-	examID     string
-	versionID  string
-	scheduleID string
-	rw         adaptiveBranch
-	math       adaptiveBranch
+	t           *testing.T
+	db          *sql.DB
+	owner       string
+	questionIDs []string
+	revisionIDs []string
+	examID      string
+	versionID   string
+	scheduleID  string
+	rw          adaptiveBranch
+	math        adaptiveBranch
 }
 
 func newAdaptiveExam(t *testing.T) *adaptiveExam {
@@ -136,12 +138,14 @@ func (f *adaptiveExam) seedSection(sectionKey, title string, order int) adaptive
 			revisionID := uuid.NewString()
 			examQuestionID := uuid.NewString()
 			exec(`INSERT INTO assessment_questions (id, provider_key, created_by) VALUES (?, 'sat', ?)`, questionID, f.owner)
+			f.questionIDs = append(f.questionIDs, questionID)
 			exec(`INSERT INTO assessment_question_revisions (
 				id, question_id, semantic_revision, state, question_type, stimulus,
 				prompt, answer_definition, rationale, metadata, accessibility, created_by
 			) VALUES (?, ?, 1, 'sealed', 'single_choice', '{"version":1,"nodes":[]}',
 				'{"version":1,"nodes":[]}', '{"kind":"single_choice","correctOptionId":"B"}',
 				'{}', '{}', '{}', ?)`, revisionID, questionID, f.owner)
+			f.revisionIDs = append(f.revisionIDs, revisionID)
 			exec(`INSERT INTO assessment_exam_questions (
 				id, module_id, question_id, question_revision_id, display_order, is_pretest
 			) VALUES (?, ?, ?, ?, ?, FALSE)`, examQuestionID, id, questionID, revisionID, q)
@@ -261,8 +265,14 @@ func (f *adaptiveExam) cleanup() {
 			quiet(`DELETE FROM assessment_exam_questions WHERE module_id = ?`, moduleID)
 		}
 	}
-	quiet(`DELETE FROM assessment_question_revisions WHERE question_id IN (SELECT id FROM assessment_questions WHERE created_by = ?)`, f.owner)
-	quiet(`DELETE FROM assessment_questions WHERE created_by = ?`, f.owner)
+	// Keep shared-DB cleanup row-scoped: owner-filter subqueries scan and lock
+	// unrelated question rows while other packages seed concurrent fixtures.
+	for _, revisionID := range f.revisionIDs {
+		quiet(`DELETE FROM assessment_question_revisions WHERE id = ?`, revisionID)
+	}
+	for _, questionID := range f.questionIDs {
+		quiet(`DELETE FROM assessment_questions WHERE id = ?`, questionID)
+	}
 	quiet(`DELETE FROM assessment_routing_policies WHERE section_id IN (?, ?)`, f.rw.sectionID, f.math.sectionID)
 	quiet(`DELETE FROM assessment_scoring_policies WHERE exam_version_id = ?`, f.versionID)
 	for _, moduleID := range []string{f.rw.baseID, f.rw.lowID, f.rw.highID, f.math.baseID, f.math.lowID, f.math.highID} {

@@ -564,7 +564,9 @@ test.describe("SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       await stubScreenDetails(studentContext);
       studentPage = await studentContext.newPage();
       await studentPage.goto(new URL(`/join/${link.id}`, page.url()).toString());
-      await expect(studentPage.getByRole("heading", { name: linkName })).toBeVisible();
+      await expect(
+        studentPage.getByRole("heading", { name: "Exam Check-in", exact: true })
+      ).toBeVisible();
       await studentPage.getByLabel("Full name").fill(`Timing candidate ${stamp}`);
       await studentPage.getByLabel("Email").fill(`sat-timing-${stamp}@example.com`);
       await studentPage.getByRole("button", { name: /Continue/i }).click();
@@ -671,7 +673,6 @@ test.describe("SAT timing contract against MySQL, HTTP, WebSocket, and browser r
 
     const joinStudent = async (
       link: AccessLinkSnapshot,
-      heading: string,
       name: string,
       email: string,
       delayFirstModuleStartMs: number
@@ -711,9 +712,9 @@ test.describe("SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       }
       const studentPage = await context.newPage();
       await studentPage.goto(new URL(`/join/${link.id}`, page.url()).toString());
-      await expect(studentPage.getByRole("heading", { name: heading })).toBeVisible({
-        timeout: 30_000,
-      });
+      await expect(
+        studentPage.getByRole("heading", { name: "Exam Check-in", exact: true })
+      ).toBeVisible({ timeout: 30_000 });
       await studentPage.getByLabel("Full name").fill(name);
       await studentPage.getByLabel("Email").fill(email);
       await studentPage.getByRole("button", { name: /Continue/i }).click();
@@ -859,7 +860,6 @@ test.describe("SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       // held window must be a transition surface, not consumed module time.
       const first = await joinStudent(
         link,
-        linkName,
         `Personal A ${stamp}`,
         `sat-personal-a-${stamp}@example.com`,
         5_000
@@ -893,7 +893,6 @@ test.describe("SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       // model would clamp this module to what is left of the section.
       const second = await joinStudent(
         link,
-        linkName,
         `Personal B ${stamp}`,
         `sat-personal-b-${stamp}@example.com`,
         0
@@ -932,7 +931,6 @@ test.describe("SAT timing contract against MySQL, HTTP, WebSocket, and browser r
 
     const joinStudent = async (
       link: AccessLinkSnapshot,
-      heading: string,
       name: string,
       email: string
     ): Promise<Page> => {
@@ -941,9 +939,9 @@ test.describe("SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       await stubScreenDetails(context);
       const studentPage = await context.newPage();
       await studentPage.goto(new URL(`/join/${link.id}`, page.url()).toString());
-      await expect(studentPage.getByRole("heading", { name: heading })).toBeVisible({
-        timeout: 30_000,
-      });
+      await expect(
+        studentPage.getByRole("heading", { name: "Exam Check-in", exact: true })
+      ).toBeVisible({ timeout: 30_000 });
       await studentPage.getByLabel("Full name").fill(name);
       await studentPage.getByLabel("Email").fill(email);
       await studentPage.getByRole("button", { name: /Continue/i }).click();
@@ -1084,7 +1082,6 @@ test.describe("SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       // Candidate A enters at T0 and holds the full authored window.
       const firstPage = await joinStudent(
         link,
-        linkName,
         `Five A ${stamp}`,
         `sat-personal-five-a-${stamp}@example.com`
       );
@@ -1098,7 +1095,6 @@ test.describe("SAT timing contract against MySQL, HTTP, WebSocket, and browser r
       await page.waitForTimeout(5 * 60_000);
       const secondPage = await joinStudent(
         link,
-        linkName,
         `Five B ${stamp}`,
         `sat-personal-five-b-${stamp}@example.com`
       );

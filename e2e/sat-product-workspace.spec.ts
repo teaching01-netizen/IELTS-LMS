@@ -504,7 +504,8 @@ async function startSatAttempt(
   await expect(page).toHaveURL(`/sat/exams/${examId}/access`, { timeout: 30_000 });
   const roomSetup = page.getByRole("dialog", { name: "Create room" });
   const setupProgress = roomSetup.getByRole("progressbar", { name: "Room setup progress" });
-  await expect(roomSetup).toBeVisible();
+  // Publishing a first release opens room setup on the exam's access route.
+  await expect(roomSetup).toBeVisible({ timeout: 30_000 });
   await expect(setupProgress).toHaveAttribute("aria-valuenow", "1");
   await expect(roomSetup).toContainText(`This room uses Version 1 of ${examTitle}.`);
   await roomSetup.getByLabel("Room name").fill(linkName);

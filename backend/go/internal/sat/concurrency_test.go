@@ -66,15 +66,15 @@ func satUnscopedRun(mock sqlmock.Sqlmock) {
 
 func satTopologyRows(rows ...[2]string) *sqlmock.Rows {
 	// One base row per section; a section's second row is its decided Module 2.
-	out := sqlmock.NewRows([]string{"section_key", "state", "adaptive_role", "module_id", "selected_module_id", "plan"})
+	out := sqlmock.NewRows([]string{"classroom", "section_key", "state", "adaptive_role", "module_id", "selected_module_id", "plan"})
 	seen := map[string]bool{}
 	for _, row := range rows {
 		if seen[row[0]] {
-			out.AddRow(row[0], row[1], "higher_branch", row[0]+"-m2", row[0]+"-m2", "")
+			out.AddRow(false, row[0], row[1], "higher_branch", row[0]+"-m2", row[0]+"-m2", "")
 			continue
 		}
 		seen[row[0]] = true
-		out.AddRow(row[0], row[1], "base", row[0]+"-m1", row[0]+"-m2", "")
+		out.AddRow(false, row[0], row[1], "base", row[0]+"-m1", row[0]+"-m2", "")
 	}
 	return out
 }
@@ -95,7 +95,7 @@ func expectCompleteAssessmentPrefix(mock sqlmock.Sqlmock, delivery, phase, proct
 		WillReturnRows(satAttemptRow(delivery, phase, proctor))
 	satNoReceipt(mock)
 	satUnscopedRun(mock)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(s.section_key, ''), ma.state")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_session_mode, 'practice') = 'classroom', COALESCE(s.section_key, ''), ma.state")).
 		WillReturnRows(rows)
 }
 

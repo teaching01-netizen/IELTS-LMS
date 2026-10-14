@@ -4,7 +4,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import type { TransitionResult } from '../../../types/domain';
+import type { ExamEntity, TransitionResult } from '../../../types/domain';
 import { examAuthoringFacade } from '../application/examAuthoringFacade';
 import type { DeleteExamInput, ExamListData } from '../contracts/examList';
 
@@ -76,6 +76,12 @@ export function useDeleteExamMutation() {
       void queryClient.invalidateQueries({ queryKey: examKeys.all });
       queryClient.removeQueries({ queryKey: examKeys.detail(examId) });
     },
+  });
+}
+
+export function useSaveExamMutation() {
+  return useMutation<void, Error, ExamEntity>({
+    mutationFn: (exam) => examAuthoringFacade.repository.saveExam(exam),
   });
 }
 

@@ -120,8 +120,9 @@ func TestV2SubmitSATSealsAfterTopologyGate(t *testing.T) {
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("FROM assessment_module_attempts").
-		WillReturnRows(sqlmock.NewRows([]string{"section_key", "state", "adaptive_role", "module_id", "selected_module_id", "plan"}).
-			AddRow("reading-writing", "submitted", "base", "rw-m1", "", "").AddRow("math", "locked", "base", "math-m1", "", ""))
+		WillReturnRows(sqlmock.NewRows([]string{"classroom", "section_key", "state", "adaptive_role", "module_id", "selected_module_id", "plan"}).
+			AddRow(false, "reading-writing", "submitted", "base", "rw-m1", "", "").
+			AddRow(false, "math", "locked", "base", "math-m1", "", ""))
 	mock.ExpectQuery("sat_route_policy = 'staff_selects'").WillReturnRows(sqlmock.NewRows([]string{"awaiting"}).AddRow(false))
 	mock.ExpectQuery("FROM attempt_responses_v2").
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))

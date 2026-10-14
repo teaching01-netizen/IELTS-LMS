@@ -7,16 +7,19 @@ import {
   examKeys,
   useDeleteExamMutation,
   useExamListQuery,
+  useSaveExamMutation,
 } from '../examQueries';
 
 const mockGetAllExams = vi.fn();
 const mockAdaptExams = vi.fn();
 const mockDeleteExam = vi.fn();
+const mockSaveExam = vi.fn();
 
 vi.mock('../../application/examAuthoringFacade', () => ({
   examAuthoringFacade: {
     repository: {
       getAllExamsWithLegacyMigration: (...args: unknown[]) => mockGetAllExams(...args),
+      saveExam: (...args: unknown[]) => mockSaveExam(...args),
     },
     adaptExamEntitiesToLegacyExams: (...args: unknown[]) => mockAdaptExams(...args),
     lifecycle: {
@@ -142,5 +145,19 @@ describe('exam-authoring query boundary', () => {
       entities: [examEntity],
       exams: [],
     });
+  });
+
+  it('saves an exam through the feature-owned mutation boundary', async () => {
+    const queryClient = createQueryClient();
+    mockSaveExam.mockResolvedValue(undefined);
+    const save = renderHook(() => useSaveExamMutation(), {
+      wrapper: createWrapper(queryClient),
+    });
+
+    await act(async () => {
+      await save.result.current.mutateAsync(examEntity);
+    });
+
+    expect(mockSaveExam).toHaveBeenCalledWith(examEntity);
   });
 });

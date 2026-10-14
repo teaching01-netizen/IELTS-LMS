@@ -416,10 +416,8 @@ type SatAttemptHarness = {
 
 /**
  * Shared journey setup: author, publish, link, join, and proctor-start a
- * real SAT so the exam is live with the first module auto-opened. Mirrors
- * the product-workspace harness (same UI path, same assertions) without the
- * co-edit save barrier that flakes in constrained environments: readiness
- * is proven by the authored-question count, not the realtime acknowledgement.
+ * real SAT so the exam is live with the first module auto-opened. It waits for
+ * both section counts and the co-edit acknowledgement before publishing.
  */
 async function startSatAttempt(
   page: Page,
@@ -445,20 +443,27 @@ async function startSatAttempt(
   if (!examId) throw new Error("SAT exam id was not present after creation");
 
   await expect(page.getByRole("heading", { name: examTitle })).toBeVisible();
-  await page.getByRole("button", { name: "More authoring actions" }).click();
+  await page.getByRole("button", { name: "More exam actions" }).click();
   await page.getByRole("menuitem", { name: /Load sample exam/ }).click();
   await expect(page.getByRole("dialog", { name: "Load sample SAT" })).toBeVisible();
   await page.getByRole("button", { name: "Load 147 questions" }).click();
-  // Both the load dialog and the section panel report the authored count;
-  // match either surface — the load is done when all 147 are authored.
-  await expect(page.getByText(/147 of 147 (questions )?authored/).first()).toBeVisible({
+  // The editor reports each section independently: 81 Reading & Writing and
+  // 66 Math questions. Wait for both committed section counts before release.
+  await expect(
+    page.getByRole("tab", { name: /Reading & Writing, 81 of 81 authored/ })
+  ).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByRole("tab", { name: /Math, 66 of 66 authored/ })).toBeVisible({
     timeout: 90_000,
   });
   // Release reads the committed Go projection, not the optimistic editor
   // view. Wait for the co-edit acknowledgement before crossing that barrier.
   await expect(page.getByText("Saved", { exact: true }).last()).toBeVisible({ timeout: 90_000 });
 
-  await page.getByRole("button", { name: "Release" }).click();
+  await page.getByRole("heading", { name: examTitle }).click();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
+  const commandPalette = page.getByRole("dialog", { name: "Jump to question" });
+  await expect(commandPalette).toBeVisible();
+  await commandPalette.getByText("Release exam", { exact: true }).click();
   await expect(page).toHaveURL(`/sat/exams/${examId}/release`);
   await expect(page.getByRole("heading", { name: "Ready to publish" })).toBeVisible({
     timeout: 30_000,
@@ -468,15 +473,29 @@ async function startSatAttempt(
   await expect(publishDialog).toBeVisible();
   await publishDialog.getByRole("button", { name: "Publish Full SAT", exact: true }).click();
 
-  await expect(page).toHaveURL(`/sat/exams/${examId}/access`, { timeout: 30_000 });
-  await expect(page.getByRole("heading", { name: "Student Access", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "New Student Link", exact: true }).first().click();
-  await page.getByLabel("Student Link name").fill(linkName);
-  await page.getByRole("button", { name: /Name \+ email only/i }).click();
-  await page.getByRole("button", { name: /Anytime/i }).click();
-  await page.getByRole("button", { name: "Create Link" }).click();
-  await expect(page.getByText(linkName).first()).toBeVisible({ timeout: 20_000 });
-  const joinHref = await page.getByRole("link", { name: "Open student page" }).getAttribute("href");
+  // Publishing returns to the exam's Rooms workspace. Create a proctor-started
+  // room there, then share its student link from the room page. Publishing
+  // opens the room setup dialog directly when the exam has no rooms.
+  const roomSetup = page.getByRole("dialog", { name: "Create room" });
+  await expect(roomSetup).toBeVisible({ timeout: 30_000 });
+  await roomSetup.getByLabel("Room name").fill(linkName);
+  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
+  await roomSetup.getByRole("button", { name: /Name \+ email only/i }).click();
+  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
+  await roomSetup.getByRole("button", { name: /^Open now/ }).click();
+  await roomSetup.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(roomSetup.getByRole("heading", { name: "Summary" })).toBeVisible();
+  await expect(roomSetup.getByText("The proctor starts the exam.", { exact: true })).toBeVisible();
+  await roomSetup.getByRole("button", { name: "Create room", exact: true }).click();
+
+  await expect(page).toHaveURL(/\/sat\/sessions\/[0-9a-f-]+$/i, { timeout: 30_000 });
+  const roomScheduleId = new URL(page.url()).pathname.split("/").filter(Boolean)[2];
+  if (!roomScheduleId) throw new Error("SAT room id was not present after creation");
+  await expect(page.getByRole("heading", { level: 1, name: linkName })).toBeVisible();
+  await page.getByRole("button", { name: "Student link", exact: true }).click();
+  const shareDialog = page.getByRole("dialog", { name: `Share ${linkName} with students` });
+  await expect(shareDialog).toBeVisible();
+  const joinHref = await shareDialog.getByText(/\/join\//).textContent();
   if (!joinHref) throw new Error("Student join URL was not created");
 
   const studentContext = await browser.newContext();
@@ -491,6 +510,7 @@ async function startSatAttempt(
   const candidateId = decodeURIComponent(studentPath[2] ?? "");
   if (!scheduleId || !candidateId)
     throw new Error("Student handoff did not include schedule and candidate ids");
+  expect(scheduleId).toBe(roomScheduleId);
 
   // These identity scenarios exercise section-to-section adaptive routing.
   // New SAT schedules default to personal timing, so pin the cohort timing
@@ -511,11 +531,11 @@ async function startSatAttempt(
   await sessionRow.click();
   await expect(page).toHaveURL(`/sat/sessions/${scheduleId}`);
   await expect(page.getByText(studentName).first()).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await page.getByRole("button", { name: "Review and start exam" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Start exam" }).click();
 
-  // The proctor's Start is the ONLY action taken: refresh (never click) and
-  // the module must be OPEN by itself. One reload retry absorbs a first load
-  // that raced the runtime start; entry itself is still asserted below.
+  // Starting from the proctor controls must auto-open the module. The student
+  // reloads without clicking Begin; one retry absorbs a first-load race.
   await studentPage.reload();
   try {
     await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });

@@ -46,6 +46,13 @@ const databaseUrl =
 if (databaseUrl) process.env["DATABASE_URL"] = databaseUrl;
 const coeditPublicUrl =
   inheritedEnv["AUTHORING_COEDIT_PUBLIC_URL"] ?? `${backendApiOrigin}/authoring-coedit`;
+const coeditServicePort =
+  inheritedEnv["AUTHORING_COEDIT_PORT"] ?? process.env["AUTHORING_COEDIT_PORT"] ?? "1235";
+const coeditServiceUrl =
+  inheritedEnv["AUTHORING_COEDIT_SERVICE_URL"] ??
+  (inheritedEnv["AUTHORING_COEDIT_PORT"]
+    ? `http://127.0.0.1:${coeditServicePort}`
+    : (process.env["AUTHORING_COEDIT_SERVICE_URL"] ?? `http://127.0.0.1:${coeditServicePort}`));
 const coeditPublicWSScheme =
   inheritedEnv["AUTHORING_COEDIT_PUBLIC_WS_SCHEME"] ??
   (new URL(frontendUrl).protocol === "https:" ? "wss" : "ws");
@@ -88,6 +95,7 @@ const backendRuntimeEnv = {
   AUTHORING_COEDIT_PUBLIC_URL: coeditPublicUrl,
   AUTHORING_COEDIT_PUBLIC_WS_SCHEME: coeditPublicWSScheme,
   AUTHORING_COEDIT_ALLOWED_ORIGIN: inheritedEnv["AUTHORING_COEDIT_ALLOWED_ORIGIN"] ?? frontendUrl,
+  AUTHORING_COEDIT_SERVICE_URL: coeditServiceUrl,
   // The embedded service calls back into Go to hydrate authorized documents.
   // Local E2E often runs the API on a dynamically assigned port, so keep this
   // internal callback aligned with the same backend origin advertised to Vite.

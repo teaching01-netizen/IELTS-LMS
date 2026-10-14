@@ -23,7 +23,7 @@ func expectRepairPrefix(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE")).
 		WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(s.section_key, ''), ma.state")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_session_mode, 'practice') = 'classroom', COALESCE(s.section_key, ''), ma.state")).
 		WillReturnRows(satCompleteTopologyRows())
 	satNotAwaitingStaffRoute(mock)
 }

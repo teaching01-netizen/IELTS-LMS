@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { fireEvent, render as testingLibraryRender, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { ExamEntity } from "../../../../types/domain";
 import type {
@@ -12,6 +13,17 @@ import { SatDeliveryReleasePage } from "../SatDeliveryReleasePage";
 
 // The converter panel owns its own queries; ScoreConverterPanel.test covers it.
 vi.mock("../release/ScoreConverterPanel", () => ({ ScoreConverterPanel: () => null }));
+
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return testingLibraryRender(ui, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 const exam: ExamEntity = {
   id: "exam-sat-1",
