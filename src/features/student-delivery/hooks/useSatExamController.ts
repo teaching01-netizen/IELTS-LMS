@@ -121,6 +121,13 @@ const SAT_BREAK_END_PULL_WINDOW_MS = 2_000;
  */
 const SAT_CLOSE_BUDGET_MS = 20_000;
 const SAT_CLOSE_FALLBACK_READS = 8;
+/**
+ * How long the timeout overlay may wait for the server to report the expired
+ * module closed before it offers a retry and points the student to the
+ * proctor. Longer than the close budget plus the fallback reads (~45 s), so a
+ * close that is merely slow never shows it.
+ */
+const SAT_TIMEOUT_STALL_MS = 60_000;
 
 /**
  * The control-epoch fence is optional on the wire: with
@@ -1682,6 +1689,26 @@ export function useSatExamController({
     }
   }, [onTemporalBoundary, stateModule, stateModuleAttempt, now]);
 
+  // The overlay clears only when the server reports the module closed. If that
+  // never arrives (close refused, reconciler behind, connection lost), stop
+  // presenting an endless spinner: offer a retry and point to the proctor.
+  // Keyed by module attempt so a routed next module never inherits it.
+  const [timeoutStalledKey, setTimeoutStalledKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (!answerInteractionBlocked || activeModuleAttemptKey === null || timeoutStalledKey === activeModuleAttemptKey) return;
+    const key = activeModuleAttemptKey;
+    const timer = window.setTimeout(() => setTimeoutStalledKey(key), SAT_TIMEOUT_STALL_MS);
+    return () => window.clearTimeout(timer);
+  }, [activeModuleAttemptKey, answerInteractionBlocked, timeoutStalledKey]);
+  const timeoutCloseStalled = answerInteractionBlocked && activeModuleAttemptKey !== null && timeoutStalledKey === activeModuleAttemptKey;
+  const retryTimeoutClose = useCallback(() => {
+    if (activeModuleAttemptKey === null) return;
+    setTimeoutStalledKey(null);
+    // Re-run the same expiry path (close, or flush + recovery read) from the top.
+    timeoutTransitionKeyRef.current = null;
+    onTemporalBoundary("expiry", activeModuleAttemptKey);
+  }, [activeModuleAttemptKey, onTemporalBoundary]);
+
   // Phase 04 commit-first / reconciler-second: the poll commit dispatches
   // showDirections synchronously when it carries the finalized predicate;
   // this stays as the idempotent safety net for externally-driven data
@@ -1832,6 +1859,7 @@ export function useSatExamController({
     answerInteractionBlocked,
     timeoutTransitionPending,
     timeoutTransitionStarted,
+    timeoutCloseStalled,
     answersRecorded,
     // Exam-screen integrity hold: present once the student returns from a
     // visibility excursion, cleared only by acknowledging it.
@@ -1845,6 +1873,7 @@ export function useSatExamController({
       startPendingModule,
       startWithCode,
       retryFinalization,
+      retryTimeoutClose,
       takeOverDurabilityLease: persistence.takeOverLease,
       setAnswer,
       toggleReview,

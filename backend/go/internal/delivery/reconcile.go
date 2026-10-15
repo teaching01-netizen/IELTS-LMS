@@ -39,10 +39,8 @@ type reconcileRow struct {
 	accumulatedPausedSeconds int
 	extensionSeconds         int
 	completionReason         *string
-	// Personal-model entry fence. A confirmed offer whose first active frame
-	// was never acknowledged (entry_confirmed_at set, entry_entered_at NULL) is
-	// a module the candidate has never seen: it must stay rearmable instead of
-	// being expired by the timeout sweep (plan 2026-09-24, full-entry-time).
+	// Personal-model entry marks. Read for the deprecated offer path; they no
+	// longer fence expiry (see reconcilePersonalOrLegacyExpiredTx).
 	entryConfirmedAt *time.Time
 	entryEnteredAt   *time.Time
 }
@@ -589,7 +587,6 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
 			WHERE m.state IN ('active', 'review') AND m.paused_at IS NULL
 			  AND m.started_at IS NOT NULL AND m.started_at <= ?
-			  AND (m.entry_confirmed_at IS NULL OR m.entry_entered_at IS NOT NULL)
 			  AND DATE_ADD(m.started_at, INTERVAL (m.allocated_seconds + m.extension_seconds + m.accumulated_paused_seconds + IF(r.sat_handoff_mode = 'client_start', ?, 3)) SECOND) <= ?
 			  AND r.timing_model = 'sat_personal_v1'
 			  AND a.submitted_at IS NULL
@@ -761,23 +758,17 @@ func reconcileModuleExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeSt
 // reconcilePersonalOrLegacyExpiredTx is the per-module clock branch shared by
 // the legacy model and the attempt-owned personal SAT model.
 //
-// A personal offer that was confirmed but never painted is NOT expired: the
-// candidate has never seen the module, so the honest recovery is a rearm (the
-// client requests a new offer; the arm path allows it while entry_entered_at IS
-// NULL and no response was accepted), not a silent finalization of a clock the
-// candidate never watched. Once entry is acknowledged (entry_entered_at set —
-// either by markStageVisible or by the first accepted response) the module
-// expires on its own deadline plus the existing save-only grace, exactly like
-// every other model.
+// A started module expires on its own deadline plus the save-only grace whether
+// or not its first frame was acknowledged (entry_entered_at). A lost
+// markStageVisible must not leave the candidate's browser, whose clock has
+// already run out, waiting on a module the server never closes; a proctor
+// re-arm remains the recovery for a candidate who truly never saw it.
 func reconcilePersonalOrLegacyExpiredTx(runtimeStatus, timingModel string, mod *reconcileRow, asOf time.Time, closing bool) bool {
 	if runtimeStatus == "cancelled" || (runtimeStatus == "completed" && !closing) {
 		return true
 	}
 	if runtimeStatus == "completed" && mod.startedAt == nil {
 		return true
-	}
-	if examruntime.IsSatPersonal(timingModel) && mod.entryConfirmedAt != nil && mod.entryEnteredAt == nil {
-		return false
 	}
 	if closing && runtimeStatus == "completed" && moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf.Add(attempts.ModuleCloseWindow(timingModel))) > 0 {
 		return true // A proctor closed the room before this module's clock ended.

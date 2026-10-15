@@ -59,12 +59,18 @@ export function SatTimeoutOverlay({
   saveFailureKind,
   saveFailure,
   onRetrySave,
+  closeStalled = false,
+  onRetryClose,
 }: {
   saveFailureKind: "offline" | "retryable" | "terminal" | "expired" | "superseded" | "module_closed" | null;
   saveFailure: string | null;
   onRetrySave: () => void;
+  /** The server has not confirmed the module closed; a save failure still takes precedence. */
+  closeStalled?: boolean;
+  onRetryClose?: () => void;
 }) {
   const hasSaveFailure = saveFailureKind !== null;
+  const showCloseRetry = closeStalled && !hasSaveFailure && onRetryClose !== undefined;
   const note =
     saveFailureKind === "offline"
       ? SAT_COPY.timeout.offline
@@ -72,7 +78,9 @@ export function SatTimeoutOverlay({
         ? saveFailure || SAT_COPY.timeout.failed
         : saveFailureKind === "superseded"
           ? SAT_COPY.review.saveSuperseded
-          : SAT_COPY.timeout.recordingAnswers;
+          : showCloseRetry
+            ? SAT_COPY.timeout.stalled
+            : SAT_COPY.timeout.recordingAnswers;
   return (
     <div
       className="sat-ui fixed inset-0 z-[80] grid place-items-center bg-[var(--sat-background)]/90"
@@ -81,10 +89,12 @@ export function SatTimeoutOverlay({
       aria-atomic="true"
     >
       <div className="rounded-[8px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-7 py-5 text-center shadow-xl">
-        <div
-          className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-[var(--sat-divider-soft)] border-t-[var(--sat-text)] motion-reduce:hidden"
-          aria-hidden="true"
-        />
+        {showCloseRetry ? null : (
+          <div
+            className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-[var(--sat-divider-soft)] border-t-[var(--sat-text)] motion-reduce:hidden"
+            aria-hidden="true"
+          />
+        )}
         <p className="text-[14px] font-semibold text-[var(--sat-text)]">{SAT_COPY.timeout.title}</p>
         <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">{note}</p>
         {hasSaveFailure && saveFailureKind !== "superseded" && saveFailureKind !== "expired" ? (
@@ -94,6 +104,15 @@ export function SatTimeoutOverlay({
             className="sat-touch-target sat-pressable mt-4 rounded-full border border-[var(--sat-divider)] px-5 text-[14px] font-semibold text-[var(--sat-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
           >
             {SAT_COPY.review.retrySave}
+          </button>
+        ) : null}
+        {showCloseRetry ? (
+          <button
+            type="button"
+            onClick={onRetryClose}
+            className="sat-touch-target sat-pressable mt-4 rounded-full border border-[var(--sat-divider)] px-5 text-[14px] font-semibold text-[var(--sat-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+          >
+            {SAT_COPY.timeout.retryClose}
           </button>
         ) : null}
       </div>

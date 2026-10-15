@@ -11,11 +11,10 @@ import (
 )
 
 // SAT full-entry-time (plan 2026-09-24, task 3.4): the timeout sweep must never
-// expire a module the candidate was never shown. A personal offer that was never
-// confirmed (armed, started_at NULL) and one that was confirmed but whose first
-// active frame was never acknowledged (entry_confirmed_at set, entry_entered_at
-// NULL) both stay open so the client can request a fresh offer; only an ENTERED
-// module expires on its own deadline plus the existing save-only grace.
+// expire a module whose clock never started. A personal offer that was never
+// confirmed (armed, started_at NULL) stays open so the client can request a
+// fresh offer; a STARTED module expires on its own deadline plus the existing
+// save-only grace, whether or not its first frame was acknowledged.
 
 // personalReconcileHarness stages the reconcile preamble for a personal runtime
 // up to (not including) the open-module row.
@@ -83,46 +82,32 @@ func TestPersonalUnconfirmedOfferIsNotExpiredByTimeout(t *testing.T) {
 	}
 }
 
-func TestPersonalConfirmedButUnenteredOfferIsNotExpiredByTimeout(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := NewService(db, tx.NewRunner(db))
+func TestPersonalStartedModuleExpiresOnItsOwnDeadline(t *testing.T) {
 	started := time.Now().UTC().Add(-10 * time.Minute)
-	confirmed := started
-	personalReconcileHarness(mock, "live", 0)
-	// Confirmed entry (started_at = entry_starts_at, entry_confirmed_at set) but
-	// the first active frame was never acknowledged and no response exists: the
-	// candidate never saw this module, so it must stay rearmable.
-	personalOfferRow(mock, "active", started, confirmed, nil)
-	mock.ExpectCommit()
-
-	changed, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", time.Now().UTC())
-	if err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if changed {
-		t.Fatal("a confirmed-but-unentered personal offer must not finalize a module")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
+	for name, enteredAt := range map[string]any{
+		"entered": started,
+		// A lost markStageVisible leaves entry_entered_at NULL; the browser's
+		// clock has still run out, so the server must close the module.
+		"unacknowledged entry": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			expectPersonalModuleExpires(t, started, enteredAt)
+		})
 	}
 }
 
-func TestPersonalEnteredModuleExpiresOnItsOwnDeadline(t *testing.T) {
+func expectPersonalModuleExpires(t *testing.T, started time.Time, enteredAt any) {
+	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 	svc := NewService(db, tx.NewRunner(db))
-	started := time.Now().UTC().Add(-10 * time.Minute)
 	personalReconcileHarness(mock, "live", 0)
-	// Entered (entry_entered_at set) and past the authored 120s allotment: the
-	// module closes like any other per-module clock.
-	personalOfferRow(mock, "active", started, started, started)
+	// Past the authored 120s allotment: the module closes like any other
+	// per-module clock.
+	personalOfferRow(mock, "active", started, started, enteredAt)
 	// finalizeModuleTx: scoring rows (none), UPDATE 1 row, section lookup,
 	// next module none (last open -> arms completion).
 	mock.ExpectQuery("FROM assessment_exam_questions eq").
@@ -147,7 +132,7 @@ func TestPersonalEnteredModuleExpiresOnItsOwnDeadline(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if !changed {
-		t.Fatal("an entered, expired personal module must finalize")
+		t.Fatal("an expired personal module must finalize")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

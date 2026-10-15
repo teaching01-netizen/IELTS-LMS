@@ -107,7 +107,7 @@ func writeStudentEntry(w http.ResponseWriter, r *http.Request, app *App, identit
 		return
 	}
 	expiresAt, idleTimeoutAt := auth.SessionExpiry(app.Config, auth.RoleStudent, now)
-	setCreatedSessionCookies(w, app, auth.RoleStudent, sessionToken, csrfToken, expiresAt, idleTimeoutAt, now)
+	setCreatedSessionCookies(w, app, auth.RoleStudent, sessionToken, csrfToken, expiresAt, now)
 	out := map[string]any{
 		"user":      map[string]any{"id": identity.UserID, "email": identity.Email, "displayName": identity.DisplayName, "role": auth.RoleStudent, "state": "active"},
 		"csrfToken": csrfToken, "expiresAt": expiresAt, "idleTimeoutAt": idleTimeoutAt,

@@ -97,7 +97,7 @@ func writeCreatedSession(w http.ResponseWriter, r *http.Request, app *App, userI
 		httpx.WriteError(w, r, err)
 		return
 	}
-	setCreatedSessionCookies(w, app, role, sessionToken, csrfToken, expiresAt, idleTimeoutAt, now)
+	setCreatedSessionCookies(w, app, role, sessionToken, csrfToken, expiresAt, now)
 	httpx.WriteJSON(w, http.StatusOK, payload)
 }
 
@@ -239,18 +239,20 @@ func setSessionCookies(w http.ResponseWriter, app *App, sessionToken, csrfToken 
 	})
 }
 
-// setCreatedSessionCookies makes student sessions survive a browser restart,
-// while bounding both cookies by the server-side absolute and idle deadlines.
+// setCreatedSessionCookies makes student sessions survive a browser restart.
+// Both cookies live until the session's absolute deadline. The idle deadline
+// is deliberately not copied into the cookie: the server slides it forward on
+// every authenticated request but only issues cookies here, so an idle-bound
+// cookie expired in the browser one idle window after entry while the student
+// was still actively sitting the exam, logging the whole room out mid-test.
+// Idle expiry stays enforced server-side by the session lookup.
 // Staff cookie behavior remains session-scoped.
-func setCreatedSessionCookies(w http.ResponseWriter, app *App, role, sessionToken, csrfToken string, expiresAt, idleTimeoutAt, now time.Time) {
+func setCreatedSessionCookies(w http.ResponseWriter, app *App, role, sessionToken, csrfToken string, expiresAt, now time.Time) {
 	if role != auth.RoleStudent {
 		setSessionCookies(w, app, sessionToken, csrfToken)
 		return
 	}
 	deadline := expiresAt
-	if idleTimeoutAt.Before(deadline) {
-		deadline = idleTimeoutAt
-	}
 	maxAge := int(deadline.Sub(now).Seconds())
 	if maxAge <= 0 {
 		maxAge = -1
@@ -296,7 +298,7 @@ func sessionHandler(app *App) http.HandlerFunc {
 		}
 		if sess.Role == auth.RoleStudent {
 			if cookie, cookieErr := r.Cookie(app.Config.EffectiveSessionCookieName()); cookieErr == nil && cookie.Value != "" {
-				setCreatedSessionCookies(w, app, sess.Role, cookie.Value, sess.CSRFToken, sess.ExpiresAt, sess.IdleTimeoutAt, time.Now().UTC())
+				setCreatedSessionCookies(w, app, sess.Role, cookie.Value, sess.CSRFToken, sess.ExpiresAt, time.Now().UTC())
 			}
 		}
 		httpx.WriteJSON(w, http.StatusOK, payload)

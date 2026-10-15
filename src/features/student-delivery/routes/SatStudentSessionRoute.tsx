@@ -730,6 +730,8 @@ export function SatStudentSessionRoute({
             saveFailureKind={persistence.failureKind}
             saveFailure={persistence.failure}
             onRetrySave={() => void persistence.retryFailed()}
+            closeStalled={exam.timeoutCloseStalled}
+            onRetryClose={commands.retryTimeoutClose}
           />
         ) : null}
         <SatReviewPage
@@ -824,6 +826,8 @@ export function SatStudentSessionRoute({
           saveFailureKind={persistence.failureKind}
           saveFailure={persistence.failure}
           onRetrySave={() => void persistence.retryFailed()}
+          closeStalled={exam.timeoutCloseStalled}
+          onRetryClose={commands.retryTimeoutClose}
         />
       ) : null}
       {/* Integrity hold sits above every tool and dialog (blocking layer): a

@@ -496,6 +496,46 @@ describe("SAT cohort module clock", () => {
     }
   });
 
+  // The server never reports the expired module closed: the overlay must not
+  // spin forever. After the stall window it offers a retry, and the retry
+  // re-runs the expiry path (flush + recovery read) and re-arms the window.
+  it("marks a timeout the server never closes as stalled and retries it", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
+    const hook = renderWithTemporalRuntime(() =>
+      useSatExamController({
+        scheduleId: "schedule",
+        attemptId: "attempt-a",
+        candidateId: "candidate",
+        liveSocketConnected: true,
+      }),
+    );
+    await act(async () => {
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+    expect(hook.result.current.answerInteractionBlocked).toBe(true);
+    expect(hook.result.current.timeoutCloseStalled).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(hook.result.current.timeoutCloseStalled).toBe(true);
+
+    persistenceMock.flush.mockClear();
+    gatewayMocks.bootstrap.mockClear();
+    await act(async () => {
+      hook.result.current.commands.retryTimeoutClose();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    expect(hook.result.current.timeoutCloseStalled).toBe(false);
+    expect(persistenceMock.flush).toHaveBeenCalledTimes(1);
+    expect(gatewayMocks.bootstrap).toHaveBeenCalled();
+    hook.unmount();
+    vi.useRealTimers();
+  });
+
   // The memoized temporal model keeps a stable identity while authoritative
   // facts are unchanged: a parent re-render alone must not publish a new
   // context value and re-render every per-second temporal consumer.
