@@ -1,0 +1,74 @@
+$ lake build
+ℹ [5/6] Built SatFinishScore
+info: ./././proof/SatFinishScore.lean:2:0: SatFinishScore.init_safe {s : SatFinishScore.State} (h : SatFinishScore.Init s) : SatFinishScore.Invariant s
+info: ./././proof/SatFinishScore.lean:3:0: 'SatFinishScore.init_safe' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatFinishScore.lean:4:0: SatFinishScore.step_safe {s s' : SatFinishScore.State} (h : SatFinishScore.Invariant s)
+  (step : SatFinishScore.Step s s') : SatFinishScore.Invariant s'
+info: ./././proof/SatFinishScore.lean:5:0: 'SatFinishScore.step_safe' depends on axioms: [propext]
+info: ./././proof/SatFinishScore.lean:6:0: SatFinishScore.reachable_safe {s : SatFinishScore.State} (h : SatFinishScore.Reachable s) : SatFinishScore.Invariant s
+info: ./././proof/SatFinishScore.lean:7:0: 'SatFinishScore.reachable_safe' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatFinishScore.lean:8:0: SatFinishScore.response_after_commit_and_matches_bootstrap {s : SatFinishScore.State} (h : SatFinishScore.Reachable s)
+  (r : SatFinishScore.Response) (hm : r ∈ s.responses) :
+  r.ticket ∈ s.committedReads ∧ r.body = SatFinishScore.bootstrap r.ticket.report r.observed r.gate
+info: ./././proof/SatFinishScore.lean:9:0: 'SatFinishScore.response_after_commit_and_matches_bootstrap' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatFinishScore.lean:10:0: SatFinishScore.overlay_preserves_raw (r : SatFinishScore.Report) (o : SatFinishScore.Observation) :
+  (SatFinishScore.overlay r o).raw = r.raw
+info: ./././proof/SatFinishScore.lean:11:0: 'SatFinishScore.overlay_preserves_raw' depends on axioms: [propext]
+info: ./././proof/SatFinishScore.lean:12:0: SatFinishScore.overlay_preserves_release (r : SatFinishScore.Report) (o : SatFinishScore.Observation) :
+  (SatFinishScore.overlay r o).released = r.released
+info: ./././proof/SatFinishScore.lean:13:0: 'SatFinishScore.overlay_preserves_release' depends on axioms: [propext]
+info: ./././proof/SatFinishScore.lean:14:0: SatFinishScore.missing_raw_unchanged (r : SatFinishScore.Report) (o : SatFinishScore.Observation) (h : r.raw = none) :
+  SatFinishScore.overlay r o = r
+info: ./././proof/SatFinishScore.lean:15:0: 'SatFinishScore.missing_raw_unchanged' depends on axioms: [propext]
+info: ./././proof/SatFinishScore.lean:16:0: SatFinishScore.policy_failure_strips_conversion (r : SatFinishScore.Report) (raw : Nat) (h : r.raw = some raw) :
+  (SatFinishScore.overlay r SatFinishScore.Observation.failed).conversion = none
+info: ./././proof/SatFinishScore.lean:17:0: 'SatFinishScore.policy_failure_strips_conversion' depends on axioms: [propext]
+info: ./././proof/SatFinishScore.lean:18:0: SatFinishScore.overlay_idempotent (r : SatFinishScore.Report) (o : SatFinishScore.Observation) :
+  SatFinishScore.overlay (SatFinishScore.overlay r o) o = SatFinishScore.overlay r o
+info: ./././proof/SatFinishScore.lean:19:0: 'SatFinishScore.overlay_idempotent' depends on axioms: [propext]
+info: ./././proof/SatFinishScore.lean:20:0: SatFinishScore.no_snapshot_exposure (r : SatFinishScore.Report) (o : SatFinishScore.Observation)
+  (g : SatFinishScore.Gate) (out : SatFinishScore.Report) (h : SatFinishScore.finish r o g = some out) :
+  out.snapshot = none
+info: ./././proof/SatFinishScore.lean:21:0: 'SatFinishScore.no_snapshot_exposure' depends on axioms: [propext]
+info: ./././proof/SatFinishScore.lean:22:0: SatFinishScore.closed_gate_hides_report (r : SatFinishScore.Report) (o : SatFinishScore.Observation) :
+  SatFinishScore.finish r o SatFinishScore.Gate.closed = some (SatFinishScore.receipt (SatFinishScore.overlay r o))
+info: ./././proof/SatFinishScore.lean:23:0: 'SatFinishScore.closed_gate_hides_report' depends on axioms: [propext]
+info: ./././proof/SatFinishScore.lean:24:0: SatFinishScore.withheld_hides_report (r : SatFinishScore.Report) (o : SatFinishScore.Observation)
+  (g : SatFinishScore.Gate) (h : r.released = false) :
+  SatFinishScore.finish r o g = some (SatFinishScore.receipt (SatFinishScore.overlay r o))
+info: ./././proof/SatFinishScore.lean:25:0: 'SatFinishScore.withheld_hides_report' depends on axioms: [propext]
+info: ./././proof/SatFinishScore.lean:26:0: SatFinishScore.response_does_not_write (s : SatFinishScore.State) (actor : Nat) (t : SatFinishScore.Ticket)
+  (g : SatFinishScore.Gate) :
+  { stored := s.stored, ready := SatFinishScore.set s.ready actor none, committedReads := s.committedReads,
+        responses :=
+          { ticket := t, observed := s.policy, gate := g, body := SatFinishScore.finish t.report s.policy g } ::
+            s.responses,
+        policy := s.policy }.stored =
+    s.stored
+info: ./././proof/SatFinishScore.lean:27:0: 'SatFinishScore.response_does_not_write' does not depend on any axioms
+info: ./././proof/SatFinishScore.lean:28:0: SatFinishScore.old_finish_misses_score :
+  SatFinishScore.rawReport.conversion = none ∧
+    (SatFinishScore.overlay SatFinishScore.rawReport
+          (SatFinishScore.Observation.active fun x => some (SatFinishScore.converted 1))).conversion =
+      some (SatFinishScore.converted 1)
+info: ./././proof/SatFinishScore.lean:29:0: 'SatFinishScore.old_finish_misses_score' does not depend on any axioms
+info: ./././proof/SatFinishScore.lean:30:0: SatFinishScore.policy_change_can_change_display :
+  SatFinishScore.finish SatFinishScore.rawReport
+      (SatFinishScore.Observation.active fun x => some (SatFinishScore.converted 1)) SatFinishScore.Gate.open ≠
+    SatFinishScore.bootstrap SatFinishScore.rawReport
+      (SatFinishScore.Observation.active fun x => some (SatFinishScore.converted 2)) SatFinishScore.Gate.open
+info: ./././proof/SatFinishScore.lean:31:0: 'SatFinishScore.policy_change_can_change_display' does not depend on any axioms
+info: ./././proof/SatFinishScore.lean:32:0: SatFinishScore.disabled_old_endpoint_leaks :
+  SatFinishScore.rawReport.raw ≠ none ∧
+    (SatFinishScore.receipt (SatFinishScore.overlay SatFinishScore.rawReport SatFinishScore.Observation.absent)).raw =
+      none
+info: ./././proof/SatFinishScore.lean:33:0: 'SatFinishScore.disabled_old_endpoint_leaks' does not depend on any axioms
+info: ./././proof/SatFinishScore.lean:34:0: SatFinishScore.nonvacuous_response :
+  SatFinishScore.Reachable SatFinishScore.emitted ∧
+    ∃ out,
+      (SatFinishScore.emitted.responses.head?.bind fun x => x.body) = some out ∧
+        out.conversion = some (SatFinishScore.converted 1)
+info: ./././proof/SatFinishScore.lean:35:0: 'SatFinishScore.nonvacuous_response' depends on axioms: [propext]
+Build completed successfully.
+
+exit=0

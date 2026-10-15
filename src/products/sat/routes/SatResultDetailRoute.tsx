@@ -190,7 +190,7 @@ export function SatResultDetailContent({ resultId, backTarget = '/sat/results', 
       {isScored && !scoreView?.methodology.converterVersion ? <p className="mt-1 text-[12px] leading-4 text-[var(--sat-staff-text-secondary,#515154)]">Raw results · not an official SAT score</p> : null}
       {isScored && explanation ? <p className="mt-2 text-[12px] leading-4 text-[var(--sat-staff-text-secondary,#515154)]">{explanation} <Link className="font-semibold text-[var(--sat-staff-accent,#2563eb)] underline underline-offset-2" to="/sat/score-conversion">Score Conversion</Link></p> : null}
       {!isScored ? <p className="mt-1 text-[12px] leading-4 text-[var(--sat-staff-text-secondary,#515154)]">{isInvalidated ? 'The attempt ended without a score.' : 'Saved answers are available for review.'}</p> : null}
-      <SatAnsweredExamDownload attemptId={summary.attemptId} />
+      <SatAnsweredExamDownload attemptId={summary.attemptId} view={isScored ? scoreView : null} />
       {query.isFetching && !query.isLoading ? <p role="status" className="mt-1 text-[12px] leading-4 text-[var(--sat-staff-text-tertiary,#6e6e73)]">Updating…</p> : null}
     </div>
   );

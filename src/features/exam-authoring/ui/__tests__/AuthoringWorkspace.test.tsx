@@ -251,6 +251,18 @@ function openOutline() {
 describe("AuthoringWorkspace (spine-only)", () => {
   beforeEach(() => { setupDefaults(); harness.createRoomFlow.nextInstance = 0; });
 
+  it("hides excluded sections from the builder and validates only the exam scope", () => {
+    const shell = makeShell();
+    shell.sections.push({ ...shell.sections[0]!, id: "sec-math", sectionKey: "math", title: "Math", modules: [] });
+    harness.shellResult.data = { state: "READY", shell };
+    openOutline();
+    const client = renderWorkspaceClient();
+    render(<QueryClientProvider client={client}><MemoryRouter><AuthoringWorkspace examId="exam-1" examTitle="Reading only" sectionScope="reading-writing" /></MemoryRouter></QueryClientProvider>);
+    expect(harness.useValidation).toHaveBeenLastCalledWith("exam-1", "reading-writing");
+    expect(screen.queryByText("Math")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Reading & Writing").length).toBeGreaterThan(0);
+  });
+
   it("keeps the open create-room flow mounted while the draft shell is sealed away", async () => {
     harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
     const queryClient = renderWorkspaceClient();

@@ -693,6 +693,7 @@ type examPin struct {
 	orgID        sql.NullString
 	versionID    string
 	publishScope examdomain.SATPublishScope
+	sectionScope examdomain.SATPublishScope
 }
 
 // pinExamVersionTx mirrors resolve_published_version_tx(): it locks the exam
@@ -703,8 +704,8 @@ func pinExamVersionTx(ctx context.Context, q tx.Tx, examID string, requested *st
 	var pin examPin
 	var current sql.NullString
 	err := q.QueryRowContext(ctx,
-		"SELECT title, provider_key, organization_id, current_published_version_id FROM exam_entities WHERE id = ? FOR UPDATE",
-		examID).Scan(&pin.title, &pin.providerKey, &pin.orgID, &current)
+		"SELECT title, provider_key, organization_id, current_published_version_id, sat_section_scope FROM exam_entities WHERE id = ? FOR UPDATE",
+		examID).Scan(&pin.title, &pin.providerKey, &pin.orgID, &current, &pin.sectionScope)
 	if err == sql.ErrNoRows {
 		return pin, notFound("Exam not found.")
 	}
@@ -739,7 +740,13 @@ func pinExamVersionTx(ctx context.Context, q tx.Tx, examID string, requested *st
 
 // validateEffectiveSections prevents a SAT link from delivering no sections
 // after its section choice intersects the immutable published release.
-func validateEffectiveSections(providerKey string, publishScope examdomain.SATPublishScope, enabledSections []string) error {
+func validateEffectiveSections(providerKey string, publishScope examdomain.SATPublishScope, enabledSections []string, examScope examdomain.SATPublishScope) error {
+	if providerKey == "sat" && examScope != "" && examScope != examdomain.SATPublishScopeFull {
+		if len(enabledSections) != 1 || enabledSections[0] != string(examScope) {
+			return apperrors.New(apperrors.CodeExamScopeUnavailable, "The requested room includes sections outside this exam's section scope.")
+		}
+	}
+
 	if !hasEffectiveSections(providerKey, publishScope, enabledSections) {
 		return badRequest("Student Link scope must include at least one section enabled in its published version.")
 	}
@@ -787,6 +794,7 @@ type linkLock struct {
 	scheduleID   string
 	providerKey  string
 	publishScope examdomain.SATPublishScope
+	sectionScope examdomain.SATPublishScope
 	lifecycle    LifecycleState
 	revision     int32
 	// enabledSections is the stored scope (nil = all sections).
@@ -809,12 +817,12 @@ func lockLinkTx(ctx context.Context, q tx.Tx, linkID string) (linkLock, error) {
 		"SELECT assessment_access_links.schedule_id, assessment_access_links.lifecycle_state, assessment_access_links.revision, assessment_access_links.enabled_sections,"+
 			" (EXISTS(SELECT 1 FROM schedule_registrations r WHERE r.schedule_id = assessment_access_links.schedule_id LIMIT 1)"+
 			" OR EXISTS(SELECT 1 FROM student_attempts a WHERE a.schedule_id = assessment_access_links.schedule_id LIMIT 1)) AS has_participation"+
-			" , exam_entities.provider_key, exam_versions.sat_publish_scope"+
+			" , exam_entities.provider_key, exam_versions.sat_publish_scope, exam_entities.sat_section_scope"+
 			" FROM assessment_access_links"+
 			" JOIN exam_entities ON exam_entities.id = assessment_access_links.exam_id"+
 			" JOIN exam_versions ON exam_versions.id = assessment_access_links.published_version_id"+
 			" WHERE assessment_access_links.id = ? FOR UPDATE",
-		linkID).Scan(&lock.scheduleID, &lifecycle, &lock.revision, &enabledSections, &hasParticipation, &lock.providerKey, &publishScope)
+		linkID).Scan(&lock.scheduleID, &lifecycle, &lock.revision, &enabledSections, &hasParticipation, &lock.providerKey, &publishScope, &lock.sectionScope)
 	if err == sql.ErrNoRows {
 		return lock, notFound("Access link was not found.")
 	}
@@ -1120,7 +1128,7 @@ func (p *PreparedCreate) InsertWithScheduleTx(ctx context.Context, q tx.Tx) (lin
 	if err != nil {
 		return "", "", err
 	}
-	if err := validateEffectiveSections(pin.providerKey, pin.publishScope, p.enabledSections); err != nil {
+	if err := validateEffectiveSections(pin.providerKey, pin.publishScope, p.enabledSections, pin.sectionScope); err != nil {
 		return "", "", err
 	}
 	if err := insertBackingScheduleTx(ctx, q, scheduleID, p.examID, pin, p.cohort, p.start, p.end, p.createdBy, p.satSession, p.enabledSections); err != nil {
@@ -1170,7 +1178,7 @@ func (s *Service) Update(ctx context.Context, linkID string, req UpdateRequest) 
 				enabledSections = requested
 			}
 		}
-		if err := validateEffectiveSections(current.providerKey, current.publishScope, enabledSections); err != nil {
+		if err := validateEffectiveSections(current.providerKey, current.publishScope, enabledSections, current.sectionScope); err != nil {
 			return err
 		}
 		var memberInputs []MemberInput
@@ -1422,7 +1430,7 @@ func (s *Service) Duplicate(ctx context.Context, linkID, createdBy string, req D
 		if err != nil {
 			return err
 		}
-		if err := validateEffectiveSections(pin.providerKey, pin.publishScope, parseEnabledSections(source.enabledSections)); err != nil {
+		if err := validateEffectiveSections(pin.providerKey, pin.publishScope, parseEnabledSections(source.enabledSections), pin.sectionScope); err != nil {
 			return err
 		}
 		cohort := normalizedName

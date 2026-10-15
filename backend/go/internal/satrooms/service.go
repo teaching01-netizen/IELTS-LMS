@@ -130,6 +130,23 @@ type examState struct {
 	draftID            sql.NullString
 	publishedID        sql.NullString
 	revision           int
+	sectionScope       string
+}
+
+func (st examState) checkScope(need exams.SATPublishScope) error {
+	if covers(st.sectionScope, need) {
+		return nil
+	}
+	label := "the configured sections"
+	switch st.sectionScope {
+	case string(exams.SATPublishScopeReadingWriting):
+		label = "Reading & Writing"
+	case string(exams.SATPublishScopeMath):
+		label = "Math"
+	}
+	e := apperrors.New(apperrors.CodeExamScopeUnavailable, "This exam includes only "+label+". Choose a room with those sections.")
+	e.Details = map[string]any{"examScope": st.sectionScope, "requestedScope": string(need), "currentExamRevision": st.revision}
+	return e
 }
 
 type draftState struct {
@@ -151,11 +168,11 @@ type queryRower interface {
 
 func loadExam(ctx context.Context, q queryRower, examID string, lock bool) (examState, error) {
 	var st examState
-	query := "SELECT provider_key, exam_type, current_draft_version_id, current_published_version_id, revision FROM exam_entities WHERE id = ?"
+	query := "SELECT provider_key, exam_type, current_draft_version_id, current_published_version_id, revision, sat_section_scope FROM exam_entities WHERE id = ?"
 	if lock {
 		query += " FOR UPDATE"
 	}
-	err := q.QueryRowContext(ctx, query, examID).Scan(&st.provider, &st.examType, &st.draftID, &st.publishedID, &st.revision)
+	err := q.QueryRowContext(ctx, query, examID).Scan(&st.provider, &st.examType, &st.draftID, &st.publishedID, &st.revision, &st.sectionScope)
 	if err == sql.ErrNoRows {
 		return st, apperrors.New(apperrors.CodeNotFound, "Exam not found.")
 	}
@@ -220,6 +237,9 @@ func (s *Service) NeedsSeal(ctx context.Context, examID string, sections []strin
 func (s *Service) sealNeeded(ctx context.Context, examID string, need exams.SATPublishScope) (bool, error) {
 	st, err := loadExam(ctx, s.db, examID, false)
 	if err != nil {
+		return false, err
+	}
+	if err := st.checkScope(need); err != nil {
 		return false, err
 	}
 	draft, err := loadDraft(ctx, s.db, examID, st, false)
@@ -345,6 +365,9 @@ func (s *Service) CreateRoom(ctx context.Context, actorID, examID string, req Re
 		}
 		if exams.EffectiveProviderKey(st.provider, st.examType) != exams.ProviderSAT {
 			return apperrors.New(apperrors.CodeUnsupportedProvider, "One-action rooms are available for SAT exams only.")
+		}
+		if err := st.checkScope(need); err != nil {
+			return err
 		}
 		if req.ExpectedExamRevision != nil && *req.ExpectedExamRevision != st.revision {
 			return revisionChanged("The exam changed after this room was prepared. Review the latest exam and try again.", st.revision)

@@ -1,6 +1,6 @@
 // Package sat owns the SAT completion compatibility and recovery hooks for the
 // Go backend. Completion requires durable terminal modules and then seals the
-// attempt; score conversion is intentionally outside this path.
+// attempt; estimated score conversion runs after the terminal write commits.
 package sat
 
 import (
@@ -293,8 +293,8 @@ type moduleRow struct {
 }
 
 // CompleteAssessment validates the SAT module topology and idempotently seals
-// the attempt. The terminalization service materializes the lightweight SAT
-// pending result with no scaled score.
+// the attempt. The terminalization service materializes the result, then released
+// classroom scores are overlaid with the active global conversion policy.
 func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (*AssessmentResult, error) {
 	if strings.TrimSpace(req.AttemptID) == "" || strings.TrimSpace(req.ScheduleID) == "" {
 		return nil, apperrors.New(apperrors.CodeBadRequest, "Attempt and schedule ids are required.")
@@ -327,6 +327,11 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 	}
 	if err != nil {
 		return nil, err
+	}
+	if out != nil {
+		// Same read-time estimate as LoadResultForAttempt, so the finish screen
+		// matches what a refresh shows.
+		satscoring.Overlay(ctx, s.db, out.ScorePayload)
 	}
 	return out, nil
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAccessDistributionOverview, useAccessLinkMembers } from '../../../features/exam-authoring/api/assessmentAccessLinkQueries';
 import type { AccessLinkMemberInput, AssessmentAccessLink } from '../../../features/exam-authoring/contracts/accessLinks';
-import type { AssessmentValidationIssue } from '../../../features/exam-authoring/contracts/assessment';
+import type { AssessmentValidationIssue, SatPublishScope } from '../../../features/exam-authoring/contracts/assessment';
 import { SatCreateRoomFlow } from '../../../features/exam-authoring/ui/publish/SatCreateRoomFlow';
 import { SatFormDialog } from '../ui/ConfirmDialog';
 import { SatButton, SatField } from '../ui/SatPage';
@@ -9,6 +9,7 @@ import { SatButton, SatField } from '../ui/SatPage';
 export interface SatNewSessionExam {
   id: string;
   title: string;
+  satSectionScope?: SatPublishScope | undefined;
 }
 
 const EMPTY_MEMBERS: AccessLinkMemberInput[] = [];
@@ -92,6 +93,7 @@ export function SatNewSessionFlow({
       key={prefill?.id ?? 'new-room'}
       examId={chosenId}
       examTitle={chosen.title}
+      sectionScope={chosen.satSectionScope ?? "full"}
       examPicker={examPicker}
       prefill={prefill}
       reuseOptions={overview.data?.links ?? []}

@@ -191,7 +191,8 @@ type Exam struct {
 	CanDelete                     bool             `json:"canDelete"`
 	// SatScoreReportEnabled releases the SAT score report and answered-exam
 	// download on completion; off, the student only sees "SAT complete".
-	SatScoreReportEnabled bool `json:"satScoreReportEnabled"`
+	SatScoreReportEnabled bool            `json:"satScoreReportEnabled"`
+	SatSectionScope       SATPublishScope `json:"satSectionScope"`
 }
 
 // Version is the exam_versions row projection used by ListVersions.
@@ -324,7 +325,7 @@ func claimExamOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, fing
 	return storedResult, false, nil
 }
 
-const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), (SELECT v.version_number FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), sat_score_report_enabled"
+const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), (SELECT v.version_number FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), sat_score_report_enabled, sat_section_scope"
 
 func scanExam(row interface {
 	Scan(dest ...any) error
@@ -332,7 +333,7 @@ func scanExam(row interface {
 	var e Exam
 	var providerExamType, orgID, draftID, pubID, publishedScope sql.NullString
 	var publishedVersionNumber sql.NullInt64
-	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope, &publishedVersionNumber, &e.SatScoreReportEnabled); err != nil {
+	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope, &publishedVersionNumber, &e.SatScoreReportEnabled, &e.SatSectionScope); err != nil {
 		return Exam{}, err
 	}
 	if providerExamType.Valid {
@@ -716,6 +717,18 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Exam, error) {
 			if err != nil {
 				return err
 			}
+			sectionScope := SATPublishScopeFull
+			if req.SATConfig != nil {
+				sectionScope, err = satpublish.NormalizeScope(req.SATConfig.SectionScope)
+				if err != nil {
+					return validationError(err.Error())
+				}
+			}
+			if sectionScope != SATPublishScopeFull {
+				if _, err := q.ExecContext(ctx, "UPDATE exam_entities SET sat_section_scope = ? WHERE id = ?", sectionScope, id); err != nil {
+					return err
+				}
+			}
 			if req.SATConfig != nil && req.SATConfig.ShowClassroomScoreReport != nil {
 				if _, err := q.ExecContext(ctx, "UPDATE exam_entities SET sat_score_report_enabled = ? WHERE id = ?", *req.SATConfig.ShowClassroomScoreReport, id); err != nil {
 					return err
@@ -1051,12 +1064,16 @@ func (s *Service) publishDraftTx(ctx context.Context, q tx.Tx, actorID, examID s
 	var content, config string
 	var draftRev int
 	var providerKey, examType string
+	var examSectionScope SATPublishScope
 	var organizationID sql.NullString
-	if err := q.QueryRowContext(ctx, "SELECT v.id, v.version_number, CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), v.revision, e.provider_key, e.exam_type, e.organization_id FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND v.id = (SELECT current_draft_version_id FROM exam_entities WHERE id = ?) FOR UPDATE", examID, examID).Scan(&draftID, &versionNumber, &content, &config, &draftRev, &providerKey, &examType, &organizationID); err != nil {
+	if err := q.QueryRowContext(ctx, "SELECT v.id, v.version_number, CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), v.revision, e.provider_key, e.exam_type, e.organization_id, e.sat_section_scope FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND v.id = (SELECT current_draft_version_id FROM exam_entities WHERE id = ?) FOR UPDATE", examID, examID).Scan(&draftID, &versionNumber, &content, &config, &draftRev, &providerKey, &examType, &organizationID, &examSectionScope); err != nil {
 		if err == sql.ErrNoRows {
 			return Version{}, notFoundError("Draft version not found.")
 		}
 		return Version{}, err
+	}
+	if EffectiveProviderKey(providerKey, examType) == ProviderSAT && examSectionScope != "" && examSectionScope != SATPublishScopeFull && examSectionScope != requestedScope {
+		return Version{}, apperrors.New(apperrors.CodeExamScopeUnavailable, "The requested release includes sections outside this exam's section scope.")
 	}
 	if req.ExpectedDraftVersionID != nil && *req.ExpectedDraftVersionID != draftID {
 		return Version{}, conflictError("Draft changed while publish checks were running. Run the checks again.")

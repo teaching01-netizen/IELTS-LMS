@@ -51,6 +51,9 @@ func TestSchemaGuardListSizes(t *testing.T) {
 		}
 		seen[k] = true
 	}
+	if !seen["exam_entities.sat_section_scope"] {
+		t.Fatal("SAT exam section scope must be required before serving")
+	}
 }
 
 func allPresentColumns() *sqlmock.Rows {

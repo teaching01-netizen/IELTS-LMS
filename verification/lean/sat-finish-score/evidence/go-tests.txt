@@ -1,0 +1,355 @@
+$ TEST_MYSQL_DSN=<isolated schema; parseTime=true; loc=UTC> go test ./internal/sat/... ./internal/satscoring/... ./internal/delivery/... ./integration/... ./cmd/api/...
+ok  	example.com/ielts-proctoring/internal/sat	(cached)
+ok  	example.com/ielts-proctoring/internal/satscoring	61.519s
+ok  	example.com/ielts-proctoring/internal/delivery	(cached)
+ok  	example.com/ielts-proctoring/integration	130.324s
+2026/10/15 14:51:43 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"928fb655-51ee-497d-a409-5dc2f6084d87","route":"GET /session","status":401}
+2026/10/15 14:51:43 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"8ff366e9-8ce4-4f0d-bdfa-06666c20b9e9","route":"GET /session","status":401}
+2026/10/15 14:51:50 api: authoring ws denied request_id= user_id=user-alice role=student exam_id=exam-1 reason=permission_denied
+2026/10/15 14:51:50 api: authoring ws denied request_id= user_id=u-student role=student exam_id=exam-1 reason=permission_denied
+2026/10/15 14:51:50 api: authoring ws denied request_id= user_id=u-grader role=grader exam_id=exam-1 reason=permission_denied
+2026/10/15 14:51:50 api: authoring ws denied request_id= user_id=u-admin role=admin exam_id=exam-unknown reason=entity_deleted
+2026/10/15 14:51:51 api: authoring ws barrier unavailable user_id=u-admin exam_id=exam-1 err=bus unavailable
+2026/10/15 14:51:51 api: authoring ws draft rebind required user_id=u-admin exam_id=exam-1 draft_id=draft-7 kind=draft.replaced
+2026/10/15 14:51:51 {"level":"warn","msg":"authz deny: role not admitted","route":"GET /api/v1/assessment-authoring/exams/{examID}/shell","role":"student"}
+2026/10/15 14:51:51 {"actor":"anonymous","latency_ms":3,"level":"info","method":"GET","msg":"request","request_id":"a3b0ec58-7d99-48a5-9a6d-8d0a689890ff","route":"unknown","status":403}
+2026/10/15 14:51:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"f81ec5ba-985b-4e11-ae8f-eebcdc020fa3","route":"unknown","status":401}
+2026/10/15 14:51:51 {"level":"error","msg":"authoring draft pointer is dangling","examId":"exam-1","requestId":"","err":"DRAFT_INTEGRITY_VIOLATION: dangling"}
+2026/10/15 14:51:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"f8b355c1-f729-47a0-ad5a-34c97696c0cb","route":"GET /session","status":401}
+2026/10/15 14:51:51 {"level":"warn","msg":"authz deny: role not admitted","route":"GET /","role":"student"}
+2026/10/15 14:51:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"8735e49d-b894-4081-9d30-e8e8c605e291","route":"GET /","status":403}
+2026/10/15 14:51:51 {"level":"warn","msg":"authz deny: unknown route","route":"GET /no-such-table-key"}
+2026/10/15 14:51:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"cdd10b62-6fcd-4e6b-b470-49a74e2bcd82","route":"POST /student/entry","status":400}
+2026/10/15 14:51:51 {"actor":"anonymous","latency_ms":1,"level":"info","method":"POST","msg":"request","request_id":"06d09c12-a020-4646-ba91-23ef1785c03b","route":"POST /schedules/{scheduleID}/bootstrap","status":401}
+2026/10/15 14:51:51 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:51:51 {"actor":"anonymous","latency_ms":1,"level":"info","method":"GET","msg":"request","request_id":"3a7bf79d-530e-49d2-af14-9e9817da8c54","route":"GET /metrics","status":403}
+2026/10/15 14:51:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"8afe3554-3c43-45d5-88d9-504320403cfa","route":"unknown","status":404}
+2026/10/15 14:51:51 background: state=active
+2026/10/15 14:51:51 background: state=draining
+2026/10/15 14:51:51 background: state=idle
+2026/10/15 14:51:51 background: state=active
+2026/10/15 14:51:51 background: state=active
+2026/10/15 14:51:51 background: state=draining
+2026/10/15 14:51:51 background: state=idle
+2026/10/15 14:51:51 background: state=active
+2026/10/15 14:51:51 background: state=draining
+2026/10/15 14:51:51 background: state=idle
+2026/10/15 14:51:54 {"level":"error","msg":"grading projection corrupt","column":"answers","submissionId":"sub-1","requestId":""}
+2026/10/15 14:51:56 {"actor":"anonymous","latency_ms":2,"level":"info","method":"POST","msg":"request","request_id":"74b403df-4dd3-47eb-a8f4-e4ba7f67084e","route":"POST /student/entry","status":422}
+2026/10/15 14:51:56 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"e5f62b5e-a8f2-4d0e-8947-1fa97616820f","route":"GET /","status":200}
+2026/10/15 14:51:56 api: authoring ws denied request_id= user_id=u1 role=student exam_id=exam-1 reason=permission_denied
+2026/10/15 14:51:56 api: authoring ws denied request_id= user_id=u1 role=proctor exam_id=exam-1 reason=permission_denied
+2026/10/15 14:51:56 api: authoring ws denied request_id= user_id=u1 role=grader exam_id=exam-1 reason=permission_denied
+2026/10/15 14:51:56 api: authoring ws denied request_id= user_id=u1 role=admin exam_id=exam-1 reason=subscription_forbidden
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"f0be800d-0c5a-4a70-9813-12c186c99733","route":"GET /healthz","status":200}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"dc2731b2-6a7f-4ddb-b71b-dcfeff81c987","route":"POST /student/entry","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"3382d1ea-1440-4173-995d-ee3eb8d92a8d","route":"POST /schedules/{scheduleID}/bootstrap","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"bd047c70-c38c-4f04-beea-68a46856b6e7","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"1083acc3-fffe-4f36-8084-e2fc2b4d2979","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"02041d92-cbdf-4e35-9a3e-44bae1c20bea","route":"GET /ws/live","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"8f9d0cb9-f99f-448c-ad34-2800bd52f562","route":"POST /{id}/runtime/commands","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"0089e3cd-f834-4512-a5c4-71bfc8566315","route":"POST /login","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"4844d663-9529-4b95-9887-9cd047f792f7","route":"GET /sessions/{scheduleID}","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"d78a55c1-1c86-42af-a67b-65d9439144d5","route":"POST /sessions/{scheduleID}/presence","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"985c83ae-4fc6-4f96-97a8-c31b8cfda657","route":"POST /sessions/{scheduleID}/attempts/{attemptID}/warn","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"91f4dfb9-66e4-446e-8252-ee8157714271","route":"POST /{id}/runtime/commands","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"324b7bb7-cea8-4d55-a257-2a599681ac08","route":"GET /{id}/runtime","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"8f4f41e7-abd8-4fdd-9970-e0b6e59701d2","route":"GET /sessions","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"cfa0ef1f-04a5-4744-94d7-c2092f6e144d","route":"POST /student/entry","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"7c4c0ff8-0196-49d6-84dd-1bfb305910c2","route":"POST /{scheduleID}/bootstrap","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"54912bae-6072-4978-a8a7-807f13dc7e72","route":"POST /{scheduleID}/precheck","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"137adb9b-4993-4245-af1e-f2470ecdf932","route":"GET /{scheduleID}","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"8776fe0e-4737-49fe-bddb-346b2f25fbc9","route":"POST /{scheduleID}/heartbeat","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"f78229f2-314c-4679-8057-5240538bfd95","route":"POST /{scheduleID}/mutations:batch","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"95caed99-260c-4623-8949-e2fd9ee5f92d","route":"POST /{scheduleID}/submit","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"c5e8fd15-e6a3-4525-866c-f2b058756f99","route":"POST /schedules/{scheduleID}/bootstrap","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"10e34168-00b9-4a85-9ed5-f394735c5bb8","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"4912bf14-55a1-47a5-a09c-7aa2c49bc75b","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"587e365e-be76-478f-94be-cc8b9256e0d1","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"b08fb7fd-fde8-49ad-b8ac-c079b867e38f","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":2,"level":"info","method":"POST","msg":"request","request_id":"5328fd1d-39bf-40b3-bbad-f272b1f12adf","route":"POST /student/entry","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"77f2272d-e938-497e-bccc-1eeeb176ecf5","route":"POST /student/entry","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"94e7cadb-5bbf-4a96-ad8f-0918db2f9080","route":"POST /student/entry","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"10d4752e-17b2-4b7b-8bb5-5137e00541ad","route":"POST /student/entry","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"e268812d-2e2c-48b2-b23f-dda353658cd4","route":"POST /uploads","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"275943da-d364-4758-bbc3-bbe4f00b5f3e","route":"POST /import-url","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PUT","msg":"request","request_id":"afc8ff73-34c7-4c26-9aa2-407094137699","route":"PUT /uploads/{assetID}","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"7553568f-6b80-460f-87df-ad6489b91806","route":"POST /uploads/{assetID}/complete","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"f5252a5e-05b6-4edb-961c-185b53febb06","route":"unknown","status":405}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"df117198-67d1-4e7b-a29b-0f11019ca4b2","route":"unknown","status":405}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"8a6842cf-5092-4d15-a3cb-b104848a861e","route":"unknown","status":405}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"b1b15a62-2aed-4f07-a097-d8ea56005315","route":"unknown","status":404}
+2026/10/15 14:51:57 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"6cd49854-47ba-42b3-8c64-b3067acc6445","route":"GET /metrics","status":403}
+2026/10/15 14:51:57 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"1ce5647e-4ebb-46b8-9cfe-2340862edd8b","route":"GET /metrics","status":403}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"c589351e-e29b-47a2-8a94-42aba323e1bb","route":"GET /metrics","status":200}
+2026/10/15 14:51:57 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":2,"level":"info","method":"GET","msg":"request","request_id":"35cfcaab-4fe7-4994-bd71-746b9819112b","route":"GET /metrics","status":403}
+2026/10/15 14:51:57 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"edea2953-82cf-4fc4-a4f7-806458e20e21","route":"GET /metrics","status":403}
+2026/10/15 14:51:57 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"bea6c267-5d30-4126-97f9-22398829b8ed","route":"GET /metrics","status":403}
+2026/10/15 14:51:57 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"15d335cf-e989-4cb9-a59f-9c5d14288793","route":"GET /metrics","status":403}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"d3cc195b-058e-4106-a610-aeb0e3c6ec1a","route":"GET /metrics","status":200}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"a657e7ab-266a-49e5-9d64-412cf29e8fc1","route":"GET /session","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"order-probe-1","route":"GET /session","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"4309cf2f-5106-4935-91ed-b336d651a770","route":"GET /sessions","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"907d997e-f1c8-4985-b880-148c188a8c1c","route":"GET /sessions","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"ce680cb5-ddac-4c48-b840-ec5a0325ed53","route":"GET /sessions/{scheduleID}/roster","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"648841c0-e3f8-4810-a14a-9c037469c2c2","route":"GET /sessions/{scheduleID}","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"0023244f-ff00-4c09-ac00-0d8d02675c40","route":"GET /submissions/{submissionID}/targets/{targetID}","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"13b02c74-3960-4bc8-aeb8-0fc23565e464","route":"GET /submissions/{submissionID}/targets/{targetID}","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"26f5ca2c-8c5a-4b06-9ec4-3d89e1290d2e","route":"GET /passages","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"DELETE","msg":"request","request_id":"c47ec321-f98f-4714-a018-175dfbcdce94","route":"DELETE /passages/{id}","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"7e5ccdaa-1070-48f5-8d7a-e07fa423c7a9","route":"GET /sessions/{sessionID}","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"DELETE","msg":"request","request_id":"118c77a9-0e48-4c93-80d3-7c4124089f76","route":"DELETE /questions/{id}","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"7bf959b6-2b13-41d9-bc7e-f572161ce58d","route":"GET /session","status":401}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"backstop","key_class":"ip","route":"unknown","method":"GET","retry_after":59}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"writes","key_class":"ip","route":"unknown","method":"POST","retry_after":1}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"writes","key_class":"ip","route":"unknown","method":"POST","retry_after":59}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"anon-auth","key_class":"ip","route":"unknown","method":"POST","retry_after":59}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"anon-auth","key_class":"ip","route":"unknown","method":"POST","retry_after":59}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"05d1e86b-cca1-4de8-86cd-5bfa5a1ce8a3","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"af7838b3-64ce-481a-9d70-8427f2e8a430","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"8851558b-af48-4d8e-adba-20d8d2e5facb","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"986c9748-c34a-4ad5-b98f-c2b5d13ec567","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"03b27ca0-99b8-4829-87ec-0b1506c13d1b","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"b1ca7439-a03e-4173-b29a-d603814055dd","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"77ed57b3-1aef-4195-9480-a04b5974bb59","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"writes","key_class":"attempt","route":"unknown","method":"PATCH","retry_after":29}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"23636d23-d599-4acb-9592-ba255b5ef723","route":"unknown","status":429}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"740d3fc1-5e2d-4aed-899b-32c2d087a9a7","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"22b10777-51c6-413a-8132-813d202a5b1c","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"e40f4e4a-8f5b-46ce-8948-d12125192368","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"1170510f-32c1-47af-97f8-6ba20d1dc4fe","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"ecadd6df-d926-47ab-bfff-ac394d8c2c24","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"a32750e5-fa3e-4d9c-ab4a-871581136ffc","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"4f2a6478-ef0a-4368-adc1-6bfb6d1438a6","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"54c3ce45-da7e-4cf2-8002-a9937d00e875","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"5b7e9375-49e0-4810-a605-10a7bfd69619","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"ec42d0c8-917d-4f76-abb8-8569e8eb20f4","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"01bd5d4a-ffad-45fd-98b9-430c64804dee","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"fc7f90a0-fe08-407d-8814-ed1689566d73","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"writes","key_class":"attempt","route":"unknown","method":"PATCH","retry_after":29}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"a2c6e633-14ad-4dad-b656-842f1ebc9ba4","route":"unknown","status":429}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"c8712843-396e-4713-b56f-0b742123e122","route":"GET /public/access-links/{linkID}","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"138d900d-1910-4a5d-b0b5-2be98e5fe713","route":"POST /public/access-links/{linkID}/resolve-entry","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"f798184a-6e14-42b5-8e18-4c55256618fa","route":"GET /student/schedules/{id}","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"ef7f7963-2e76-4379-8d6e-5738f22517c7","route":"POST /student/entry","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"2fe67d1d-d534-40a0-8a74-5891015f7a58","route":"GET /public/access-links/{linkID}","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"09c05a42-c2ce-4097-af13-db6bc66961a1","route":"POST /public/access-links/{linkID}/resolve-entry","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"eb35f1a2-d323-4e0a-9f85-f29847f6fd82","route":"GET /student/schedules/{id}","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"e54771b5-d430-482c-83bd-4547c1a8e922","route":"POST /student/entry","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"13f99189-69cd-41e2-97fe-df839f46f842","route":"GET /public/access-links/{linkID}","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"dbd62507-359d-410a-b9fe-8c648677edf7","route":"POST /public/access-links/{linkID}/resolve-entry","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"bc9185c8-5236-4a6a-9901-9140e4eb4d1a","route":"GET /student/schedules/{id}","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"b23e6fe7-df7f-4938-b629-d8f47cdc4812","route":"POST /student/entry","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"755c50f4-9e43-4dba-8acf-537cba9963e2","route":"POST /login","status":400}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"e5a7827c-6366-4858-87b5-77a2ba466ffa","route":"POST /login","status":400}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"anon-auth","key_class":"ip","route":"unknown","method":"POST","retry_after":29}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"760fe731-ea4a-44ad-9cb9-8c0a82610fb3","route":"unknown","status":429}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"bffabef8-b642-46f3-9b6b-afd33c91d54f","route":"GET /public/access-links/{linkID}","status":503}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"7b95558b-947f-4e76-8723-2b45b11d9407","route":"POST /public/access-links/{linkID}/resolve-entry","status":503}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"student-checkin","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"6f7ae7d1-2dc9-4399-89ea-e87f262bc4df","route":"unknown","status":429}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"1219ef99-42a5-46b7-99ed-9332665278b6","route":"GET /session","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"8b018eb5-56d1-41b1-885b-4c3182138537","route":"GET /session","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"eaa59e87-452f-467e-b2db-83f85e34ca1b","route":"GET /session","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"102284f3-cbc8-4af6-86c2-1fe7261a0334","route":"GET /session","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"b84a3f39-146e-4ad5-b2cf-33d97315ee47","route":"GET /session","status":401}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"dbca1d28-7302-4781-b710-31546ae9063d","route":"GET /session","status":401}
+2026/10/15 14:51:57 {"level":"warn","msg":"rate limit denied","tier":"auth-critical","key_class":"ip","route":"unknown","method":"GET","retry_after":59}
+2026/10/15 14:51:57 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"9e5bc9b2-119f-476b-9541-19481c25cf60","route":"unknown","status":429}
+2026/10/15 14:52:13 {"actor":"anonymous","latency_ms":3,"level":"info","method":"POST","msg":"request","request_id":"bbcbeebb-d056-439e-862f-e32343c84b44","route":"POST /{id}/runtime/commands","status":401}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:52:23 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+--- FAIL: TestSATAnsweredExamMySQL (3.39s)
+    sat_answered_exam_mysql_test.go:198: burst returned a different paper
+2026/10/15 14:52:24 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":270,"level":"info","method":"POST","msg":"request","request_id":"c958c41b-f22e-4e66-9fb8-302a9ca2e01f","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":13,"level":"info","method":"POST","msg":"request","request_id":"452396c1-ec38-47db-8d63-e99e1fab18bd","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":16,"level":"info","method":"POST","msg":"request","request_id":"0e2e9070-eb15-4abc-9424-481ce3c5b8f9","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":43,"level":"info","method":"POST","msg":"request","request_id":"9f6bf3f5-10c3-41b0-9b57-a8a51ddfaa42","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":46,"level":"info","method":"POST","msg":"request","request_id":"1d019d00-09f4-4be0-a1f7-ef075ad37276","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":50,"level":"info","method":"POST","msg":"request","request_id":"0449dc99-69fe-4d74-9b25-79a99206b042","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:15 INFO SAT module close attempt_id=af5d0d7a-12c7-4504-b784-276d8f727408 module_attempt_id=c66b9271-92a1-4e20-a667-12bafd0ac7e3 close_id=a83cbada-e168-4cfa-9f30-2fc0f3ac75ac route_basis=client_confirmed late_answer_count=3 selected_route=higher outcome=closed
+2026/10/15 14:53:15 INFO SAT module close attempt_id=af5d0d7a-12c7-4504-b784-276d8f727408 module_attempt_id=c66b9271-92a1-4e20-a667-12bafd0ac7e3 close_id=a83cbada-e168-4cfa-9f30-2fc0f3ac75ac route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":126,"level":"info","method":"POST","msg":"request","request_id":"0d130051-8076-459a-ac6b-6efe8f51fc6d","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":124,"level":"info","method":"POST","msg":"request","request_id":"a332dd81-1c80-481e-9c83-eb2c61c95ad3","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":145,"level":"info","method":"POST","msg":"request","request_id":"d58337b8-fecf-45aa-baa3-17527b71b9f5","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":147,"level":"info","method":"POST","msg":"request","request_id":"8b7df272-cd9b-4f63-b914-30af4c9743da","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:15 INFO SAT module close attempt_id=af5d0d7a-12c7-4504-b784-276d8f727408 module_attempt_id=c66b9271-92a1-4e20-a667-12bafd0ac7e3 close_id=a83cbada-e168-4cfa-9f30-2fc0f3ac75ac route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":107,"level":"info","method":"POST","msg":"request","request_id":"bc6b4a4c-6e30-4d08-82c9-b69c38d90155","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":153,"level":"info","method":"POST","msg":"request","request_id":"23b8fe6d-fc2c-42db-bc35-bc09a0d37f3a","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:15 INFO SAT module close attempt_id=af5d0d7a-12c7-4504-b784-276d8f727408 module_attempt_id=c66b9271-92a1-4e20-a667-12bafd0ac7e3 close_id=a83cbada-e168-4cfa-9f30-2fc0f3ac75ac route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":110,"level":"info","method":"POST","msg":"request","request_id":"4ef91a39-d2d6-4c2b-b1f9-b9409bd01873","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:15 INFO SAT module close attempt_id=af5d0d7a-12c7-4504-b784-276d8f727408 module_attempt_id=c66b9271-92a1-4e20-a667-12bafd0ac7e3 close_id=a83cbada-e168-4cfa-9f30-2fc0f3ac75ac route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":110,"level":"info","method":"POST","msg":"request","request_id":"365bf193-601c-412b-ba16-9fe9bd5020e7","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:15 INFO SAT module close attempt_id=af5d0d7a-12c7-4504-b784-276d8f727408 module_attempt_id=c66b9271-92a1-4e20-a667-12bafd0ac7e3 close_id=a83cbada-e168-4cfa-9f30-2fc0f3ac75ac route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:15 INFO SAT module close attempt_id=af5d0d7a-12c7-4504-b784-276d8f727408 module_attempt_id=c66b9271-92a1-4e20-a667-12bafd0ac7e3 close_id=a83cbada-e168-4cfa-9f30-2fc0f3ac75ac route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":61,"level":"info","method":"POST","msg":"request","request_id":"26a29187-53ba-402c-b772-934c5a6dd3b6","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":59,"level":"info","method":"POST","msg":"request","request_id":"eddc79d8-4937-4000-b3a6-8487433bcc56","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:15 INFO SAT module close attempt_id=af5d0d7a-12c7-4504-b784-276d8f727408 module_attempt_id=c66b9271-92a1-4e20-a667-12bafd0ac7e3 close_id=a83cbada-e168-4cfa-9f30-2fc0f3ac75ac route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":72,"level":"info","method":"POST","msg":"request","request_id":"2bd07d1c-224d-45d7-83d4-05f8bec8637f","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":116,"level":"info","method":"POST","msg":"request","request_id":"46fdbfc0-7fed-4ce4-bc7c-9d1af6eb863b","route":"POST /schedules/{scheduleID}/modules/start","status":200}
+2026/10/15 14:53:15 {"actor":"anonymous","latency_ms":4,"level":"info","method":"GET","msg":"request","request_id":"0440892e-e0f7-492f-a216-e0932ad806f6","route":"GET /{attemptID}/responses","status":200}
+2026/10/15 14:53:16 {"actor":"anonymous","latency_ms":99,"level":"info","method":"POST","msg":"request","request_id":"64224302-6f0a-4d0d-b6c8-3f4f34501ac0","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":609,"level":"info","method":"POST","msg":"request","request_id":"3e1b108a-9e6a-43ee-a2d4-748244f45d6f","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":617,"level":"info","method":"POST","msg":"request","request_id":"ca46642a-f77f-40ca-9526-b1f62c1d6312","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":740,"level":"info","method":"POST","msg":"request","request_id":"abbb2b1c-b570-44b0-aaad-d2fef93d03e0","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":739,"level":"info","method":"POST","msg":"request","request_id":"03b58a87-ed14-491a-bb36-79ed5219a2a3","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":746,"level":"info","method":"POST","msg":"request","request_id":"9eaec540-4e6d-471d-8d47-417a7ef1a71c","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":817,"level":"info","method":"POST","msg":"request","request_id":"1875a9b0-07d4-4452-9b2e-5639fd08a3cf","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":816,"level":"info","method":"POST","msg":"request","request_id":"2c9f4b82-4847-48a9-ae9c-7afc0aa7992a","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":815,"level":"info","method":"POST","msg":"request","request_id":"a550f527-b138-430a-8e45-d11fb1330471","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":830,"level":"info","method":"POST","msg":"request","request_id":"8a4e0264-f901-49b4-8c46-b7ced7ceb7c3","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":831,"level":"info","method":"POST","msg":"request","request_id":"1b288789-9b6b-42df-9bce-f9cfd0113ccc","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":841,"level":"info","method":"POST","msg":"request","request_id":"37bfae9d-8557-4509-8e2a-2ef4a8661d44","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":833,"level":"info","method":"POST","msg":"request","request_id":"65772f76-ae84-4e91-91a2-471b1bb25cd6","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":833,"level":"info","method":"POST","msg":"request","request_id":"82da7c05-8d96-4ae6-a39e-6d8fcc75dc9d","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":831,"level":"info","method":"POST","msg":"request","request_id":"808ec54a-4622-42dc-8cbe-ba5e6ca7f4ae","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":832,"level":"info","method":"POST","msg":"request","request_id":"f0322e27-2bf0-4ad7-bb54-766b115c4f67","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":832,"level":"info","method":"POST","msg":"request","request_id":"adab8bb2-6fcf-41a7-ac81-e85d1a3a64b6","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":833,"level":"info","method":"POST","msg":"request","request_id":"75923c9e-9df1-4e44-9208-cb828bd62df6","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":841,"level":"info","method":"POST","msg":"request","request_id":"e656dccd-e148-4179-95f7-ddd0ce44b431","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":833,"level":"info","method":"POST","msg":"request","request_id":"e0186771-33ff-47bf-8944-048a00e8daf6","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":858,"level":"info","method":"POST","msg":"request","request_id":"942a5086-c831-4986-970e-a17df812411a","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=d279c704-a997-4b7b-a2f0-26a4380996be module_attempt_id=a8050e57-9828-43d9-8361-c7e1bd8fe9a9 close_id=263565fb-522d-4c8c-b520-997470433b73 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":478,"level":"info","method":"POST","msg":"request","request_id":"43e9a369-d3e5-478e-909b-1d908d316672","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=1f310758-1786-4a25-b5d5-ed4243fdcbe9 module_attempt_id=6888965e-ff44-4963-9505-b1e8e161c720 close_id=baba3cbd-2f45-4dc1-bf47-b4f5f974012c route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 INFO SAT module close attempt_id=821ba441-40fc-416a-9f23-f348045d4ae3 module_attempt_id=932f460d-4f47-41b5-950f-0a0795ce31eb close_id=21f3edee-eace-4c58-91e7-c69111545942 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":526,"level":"info","method":"POST","msg":"request","request_id":"91d1af62-f740-42c0-b700-cb8345b7501b","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":526,"level":"info","method":"POST","msg":"request","request_id":"5b98e0e5-3af0-48c5-b0b8-ce102f5f2a73","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=3dd14ae3-243a-4290-a7cd-2382e1e3b02f module_attempt_id=82dae66c-14b0-436f-aec6-8ceff8f2d23d close_id=5e291115-bd9d-4505-9e73-f61114041429 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":622,"level":"info","method":"POST","msg":"request","request_id":"5043a379-87b4-42f2-b912-f6220f59d535","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=59d95e69-e53f-4da8-b658-45c9b03d8342 module_attempt_id=2ee422b3-6dfb-4b3e-a8c5-f137d0511a5c close_id=f8c2edf4-280e-4db9-8fc5-18130cda83d6 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 INFO SAT module close attempt_id=f2889047-601e-4217-a0ef-d239cd8f1a60 module_attempt_id=1b001066-292f-437d-9a9e-f841acef954c close_id=367541d2-fa49-4dd2-bae0-6b7193cd5aa0 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 INFO SAT module close attempt_id=fa0696f5-dcd9-4efa-a711-bcde10cad36f module_attempt_id=02678a2c-1eb1-45e6-94a5-cff50278c201 close_id=ca1c392c-9c6b-42b1-936d-f839dd7b8634 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":529,"level":"info","method":"POST","msg":"request","request_id":"f987d791-8a9f-4949-ae77-730e5fa9a6db","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":530,"level":"info","method":"POST","msg":"request","request_id":"ba091854-66c4-4732-bc8e-34fe63a24062","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":753,"level":"info","method":"POST","msg":"request","request_id":"8f1fc5df-a501-4605-aed3-13cfba4aa506","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=30199243-4865-4c2b-b551-fca3dff917bd module_attempt_id=07c4d607-bf24-424a-a8bb-475ac78125a1 close_id=7ee1a4da-31f6-4eb5-8cbe-c4ea66c65d65 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 INFO SAT module close attempt_id=5614e85f-841f-44a9-8dec-fdb1bda90ba9 module_attempt_id=389274dc-4b52-475f-8520-9d61dde8d11e close_id=084dceb7-4ee4-44e7-8908-5e318a141bd4 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":529,"level":"info","method":"POST","msg":"request","request_id":"3a16361b-90fd-4209-aa76-b9107534c6fc","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":625,"level":"info","method":"POST","msg":"request","request_id":"8e0a42b9-4a8a-4c76-9e2c-b9ce5845fa2e","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=e87d101e-e8b2-4076-8bdb-ca65bba75ed7 module_attempt_id=9c2f2629-0111-4268-98f9-ab55c1c52e57 close_id=5511d2a4-edcf-4f87-8fdf-9d45e84d72d6 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":625,"level":"info","method":"POST","msg":"request","request_id":"d9e09cae-f20d-4125-adec-de5d104a09da","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=3dd1dbfc-3101-49a8-823f-2f1fa4588835 module_attempt_id=4382c1d0-91ca-4374-8e29-ee588a4e646f close_id=6c965aa2-3977-4c59-b141-5e291ded725f route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":531,"level":"info","method":"POST","msg":"request","request_id":"619d29f1-c901-42c4-98f9-841a2706061c","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=da42050e-859d-4d45-a890-ba0d44305183 module_attempt_id=2c87cfe4-6b2b-448d-8250-8eb4b91b4c57 close_id=3d712930-2e22-4fdf-ba84-4ce4b72dfd77 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":532,"level":"info","method":"POST","msg":"request","request_id":"b6630ad1-ce4e-4d0c-a623-1724e07914a3","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=63e6ef10-116e-4e89-ad9e-ba42025494f1 module_attempt_id=bba42606-0284-4f8f-b60b-afd047568c3e close_id=2cedf864-8829-4241-8b66-a1e64d6f2c68 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 INFO SAT module close attempt_id=aade2494-1fe6-4b03-98fd-3aa5267cdf13 module_attempt_id=8483d0fa-1e01-4f3a-be9d-372d4c3bc91e close_id=2c583ac8-1998-4ed8-8a65-b48cec85a2d5 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":531,"level":"info","method":"POST","msg":"request","request_id":"34e26285-0d04-482f-ba1b-83640d7cf803","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=cdb2c54f-8857-45fd-b3ee-473a34ab3771 module_attempt_id=51b51727-fe9e-4064-bffc-401d8a01c5b1 close_id=855ae623-d7c6-46e4-989e-2778500281f9 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":533,"level":"info","method":"POST","msg":"request","request_id":"f5d21d45-c8ae-4f1e-8af3-fdfb5e4e959e","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":508,"level":"info","method":"POST","msg":"request","request_id":"4477ce21-c32f-4c13-936e-67fdaa1c126c","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:18 INFO SAT module close attempt_id=ba06258e-98d8-4984-9a97-b0890d050997 module_attempt_id=56127c19-8f6b-4533-a945-fea2b5c5dff0 close_id=71cd70d3-76f2-4181-89ea-efac192c294b route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:18 {"actor":"anonymous","latency_ms":757,"level":"info","method":"POST","msg":"request","request_id":"8c36a4f0-68e4-43be-9390-754703d46470","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:19 INFO SAT module close attempt_id=035955f5-eacb-4d3e-b6c9-ebc6944109af module_attempt_id=a06a5406-5fe9-48ce-8253-510402ab4533 close_id=7ee3dcac-4e18-4dbd-8287-6356e4c7ffd7 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:19 INFO SAT module close attempt_id=118b6b94-c6cf-4b4b-b6b2-7b2dd41c3de3 module_attempt_id=63510e1e-850a-4564-8a35-3931a21d7673 close_id=23e82d40-cb45-43e5-b549-f7c0ba22dadb route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:19 INFO SAT module close attempt_id=af2e1a49-0f47-427e-988f-ee77614d43d9 module_attempt_id=d4ae642a-7e7d-429a-8b3c-e891aeccd468 close_id=b651d278-71d4-4095-82b3-2d91886b6ed0 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:19 {"actor":"anonymous","latency_ms":615,"level":"info","method":"POST","msg":"request","request_id":"44daf141-030b-4700-9b3c-dc0687c5432b","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:19 {"actor":"anonymous","latency_ms":615,"level":"info","method":"POST","msg":"request","request_id":"dc50b3af-64c6-4b5d-abca-32ddea0b8ac7","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:19 {"actor":"anonymous","latency_ms":602,"level":"info","method":"POST","msg":"request","request_id":"a2e91eb9-6a30-40d8-9a02-79fcf4ba03ec","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:19 INFO SAT module close attempt_id=c28fe673-aa00-4500-a6e6-fad3edfc8b91 module_attempt_id=a160a245-1547-433f-b25d-bceb8cf586a0 close_id=bd9797d3-f486-4aba-8adb-20956d087ed6 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:53:19 {"actor":"anonymous","latency_ms":602,"level":"info","method":"POST","msg":"request","request_id":"4324c0a6-36f0-4c40-ac10-4f4fbdb92a41","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=3 selected_route=higher outcome=closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:24 INFO SAT module close attempt_id=aefe8448-0352-44bd-a57c-8eb4926a6a6d module_attempt_id=b7308fae-d967-4b96-800d-1af7c562e380 close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"f23d81da-400a-4572-8863-a210cb7bafdf","route":"POST /student/entry","status":400}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":3,"level":"info","method":"POST","msg":"request","request_id":"6332a3d8-b1e5-4788-b853-e97373d14cc4","route":"POST /{scheduleID}/bootstrap","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"24ecbfd0-329c-4f95-b0a7-5f3217b6a131","route":"POST /schedules/{scheduleID}/bootstrap","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"07997e9a-1c9e-4116-b080-3d3d75904941","route":"POST /schedules/{scheduleID}/modules/close","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"c512d186-0516-411d-93f0-4f5f779526ee","route":"POST /schedules/{scheduleID}/modules/start","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"0f09e20c-d514-4cfb-a386-888d91987c39","route":"POST /schedules/{scheduleID}/modules/enter","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"fdd8f3b0-c4ee-4c79-add1-17e0e57f48ad","route":"POST /schedules/{scheduleID}/modules/visible","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"43237b52-efa3-4d97-8502-67e473dd503c","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"19e5b652-f3a3-446b-98e8-cf09f742d1e9","route":"POST /schedules/{scheduleID}/breaks/{breakID}/start","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"a0cf78f6-375c-4ac4-80bb-80a63e1ac0d0","route":"POST /schedules/{scheduleID}/breaks/enter","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"a16b858f-84b1-44bc-9ca5-9aa1bbebc414","route":"POST /schedules/{scheduleID}/breaks/visible","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"ff8b9520-c3f8-4ea8-971c-54b90fed38bb","route":"POST /schedules/{scheduleID}/modules/submit","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"722d18a4-5193-45a1-9a3b-c28908052aaa","route":"POST /schedules/{scheduleID}/submit","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"3f9a7fd4-a279-4f96-9fc6-075763417887","route":"POST /{attemptID}/responses:batch","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"d6f44452-6c9b-4ec7-ad98-0edde1f4d385","route":"POST /{attemptID}/submit","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"92739803-1442-4ec7-92e6-0c67dac4fc09","route":"GET /{attemptID}/responses","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"5af48e13-1a70-407a-bd12-731609305028","route":"GET /sat","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"1b706788-1171-4252-a77e-a4fbdc948a65","route":"GET /sessions/{scheduleID}","status":401}
+2026/10/15 14:53:25 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"06dc1050-eb1a-4dca-9935-b5f627138115","route":"POST /{id}/runtime/commands","status":401}
+2026/10/15 14:53:46 {"event":"sat_publish_media_blocked","request_id":"","version_id":"c179be8d-fffa-4bf4-9d8b-7d76a676835f","question_id":"3945024d-f3df-44a3-a8e1-e4d0775768b0","asset_id":"missing-media","storage_error_class":"missing"}
+2026/10/15 14:53:46 {"event":"sat_publish_media_blocked","request_id":"","version_id":"7fd74aaa-eb51-47f8-b05e-933f261abae1","question_id":"a92d5e68-368a-4a94-ad42-a679460d71bd","asset_id":"legacy-lost-image","storage_error_class":""}
+--- FAIL: TestSATPublishRequiresCompleteConverterMySQL (0.30s)
+    sat_publish_mysql_test.go:1061: publish with a complete converter: VALIDATION_ERROR: SAT publish requirements are not met: math full_higher table "full" covers 3 operational questions; the exam delivers 6.
+2026/10/15 14:53:47 {"level":"warn","msg":"rate limit denied","tier":"results-export","key_class":"user","route":"unknown","method":"GET","retry_after":59}
+2026/10/15 14:53:47 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"337b061c-7058-4b93-8ea9-e29b6441cc02","route":"GET /sat/export/rawdata","status":401}
+2026/10/15 14:53:47 {"actor":"anonymous","latency_ms":1,"level":"info","method":"POST","msg":"request","request_id":"4a01853e-bee4-4b3c-bbbe-3a7d407dfe87","route":"unknown","status":405}
+2026/10/15 14:53:49 {"actor":"anonymous","latency_ms":9,"level":"info","method":"GET","msg":"request","request_id":"ca0a97f1-9f2c-4d7a-abdd-f04ac00b4d13","route":"GET /sessions/{scheduleID}","status":200}
+2026/10/15 14:53:49 INFO SAT module close attempt_id=011dfcb8-9b5c-4774-8ec3-8ba738dbaf4f module_attempt_id=5c852e4b-c640-4939-9153-25560b52da65 close_id=close-nt6 route_basis=client_confirmed late_answer_count=3 selected_route=higher outcome=closed
+--- FAIL: TestSATSingleModuleTransactionRollsBackLateReceiptFailureMySQL (0.16s)
+    sat_single_module_import_mysql_test.go:500: Error 1146 (42S02): Table 'codex_sat_formal_20261015.sat_single_module_imports' doesn't exist
+2026/10/15 14:53:56 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"8407a707-1fdf-4f2f-8773-24dbda21b8fe","route":"POST /","status":401}
+2026/10/15 14:53:58 api: live websocket authorization lookup failed request_id= user_id=u-1 schedule_id=sched-2 attempt_id= err=NOT_FOUND: Live resource not found.
+2026/10/15 14:53:58 api: live websocket authorization lookup failed request_id= user_id=u-1 schedule_id=sched-1 attempt_id=att-9 err=NOT_FOUND: Live resource not found.
+FAIL
+FAIL	example.com/ielts-proctoring/cmd/api	135.590s
+FAIL
+
+exit=1; elapsed_seconds=139.36

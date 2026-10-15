@@ -28,7 +28,8 @@ type SATSectionConfig struct {
 // complete. Per-room choices (route policy, audience, window) are NOT exam
 // configuration and are deliberately not accepted here.
 type SATExamConfig struct {
-	Sections map[string]SATSectionConfig `json:"sections"`
+	Sections     map[string]SATSectionConfig `json:"sections"`
+	SectionScope SATPublishScope             `json:"sectionScope,omitempty"`
 	// ShowClassroomScoreReport releases the score report on Classroom completion.
 	ShowClassroomScoreReport *bool `json:"showClassroomScoreReport,omitempty"`
 	// ClassroomPlan fixes the modules students receive in selected sections.
@@ -67,7 +68,7 @@ const (
 // the defaults a staff member sees are exactly what an unconfigured create
 // produces.
 func DefaultSATExamConfig() SATExamConfig {
-	cfg := SATExamConfig{Sections: make(map[string]SATSectionConfig, len(satInitialBlueprint))}
+	cfg := SATExamConfig{SectionScope: SATPublishScopeFull, Sections: make(map[string]SATSectionConfig, len(satInitialBlueprint))}
 	for _, section := range satInitialBlueprint {
 		durations := map[string]int{}
 		for _, module := range section.modules {
@@ -117,6 +118,10 @@ func satDefaultThreshold(section satInitialSection) int {
 // per offending field, so a form can show every problem at once.
 func (c SATExamConfig) Validate() error {
 	var problems []string
+	scope, err := satpublish.NormalizeScope(c.SectionScope)
+	if err != nil {
+		return validationError(err.Error())
+	}
 	if len(c.ClassroomPlan) > 0 {
 		rawPlan, err := json.Marshal(c.ClassroomPlan)
 		if err != nil {
@@ -124,6 +129,11 @@ func (c SATExamConfig) Validate() error {
 		}
 		if _, err := satpublish.ParsePlan(string(rawPlan)); err != nil {
 			return validationError(err.Error())
+		}
+		for section := range c.ClassroomPlan {
+			if scope != SATPublishScopeFull && section != string(scope) {
+				return validationError(fmt.Sprintf("SAT classroom plan section %q is outside the exam's section scope.", section))
+			}
 		}
 	}
 	if converter := strings.TrimSpace(string(c.ScoreConverter)); converter != "" && converter != "null" {

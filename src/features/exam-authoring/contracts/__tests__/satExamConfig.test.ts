@@ -40,4 +40,9 @@ describe("SAT exam configuration", () => {
     expect(satExamConfigDiffers(changed, base())).toBe(true);
     expect(satExamConfigDiffers({ ...base(), showClassroomScoreReport: true }, base())).toBe(true);
   });
+
+  it("sends a narrowed section scope even when timings use defaults", () => {
+    expect(satExamConfigDiffers({ ...base(), sectionScope: "reading-writing" }, base())).toBe(true);
+    expect(satExamConfigDiffers({ ...base(), sectionScope: "full" }, base())).toBe(false);
+  });
 });

@@ -59,7 +59,7 @@ function examMeta(exam: ExamEntity): string {
   const parts: string[] = [];
   // The list payload omits question counts; never print a misleading "0 questions".
   if (exam.totalQuestions) parts.push(`${exam.totalQuestions} ${exam.totalQuestions === 1 ? 'question' : 'questions'}`);
-  parts.push(exam.currentPublishedVersionId ? satPublishScopeCopy(exam.currentPublishedScope ?? 'full') : 'Not in a room yet');
+  parts.push(exam.currentPublishedVersionId ? satPublishScopeCopy(exam.currentPublishedScope ?? 'full') : exam.satSectionScope && exam.satSectionScope !== 'full' ? satPublishScopeCopy(exam.satSectionScope) : 'Not in a room yet');
   return parts.join(' · ');
 }
 

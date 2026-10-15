@@ -1,0 +1,31 @@
+{
+  "base_commit": "a06e8c43bcf3f47fe7975dc0599f44070e6fca1d",
+  "working_tree": "uncommitted; unrelated concurrent edits exist and were not reverted",
+  "source_sha256": {
+    "backend/go/internal/sat/service.go": "8e0882967794f833b09feb9f386f460ff77d7e81ed50b61983355b2678dfe939",
+    "backend/go/internal/sat/completion_overlay_test.go": "898e0b337e4facc8aafe9ed7ba762ee031d2504a838352fee98b5152c92eeae6",
+    "backend/go/integration/sat_completion_scope_test.go": "2ddc6a7a59050cd7bb62f1d893d9c2ca229a4f8eba8950fc3df24dd81a4d1641",
+    "backend/go/internal/satscoring/overlay.go": "3f16c48e3d01ebcbdd5a3936ff2d71da084c758cbfc12452e307c446c6b51a1b",
+    "backend/go/internal/satscoring/service.go": "53d84079d1ac9b910adcd1937ff657614f567022dd89c23cefbc27b905b549d7",
+    "backend/go/internal/satscoring/service_mysql_test.go": "1547dc544cf0ef1c115bf61097d722d9d613b0cb1b06695b68312c6da3f93cc6",
+    "backend/go/internal/platform/tx/tx.go": "baf621a0473dc48637cccc01886fc40d7371e243479f90e81fb86bc4286c2091",
+    "backend/go/internal/terminalization/service.go": "520f5f470c1c38f906badafa4fd4ec673c12d559748f8754e5dd874b5b5f4d0b",
+    "backend/go/internal/delivery/service.go": "137bc13cd07418b6e17d67ef1537a397cc4b994581a1b4b2517b3f169181571c",
+    "backend/go/internal/delivery/student_result_release.go": "9b8f75409a50b0ee3a451e51e26064134f271f3f8a094aec683ac10ed7df9dc5",
+    "backend/go/internal/delivery/student_result_release_test.go": "17ff7dd7b1ab223b04f32ce4386f8e3847656ecc412d4fc4b1a6921a6dd7572d",
+    "backend/go/cmd/api/handlers_delivery.go": "806caf92249297cf9e9ee5c9fc2b7d7f0ef409f3f701feaa2f54c519caca56b9",
+    "backend/go/internal/results/service.go": "9d2dc74c2eeca17032fa2c1a315e0223e05a1bf9aa568d68e173e77903b02ce5",
+    "backend/go/internal/attempts/sat_modules.go": "43575343a0170d6e3106ebc686b146355687d042670fcde48c36b1b2500888d4",
+    "backend/go/migrations/0087_sat_score_conversion.sql": "9998533df32f444b0e98c7731b8d10b308e1dea6e3835dc552c252ba025296fa",
+    "backend/go/go.mod": "b4d0e137699632681ed5bea5d40018a0e2475253063c3d91d882a4d74cf191f8",
+    "backend/go/go.sum": "8a9f99aefe93b69369bf74385c299fe4882bffabc20ee868112e643e50978400",
+    "verification/lean/sat-finish-score/proof/Safety.lean": "6d9518c5af484c97684c98fa4223aa7da5117246956a6197eb99a45cd03e9ec0",
+    "verification/lean/sat-finish-score/proof/Model.lean": "3baa25389ee13436a17ba870b05ed2fb87d628d45ccf0aed4b96fbc5e2c3b3c3",
+    "verification/lean/sat-finish-score/proof/SatFinishScore.lean": "08704a52e45fec125536b41189997af9cbc300fbb238fa4433a5df7de9a80397",
+    "verification/lean/sat-finish-score/proof/Counterexamples.lean": "4357002dbc08c549eeb600352023ac4f7aef3591192e9471704547d803bcce3c",
+    "verification/lean/sat-finish-score/lean-toolchain": "55e97be96000b5e9e290c9e74482e5e317861499a5540353ce845471bded8cea",
+    "verification/lean/sat-finish-score/lakefile.lean": "c2731c71c2a023cb9b449ad8d67a0a1136dc640a862c4995c5930b12ea3bba69",
+    "verification/lean/sat-finish-score/lake-manifest.json": "ec5a38214e95c51221806490fec821f4cd5071d656fc8317addca63e88ef2507",
+    "verification/lean/sat-finish-score/Replay.lean": "a181788c3b64fafdc586d0dcd17294c276b31e76b8e09a9265fdf47fba7aae5b"
+  }
+}

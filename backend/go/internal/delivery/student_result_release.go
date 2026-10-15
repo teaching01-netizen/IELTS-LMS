@@ -1,8 +1,12 @@
 package delivery
 
 import (
+	"context"
+	"database/sql"
 	"strings"
 
+	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/sat"
 )
 
@@ -48,6 +52,25 @@ func StudentResultScoreVisible(providerKey, releaseStatus string) bool {
 		return status == studentVisibleReleasedStatus
 	}
 	return visible[status]
+}
+
+// StudentSATResult applies the live report switch and release allowlist to
+// both finish and bootstrap responses. Stored terminal snapshots stay private.
+func StudentSATResult(ctx context.Context, db tx.Tx, in *sat.AssessmentResult) (*sat.AssessmentResult, error) {
+	if in == nil {
+		return nil, nil
+	}
+	if !StudentResultScoreVisible("sat", in.ReleaseStatus) {
+		return satReceiptProjection(in), nil
+	}
+	var enabled bool
+	if err := db.QueryRowContext(ctx, results.SATScoreReportOpenSQL, in.AttemptID).Scan(&enabled); err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	if !enabled {
+		return satReceiptProjection(in), nil
+	}
+	return satReleasedProjection(in), nil
 }
 
 // studentSafeBootstrapResult applies the release policy to a terminal attempt's

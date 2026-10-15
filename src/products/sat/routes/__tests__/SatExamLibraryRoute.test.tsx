@@ -59,6 +59,63 @@ function createFromReview() {
 }
 
 describe('SatExamLibraryRoute', () => {
+  it('creates with one section using standard settings and keeps at least one on', async () => {
+    createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'Reading only' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Math' }));
+    expect(screen.getByRole('button', { name: 'Math' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Reading & Writing' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reading & Writing' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create with standard settings' }));
+    await waitFor(() => expect(createProviderExamMock).toHaveBeenCalledWith(
+      expect.objectContaining({ configuration: { ...defaultsMock.data.config, sectionScope: 'reading-writing' } }),
+      'Admin',
+    ));
+  });
+
+  it('hides excluded timing fields and shows the section choice in review', () => {
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'Reading only' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Math' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(document.getElementById('sat-create-math-module1Minutes')).toBeNull();
+    expect(document.getElementById('sat-create-reading-writing-module1Minutes')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByText(/Students take Reading & Writing only/)).toBeInTheDocument();
+    expect(screen.queryByText(/Math:/)).not.toBeInTheDocument();
+  });
+
+  it('labels the section scope before the first room exists', () => {
+    useExamListQueryMock.mockReturnValue({ data: { entities: [{ ...satExam, satSectionScope: 'math' }], exams: [] }, isLoading: false, error: null });
+    renderRoute();
+    expect(screen.getByText(/Math only/)).toBeInTheDocument();
+  });
+
+  it('drops an excluded section plan and resets its hidden invalid timings', async () => {
+    createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'Create exam' }));
+    fireEvent.change(screen.getByLabelText('Exam name'), { target: { value: 'Math only' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom modules' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Reading & Writing: Easy Module 2 only' }));
+    fireEvent.change(document.getElementById('sat-create-reading-writing-module2LowerMinutes')!, { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reading & Writing' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    createFromReview();
+    await waitFor(() => expect(createProviderExamMock).toHaveBeenCalledOnce());
+    const input = createProviderExamMock.mock.calls[0]![0];
+    expect(input.configuration.sectionScope).toBe('math');
+    expect(input.configuration.classroomPlan ?? {}).toEqual({});
+    expect(input.configuration.sections['reading-writing']).toEqual(defaultsMock.data.config.sections['reading-writing']);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, satExam], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });

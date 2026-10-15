@@ -1,0 +1,455 @@
+$ go test ./internal/sat/... ./internal/satscoring/... ./internal/delivery/... ./integration/... ./cmd/api/...
+ok  	example.com/ielts-proctoring/internal/sat	0.797s
+ok  	example.com/ielts-proctoring/internal/satscoring	40.605s
+ok  	example.com/ielts-proctoring/internal/delivery	2.080s
+ok  	example.com/ielts-proctoring/integration	89.961s
+2026/10/15 14:49:47 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"7e6b5d56-9986-488f-b77d-ce633857391e","route":"GET /session","status":401}
+2026/10/15 14:49:47 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"3441fe81-e675-4531-9099-fced1886d380","route":"GET /session","status":401}
+--- FAIL: TestAuthoringFinalSlotRaceMySQL (1.13s)
+    authoring_concurrency_mysql_test.go:99: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestAuthoringBulkRollbackMySQL (0.04s)
+    authoring_concurrency_mysql_test.go:148: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestAuthoringPublishVsEditMySQL (0.04s)
+    authoring_concurrency_mysql_test.go:183: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestAuthoringIdempotentReplayMySQL (0.06s)
+    authoring_concurrency_mysql_test.go:238: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+2026/10/15 14:49:49 api: authoring ws denied request_id= user_id=user-alice role=student exam_id=exam-1 reason=permission_denied
+2026/10/15 14:49:49 api: authoring ws denied request_id= user_id=u-student role=student exam_id=exam-1 reason=permission_denied
+2026/10/15 14:49:49 api: authoring ws denied request_id= user_id=u-grader role=grader exam_id=exam-1 reason=permission_denied
+2026/10/15 14:49:49 api: authoring ws denied request_id= user_id=u-admin role=admin exam_id=exam-unknown reason=entity_deleted
+2026/10/15 14:49:49 api: authoring ws barrier unavailable user_id=u-admin exam_id=exam-1 err=bus unavailable
+2026/10/15 14:49:49 api: authoring ws draft rebind required user_id=u-admin exam_id=exam-1 draft_id=draft-7 kind=draft.replaced
+2026/10/15 14:49:49 {"level":"warn","msg":"authz deny: role not admitted","route":"GET /api/v1/assessment-authoring/exams/{examID}/shell","role":"student"}
+2026/10/15 14:49:49 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"2c16aaa7-25af-4214-b25e-a47e06c1cc6b","route":"unknown","status":403}
+2026/10/15 14:49:49 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"754dc1b7-12d5-4a83-a70a-61d72490e93d","route":"unknown","status":401}
+2026/10/15 14:49:49 {"level":"error","msg":"authoring draft pointer is dangling","examId":"exam-1","requestId":"","err":"DRAFT_INTEGRITY_VIOLATION: dangling"}
+2026/10/15 14:49:49 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"f6b589b8-a28a-41b3-b453-fcc3f23e94ce","route":"GET /session","status":401}
+2026/10/15 14:49:49 {"level":"warn","msg":"authz deny: role not admitted","route":"GET /","role":"student"}
+2026/10/15 14:49:49 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"55bbb0e7-04aa-40d1-a2db-f4cfd9559459","route":"GET /","status":403}
+2026/10/15 14:49:49 {"level":"warn","msg":"authz deny: unknown route","route":"GET /no-such-table-key"}
+2026/10/15 14:49:49 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"224d7d29-e2fa-4ca2-b61e-19cef924cb3e","route":"POST /student/entry","status":400}
+2026/10/15 14:49:49 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"8177b477-9887-4efa-8ff4-95f4a7e1c071","route":"POST /schedules/{scheduleID}/bootstrap","status":401}
+2026/10/15 14:49:49 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:49:49 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"18104330-1ec5-405a-9366-9a97d2463003","route":"GET /metrics","status":403}
+2026/10/15 14:49:49 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"142f42ad-d9b1-47d4-a3a2-d18336bf8a05","route":"unknown","status":404}
+2026/10/15 14:49:50 background: state=active
+2026/10/15 14:49:50 background: state=draining
+2026/10/15 14:49:50 background: state=idle
+2026/10/15 14:49:50 background: state=active
+2026/10/15 14:49:50 background: state=active
+2026/10/15 14:49:50 background: state=draining
+2026/10/15 14:49:50 background: state=idle
+2026/10/15 14:49:50 background: state=active
+2026/10/15 14:49:50 background: state=draining
+2026/10/15 14:49:50 background: state=idle
+--- FAIL: TestAuthoringHTTPContractsMySQL (1.17s)
+    contracts_mysql_test.go:43: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+2026/10/15 14:49:51 {"level":"error","msg":"grading projection corrupt","column":"answers","submissionId":"sub-1","requestId":""}
+2026/10/15 14:49:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"ea4b5803-932e-4b6c-b1e4-7af5f4fd997a","route":"POST /student/entry","status":422}
+--- FAIL: TestSATExamCreateIdempotencyRaceMySQL (0.25s)
+    exam_create_idempotency_mysql_test.go:15: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+2026/10/15 14:49:52 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"e833f8fa-8ed5-4555-93d1-182896ee4bac","route":"GET /","status":200}
+2026/10/15 14:49:52 api: authoring ws denied request_id= user_id=u1 role=student exam_id=exam-1 reason=permission_denied
+2026/10/15 14:49:52 api: authoring ws denied request_id= user_id=u1 role=proctor exam_id=exam-1 reason=permission_denied
+2026/10/15 14:49:52 api: authoring ws denied request_id= user_id=u1 role=grader exam_id=exam-1 reason=permission_denied
+2026/10/15 14:49:52 api: authoring ws denied request_id= user_id=u1 role=admin exam_id=exam-1 reason=subscription_forbidden
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"6682be67-75c8-4e9d-87b2-a11c66f17473","route":"GET /healthz","status":200}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"f6242ec1-8ef9-4aff-a5dd-e83aa5c2d34d","route":"POST /student/entry","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"c405dfc0-6798-44b8-87d5-4218a8222a15","route":"POST /schedules/{scheduleID}/bootstrap","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"dc53b78c-0907-4eba-a542-5e14823ccaac","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"c22ad463-f858-4403-aa0f-a705adaa0aa7","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"50ce91c7-48ef-4443-a509-181958332b72","route":"GET /ws/live","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"6de57062-37b6-4079-bc1f-e44053f2f28e","route":"POST /{id}/runtime/commands","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"bc0e5fd5-5626-4849-9e6e-15b33a4b722b","route":"POST /login","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"29d553cd-ad24-47fb-a578-3d9c1004e310","route":"GET /sessions/{scheduleID}","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"07312826-261b-49bd-be25-f92a2515fec1","route":"POST /sessions/{scheduleID}/presence","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"cf490f95-0c71-48d8-84ea-12913a68411f","route":"POST /sessions/{scheduleID}/attempts/{attemptID}/warn","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"bfe6474a-ebb4-4b60-a844-0dd8f842d4c6","route":"POST /{id}/runtime/commands","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"99a02a72-aee1-4139-a6e7-0f0784f18e59","route":"GET /{id}/runtime","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"12eec59a-f5f5-4902-98cd-03bc3b21e26c","route":"GET /sessions","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"2c11241b-6a4d-4451-9da5-a635eeadef6f","route":"POST /student/entry","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":1,"level":"info","method":"POST","msg":"request","request_id":"b3e49d2f-d251-4aa1-a4b0-4c638cd97e0e","route":"POST /{scheduleID}/bootstrap","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"9e8cadcd-a98f-4f90-b7de-545df4b305d0","route":"POST /{scheduleID}/precheck","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"1f61c900-5286-49e0-8f61-0a83cde56d7a","route":"GET /{scheduleID}","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"17a7c318-65de-467c-b31f-bd11d9571697","route":"POST /{scheduleID}/heartbeat","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"c6986894-385b-454c-853b-f67570b85805","route":"POST /{scheduleID}/mutations:batch","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"20d13b5d-8687-464b-b6bd-d177c9ced287","route":"POST /{scheduleID}/submit","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"89fe733d-5ec1-4740-9b63-7920ffa696de","route":"POST /schedules/{scheduleID}/bootstrap","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"ee43c42c-99de-42bc-ba4c-d15f569aac73","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"35f2b55f-45d0-4bcd-b463-28932d468efa","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"b2446156-e0d3-4ded-961b-e9420398bd50","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"aeeb824d-0cba-44a9-8614-e81cda262237","route":"GET /{scheduleID}/runtime","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"c9fec409-bcc5-40bd-8dce-36b8cb2e1438","route":"POST /student/entry","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"8d68303b-cce0-4277-854a-5f9e2c0eaef5","route":"POST /student/entry","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"11ac8c19-4342-498d-8f44-b21ff7ddd56c","route":"POST /student/entry","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"cb25c8f7-9c0c-4813-b5db-64a58525ae45","route":"POST /student/entry","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"b0335e91-1513-4e88-8494-54da6518bbf3","route":"POST /uploads","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"b63b0af8-bf5f-4fe0-b042-c3b287a9cc84","route":"POST /import-url","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PUT","msg":"request","request_id":"35c9d4b8-e620-4b77-9e4d-95a50a9f4d40","route":"PUT /uploads/{assetID}","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"cd888584-a7e3-4d4b-8453-f3ed68a103c8","route":"POST /uploads/{assetID}/complete","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"0874c9a5-5972-4859-be91-cbfdcc115e61","route":"unknown","status":405}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":6,"level":"info","method":"GET","msg":"request","request_id":"bb91bd60-a642-4ef7-b2f3-a4d71c13d645","route":"unknown","status":405}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":8,"level":"info","method":"POST","msg":"request","request_id":"05bf9ed4-9216-40fd-a259-9a00b8a9af35","route":"unknown","status":405}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"eb05f4c8-c253-4600-ae2f-085921191397","route":"unknown","status":404}
+2026/10/15 14:49:53 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"cfc45f98-59da-4e18-af6d-9fff5f1a3ca7","route":"GET /metrics","status":403}
+2026/10/15 14:49:53 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":2,"level":"info","method":"GET","msg":"request","request_id":"e86171e8-80bb-4fb4-b5e9-1151f05c0ab6","route":"GET /metrics","status":403}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"033c245a-7aad-48f4-ace0-f5b3496ba1c6","route":"GET /metrics","status":200}
+2026/10/15 14:49:53 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"7f5df4c2-ae3b-4b62-bbfb-32becc821255","route":"GET /metrics","status":403}
+2026/10/15 14:49:53 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"11db298a-010d-4b43-bf7f-14fdfef9cf0e","route":"GET /metrics","status":403}
+2026/10/15 14:49:53 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"760b32af-32f2-4597-ae34-2374aeb1f411","route":"GET /metrics","status":403}
+2026/10/15 14:49:53 {"level":"warn","msg":"metrics scrape denied","remote":"192.0.2.1:1234"}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"8906b516-7487-45c0-ae54-990689cabd68","route":"GET /metrics","status":403}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"e1455a32-ec37-4d8d-b708-aac6b463358b","route":"GET /metrics","status":200}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"ce956ce1-6047-4fbc-8dd9-d58521eb53fb","route":"GET /session","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"order-probe-1","route":"GET /session","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"4ee8bdd5-a729-4f96-9df8-b36adbaae192","route":"GET /sessions","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"67021854-ab62-4ebb-a4f5-195f23b0a690","route":"GET /sessions","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"8d1f9022-2418-4b69-a2c3-8920c847ccaf","route":"GET /sessions/{scheduleID}/roster","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"78815219-d6a3-4db7-8092-80ed38cbbd3d","route":"GET /sessions/{scheduleID}","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"9d1f6e99-3a12-465e-8120-d68b1ed62b24","route":"GET /submissions/{submissionID}/targets/{targetID}","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"d3613673-e9e7-45fb-99d5-9ab48b5c1aed","route":"GET /submissions/{submissionID}/targets/{targetID}","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"737b09e0-d755-4170-bedf-afecae3b75e2","route":"GET /passages","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"DELETE","msg":"request","request_id":"e5fae21e-d8a2-43d9-a8eb-af1fdeb071b3","route":"DELETE /passages/{id}","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"48087a52-62f6-4cbc-9994-0360289da38f","route":"GET /sessions/{sessionID}","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"DELETE","msg":"request","request_id":"560a3a19-2334-4b56-b933-e123a41267eb","route":"DELETE /questions/{id}","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"d65080af-8ee8-4f12-8820-8fb32b470a03","route":"GET /session","status":401}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"backstop","key_class":"ip","route":"unknown","method":"GET","retry_after":59}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"writes","key_class":"ip","route":"unknown","method":"POST","retry_after":1}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"writes","key_class":"ip","route":"unknown","method":"POST","retry_after":59}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"polling","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"anon-auth","key_class":"ip","route":"unknown","method":"POST","retry_after":59}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"anon-auth","key_class":"ip","route":"unknown","method":"POST","retry_after":59}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"40de51e2-7fa8-46bf-8cb1-f08829e848ab","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"595a89cb-92aa-4af4-a856-d245a06428fb","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"a3901816-1487-44be-8065-a94a79edb6da","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"842f4205-d344-4947-9db8-47622d5cb507","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"5a5c83a4-0dd5-4f2c-97d5-f5772345b22a","route":"GET /{assetID}/content","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"163c6e21-3254-4b5d-86fa-ae5fef6a9dc6","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"cfa4e72b-8e8d-4d36-88ee-a523872d730d","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"writes","key_class":"attempt","route":"unknown","method":"PATCH","retry_after":29}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"a264b967-f9db-4cac-b059-3ecec700a08e","route":"unknown","status":429}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"49a1b951-d1d5-49be-86a3-84e633671f4d","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"fdfab87e-7d4d-47e0-9c4a-5ec1d9125e3d","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"8bc258e0-ebe3-4d72-a18d-f65065931f33","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"ae75d5f4-604e-449b-a78e-743ab324328e","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"b7818881-1629-498f-8566-12c9534e589b","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"ec0da955-d7a4-4656-b108-c401ae67d587","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"ac58e253-d1eb-4fec-809d-9d319524506c","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"4dee2dab-7ce3-4e54-b8c0-6f9e97a31111","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"297124de-9bcd-4060-a17e-e345f219ca3c","route":"GET /schedules/{scheduleID}/state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"fceb2719-206e-420e-9576-867ce5f115ca","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"9f268c7f-0da6-42a7-b6b5-5195b00c1011","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"172c8e0a-d7d6-4009-b3ab-d4a892cb8cec","route":"PATCH /schedules/{scheduleID}/responses/{examQuestionID}","status":401}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"writes","key_class":"attempt","route":"unknown","method":"PATCH","retry_after":29}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"PATCH","msg":"request","request_id":"5e00078c-17be-41ce-b99a-b299187106c9","route":"unknown","status":429}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"0b3fa7d5-d3c0-462a-83d8-ac56feef70f6","route":"GET /public/access-links/{linkID}","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"37983db3-550a-433c-802e-f224d0030fe1","route":"POST /public/access-links/{linkID}/resolve-entry","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"4475c655-43ad-403e-88c4-421069523a00","route":"GET /student/schedules/{id}","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"df9e732f-bbb3-431b-9a7c-48311963cc00","route":"POST /student/entry","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"f3c1de18-4d9c-446f-b1f2-a7fcbe947960","route":"GET /public/access-links/{linkID}","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"d71d7bf9-4fb9-4279-8d24-851a4a1d86d1","route":"POST /public/access-links/{linkID}/resolve-entry","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"23cea118-7c0b-4ab7-8e5c-6b58d4924fc2","route":"GET /student/schedules/{id}","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"39183dd1-6b5a-4a2b-ae18-97d29a2d27c2","route":"POST /student/entry","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"04bb35ab-a2b3-4af6-b819-6e53f9138170","route":"GET /public/access-links/{linkID}","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"2fdd0bc1-1b41-4f5b-aa8f-e31e7d7a761f","route":"POST /public/access-links/{linkID}/resolve-entry","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"97fc7be6-9925-4703-800e-7e3ef9b36ea6","route":"GET /student/schedules/{id}","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"041424c5-c1ce-4c8f-b401-c4adec06b5ed","route":"POST /student/entry","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"1936549e-b4c3-46eb-a6de-b202491f122c","route":"POST /login","status":400}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"ea336841-8da7-46e2-bd00-ae054d538c67","route":"POST /login","status":400}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"anon-auth","key_class":"ip","route":"unknown","method":"POST","retry_after":29}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"5d0e3c4c-7a40-4587-92b3-710ffbf5fa1f","route":"unknown","status":429}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"987b48e9-a53e-4f2e-96af-50582f7b6e70","route":"GET /public/access-links/{linkID}","status":503}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"a6008254-6d2c-4a36-b36a-f3f15585af92","route":"POST /public/access-links/{linkID}/resolve-entry","status":503}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"student-checkin","key_class":"ip","route":"unknown","method":"GET","retry_after":29}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"038726df-965d-4993-95a5-572ad2ea8af3","route":"unknown","status":429}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"07f8c605-a438-4e4d-9870-09259c34b7f2","route":"GET /session","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"a1ee58e7-efa3-41be-a254-00ca9b3d98e7","route":"GET /session","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"c302bffe-b43f-4f18-9256-fa92517d25a8","route":"GET /session","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"10d1bc0a-9c14-4ced-a2ba-c3ffa405a7ae","route":"GET /session","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"04eb69e0-3df7-4c6f-b643-7f82964ee726","route":"GET /session","status":401}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"a5c6a5fc-d381-4006-af02-472bfc864d1c","route":"GET /session","status":401}
+2026/10/15 14:49:53 {"level":"warn","msg":"rate limit denied","tier":"auth-critical","key_class":"ip","route":"unknown","method":"GET","retry_after":59}
+2026/10/15 14:49:53 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"d7f2ecd1-73ac-4bdf-b8a9-93139420f00f","route":"unknown","status":429}
+--- FAIL: TestStartWaitsForTheScheduleLockAndPlansFromTheVersionItFinds (0.18s)
+    runtime_start_concurrency_mysql_test.go:214: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestStartAndCheckInDoNotDeadlock (0.20s)
+    runtime_start_concurrency_mysql_test.go:298: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestConcurrentCheckInRetryMintsOneAttemptMySQL (0.19s)
+    runtime_start_concurrency_mysql_test.go:373: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+2026/10/15 14:49:54 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"617590f6-4819-4a47-a639-47e8c1211a68","route":"POST /{id}/runtime/commands","status":401}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+2026/10/15 14:49:59 {"level":"warn","msg":"rate limit denied","tier":"answered-exam","key_class":"node","route":"unknown","method":"GET","retry_after":2}
+--- FAIL: TestSatExamConfigAtCreateMySQL (0.14s)
+    sat_exam_config_mysql_test.go:16: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATExamSectionScopeMySQL (0.09s)
+    sat_exam_section_scope_mysql_test.go:14: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+2026/10/15 14:50:42 {"actor":"anonymous","latency_ms":173,"level":"info","method":"POST","msg":"request","request_id":"8e6195ad-0553-40a4-b54e-c072ad2aa0e9","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:42 {"actor":"anonymous","latency_ms":37,"level":"info","method":"POST","msg":"request","request_id":"18a05ff6-b84a-416f-8748-6ef66155307c","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:42 {"actor":"anonymous","latency_ms":41,"level":"info","method":"POST","msg":"request","request_id":"e8bd817b-8c24-49ea-8d66-7ed25e1b4a19","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:42 {"actor":"anonymous","latency_ms":43,"level":"info","method":"POST","msg":"request","request_id":"c3c9abde-2fb4-45d9-b502-7a0c5aae7274","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":86,"level":"info","method":"POST","msg":"request","request_id":"0422140a-695e-4b7b-b664-1de3757b9411","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":94,"level":"info","method":"POST","msg":"request","request_id":"a813541a-5a6a-476c-b745-7b08ebf428b4","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":99,"level":"info","method":"POST","msg":"request","request_id":"ea6de5b6-6ad0-4be4-bb03-fddd0997862e","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":101,"level":"info","method":"POST","msg":"request","request_id":"dd9d3f96-7035-4718-9bc7-a0e41894ce3f","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":104,"level":"info","method":"POST","msg":"request","request_id":"7a04b933-bf16-4673-bfba-c2896fb6026a","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:43 INFO SAT module close attempt_id=e1276860-80fd-4fb1-b746-e6a72a8b1095 module_attempt_id=d65cbe65-c3a3-4e6d-b3cd-e8313119aabe close_id=2201c155-c65b-4214-a85f-2dcce05a129f route_basis=client_confirmed late_answer_count=3 selected_route=higher outcome=closed
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":110,"level":"info","method":"POST","msg":"request","request_id":"a4d5c733-911e-4312-97d4-d9c664a37450","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:43 INFO SAT module close attempt_id=e1276860-80fd-4fb1-b746-e6a72a8b1095 module_attempt_id=d65cbe65-c3a3-4e6d-b3cd-e8313119aabe close_id=2201c155-c65b-4214-a85f-2dcce05a129f route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":109,"level":"info","method":"POST","msg":"request","request_id":"a73bfb76-0b97-4496-8991-c6ea3b349539","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:43 INFO SAT module close attempt_id=e1276860-80fd-4fb1-b746-e6a72a8b1095 module_attempt_id=d65cbe65-c3a3-4e6d-b3cd-e8313119aabe close_id=2201c155-c65b-4214-a85f-2dcce05a129f route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":130,"level":"info","method":"POST","msg":"request","request_id":"30e8bf89-d354-4cbf-9fe8-7d9c2964409a","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:43 INFO SAT module close attempt_id=e1276860-80fd-4fb1-b746-e6a72a8b1095 module_attempt_id=d65cbe65-c3a3-4e6d-b3cd-e8313119aabe close_id=2201c155-c65b-4214-a85f-2dcce05a129f route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":92,"level":"info","method":"POST","msg":"request","request_id":"964359e5-97b4-4b52-863f-2e57f49fff07","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:43 INFO SAT module close attempt_id=e1276860-80fd-4fb1-b746-e6a72a8b1095 module_attempt_id=d65cbe65-c3a3-4e6d-b3cd-e8313119aabe close_id=2201c155-c65b-4214-a85f-2dcce05a129f route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":87,"level":"info","method":"POST","msg":"request","request_id":"c4ae777a-812d-45bf-83c8-17483f57301d","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:43 INFO SAT module close attempt_id=e1276860-80fd-4fb1-b746-e6a72a8b1095 module_attempt_id=d65cbe65-c3a3-4e6d-b3cd-e8313119aabe close_id=2201c155-c65b-4214-a85f-2dcce05a129f route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":86,"level":"info","method":"POST","msg":"request","request_id":"be53d278-1537-40bf-95d1-39053931c5a1","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:43 INFO SAT module close attempt_id=e1276860-80fd-4fb1-b746-e6a72a8b1095 module_attempt_id=d65cbe65-c3a3-4e6d-b3cd-e8313119aabe close_id=2201c155-c65b-4214-a85f-2dcce05a129f route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":85,"level":"info","method":"POST","msg":"request","request_id":"0490b4bb-f68d-413d-b2f7-a3bb2bcd16f1","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:43 INFO SAT module close attempt_id=e1276860-80fd-4fb1-b746-e6a72a8b1095 module_attempt_id=d65cbe65-c3a3-4e6d-b3cd-e8313119aabe close_id=2201c155-c65b-4214-a85f-2dcce05a129f route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":85,"level":"info","method":"POST","msg":"request","request_id":"536a4daa-3b1b-4f75-a280-644470e74c0a","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":36,"level":"info","method":"POST","msg":"request","request_id":"dd8ed04a-8220-4b7f-9e26-be064d7f1a13","route":"POST /schedules/{scheduleID}/modules/start","status":200}
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":6,"level":"info","method":"GET","msg":"request","request_id":"d2b6ce77-b398-430c-91bc-940035eabc2a","route":"GET /{attemptID}/responses","status":200}
+2026/10/15 14:50:43 {"actor":"anonymous","latency_ms":79,"level":"info","method":"POST","msg":"request","request_id":"2ea1f446-34f9-4f5c-b164-f26f231fae4e","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:44 {"actor":"anonymous","latency_ms":189,"level":"info","method":"POST","msg":"request","request_id":"1729e11c-5172-4328-9259-33026414e29c","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:44 {"actor":"anonymous","latency_ms":206,"level":"info","method":"POST","msg":"request","request_id":"0d8f21a3-c1e6-469f-899f-0586880ea2c0","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":868,"level":"info","method":"POST","msg":"request","request_id":"6341b49f-5680-43be-abdd-b3d65fe2174b","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":869,"level":"info","method":"POST","msg":"request","request_id":"b207106d-d953-4296-8ed4-6ee533d81cb6","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":868,"level":"info","method":"POST","msg":"request","request_id":"f5b1deae-a144-415f-9a72-62731f018136","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":869,"level":"info","method":"POST","msg":"request","request_id":"3ec91e8a-b953-4b13-9c19-ee5d1b8b4211","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":978,"level":"info","method":"POST","msg":"request","request_id":"148582a9-2867-49f3-b4e1-fcbe5eb62073","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":977,"level":"info","method":"POST","msg":"request","request_id":"f9d27703-ca93-4d36-85ee-1fa3a7661051","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":977,"level":"info","method":"POST","msg":"request","request_id":"8592664c-2004-4a8b-8d80-04179b613039","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":978,"level":"info","method":"POST","msg":"request","request_id":"a4117a3a-f6a0-434c-b11e-5010a4ca3dbd","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":977,"level":"info","method":"POST","msg":"request","request_id":"82b400e1-e2e8-46d6-8cd0-3c1c84e37e16","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":977,"level":"info","method":"POST","msg":"request","request_id":"4e828d7f-5051-4769-a2d1-ed7b38b4fd9e","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":978,"level":"info","method":"POST","msg":"request","request_id":"5fc8fb6c-2c4c-470c-bc6b-2ecea8b228c8","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":979,"level":"info","method":"POST","msg":"request","request_id":"088643f1-a6c3-4848-a2d4-39973611654b","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":979,"level":"info","method":"POST","msg":"request","request_id":"b1544a77-deb6-40c0-86c7-2d4e101af223","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":981,"level":"info","method":"POST","msg":"request","request_id":"086373b7-9c6b-4569-83c4-3728d726da01","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":980,"level":"info","method":"POST","msg":"request","request_id":"f8f2a6fa-bd39-4670-a4a5-7e7152dd1260","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":980,"level":"info","method":"POST","msg":"request","request_id":"ad9d921e-0be4-471f-99d9-1bd753e8034e","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":982,"level":"info","method":"POST","msg":"request","request_id":"d4d515a5-ff12-4fc9-a123-b0a12f5856ab","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":980,"level":"info","method":"POST","msg":"request","request_id":"01804227-3a20-4d6e-89ec-1a4c65ce2b87","route":"POST /{attemptID}/responses:batch","status":200}
+2026/10/15 14:50:45 INFO SAT module close attempt_id=bd3f59ab-2e25-41be-b9a3-cd89a4981771 module_attempt_id=72ba7451-6d48-4273-8422-23eb16daacc8 close_id=af898c2b-e738-4bc2-bc30-062269f80453 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":793,"level":"info","method":"POST","msg":"request","request_id":"b5c69c37-4f2e-4fb4-b885-21d65cfa004b","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:45 INFO SAT module close attempt_id=bd2de93f-e374-4521-8b65-dcc1343482ba module_attempt_id=194f7bec-dc59-4244-bb54-ad5f90f50026 close_id=c5703684-ef48-44d9-85e2-d1a7795a7b54 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":808,"level":"info","method":"POST","msg":"request","request_id":"fa31bd96-1581-4f74-9654-c6799c82b406","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:45 INFO SAT module close attempt_id=1ec2afce-f8df-45ad-89da-070ac18ba762 module_attempt_id=e094569a-50df-41e6-ac92-321db1ac3496 close_id=ac62311f-99e3-441e-8e1d-f737f2ead7e1 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":360,"level":"info","method":"POST","msg":"request","request_id":"1598f840-1086-4af4-9b84-0e24575394a0","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:45 INFO SAT module close attempt_id=a853f7fd-5f5a-4f41-a9d2-4f4d90c9d285 module_attempt_id=2e500806-5daf-41c4-b838-26e225ce1505 close_id=dc306989-48ce-47b5-9e37-051948895a80 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:45 {"actor":"anonymous","latency_ms":538,"level":"info","method":"POST","msg":"request","request_id":"4f0034da-df8a-4c11-8eba-ad2937008acc","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=c2816bf6-af9a-4894-aa14-a693074df60f module_attempt_id=d1f95d19-09da-4441-a584-d632106d282d close_id=dedc77a9-9b60-4045-8990-9810dcbb369f route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":616,"level":"info","method":"POST","msg":"request","request_id":"8f8d0c0e-9cb4-4abb-b82e-3ec2bb319737","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=b99a9a16-3ec8-453c-b340-1dc084116775 module_attempt_id=474a6acb-322b-414b-ab8f-5dc6b30fb707 close_id=f4fb54dd-9a2f-48fc-81b4-9cf924663b71 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 INFO SAT module close attempt_id=dc04cdf6-7b62-4d3c-bc69-d16c78c8a307 module_attempt_id=5680253e-65c5-4c19-9255-ad8297ebcb36 close_id=11b94c1a-2a4c-4284-b4da-064a8ea190f9 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":815,"level":"info","method":"POST","msg":"request","request_id":"df5a394a-ce85-46b7-a5ea-ffe7faf29845","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=5eed8aa8-e85c-4723-a426-17328fdfc4af module_attempt_id=b32372e2-283b-4e3e-aceb-1a4668e7a335 close_id=0d61d1a8-f2e2-4f6b-9367-8f73c5ef9075 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":814,"level":"info","method":"POST","msg":"request","request_id":"affd26d9-6549-49dd-b9fa-87af87764ef8","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=796b56b2-1ba4-415d-95b8-e4342ec3952c module_attempt_id=ab0dc4e3-0d5b-4d76-ad5d-ff227048f840 close_id=d81f8bf2-5414-47f0-be31-fefc64135c08 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 INFO SAT module close attempt_id=de6e18e0-7b62-47ae-aca7-2511ae33ff88 module_attempt_id=e4b89c5d-cac4-43ed-9895-84c1d99d2673 close_id=0aea2e48-b56a-4ad6-a323-72a9004e9fe6 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 INFO SAT module close attempt_id=481d11df-57b2-4994-8735-f6abedc27b12 module_attempt_id=33e28783-477b-483a-aa4c-357a1f5450fc close_id=fc140ec2-b6d7-4230-92d2-9f132d99b688 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":705,"level":"info","method":"POST","msg":"request","request_id":"1af123cc-b7dd-42cd-9ca1-439a899e13f1","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=30e53d35-11d3-47f9-9d56-599719519ae7 module_attempt_id=2c5dce1a-464e-446a-b17f-b6d720652aad close_id=4094d89b-d4cc-4ae6-8f8b-589dc22e1205 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":707,"level":"info","method":"POST","msg":"request","request_id":"4f86997c-b953-4690-8f63-a84d3b50bc02","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=4d33422f-a834-46f0-8fb9-779c6ee5d17c module_attempt_id=f4d172e1-5040-491e-ba96-55a172ec4a33 close_id=70a18bda-6072-4a4b-98e5-3860982a3842 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 INFO SAT module close attempt_id=18520ade-6876-4463-bf6e-21f0eb9c3c5a module_attempt_id=08317cd5-86d6-4634-bf87-cd86d755ffc9 close_id=318a1e34-1aa0-4b81-98d3-65305c3929f9 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":706,"level":"info","method":"POST","msg":"request","request_id":"686d0e08-a630-4070-9cc8-8c70cefc0903","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":819,"level":"info","method":"POST","msg":"request","request_id":"1cd676ae-2721-4f22-8b34-4731dc466274","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":709,"level":"info","method":"POST","msg":"request","request_id":"de787a3c-a31b-447c-ba20-a34f0e98b3b9","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":710,"level":"info","method":"POST","msg":"request","request_id":"272d31ac-77f4-4f52-97e2-bc62f79ee413","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":708,"level":"info","method":"POST","msg":"request","request_id":"7de713c5-6ee2-49ff-a12d-d4aa942e779d","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=018ed131-b99b-4289-b233-6f7311470398 module_attempt_id=8e3df2f6-62e5-4d36-b8ef-8cf5761747bd close_id=a77289fc-eaa8-4ac1-b883-30a0a029c22d route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 INFO SAT module close attempt_id=a2b38a67-a424-4909-a707-9977fd33a891 module_attempt_id=97cd1e99-417a-4a65-9a2c-776428d3e4a3 close_id=6ab8c994-add2-4f3a-b614-e37abf70b8ab route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":710,"level":"info","method":"POST","msg":"request","request_id":"18f7d13e-a096-4a2a-aab8-315bc5b24202","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":715,"level":"info","method":"POST","msg":"request","request_id":"3f08c727-5d67-404c-a844-272d9e88d8b0","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=a4cb3c8f-dbc3-41b8-ae0a-948142365602 module_attempt_id=625f48a7-b484-414a-80df-6840cd4bbb90 close_id=72c8ff3a-3e14-4163-ba4a-a0cd756acf2f route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 INFO SAT module close attempt_id=398a8e74-3b4f-4d4f-8b2f-6f8252877213 module_attempt_id=2729919c-d304-43d5-84d8-f715aa1b09dd close_id=5185bbf4-02b1-4f3c-b261-261a7d61e5ea route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":712,"level":"info","method":"POST","msg":"request","request_id":"f99592e1-a2c6-468f-8e5b-77f07792eaec","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=905b7b99-0068-416a-bbe5-4a525a9724fe module_attempt_id=a6131e39-dfae-43a6-8d7f-6b360822f27f close_id=a5ade38d-8d72-441b-bb5d-4b6839ff53af route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":715,"level":"info","method":"POST","msg":"request","request_id":"ace721a2-76f1-4a30-b07a-4c5ecef53b31","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 INFO SAT module close attempt_id=4bac07fb-7211-4d50-aa1a-215b044cd173 module_attempt_id=0d8a9976-be84-4245-9ddf-3ed3bfbda1d0 close_id=41e66878-51bc-4e49-bb89-c3dfdaecb6b7 route_basis=client_confirmed late_answer_count=2 selected_route=higher outcome=closed
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":712,"level":"info","method":"POST","msg":"request","request_id":"34774b14-180b-444e-82c8-aea15a502905","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:46 {"actor":"anonymous","latency_ms":716,"level":"info","method":"POST","msg":"request","request_id":"054082ba-553b-473c-b379-819ecb4d2b6d","route":"POST /schedules/{scheduleID}/modules/close","status":200}
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=3 selected_route=higher outcome=closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:50 INFO SAT module close attempt_id=bca7c603-2ba4-4b70-8fb7-882f754c1fd1 module_attempt_id=e7a7045e-7b7c-4420-b166-df86aa0d132f close_id=close-mysql route_basis=client_confirmed late_answer_count=0 selected_route="" outcome=already_closed
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"d4c9dd79-b5d5-4f97-922d-3957548a99eb","route":"POST /student/entry","status":400}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":2,"level":"info","method":"POST","msg":"request","request_id":"fb4fba7c-2030-4419-bc2f-e44c026b236b","route":"POST /{scheduleID}/bootstrap","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"5771121b-b14e-4922-8229-2dba94195edc","route":"POST /schedules/{scheduleID}/bootstrap","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"ddc3ccb3-91c2-4e0f-964c-f815b1c96cc5","route":"POST /schedules/{scheduleID}/modules/close","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"aa788730-7d03-42c3-80d1-ee569e446912","route":"POST /schedules/{scheduleID}/modules/start","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"823a270b-825a-4b8b-9d74-6e171b43bcae","route":"POST /schedules/{scheduleID}/modules/enter","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"af0d1b7e-db96-4a9d-8b4a-1b57dec61614","route":"POST /schedules/{scheduleID}/modules/visible","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"b1603441-b8b0-41a4-9f02-46b93933dc44","route":"GET /schedules/{scheduleID}/modules/{moduleID}/entry-state","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"0e06a97d-215a-4170-a21a-a3103a9448b0","route":"POST /schedules/{scheduleID}/breaks/{breakID}/start","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"868e0c00-d931-4764-b05a-c71cfc2d8869","route":"POST /schedules/{scheduleID}/breaks/enter","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"d768770a-625d-401f-8639-064cc890cf1d","route":"POST /schedules/{scheduleID}/breaks/visible","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"7dcd2b25-9543-4751-8075-6188824a7eff","route":"POST /schedules/{scheduleID}/modules/submit","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"be52d0cf-59eb-4757-8c93-a1160f74fe7a","route":"POST /schedules/{scheduleID}/submit","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"c2807dce-f917-449b-9803-20a3c334bdef","route":"POST /{attemptID}/responses:batch","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"417bbef1-df6a-48af-9942-b9376937aa9c","route":"POST /{attemptID}/submit","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"92bd3578-21be-4341-99f2-69adf91945cb","route":"GET /{attemptID}/responses","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"d7cf66e6-84bc-4ca1-a3a9-94ba2b2f8548","route":"GET /sat","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"73cda36c-6852-41da-9b0f-f94898db4352","route":"GET /sessions/{scheduleID}","status":401}
+2026/10/15 14:50:51 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"41d3e1ad-f616-4ee2-9dc4-fb566fb77f87","route":"POST /{id}/runtime/commands","status":401}
+--- FAIL: TestSATPublishUsesConfiguredQuestionCountsMySQL (0.02s)
+    sat_publish_mysql_test.go:373: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishScopeIgnoresExcludedIssuesAndPersistsScopeMySQL (0.02s)
+    sat_publish_mysql_test.go:424: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishSealsLegacyPretestFlagsAsScoredMySQL (0.01s)
+    sat_publish_mysql_test.go:474: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishMathScopeIgnoresExcludedIssuesAndPersistsScopeMySQL (0.01s)
+    sat_publish_mysql_test.go:499: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishRejectsUnknownScopeMySQL (0.04s)
+    sat_publish_mysql_test.go:544: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishRejectsEachContentViolationMySQL (0.65s)
+    --- FAIL: TestSATPublishRejectsEachContentViolationMySQL/empty_prompt (0.02s)
+        sat_publish_mysql_test.go:647: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishRejectsEachContentViolationMySQL/choice_count (0.01s)
+        sat_publish_mysql_test.go:647: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishRejectsEachContentViolationMySQL/choice_content (0.07s)
+        sat_publish_mysql_test.go:647: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishRejectsEachContentViolationMySQL/duplicate_choice_id (0.18s)
+        sat_publish_mysql_test.go:647: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishRejectsEachContentViolationMySQL/missing_correct_answer (0.10s)
+        sat_publish_mysql_test.go:647: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishRejectsEachContentViolationMySQL/invalid_correct_answer (0.11s)
+        sat_publish_mysql_test.go:647: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishRejectsEachContentViolationMySQL/SPR_without_accepted_response (0.14s)
+        sat_publish_mysql_test.go:647: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishRejectsEachContentViolationMySQL/module_count_differs_from_configured_target (0.03s)
+        sat_publish_mysql_test.go:647: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishStrictSPRValidationMySQL (0.51s)
+    --- FAIL: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["twelve"]} (0.25s)
+        sat_publish_mysql_test.go:665: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12","bad"]} (0.09s)
+        sat_publish_mysql_test.go:665: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["1/0"]} (0.04s)
+        sat_publish_mysql_test.go:665: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["123456"]} (0.02s)
+        sat_publish_mysql_test.go:665: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"numericTolerance":"0.1"} (0.08s)
+        sat_publish_mysql_test.go:665: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeFraction":false} (0.00s)
+        sat_publish_mysql_test.go:665: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishStrictSPRValidationMySQL/{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeDecimal":false} (0.01s)
+        sat_publish_mysql_test.go:665: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishStrictSPRValidationMySQL/long_canonical_numeric_key (0.02s)
+        sat_publish_mysql_test.go:679: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishIgnoresLegacyReadinessFieldsMySQL (0.01s)
+    sat_publish_mysql_test.go:688: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishPreservesRevisionFencesMySQL (0.04s)
+    --- FAIL: TestSATPublishPreservesRevisionFencesMySQL/expected_draft_id (0.00s)
+        sat_publish_mysql_test.go:765: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishPreservesRevisionFencesMySQL/expected_draft_revision (0.02s)
+        sat_publish_mysql_test.go:765: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+    --- FAIL: TestSATPublishPreservesRevisionFencesMySQL/exam_revision (0.01s)
+        sat_publish_mysql_test.go:765: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishOperationKeyReplaysOneReleaseMySQL (0.03s)
+    sat_publish_mysql_test.go:782: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishBlocksUnavailableMediaMySQL (0.03s)
+    sat_publish_mysql_test.go:828: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishAfterLegacyImageReplacementMySQL (0.02s)
+    sat_publish_mysql_test.go:861: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishConflictsWhenDraftChangesDuringMediaCheckMySQL (0.01s)
+    sat_publish_mysql_test.go:958: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATPublishRequiresCompleteConverterMySQL (0.01s)
+    sat_publish_mysql_test.go:992: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+2026/10/15 14:50:55 {"level":"warn","msg":"rate limit denied","tier":"results-export","key_class":"user","route":"unknown","method":"GET","retry_after":59}
+2026/10/15 14:50:55 {"actor":"anonymous","latency_ms":0,"level":"info","method":"GET","msg":"request","request_id":"ebc1528e-5b3a-4ce2-b0dd-67cb8fd06599","route":"GET /sat/export/rawdata","status":401}
+2026/10/15 14:50:55 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"33ebc7f9-057a-4843-9acd-ef0e0df4fbdd","route":"unknown","status":405}
+--- FAIL: TestSatRoomsReleaseLifecycleMySQL (0.12s)
+    sat_rooms_mysql_test.go:93: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSatRoomsSameKeyRaceMySQL (0.02s)
+    sat_rooms_mysql_test.go:196: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSatRoomsNotReadyWritesNothingMySQL (0.02s)
+    sat_rooms_mysql_test.go:240: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSatRoomsClassroomDisabledRollsBackMySQL (0.03s)
+    sat_rooms_mysql_test.go:264: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSatRoomsStaleFenceMySQL (0.07s)
+    sat_rooms_mysql_test.go:300: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSatRoomVerificationPolicyAndReplayMySQL (0.02s)
+    sat_rooms_verification_mysql_test.go:19: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSatRoomVerificationRollbackAfterSealMySQL (0.01s)
+    sat_rooms_verification_mysql_test.go:83: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSatRoomVerificationDistinctKeysBarrierMySQL (0.02s)
+    sat_rooms_verification_mysql_test.go:114: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSatRoomVerificationUnfencedAndNoOpMySQL (0.01s)
+    sat_rooms_verification_mysql_test.go:149: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+2026/10/15 14:50:57 {"actor":"anonymous","latency_ms":8,"level":"info","method":"GET","msg":"request","request_id":"6269b429-11ac-468e-b757-f756adc44984","route":"GET /sessions/{scheduleID}","status":200}
+2026/10/15 14:50:57 INFO SAT module close attempt_id=9807c044-224d-4544-84fd-e928a825f6a2 module_attempt_id=aeb2145d-286d-4769-a464-c652a0343f1f close_id=close-nt6 route_basis=client_confirmed late_answer_count=3 selected_route=higher outcome=closed
+--- FAIL: TestSATSingleModulePreviewAndCommitHTTPMySQL (0.01s)
+    sat_single_module_import_mysql_test.go:127: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATSingleModulePreservesOtherModulesAndUndoMySQL (0.02s)
+    sat_single_module_import_mysql_test.go:258: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATMultipleModulesImportReplacesOnlySelectedMySQL (0.01s)
+    sat_single_module_import_mysql_test.go:331: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATSingleModuleTwoInstanceRaceMySQL (0.05s)
+    sat_single_module_import_mysql_test.go:374: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATWorkbookRejectsTamperedRequestsMySQL (0.03s)
+    sat_single_module_import_mysql_test.go:437: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATSingleModuleTransactionRollsBackLateReceiptFailureMySQL (0.03s)
+    sat_single_module_import_mysql_test.go:464: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+--- FAIL: TestSATFullWorkbookImportCompatibilityMySQL (0.02s)
+    sat_single_module_import_mysql_test.go:515: sql: Scan error on column index 14, name "created_at": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+2026/10/15 14:51:04 {"actor":"anonymous","latency_ms":0,"level":"info","method":"POST","msg":"request","request_id":"9077d589-cc23-4e79-94a3-252eb1f464d6","route":"POST /","status":401}
+2026/10/15 14:51:06 api: live websocket authorization lookup failed request_id= user_id=u-1 schedule_id=sched-2 attempt_id= err=NOT_FOUND: Live resource not found.
+2026/10/15 14:51:06 api: live websocket authorization lookup failed request_id= user_id=u-1 schedule_id=sched-1 attempt_id=att-9 err=NOT_FOUND: Live resource not found.
+FAIL
+FAIL	example.com/ielts-proctoring/cmd/api	79.519s
+FAIL
+
+exit=1; elapsed_seconds=100.38

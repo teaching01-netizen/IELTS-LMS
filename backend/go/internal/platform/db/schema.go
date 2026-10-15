@@ -83,6 +83,7 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "exam_schedules", Column: "sat_session_mode"},
 	// SAT score report switch (0085): terminalization reads the release gate.
 	{Table: "exam_entities", Column: "sat_score_report_enabled"},
+	{Table: "exam_entities", Column: "sat_section_scope"},
 	{Table: "sat_room_operations", Column: "response_snapshot"},
 }
 

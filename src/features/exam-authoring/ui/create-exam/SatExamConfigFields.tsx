@@ -76,7 +76,7 @@ export function SatExamConfigFields({
 
   return (
     <div className="space-y-6">
-      {SAT_CONFIG_SECTION_KEYS.map((section) => {
+      {SAT_CONFIG_SECTION_KEYS.filter((section) => !value.sectionScope || value.sectionScope === "full" || value.sectionScope === section).map((section) => {
         const shape = customModules ? value.classroomPlan?.[section] ?? "full" : "full";
         const roles = SHAPE_MODULE_ROLES[shape];
         const visibleFields = FIELDS.filter((field) => {

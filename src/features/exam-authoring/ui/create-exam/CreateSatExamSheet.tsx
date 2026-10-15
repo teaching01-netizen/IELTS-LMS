@@ -17,6 +17,8 @@ import {
 } from "../../contracts/satExamConfig";
 import { SatButton, SatField } from "../../../../products/sat/ui/SatPage";
 import { SatConfirmDialog, SatFormDialog } from "../../../../products/sat/ui/ConfirmDialog";
+import { accessLinkSectionRequest, availableAccessLinkSections, type AccessLinkSectionKey } from "../../contracts/accessLinks";
+import { SectionToggle, sectionsSummary } from "../access-links/AccessLinkEditorSheet";
 import { SatExamConfigFields } from "./SatExamConfigFields";
 
 const FORM_ID = "sat-create-exam-form";
@@ -24,6 +26,7 @@ const STEP_NAMES = ["Basics", "Modules & timing", "Results", "Review"] as const;
 
 function planSummary(config: SatExamConfig): string {
   return SAT_CONFIG_SECTION_KEYS
+    .filter((section) => !config.sectionScope || config.sectionScope === "full" || config.sectionScope === section)
     .map((section) => {
       const shape = config.classroomPlan?.[section] ?? "full";
       const timing = config.sections[section];
@@ -105,6 +108,9 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
     const nextTitle = title.trim();
     if (!nextTitle || creating) return;
     let configuration: SatExamConfig | undefined;
+    if (standardSettings && config?.sectionScope && config.sectionScope !== "full" && defaultsQuery.data) {
+      configuration = { ...defaultsQuery.data.config, sectionScope: config.sectionScope };
+    }
     if (!standardSettings && config && defaultsQuery.data) {
       const errors = validateSatExamConfig(config, defaultsQuery.data.limits);
       setConfigErrors(errors);
@@ -238,6 +244,22 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
     setConverterMode("raw");
   };
 
+  const sections = availableAccessLinkSections(config?.sectionScope ?? "full");
+  const toggleSection = (section: AccessLinkSectionKey) => {
+    if (!config) return;
+    const next = sections.includes(section) ? sections.filter((key) => key !== section) : [...sections, section];
+    if (next.length === 0) return;
+    const classroomPlan = { ...config.classroomPlan };
+    const sectionConfig = { ...config.sections };
+    for (const key of SAT_CONFIG_SECTION_KEYS) {
+      if (!next.includes(key)) {
+        delete classroomPlan[key];
+        if (defaultsQuery.data) sectionConfig[key] = defaultsQuery.data.config.sections[key];
+      }
+    }
+    setConfig({ ...config, sections: sectionConfig, sectionScope: accessLinkSectionRequest(next)?.[0] ?? "full", classroomPlan });
+  };
+
   const customDisabled = !defaultsQuery.data?.classroomCreationEnabled;
   const hasCustomPlan = Boolean(config && Object.keys(config.classroomPlan ?? {}).length > 0);
   const footer = (
@@ -306,7 +328,7 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                         <input id="sat-exam-mode-full" type="radio" name="sat-exam-mode" aria-label="Full SAT" checked={!customModules} disabled={creating} onChange={() => setMode(false)} className="mt-1 h-4 w-4 accent-[var(--sat-staff-accent,#0071e3)]" />
                         <span>
                           <span className="block text-[15px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Full SAT</span>
-                          <span className="mt-1 block text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Both sections with an adaptive Module 2. Works in Practice and Classroom rooms.</span>
+                          <span className="mt-1 block text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Full adaptive Module 2. Works in Practice and Classroom rooms.</span>
                         </span>
                       </label>
                       <label
@@ -328,6 +350,15 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                     ) : defaultsQuery.error ? (
                       <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">Exam settings could not load. You can still create with standard settings.</p>
                     ) : null}
+                  </fieldset>
+                  <fieldset className="space-y-2" aria-describedby="sat-create-sections-help">
+                    <legend className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Sections</legend>
+                    <div className="grid grid-cols-2 gap-2">
+                      {SAT_CONFIG_SECTION_KEYS.map((section) => (
+                        <SectionToggle key={section} label={SAT_CONFIG_SECTION_LABELS[section]} active={sections.includes(section)} locked={creating || !config || (sections.length === 1 && sections.includes(section))} onToggle={() => toggleSection(section)} />
+                      ))}
+                    </div>
+                    <p id="sat-create-sections-help" className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{sectionsSummary(sections, false)} Section choices are fixed when you create the exam.</p>
                   </fieldset>
                 </>
               ) : null}
@@ -403,7 +434,7 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                 config ? (
                   <div className="space-y-4">
                     <div className="flex items-start justify-between gap-3 border-b border-[var(--sat-staff-border-hairline)] pb-4">
-                      <div><h4 className="text-[14px] font-semibold">Basics</h4><p className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">{title.trim()} · {customModules ? "Custom modules" : "Full SAT"}</p></div>
+                      <div><h4 className="text-[14px] font-semibold">Basics</h4><p className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">{title.trim()} · {customModules ? "Custom modules" : "Full SAT"}</p><p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{sectionsSummary(sections, false)}</p></div>
                       <button type="button" disabled={creating} onClick={() => setStep(0)} className="min-h-11 shrink-0 px-2 text-[14px] font-semibold text-[var(--sat-staff-accent,#0071e3)] underline disabled:opacity-50">Edit</button>
                     </div>
                     <div className="flex items-start justify-between gap-3 border-b border-[var(--sat-staff-border-hairline)] pb-4">

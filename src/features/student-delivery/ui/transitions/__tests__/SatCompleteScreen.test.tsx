@@ -260,25 +260,87 @@ describe("SatCompleteScreen", () => {
     expect(screen.getByRole("region", { name: "Score report" })).not.toHaveTextContent(/Estimated/);
   });
 
-  it("marks the paper: chosen option circled, SPR boxed, unmatched and unanswered labelled", () => {
+  it("prints each question number with the answer only: choice letter, SPR as typed, unmatched and unanswered labelled", () => {
     const { container } = render(<AnsweredExamPaper exam={answeredExam()} generation={1} />);
     const paper = container.querySelector<HTMLElement>(".sat-answered-paper")!;
     expect(paper.dataset["complete"]).toBe("true");
     expect(paper.dataset["generation"]).toBe("1");
     expect(paper).toHaveTextContent("Module 1");
     expect(paper).not.toHaveTextContent("Module 2 skipped");
-    const articles = paper.querySelectorAll("article");
-    const selected = paper.querySelectorAll("[data-selected]");
-    expect(selected).toHaveLength(1);
-    expect(selected[0]).toHaveTextContent("second");
-    expect(articles[0]).not.toHaveTextContent("Unanswered");
-    expect(articles[1]).toHaveTextContent("3/4");
-    expect(articles[2]).toHaveTextContent("Unanswered");
+    const rows = [...paper.querySelectorAll("[data-question]")].map((row) => row.textContent);
     // A recorded choice that matches no option is reported, not silently dropped.
-    expect(articles[3]!.querySelectorAll("[data-selected]")).toHaveLength(0);
-    expect(articles[3]).toHaveTextContent("Recorded answer “o9” matches none of the listed choices.");
-    expect(articles[3]).not.toHaveTextContent("Unanswered");
+    expect(rows).toEqual(["Q1B", "Q23/4", "Q3Unanswered", "Q4o9 (not a listed choice)"]);
+    // No question content or choices.
+    expect(paper).not.toHaveTextContent(/stim|P1|first|second/);
     expect(answeredPaperReady(paper)).toBe(true);
+  });
+
+  it("prints the score report with module, total and domain counts, nothing collapsed", () => {
+    render(
+      <SatCompleteScreen
+        result={result({
+          scorePayload: {
+            classroomRaw: {
+              rawCorrect: 15,
+              total: 22,
+              sections: [{ sectionKey: "math", rawCorrect: 15, total: 22, modules: [
+                { moduleKey: "math-1", rawCorrect: 8, total: 11 },
+                { moduleKey: "math-2", rawCorrect: 7, total: 11 },
+              ] }],
+              domains: [{ sectionKey: "math", domain: "Algebra", correct: 3, total: 4 }],
+            },
+          },
+        })}
+        onExit={vi.fn()}
+        answered={sourceOf(answeredExam())}
+      />,
+    );
+    const report = screen.getByRole("region", { name: "Score report" });
+    // Module counts show without expanding anything.
+    expect(report.querySelector("details summary")?.textContent ?? "").not.toMatch(/Module/);
+    expect(report).toHaveTextContent("8 of 11 correct");
+    // The PDF download comes before the score.
+    const download = screen.getByRole("button", { name: /answered exam/ });
+    const score = report.querySelector("#sat-report-primary")!;
+    expect(download.compareDocumentPosition(score) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const { container } = render(
+      <AnsweredExamPaper
+        exam={answeredExam()}
+        view={{
+          layout: "single-subject",
+          title: "Math",
+          primaryLabel: "Math",
+          primaryScore: { kind: "estimated", low: 610, high: 610, scale: { min: 200, max: 800 } },
+          showCombinedScore: false,
+          notice: null,
+          methodology: { converterVersion: "v1" },
+          issues: [],
+          subjects: [{
+            key: "math",
+            label: "Math",
+            score: { kind: "estimated", low: 610, high: 610, scale: { min: 200, max: 800 } },
+            rawCorrect: 15,
+            rawTotal: 22,
+            modules: [
+              { key: "math-1", label: "Module 1", rawCorrect: 8, rawTotal: 11 },
+              { key: "math-2", label: "Module 2", rawCorrect: 7, rawTotal: 11 },
+            ],
+            domains: [{ name: "Algebra", correct: 3, total: 4, accuracy: 75 }],
+          }],
+        } as never}
+      />,
+    );
+    const paper = container.querySelector<HTMLElement>(".sat-answered-paper")!;
+    expect(paper).toHaveTextContent("610");
+    expect(paper).toHaveTextContent("Total correct: 15 of 22 · 68%");
+    expect(paper).toHaveTextContent("Module 18 of 11 correct");
+    expect(paper).toHaveTextContent("Module 27 of 11 correct");
+    expect(paper).toHaveTextContent("Algebra3 of 4 · 75%");
+  });
+
+  it("says the PDF carries the score report and the answers", () => {
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam())} />);
+    expect(screen.getByRole("status")).toHaveTextContent("It includes your score report and answers.");
   });
 
   // PDF-06, Model: verification/lean/sat-result (Paper.answer_unique).
@@ -290,10 +352,8 @@ describe("SatCompleteScreen", () => {
     source.attempt.responses.push({ moduleAttemptId: "ma2", examQuestionId: "q1", response: "o1" } as never);
     const { container } = render(<AnsweredExamPaper exam={source} />);
     const [first, second] = container.querySelectorAll<HTMLElement>(".sat-answered-paper section");
-    expect(first!.querySelectorAll("[data-selected]")).toHaveLength(1);
-    expect(first!.querySelector("[data-selected]")).toHaveTextContent("second");
-    expect(second!.querySelectorAll("[data-selected]")).toHaveLength(1);
-    expect(second!.querySelector("[data-selected]")).toHaveTextContent("first");
+    expect(first!.querySelector("[data-question='1']")).toHaveTextContent("Q1B");
+    expect(second!.querySelector("[data-question='1']")).toHaveTextContent("Q1A");
   });
 
   it("marks the paper incomplete when an administered module is withheld or missing", () => {
@@ -310,19 +370,6 @@ describe("SatCompleteScreen", () => {
       expect(answeredPaperReady(paper)).toBe(false);
       unmount();
     }
-  });
-
-  it("is ready only when every figure shows a decoded image", () => {
-    const paper = document.createElement("div");
-    paper.dataset["complete"] = "true";
-    const figure = paper.appendChild(document.createElement("figure"));
-    expect(answeredPaperReady(paper)).toBe(false);
-    const image = figure.appendChild(document.createElement("img"));
-    Object.defineProperty(image, "complete", { value: true });
-    Object.defineProperty(image, "naturalWidth", { configurable: true, value: 0 });
-    expect(answeredPaperReady(paper)).toBe(false);
-    Object.defineProperty(image, "naturalWidth", { configurable: true, value: 640 });
-    expect(answeredPaperReady(paper)).toBe(true);
   });
 
   it("prints the server's answered-exam projection, alone, not the delivered snapshot", async () => {
@@ -407,27 +454,6 @@ describe("SatCompleteScreen", () => {
       expect(screen.getByRole("button", { name: /answered exam/ })).toBeEnabled();
       unmount();
     }
-    expect(print).not.toHaveBeenCalled();
-    print.mockRestore();
-  });
-
-  it("never prints when a figure cannot load", async () => {
-    const print = vi.spyOn(window, "print").mockImplementation(() => {});
-    const source = answeredExam();
-    source.sections[0]!.modules[0]!.questions[0]!.stimulus = {
-      version: 2,
-      nodes: [],
-      document: { type: "doc", content: [{ type: "image", attrs: { assetId: "asset-1", alt: "Graph" } }] },
-    } as never;
-    render(
-      <SatCompleteScreen
-        result={reportResult}
-        onExit={vi.fn()}
-        answered={sourceOf(source, { loadMediaUrl: async () => null })}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("no PDF was made");
     expect(print).not.toHaveBeenCalled();
     print.mockRestore();
   });

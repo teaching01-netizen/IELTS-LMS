@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import type {
   AssessmentAnsweredExam,
   AssessmentDeliverySection,
@@ -8,12 +7,16 @@ import type {
 } from "../../contracts/assessmentDelivery";
 import { logWarn } from "../../../../shared/observability/errorLogger";
 import { SatKnowledgeSkills } from "./score-report/SatKnowledgeSkills";
-import { SatReportActions } from "./score-report/SatReportActions";
+import { SatReportActions, SatReportDownload } from "./score-report/SatReportActions";
 import { SatReportHeader } from "./score-report/SatReportHeader";
 import { SatReportMethodology } from "./score-report/SatReportMethodology";
-import { SatScoreOverview } from "./score-report/SatScoreOverview";
+import { formatRange, SatScoreOverview } from "./score-report/SatScoreOverview";
 import { SatSubjectPerformance } from "./score-report/SatSubjectPerformance";
-import { buildStudentScoreReportView } from "./score-report/scoreReportViewModel";
+import {
+  buildStudentScoreReportView,
+  type ScoreDisplay,
+  type StudentScoreReportView,
+} from "./score-report/scoreReportViewModel";
 
 /** An estimated 200–800 section (or 400–1600 total) score; a range when low < high. */
 export interface ScaledScore {
@@ -70,17 +73,12 @@ function isScaled(value: unknown): value is ScaledScore {
 }
 
 /** What the paper prints from the server's answered-exam projection. */
-export type AnsweredExam = Pick<AssessmentAnsweredExam, "sections" | "attempt">;
-
-export type LoadMediaUrl = (
-  assetId: string,
-  options?: { fresh?: boolean }
-) => Promise<string | null>;
+export type AnsweredExam = Pick<AssessmentAnsweredExam, "sections" | "attempt"> &
+  Partial<Pick<AssessmentAnsweredExam, "examTitle" | "candidateName">>;
 
 export interface AnsweredExamPrintSource {
   /** One authoritative read of the projection; null when it could not be loaded. */
   load: () => Promise<AnsweredExam | null>;
-  loadMediaUrl?: LoadMediaUrl | undefined;
 }
 
 export interface AnsweredExamSource extends AnsweredExamPrintSource {
@@ -88,21 +86,17 @@ export interface AnsweredExamSource extends AnsweredExamPrintSource {
   sections: AssessmentDeliverySection[];
 }
 
-// offcut: readiness is polled; an exam whose figures need over 30 s fails closed with a retry
+// offcut: readiness is polled; a paper not mounted within 30 s fails closed with a retry
 const PAPER_READY_TIMEOUT_MS = 30_000;
 const PAPER_READY_POLL_MS = 100;
 
 /**
  * PDF-10: the paper may print only when every administered module is present
- * with its content and every figure shows a decoded image. Anything else
- * would be an incomplete PDF.
+ * with its content. The paper prints no figures, so PDF-10's figure clause
+ * holds vacuously.
  */
 export function answeredPaperReady(paper: HTMLElement): boolean {
-  if (paper.dataset["complete"] !== "true") return false;
-  return [...paper.querySelectorAll("figure")].every((figure) => {
-    const image = figure.querySelector("img");
-    return image !== null && image.complete && image.naturalWidth > 0;
-  });
+  return paper.dataset["complete"] === "true";
 }
 
 /**
@@ -110,18 +104,20 @@ export function answeredPaperReady(paper: HTMLElement): boolean {
  * load the projection, mount the paper, print only once it is complete
  * (PDF-10). Model: verification/lean/sat-result (PrintGate.print_gate_sound).
  */
-export function useAnsweredExamPrint(source: AnsweredExamPrintSource | null): {
+export function useAnsweredExamPrint(
+  source: AnsweredExamPrintSource | null,
+  view?: StudentScoreReportView | null
+): {
   download: "idle" | "preparing" | "failed";
   print: () => Promise<void>;
   paper: ReactNode;
 } {
   const [download, setDownload] = useState<"idle" | "preparing" | "failed">("idle");
-  // The paper mounts on request only: it loads every figure of the exam.
-  // A new generation remounts it, so a retry re-reads answers and media.
+  // The paper mounts on request only. A new generation remounts it, so a
+  // retry re-reads the answers.
   const [loaded, setLoaded] = useState<{ exam: AnsweredExam; generation: number } | null>(null);
   const generationRef = useRef(0);
   const paperRef = useRef<HTMLDivElement | null>(null);
-  const mediaFailed = useRef(false);
   // One download in flight: a second flow would remount the paper under the
   // first one's poll and report a false failure.
   const inFlight = useRef(false);
@@ -130,7 +126,6 @@ export function useAnsweredExamPrint(source: AnsweredExamPrintSource | null): {
     if (!source || inFlight.current) return;
     inFlight.current = true;
     setDownload("preparing");
-    mediaFailed.current = false;
     try {
       const exam = await source.load().catch(() => null);
       if (!exam) {
@@ -142,7 +137,6 @@ export function useAnsweredExamPrint(source: AnsweredExamPrintSource | null): {
       const deadline = Date.now() + PAPER_READY_TIMEOUT_MS;
       while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, PAPER_READY_POLL_MS));
-        if (mediaFailed.current) break;
         const paper = paperRef.current;
         if (paper?.dataset["generation"] === String(generation) && answeredPaperReady(paper)) {
           setDownload("idle");
@@ -164,12 +158,9 @@ export function useAnsweredExamPrint(source: AnsweredExamPrintSource | null): {
             <AnsweredExamPaper
               key={loaded.generation}
               exam={loaded.exam}
-              loadMediaUrl={source.loadMediaUrl}
+              view={view}
               generation={loaded.generation}
               paperRef={paperRef}
-              onMediaFailure={() => {
-                mediaFailed.current = true;
-              }}
             />
           </div>,
           document.body
@@ -191,11 +182,11 @@ export function SatScoreReport({
   answered: AnsweredExamSource | null;
   onExit: () => void | Promise<void>;
 }) {
-  const { download, print: printAnsweredExam, paper } = useAnsweredExamPrint(answered);
   const view = useMemo(
     () => buildStudentScoreReportView(report, answered?.sections),
     [report, answered?.sections]
   );
+  const { download, print: printAnsweredExam, paper } = useAnsweredExamPrint(answered, view);
   const issues = view.issues.join(",");
   useEffect(() => {
     // Codes only: nothing here identifies the student.
@@ -207,18 +198,18 @@ export function SatScoreReport({
         <main className="mx-auto w-full max-w-[920px]">
           <section aria-label="Score report">
             <SatReportHeader title={view.title} />
+            <SatReportDownload
+              canPrint={answered !== null}
+              download={download}
+              onPrint={() => void printAnsweredExam()}
+            />
             <div className="mt-6">
               <SatScoreOverview view={view} />
             </div>
             <SatSubjectPerformance view={view} />
             <SatKnowledgeSkills subjects={view.subjects} />
             <SatReportMethodology methodology={view.methodology} />
-            <SatReportActions
-              canPrint={answered !== null}
-              download={download}
-              onPrint={() => void printAnsweredExam()}
-              onExit={() => void onExit()}
-            />
+            <SatReportActions onExit={() => void onExit()} />
           </section>
         </main>
       </div>
@@ -227,24 +218,97 @@ export function SatScoreReport({
   );
 }
 
+
+function percent(correct: number, total: number): number {
+  return total > 0 ? Math.round((correct / total) * 100) : 0;
+}
+
+function printedScore(score: ScoreDisplay): string {
+  if (score.kind === "estimated") return formatRange(score.low, score.high);
+  if (score.kind === "raw") return `${score.correct} of ${score.total} correct`;
+  return score.display === "dash" ? "-" : score.reason;
+}
+
+/** The score report as printed: every count visible, nothing collapsed. */
+function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
+  const correct = view.subjects.reduce((sum, subject) => sum + subject.rawCorrect, 0);
+  const total = view.subjects.reduce((sum, subject) => sum + subject.rawTotal, 0);
+  return (
+    <section className="mt-4">
+      {view.primaryScore ? (
+        <div>
+          {view.primaryLabel ? <p className="text-[12px] font-semibold">{view.primaryLabel}</p> : null}
+          <p className="text-[28px] font-semibold tabular-nums">{printedScore(view.primaryScore)}</p>
+          {view.primaryScore.kind === "estimated" ? (
+            <p className="text-[11px]">
+              Score scale {view.primaryScore.scale.min}–{view.primaryScore.scale.max} · Estimated using a classroom
+              score conversion table. Not an official SAT score.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {view.notice ? <p className="mt-1 text-[11px]">{view.notice}</p> : null}
+      <p className="mt-2 text-[13px] font-semibold tabular-nums">
+        Total correct: {correct} of {total} · {percent(correct, total)}%
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-4">
+        {view.subjects.map((subject) => (
+          <div key={subject.key} className="break-inside-avoid border border-black p-3 text-[12px]">
+            <h3 className="text-[14px] font-semibold">{subject.label}</h3>
+            {view.subjects.length > 1 ? (
+              <p className="tabular-nums">Score: {printedScore(subject.score)}</p>
+            ) : null}
+            <p className="tabular-nums">
+              Correct: {subject.rawCorrect} of {subject.rawTotal} · {percent(subject.rawCorrect, subject.rawTotal)}%
+            </p>
+            {subject.modules.length ? (
+              <dl className="mt-2 border-t border-neutral-400 pt-1">
+                {subject.modules.map((module) => (
+                  <div key={module.key} className="flex justify-between gap-2">
+                    <dt>{module.label}</dt>
+                    <dd className="tabular-nums">
+                      {module.rawCorrect} of {module.rawTotal} correct
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+            {subject.domains.length ? (
+              <dl className="mt-2 border-t border-neutral-400 pt-1">
+                {subject.domains.map((domain) => (
+                  <div key={domain.name} className="flex justify-between gap-2">
+                    <dt>{domain.name}</dt>
+                    <dd className="shrink-0 tabular-nums">
+                      {domain.accuracy === null
+                        ? "No scored questions"
+                        : `${domain.correct} of ${domain.total} · ${domain.accuracy}%`}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /**
- * Print-only paper of the administered questions with the student's saved
- * answers: the selected choice is circled (matched by option id), a
- * student-produced response is boxed, a recorded choice that matches no listed
- * option is printed as such, and unanswered questions say so. Correct answers
- * are never shown. `data-complete` is false when an administered module is
- * missing or withheld, so the paper never prints without it.
+ * Print-only answer sheet: the score report (when one is given) and, per
+ * administered module, each question number with the student's saved answer —
+ * a choice as its letter, a student-produced response as typed. No question
+ * content and no correct answers are printed. `data-complete` is false when an
+ * administered module is missing or withheld, so the paper never prints without it.
  */
 export function AnsweredExamPaper({
   exam,
-  loadMediaUrl,
-  onMediaFailure,
+  view,
   generation,
   paperRef,
 }: {
   exam: AnsweredExam;
-  loadMediaUrl?: LoadMediaUrl | undefined;
-  onMediaFailure?: () => void;
+  view?: StudentScoreReportView | null | undefined;
   generation?: number;
   paperRef?: Ref<HTMLDivElement>;
 }) {
@@ -269,7 +333,6 @@ export function AnsweredExamPaper({
         : "";
     if (moduleId && value) answers.set(`${moduleId}:${response.examQuestionId}`, value);
   }
-  const mediaFailure = onMediaFailure ? () => onMediaFailure() : undefined;
   return (
     <div
       ref={paperRef}
@@ -278,90 +341,50 @@ export function AnsweredExamPaper({
       data-complete={complete}
       data-generation={generation}
     >
+      <header className="border-b-2 border-black pb-2">
+        <p className="text-[12px] font-semibold">Digital SAT · Score report</p>
+        {exam.examTitle ? <h1 className="text-[18px] font-semibold">{exam.examTitle}</h1> : null}
+        {exam.candidateName ? <p className="text-[13px]">{exam.candidateName}</p> : null}
+      </header>
+      {view ? <PaperScoreSummary view={view} /> : null}
       {exam.sections.map((section) =>
         [...section.modules]
           .sort((a, b) => a.displayOrder - b.displayOrder)
           .filter((module) => printable.has(module.id))
           .map((module) => (
-            <section key={module.id} className="break-before-page">
-              <h2 className="border-b border-black pb-2 text-[16px] font-semibold">
+            <section key={module.id} className="mt-5 break-inside-avoid">
+              <h2 className="border-b border-black pb-1 text-[14px] font-semibold">
                 {SAT_SECTION_LABEL[section.sectionKey] ?? section.title} · {module.title}
               </h2>
-              {[...module.questions]
-                .sort((a, b) => a.displayOrder - b.displayOrder)
-                .map((question, index) => {
-                  const answer = answers.get(`${module.id}:${question.examQuestionId}`) ?? null;
-                  const unmatched =
-                    answer !== null &&
-                    question.answer.kind === "single_choice" &&
-                    !question.answer.options.some((option) => option.id === answer);
-                  return (
-                    <article
-                      key={question.examQuestionId}
-                      className="break-inside-avoid border-b border-neutral-300 py-4"
-                    >
-                      <h3 className="text-[14px] font-semibold">Question {index + 1}</h3>
-                      <StructuredContentRenderer
-                        content={question.stimulus}
-                        className="mt-2 text-[13px]"
-                        loadMediaUrl={loadMediaUrl}
-                        onMediaFailure={mediaFailure}
-                        questionId={question.examQuestionId}
-                        eagerMedia
-                      />
-                      <StructuredContentRenderer
-                        content={question.prompt}
-                        className="mt-2 text-[13px]"
-                        loadMediaUrl={loadMediaUrl}
-                        onMediaFailure={mediaFailure}
-                        questionId={question.examQuestionId}
-                        eagerMedia
-                      />
-                      {question.answer.kind === "single_choice" ? (
-                        <ol className="mt-2 space-y-1.5">
-                          {question.answer.options.map((option, optionIndex) => {
-                            const selected = answer === option.id;
-                            return (
-                              <li
-                                key={option.id}
-                                className="flex items-start gap-2 text-[13px]"
-                                data-selected={selected || undefined}
-                              >
-                                <span
-                                  className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[12px] font-semibold ${selected ? "border-2 border-black" : "border border-transparent"}`}
-                                >
-                                  {CHOICE_LETTERS[optionIndex] ?? optionIndex + 1}
-                                </span>
-                                <StructuredContentRenderer
-                                  content={option.content}
-                                  loadMediaUrl={loadMediaUrl}
-                                  onMediaFailure={mediaFailure}
-                                  questionId={question.examQuestionId}
-                                  eagerMedia
-                                />
-                              </li>
-                            );
-                          })}
-                        </ol>
-                      ) : (
-                        <p className="mt-2 text-[13px]">
-                          Your answer:{" "}
-                          {answer ? (
-                            <span className="inline-block min-w-16 border-2 border-black px-2 py-0.5 font-semibold">
-                              {answer}
-                            </span>
-                          ) : null}
-                        </p>
-                      )}
-                      {unmatched ? (
-                        <p className="mt-2 text-[12px] italic">
-                          Recorded answer “{answer}” matches none of the listed choices.
-                        </p>
-                      ) : null}
-                      {answer ? null : <p className="mt-2 text-[12px] italic">Unanswered</p>}
-                    </article>
-                  );
-                })}
+              <ol className="mt-2 grid grid-cols-4 gap-x-4 gap-y-1 text-[12px]">
+                {[...module.questions]
+                  .sort((a, b) => a.displayOrder - b.displayOrder)
+                  .map((question, index) => {
+                    const answer = answers.get(`${module.id}:${question.examQuestionId}`) ?? null;
+                    const choice =
+                      answer !== null && question.answer.kind === "single_choice"
+                        ? question.answer.options.findIndex((option) => option.id === answer)
+                        : null;
+                    return (
+                      <li
+                        key={question.examQuestionId}
+                        className="flex gap-2 border-b border-neutral-300 py-0.5"
+                        data-question={index + 1}
+                      >
+                        <span className="w-8 shrink-0 font-semibold tabular-nums">Q{index + 1}</span>
+                        {answer === null ? (
+                          <span className="italic">Unanswered</span>
+                        ) : choice === null ? (
+                          <span className="font-semibold [overflow-wrap:anywhere]">{answer}</span>
+                        ) : choice >= 0 ? (
+                          <span className="font-semibold">{CHOICE_LETTERS[choice] ?? choice + 1}</span>
+                        ) : (
+                          <span className="italic [overflow-wrap:anywhere]">{answer} (not a listed choice)</span>
+                        )}
+                      </li>
+                    );
+                  })}
+              </ol>
             </section>
           ))
       )}

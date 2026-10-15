@@ -28,7 +28,7 @@ type concurrencyHarness struct {
 	examID  string
 }
 
-func newConcurrencyHarness(t *testing.T) *concurrencyHarness {
+func newConcurrencyHarness(t *testing.T, configs ...*exams.SATExamConfig) *concurrencyHarness {
 	t.Helper()
 	dsn := os.Getenv("TEST_MYSQL_DSN")
 	if dsn == "" {
@@ -44,7 +44,11 @@ func newConcurrencyHarness(t *testing.T) *concurrencyHarness {
 	authors := authoring.NewService(db, runner)
 	actor := "race-" + uuid.NewString()
 	provider := "sat"
-	exam, err := examService.Create(context.Background(), exams.CreateRequest{Slug: actor, Title: "Concurrency proof", ExamType: "Academic", Visibility: "private", ProviderKey: &provider, OwnerID: actor})
+	var satConfig *exams.SATExamConfig
+	if len(configs) > 0 {
+		satConfig = configs[0]
+	}
+	exam, err := examService.Create(context.Background(), exams.CreateRequest{Slug: actor, Title: "Concurrency proof", ExamType: "Academic", Visibility: "private", ProviderKey: &provider, OwnerID: actor, SATConfig: satConfig})
 	if err != nil {
 		t.Fatal(err)
 	}

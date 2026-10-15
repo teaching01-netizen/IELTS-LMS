@@ -61,7 +61,6 @@ func TestNormalizeEnabledSections(t *testing.T) {
 	}
 }
 
-
 func TestHasEffectiveSectionsTreatsUnscopedFullSATAsAllSections(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -260,8 +259,8 @@ func TestCreatePersistsEnabledSections(t *testing.T) {
 	s := svc(db)
 	begin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_entities WHERE id")).WillReturnRows(
-		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id"}).
-			AddRow("SAT Mock", "sat", nil, "ver-1"))
+		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id", "sat_section_scope"}).
+			AddRow("SAT Mock", "sat", nil, "ver-1", "full"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id")).WillReturnRows(
 		sqlmock.NewRows([]string{"is_published", "sat_publish_scope"}).AddRow(true, "full"))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO exam_schedules")).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -294,8 +293,8 @@ func TestCreateRejectsScopeOutsidePinnedRelease(t *testing.T) {
 	s := svc(db)
 	begin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_entities WHERE id")).WillReturnRows(
-		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id"}).
-			AddRow("SAT Mock", "sat", nil, "ver-1"))
+		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id", "sat_section_scope"}).
+			AddRow("SAT Mock", "sat", nil, "ver-1", "full"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id")).WillReturnRows(
 		sqlmock.NewRows([]string{"is_published", "sat_publish_scope"}).AddRow(true, "reading-writing"))
 	mock.ExpectRollback()
@@ -369,8 +368,8 @@ func TestDuplicateCopiesEnabledSections(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_access_link_members WHERE link_id")).
 		WillReturnRows(sqlmock.NewRows([]string{"student_code", "student_name", "student_email"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_entities WHERE id")).WillReturnRows(
-		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id"}).
-			AddRow("SAT Mock", "sat", nil, "ver-1"))
+		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id", "sat_section_scope"}).
+			AddRow("SAT Mock", "sat", nil, "ver-1", "full"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id")).WillReturnRows(
 		sqlmock.NewRows([]string{"is_published", "sat_publish_scope"}).AddRow(true, "full"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_session_mode, 'practice'), COALESCE(sch.sat_route_policy, 'adaptive') FROM assessment_access_links l")).
@@ -410,8 +409,8 @@ func TestDuplicateRejectsScopeOutsideTargetRelease(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_access_link_members WHERE link_id")).
 		WillReturnRows(sqlmock.NewRows([]string{"student_code", "student_name", "student_email"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_entities WHERE id")).WillReturnRows(
-		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id"}).
-			AddRow("SAT Mock", "sat", nil, "ver-1"))
+		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id", "sat_section_scope"}).
+			AddRow("SAT Mock", "sat", nil, "ver-1", "full"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id")).WillReturnRows(
 		sqlmock.NewRows([]string{"is_published", "sat_publish_scope"}).AddRow(true, "reading-writing"))
 	mock.ExpectRollback()
@@ -420,6 +419,48 @@ func TestDuplicateRejectsScopeOutsideTargetRelease(t *testing.T) {
 	})
 	if codeOf(err) != apperrors.CodeBadRequest {
 		t.Fatalf("expected BAD_REQUEST for an empty duplicated scope, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateRejectsSectionsOutsideExamScope(t *testing.T) {
+	for _, sections := range [][]string{{"math"}, {"reading-writing", "math"}, nil} {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		begin(mock)
+		mock.ExpectQuery("FROM exam_entities WHERE id").WillReturnRows(sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id", "sat_section_scope"}).AddRow("RW exam", "sat", nil, "version", "reading-writing"))
+		mock.ExpectQuery("FROM exam_versions WHERE id").WillReturnRows(sqlmock.NewRows([]string{"is_published", "sat_publish_scope"}).AddRow(true, "full"))
+		mock.ExpectRollback()
+		_, err = svc(db).Create(context.Background(), "exam", "staff", CreateRequest{Name: "Invalid scope", AudienceType: AudienceAnyone, AccessMode: ModeStudentCode, AvailabilityType: AvailabilityAnytime, EnabledSections: sections})
+		typed, ok := apperrors.As(err)
+		if !ok || typed.Code != apperrors.CodeExamScopeUnavailable {
+			t.Fatalf("scope unavailable required, got %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+		db.Close()
+	}
+}
+
+func TestUpdateRejectsSectionsOutsideExamScope(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	begin(mock)
+	mock.ExpectQuery("FROM assessment_access_links").WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision", "enabled_sections", "has_participation", "provider_key", "sat_publish_scope", "sat_section_scope"}).AddRow("schedule", "active", 4, `["reading-writing"]`, 0, "sat", "full", "reading-writing"))
+	mock.ExpectRollback()
+	both := []string{"reading-writing", "math"}
+	_, err = svc(db).Update(context.Background(), "link", UpdateRequest{Revision: 4, Name: "Both", EnabledSections: &both, AudienceType: AudienceAnyone, AccessMode: ModeStudentCode, AvailabilityType: AvailabilityAnytime})
+	typed, ok := apperrors.As(err)
+	if !ok || typed.Code != apperrors.CodeExamScopeUnavailable {
+		t.Fatalf("scope unavailable required, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

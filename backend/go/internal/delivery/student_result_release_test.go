@@ -2,7 +2,9 @@ package delivery
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -50,9 +52,9 @@ func TestStudentSafeBootstrapResultWithholdsSATTotals(t *testing.T) {
 	released := &sat.AssessmentResult{
 		ID: "res-1", AttemptID: "att-1", ProviderKey: "sat",
 		OutcomeStatus: "scored", ScoreKind: "practice", TotalScore: &total,
-		ScorePayload: map[string]any{"raw": 39},
+		ScorePayload:  map[string]any{"raw": 39},
 		ReleaseStatus: "released",
-		Sections: []sat.SectionResult{{SectionKey: "reading-writing"}},
+		Sections:      []sat.SectionResult{{SectionKey: "reading-writing"}},
 	}
 
 	// Released keeps the score fields; the payload is narrowed to the
@@ -181,5 +183,67 @@ func TestLoadBootstrapResultReadsScoreReportFlagLive(t *testing.T) {
 			t.Fatal(err)
 		}
 		db.Close()
+	}
+}
+
+func TestStudentSATResultUsesLiveGateAndStripsSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		release string
+		enabled bool
+		readErr error
+		visible bool
+	}{
+		{name: "released and enabled", release: "released", enabled: true, visible: true},
+		{name: "disabled after release", release: "released"},
+		{name: "missing gate fails closed", release: "released", readErr: sql.ErrNoRows},
+		{name: "gate read failure", release: "released", readErr: errors.New("database unavailable")},
+		{name: "pending", release: "pending"},
+		{name: "invalidated", release: "invalidated"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if tc.release == "released" {
+				query := mock.ExpectQuery("sat_score_report_enabled").WithArgs("a1")
+				if tc.readErr != nil {
+					query.WillReturnError(tc.readErr)
+				} else {
+					query.WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(tc.enabled))
+				}
+			}
+			in := &sat.AssessmentResult{
+				ID: "r1", AttemptID: "a1", ReleaseStatus: tc.release,
+				ScorePayload: map[string]any{
+					"classroomRaw": map[string]any{"totalScaled": map[string]any{"low": 1100, "high": 1100}},
+					"snapshot":     map[string]any{"answers": "private"},
+				},
+			}
+			out, err := StudentSATResult(context.Background(), db, in)
+			if tc.readErr != nil && tc.readErr != sql.ErrNoRows {
+				if !errors.Is(err, tc.readErr) || out != nil {
+					t.Fatalf("read failure must not expose result: %+v, %v", out, err)
+				}
+			} else {
+				if err != nil || out == nil || out.ID != in.ID {
+					t.Fatalf("receipt = %+v, %v", out, err)
+				}
+				if (out.ScorePayload["classroomRaw"] != nil) != tc.visible {
+					t.Fatalf("unexpected score visibility: %+v", out)
+				}
+				if out.ScorePayload["snapshot"] != nil {
+					t.Fatal("snapshot exposed")
+				}
+				if in.ScorePayload["snapshot"] == nil {
+					t.Fatal("stored payload mutated")
+				}
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

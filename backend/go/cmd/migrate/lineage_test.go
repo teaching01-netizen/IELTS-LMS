@@ -83,8 +83,8 @@ func migDir(t *testing.T) string {
 // 89->90. Any other
 // count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 90
-	pinnedMigrationMax   = 90
+	pinnedMigrationFiles = 91
+	pinnedMigrationMax   = 91
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

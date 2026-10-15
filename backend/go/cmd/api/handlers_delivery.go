@@ -489,6 +489,11 @@ func deliverySubmitAssessmentHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
+		out, err = delivery.StudentSATResult(r.Context(), app.DB, out)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
 }

@@ -216,12 +216,24 @@ describe('SAT Results hierarchy', () => {
       printed = document.querySelector('body > .sat-answered-print .sat-answered-paper')?.textContent ?? '';
     });
     fetchSatAnsweredExamMock.mockResolvedValueOnce(exam).mockRejectedValueOnce(new Error('429'));
+    const detail = useSatResultQueryMock();
+    useSatResultQueryMock.mockReturnValue({ ...detail, data: { ...detail.data, scorePayload: { classroomRaw: {
+      rawCorrect: 1, total: 1,
+      sections: [{ sectionKey: 'math', rawCorrect: 1, total: 1, modules: [{ moduleKey: 'math-m1', rawCorrect: 1, total: 1 }] }],
+      domains: [{ sectionKey: 'math', domain: 'Algebra', correct: 1, total: 1 }],
+    } } } });
     renderResultsRoute('/sat/results/result-1');
     const button = screen.getByRole('button', { name: 'Download answered exam (PDF)' });
     fireEvent.click(button);
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
     expect(fetchSatAnsweredExamMock).toHaveBeenCalledWith('attempt-1');
-    expect(printed).toContain('Your answer: 7');
+    // Answers only: question number and the student's answer, no question content.
+    expect(printed).toContain('Q17');
+    expect(printed).not.toContain('P1');
+    // The score report prints with it.
+    expect(printed).toContain('Total correct: 1 of 1 · 100%');
+    expect(printed).toContain('1 of 1 correct');
+    expect(printed).toContain('Algebra1 of 1 · 100%');
     fireEvent.click(screen.getByRole('button', { name: 'Download answered exam (PDF)' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('no PDF was made');
     expect(print).toHaveBeenCalledTimes(1);

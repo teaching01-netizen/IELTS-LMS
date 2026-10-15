@@ -34,9 +34,9 @@ type satPublishFixture struct {
 	modules       []satPublishModuleFixture
 }
 
-func newSATPublishFixture(t *testing.T, customTarget bool) *satPublishFixture {
+func newSATPublishFixture(t *testing.T, customTarget bool, configs ...*exams.SATExamConfig) *satPublishFixture {
 	t.Helper()
-	h := newConcurrencyHarness(t)
+	h := newConcurrencyHarness(t, configs...)
 	ctx := context.Background()
 	shell, err := h.authors.Shell(ctx, h.examID)
 	if err != nil {

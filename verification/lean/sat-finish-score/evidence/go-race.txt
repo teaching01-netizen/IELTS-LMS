@@ -1,0 +1,6 @@
+$ go test -race -p 1 ./internal/sat ./internal/delivery ./integration -run ^Test(CompletionOverlayRunsOnlyAfterSuccessfulCommit|StudentSATResultUsesLiveGateAndStripsSnapshot|LoadBootstrapResultReadsScoreReportFlagLive|SATCompletionOverlaysGlobalScaledScores|ConcurrentSATClientSubmitAndTimeoutReconcileSealOnce)$ -count=3 -shuffle=42
+ok  	example.com/ielts-proctoring/internal/sat	1.868s
+ok  	example.com/ielts-proctoring/internal/delivery	1.568s
+ok  	example.com/ielts-proctoring/integration	5.527s
+
+exit=0; elapsed_seconds=42.79

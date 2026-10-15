@@ -5,6 +5,7 @@ import type {
   AssessmentAuthoringShell,
   AssessmentValidationIssue,
   QuestionRevision,
+  SatPublishScope,
 } from "../contracts/assessment";
 import type { AssessmentAccessLink } from "../contracts/accessLinks";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
@@ -126,9 +127,10 @@ export interface AuthoringWorkspaceProps {
   examId: string;
   examTitle: string;
   chrome?: AuthoringWorkspaceChrome;
+  sectionScope?: SatPublishScope;
 }
 
-export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME }: AuthoringWorkspaceProps) {
+export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", chrome = DEFAULT_CHROME }: AuthoringWorkspaceProps) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const authSession = useOptionalAuthSession();
@@ -154,7 +156,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   const duplicateQuestion = useDuplicateAssessmentQuestion(examId);
   const reorderQuestions = useReorderAssessmentQuestions(examId);
   const bulkQuestions = useBulkAssessmentQuestions(examId);
-  const validation = useAssessmentValidation(examId);
+  const validation = useAssessmentValidation(examId, sectionScope);
   const loadSampleExam = useLoadSatSampleExam(examId);
   // The open question's draft is one owner with one mutation surface (see
   // `useAuthoringDraft`): nothing else installs a revision or clears the
@@ -237,7 +239,11 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   // EXAM_NOT_FOUND / FORBIDDEN / error). Everything below this line is either
   // a real shell or the lifecycle surface; no status code is inspected here.
   const shellState = shellLifecycle.state;
-  const shell = shellState.kind === "ready" ? shellState.shell : undefined;
+  const readyShell = shellState.kind === "ready" ? shellState.shell : undefined;
+  const shell = useMemo(() => {
+    if (!readyShell || sectionScope === "full") return readyShell;
+    return { ...readyShell, sections: readyShell.sections.filter((section) => section.sectionKey === sectionScope) };
+  }, [readyShell, sectionScope]);
   const classroomPlanQuery = useClassroomPlan(shell ? examId : "");
   const classroomPlan = classroomPlanQuery.data?.plan ?? null;
   const publishedTarget = chrome.publishedTarget ?? null;
@@ -1012,6 +1018,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
       key="sat-create-room-flow"
       examId={examId}
       examTitle={examTitle}
+      sectionScope={sectionScope}
       onClose={() => setCreateRoomOpen(false)}
       onFixIssue={(issue) => {
         setCreateRoomOpen(false);

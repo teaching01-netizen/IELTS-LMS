@@ -489,6 +489,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       key={prefillLink?.id ?? "new-room"}
       examId={exam.id}
       examTitle={exam.title}
+      sectionScope={exam.satSectionScope ?? "full"}
       prefill={prefillLink}
       reuseOptions={links}
       onReuseSetup={openDuplicateSetup}

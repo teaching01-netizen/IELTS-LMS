@@ -928,12 +928,12 @@ function classroomUnavailableMessage(availability: ClassroomAvailability | undef
  * One section toggle. A locked toggle stays visible (so the scope is legible)
  * but disabled, mirroring how a revoked link's editor is presented.
  */
-function SectionToggle({ label, active, locked, onToggle }: { label: string; active: boolean; locked: boolean; onToggle: () => void }) {
+export function SectionToggle({ label, active, locked, onToggle }: { label: string; active: boolean; locked: boolean; onToggle: () => void }) {
   return <button type="button" aria-pressed={active} disabled={locked} onClick={onToggle} className={`sat-press sat-press-fill flex min-h-11 items-center justify-between rounded-[var(--sat-staff-radius-control,10px)] border px-3 text-left text-[14px] font-semibold ${active ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)] text-[var(--sat-staff-text-primary,#1d1d1f)]" : "border-[var(--sat-staff-border-strong)] bg-white text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)]"} disabled:opacity-45`}><span>{label}</span><span aria-hidden="true" className={active ? "text-[var(--sat-staff-accent,#0071e3)]" : undefined}>{active ? "On" : "Off"}</span></button>;
 }
 
 /** The one-line consequence of the current selection, including the score rule. */
-function sectionsSummary(selection: readonly AccessLinkSectionKey[], locked: boolean): string {
+export function sectionsSummary(selection: readonly AccessLinkSectionKey[], locked: boolean): string {
   if (selection.length === 0) return "Pick at least one section before saving.";
   const both = ACCESS_LINK_SECTION_KEYS.every((key) => selection.includes(key));
   const base = both

@@ -32,7 +32,6 @@ import (
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
-	"example.com/ielts-proctoring/internal/results"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
 	"example.com/ielts-proctoring/internal/satpublish"
@@ -577,16 +576,8 @@ func (s *Service) loadBootstrapResult(ctx context.Context, providerKey, attemptI
 	if err != nil {
 		return nil, err
 	}
-	if typed, ok := result.(*sat.AssessmentResult); ok && typed != nil && typed.ScorePayload != nil {
-		// The exam's score report switch is read live: turning it off hides an
-		// already-released report and leaves only the completion receipt.
-		var enabled bool
-		if err := s.db.QueryRowContext(ctx, results.SATScoreReportOpenSQL, attemptID).Scan(&enabled); err != nil && err != sql.ErrNoRows {
-			return nil, err
-		}
-		if !enabled {
-			return satReceiptProjection(typed), nil
-		}
+	if typed, ok := result.(*sat.AssessmentResult); ok {
+		return StudentSATResult(ctx, s.db, typed)
 	}
 	return studentSafeBootstrapResult(providerKey, result), nil
 }

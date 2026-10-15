@@ -2,15 +2,16 @@ import { useMemo } from 'react';
 import { fetchSatAnsweredExam } from '../../../features/results/api/satResultsQueries';
 import type { AssessmentAnsweredExam } from '../../../features/student-delivery/contracts/assessmentDelivery';
 import { useAnsweredExamPrint } from '../../../features/student-delivery/ui/transitions/SatScoreReport';
+import type { StudentScoreReportView } from '../../../features/student-delivery/ui/transitions/score-report/scoreReportViewModel';
 
 /**
  * Staff copy of the student's answered-exam PDF (PDF-08): the same server
  * projection and print gate, independent of the student's report switch.
- * Media resolves through the staff media read (no loader passed).
+ * `view` adds the score report to the paper; omit it for an unscored attempt.
  */
-export function SatAnsweredExamDownload({ attemptId }: { attemptId: string }) {
+export function SatAnsweredExamDownload({ attemptId, view = null }: { attemptId: string; view?: StudentScoreReportView | null }) {
   const source = useMemo(() => ({ load: () => fetchSatAnsweredExam<AssessmentAnsweredExam>(attemptId) }), [attemptId]);
-  const { download, print, paper } = useAnsweredExamPrint(source);
+  const { download, print, paper } = useAnsweredExamPrint(source, view);
   return (
     <div className="mt-3 print:hidden">
       <button type="button" disabled={download === 'preparing'} onClick={() => void print()} className="sat-btn sat-btn--secondary sat-press disabled:opacity-50">

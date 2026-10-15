@@ -128,3 +128,86 @@ func TestInitializeSATDraftStoresPlanAndConverterInTransaction(t *testing.T) {
 		t.Fatalf("transaction did not persist the plan and converter: %v", err)
 	}
 }
+
+func TestSATExamConfigSectionScope(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, want string
+	}{
+		{"legacy full", `{}`, ""},
+		{"explicit full", `{"sectionScope":"full","classroomPlan":{"math":"m2_hard","reading-writing":"m1_easy"}}`, ""},
+		{"math only", `{"sectionScope":"math","classroomPlan":{"math":"m2_hard"}}`, ""},
+		{"reading writing only", `{"sectionScope":"reading-writing","classroomPlan":{"reading-writing":"m1_easy"}}`, ""},
+		{"unknown scope", `{"sectionScope":"science"}`, "unknown SAT publish scope"},
+		{"math plan outside reading writing", `{"sectionScope":"reading-writing","classroomPlan":{"math":"m2_hard"}}`, "outside the exam's section scope"},
+		{"reading writing plan outside math", `{"sectionScope":"math","classroomPlan":{"reading-writing":"m1_easy"}}`, "outside the exam's section scope"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg SATExamConfig
+			if err := json.Unmarshal([]byte(tc.raw), &cfg); err != nil {
+				t.Fatal(err)
+			}
+			err := cfg.Validate()
+			if tc.want == "" && err != nil {
+				t.Fatalf("valid config: %v", err)
+			}
+			if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestCreatePersistsSATSectionScope(t *testing.T) {
+	for _, scope := range []string{"", "full", "math", "reading-writing"} {
+		t.Run("scope="+scope, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			var cfg SATExamConfig
+			if err := json.Unmarshal([]byte(`{"sectionScope":"`+scope+`"}`), &cfg); err != nil {
+				t.Fatal(err)
+			}
+			expected := scope
+			if expected == "" {
+				expected = "full"
+			}
+			expectCreateTxStart(mock)
+			mock.ExpectExec("INSERT INTO exam_entities").WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectQuery("SELECT COALESCE\\(MAX\\(version_number\\), 0\\) ").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+			mock.ExpectExec("INSERT INTO exam_versions").WillReturnResult(sqlmock.NewResult(1, 1))
+			for _, section := range satInitialBlueprint {
+				mock.ExpectExec("INSERT INTO assessment_sections").WillReturnResult(sqlmock.NewResult(1, 1))
+				for range section.modules {
+					mock.ExpectExec("INSERT INTO assessment_modules").WillReturnResult(sqlmock.NewResult(1, 1))
+				}
+				mock.ExpectExec("INSERT INTO assessment_routing_policies").WillReturnResult(sqlmock.NewResult(1, 1))
+			}
+			mock.ExpectExec("INSERT INTO assessment_scoring_policies").WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectExec("UPDATE exam_entities SET current_draft_version_id").WillReturnResult(sqlmock.NewResult(0, 1))
+			if expected != "full" {
+				mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_entities SET sat_section_scope = ? WHERE id = ?")).WithArgs(expected, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+			}
+			mock.ExpectExec("INSERT INTO exam_events").WillReturnResult(sqlmock.NewResult(1, 1))
+			var response Exam
+			if err := json.Unmarshal([]byte(`{"id":"exam","satSectionScope":"`+expected+`"}`), &response); err != nil {
+				t.Fatal(err)
+			}
+			expectExamResponse(mock, response)
+			mock.ExpectCommit()
+			provider := ProviderSAT
+			result, err := NewService(db, tx.NewRunner(db)).Create(context.Background(), CreateRequest{Slug: "scoped", Title: "Scoped SAT", ExamType: ExamTypeAcademic, Visibility: VisibilityPrivate, OwnerID: "staff", ProviderKey: &provider, SATConfig: &cfg})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(result)
+			if !strings.Contains(string(raw), `"satSectionScope":"`+expected+`"`) {
+				t.Fatalf("scope absent from response: %s", raw)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

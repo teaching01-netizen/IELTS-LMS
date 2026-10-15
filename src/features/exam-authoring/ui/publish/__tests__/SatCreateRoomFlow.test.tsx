@@ -55,10 +55,11 @@ const receipt = {
   exam: { revision: 19 },
 } as unknown as SatRoomReceipt;
 
-function renderFlow() {
+function renderFlow(sectionScope: "full" | "reading-writing" | "math" = "full") {
   const props = {
     examId: "exam-1",
     examTitle: "SAT Mock Test — October",
+    sectionScope,
     onClose: vi.fn(),
     onFixIssue: vi.fn(),
     onRoomCreated: vi.fn(),
@@ -90,6 +91,16 @@ beforeEach(() => {
 });
 
 describe("SatCreateRoomFlow", () => {
+  it("creates within the exam's section scope without offering the excluded section", async () => {
+    mocks.create.mockResolvedValue(receipt);
+    renderFlow("reading-writing");
+    fillName("Reading room");
+    expect(screen.queryByRole("button", { name: /Math/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("exam-1", expect.objectContaining({
+      room: expect.objectContaining({ enabledSections: ["reading-writing"] }),
+    })));
+  });
   it("creates a room in one request pinned to the committed revisions, with no publish or version choice", async () => {
     mocks.create.mockResolvedValue(receipt);
     const { props } = renderFlow();

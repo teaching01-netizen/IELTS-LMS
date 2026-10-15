@@ -49,6 +49,7 @@ type BackendExamEntity = {
   currentPublishedVersionId?: string | null | undefined;
   currentPublishedScope?: SatPublishScope | null | undefined;
   currentPublishedVersionNumber?: number | null | undefined;
+  satSectionScope?: SatPublishScope | undefined;
   satScoreReportEnabled?: boolean | undefined;
   totalQuestions?: number | null | undefined;
   totalReadingQuestions?: number | null | undefined;
@@ -512,6 +513,7 @@ export function mapBackendExamEntity(payload: BackendExamEntity): ExamEntity {
     currentPublishedVersionId: payload.currentPublishedVersionId ?? null,
     currentPublishedScope: payload.currentPublishedScope ?? null,
     currentPublishedVersionNumber: payload.currentPublishedVersionNumber ?? null,
+    satSectionScope: payload.satSectionScope ?? "full",
     satScoreReportEnabled: payload.satScoreReportEnabled === true,
     canEdit: payload.canEdit === true,
     canPublish: payload.canPublish === true,

@@ -1,0 +1,35 @@
+import Counterexamples
+#check SatFinishScore.init_safe
+#print axioms SatFinishScore.init_safe
+#check SatFinishScore.step_safe
+#print axioms SatFinishScore.step_safe
+#check SatFinishScore.reachable_safe
+#print axioms SatFinishScore.reachable_safe
+#check SatFinishScore.response_after_commit_and_matches_bootstrap
+#print axioms SatFinishScore.response_after_commit_and_matches_bootstrap
+#check SatFinishScore.overlay_preserves_raw
+#print axioms SatFinishScore.overlay_preserves_raw
+#check SatFinishScore.overlay_preserves_release
+#print axioms SatFinishScore.overlay_preserves_release
+#check SatFinishScore.missing_raw_unchanged
+#print axioms SatFinishScore.missing_raw_unchanged
+#check SatFinishScore.policy_failure_strips_conversion
+#print axioms SatFinishScore.policy_failure_strips_conversion
+#check SatFinishScore.overlay_idempotent
+#print axioms SatFinishScore.overlay_idempotent
+#check SatFinishScore.no_snapshot_exposure
+#print axioms SatFinishScore.no_snapshot_exposure
+#check SatFinishScore.closed_gate_hides_report
+#print axioms SatFinishScore.closed_gate_hides_report
+#check SatFinishScore.withheld_hides_report
+#print axioms SatFinishScore.withheld_hides_report
+#check SatFinishScore.response_does_not_write
+#print axioms SatFinishScore.response_does_not_write
+#check SatFinishScore.old_finish_misses_score
+#print axioms SatFinishScore.old_finish_misses_score
+#check SatFinishScore.policy_change_can_change_display
+#print axioms SatFinishScore.policy_change_can_change_display
+#check SatFinishScore.disabled_old_endpoint_leaks
+#print axioms SatFinishScore.disabled_old_endpoint_leaks
+#check SatFinishScore.nonvacuous_response
+#print axioms SatFinishScore.nonvacuous_response

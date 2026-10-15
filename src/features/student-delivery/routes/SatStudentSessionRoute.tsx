@@ -464,7 +464,7 @@ export function SatStudentSessionRoute({
       <SatCompleteScreen
         result={data.result ?? result}
         onExit={onExit}
-        answered={{ sections: data.sections, loadMediaUrl, load: () => assessmentDeliveryApi.answeredExam(scheduleId, attemptId) }}
+        answered={{ sections: data.sections, load: () => assessmentDeliveryApi.answeredExam(scheduleId, attemptId) }}
       />,
     );
   }

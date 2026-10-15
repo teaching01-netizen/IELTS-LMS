@@ -8,7 +8,7 @@ import type {
   AccessLinkMemberInput,
   AssessmentAccessLink,
 } from "../../contracts/accessLinks";
-import type { AssessmentValidationIssue, SatClassroomPlan } from "../../contracts/assessment";
+import type { AssessmentValidationIssue, SatClassroomPlan, SatPublishScope } from "../../contracts/assessment";
 import type { CreateRoomState, SatRoomFields, SatRoomIssue, SatRoomReceipt } from "../../contracts/satCreateRoom";
 import { AccessLinkEditorSheet } from "../access-links/AccessLinkEditorSheet";
 import { publishIssueDestinationLabel, resolvePublishIssueDestination } from "../release/releaseSelectors";
@@ -20,6 +20,7 @@ const VERSION_SUMMARY = "the latest saved exam";
 interface SatCreateRoomFlowProps {
   examId: string;
   examTitle: string;
+  sectionScope?: SatPublishScope;
   /** Host content above the room name (the global Rooms page's exam picker). */
   examPicker?: ReactNode;
   /** Duplicate setup: start from an earlier room's audience, entry and sections. */
@@ -129,7 +130,7 @@ export function SatCreateRoomFlow(props: SatCreateRoomFlowProps) {
       onRetryClassroomPlan={() => void classroomPlanQuery.refetch()}
       classroomAvailability={classroomAvailability}
       examTitle={props.examTitle}
-      publishScope="full"
+      publishScope={props.sectionScope ?? examQuery.data?.satSectionScope ?? "full"}
       versionSummary={VERSION_SUMMARY}
       members={props.members ?? restoreDraft?.selectedStudents ?? EMPTY_MEMBERS}
       {...(props.membersLoading !== undefined ? { membersLoading: props.membersLoading } : {})}

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SatClassroomPlan, SatClassroomShape } from "./assessment";
+import type { SatClassroomPlan, SatClassroomShape, SatPublishScope } from "./assessment";
 
 /** Section keys that carry exam-level configuration. */
 export const SAT_CONFIG_SECTION_KEYS = ["reading-writing", "math"] as const;
@@ -23,6 +23,8 @@ export interface SatSectionConfig {
  * Per-room choices (Module 2 routing, audience, window) are NOT part of it.
  */
 export interface SatExamConfig {
+  /** Fixed at creation; omitted scope includes both sections. */
+  sectionScope?: SatPublishScope;
   sections: Record<SatConfigSectionKey, SatSectionConfig>;
   showClassroomScoreReport: boolean;
   classroomPlan?: SatClassroomPlan;
@@ -128,6 +130,7 @@ export function validateSatExamConfig(config: SatExamConfig, limits: SatConfigLi
 /** True when the configuration differs from the server defaults (so a create must send it). */
 export function satExamConfigDiffers(config: SatExamConfig, defaults: SatExamConfig): boolean {
   return (
+    (config.sectionScope ?? "full") !== (defaults.sectionScope ?? "full") ||
     config.showClassroomScoreReport !== defaults.showClassroomScoreReport ||
     Object.keys(config.classroomPlan ?? {}).length > 0 ||
     (config.scoreConverter !== undefined && config.scoreConverter !== null) ||

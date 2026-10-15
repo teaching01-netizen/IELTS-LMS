@@ -66,8 +66,8 @@ func linkLockRow(participation int, enabledSections any, pin ...string) *sqlmock
 	if len(pin) > 1 {
 		publishScope = pin[1]
 	}
-	return sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision", "enabled_sections", "has_participation", "provider_key", "sat_publish_scope"}).
-		AddRow("sched-1", "active", 4, enabledSections, participation, providerKey, publishScope)
+	return sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision", "enabled_sections", "has_participation", "provider_key", "sat_publish_scope", "sat_section_scope"}).
+		AddRow("sched-1", "active", 4, enabledSections, participation, providerKey, publishScope, "full")
 }
 
 // expectLinkSelect stubs the post-commit re-read in s.Get.
@@ -89,8 +89,8 @@ func TestCreateHappyPathQueryShape(t *testing.T) {
 	closes := time.Now().UTC().Add(time.Hour)
 	begin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_entities WHERE id")).WillReturnRows(
-		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id"}).
-			AddRow("IELTS Mock", "ielts", nil, "ver-1"))
+		sqlmock.NewRows([]string{"title", "provider_key", "organization_id", "current_published_version_id", "sat_section_scope"}).
+			AddRow("IELTS Mock", "ielts", nil, "ver-1", "full"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id")).WillReturnRows(
 		sqlmock.NewRows([]string{"is_published", "sat_publish_scope"}).AddRow(true, "full"))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO exam_schedules (id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name")).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -205,8 +205,8 @@ func TestDeleteRemovesOnlyAccessLinkAndFencesRevision(t *testing.T) {
 
 	begin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_access_links")).WillReturnRows(
-		sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision", "enabled_sections", "has_participation", "provider_key", "sat_publish_scope"}).
-			AddRow("sched-1", "active", int32(0), nil, 1, "ielts", "full"))
+		sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision", "enabled_sections", "has_participation", "provider_key", "sat_publish_scope", "sat_section_scope"}).
+			AddRow("sched-1", "active", int32(0), nil, 1, "ielts", "full", "full"))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM assessment_access_links WHERE id = ? AND revision = ?")).
 		WithArgs("link-1", int32(0)).
 		WillReturnResult(sqlmock.NewResult(0, 1))

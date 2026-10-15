@@ -17,6 +17,7 @@ function SatAuthoringWorkspaceHost({ examId, examTitle }: { examId: string; exam
     <AuthoringWorkspace
       examId={examId}
       examTitle={examTitle}
+      sectionScope={exam?.satSectionScope ?? "full"}
       chrome={{
         ...chrome,
         canCreateSession: Boolean(exam?.canEdit),
