@@ -1,0 +1,6 @@
+ M src/features/student-delivery/ui/transitions/score-report/SatScoreOverview.tsx
+ M src/features/student-delivery/ui/transitions/score-report/SatSubjectPerformance.tsx
+ M src/features/student-delivery/ui/transitions/score-report/__tests__/scoreReportViewModel.test.ts
+ M src/features/student-delivery/ui/transitions/score-report/scoreReportViewModel.ts
+?? src/features/student-delivery/ui/transitions/score-report/__tests__/scoreDisplay.test.tsx
+?? verification/lean/sat-student-score-display/

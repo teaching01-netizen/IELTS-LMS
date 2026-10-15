@@ -1,0 +1,134 @@
+ℹ [5/7] Built proof.AxiomAudit
+info: ././././proof/AxiomAudit.lean:6:0: SATStudentScoreDisplay.adaptive_route_uses_inclusive_threshold (threshold rawCorrect operationalCount : Nat)
+  (hpositive : 0 < operationalCount) (hthresholdLow : 1 ≤ threshold) (hthresholdHigh : threshold ≤ operationalCount)
+  (hraw : rawCorrect ≤ operationalCount) :
+  chooseRoute (RoutePolicy.adaptive threshold) rawCorrect operationalCount =
+    some (if threshold ≤ rawCorrect then Route.higher else Route.lower)
+info: ././././proof/AxiomAudit.lean:7:0: SATStudentScoreDisplay.forced_higher_route_ignores_threshold_and_raw_score (rawCorrect operationalCount : Nat)
+  (hraw : rawCorrect ≤ operationalCount) :
+  chooseRoute RoutePolicy.forceHigher rawCorrect operationalCount = some Route.higher
+info: ././././proof/AxiomAudit.lean:8:0: SATStudentScoreDisplay.adaptive_example_below_threshold_routes_lower :
+  chooseRoute (RoutePolicy.adaptive 13) 12 25 = some Route.lower
+info: ././././proof/AxiomAudit.lean:9:0: SATStudentScoreDisplay.adaptive_example_at_threshold_routes_higher :
+  chooseRoute (RoutePolicy.adaptive 13) 13 25 = some Route.higher
+info: ././././proof/AxiomAudit.lean:10:0: SATStudentScoreDisplay.adaptive_example_above_threshold_routes_higher :
+  chooseRoute (RoutePolicy.adaptive 13) 14 25 = some Route.higher
+info: ././././proof/AxiomAudit.lean:11:0: SATStudentScoreDisplay.unavailable_section_with_converter_is_dash (sec : InputSection)
+  (hstatus : sec.conversionStatus = ConversionStatus.unavailable) : sectionScore true sec = ScoreDisplay.dash
+info: ././././proof/AxiomAudit.lean:12:0: SATStudentScoreDisplay.unavailable_section_without_converter_is_raw (sec : InputSection)
+  (hstatus : sec.conversionStatus = ConversionStatus.unavailable) :
+  sectionScore false sec = ScoreDisplay.raw sec.details.overall.correct sec.details.overall.total
+info: ././././proof/AxiomAudit.lean:13:0: SATStudentScoreDisplay.valid_section_estimate_survives (sec : InputSection) (score : Interval)
+  (hstatus : sec.conversionStatus = ConversionStatus.converted) (hscaled : sec.scaled = some score)
+  (hvalid : validSectionInterval score) : sectionScore true sec = ScoreDisplay.estimated score.low score.high
+info: ././././proof/AxiomAudit.lean:14:0: SATStudentScoreDisplay.malformed_converted_interval_is_dash (sec : InputSection) (score : Interval)
+  (hstatus : sec.conversionStatus = ConversionStatus.converted) (hscaled : sec.scaled = some score)
+  (hinvalid : ¬validSectionInterval score) : sectionScore true sec = ScoreDisplay.dash
+info: ././././proof/AxiomAudit.lean:15:0: SATStudentScoreDisplay.five_point_section_score_is_invalid : ¬validSectionInterval { low := 605, high := 605 }
+info: ././././proof/AxiomAudit.lean:16:0: SATStudentScoreDisplay.full_report_keeps_valid_section_estimates_when_total_is_missing (rw math : InputSection)
+  (rwScore mathScore : Interval) (hrwSubject : rw.subject = Subject.readingWriting)
+  (hmathSubject : math.subject = Subject.math) (hrwStatus : rw.conversionStatus = ConversionStatus.converted)
+  (hmathStatus : math.conversionStatus = ConversionStatus.converted) (hrwScaled : rw.scaled = some rwScore)
+  (hmathScaled : math.scaled = some mathScore) (hrwValid : validSectionInterval rwScore)
+  (hmathValid : validSectionInterval mathScore) (hrwRaw : validSectionInput rw) (hmathRaw : validSectionInput math) :
+  ∃ subjects primary showCombined,
+    buildReport { converterPresent := true, sections := [rw, math], totalScaled := none } =
+        ReportView.available subjects primary showCombined ∧
+      List.map SectionView.score subjects =
+          [ScoreDisplay.estimated rwScore.low rwScore.high, ScoreDisplay.estimated mathScore.low mathScore.high] ∧
+        primary = some ScoreDisplay.dash ∧ showCombined = false
+info: ././././proof/AxiomAudit.lean:17:0: SATStudentScoreDisplay.no_converter_full_report_keeps_raw_total (rw math : InputSection)
+  (hrwSubject : rw.subject = Subject.readingWriting) (hmathSubject : math.subject = Subject.math)
+  (hrwStatus : rw.conversionStatus = ConversionStatus.unavailable)
+  (hmathStatus : math.conversionStatus = ConversionStatus.unavailable) (hrwRaw : validSectionInput rw)
+  (hmathRaw : validSectionInput math) :
+  ∃ subjects primary showCombined,
+    buildReport { converterPresent := false, sections := [rw, math], totalScaled := none } =
+        ReportView.available subjects primary showCombined ∧
+      primary =
+          some
+            (ScoreDisplay.raw (rw.details.overall.correct + math.details.overall.correct)
+              (rw.details.overall.total + math.details.overall.total)) ∧
+        showCombined = false
+info: ././././proof/AxiomAudit.lean:18:0: SATStudentScoreDisplay.full_report_shows_available_total_and_section_estimates (rw math : InputSection)
+  (rwScore mathScore totalScore : Interval) (hrwSubject : rw.subject = Subject.readingWriting)
+  (hmathSubject : math.subject = Subject.math) (hrwStatus : rw.conversionStatus = ConversionStatus.converted)
+  (hmathStatus : math.conversionStatus = ConversionStatus.converted) (hrwScaled : rw.scaled = some rwScore)
+  (hmathScaled : math.scaled = some mathScore) (hrwValid : validSectionInterval rwScore)
+  (hmathValid : validSectionInterval mathScore) (htotalValid : validTotalInterval totalScore)
+  (hrwRaw : validSectionInput rw) (hmathRaw : validSectionInput math) :
+  ∃ subjects,
+    buildReport { converterPresent := true, sections := [rw, math], totalScaled := some totalScore } =
+        ReportView.available subjects (some (ScoreDisplay.estimated totalScore.low totalScore.high)) true ∧
+      List.map SectionView.score subjects =
+        [ScoreDisplay.estimated rwScore.low rwScore.high, ScoreDisplay.estimated mathScore.low mathScore.high]
+info: ././././proof/AxiomAudit.lean:19:0: SATStudentScoreDisplay.full_report_shows_dash_for_missing_section_and_total (rw math : InputSection)
+  (mathScore : Interval) (hrwSubject : rw.subject = Subject.readingWriting) (hmathSubject : math.subject = Subject.math)
+  (hrwStatus : rw.conversionStatus = ConversionStatus.unavailable)
+  (hmathStatus : math.conversionStatus = ConversionStatus.converted) (hmathScaled : math.scaled = some mathScore)
+  (hmathValid : validSectionInterval mathScore) (hrwRaw : validSectionInput rw) (hmathRaw : validSectionInput math) :
+  ∃ subjects,
+    buildReport { converterPresent := true, sections := [rw, math], totalScaled := none } =
+        ReportView.available subjects (some ScoreDisplay.dash) false ∧
+      List.map SectionView.score subjects = [ScoreDisplay.dash, ScoreDisplay.estimated mathScore.low mathScore.high] ∧
+        List.map SectionView.details subjects = [rw.details, math.details]
+info: ././././proof/AxiomAudit.lean:20:0: SATStudentScoreDisplay.section_view_preserves_details (converterPresent : Bool) (sec : InputSection) :
+  (sectionView converterPresent sec).details = sec.details
+info: ././././proof/AxiomAudit.lean:21:0: SATStudentScoreDisplay.section_scores_preserve_details (converterPresent : Bool) (sections : List InputSection) :
+  List.map SectionView.details (List.map (sectionView converterPresent) sections) =
+    List.map InputSection.details sections
+info: ././././proof/AxiomAudit.lean:22:0: SATStudentScoreDisplay.malformed_section_shape_is_unavailable (report : InputReport)
+  (hinvalid : ¬validSectionList report.sections) : buildReport report = ReportView.unavailable
+info: ././././proof/AxiomAudit.lean:23:0: SATStudentScoreDisplay.rendered_dash_is_hyphen : renderedUnavailableScore ScoreDisplay.dash = "-"
+info: ././././proof/AxiomAudit.lean:24:0: SATStudentScoreDisplay.witness_converter_miss_renders_dash :
+  buildReport (oneSubjectReport true) =
+    ReportView.available
+      [{ subject := Subject.math, score := ScoreDisplay.dash, details := mathWithoutConversion.details }]
+      (some ScoreDisplay.dash) false
+info: ././././proof/AxiomAudit.lean:25:0: SATStudentScoreDisplay.witness_no_converter_retains_raw_score_and_details :
+  buildReport (oneSubjectReport false) =
+    ReportView.available
+      [{ subject := Subject.math, score := ScoreDisplay.raw 34 44, details := mathWithoutConversion.details }]
+      (some (ScoreDisplay.raw 34 44)) false
+info: ././././proof/AxiomAudit.lean:26:0: SATStudentScoreDisplay.witness_old_raw_fallback_would_show_raw_count_instead_of_dash :
+  renderedUnavailableScore (ScoreDisplay.raw 34 44) = "34 of 44 correct" ∧
+    renderedUnavailableScore ScoreDisplay.dash = "-"
+info: ././././proof/AxiomAudit.lean:28:0: 'SATStudentScoreDisplay.adaptive_route_uses_inclusive_threshold' depends on axioms: [propext]
+info: ././././proof/AxiomAudit.lean:29:0: 'SATStudentScoreDisplay.forced_higher_route_ignores_threshold_and_raw_score' depends on axioms: [propext]
+info: ././././proof/AxiomAudit.lean:30:0: 'SATStudentScoreDisplay.adaptive_example_below_threshold_routes_lower' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:31:0: 'SATStudentScoreDisplay.adaptive_example_at_threshold_routes_higher' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:32:0: 'SATStudentScoreDisplay.adaptive_example_above_threshold_routes_higher' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:33:0: 'SATStudentScoreDisplay.unavailable_section_with_converter_is_dash' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: ././././proof/AxiomAudit.lean:34:0: 'SATStudentScoreDisplay.unavailable_section_without_converter_is_raw' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: ././././proof/AxiomAudit.lean:35:0: 'SATStudentScoreDisplay.valid_section_estimate_survives' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././proof/AxiomAudit.lean:36:0: 'SATStudentScoreDisplay.malformed_converted_interval_is_dash' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././proof/AxiomAudit.lean:37:0: 'SATStudentScoreDisplay.five_point_section_score_is_invalid' depends on axioms: [propext, Quot.sound]
+info: ././././proof/AxiomAudit.lean:38:0: 'SATStudentScoreDisplay.section_view_preserves_details' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././proof/AxiomAudit.lean:39:0: 'SATStudentScoreDisplay.section_scores_preserve_details' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././proof/AxiomAudit.lean:40:0: 'SATStudentScoreDisplay.rendered_dash_is_hyphen' does not depend on any axioms
+info: ././././proof/AxiomAudit.lean:41:0: 'SATStudentScoreDisplay.malformed_section_shape_is_unavailable' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: ././././proof/AxiomAudit.lean:42:0: 'SATStudentScoreDisplay.full_report_keeps_valid_section_estimates_when_total_is_missing' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: ././././proof/AxiomAudit.lean:43:0: 'SATStudentScoreDisplay.no_converter_full_report_keeps_raw_total' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: ././././proof/AxiomAudit.lean:44:0: 'SATStudentScoreDisplay.full_report_shows_available_total_and_section_estimates' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: ././././proof/AxiomAudit.lean:45:0: 'SATStudentScoreDisplay.full_report_shows_dash_for_missing_section_and_total' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: ././././proof/AxiomAudit.lean:46:0: 'SATStudentScoreDisplay.witness_converter_miss_renders_dash' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: ././././proof/AxiomAudit.lean:47:0: 'SATStudentScoreDisplay.witness_no_converter_retains_raw_score_and_details' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: ././././proof/AxiomAudit.lean:48:0: 'SATStudentScoreDisplay.witness_old_raw_fallback_would_show_raw_count_instead_of_dash' does not depend on any axioms
+✔ [6/7] Built SatStudentScoreDisplay
+Build completed successfully.

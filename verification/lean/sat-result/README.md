@@ -1,9 +1,9 @@
 # SAT result verification
 
-Lean 4.19.0 model, proofs and evidence for [`docs/sat-result.md`](../../../docs/sat-result.md).
-It covers score conversion, the classroom raw score report, release and student
-authorization, the staff breakdown, and the answered-exam paper and its print
-gate.
+Lean 4.19.0 model, proofs and evidence for SAT result reporting, release and
+student authorization, the staff breakdown, and the answered-exam paper and
+its print gate. The current global score-conversion policy has a separate
+model and verification package at [`../sat-score-conversion`](../sat-score-conversion/README.md).
 
 - [SPEC.md](./SPEC.md): the requirement as verified, the guarantees, and what is implemented vs planned
 - [ASSUMPTIONS.md](./ASSUMPTIONS.md): assumptions (A-*), unknowns (U-*) and limitations (L-*)
@@ -30,7 +30,7 @@ lake env lean AxiomAudit.lean
 | `SatResult.lean` | Root import |
 | `evidence/` | Build, axiom, Go, MySQL, vitest, typecheck and lint transcripts, plus `source-snapshot.json` |
 
-The Lean results are about these definitions. They link to the Go, SQL and
-TypeScript code through review and tests, not through a mechanized refinement.
-The plan's converted scores and server PDF endpoint are not implemented, so
-they are reported as NOT ESTABLISHED rather than proved.
+The Lean results are about these definitions. They link to Go, SQL and
+TypeScript through review and tests, not through a mechanized refinement. The
+global score-conversion implementation is separate from this package's result
+and release model; neither Lean model proves the complete production path.

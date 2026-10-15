@@ -1,6 +1,6 @@
 import Model
 
-/-! # Safety theorems for docs/sat-result.md
+/-! # Safety theorems for the requirements in SPEC.md
 
 Every theorem is kernel-checked; AxiomAudit.lean prints its axioms. -/
 

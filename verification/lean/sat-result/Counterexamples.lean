@@ -2,8 +2,8 @@ import Safety
 
 /-! # Counterexamples and anti-vacuity witnesses
 
-Concrete, kernel-evaluated traces: each pre-fix behaviour that violated
-docs/sat-result.md, each documented limitation, and a witness that every
+Concrete, kernel-evaluated traces: each pre-fix behaviour that violated the
+requirements recorded in SPEC.md, each documented limitation, and a witness that every
 "only if" theorem in Safety.lean has a reachable positive case. -/
 
 inductive SecK | rw | math

@@ -47,6 +47,28 @@ describe("buildStudentScoreReportView", () => {
     }
   });
 
+  it("treats a blank converter version as absent instead of suppressing the raw result", () => {
+    const view = buildStudentScoreReportView(
+      report([math({ conversionStatus: "unavailable" })], {
+        conversion: { converterVersion: " \t\n " },
+      }),
+    );
+
+    expect(view.primaryScore).toEqual({ kind: "raw", correct: 34, total: 44 });
+    expect(view.methodology.converterVersion).toBeNull();
+  });
+
+  it("treats malformed converter metadata as absent without throwing", () => {
+    const view = buildStudentScoreReportView(
+      report([math({ conversionStatus: "unavailable" })], {
+        conversion: { converterVersion: 7 } as unknown as ClassroomReport["conversion"],
+      }),
+    );
+
+    expect(view.primaryScore).toEqual({ kind: "raw", correct: 34, total: 44 });
+    expect(view.methodology.converterVersion).toBeNull();
+  });
+
   it("R06 full SAT with one converted section: no total, no invented combination", () => {
     const view = buildStudentScoreReportView(
       report([rw(), math(converted(630))], { totalScaled: { low: 1210, high: 1210 } }),
@@ -65,6 +87,91 @@ describe("buildStudentScoreReportView", () => {
     expect(view.primaryScore).toEqual({ kind: "raw", correct: 74, total: 98 });
   });
 
+  it("shows a dash for an unavailable single-subject estimate and retains raw details", () => {
+    const section = math({
+      conversionStatus: "unavailable",
+      modules: [{ moduleKey: "math-m1", rawCorrect: 20, total: 22 }],
+    });
+    const view = buildStudentScoreReportView(
+      report([section], {
+        conversion: { converterVersion: "v1" },
+        domains: [{ sectionKey: "math", domain: "Algebra", correct: 8, total: 10 }],
+      }),
+    );
+
+    expect(view.primaryScore).toEqual({
+      kind: "unavailable",
+      reason: "Estimated Math score is unavailable.",
+      display: "dash",
+    });
+    expect(view.subjects[0]).toMatchObject({
+      rawCorrect: 34,
+      rawTotal: 44,
+      modules: [{ key: "math-m1", rawCorrect: 20, rawTotal: 22 }],
+      domains: [{ name: "Algebra", correct: 8, total: 10, accuracy: 80 }],
+    });
+  });
+
+  it("filters malformed fractional module and domain rows without hiding valid report details", () => {
+    const view = buildStudentScoreReportView(
+      report(
+        [math({
+          modules: [
+            { moduleKey: "math-m1", rawCorrect: 20.5, total: 22 },
+            { moduleKey: "math-m2", rawCorrect: 21, total: 22 },
+          ],
+        })],
+        {
+          domains: [
+            { sectionKey: "math", domain: "Algebra", correct: 8.5, total: 10 },
+            { sectionKey: "math", domain: "Geometry", correct: 7, total: 10 },
+          ],
+        },
+      ),
+    );
+
+    expect(view.layout).toBe("single-subject");
+    expect(view.primaryScore).toEqual({ kind: "raw", correct: 34, total: 44 });
+    expect(view.subjects[0]!.modules.map((module) => module.key)).toEqual(["math-m2"]);
+    expect(view.subjects[0]!.domains.map((domain) => domain.name)).toEqual(["Geometry"]);
+    expect(view.issues).toContain("module-invalid");
+    expect(view.issues).toContain("domain-invalid");
+  });
+
+  it("shows dashes for unavailable section and combined estimates while retaining converted sections", () => {
+    const view = buildStudentScoreReportView(
+      report(
+        [rw({ conversionStatus: "unavailable" }), math(converted(620))],
+        { conversion: { converterVersion: "v1" } },
+      ),
+    );
+
+    expect(view.layout).toBe("partial-results");
+    expect(view.primaryLabel).toBe("Estimated total SAT score");
+    expect(view.primaryScore).toMatchObject({ kind: "unavailable", display: "dash" });
+    expect(view.subjects.map((subject) => subject.score.kind)).toEqual(["unavailable", "estimated"]);
+    expect(view.subjects[0]!.rawCorrect).toBe(40);
+  });
+
+  it("does not substitute a raw total when an active converter cannot convert either section", () => {
+    const view = buildStudentScoreReportView(
+      report(
+        [rw({ conversionStatus: "unavailable" }), math({ conversionStatus: "unavailable" })],
+        { conversion: { converterVersion: "v1" } },
+      ),
+    );
+
+    expect(view.primaryScore).toMatchObject({ kind: "unavailable", display: "dash" });
+    expect(view.subjects.map((subject) => subject.score)).toEqual([
+      expect.objectContaining({ kind: "unavailable", display: "dash" }),
+      expect.objectContaining({ kind: "unavailable", display: "dash" }),
+    ]);
+    expect(view.subjects.map((subject) => [subject.rawCorrect, subject.rawTotal])).toEqual([
+      [40, 54],
+      [34, 44],
+    ]);
+  });
+
   it("R08/R09 only the administered module is listed, with no placeholder for the other", () => {
     const view = buildStudentScoreReportView(report([math({ modules: [{ moduleKey: "math-2", rawCorrect: 15, total: 22 }] })]));
     expect(view.subjects[0]!.modules).toEqual([{ key: "math-2", label: "Module 2", rawCorrect: 15, rawTotal: 22 }]);
@@ -76,7 +183,7 @@ describe("buildStudentScoreReportView", () => {
   });
 
   it("rejects scaled scores outside their scale or inverted, falling back to raw", () => {
-    for (const bad of [converted(900), converted(100), converted(600, 500), { conversionStatus: "converted" as const }]) {
+    for (const bad of [converted(900), converted(100), converted(605), converted(600, 500), { conversionStatus: "converted" as const }]) {
       const view = buildStudentScoreReportView(report([math(bad)]));
       expect(view.primaryScore?.kind).toBe("raw");
     }
@@ -84,6 +191,38 @@ describe("buildStudentScoreReportView", () => {
       report([rw(converted(580)), math(converted(630))], { totalScaled: { low: 1700, high: 1700 } }),
     );
     expect(total.layout).toBe("partial-results");
+    expect(total.issues).toContain("total-scaled-invalid");
+  });
+
+  it("shows a dash instead of accepting malformed converted score intervals", () => {
+    const malformed = [
+      { conversionStatus: "converted" as const, scaled: { low: 600.5, high: 600.5 } },
+      { conversionStatus: "converted" as const, scaled: { low: 605, high: 605 } },
+      { conversionStatus: "converted" as const, scaled: { low: 600, high: 615 } },
+      { conversionStatus: "converted" as const },
+    ];
+    for (const badScore of malformed) {
+      const view = buildStudentScoreReportView(
+        report([math(badScore)], {
+          conversion: { converterVersion: "v1" },
+        }),
+      );
+
+      expect(view.primaryScore).toMatchObject({ kind: "unavailable", display: "dash" });
+      expect(view.issues).toContain("scaled-invalid");
+    }
+
+    for (const totalScaled of [{ low: 1215, high: 1215 }, { low: 1210.5, high: 1210.5 }]) {
+      const total = buildStudentScoreReportView(
+        report([rw(converted(580)), math(converted(630))], {
+          conversion: { converterVersion: "v1" },
+          totalScaled,
+        }),
+      );
+      expect(total.primaryScore).toMatchObject({ kind: "unavailable", display: "dash" });
+      expect(total.subjects.map((subject) => subject.score.kind)).toEqual(["estimated", "estimated"]);
+      expect(total.issues).toContain("total-scaled-invalid");
+    }
   });
 
   it("R13 duplicate or invalid sections give the unavailable state", () => {
@@ -91,6 +230,8 @@ describe("buildStudentScoreReportView", () => {
       [math(), math()],
       [math({ rawCorrect: 50 })],
       [math({ rawCorrect: -1 })],
+      [math({ rawCorrect: 10.5 })],
+      [math({ total: 44.5 })],
       [math({ total: Number.NaN })],
       [{ sectionKey: "history", rawCorrect: 1, total: 2 }],
       [rw(), math({ rawCorrect: 99 })],

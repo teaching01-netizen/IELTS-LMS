@@ -1,10 +1,10 @@
-// Package satconvert owns the versioned classroom score converter of
-// docs/sat-result.md §1–2: staff-approved tables, keyed by section and module
-// topology, that map an operational raw score to an estimated 200–800 section
-// score. It never interpolates, never falls back to another topology and never
-// reuses a full two-module table for a standalone Module 2: a missing or
-// invalid entry yields "conversion unavailable", not a number.
-// Model: verification/lean/sat-result (Convert.convertTopo_*).
+// Package satconvert owns SAT classroom score conversion. The per-exam
+// Converter uses one-dimensional tables keyed by section and topology; global
+// Content uses matrices for full topologies and one-dimensional tables for
+// standalone Module 2. Both require exact operational dimensions and fail
+// closed for missing or invalid scores. The global policy has a separate Lean
+// model at verification/lean/sat-score-conversion; ConvertTopo models the
+// per-exam converter at verification/lean/sat-result.
 package satconvert
 
 import (

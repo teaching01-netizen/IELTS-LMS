@@ -17,7 +17,7 @@ export interface ScoreScale {
 export type ScoreDisplay =
   | { kind: "estimated"; low: number; high: number; scale: ScoreScale }
   | { kind: "raw"; correct: number; total: number }
-  | { kind: "unavailable"; reason: string };
+  | { kind: "unavailable"; reason: string; display?: "dash" };
 
 export type ReportLayout = "full-sat" | "single-subject" | "partial-results" | "unavailable";
 
@@ -76,7 +76,7 @@ function isSubject(key: string): key is SatSubject {
 }
 
 function isCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function validRaw(correct: unknown, total: unknown): boolean {
@@ -87,9 +87,14 @@ function estimate(value: unknown, scale: ScoreScale): ScoreDisplay | null {
   const score = value as { low?: unknown; high?: unknown } | null | undefined;
   const { low, high } = score ?? {};
   if (typeof low !== "number" || typeof high !== "number") return null;
-  if (!Number.isFinite(low) || !Number.isFinite(high) || low > high) return null;
+  if (!Number.isInteger(low) || !Number.isInteger(high) || low > high) return null;
   if (low < scale.min || high > scale.max) return null;
+  if (low % 10 !== 0 || high % 10 !== 0) return null;
   return { kind: "estimated", low, high, scale };
+}
+
+function unavailableEstimate(reason: string): ScoreDisplay {
+  return { kind: "unavailable", reason, display: "dash" };
 }
 
 /** Readable fallback when the delivered assessment does not title a module. */
@@ -205,7 +210,11 @@ export function buildStudentScoreReportView(
   delivered?: AssessmentDeliverySection[]
 ): StudentScoreReportView {
   const issues: string[] = [];
-  const converterVersion = report.conversion?.converterVersion ?? null;
+  const converterVersion =
+    typeof report.conversion?.converterVersion === "string"
+      ? report.conversion.converterVersion.trim() || null
+      : null;
+  const hasConverter = converterVersion !== null;
   const meta = moduleMeta(delivered);
 
   const bySubject = new Map<SatSubject, ReportSection>();
@@ -231,10 +240,13 @@ export function buildStudentScoreReportView(
     const converted =
       section.conversionStatus === "converted" ? estimate(section.scaled, SECTION_SCALE) : null;
     if (section.conversionStatus === "converted" && !converted) issues.push("scaled-invalid");
+    const score = converted ?? (hasConverter
+      ? unavailableEstimate(`Estimated ${SUBJECT_LABEL[key]} score is unavailable.`)
+      : { kind: "raw" as const, correct: section.rawCorrect, total: section.total });
     subjects.push({
       key,
       label: SUBJECT_LABEL[key],
-      score: converted ?? { kind: "raw", correct: section.rawCorrect, total: section.total },
+      score,
       rawCorrect: section.rawCorrect,
       rawTotal: section.total,
       modules: buildModules(section, meta, issues),
@@ -256,10 +268,11 @@ export function buildStudentScoreReportView(
   if (subjects.length === 1 && only) {
     // A stray totalScaled never applies to one subject.
     const estimated = only.score.kind === "estimated";
+    const unavailable = only.score.kind === "unavailable" && only.score.display === "dash";
     return {
       layout: "single-subject",
       title: `Your ${only.label} results`,
-      primaryLabel: estimated ? `Estimated ${only.label} score` : "Scored practice questions",
+      primaryLabel: estimated || unavailable ? `Estimated ${only.label} score` : "Scored practice questions",
       primaryScore: only.score,
       subjects,
       showCombinedScore: false,
@@ -271,6 +284,8 @@ export function buildStudentScoreReportView(
 
   // The combined score is the server's; it counts only when both sections converted.
   const total = convertedCount === subjects.length ? estimate(report.totalScaled, TOTAL_SCALE) : null;
+  if (convertedCount === subjects.length && report.totalScaled !== undefined && !total)
+    issues.push("total-scaled-invalid");
   if (total) {
     return {
       layout: "full-sat",
@@ -280,6 +295,20 @@ export function buildStudentScoreReportView(
       subjects,
       showCombinedScore: true,
       notice: null,
+      methodology,
+      issues,
+    };
+  }
+
+  if (hasConverter) {
+    return {
+      layout: "partial-results",
+      title: "Your SAT practice results",
+      primaryLabel: "Estimated total SAT score",
+      primaryScore: unavailableEstimate("Estimated combined SAT score is unavailable."),
+      subjects,
+      showCombinedScore: false,
+      notice: "An estimated combined score is unavailable.",
       methodology,
       issues,
     };

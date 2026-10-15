@@ -28,32 +28,20 @@ The live flag read at bootstrap (`loadBootstrapResult`, `delivery/service.go:580
 is pinned by `TestLoadBootstrapResultReadsScoreReportFlagLive`. Removing the
 gate fails it.
 
-## R-1. Wire converted scores, keyed by topology and versioned (SC-01…SC-05; SC-04 MISMATCH)
+## R-1. Score conversion wiring (implemented by migration 0087)
 
-**Severity: high, for the plan as written.** The plan's 200–800 section scores
-and 400–1600 total do not exist in production. `PolicyScorer.ScoreSection` is
-proved fail-closed, but nothing calls it. Its key `(section, route, raw)` cannot
-tell a standalone Module 2 from a full-exam Module 2, so SC-04 cannot hold even
-once it is wired.
+The former recommendation to wire classroom estimates is superseded. The
+global, versioned policy resolves released `classroomRaw` results at read time
+on both student and staff surfaces. It distinguishes full lower/higher
+topologies from standalone Module 2, requires exact operational dimensions,
+and fails closed when a mapping is absent. `TestSATGlobalScoreConversionIsRetroactiveMySQL`
+verifies both read surfaces and that publishing does not rewrite the stored
+result. `sat-score-conversion` contains the separate abstract Lean model.
 
-Change:
-1. Add a topology level to the table, e.g.
-   `{"math":{"full":{"lower":{…}},"standalone_m2":{"higher":{…}}}}`, and pass
-   the topology from the plan (`satpublish.LoadPlan`) into `ScoreSection`.
-2. Call it from `materializeSATResult` next to `classroomRawScoreTx`, inside the
-   same seal transaction. Persist `{scaled, converterVersion}` per section, and
-   a total only when both sections converted (CONV-2).
-3. Store the policy version on the published version, and make the publish
-   gate (`exams/service.go:929`) reject a policy missing any raw value
-   `0…operational` for any route the plan can reach (SC-05, "publish
-   rejected").
-4. If a conversion still fails at seal time, write
-   `conversionStatus: "unavailable"` rather than a number.
-
-Regression: one Go test per SC row, plus a MySQL flow test asserting the
-persisted scaled score equals the table entry. The Lean `Convert` theorems
-already state the contract. Add `topology` to `Convert.Table` and re-prove
-`convert_local` so SC-04 becomes a theorem.
+No wiring change is currently indicated. Remaining boundaries are the
+psychometric approval of table values, production database/configuration
+evidence, and the lack of a mechanized refinement connecting Go's topology and
+total logic to the Lean models.
 
 ## R-2. Decide the PDF design: build the endpoint or accept client print (PDF-08, PDF-09)
 
@@ -63,23 +51,21 @@ prints in the student's browser. That design leaks nothing: the paper is built
 from the bearer's own keyless bootstrap (A-SESS, A-KEYLESS), and there is no
 server work to bound. Either:
 
-- **accept it**: amend `docs/sat-result.md` §4–5 and drop PDF-08/09 for the
-  endpoint, or
+- **accept it**: update the local `SPEC.md` and drop PDF-08/09 for the endpoint,
+  or
 - **build it**: an authenticated handler that resolves the attempt from the
   bearer or staff role (never from a path id alone), renders from the pinned
   version (A-PIN), and runs on a bounded worker pool with a queue limit and 429
   on overflow. Test it with the same oracle as PDF-08 (another student's id →
   403) and a load test for PDF-09.
 
-## R-3. Decide whether the score-report flag applies to Standard Practice (U-5, L-4, REG-01)
+## R-3. Classroom-only score-report gate (implemented)
 
-**Severity: medium; a product decision.** The gate is the exam flag. Migration
-0085 backfilled `TRUE` for every exam that ever ran a classroom session, so
-their Standard Practice sittings now release the raw report. If REG-01 means "Standard
-Practice never shows a report", add `AND sat_session_mode = 'classroom'` to the
-gate in both `classroomRawScoreTx` and `loadBootstrapResult`. Then add
-`sessionMode` to `ResultMachine` and re-prove `released_only_when_enabled`. If
-not, record the behaviour as intended in the plan.
+The release predicate now requires both `sat_score_report_enabled` and
+`sat_session_mode = 'classroom'` in `SATScoreReportOpenSQL`. The backend
+integration test `TestSATPracticeSittingNeverReleasesWithReportOnMySQL` passes
+for a Standard Practice sitting with the report flag on. No additional gate
+change is indicated.
 
 ## R-4. Validate schedule status changes and make Delete refuse cleanly
 

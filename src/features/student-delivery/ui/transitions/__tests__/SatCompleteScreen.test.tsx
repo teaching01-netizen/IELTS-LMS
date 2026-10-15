@@ -208,7 +208,7 @@ describe("SatCompleteScreen", () => {
     );
     const report = screen.getByRole("region", { name: "Score report" });
     expect(report).toHaveTextContent("An estimated SAT score is not available for this sitting.");
-    expect(report).toHaveTextContent("9 of 22 correct");
+    expect(report).toHaveTextContent("9 of 22 scored questions correct");
     expect(report).not.toHaveTextContent(/Estimated total/);
     expect(report).not.toHaveTextContent(/\b[2-8]\d0\b/);
   });

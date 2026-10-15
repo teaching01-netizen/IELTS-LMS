@@ -1,28 +1,33 @@
 # SAT result verification report
 
-Requirement: [`docs/sat-result.md`](../../../docs/sat-result.md). Interpretation:
-[SPEC.md](SPEC.md). Per-row status: [TRACEABILITY.md](TRACEABILITY.md).
+Requirement interpretation: [SPEC.md](SPEC.md). Per-row status:
+[TRACEABILITY.md](TRACEABILITY.md). The formerly referenced
+`docs/sat-result.md` source file is absent from this checkout.
 
 ## Verdict
 
 | Field | Value |
 | --- | --- |
 | **Formal status** | **PROVED** for every theorem in `Safety.lean` (now including `ConvertTopo`, `practice_never_released` and `RepairQueue`): the pinned Lean 4.19.0 kernel build, the 154-entry axiom audit and an independent kernel replay (`Replay.lean`) all exit 0, with no `sorry`, `admit`, custom `axiom` or `native_decide`. **NOT_RUN** for PDF-05, PDF-07, PDF-08 and PDF-09, which have no theorem. |
-| **Correspondence status** | **REVIEWED_WITH_TESTS** for every implemented row, including converted scores (R-1, topology-keyed), the answered-exam endpoint (R-2) and the REG-01 gate (`enabled ∧ classroom`). SC-04 is no longer a MISMATCH. No row is MECHANIZED: the Lean is a hand transcription. |
+| **Correspondence status** | **REVIEWED_WITH_TESTS** for implemented rows, including global converted scores and the classroom-only release gate. The global score-conversion model is separate from the older result/release model; no row is MECHANIZED to Go/SQL. |
 | **Production evidence** | **PARTIAL.** <br>• MySQL 9.6.0 and **8.4.9** scratch DBs: result flow, publish gate and answered-exam suites pass under `-race` ([mysql84-suite.txt](evidence/mysql84-suite.txt), 59 PASS). <br>• Multi-worker repair soak (6 pools, flag toggling) plus a 5× `-race` re-run: all invariants hold ([mysql-result-soak.txt](evidence/mysql-result-soak.txt)). <br>• Playwright print fidelity (PDF-05/10) in 3 engines. <br>• Not known: production instance count and `transaction_isolation` (U-1, U-2). |
-| **Overall** | **CONDITIONAL.** Every plan row has a built implementation with proof and tests. Remaining blockers: production topology and isolation level are UNKNOWN; correspondence is reviewed, not mechanized; versions published before the validators are not audited (R-6); R-1…R-4 still need product sign-off. |
+| **Overall** | **CONDITIONAL.** Production topology and isolation level remain UNKNOWN; correspondence is reviewed, not mechanized; and legacy published versions were not audited. This turn's score-conversion check is local MySQL evidence, not production evidence. |
 
-> **Doc refresh incomplete.** The verdict above is current. The rest of this report, SPEC, ASSUMPTIONS, TRACEABILITY, PRODUCTION_TEST_PLAN and README still describe the earlier state (pre R-1/R-2/REG-01 fix, pre repair-starvation fix). See RECOMMENDATIONS "Done in this verification".
+### SAT classroom conversion check (2026-10-15)
+
+- `sat.LoadResultForAttempt` and `results.GetSATResult` both apply `satscoring.Overlay` to the read payload. The student-safe projection still requires `release_status = 'released'`; report materialization requires the score-report flag and classroom session mode.
+- `TestSATGlobalScoreConversionIsRetroactiveMySQL` passed on a disposable local MySQL 9.6.0 schema migrated through 0089. It verified student and staff estimates update after publish while the stored result payload stays byte-identical. `TestSATPracticeSittingNeverReleasesWithReportOnMySQL` also passed.
+- `go test -count=1 ./internal/satconvert ./internal/satscoring ./internal/terminalization` passed with the same MySQL DSN, including database-backed policy and fail-closed cases. The disposable database was dropped afterward.
+- The active policy configured in any production database and the calibration accuracy of its table values were not inspected. The Lean policy theorems prove their abstract model; they do not establish Go/SQL refinement or compose conversion with the result-release model.
 
 ### NOT ESTABLISHED
 
 | Item | Why |
 | --- | --- |
-| Converted 200–800 / 400–1600 scores (SC-01…SC-03, SC-05 end to end) | `PolicyScorer.ScoreSection` is proved fail-closed but has no production caller. There is no converter versioning and no publish gate for tables. RECOMMENDATIONS R-1. |
-| SC-04 (standalone M2 calibration) | **MISMATCH**: the table key `(section, route, raw)` cannot tell the two apart. R-1. |
+| Psychometric validity of the active table values | No authoritative calibration reference was supplied or compared. The local integration test proves the read path applies a published policy, not that its values match College Board or any approved calibration. |
+| Mechanized end-to-end score conversion refinement | The current global Lean model proves abstract lookup/publish/display properties, but does not model Go topology assignment or combined totals, and is not composed with this package's classroom release gates. |
 | Server PDF endpoint, staff export, PDF-08 for that endpoint, PDF-09 | Not implemented. The product prints in the student's browser. R-2. |
 | PDF-05 (long passages, figures, equations without clipping) | Rendering fidelity is outside the model and untested in a real browser. R-5. |
-| REG-01 for exams backfilled by 0085 | Their Standard Practice sittings also release the raw report (L-4). Product decision R-3. |
 | Multi-instance repair and MySQL 8.4 | Only one host on MySQL 9.6.0 was run (U-1, U-2). R-8. |
 
 ## Reproducible Lean evidence

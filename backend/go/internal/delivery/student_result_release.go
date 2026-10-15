@@ -18,15 +18,15 @@ import (
 // all. Fail closed on an unknown provider, an unknown status and a NULL status.
 //
 // Practice opt-in: a practice sitting may be configured to release immediately,
-// but that is a stored per-sitting policy the product has not defined yet. When
-// it exists it belongs in this table (or as an extra argument to
-// StudentResultScoreVisible) - never as a second rule somewhere else.
+// but that requires a stored per-sitting policy. For SAT, report materialization
+// currently also requires classroom session mode (`SATScoreReportOpenSQL`). If
+// practice opt-in is added, it belongs in the release policy boundary, not in
+// a second rule elsewhere.
 //
-// Current state worth knowing: SAT results materialize as `pending` (submitted)
-// or `invalidated` (terminated) and no release step currently publishes a SAT
-// result to `released`. Withholding therefore means a SAT candidate sees a
-// completion receipt and no score, which is what the shipped client already
-// does - SatCompleteScreen renders no score fields at all.
+// Current SAT state: an enabled classroom result releases when every module is
+// scored; an incomplete result stays pending until the repair path can release
+// it. The student projection still strips score fields unless release status is
+// `released`.
 const studentVisibleReleasedStatus = "released"
 
 var studentVisibleScoreStatuses = map[string]map[string]bool{

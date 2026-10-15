@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"example.com/ielts-proctoring/internal/auth"
+	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/sat"
@@ -14,12 +15,11 @@ import (
 	"example.com/ielts-proctoring/internal/terminalization"
 )
 
-// Global score conversion end to end (docs/scoreconverimplement.md TC-7, TC-13,
-// TC-16): a classroom result released BEFORE any policy existed shows the
-// estimated score of the policy published AFTER it, on both read surfaces (the
-// student bootstrap loader and the staff result detail), while the stored
-// result row - the audit evidence - is never rewritten, and a switched-off
-// score report still withholds everything.
+// Global score conversion end to end (global policy SPEC.md G-6 and prior plan
+// cases TC-7, TC-13, TC-16): a classroom result released before any policy
+// existed shows the estimate from a policy published afterward on both read
+// surfaces: the student bootstrap's SAT result loader and staff result detail.
+// The stored row remains unchanged; release-gate behavior is covered separately.
 func TestSATGlobalScoreConversionIsRetroactiveMySQL(t *testing.T) {
 	f := newSATV2CompletionFixture(t)
 	ctx := context.Background()
@@ -80,11 +80,16 @@ func TestSATGlobalScoreConversionIsRetroactiveMySQL(t *testing.T) {
 		}
 		return doc.Report
 	}
+	studentDelivery := delivery.NewService(f.db, tx.NewRunner(f.db))
 	student := func(t *testing.T) reportDoc {
 		t.Helper()
-		res, err := sat.LoadResultForAttempt(ctx, f.db, f.attemptID)
-		if err != nil || res == nil {
-			t.Fatalf("load result: %v", err)
+		bootstrap, err := studentDelivery.Bootstrap(ctx, f.scheduleID, f.attemptID, f.scheduleID)
+		if err != nil || bootstrap == nil {
+			t.Fatalf("load student bootstrap: %v", err)
+		}
+		res, ok := bootstrap.Result.(*sat.AssessmentResult)
+		if !ok || res == nil {
+			t.Fatalf("bootstrap result = %#v", bootstrap.Result)
 		}
 		return read(t, res.ScorePayload)
 	}
@@ -144,5 +149,20 @@ func TestSATGlobalScoreConversionIsRetroactiveMySQL(t *testing.T) {
 	var storedAfter string
 	if err := f.db.QueryRowContext(ctx, "SELECT CAST(score_payload AS CHAR) FROM assessment_results WHERE id = ?", resultID).Scan(&storedAfter); err != nil || storedAfter != storedBefore {
 		t.Fatalf("publish rewrote the stored result: %v\n%s\n%s", err, storedBefore, storedAfter)
+	}
+
+	// The real student bootstrap keeps the release switch in front of the
+	// student-safe projection even with an active conversion policy.
+	if _, err := f.db.ExecContext(ctx, "UPDATE exam_entities e JOIN exam_schedules sch ON sch.exam_id = e.id SET e.sat_score_report_enabled = FALSE WHERE sch.id = ?", f.scheduleID); err != nil {
+		t.Fatal(err)
+	}
+	bootstrap, err := studentDelivery.Bootstrap(ctx, f.scheduleID, f.attemptID, f.scheduleID)
+	if err != nil || bootstrap == nil {
+		t.Fatalf("load withheld student bootstrap: %v", err)
+	}
+	withheld, ok := bootstrap.Result.(*sat.AssessmentResult)
+	if !ok || withheld == nil || withheld.ReleaseStatus != "released" || withheld.ScoreKind != "" ||
+		withheld.TotalScore != nil || withheld.ScorePayload != nil || len(withheld.Sections) != 0 {
+		t.Fatalf("active policy bypassed the student release gate: %#v", bootstrap.Result)
 	}
 }

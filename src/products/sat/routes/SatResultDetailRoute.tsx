@@ -68,9 +68,9 @@ const isScaled = (value: unknown): value is Scaled =>
 const formatScaled = (score: Scaled) => (score.low === score.high ? String(score.low) : `${score.low}–${score.high}`);
 
 /**
- * The estimated scores pinned in classroomRaw at release (docs/sat-result.md
- * §1–3): null without a converter; a section maps to null when its
- * conversion was unavailable, so nothing is invented.
+ * The estimated scores overlaid from the active global policy on result reads.
+ * Raw module scores remain pinned in classroomRaw; a section maps to null when
+ * its exact topology/count conversion is unavailable, so nothing is invented.
  */
 function estimatedScores(payload: Record<string, unknown> | undefined): EstimatedScores | null {
   const raw = payload?.['classroomRaw'] as { conversion?: { converterVersion?: unknown }; totalScaled?: unknown; sections?: unknown } | undefined;

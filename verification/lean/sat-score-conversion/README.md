@@ -1,6 +1,6 @@
 # Global SAT score conversion verification
 
-Lean 4.19.0 model and proofs for [`docs/scoreconverimplement.md`](../../../docs/scoreconverimplement.md)
+Lean 4.19.0 model and proofs for the policy described in [SPEC.md](./SPEC.md)
 (migration `0087`, `internal/satscoring`, `internal/satconvert/content.go`).
 
 - [SPEC.md](./SPEC.md) · [ASSUMPTIONS.md](./ASSUMPTIONS.md) · [TRACEABILITY.md](./TRACEABILITY.md)

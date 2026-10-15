@@ -21,6 +21,14 @@ function SubjectCard({ subject, repeatScore }: { subject: SubjectReportView; rep
             </p>
             <p className="text-[13px] text-[var(--sat-text-secondary)]">Estimated score</p>
           </>
+        ) : score.kind === "unavailable" && score.display === "dash" ? (
+          <>
+            <p className="mt-2 text-[28px] font-semibold tabular-nums sm:text-[36px]">
+              <span aria-hidden="true">-</span>
+              <span className="sr-only">{score.reason}</span>
+            </p>
+            <p className="text-[13px] text-[var(--sat-text-secondary)]">Estimated score</p>
+          </>
         ) : (
           <p className="mt-2 text-[14px] text-[var(--sat-text-secondary)]">
             An estimated score is not available for this section.

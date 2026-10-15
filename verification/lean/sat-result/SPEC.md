@@ -1,8 +1,9 @@
 # SAT result: specification as verified
 
-Source requirement: [`docs/sat-result.md`](../../../docs/sat-result.md) (score
-conversion, SAT-style score report, Answered Exam PDF, release/authorization,
-test table SC-01…REG-01).
+The source document previously referenced as `docs/sat-result.md` is not present
+in this checkout. This file records the SAT result and release properties that
+this Lean package models. Current global score-conversion behavior is specified
+and modeled separately in [`../sat-score-conversion/SPEC.md`](../sat-score-conversion/SPEC.md).
 
 ## Scope (Phase 0)
 
@@ -38,7 +39,7 @@ test table SC-01…REG-01).
 - Re-read failure.
 - Timeout.
 
-**Gate.** "Classroom" in this package means an exam whose `sat_score_report_enabled` is on. Migration 0085 backfilled the flag to `TRUE` for every exam that had run a classroom session. A Standard Practice session of such an exam therefore also releases the raw report. REG-01 holds for exams with the flag off (L-4).
+**Gate.** A report is released only when the exam's `sat_score_report_enabled` flag is on and the attempt's schedule has `sat_session_mode = 'classroom'` (`results.SATScoreReportOpenSQL`). Migration 0085 backfilled the flag for exams that had run a classroom session; the session-mode check still withholds Standard Practice sittings.
 
 **Out of scope:** IRT/official-score validity, conversion-table values, percentiles, PDF pixel fidelity, browser print engine behaviour, capacity.
 
@@ -49,8 +50,8 @@ PDF endpoint. The repository implements:
 
 | Plan item | Implemented as | Consequence for this verification |
 | --- | --- | --- |
-| Converted section scores + total (§1–2) | `PolicyScorer.ScoreSection` exists and is fail-closed, but **no production path calls it** (`grep ScoreSection(` → only tests). No converter versioning, no publish gate. | The converter *primitive* and the total *contract* are proved; SC-01…SC-05 end-to-end are **NOT ESTABLISHED**. |
-| Score report (§3) | **Raw** classroom report: `score_payload.classroomRaw = {rawCorrect, total, sections[], domains?}` materialized at seal, released only when every module is scored and the exam's score-report flag is on. | Fully modeled (Report, ResultMachine, Release). |
+| Converted section scores + total | Migration 0087 adds a global, versioned policy. Student and staff result reads apply its active revision to released `classroomRaw` module scores; exact topology/count mismatches are unavailable, and a total is emitted only for two converted full sections. Before the first global publish, any conversion already stored at seal remains visible. | The active-policy model and the result/release model are separate. The current Go paths are reviewed and tested, but no Lean refinement composes policy lookup, topology resolution, total construction, and release gates end to end. See [`../sat-score-conversion/TRACEABILITY.md`](../sat-score-conversion/TRACEABILITY.md). |
+| Score report (§3) | **Raw** classroom report: `score_payload.classroomRaw = {rawCorrect, total, sections[], domains?}` materialized at seal, released only when every module is scored and the report gate is on. In production the gate requires both the exam's score-report flag and classroom session mode. | The release model captures the gate abstractly; its full SQL correspondence is reviewed and tested, not mechanized. |
 | Answered Exam PDF (§4–5) | Client-side: `AnsweredExamPaper` + `window.print()` in the student completion screen, gated by `PrintGate`. No `GET …/answered-exam.pdf`, no staff export. | Paper semantics and print gate proved. Server endpoint, staff export, PDF-08 for that endpoint, and PDF-09 are **NOT ESTABLISHED**. |
 | Staff view (§6) | `attachSATModules` nests module rows by `sectionKeys[i]`. | Proved (Attach). |
 
@@ -63,15 +64,15 @@ The IDs are local to this package. The plan's own IDs are mapped in
 
 | ID | Guarantee (exact interpretation) |
 | --- | --- |
-| CONV-1 | A conversion returns a number **iff** the table holds an integer entry for that `(section, route, raw)` and it lies in `[200, 800]`. A `null`, a missing entry, or an off-scale entry gives *no number* (never 0, never the raw value). |
-| CONV-2 | A combined total exists **only** when both sections converted, and then lies in `[400, 1600]`. A single-section exam has no total. |
+| CONV-1 | The live global policy returns an estimate only for an assigned table matching the administered topology and operational counts, with an in-range raw score and valid cell. Missing or invalid mappings are unavailable, never fabricated. |
+| CONV-2 | A combined total exists only when Reading & Writing and Math both convert from full two-module topologies. Single-subject and standalone Module 2 sittings have no combined total. |
 | SCORE-1 | A module's raw score counts exactly the non-pretest correct rows, and its operational count is exactly the non-pretest rows. Pretest rows are irrelevant to both, and raw ≤ operational. |
 | RPT-1 | The report has **one section per section key**, in first-appearance order. Each section's raw and total equal the sum over exactly that key's module rows, and the report totals equal the sum over all rows. This holds even when a section's modules are interleaved with another section's in query order. |
 | RPT-2 | A report exists **iff** there is at least one module row and every row has a non-NULL raw score with a non-NULL, positive operational count. Then `0 ≤ raw ≤ total`, `0 < total`, and the same holds per section. |
 | REL-1 | A result row is `released` only if it is `scored` and carries exactly `reportOf(modules)` — the report computed from the persisted module rows. |
-| REL-2 | A release happens only when the score-report gate is on. The gate is the per-exam `exam_entities.sat_score_report_enabled` flag: migration 0085 made it replace the classroom-session check, default `FALSE`. With the gate off, `classroomRaw` is never produced. |
+| REL-2 | A release happens only when the score-report gate is on. In production, `SATScoreReportOpenSQL` requires both `exam_entities.sat_score_report_enabled` and `exam_schedules.sat_session_mode = 'classroom'`; with the gate off, `classroomRaw` is never produced. The Go/SQL correspondence is reviewed and tested, not mechanized. |
 | REL-3 | Submit is a no-op on an existing row. A repeated terminate by the same actor is a no-op. Repair only acts on a `pending/pending` row. In the model, a released row changes only through a terminate. Production never terminates a sealed submitted attempt (A-RCPT), so there a released row is final (L-2). |
-| REL-4 | The student-visible projection exposes score fields only when the exam's flag is on **at read time** and `norm(release_status) = "released"`. The only payload key it can expose is `classroomRaw`. The client renders a report only for the literal `"released"`. So the student sees `classroomRaw` only while the flag is on and the server row is released. Turning the flag off hides an already released report. |
+| REL-4 | The student-visible projection exposes score fields only when the score-report gate is on **at read time** and `norm(release_status) = "released"`. In production the gate also requires classroom session mode. The only payload key it can expose is `classroomRaw`. The client renders a report only for the literal `"released"`. Turning the report flag off or changing the session out of classroom mode hides an already released report. |
 | STAFF-1 | In the staff breakdown each section holds exactly its own module rows, in order — sound and complete — even when two sections share a module key. |
 | PAPER-1 | Each question carries exactly one indication: a single circled option, an "unmatched" note, or "Unanswered". The circle is on the option whose id equals the recorded answer. The circle does not depend on correctness (the paper has no key input). |
 | PAPER-2 | The paper reads each answer by `(module, exam_question_id)`, given one response per key. A question reused across modules shows each module's own answer. |
@@ -79,6 +80,14 @@ The IDs are local to this package. The plan's own IDs are mapped in
 | PRINT-1 | Every printed paper meets four conditions. It is complete. All of its figures decoded. No media failure was seen during its flow. It is the current generation, rendered after a successful authoritative re-read that started after the click. |
 | PRINT-2 | At most one download flow runs per screen: `busy = false ↔ idle`. |
 | PRINT-3 | Once the module is closed, the server's accepted answers never change. A re-read makes the cache equal to the server, and it stays equal. |
+
+The `ConvertTopo` theorems in this package state topology, operational-count,
+standalone-module, and combined-total contracts for the per-exam converter
+interface. They do not refine the current global `Content` read overlay. The
+separate global policy model proves its stated lookup, publish, and display
+properties, but is not composed with `ConvertTopo` or the result-release model.
+The complete production path therefore still relies on code review and tests
+for its correspondence to Go and SQL.
 
 ### Liveness (conditional)
 

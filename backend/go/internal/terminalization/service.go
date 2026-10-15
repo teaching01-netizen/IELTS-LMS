@@ -1036,8 +1036,9 @@ func (s *Service) materializeSATResult(ctx context.Context, q tx.Tx, attemptID, 
 }
 
 // classroomRawScoreTx returns the student-facing score report of an attempt
-// whose exam has the SAT score report enabled: per-section and per-module
-// correct/total over the module attempts the student actually received, plus
+// whose SAT score-report gate is open (flag enabled and classroom mode):
+// per-section and per-module correct/total over the module attempts the
+// student actually received, plus
 // best-effort raw domain accuracy. It returns nil when the report is off and
 // when any module attempt is not scored yet, so the caller falls back to the
 // withheld "pending" result instead of publishing a partial or invented score.
@@ -1115,13 +1116,11 @@ func sectionRoles(section map[string]any) []string {
 	return roles
 }
 
-// convertClassroomScoresTx applies the exam version's versioned score converter
-// (docs/sat-result.md §2) to the grouped report. Without a converter the report
-// stays raw-only. With one, every section is marked converted or unavailable;
-// a section is never given a number from another topology's table, and the
-// 400–1600 total appears only when both sections converted from full
-// two-module topologies. The converter version is persisted with the scores,
-// so later converter edits (draft-only) never change a released result.
+// convertClassroomScoresTx materializes the exam version's converter into the
+// grouped report when configured. Result reads subsequently overlay the active
+// global SAT policy from persisted module raw scores; when active, that policy
+// replaces these conversion fields in the returned payload only. Without an
+// active global policy, the sealed per-exam conversion remains visible.
 func convertClassroomScoresTx(ctx context.Context, q tx.Tx, attemptID string, sections []map[string]any, out map[string]any) error {
 	defer func() {
 		for _, section := range sections {

@@ -116,7 +116,8 @@ func sectionList(raw map[string]any) []map[string]any {
 }
 
 // Overlay resolves payload["classroomRaw"] against the active revision, in
-// place. Callers run it after their release gates, on a payload they own:
+// place. It changes only the caller-owned response payload; the caller must
+// still enforce its release gates before exposing that payload:
 //
 //   - no classroomRaw (withheld / pending / invalidated): untouched (INV-4);
 //   - no active revision: untouched, so previously stored scores stay visible

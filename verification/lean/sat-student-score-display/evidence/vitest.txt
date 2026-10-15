@@ -1,0 +1,11 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/features/student-delivery/ui/transitions/score-report/__tests__/scoreReportViewModel.test.ts (19 tests) 30ms
+ ✓ src/features/student-delivery/ui/transitions/score-report/__tests__/scoreDisplay.test.tsx (2 tests) 32ms
+
+ Test Files  2 passed (2)
+      Tests  21 passed (21)
+   Start at  06:15:28
+   Duration  1.71s (transform 141ms, setup 565ms, collect 116ms, tests 62ms, environment 948ms, prepare 555ms)
+

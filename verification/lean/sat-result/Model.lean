@@ -1,9 +1,9 @@
 /-!
 # SAT result, score report and answered-exam paper — operational model
 
-Formal model of docs/sat-result.md as implemented in the working tree on top of
-commit 2c319e59. Each definition names the code it abstracts; TRACEABILITY.md
-maps every requirement to a theorem, a code path and a test.
+Formal model for the SAT result and release requirements recorded in SPEC.md.
+Each definition names the code it abstracts; TRACEABILITY.md maps requirements
+to theorems, code paths and tests.
 
 Namespaces:
 * `Convert`       — `sat.PolicyScorer` conversion, `normalizedRaw`, total (§1–2, SC-01..05)

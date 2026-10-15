@@ -3,7 +3,7 @@ import Model
 /-!
 # Safety theorems for the global score-conversion policy
 
-Requirement ids refer to docs/scoreconverimplement.md (FR-*, INV-*).
+Requirement ids refer to the local `SPEC.md` (G-*, INV-*).
 Everything here is about the definitions in `Model.lean` and its stated assumptions.
 -/
 

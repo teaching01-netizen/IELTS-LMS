@@ -19,6 +19,14 @@ function PrimaryValue({ score }: { score: ScoreDisplay }) {
       </p>
     );
   }
+  if (score.display === "dash") {
+    return (
+      <p className={SCORE_CLASS}>
+        <span aria-hidden="true">-</span>
+        <span className="sr-only">{score.reason}</span>
+      </p>
+    );
+  }
   return <p className="mt-2 text-[18px] font-semibold">{score.reason}</p>;
 }
 
@@ -31,6 +39,10 @@ export function SatScoreOverview({ view }: { view: StudentScoreReportView }) {
     ) : null;
   }
   const single = view.layout === "single-subject" ? subjects[0] : undefined;
+  const showSingleRawCount = single && (
+    single.score.kind === "estimated" ||
+    (single.score.kind === "unavailable" && single.score.display === "dash")
+  );
   return (
     <section aria-labelledby="sat-report-primary" className="border-t border-[var(--sat-divider)] pt-6">
       {primaryLabel ? (
@@ -44,7 +56,7 @@ export function SatScoreOverview({ view }: { view: StudentScoreReportView }) {
           Score scale {primaryScore.scale.min}–{primaryScore.scale.max}
         </p>
       ) : null}
-      {single && single.score.kind === "estimated" ? (
+      {showSingleRawCount && single ? (
         <p className="mt-1 text-[14px] tabular-nums">
           {single.rawCorrect} of {single.rawTotal} scored questions correct
         </p>
