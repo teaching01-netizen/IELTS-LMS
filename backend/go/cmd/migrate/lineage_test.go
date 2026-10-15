@@ -79,11 +79,12 @@ func migDir(t *testing.T) string {
 // report switch (0085) bumps 84->85. The classroom plan write fence (0086)
 // bumps 85->86. Global SAT score conversion (0087) bumps 86->87. The SAT
 // one-action room receipt (0088) bumps 87->88. Exact response replay
-// (0089) bumps 88->89. Any other
+// (0089) bumps 88->89. The exam-purge terminalization fence (0090) bumps
+// 89->90. Any other
 // count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 89
-	pinnedMigrationMax   = 89
+	pinnedMigrationFiles = 90
+	pinnedMigrationMax   = 90
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

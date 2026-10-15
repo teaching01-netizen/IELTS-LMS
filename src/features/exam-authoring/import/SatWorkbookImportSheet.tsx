@@ -12,8 +12,11 @@ import type {
 } from "../contracts/assessment";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import { uploadAssessmentImportAsset } from "../api/assessmentMediaApi";
-import { ExamQuestionRenderer } from "../../exam-rendering/api/ExamQuestionRenderer";
+import { SatQuestionPreview } from "../../student-delivery/api/SatQuestionPreview";
 import { AuthoringDialog } from "../ui/authoringPrimitives";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@components/ui/tabs";
+import { SAT_WORKBOOK_EXAMPLES } from "./satWorkbookExamples";
+import { SatWorkbookExampleGuide } from "./SatWorkbookExampleGuide";
 
 const MODULE_LABELS: Record<string, string> = {
   "rw-m1": "Reading & Writing · Module 1",
@@ -79,6 +82,9 @@ export function SatWorkbookImportSheet({
   const [replaceConfirmed, setReplaceConfirmed] = useState(false);
   const [selectedModuleKey, setSelectedModuleKey] = useState<string | null>(null);
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState(0);
+  const [previewTab, setPreviewTab] = useState("examples");
+  const [exampleId, setExampleId] = useState("text-only");
+  const example = SAT_WORKBOOK_EXAMPLES.find((item) => item.id === exampleId) ?? SAT_WORKBOOK_EXAMPLES[0]!;
   const busy = activity !== "idle";
 
   const clearInspection = useCallback(() => {
@@ -99,6 +105,8 @@ export function SatWorkbookImportSheet({
 
   useEffect(() => {
     clearInspection();
+    setPreviewTab("examples");
+    setExampleId("text-only");
     return () => { inspectionRef.current += 1; };
   }, [open, examId, clearInspection]);
 
@@ -172,6 +180,7 @@ export function SatWorkbookImportSheet({
     setFailedStep(null);
     setReplaceConfirmed(false);
     setFile(nextFile);
+    setPreviewTab("workbook");
     setPreview(null);
     setRenderModules(null);
     setStagedAssets([]);
@@ -315,8 +324,8 @@ export function SatWorkbookImportSheet({
         </button>
       </header>
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[430px_minmax(0,1fr)]">
-        <div className="min-h-0 overflow-y-auto border-b border-au-separator p-4 sm:p-5 lg:border-b-0 lg:border-r">
+      <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[380px_minmax(0,1fr)] lg:overflow-hidden">
+        <div className="min-h-0 border-b border-au-separator p-4 sm:p-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
           <DropTarget
             file={file}
             checking={busy}
@@ -353,6 +362,12 @@ export function SatWorkbookImportSheet({
             Includes a copyable AI prompt, authoring guide, and import checklist. Fill in any
             modules you have; leave the rest untouched.
           </p>
+
+          {previewTab === "examples" ? <SatWorkbookExampleGuide example={example} /> : (
+            <p className="mt-3 rounded-xl bg-au-fill p-3 text-xs leading-5 text-slate-600">
+              Prompt → Question text. Stimulus → Passage or image (optional). Open Examples to see where each Excel value appears.
+            </p>
+          )}
 
           {error ? (
             <div
@@ -521,7 +536,26 @@ export function SatWorkbookImportSheet({
           ) : null}
         </div>
 
-        <div className="flex min-h-[420px] min-w-0 flex-col bg-au-fill">
+        <Tabs value={previewTab} onValueChange={setPreviewTab} className="min-h-[420px] min-w-0 gap-0 bg-au-fill lg:overflow-y-auto">
+          <div className="shrink-0 border-b border-au-separator px-4 py-2 sm:px-5">
+            <TabsList aria-label="Excel preview" className="h-auto min-h-11 bg-au-fill">
+              <TabsTrigger value="examples" className="min-h-11 px-4 text-xs">Examples</TabsTrigger>
+              <TabsTrigger value="workbook" className="min-h-11 px-4 text-xs">Your workbook</TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="examples" className="min-w-0 flex-none">
+            <div className="border-b border-au-separator bg-au-surface px-4 py-3 sm:px-5">
+              <label htmlFor="sat-workbook-example" className="block text-xs font-semibold text-slate-800">Question example
+              <select id="sat-workbook-example" value={exampleId} onChange={(event) => setExampleId(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-au-separator bg-au-surface px-3 text-sm font-normal text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
+                {SAT_WORKBOOK_EXAMPLES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+              </label>
+              <p className="mt-2 text-xs leading-5 text-slate-600">{example.guidance}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-700">Student view · read-only example</p>
+            </div>
+            <SatQuestionPreview key={example.id} question={example.question} questionNumber={1} />
+          </TabsContent>
+          <TabsContent value="workbook" className="min-w-0 flex-none">
           {selectedModule && selectedQuestion ? (
             <>
               <div className="flex shrink-0 items-center justify-between gap-3 border-b border-au-separator px-4 py-3 authoring-glass sm:px-5">
@@ -544,11 +578,17 @@ export function SatWorkbookImportSheet({
                   ))}
                 </select>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
-                <div className="mx-auto max-w-[760px]">
-                  <ExamQuestionRenderer question={selectedQuestion} disabled />
-                </div>
-              </div>
+              {preview && preview.assets.length > 0 && !stagingComplete ? (
+                <p role="status" className="p-6 text-sm leading-6 text-slate-600">
+                  {!preview.valid
+                    ? "Fix the workbook issues to preview its visuals."
+                    : activity === "staging"
+                      ? "Preparing workbook visuals for the student preview…"
+                      : "Retry securing visuals to show the student preview."}
+                </p>
+              ) : (
+                <SatQuestionPreview key={`${selectedModule.moduleKey}-${selectedQuestionIndex}`} question={selectedQuestion} questionNumber={selectedQuestionIndex + 1} />
+              )}
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center p-8 text-center">
@@ -564,7 +604,8 @@ export function SatWorkbookImportSheet({
               </div>
             </div>
           )}
-        </div>
+          </TabsContent>
+        </Tabs>
       </div>
 
       <footer className="shrink-0 border-t border-au-separator px-5 py-3 sm:px-6">

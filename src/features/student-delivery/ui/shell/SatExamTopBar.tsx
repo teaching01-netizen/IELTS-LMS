@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, type Ref } from "react";
-import { BookOpen, Calculator, ChevronDown, EllipsisVertical, Highlighter } from "lucide-react";
+import { BookOpen, Calculator, ChevronDown, EllipsisVertical, Highlighter, ScanLine } from "lucide-react";
 import { SAT_COPY, satNotesToolLabel } from "../../domain/satCopy";
 import type { StructuredContent } from "../../../exam-authoring/api/assessmentContracts";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
@@ -45,6 +45,10 @@ export interface SatExamTopBarProps {
   /** When false the More utility center is excluded (button + menu). Defaults to false for now. */
   moreAvailable?: boolean | undefined;
   moreOpen?: boolean | undefined;
+  /** Reading & Writing only: the Line Reader toggle sits in the bar itself. */
+  lineReaderAvailable?: boolean | undefined;
+  lineReaderOn?: boolean | undefined;
+  onToggleLineReader?: (() => void) | undefined;
   readingOpen: boolean;
   readingPreferences: SatReadingPreferences;
   /**
@@ -273,6 +277,16 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
               presentation={props.displayPresentation ?? 'anchored'}
             />
           </div>
+          {props.lineReaderAvailable === true && props.onToggleLineReader ? (
+            <TopToolButton
+              label={SAT_COPY.more.lineReader}
+              dataSatFocus="topbar-line-reader"
+              pressed={props.lineReaderOn === true}
+              disabled={props.blocked}
+              onClick={props.onToggleLineReader}
+              icon={<ScanLine className="h-5 w-5" aria-hidden="true" />}
+            />
+          ) : null}
           {props.calculatorAvailable ? (
             <TopToolButton
               label="Calculator"

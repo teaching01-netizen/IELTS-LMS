@@ -68,29 +68,31 @@ describe('SatExamLibraryRoute', () => {
 
   afterEach(() => { consumeAuthoringDraftOnEntry('sat-1'); });
 
-  it('bulk-deletes only selected exams that no room has captured', async () => {
+  it('bulk-deletes any selected exam, warning that rooms and results go with it', async () => {
     const second = { ...satExam, id: 'sat-2', slug: 'sat-2', title: 'SAT Practice 07' };
     const roomed = { ...satExam, id: 'sat-3', slug: 'sat-3', title: 'SAT Live 01', status: 'published', currentPublishedVersionId: 'v1' };
     useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, second, roomed], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     bulkDeleteMock.mockResolvedValue({
-      success: true, total: 2, succeeded: 1, failed: 1,
+      success: true, total: 3, succeeded: 2, failed: 1,
       results: [
         { examId: 'sat-1', examTitle: 'SAT Practice 06', success: true },
         { examId: 'sat-2', examTitle: 'SAT Practice 07', success: false, error: 'Locked' },
+        { examId: 'sat-3', examTitle: 'SAT Live 01', success: true },
       ],
     });
     renderRoute();
 
-    expect(screen.getByRole('checkbox', { name: 'Select SAT Live 01' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all 2 exams that can be deleted' }));
-    expect(screen.getByRole('status')).toHaveTextContent('2 selected');
+    expect(screen.getByRole('checkbox', { name: 'Select SAT Live 01' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all 3 exams' }));
+    expect(screen.getByRole('status')).toHaveTextContent('3 selected');
 
-    fireEvent.click(screen.getByRole('button', { name: /Delete 2 exams/ }));
-    const alert = await screen.findByRole('alertdialog', { name: 'Delete 2 exams?' });
+    fireEvent.click(screen.getByRole('button', { name: /Delete 3 exams/ }));
+    const alert = await screen.findByRole('alertdialog', { name: 'Delete 3 exams?' });
+    expect(alert).toHaveTextContent('These 3 exams will be permanently deleted. 1 of them has rooms. Those rooms, student attempts and results will be deleted too.');
     fireEvent.click(within(alert).getByRole('button', { name: 'Delete' }));
 
-    await waitFor(() => expect(bulkDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ examIds: ['sat-1', 'sat-2'] })));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Deleted 1 of 2 exams. Couldn\'t delete “SAT Practice 07” (Locked).');
+    await waitFor(() => expect(bulkDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ examIds: ['sat-1', 'sat-2', 'sat-3'] })));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Deleted 2 of 3 exams. Couldn\'t delete “SAT Practice 07” (Locked).');
     // The failure stays selected so it can be retried.
     expect(screen.getByRole('checkbox', { name: 'Select SAT Practice 07' })).toBeChecked();
   });

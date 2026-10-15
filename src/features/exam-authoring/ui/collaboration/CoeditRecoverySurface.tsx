@@ -38,6 +38,15 @@ export function CoeditRecoverySurface({
     >
       <p className="min-w-0 flex-1 font-medium text-foreground">{body}</p>
       <div className="flex flex-wrap items-center gap-2">
+        {onReviewMyChanges ? (
+          <button
+            type="button"
+            onClick={onReviewMyChanges}
+            className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {PUBLISH_COPY.reviewMyChanges}
+          </button>
+        ) : null}
         {onOpenCurrentDraft ? (
           <button
             type="button"
@@ -45,15 +54,6 @@ export function CoeditRecoverySurface({
             className="min-h-11 rounded-md px-3 text-xs font-semibold hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {PUBLISH_COPY.openCurrentDraft}
-          </button>
-        ) : null}
-        {onReviewMyChanges ? (
-          <button
-            type="button"
-            onClick={onReviewMyChanges}
-            className="min-h-11 rounded-md px-3 text-xs font-semibold hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {PUBLISH_COPY.reviewMyChanges}
           </button>
         ) : null}
         <button

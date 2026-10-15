@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CoeditConnectionPhase, CoeditLifecyclePhase, CoeditLifecycleIssue } from "../../realtime/coedit/contracts";
 import type { CoeditSaveDisplayStatus } from "../../realtime/connectionCopy";
 import type { CollaborationParticipant } from "./collaborationParticipants";
+import { PUBLISH_COPY } from "./collaborationCopy";
 
 export interface CollaborationLiveRegionProps {
   enabled: boolean;
@@ -62,7 +63,7 @@ export function CollaborationLiveRegion({
 
     let message: string | null = null;
     if (prior.recoveryIssue !== next.recoveryIssue && (next.recoveryIssue === "closed" || next.recoveryIssue === "replaced")) {
-      message = "A newer version is active. Your unsaved changes are still available.";
+      message = PUBLISH_COPY.recoveryBody;
     } else if (
       prior.recoveryIssue !== next.recoveryIssue &&
       (next.recoveryIssue === "oversized" || next.recoveryIssue === "rejected")

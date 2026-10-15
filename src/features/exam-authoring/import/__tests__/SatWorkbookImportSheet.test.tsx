@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assessmentAuthoringApi } from "../../api/assessmentAuthoringApi";
-import { uploadAssessmentImportAsset } from "../../api/assessmentMediaApi";
+import * as assessmentMedia from "../../api/assessmentMediaApi";
 import type {
   AssessmentAuthoringShell,
   BatchQuestionDraft,
@@ -81,6 +81,83 @@ const validPreview: SatWorkbookPreview = {
 
 describe("SAT workbook import sheet", () => {
   beforeEach(() => vi.restoreAllMocks());
+
+  it("teaches field placement with five examples without preparing an import", () => {
+    const preview = vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook");
+    const commit = vi.spyOn(assessmentAuthoringApi, "commitSatWorkbook");
+    const upload = vi.spyOn(assessmentMedia, "uploadAssessmentImportAsset");
+    render(<SatWorkbookImportSheet open examId="exam-1" shell={shell} existingQuestionCount={0} onClose={vi.fn()} onCommitted={vi.fn()} />);
+
+    expect(screen.getByRole("tab", { name: "Examples" })).toHaveAttribute("aria-selected", "true");
+    const select = screen.getByLabelText("Question example");
+    expect(within(select).getAllByRole("option")).toHaveLength(5);
+    let student = within(screen.getByRole("region", { name: "Student preview" }));
+    expect(student.queryByLabelText("Supporting material")).not.toBeInTheDocument();
+    expect(student.getAllByRole("radio")).toHaveLength(4);
+    for (const radio of student.getAllByRole("radio")) expect(radio).toBeDisabled();
+    expect(screen.getByText(/Leave Stimulus blank/)).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "passage" } });
+    student = within(screen.getByRole("region", { name: "Student preview" }));
+    expect(student.getByLabelText("Passage")).toHaveTextContent("Native plants");
+    fireEvent.change(select, { target: { value: "table" } });
+    student = within(screen.getByRole("region", { name: "Student preview" }));
+    expect(student.getByRole("table")).toHaveTextContent("Area (square feet)");
+    expect(student.getByLabelText("Supporting material")).toContainElement(student.getByRole("table"));
+    fireEvent.change(select, { target: { value: "image" } });
+    student = within(screen.getByRole("region", { name: "Student preview" }));
+    expect(student.getByRole("img", { name: /bike.*250/i })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "numeric" } });
+    student = within(screen.getByRole("region", { name: "Student preview" }));
+    expect(student.getByRole("textbox", { name: "Enter your answer" })).toBeDisabled();
+    expect(student.queryByRole("radio")).not.toBeInTheDocument();
+    expect(student.queryByText(/Correct|Accepted Responses|Explanation|paused by the proctor/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import workbook" })).toBeDisabled();
+    expect(preview).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("preserves the uploaded workbook and diagnostics when switching to examples and back", async () => {
+    const preview = vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockResolvedValue({
+      ...validPreview,
+      valid: false,
+      issues: [{ row: 2, field: "Correct", message: "Check the verified answer key." }],
+      modules: [{ ...validPreview.modules[0]!, questions: [{ ...draft, stimulus: plainContentFromText("Uploaded passage") }] }],
+    });
+    render(<SatWorkbookImportSheet open examId="exam-1" shell={shell} existingQuestionCount={0} onClose={vi.fn()} onCommitted={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), { target: { files: [new File(["xlsx"], "SAT.xlsx")] } });
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Your workbook" })).toHaveAttribute("aria-selected", "true"));
+    expect(await screen.findByText("Uploaded passage")).toBeInTheDocument();
+    expect(screen.getByText("Check the verified answer key.")).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Examples" }), { button: 0, ctrlKey: false });
+    expect(screen.getByLabelText("Question example")).toBeInTheDocument();
+    expect(screen.getByText("Check the verified answer key.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import workbook" })).toBeDisabled();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Your workbook" }), { button: 0, ctrlKey: false });
+    expect(screen.getByText("Uploaded passage")).toBeInTheDocument();
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for image staging before resolving the uploaded image in the student preview", async () => {
+    vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockResolvedValue({
+      ...validPreview,
+      assets: [{ key: "graph_01", fileName: "graph.png", contentType: "image/png", sizeBytes: 3, checksumSha256: "checksum", altText: "Uploaded graph", caption: null, dataBase64: btoa("png") }],
+      modules: [{ moduleKey: "rw-m1", sectionKey: "reading-writing", questions: [{ ...draft, stimulus: { version: 2, nodes: [], document: { type: "doc", content: [{ type: "image", attrs: { assetId: "workbook:graph_01", alt: "Uploaded graph" } }] } } }] }],
+    });
+    let finishUpload!: (value: assessmentMedia.AssessmentMediaAsset) => void;
+    const upload = vi.spyOn(assessmentMedia, "uploadAssessmentImportAsset").mockImplementation(() => new Promise((resolve) => { finishUpload = resolve; }));
+    const asset = { id: "secured-graph", fileName: "graph.png", contentType: "image/png", uploadStatus: "complete", downloadUrl: "/qa-graph.png" };
+    const load = vi.spyOn(assessmentMedia, "getAssessmentMediaAsset").mockResolvedValue(asset);
+    render(<SatWorkbookImportSheet open examId="exam-1" shell={shell} existingQuestionCount={0} onClose={vi.fn()} onCommitted={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), { target: { files: [new File(["xlsx"], "SAT.xlsx")] } });
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    expect(load).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Import 147 questions" })).toBeDisabled();
+    await act(async () => finishUpload(asset));
+    await waitFor(() => expect(load).toHaveBeenCalledWith("secured-graph"));
+    expect(await screen.findByRole("img", { name: "Uploaded graph" })).toHaveAttribute("src", "/qa-graph.png");
+  });
 
   it("describes the authoring guidance included in the template", () => {
     render(
@@ -210,6 +287,8 @@ describe("SAT workbook import sheet", () => {
     expect(replace).toBeDisabled();
     expect(screen.getByText("Confirm the replacement to continue.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: /replaces all 12 questions/ }));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Examples" }), { button: 0, ctrlKey: false });
+    expect(screen.getByLabelText("Question example")).toBeInTheDocument();
     fireEvent.click(replace);
 
     await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
@@ -425,7 +504,7 @@ describe("SAT workbook import sheet", () => {
       sections: [{ moduleKeys: ["rw-m1"], modules: [{ moduleKey: "rw-m1", questions: Array.from({ length: 20 }) }] }],
     } as unknown as AssessmentAuthoringShell;
     render(<SatWorkbookImportSheet open examId="exam-1" shell={draftShell} existingQuestionCount={20} onClose={vi.fn()} onCommitted={vi.fn()} />);
-    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /whole draft|single module|all modules/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Target module")).not.toBeInTheDocument();
 
     const file = new File(["xlsx"], "Verbal.xlsx");

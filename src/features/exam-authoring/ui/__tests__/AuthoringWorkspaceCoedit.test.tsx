@@ -976,9 +976,9 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       // copy/export of the prompt before the new draft opens.
       const recovery = await screen.findByTestId("coedit-recovery-surface");
       expect(recovery).toHaveTextContent(
-        "A newer version is active. Your unsaved changes are still available.",
+        "This draft was replaced while you were editing. Your unsaved edits are kept on this device — review them before you continue.",
       );
-      expect(within(recovery).getByRole("button", { name: "Open current draft" })).toBeInTheDocument();
+      expect(within(recovery).getByRole("button", { name: "Open latest draft" })).toBeInTheDocument();
       expect(within(recovery).getByRole("button", { name: "Review my changes" })).toBeInTheDocument();
       const copy = within(recovery).getByRole("button", { name: "Copy my work" });
       // Frozen, not silently writable: the room no longer accepts writes.
@@ -1014,7 +1014,7 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       // The work is local and real, so the export is offered; a retry and a
       // replacement draft would both be untrue of this state.
       expect(within(recovery).getByRole("button", { name: "Copy my work" })).toBeInTheDocument();
-      expect(within(recovery).queryByRole("button", { name: "Open current draft" })).toBeNull();
+      expect(within(recovery).queryByRole("button", { name: "Open latest draft" })).toBeNull();
       expect(within(recovery).queryByRole("button", { name: "Review my changes" })).toBeNull();
       expect(saveStatusText()).not.toContain("Saved");
     });
@@ -1113,9 +1113,9 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
 
       const recovery = await screen.findByTestId("coedit-recovery-surface");
       expect(recovery).toHaveTextContent(
-        "A newer version is active. Your unsaved changes are still available.",
+        "This draft was replaced while you were editing. Your unsaved edits are kept on this device — review them before you continue.",
       );
-      expect(within(recovery).getByRole("button", { name: "Open current draft" })).toBeInTheDocument();
+      expect(within(recovery).getByRole("button", { name: "Open latest draft" })).toBeInTheDocument();
       expect(within(recovery).getByRole("button", { name: "Review my changes" })).toBeInTheDocument();
       expect(within(recovery).getByRole("button", { name: "Copy my work" })).toBeInTheDocument();
     });

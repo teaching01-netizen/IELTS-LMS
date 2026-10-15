@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { authoringEffects } from "../api/authoringQueryEffects";
 import type { QuestionSaveStatus } from "../hooks/useQuestionAutosave";
+import { coeditRoomCleanlyEnded } from "../realtime/coedit";
 import type {
   CoeditLifecycleIssue,
   CoeditRecovery,
@@ -71,9 +72,23 @@ export function coeditRecoverySurfaceFor(input: {
   issue: CoeditLifecycleIssue;
   published: boolean;
   coeditUiActive: boolean;
+  /** Absent means unknown, which keeps the surface: never hide possible work. */
+  hadUnsavedWork?: boolean;
 }): CoeditRecoverySurfaceState | null {
   if (!input.coeditUiActive || input.published) return null;
   const issue = input.issue;
+  // A clean tab whose room ended (the author's own import, an undo, another
+  // author's replacement while idle) has nothing to recover: it is reopened on
+  // the current draft below instead of being told its work is at risk.
+  if (
+    coeditRoomCleanlyEnded({
+      issue,
+      published: input.published,
+      ...(input.hadUnsavedWork === undefined ? {} : { hadUnsavedWork: input.hadUnsavedWork }),
+    })
+  ) {
+    return null;
+  }
   if (
     issue !== "closed" &&
     issue !== "replaced" &&
@@ -174,8 +189,25 @@ export function useCoeditRecoveryAndPresence(
         issue: coeditRecovery.issue,
         published: coeditRecovery.published === true,
         coeditUiActive,
+        ...(coeditRecovery.hadUnsavedWork === undefined
+          ? {}
+          : { hadUnsavedWork: coeditRecovery.hadUnsavedWork }),
       })
     : null;
+
+  // Reopen a cleanly ended room on the current draft — what "Open current
+  // draft" did, without asking the author to choose between recovery actions
+  // for work that does not exist. `retry` replaces the provider, so the new
+  // room's recovery is `none` and this cannot loop.
+  const reopenCleanlyEnded = coeditRecovery ? coeditRoomCleanlyEnded(coeditRecovery) : false;
+  const retryWorkspaceRoom = workspaceCollaboration?.retry;
+  const retryPromptRoom = coedit.retry;
+  useEffect(() => {
+    if (!reopenCleanlyEnded) return;
+    void authoringEffects.shellChanged(queryClient, examId);
+    if (retryWorkspaceRoom) retryWorkspaceRoom();
+    else retryPromptRoom();
+  }, [examId, queryClient, reopenCleanlyEnded, retryPromptRoom, retryWorkspaceRoom]);
 
   const handleRealtimeLifecycle = useCallback(
     (signal: "draft-replaced" | "published" | "exam-changed") => {

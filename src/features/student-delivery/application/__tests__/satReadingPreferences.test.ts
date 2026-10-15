@@ -67,6 +67,20 @@ describe("SAT reading preferences", () => {
     expect(stored(3)).toBe(SAT_EXAM_ZOOM_MAX);
   });
 
+  it("normalizes the line reader frame", () => {
+    const base = createSatReadingPreferences();
+    expect(normalizeSatReadingPreferences({
+      ...base, lineReaderPosition: 0.98, lineReaderX: 0.4, lineReaderLines: 3, lineReaderExpanded: true,
+    })).toMatchObject({ lineReaderPosition: 0.98, lineReaderX: 0.4, lineReaderLines: 3, lineReaderExpanded: true });
+    const bad = normalizeSatReadingPreferences({
+      ...base, lineReaderPosition: 4, lineReaderX: -1, lineReaderLines: 4, lineReaderExpanded: "yes",
+    });
+    expect(bad.lineReaderPosition).toBe(1);
+    expect(bad.lineReaderX).toBe(0);
+    expect(bad).not.toHaveProperty("lineReaderLines");
+    expect(bad).not.toHaveProperty("lineReaderExpanded");
+  });
+
   it("persists independently per schedule and attempt", () => {
     const preferred = {
       version: 1 as const,
@@ -75,6 +89,9 @@ describe("SAT reading preferences", () => {
       splitRatio: 0.55,
       lineReaderEnabled: true,
       lineReaderPosition: 0.65,
+      lineReaderX: 0.25,
+      lineReaderLines: 2 as const,
+      lineReaderExpanded: false,
       examZoom: 1.5,
       contrastMode: 'high-contrast' as const,
     };

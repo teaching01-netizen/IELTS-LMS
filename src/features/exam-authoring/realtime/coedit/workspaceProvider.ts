@@ -96,6 +96,7 @@ export interface WorkspaceRecovery {
   issue: ReturnType<PromptCoeditProvider["snapshot"]>["issue"];
   message: string | null;
   published?: boolean;
+  hadUnsavedWork?: boolean;
   canExport: boolean;
   exportPrompt: () => unknown | null;
   exportWorkspace: () => Record<string, unknown>;

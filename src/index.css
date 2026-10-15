@@ -1398,6 +1398,7 @@ math-field.sat-block-mathfield::part(menu-toggle) {
   --sat-warning-soft: #fff4cc;
   --sat-disabled-background: #eee;
   --sat-disabled-text: #444;
+  --sat-reader-window: transparent;
   --sat-highlight-background: #ffeb3b;
   --sat-highlight-text: #000;
   --sat-underline: #000;
@@ -1653,6 +1654,8 @@ math-field.sat-block-mathfield::part(menu-toggle) {
 /* <<< SAT SPECTRUM RAIL (generated) <<< */
   --sat-scrim: rgb(0 0 0 / 72%);
   --sat-reader-mask: rgb(20 20 20 / 92%);
+  /* Line reader window: the faint grey Bluebook lays over the readable lines. */
+  --sat-reader-window: rgb(0 0 0 / 7%);
   --sat-danger: #b42318;
   --sat-danger-soft: #fff1f0;
   --sat-warning: #8a4b00;

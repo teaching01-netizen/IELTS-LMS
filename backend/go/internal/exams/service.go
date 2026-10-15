@@ -828,19 +828,45 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Exa
 	return updated, err
 }
 
-// Delete removes an exam (cascades to versions/events via FK).
+// examPurgeStatements run before the exam row is deleted. The exam cascade
+// reaches tables whose restrictive (NO ACTION) keys point at rows the same
+// cascade removes (attempts -> modules, schedules/attempts/submissions ->
+// versions, routing policies -> modules), and MySQL checks each restrictive
+// key as the cascade reaches it, so those children go first, leaf to root.
+var examPurgeStatements = []string{
+	// Receipts reference attempts/schedules restrictively; 0090 admits these
+	// deletes only for the exam named in @exam_purge_id.
+	"DELETE t FROM attempt_terminalizations t JOIN student_attempts a ON a.id = t.attempt_id WHERE a.exam_id = ?",
+	"DELETE d FROM assessment_route_decisions d JOIN student_attempts a ON a.id = d.attempt_id WHERE a.exam_id = ?",
+	"DELETE FROM student_attempts WHERE exam_id = ?",
+	"DELETE FROM student_submissions WHERE exam_id = ?",
+	"DELETE FROM grading_sessions WHERE exam_id = ?",
+	"DELETE FROM assessment_access_links WHERE exam_id = ?",
+	"DELETE FROM exam_schedules WHERE exam_id = ?",
+	"DELETE FROM sat_workbook_imports WHERE exam_id = ?",
+	"DELETE p FROM assessment_routing_policies p JOIN assessment_sections s ON s.id = p.section_id JOIN exam_versions v ON v.id = s.exam_version_id WHERE v.exam_id = ?",
+	// exam_events.version_id is intentionally restrictive so an event cannot
+	// outlive its version.
+	"DELETE FROM exam_events WHERE exam_id = ?",
+	// Internal version lineage must be detached before the exam cascade;
+	// MySQL checks self-referential foreign keys during the cascade.
+	"UPDATE exam_versions SET parent_version_id = NULL WHERE exam_id = ?",
+}
+
+// Delete permanently removes an exam with its versions, rooms (schedules),
+// attempts and results, whether or not it is published.
 func (s *Service) Delete(ctx context.Context, id string) error {
 	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		// exam_events.version_id is intentionally restrictive so an event cannot
-		// outlive its version. Delete the exam-owned audit rows first; the exam
-		// deletion then cascades the versions and the remaining exam-owned rows.
-		if _, err := q.ExecContext(ctx, "DELETE FROM exam_events WHERE exam_id = ?", id); err != nil {
+		if _, err := q.ExecContext(ctx, "SET @exam_purge_id = ?", id); err != nil {
 			return err
 		}
-		// Internal version lineage must be detached before the exam cascade;
-		// MySQL checks self-referential foreign keys during the cascade.
-		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET parent_version_id = NULL WHERE exam_id = ?", id); err != nil {
-			return err
+		// The variable lives on the pooled connection; clear it before the
+		// transaction ends so no later statement inherits the purge fence.
+		defer func() { _, _ = q.ExecContext(context.WithoutCancel(ctx), "SET @exam_purge_id = NULL") }()
+		for _, stmt := range examPurgeStatements {
+			if _, err := q.ExecContext(ctx, stmt, id); err != nil {
+				return err
+			}
 		}
 		res, err := q.ExecContext(ctx, "DELETE FROM exam_entities WHERE id = ?", id)
 		if err != nil {

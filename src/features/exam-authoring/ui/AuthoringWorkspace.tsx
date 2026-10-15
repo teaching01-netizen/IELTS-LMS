@@ -78,7 +78,11 @@ import { buildExamOverview } from "./spine/overviewModel";
 import { QuestionJumpPalette } from "./spine/QuestionJumpPalette";
 import { ShortcutHelpDialog } from "./spine/ShortcutHelpDialog";
 import { SpineQuestionView } from "./spine/SpineQuestionView";
-import { useSatAuthoringCollaboration, type SatWorkspaceCommandName } from "../realtime/coedit";
+import {
+  coeditRoomCleanlyEnded,
+  useSatAuthoringCollaboration,
+  type SatWorkspaceCommandName,
+} from "../realtime/coedit";
 import { useAuthoringCoeditSession } from "./useAuthoringCoeditSession";
 import { useAuthoringCollaborationBridge } from "./useAuthoringCollaborationBridge";
 import { useAuthoringCollaborationPresence } from "./useAuthoringCollaborationPresence";
@@ -421,12 +425,20 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   // transaction, used by all three, instead of three near-identical blocks.
   const applyReplacedShell = useCallback(
     (nextShell: AssessmentAuthoringShell) => {
-      const firstModule = nextShell.sections[0]?.modules[0] ?? null;
+      // Land on the first question that needs attention, so a replacement
+      // that brought in a problem opens on it; otherwise the first question.
+      const modules = nextShell.sections.flatMap((section) => section.modules);
+      const firstIssue = modules
+        .flatMap((module) => module.questions.map((question) => ({ module, question })))
+        .find(({ question }) => question.readiness.status === "error");
+      const landingModule = firstIssue?.module ?? modules[0] ?? null;
       setWorkspaceMode("build");
       clearRowSelection();
       clearDocument();
-      setSelectedModuleId(firstModule?.id ?? null);
-      setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
+      setSelectedModuleId(landingModule?.id ?? null);
+      setSelectedExamQuestionId(
+        firstIssue?.question.examQuestionId ?? landingModule?.questions[0]?.examQuestionId ?? null
+      );
     },
     [clearDocument, clearRowSelection, setSelectedExamQuestionId, setSelectedModuleId]
   );
@@ -438,6 +450,8 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
     baseline: workbookBaseline,
     undo: workbookUndo,
     undoBusy: workbookUndoBusy,
+    summary: workbookSummary,
+    dismissSummary: dismissWorkbookSummary,
     openImport: openWorkbookImport,
     closeImport: closeWorkbookImport,
     handleCommitted: handleWorkbookCommitted,
@@ -1396,10 +1410,18 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
                   announce={false}
                 />
               ) : null}
-              {workbookUndo?.available ? (
+              {workbookSummary || workbookUndo?.available ? (
                 <WorkbookImportUndoBanner
+                  summary={workbookSummary}
+                  issueCount={totalErrors}
+                  canUndo={Boolean(workbookUndo?.available)}
                   busy={workbookUndoBusy}
                   onUndo={() => void handleWorkbookUndo()}
+                  onReviewIssues={() => void openIssues()}
+                  onDismiss={() => {
+                    dismissWorkbookSummary();
+                    withdrawWorkbookUndo();
+                  }}
                 />
               ) : null}
               <CollaborationLiveRegion
@@ -1412,7 +1434,11 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
                 hasEstablishedConnection={coeditSession?.hasEstablishedConnection}
                 lifecyclePhase={coeditSession?.lifecyclePhase ?? (publishedFrozen ? "frozen" : undefined)}
                 saveStatus={coeditDisplayStatus}
-                recoveryIssue={coeditRecovery?.published ? null : coeditRecovery?.issue ?? null}
+                recoveryIssue={
+                  !coeditRecovery || coeditRecovery.published || coeditRoomCleanlyEnded(coeditRecovery)
+                    ? null
+                    : coeditRecovery.issue
+                }
               />
             </>
           }

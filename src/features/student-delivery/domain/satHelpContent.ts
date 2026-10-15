@@ -46,7 +46,7 @@ export const SAT_HELP_ENTRIES: readonly SatHelpEntry[] = [
   {
     id: "lineReader",
     title: "Line Reader",
-    body: "The line reader dims surrounding content so you can focus on one portion at a time. Drag the move handle, or focus it and use the arrow keys. Closing it changes only the display.",
+    body: "The line reader dims surrounding content so you can focus on a few lines at a time. Drag the six dots or the dark frame to move it, tap above or below the window to step one line, or select the six dots and use the arrow keys. The arrow under the window shows more or fewer lines, and the expand button stretches it across the screen. Closing it changes only the display.",
     whereToFind: "Where to find it: More \u22ee Line Reader. Escape or \u00d7 closes it.",
   },
   {

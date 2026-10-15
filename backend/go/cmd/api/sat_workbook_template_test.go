@@ -36,11 +36,11 @@ func TestSATWorkbookTemplateRoundTripsThroughImporter(t *testing.T) {
 	if got := book.GetSheetList(); fmt.Sprint(got) != fmt.Sprint(wantSheets) {
 		t.Fatalf("sheet order = %v, want %v", got, wantSheets)
 	}
-	if active := book.GetActiveSheetIndex(); active != 3 {
-		t.Fatalf("active sheet index = %d, want 3 (AI Instructions)", active)
+	if active := book.GetActiveSheetIndex(); active != 1 {
+		t.Fatalf("active sheet index = %d, want 1 (Guide)", active)
 	}
-	if activeName := book.GetSheetName(book.GetActiveSheetIndex()); activeName != "AI Instructions" {
-		t.Fatalf("active sheet = %q, want AI Instructions", activeName)
+	if activeName := book.GetSheetName(book.GetActiveSheetIndex()); activeName != "Guide" {
+		t.Fatalf("active sheet = %q, want Guide", activeName)
 	}
 	if visible, err := book.GetSheetVisible("_SAT"); err != nil || visible {
 		t.Fatalf("_SAT visible = %v, error = %v; want hidden", visible, err)
@@ -70,13 +70,20 @@ func TestSATWorkbookTemplateRoundTripsThroughImporter(t *testing.T) {
 			if got, _ := book.GetCellValue("Questions", fmt.Sprintf("B%d", row)); got != fmt.Sprint(order) {
 				t.Errorf("Questions!B%d = %q, want %d", row, got, order)
 			}
-			for cell, want := range map[string]string{"E": "Multiple Choice", "N": "Medium", "O": ""} {
+			for cell, want := range map[string]string{
+				"C": "", "D": "", "E": "Multiple Choice", "F": "", "G": "", "H": "", "I": "", "J": "", "K": "",
+				"L": "", "M": "", "N": "Medium", "O": "", "P": "",
+			} {
 				if got, _ := book.GetCellValue("Questions", fmt.Sprintf("%s%d", cell, row)); got != want {
 					t.Errorf("Questions!%s%d = %q, want %q", cell, row, got, want)
 				}
 			}
 			row++
 		}
+	}
+	assetRows, err := book.GetRows("Assets")
+	if err != nil || len(assetRows) != 1 || fmt.Sprint(assetRows[0]) != fmt.Sprint([]string{"Asset Key", "Alt Text", "Caption", "Image"}) {
+		t.Fatalf("Assets rows = %v, error = %v; want headers only", assetRows, err)
 	}
 
 	manifestRow := 1

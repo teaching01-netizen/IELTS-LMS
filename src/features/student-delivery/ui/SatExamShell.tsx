@@ -20,7 +20,7 @@ import type { SatToolActionBinding } from '../domain/satToolActions';
 import { SatMoreMenu } from './shell/SatMoreMenu';
 import { useSatExamFitZoom } from '../hooks/useSatExamFitZoom';
 import { resolveSatExamZoom } from '../domain/satExamFit';
-import { SatLineReader } from './reading/SatLineReader';
+import { SAT_LINE_READER_TRIGGER, SatLineReader } from './reading/SatLineReader';
 import { SatContrastContext } from './reading/SatContrastContext';
 import { useSatMediaQuery } from './useSatMediaQuery';
 import { useSatAnnotationSurface } from '../hooks/useSatAnnotationSurface';
@@ -459,7 +459,10 @@ function SatExamShellContent(props: SatExamShellProps) {
       }
       interaction.handleEscape({
         lineReaderEnabled: props.readingPreferences.lineReaderEnabled ?? false,
-        onDisableLineReader: () => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: false }),
+        onDisableLineReader: () => {
+          props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: false });
+          document.querySelector<HTMLElement>(SAT_LINE_READER_TRIGGER)?.focus();
+        },
       });
     };
     document.addEventListener('keydown', escape);
@@ -496,7 +499,7 @@ function SatExamShellContent(props: SatExamShellProps) {
   const shortcutBinding = useMemo<SatToolActionBinding>(() => ({
     calculator: () => props.onToggleCalculator(),
     reference: () => props.onToggleReference(),
-    lineReader: () => { if (moreAvailable && readingWriting) props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !(props.readingPreferences.lineReaderEnabled ?? false) }); },
+    lineReader: () => { if (readingWriting) props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !(props.readingPreferences.lineReaderEnabled ?? false) }); },
     // The shortcut is the same single meaning as the control: arm or disarm
     // annotation. It does not open notes, it does not create anything, and it
     // is not a "focus the toolbar" gesture — those would give the key a second
@@ -519,7 +522,7 @@ function SatExamShellContent(props: SatExamShellProps) {
     zoomReset: () => props.onZoomReset?.(),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toggleOverlay/closeSurface are stable-by-contract per render; prefs snapshot is intentional.
   }), [props.onToggleCalculator, props.onToggleReference, props.readingPreferences, props.onOpenHelp, props.onOpenShortcuts, props.onOpenBreakConfirm, props.onNext, props.onPrevious, props.onNextQuestion, props.onPreviousQuestion, props.onToggleEliminationMode, props.onToggleMarkForReview, props.onZoomIn, props.onZoomOut, props.onZoomReset, interaction, moreAvailable, readingWriting]);
-  useSatShortcuts(!props.blocked, shortcutBinding, { disableLineReaderShortcut: !moreAvailable || !readingWriting });
+  useSatShortcuts(!props.blocked, shortcutBinding, { disableLineReaderShortcut: !readingWriting });
 
   // One tool truth (Phase 9): the runner's activeTools flags (calculatorOpen /
   // referenceOpen props) are the ONLY mount/open state for floating tools.
@@ -635,6 +638,9 @@ function SatExamShellContent(props: SatExamShellProps) {
         moreAvailable={moreAvailable}
         moreOpen={moreAvailable && activeOverlay === "more"}
         onToggleMore={moreAvailable ? () => toggleOverlay("more") : undefined}
+        lineReaderAvailable={readingWriting}
+        lineReaderOn={props.readingPreferences.lineReaderEnabled ?? false}
+        onToggleLineReader={() => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !(props.readingPreferences.lineReaderEnabled ?? false) })}
         onToggleReading={() => toggleOverlay("reading")}
         onCloseReading={closeOverlay}
         onReadingPreferencesChange={props.onReadingPreferencesChange}
@@ -811,9 +817,21 @@ function SatExamShellContent(props: SatExamShellProps) {
         <span className="sr-only" role="status" aria-live="polite" data-testid="sat-annotation-announcement">
           {announcement}
         </span>
-        {moreAvailable && readingWriting && props.readingPreferences.lineReaderEnabled && !props.blocked ? (
-          <SatLineReader position={props.readingPreferences.lineReaderPosition ?? 0.5}
-            onPositionChange={(lineReaderPosition) => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderPosition })}
+        {readingWriting && props.readingPreferences.lineReaderEnabled && !props.blocked ? (
+          <SatLineReader
+            frame={{
+              position: props.readingPreferences.lineReaderPosition,
+              x: props.readingPreferences.lineReaderX,
+              lines: props.readingPreferences.lineReaderLines,
+              expanded: props.readingPreferences.lineReaderExpanded,
+            }}
+            onFrameChange={(frame) => props.onReadingPreferencesChange({
+              ...props.readingPreferences,
+              lineReaderPosition: frame.position,
+              lineReaderX: frame.x,
+              lineReaderLines: frame.lines,
+              lineReaderExpanded: frame.expanded,
+            })}
             onDisable={() => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: false })} />
         ) : null}
         </div>

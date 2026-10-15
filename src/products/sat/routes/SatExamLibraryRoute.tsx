@@ -55,14 +55,6 @@ const ROW_CELL = {
 } as const;
 const CHECKBOX_CLASS = 'h-4 w-4 cursor-pointer accent-[var(--sat-staff-accent,#0071e3)] disabled:cursor-not-allowed disabled:opacity-40';
 
-/**
- * Only exams no room has captured can be deleted: the backend delete cascades
- * through schedules, attempts and results, so an exam with rooms stays.
- */
-function canDelete(exam: ExamEntity): boolean {
-  return !exam.currentPublishedVersionId && exam.status !== 'published';
-}
-
 function examMeta(exam: ExamEntity): string {
   const parts: string[] = [];
   // The list payload omits question counts; never print a misleading "0 questions".
@@ -132,12 +124,21 @@ export function SatExamLibraryRoute() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
-  const lockedHintId = useId();
-  // Selection only ever counts rows the user can see and delete, so a filter
-  // change can never send a hidden exam to the delete call.
-  const deletableIds = useMemo(() => exams.filter(canDelete).map((exam) => exam.id), [exams]);
-  const selectedIds = useMemo(() => deletableIds.filter((id) => picked.has(id)), [deletableIds, picked]);
-  const allSelected = deletableIds.length > 0 && selectedIds.length === deletableIds.length;
+  const checkboxId = useId();
+  // Selection only ever counts rows the user can see, so a filter change can
+  // never send a hidden exam to the delete call.
+  const selectedExams = useMemo(() => exams.filter((exam) => picked.has(exam.id)), [exams, picked]);
+  const selectedIds = selectedExams.map((exam) => exam.id);
+  const allSelected = exams.length > 0 && selectedIds.length === exams.length;
+  // The delete is permanent and takes an exam's rooms, attempts and results with it.
+  const withRooms = selectedExams.filter((exam) => exam.currentPublishedVersionId).length;
+  const deleteWarning = [
+    `${selectedIds.length === 1 ? 'This exam' : `These ${selectedIds.length} exams`} will be permanently deleted.`,
+    withRooms
+      ? `${withRooms === selectedIds.length ? (withRooms === 1 ? 'Its' : 'Their') : `${withRooms} of them ${withRooms === 1 ? 'has' : 'have'} rooms. Those`} rooms, student attempts and results will be deleted too.`
+      : '',
+    "This can't be undone.",
+  ].filter(Boolean).join(' ');
   useEffect(() => {
     if (selectAllRef.current) selectAllRef.current.indeterminate = selectedIds.length > 0 && !allSelected;
   }, [selectedIds.length, allSelected]);
@@ -153,7 +154,7 @@ export function SatExamLibraryRoute() {
   };
   const toggleAll = (on: boolean) => {
     setNotice(null);
-    setPicked(on ? new Set(deletableIds) : new Set());
+    setPicked(on ? new Set(exams.map((exam) => exam.id)) : new Set());
   };
   const runDelete = async () => {
     setConfirmOpen(false);
@@ -230,16 +231,16 @@ export function SatExamLibraryRoute() {
         <>
         <div className="mt-3 flex min-h-10 flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex items-center gap-3">
-            {deletableIds.length ? (
-              <label htmlFor={`${lockedHintId}-all`} className="-my-2 flex cursor-pointer items-center gap-2 py-2 pl-4 text-[14px] font-medium text-[var(--sat-staff-text-secondary,#515154)]">
+            {exams.length ? (
+              <label htmlFor={`${checkboxId}-all`} className="-my-2 flex cursor-pointer items-center gap-2 py-2 pl-4 text-[14px] font-medium text-[var(--sat-staff-text-secondary,#515154)]">
                 <input
-                  id={`${lockedHintId}-all`}
+                  id={`${checkboxId}-all`}
                   ref={selectAllRef}
                   type="checkbox"
                   className={CHECKBOX_CLASS}
                   checked={allSelected}
                   onChange={(event) => toggleAll(event.target.checked)}
-                  aria-label={allSelected ? 'Clear selection' : `Select all ${plural(deletableIds.length)} that can be deleted`}
+                  aria-label={allSelected ? 'Clear selection' : `Select all ${plural(exams.length)}`}
                 />
               </label>
             ) : null}
@@ -275,7 +276,6 @@ export function SatExamLibraryRoute() {
             {notice.text}
           </p>
         ) : null}
-        <p id={lockedHintId} className="sr-only">Exams with rooms can't be deleted.</p>
         <SatList>
           <SatListColumns gridClassName={ROW_GRID} columns={[{ label: '' }, { label: 'Exam' }, { label: 'Status' }, { label: 'Updated', align: 'end' }, { label: '' }]} />
           {exams.map((exam, rowIndex) => {
@@ -297,8 +297,6 @@ export function SatExamLibraryRoute() {
               if (!hasPublishedVersion) requestAuthoringDraftOnEntry(exam.id);
               openRecord(exam.id, primaryPath);
             };
-            const deletable = canDelete(exam);
-            const checked = deletable && picked.has(exam.id);
             return (
               <SatListRowShell
                 key={exam.id}
@@ -326,19 +324,17 @@ export function SatExamLibraryRoute() {
                 <span className={'grid w-full items-center py-3 ' + ROW_GRID}>
                   <span className={ROW_CELL.select + ' flex items-center'}>
                     <label
-                      htmlFor={`${lockedHintId}-${exam.id}`}
+                      htmlFor={`${checkboxId}-${exam.id}`}
                       className={`-m-3 flex p-3 ${SAT_ROW_ACTION_CLASS}`}
-                      title={deletable ? undefined : "Exams with rooms can't be deleted"}
                     >
                       <input
-                        id={`${lockedHintId}-${exam.id}`}
+                        id={`${checkboxId}-${exam.id}`}
                         type="checkbox"
                         className={CHECKBOX_CLASS}
-                        checked={checked}
-                        disabled={!deletable || bulkDelete.isPending}
+                        checked={picked.has(exam.id)}
+                        disabled={bulkDelete.isPending}
                         onChange={(event) => toggle(exam.id, event.target.checked)}
                         aria-label={`Select ${exam.title}`}
-                        aria-describedby={deletable ? undefined : lockedHintId}
                       />
                     </label>
                   </span>
@@ -414,7 +410,7 @@ export function SatExamLibraryRoute() {
         open={confirmOpen}
         destructive
         title={`Delete ${plural(selectedIds.length)}?`}
-        description={`${selectedIds.length === 1 ? 'This exam and its draft' : 'These exams and their drafts'} will be permanently deleted. This can't be undone.`}
+        description={deleteWarning}
         confirmLabel="Delete"
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => void runDelete()}

@@ -4,8 +4,22 @@
     {
       "name": "dev",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "dev-3001",
+      "runtimeExecutable": "bunx",
+      "runtimeArgs": [
+        "vite",
+        "--port=3001",
+        "--strictPort",
+        "--host=127.0.0.1"
+      ],
+      "port": 3001
     }
   ]
 }

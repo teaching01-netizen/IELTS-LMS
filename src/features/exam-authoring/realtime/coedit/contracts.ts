@@ -342,6 +342,11 @@ export interface CoeditRecovery {
   issue: CoeditLifecycleIssue;
   message: string | null;
   published?: boolean;
+  /**
+   * The tab held unacknowledged work when the room ended. False means a
+   * closed/replaced room has nothing to recover and may simply be reopened.
+   */
+  hadUnsavedWork?: boolean;
   /** Prompt JSON captured for copy/export before a replacement is opened. */
   canExport: boolean;
   exportPrompt: () => unknown | null;
@@ -359,6 +364,23 @@ export interface CoeditRecovery {
   discardStaleCache: () => Promise<void>;
   /** Refetches the HTTP revision and re-mints a token. */
   reload: () => void;
+}
+
+/**
+ * A closed/replaced, unpublished room whose tab held no unacknowledged work.
+ * There is nothing to recover, so it is reopened on the current draft rather
+ * than announced or shown as a recovery. Unknown `hadUnsavedWork` is not clean.
+ */
+export function coeditRoomCleanlyEnded(recovery: {
+  issue: CoeditLifecycleIssue;
+  published?: boolean;
+  hadUnsavedWork?: boolean;
+}): boolean {
+  return (
+    (recovery.issue === "closed" || recovery.issue === "replaced") &&
+    recovery.published !== true &&
+    recovery.hadUnsavedWork === false
+  );
 }
 
 /** Deterministic caret color from a server-derived actor id. */

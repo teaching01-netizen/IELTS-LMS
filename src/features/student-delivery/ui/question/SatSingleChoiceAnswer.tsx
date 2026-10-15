@@ -11,6 +11,7 @@ export interface SatSingleChoiceAnswerProps {
   eliminatedOptionIds: ReadonlySet<string>;
   eliminationMode: boolean;
   disabled: boolean;
+  disabledReason?: string | undefined;
   onChange: (optionId: string) => void;
   /** Flush the latest local answer draft when focus leaves the choices. */
   onBlur?: (() => void) | undefined;
@@ -33,7 +34,7 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
       <legend className="sr-only">Answer choices</legend>
       {props.disabled ? (
         <p id="sat-answers-blocked-reason" className="sr-only">
-          Answer choices unavailable: paused by the proctor, answers safe.
+          {props.disabledReason ?? "Answer choices unavailable: paused by the proctor, answers safe."}
         </p>
       ) : null}
       {props.options.map((option, index) => {

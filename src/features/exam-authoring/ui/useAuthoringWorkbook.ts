@@ -9,6 +9,7 @@ import type { SatWorkspaceCommandName } from "../realtime/coedit";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import { authoringEffects } from "../api/authoringQueryEffects";
 import type { QuestionSaveStatus } from "../hooks/useQuestionAutosave";
+import type { WorkbookImportSummary } from "./WorkbookImportUndoBanner";
 
 /**
  * The SAT workbook import transaction.
@@ -60,6 +61,10 @@ export interface AuthoringWorkbook {
   /** The undo the server still offers, or null when there is none. */
   undo: SatWorkbookUndoState | null;
   undoBusy: boolean;
+  /** What the last commit in this tab imported; null once dismissed or edited. */
+  summary: WorkbookImportSummary | null;
+  /** Hide the confirmation. Undo stays available until the next edit. */
+  dismissSummary: () => void;
   openImport: () => Promise<void>;
   /** Close the sheet and drop the staged baseline. */
   closeImport: () => void;
@@ -72,12 +77,21 @@ export interface AuthoringWorkbook {
   undoImport: () => Promise<void>;
 }
 
+function sectionCount(section: AssessmentAuthoringShell["sections"][number]): number {
+  return section.modules.reduce((count, module) => count + module.questions.length, 0);
+}
+
 function questionCount(shell: AssessmentAuthoringShell): number {
-  return shell.sections.reduce(
-    (total, section) =>
-      total + section.modules.reduce((count, module) => count + module.questions.length, 0),
-    0
-  );
+  return shell.sections.reduce((total, section) => total + sectionCount(section), 0);
+}
+
+function importSummary(shell: AssessmentAuthoringShell): WorkbookImportSummary {
+  return {
+    total: questionCount(shell),
+    sections: shell.sections
+      .map((section) => ({ title: section.title, count: sectionCount(section) }))
+      .filter((section) => section.count > 0),
+  };
 }
 
 export function useAuthoringWorkbook(input: AuthoringWorkbookInput): AuthoringWorkbook {
@@ -97,6 +111,7 @@ export function useAuthoringWorkbook(input: AuthoringWorkbookInput): AuthoringWo
   const [baseline, setBaseline] = useState<AssessmentAuthoringShell | null>(null);
   const [undo, setUndo] = useState<SatWorkbookUndoState | null>(null);
   const [undoBusy, setUndoBusy] = useState(false);
+  const [summary, setSummary] = useState<WorkbookImportSummary | null>(null);
 
   // Availability is the server's answer, re-read whenever the draft version
   // moves: an undo that another tab already consumed must not stay on offer.
@@ -144,6 +159,7 @@ export function useAuthoringWorkbook(input: AuthoringWorkbookInput): AuthoringWo
       setImportOpen(false);
       setBaseline(null);
       setUndo(result.undo.available ? result.undo : null);
+      setSummary(importSummary(nextShell));
       announce("workbook.imported", { questionCount: questionCount(nextShell) });
     },
     [announce, examId, onQuestionsReplaced, queryClient, setImportOpen]
@@ -156,6 +172,11 @@ export function useAuthoringWorkbook(input: AuthoringWorkbookInput): AuthoringWo
 
   const withdrawUndo = useCallback(() => {
     setUndo(null);
+    setSummary(null);
+  }, []);
+
+  const dismissSummary = useCallback(() => {
+    setSummary(null);
   }, []);
 
   const undoImport = useCallback(async () => {
@@ -174,6 +195,7 @@ export function useAuthoringWorkbook(input: AuthoringWorkbookInput): AuthoringWo
       void authoringEffects.questionsReplaced(queryClient, examId, nextShell);
       onQuestionsReplaced(nextShell);
       setUndo(null);
+      setSummary(null);
       announce("workbook.undone", { importId: undo.importId });
     } catch (error) {
       setUndo(null);
@@ -198,6 +220,8 @@ export function useAuthoringWorkbook(input: AuthoringWorkbookInput): AuthoringWo
     baseline,
     undo,
     undoBusy,
+    summary,
+    dismissSummary,
     openImport,
     closeImport,
     handleCommitted,

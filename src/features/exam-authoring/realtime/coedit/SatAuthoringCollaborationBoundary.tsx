@@ -7,6 +7,7 @@ import {
   SatAuthoringCollaborationProvider,
   useSatAuthoringCollaboration,
 } from "./useSatAuthoringCollaboration";
+import { coeditRoomCleanlyEnded } from "./contracts";
 
 /**
  * The single exam-level collaboration boundary for every SAT authoring route.
@@ -106,7 +107,11 @@ function SatAuthoringCollaborationOutlet({ children }: { children: ReactNode }) 
         hasEstablishedConnection={snapshot?.hasEstablishedConnection}
         lifecyclePhase={collaboration?.lifecyclePhase}
         saveStatus={saveStatus}
-        recoveryIssue={snapshot?.published ? null : snapshot?.issue ?? null}
+        recoveryIssue={
+          snapshot?.published || (collaboration?.recovery && coeditRoomCleanlyEnded(collaboration.recovery))
+            ? null
+            : snapshot?.issue ?? null
+        }
       />
       {children}
     </>

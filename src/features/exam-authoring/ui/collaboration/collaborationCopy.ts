@@ -61,8 +61,8 @@ export const DELETION_COPY = {
 export const PUBLISH_COPY = {
   body: "This draft was published while you were editing. Your changes are preserved.",
   openNewDraft: "Open the new draft",
-  recoveryBody: "A newer version is active. Your unsaved changes are still available.",
-  openCurrentDraft: "Open current draft",
+  recoveryBody: "This draft was replaced while you were editing. Your unsaved edits are kept on this device — review them before you continue.",
+  openCurrentDraft: "Open latest draft",
   reviewMyChanges: "Review my changes",
   copyMyWork: "Copy my work",
   /**

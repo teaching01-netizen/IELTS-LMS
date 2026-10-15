@@ -275,6 +275,12 @@ export class PromptCoeditProvider {
   private readOnly: boolean;
   private issue: CoeditLifecycleIssue = "none";
   private issueMessage: string | null = null;
+  /**
+   * Whether this tab held work the room had not acknowledged when a lifecycle
+   * decision ended it. A clean tab has nothing to recover, so the workspace can
+   * reopen on the current draft instead of raising a recovery surface.
+   */
+  private hadUnsavedWork = false;
   private acknowledgedStateVector: string | null = null;
   private questionRevision: number | null = null;
   private lastError: { message: string; retryable: boolean } | null = null;
@@ -627,6 +633,7 @@ export class PromptCoeditProvider {
         issue: this.issue,
         message: this.issueMessage,
         published: this.published,
+        hadUnsavedWork: this.hadUnsavedWork,
         // A closed/replaced room offers the export unless it was published
         // (the work is durable). A refused or oversized write is the other
         // case where local content is not durable, so it must offer it too.
@@ -759,6 +766,8 @@ export class PromptCoeditProvider {
     message: string,
     published = false,
   ): void {
+    this.hadUnsavedWork =
+      this.pendingSince !== null || this.localStateVector !== this.acknowledgedStateVector;
     this.issue = issue;
     this.issueMessage = message;
     this.lifecyclePhase = "frozen";

@@ -23,6 +23,7 @@ export interface SatQuestionRendererProps {
   response: SatQuestionResponseDraft;
   eliminationMode: boolean;
   disabled: boolean;
+  disabledReason?: string | undefined;
   readingPreferences: SatReadingPreferences;
   onReadingSplitRatioChange: (ratio: number) => void;
   onAnswerChange: (answer: string) => void;
@@ -108,6 +109,7 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
                 eliminatedOptionIds={eliminated}
                 eliminationMode={props.eliminationMode}
                 disabled={props.disabled}
+                disabledReason={props.disabledReason}
                 onChange={props.onAnswerChange}
                 onBlur={props.onAnswerBlur}
                 onToggleElimination={props.onToggleEliminatedOption}

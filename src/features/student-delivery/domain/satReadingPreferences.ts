@@ -2,6 +2,7 @@ export const SAT_READING_TEXT_SCALES = [1, 1.15, 1.3, 1.5, 1.75, 2] as const;
 
 export type SatReadingTextScale = (typeof SAT_READING_TEXT_SCALES)[number];
 export type SatReadingLineSpacing = "standard" | "relaxed";
+export type SatLineReaderLines = 1 | 2 | 3;
 
 export interface SatReadingPreferences {
   version: 1;
@@ -9,7 +10,12 @@ export interface SatReadingPreferences {
   lineSpacing: SatReadingLineSpacing;
   splitRatio: number;
   lineReaderEnabled?: boolean;
-  lineReaderPosition?: number;
+  /** Line reader panel top, as a fraction of the exam shell height. */
+  lineReaderPosition?: number | undefined;
+  /** Line reader panel left edge (collapsed), as a fraction of the shell width. */
+  lineReaderX?: number | undefined;
+  lineReaderLines?: SatLineReaderLines | undefined;
+  lineReaderExpanded?: boolean | undefined;
   examZoom?: number;
   contrastMode?: 'default' | 'high-contrast';
 }
@@ -71,7 +77,12 @@ export function normalizeSatReadingPreferences(value: unknown): SatReadingPrefer
     ...(candidate.contrastMode === 'default' || candidate.contrastMode === 'high-contrast' ? { contrastMode: candidate.contrastMode } : {}),
     ...(typeof candidate.lineReaderEnabled === 'boolean' ? { lineReaderEnabled: candidate.lineReaderEnabled } : {}),
     ...(typeof candidate.lineReaderPosition === 'number' && Number.isFinite(candidate.lineReaderPosition)
-      ? { lineReaderPosition: Math.max(0.05, Math.min(0.95, candidate.lineReaderPosition)) } : {}),
+      ? { lineReaderPosition: Math.max(0, Math.min(1, candidate.lineReaderPosition)) } : {}),
+    ...(typeof candidate.lineReaderX === 'number' && Number.isFinite(candidate.lineReaderX)
+      ? { lineReaderX: Math.max(0, Math.min(1, candidate.lineReaderX)) } : {}),
+    ...(candidate.lineReaderLines === 1 || candidate.lineReaderLines === 2 || candidate.lineReaderLines === 3
+      ? { lineReaderLines: candidate.lineReaderLines } : {}),
+    ...(typeof candidate.lineReaderExpanded === 'boolean' ? { lineReaderExpanded: candidate.lineReaderExpanded } : {}),
   };
 }
 

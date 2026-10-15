@@ -34,6 +34,7 @@ export {
   COEDIT_WRITE_REFUSED_REASON,
   INITIAL_SAVE_STATE,
   coeditRecoveryFromSaveFailure,
+  coeditRoomCleanlyEnded,
   colorForActor,
   parseCoeditSaveFailureMessage,
   parseCoeditLifecycleMessage,

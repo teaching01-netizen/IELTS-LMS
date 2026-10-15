@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
@@ -217,4 +218,108 @@ func completedGeneratedWorkbookBytes(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return completed
+}
+
+func TestSATWorkbookGuideExplainsStudentPlacementAndWorkedExamples(t *testing.T) {
+	data, err := buildSATWorkbookTemplate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = book.Close() }()
+	rows, err := book.GetRows("Guide")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guide := flattenSATWorkbookRows(rows)
+	for _, text := range []string{
+		"Question text", "Passage or image", "above the answers", "separate pane", "stacked",
+		"genuinely empty", "None", "N/A", "grading only", "Explanation", "staff metadata",
+		"EXAMPLE · TEXT ONLY", "EXAMPLE · PASSAGE", "EXAMPLE · TABLE", "EXAMPLE · GRAPH", "EXAMPLE · NUMERIC",
+		"| Area (square feet) | Water (gallons) |", "![bike_value]", "crop", "OCR", "source page",
+		"Filled modules only", "untouched template defaults",
+	} {
+		if !strings.Contains(guide, text) {
+			t.Errorf("Guide missing %q", text)
+		}
+	}
+	for _, outdated := range []string{"replaces all six modules", "All six module labels and counts", "Medium and No", "both require authored questions"} {
+		if strings.Contains(guide, outdated) {
+			t.Errorf("Guide retains outdated requirement %q", outdated)
+		}
+	}
+	examples := make(map[string]map[string]string)
+	for _, row := range rows {
+		if len(row) < 3 || !strings.HasPrefix(row[0], "EXAMPLE ·") {
+			continue
+		}
+		if examples[row[0]] == nil {
+			examples[row[0]] = make(map[string]string)
+		}
+		examples[row[0]][row[1]] = row[2]
+	}
+	for _, example := range []string{"TEXT ONLY", "PASSAGE", "TABLE", "GRAPH", "NUMERIC"} {
+		fields := examples["EXAMPLE ·"+" "+example]
+		if fields["Prompt"] == "" || fields["Response Type"] == "" {
+			t.Errorf("%s example lacks Prompt or Response Type", example)
+		}
+	}
+	if got := examples["EXAMPLE · TABLE"]["Stimulus"]; !strings.Contains(got, "|---") || !strings.Contains(got, "3,780") {
+		t.Errorf("table example is not a Markdown table: %q", got)
+	}
+	if got := examples["EXAMPLE · GRAPH"]["Stimulus"]; got != "![bike_value]" {
+		t.Errorf("graph Stimulus = %q", got)
+	}
+	if got := examples["EXAMPLE · NUMERIC"]["Accepted Responses"]; got != "4" {
+		t.Errorf("numeric accepted response = %q", got)
+	}
+	prompt, err := book.GetCellValue("AI Instructions", "B4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"Question text", "Passage or image", "genuinely empty", "None", "N/A", "grading only", "source page", "graphs", "Markdown tables", "untouched template defaults"} {
+		if !strings.Contains(prompt, text) {
+			t.Errorf("AI prompt missing %q", text)
+		}
+	}
+	if strings.Contains(prompt, "both modules still require") {
+		t.Error("AI prompt requires both adaptive branches")
+	}
+}
+
+func TestSATWorkbookReferenceSheetsAreReadable(t *testing.T) {
+	data, err := buildSATWorkbookTemplate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = book.Close() }()
+	for _, sheet := range []string{"Guide", "AI Instructions"} {
+		width, err := book.GetColWidth(sheet, "C")
+		if err != nil || width < 50 {
+			t.Errorf("%s column C width = %v, error %v; want >=50", sheet, width, err)
+		}
+		for _, cell := range []string{"A1", "B2", "C2"} {
+			id, err := book.GetCellStyle(sheet, cell)
+			if err != nil {
+				t.Fatal(err)
+			}
+			style, err := book.GetStyle(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if style.Alignment == nil || !style.Alignment.WrapText || style.Alignment.Vertical != "top" {
+				t.Errorf("%s!%s needs wrapped, top-aligned text", sheet, cell)
+			}
+			if cell == "A1" && (style.Font == nil || !style.Font.Bold) {
+				t.Errorf("%s needs a bold heading", sheet)
+			}
+		}
+	}
 }
