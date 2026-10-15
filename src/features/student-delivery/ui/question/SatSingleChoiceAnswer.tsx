@@ -109,7 +109,7 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                   // Muting only: the cross-out itself is the row strike below,
                   // so equations and mixed structured content stay readable
                   // (a per-node line-through would break them apart).
-                  className={`min-w-0 flex-1 sat-type-body ${eliminated ? "text-[var(--sat-text-secondary)]" : "text-[var(--sat-text)]"}`}
+                  className={`min-w-0 flex-1 sat-exam-prose sat-type-body ${eliminated ? "text-[var(--sat-text-secondary)]" : "text-[var(--sat-text)]"}`}
                 >
                   {props.renderOptionContent
                     ? props.renderOptionContent(option, () => {

@@ -63,7 +63,7 @@ export function SatSegmentedControl<T extends string>({ label, value, options, o
             aria-checked={selected}
             tabIndex={selected ? 0 : -1}
             aria-label={option.count !== undefined ? `${option.label} ${option.count}` : undefined}
-            className="sat-segmented-option capitalize"
+            className="sat-segmented-option"
             onClick={() => onChange(option.value)}
           >
             {selected ? (

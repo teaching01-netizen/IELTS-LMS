@@ -65,8 +65,10 @@ export function SatExamConfigFields({
     if (!roles.includes("higher")) timing.module2HigherMinutes = defaults.sections[section].module2HigherMinutes;
     if (shape !== "full") timing.minimumCorrectForHigher = defaults.sections[section].minimumCorrectForHigher;
 
+    // Drop the previous plan so an all-full selection doesn't keep the stale one.
+    const { classroomPlan: _previousPlan, ...rest } = value;
     onChange({
-      ...value,
+      ...rest,
       sections: { ...value.sections, [section]: timing },
       ...(Object.keys(classroomPlan).length ? { classroomPlan } : {}),
     });

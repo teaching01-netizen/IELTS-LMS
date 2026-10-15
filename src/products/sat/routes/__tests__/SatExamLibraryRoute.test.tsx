@@ -11,8 +11,10 @@ import {
 const useExamListQueryMock = vi.hoisted(() => vi.fn());
 const createProviderExamMock = vi.hoisted(() => vi.fn());
 const invalidateExamListMock = vi.hoisted(() => vi.fn());
+const bulkDeleteMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/exam-authoring/api/examQueries', () => ({
   useExamListQuery: useExamListQueryMock,
+  useBulkDeleteExamsMutation: () => ({ mutateAsync: bulkDeleteMock, isPending: false }),
   invalidateExamList: invalidateExamListMock,
 }));
 vi.mock('../../../../features/exam-authoring/api/examAuthoringFacade', () => ({
@@ -65,6 +67,33 @@ describe('SatExamLibraryRoute', () => {
   });
 
   afterEach(() => { consumeAuthoringDraftOnEntry('sat-1'); });
+
+  it('bulk-deletes only selected exams that no room has captured', async () => {
+    const second = { ...satExam, id: 'sat-2', slug: 'sat-2', title: 'SAT Practice 07' };
+    const roomed = { ...satExam, id: 'sat-3', slug: 'sat-3', title: 'SAT Live 01', status: 'published', currentPublishedVersionId: 'v1' };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, second, roomed], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    bulkDeleteMock.mockResolvedValue({
+      success: true, total: 2, succeeded: 1, failed: 1,
+      results: [
+        { examId: 'sat-1', examTitle: 'SAT Practice 06', success: true },
+        { examId: 'sat-2', examTitle: 'SAT Practice 07', success: false, error: 'Locked' },
+      ],
+    });
+    renderRoute();
+
+    expect(screen.getByRole('checkbox', { name: 'Select SAT Live 01' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all 2 exams that can be deleted' }));
+    expect(screen.getByRole('status')).toHaveTextContent('2 selected');
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete 2 exams/ }));
+    const alert = await screen.findByRole('alertdialog', { name: 'Delete 2 exams?' });
+    fireEvent.click(within(alert).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(bulkDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ examIds: ['sat-1', 'sat-2'] })));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Deleted 1 of 2 exams. Couldn\'t delete “SAT Practice 07” (Locked).');
+    // The failure stays selected so it can be retried.
+    expect(screen.getByRole('checkbox', { name: 'Select SAT Practice 07' })).toBeChecked();
+  });
 
   it('arms the edit gesture when a row is opened, and only then', () => {
     // A published exam has no editable draft, so the row click is the gesture
@@ -126,7 +155,7 @@ describe('SatExamLibraryRoute', () => {
     // The filter tab and the row's status pill both say it.
     expect(screen.getAllByText('Rooms available')).toHaveLength(2);
     expect(screen.queryByText(/Published/)).not.toBeInTheDocument();
-    expect(screen.getByText(/0 questions · Math only/)).toBeInTheDocument();
+    expect(screen.getByText(/^Math only/)).toBeInTheDocument();
   });
 
   it('creates a SAT directly without exposing a provider selector', async () => {

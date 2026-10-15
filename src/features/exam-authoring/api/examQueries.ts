@@ -4,7 +4,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import type { ExamEntity, TransitionResult } from '../../../types/domain';
+import type { BulkOperationResult, ExamEntity, TransitionResult } from '../../../types/domain';
 import { examAuthoringFacade } from '../application/examAuthoringFacade';
 import type { DeleteExamInput, ExamListData } from '../contracts/examList';
 
@@ -75,6 +75,21 @@ export function useDeleteExamMutation() {
 
       void queryClient.invalidateQueries({ queryKey: examKeys.all });
       queryClient.removeQueries({ queryKey: examKeys.detail(examId) });
+    },
+  });
+}
+
+/** Per-exam outcomes; the list refreshes even on partial failure. */
+export function useBulkDeleteExamsMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation<BulkOperationResult, Error, { examIds: string[]; actor: string }>({
+    mutationFn: ({ examIds, actor }) => examAuthoringFacade.lifecycle.bulkDelete(examIds, actor),
+    onSettled: (result) => {
+      void queryClient.invalidateQueries({ queryKey: examKeys.all });
+      for (const item of result?.results ?? []) {
+        if (item.success) queryClient.removeQueries({ queryKey: examKeys.detail(item.examId) });
+      }
     },
   });
 }

@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
-import { ArrowRight, BookOpen, Plus, SearchX } from 'lucide-react';
-import { SAT_ROW_STACK, SatButton, SatInlineError, SatListColumns } from '../ui/SatPage';
-import { useExamListQuery } from '../../../features/exam-authoring/api/examQueries';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ArrowRight, BookOpen, Plus, SearchX, Trash2 } from 'lucide-react';
+import { SatButton, SatInlineError, SatListColumns } from '../ui/SatPage';
+import { useBulkDeleteExamsMutation, useExamListQuery } from '../../../features/exam-authoring/api/examQueries';
+import { useAuthSession } from '../../../features/auth/authSession';
+import { SatConfirmDialog } from '../ui/ConfirmDialog';
 import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/api/authoringEntryIntent';
 import type { ExamEntity } from '../../../types/domain';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
@@ -38,12 +40,38 @@ function formatDate(value: string | null | undefined): string {
 const TAB_NOUN: Record<SatLibraryTab, string> = { active: 'active', drafts: 'unused', published: 'room-ready', archived: 'archived' };
 
 /**
- * One grid for the column labels and every row, so Exam / Status / Updated
- * align. The trailing column is wide enough for a published exam's explicit
- * Edit control AND the chevron, and it is reserved on every row (and in the
- * header) so a row with a control never shifts its neighbours' columns.
+ * One grid for the column labels and every row, so Select / Exam / Status /
+ * Updated align. The trailing column is wide enough for a published exam's
+ * explicit Edit control AND the chevron, and it is reserved on every row (and
+ * in the header) so a row with a control never shifts its neighbours' columns.
+ * Below md the row stacks: checkbox | title over status | chevron.
  */
-const ROW_GRID = 'grid-cols-[minmax(0,1fr)_16px] gap-x-4 md:grid-cols-[minmax(0,1fr)_224px_120px_140px]';
+const ROW_GRID = 'grid-cols-[24px_minmax(0,1fr)_16px] gap-x-3 md:grid-cols-[24px_minmax(0,1fr)_224px_120px_140px] md:gap-x-4';
+const ROW_CELL = {
+  select: 'row-span-2 md:row-span-1',
+  title: 'col-start-2 min-w-0',
+  status: 'col-start-2 row-start-2 mt-2 flex md:col-start-auto md:row-start-auto md:mt-0',
+  chevron: 'col-start-3 row-span-2 row-start-1 md:col-start-auto md:row-span-1 md:row-start-auto',
+} as const;
+const CHECKBOX_CLASS = 'h-4 w-4 cursor-pointer accent-[var(--sat-staff-accent,#0071e3)] disabled:cursor-not-allowed disabled:opacity-40';
+
+/**
+ * Only exams no room has captured can be deleted: the backend delete cascades
+ * through schedules, attempts and results, so an exam with rooms stays.
+ */
+function canDelete(exam: ExamEntity): boolean {
+  return !exam.currentPublishedVersionId && exam.status !== 'published';
+}
+
+function examMeta(exam: ExamEntity): string {
+  const parts: string[] = [];
+  // The list payload omits question counts; never print a misleading "0 questions".
+  if (exam.totalQuestions) parts.push(`${exam.totalQuestions} ${exam.totalQuestions === 1 ? 'question' : 'questions'}`);
+  parts.push(exam.currentPublishedVersionId ? satPublishScopeCopy(exam.currentPublishedScope ?? 'full') : 'Not in a room yet');
+  return parts.join(' · ');
+}
+
+const plural = (n: number) => `${n} ${n === 1 ? 'exam' : 'exams'}`;
 
 function libraryTabMatches(tab: SatLibraryTab, exam: ExamEntity): boolean {
   if (tab === 'archived') return exam.status === 'archived';
@@ -98,6 +126,53 @@ export function SatExamLibraryRoute() {
   const { lastOpenedId, openRecord } = useSatListReturn(!query.isLoading);
   const setSearch = (value: string) => setParams({ q: value });
 
+  const { session } = useAuthSession();
+  const bulkDelete = useBulkDeleteExamsMutation();
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  const lockedHintId = useId();
+  // Selection only ever counts rows the user can see and delete, so a filter
+  // change can never send a hidden exam to the delete call.
+  const deletableIds = useMemo(() => exams.filter(canDelete).map((exam) => exam.id), [exams]);
+  const selectedIds = useMemo(() => deletableIds.filter((id) => picked.has(id)), [deletableIds, picked]);
+  const allSelected = deletableIds.length > 0 && selectedIds.length === deletableIds.length;
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = selectedIds.length > 0 && !allSelected;
+  }, [selectedIds.length, allSelected]);
+
+  const toggle = (id: string, on: boolean) => {
+    setNotice(null);
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+  const toggleAll = (on: boolean) => {
+    setNotice(null);
+    setPicked(on ? new Set(deletableIds) : new Set());
+  };
+  const runDelete = async () => {
+    setConfirmOpen(false);
+    const examIds = selectedIds;
+    try {
+      const result = await bulkDelete.mutateAsync({ examIds, actor: session?.user.id ?? 'Staff' });
+      const failed = result.results.filter((item) => !item.success);
+      setPicked(new Set(failed.map((item) => item.examId)));
+      setNotice(failed.length === 0
+        ? { tone: 'ok', text: `Deleted ${plural(result.succeeded)}.` }
+        : {
+            tone: 'error',
+            text: `Deleted ${result.succeeded} of ${plural(result.total)}. Couldn't delete ${failed.map((item) => `“${item.examTitle}” (${item.error ?? 'unknown error'})`).join(', ')}.`,
+          });
+    } catch (error) {
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'The exams could not be deleted. Try again.' });
+    }
+  };
+
   const openCreate = () => setCreateOpen(true);
 
   const loadError = query.error ? (query.error instanceof Error ? query.error.message : 'The exam library is unavailable.') : null;
@@ -123,7 +198,7 @@ export function SatExamLibraryRoute() {
               { value: 'archived', label: 'Archived', count: counts.archived },
             ]}
             onChange={(next) => setParams({ tab: next === 'active' ? '' : next })}
-            className="sm:max-w-[480px]"
+            className="sm:w-auto"
           />
         }
       >
@@ -153,9 +228,56 @@ export function SatExamLibraryRoute() {
         <SatListSkeleton rows={5} label="Loading exams" />
       ) : exams.length ? (
         <>
-        <SatResultCount total={counts[tab]} visible={exams.length} itemLabel={exams.length === 1 ? 'exam' : 'exams'} />
+        <div className="mt-3 flex min-h-10 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex items-center gap-3">
+            {deletableIds.length ? (
+              <label htmlFor={`${lockedHintId}-all`} className="-my-2 flex cursor-pointer items-center gap-2 py-2 pl-4 text-[14px] font-medium text-[var(--sat-staff-text-secondary,#515154)]">
+                <input
+                  id={`${lockedHintId}-all`}
+                  ref={selectAllRef}
+                  type="checkbox"
+                  className={CHECKBOX_CLASS}
+                  checked={allSelected}
+                  onChange={(event) => toggleAll(event.target.checked)}
+                  aria-label={allSelected ? 'Clear selection' : `Select all ${plural(deletableIds.length)} that can be deleted`}
+                />
+              </label>
+            ) : null}
+            {selectedIds.length ? (
+              <p role="status" aria-live="polite" className="text-[14px] font-semibold tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]">
+                {selectedIds.length} selected
+              </p>
+            ) : (
+              <span className="[&>p]:mt-0"><SatResultCount total={counts[tab]} visible={exams.length} itemLabel={exams.length === 1 ? 'exam' : 'exams'} /></span>
+            )}
+          </div>
+          {selectedIds.length ? (
+            <div className="flex items-center gap-2">
+              <SatButton variant="quiet" onClick={() => toggleAll(false)}>Clear</SatButton>
+              <SatButton
+                variant="danger-secondary"
+                icon={<Trash2 size={16} aria-hidden="true" />}
+                pending={bulkDelete.isPending}
+                onClick={() => setConfirmOpen(true)}
+              >
+                Delete {plural(selectedIds.length)}
+              </SatButton>
+            </div>
+          ) : null}
+        </div>
+        {notice ? (
+          <p
+            role={notice.tone === 'error' ? 'alert' : 'status'}
+            className={'mt-2 rounded-[10px] px-3 py-2 text-[14px] leading-5 ' + (notice.tone === 'error'
+              ? 'bg-[var(--sat-staff-danger-tint,rgba(215,0,21,0.08))] text-[var(--sat-staff-danger,#d70015)]'
+              : 'bg-[var(--sat-staff-success-tint,rgba(36,138,61,0.1))] text-[var(--sat-staff-success-text,#248a3d)]')}
+          >
+            {notice.text}
+          </p>
+        ) : null}
+        <p id={lockedHintId} className="sr-only">Exams with rooms can't be deleted.</p>
         <SatList>
-          <SatListColumns gridClassName={ROW_GRID} columns={[{ label: 'Exam' }, { label: 'Status' }, { label: 'Updated', align: 'end' }, { label: '' }]} />
+          <SatListColumns gridClassName={ROW_GRID} columns={[{ label: '' }, { label: 'Exam' }, { label: 'Status' }, { label: 'Updated', align: 'end' }, { label: '' }]} />
           {exams.map((exam, rowIndex) => {
             const status = statusLabel(exam);
             const tone = statusTone(exam);
@@ -175,6 +297,8 @@ export function SatExamLibraryRoute() {
               if (!hasPublishedVersion) requestAuthoringDraftOnEntry(exam.id);
               openRecord(exam.id, primaryPath);
             };
+            const deletable = canDelete(exam);
+            const checked = deletable && picked.has(exam.id);
             return (
               <SatListRowShell
                 key={exam.id}
@@ -200,13 +324,31 @@ export function SatExamLibraryRoute() {
                 }
               >
                 <span className={'grid w-full items-center py-3 ' + ROW_GRID}>
-                  <span className="min-w-0">
-                    <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{exam.title}</span>
-                    <span className="block truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">{exam.totalQuestions ?? 0} questions{exam.currentPublishedVersionId ? ` · ${satPublishScopeCopy(exam.currentPublishedScope ?? 'full')}` : ''}<span className="md:hidden"> · Updated {formatDate(exam.updatedAt)}</span></span>
+                  <span className={ROW_CELL.select + ' flex items-center'}>
+                    <label
+                      htmlFor={`${lockedHintId}-${exam.id}`}
+                      className={`-m-3 flex p-3 ${SAT_ROW_ACTION_CLASS}`}
+                      title={deletable ? undefined : "Exams with rooms can't be deleted"}
+                    >
+                      <input
+                        id={`${lockedHintId}-${exam.id}`}
+                        type="checkbox"
+                        className={CHECKBOX_CLASS}
+                        checked={checked}
+                        disabled={!deletable || bulkDelete.isPending}
+                        onChange={(event) => toggle(exam.id, event.target.checked)}
+                        aria-label={`Select ${exam.title}`}
+                        aria-describedby={deletable ? undefined : lockedHintId}
+                      />
+                    </label>
                   </span>
-                  <span className={SAT_ROW_STACK.status}><SatStatusPill tone={tone}>{status}</SatStatusPill></span>
+                  <span className={ROW_CELL.title}>
+                    <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{exam.title}</span>
+                    <span className="block truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">{examMeta(exam)}<span className="md:hidden"> · Updated {formatDate(exam.updatedAt)}</span></span>
+                  </span>
+                  <span className={ROW_CELL.status}><SatStatusPill tone={tone}>{status}</SatStatusPill></span>
                   <span className="hidden text-right text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:block">{formatDate(exam.updatedAt)}</span>
-                  <span className={'flex items-center justify-end gap-2 ' + SAT_ROW_STACK.chevron}>
+                  <span className={'flex items-center justify-end gap-2 ' + ROW_CELL.chevron}>
                     {hasPublishedVersion ? (
                       <a
                         href={`/sat/exams/${exam.id}`}
@@ -268,6 +410,15 @@ export function SatExamLibraryRoute() {
       )}
 
       <CreateSatExamSheet open={createOpen} onClose={() => setCreateOpen(false)} />
+      <SatConfirmDialog
+        open={confirmOpen}
+        destructive
+        title={`Delete ${plural(selectedIds.length)}?`}
+        description={`${selectedIds.length === 1 ? 'This exam and its draft' : 'These exams and their drafts'} will be permanently deleted. This can't be undone.`}
+        confirmLabel="Delete"
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => void runDelete()}
+      />
     </SatContainer>
   );
 }

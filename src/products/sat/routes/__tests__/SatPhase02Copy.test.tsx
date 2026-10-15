@@ -24,6 +24,7 @@ const invalidateExamListMock = vi.hoisted(() => vi.fn());
 // module, so useExamListQueryMock serves both Library and Sessions routes.
 vi.mock('../../../../features/exam-authoring/api/examQueries', () => ({
   useExamListQuery: useExamListQueryMock,
+  useBulkDeleteExamsMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   invalidateExamList: invalidateExamListMock,
 }));
 vi.mock('../../../../features/exam-authoring/api/examAuthoringFacade', () => ({
