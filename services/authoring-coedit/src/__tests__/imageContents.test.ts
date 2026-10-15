@@ -70,4 +70,58 @@ describe("co-editing service image", () => {
     );
     expect(dockerfile).not.toContain(`/usr/local/bin/bun run /app/${COEDIT_ENTRY} &`);
   });
+
+  it("ships co-edit dependencies in a production-only runtime layer", () => {
+    const dockerfile = readFileSync(join(REPO_ROOT, DOCKERFILE_PATH), "utf8");
+    const packageJson = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+
+    expect(packageJson.dependencies["tsx"]).toBeTruthy();
+    expect(packageJson.dependencies["mysql2"]).toBeTruthy();
+    expect(packageJson.devDependencies["tsx"]).toBeUndefined();
+    expect(packageJson.devDependencies["mysql2"]).toBeUndefined();
+    expect(packageJson.devDependencies["@tailwindcss/vite"]).toBeTruthy();
+    expect(packageJson.devDependencies["@vitejs/plugin-react"]).toBeTruthy();
+    expect(dockerfile).toContain("FROM node:22-bookworm-slim AS production-deps");
+    expect(dockerfile).toContain("RUN bun install --production --frozen-lockfile");
+    expect(dockerfile).toContain("COPY --from=production-deps /app/node_modules /app/node_modules");
+    expect(dockerfile).not.toContain(
+      "COPY --from=frontend-builder /app/node_modules /app/node_modules"
+    );
+  });
+
+  it("keeps backend-only source out of the frontend build cache key", () => {
+    const dockerfile = readFileSync(join(REPO_ROOT, DOCKERFILE_PATH), "utf8");
+    const frontendStage = dockerfile.split("FROM golang:")[0] ?? "";
+
+    expect(frontendStage).not.toContain("COPY . .");
+    expect(frontendStage).toContain("COPY src/ ./src");
+    expect(frontendStage).toContain("COPY public/ ./public");
+    expect(frontendStage).toContain(
+      "COPY services/authoring-coedit/src ./services/authoring-coedit/src"
+    );
+  });
+
+  it("excludes generated artifacts and compiled binaries from the Docker context", () => {
+    const dockerignore = readFileSync(join(REPO_ROOT, ".dockerignore"), "utf8").split(/\r?\n/);
+
+    for (const entry of [
+      ".git",
+      "dist",
+      "coverage",
+      "playwright-report",
+      "test-results",
+      "storybook-static",
+      "verification",
+      "archive.tar",
+      "*.tar",
+      "*.tar.gz",
+      "backend/go/api",
+      "backend/go/bin",
+    ]) {
+      expect(dockerignore).toContain(entry);
+    }
+  });
 });

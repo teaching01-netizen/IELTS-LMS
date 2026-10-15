@@ -22,8 +22,20 @@ COPY --from=oven/bun:1.3.14-debian /usr/local/bin/bun /usr/local/bin/bun
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-COPY . .
+COPY src/ ./src
+COPY public/ ./public
+COPY index.html vite.config.ts tsconfig.json postcss.config.cjs ./
+COPY services/authoring-coedit/src ./services/authoring-coedit/src
+COPY services/authoring-coedit/tsconfig.json ./services/authoring-coedit/tsconfig.json
 RUN bun run build
+
+FROM node:22-bookworm-slim AS production-deps
+
+WORKDIR /app
+
+COPY --from=oven/bun:1.3.14-debian /usr/local/bin/bun /usr/local/bin/bun
+COPY package.json bun.lock ./
+RUN bun install --production --frozen-lockfile
 
 FROM golang:1.26-bookworm AS backend-builder
 
@@ -33,9 +45,7 @@ COPY backend/go/go.mod backend/go/go.sum ./
 RUN go mod download
 
 COPY backend/go ./
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/api ./cmd/api \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/migrate ./cmd/migrate \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/worker ./cmd/worker
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/api ./cmd/migrate ./cmd/worker
 
 FROM node:22-bookworm-slim AS runner
 
@@ -51,15 +61,10 @@ ENV ENVIRONMENT=production
 ENV BACKGROUND_RUNTIME_MODE=activity_driven
 ENV IDLE_GRACE_SECS=60
 
-COPY --from=backend-builder /out/api /app/api
-COPY --from=backend-builder /out/migrate /app/migrate
-COPY --from=backend-builder /out/worker /app/worker
-COPY --from=frontend-builder /app/dist /app/frontend/dist
-# The frontend builder already installs the root dependency tree used by the
-# co-edit runtime. Copy only its runtime entrypoint, shared wire-format files,
-# and dependencies into the final image. Hocuspocus must run under Node; its
-# crossws Node adapter intentionally rejects Bun.
-COPY --from=frontend-builder /app/node_modules /app/node_modules
+# Install the stable runtime dependency tree before changing application
+# artifacts so backend and frontend edits reuse this layer. Hocuspocus must run
+# under Node; its crossws Node adapter intentionally rejects Bun.
+COPY --from=production-deps /app/node_modules /app/node_modules
 COPY --from=frontend-builder /app/package.json /app/package.json
 # The source list below is GENERATED from backend/coedit-runtime-manifest.json:
 # add a path there and run `bun run coedit:manifest`. A hand-written COPY for
@@ -83,6 +88,8 @@ COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/st
 COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/workspaceCommands.ts /app/src/features/exam-authoring/realtime/coedit/workspaceCommands.ts
 COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/workspaceSeed.ts /app/src/features/exam-authoring/realtime/coedit/workspaceSeed.ts
 # coedit-runtime-manifest:end
+COPY --from=frontend-builder /app/dist /app/frontend/dist
+COPY --from=backend-builder /out/ /app/
 COPY backend/go/migrations /app/migrations
 COPY backend/scripts/normalize-background-runtime-mode.sh /app/normalize-background-runtime-mode.sh
 

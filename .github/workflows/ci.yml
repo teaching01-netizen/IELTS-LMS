@@ -175,6 +175,165 @@ jobs:
       - name: Git diff check
         run: git diff --check
 
+  deployment-image-smoke:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ielts
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build deployment image
+        run: |
+          set -euo pipefail
+          started=$SECONDS
+          DOCKER_BUILDKIT=1 docker build --progress=plain --target runner \
+            --file backend/Dockerfile --tag ielts-proctoring:ci . \
+            2>&1 | tee "$RUNNER_TEMP/cold-image-build.log"
+          echo "cold_image_build_seconds=$((SECONDS - started))"
+          docker image inspect ielts-proctoring:ci --format='image_size_bytes={{.Size}}'
+          docker run --rm --entrypoint du ielts-proctoring:ci -sh \
+            /app/node_modules /app/frontend/dist
+
+      - name: Verify the runtime dependency layer is production-only
+        run: |
+          docker run --rm --network host --entrypoint node ielts-proctoring:ci -e '
+          const required = ["tsx", "mysql2/promise", "@hocuspocus/server", "@tiptap/core", "y-prosemirror", "yjs"];
+          for (const name of required) require.resolve(name);
+          for (const name of ["vite", "vitest", "storybook", "@tailwindcss/vite", "@vitejs/plugin-react", "typescript"]) {
+            try {
+              require.resolve(name);
+              throw new Error(`${name} unexpectedly exists in the runtime image`);
+            } catch (error) {
+              if (error.code !== "MODULE_NOT_FOUND") throw error;
+            }
+          }
+          console.log("co-edit runtime dependencies are present; build tools are absent");
+          '
+
+      - name: Measure unchanged build cache reuse
+        run: |
+          set -euo pipefail
+          started=$SECONDS
+          DOCKER_BUILDKIT=1 docker build --progress=plain --target runner \
+            --file backend/Dockerfile --tag ielts-proctoring:ci . \
+            2>&1 | tee "$RUNNER_TEMP/unchanged-image-build.log"
+          echo "unchanged_image_build_seconds=$((SECONDS - started))"
+
+      - name: Verify frontend and backend build cache boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp src/main.tsx "$RUNNER_TEMP/cache-probe-main.tsx"
+          cp backend/go/cmd/api/main.go "$RUNNER_TEMP/cache-probe-main.go"
+          restore_cache_probe_sources() {
+            cp "$RUNNER_TEMP/cache-probe-main.tsx" src/main.tsx
+            cp "$RUNNER_TEMP/cache-probe-main.go" backend/go/cmd/api/main.go
+          }
+          trap restore_cache_probe_sources EXIT
+
+          printf '\n' >> src/main.tsx
+          started=$SECONDS
+          DOCKER_BUILDKIT=1 docker build --progress=plain --target runner \
+            --file backend/Dockerfile --tag ielts-proctoring:ci . \
+            2>&1 | tee "$RUNNER_TEMP/frontend-only-image-build.log"
+          echo "frontend_only_image_build_seconds=$((SECONDS - started))"
+          if grep -E 'CACHED .*RUN bun run build' "$RUNNER_TEMP/frontend-only-image-build.log"; then
+            echo "frontend source change unexpectedly reused the frontend build layer"
+            exit 1
+          fi
+          cp "$RUNNER_TEMP/cache-probe-main.tsx" src/main.tsx
+
+          printf '\n' >> backend/go/cmd/api/main.go
+          started=$SECONDS
+          DOCKER_BUILDKIT=1 docker build --progress=plain --target runner \
+            --file backend/Dockerfile --tag ielts-proctoring:ci . \
+            2>&1 | tee "$RUNNER_TEMP/backend-only-image-build.log"
+          echo "backend_only_image_build_seconds=$((SECONDS - started))"
+          if ! grep -E 'CACHED .*RUN bun run build' "$RUNNER_TEMP/backend-only-image-build.log"; then
+            echo "backend-only source change unexpectedly rebuilt the frontend"
+            exit 1
+          fi
+
+      - name: Exercise both runtime modes against MySQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_url='mysql://root:root@127.0.0.1:3306/ielts?parseTime=true&multiStatements=true&charset=utf8mb4'
+
+          for mode in activity_driven continuous; do
+            container_name="ielts-proctoring-${mode}"
+            docker run --detach --network host --name "$container_name" \
+              --env APP_ENV=test \
+              --env ENVIRONMENT=test \
+              --env API_HOST=127.0.0.1 \
+              --env API_PORT=4000 \
+              --env PORT=4000 \
+              --env COOKIE_SECURE=false \
+              --env MIGRATIONS_DIR=/app/migrations \
+              --env DATABASE_URL="$database_url" \
+              --env DATABASE_DIRECT_URL="$database_url" \
+              --env DATABASE_MIGRATOR_URL="$database_url" \
+              --env DATABASE_WORKER_URL="$database_url" \
+              --env AUTH_SECRET=test-auth-secret-with-more-than-32-characters \
+              --env BACKGROUND_RUNTIME_MODE="$mode" \
+              --env AUTHORING_COEDIT_ENVIRONMENT=test \
+              --env AUTHORING_COEDIT_MYSQL_DSN="$database_url" \
+              --env AUTHORING_COEDIT_TOKEN_SECRET=test-coedit-token-secret-with-32-bytes \
+              --env AUTHORING_COEDIT_SERVICE_SECRET=test-coedit-service-secret-with-32-bytes \
+              --env AUTHORING_COEDIT_GO_BASE_URL=http://127.0.0.1:4000 \
+              ielts-proctoring:ci
+
+            ready=0
+            for attempt in $(seq 1 90); do
+              if curl --fail --silent http://127.0.0.1:4000/readyz >/dev/null 2>&1; then
+                if [ "$mode" = activity_driven ]; then
+                  if curl --fail --silent http://127.0.0.1:1235/readyz >/dev/null 2>&1; then
+                    echo "activity-driven co-edit service should start parked"
+                    break
+                  fi
+                  if ! curl --fail --silent http://127.0.0.1:1235/healthz >/dev/null 2>&1; then
+                    sleep 2
+                    continue
+                  fi
+                elif ! curl --fail --silent http://127.0.0.1:1235/readyz >/dev/null 2>&1; then
+                  sleep 2
+                  continue
+                fi
+                ready=1
+                break
+              fi
+              if [ "$(docker inspect --format='{{.State.Running}}' "$container_name")" != true ]; then
+                break
+              fi
+              sleep 2
+            done
+            if [ "$ready" != 1 ]; then
+              docker logs "$container_name"
+              exit 1
+            fi
+
+            docker stop --time 25 "$container_name"
+            exit_code="$(docker inspect --format='{{.State.ExitCode}}' "$container_name")"
+            if [ "$exit_code" != 0 ]; then
+              docker logs "$container_name"
+              echo "container exited with status $exit_code during graceful shutdown"
+              exit 1
+            fi
+            docker rm "$container_name"
+          done
+
   quality-gates:
     runs-on: ubuntu-latest
     steps:
@@ -195,6 +354,12 @@ jobs:
 
       - name: Install
         run: bun install --frozen-lockfile
+
+      - name: Co-edit service tests
+        run: bun run coedit:test
+
+      - name: Co-edit service typecheck
+        run: bun run coedit:typecheck
 
       - name: Typecheck
         run: bun run typecheck
