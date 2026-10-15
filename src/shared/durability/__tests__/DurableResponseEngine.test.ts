@@ -378,6 +378,70 @@ describe("DurableResponseEngine", () => {
     await flushPromise.catch(() => undefined);
   });
 
+  it("keeps answers through 401 auth failures and delivers the same write once the credential recovers", async () => {
+    // Exam-day incident class (session cookie / attempt bearer lapse): every
+    // auth rejection must stay on the retry path — never quarantine, never a
+    // terminal state — so the answer reaches the server once auth recovers.
+    // Proof model: Retention.sendTransient (verification/lean/sat-session-continuity).
+    vi.spyOn(Math, "random").mockReturnValue(0); // zero jitter backoff
+    const authFailures = [
+      { status: 401, code: "ATTEMPT_TOKEN_EXPIRED", message: "Attempt token expired." },
+      { status: 401, code: "ATTEMPT_TOKEN_INVALID", message: "Attempt token invalid." },
+      { status: 401, code: "SESSION_EXPIRED", message: "Session expired." },
+      { status: 401, code: "UNAUTHORIZED", message: "Authentication is required." },
+    ];
+    const sentWriteIds: string[] = [];
+    transport.sendBatch = vi.fn().mockImplementation((_attemptId, req: ResponseBatchRequestV2) => {
+      sentWriteIds.push(...req.commands.map((cmd) => cmd.writeId));
+      const failure = authFailures.shift();
+      if (failure) return Promise.reject(failure);
+      return Promise.resolve({
+        attemptRevision: 2,
+        serverTime: new Date().toISOString(),
+        acknowledgements: req.commands.map((cmd) => ({
+          writeId: cmd.writeId,
+          questionId: cmd.questionId,
+          clientVersion: cmd.clientVersion,
+          outcome: "applied",
+          serverRevision: 2,
+          canonicalResponse: cmd.response,
+          contentHash: "hash-2",
+        })),
+      });
+    });
+    const statuses: string[] = [];
+    const engine = new DurableResponseEngine({
+      scheduleId: "sched-1",
+      attemptId: "att-1",
+      leaseEpoch: 1,
+      controlEpoch: 1,
+      transport,
+      onStatusChange: (status) => statuses.push(status),
+    });
+
+    await engine.acceptResponse("q-1", {
+      answer: "B",
+      markedForReview: false,
+      eliminatedOptions: [],
+      annotations: [],
+    });
+    const writeId = engine.getStates().get("q-1")?.pending?.writeId;
+    if (!writeId) throw new Error("Expected a pending write id");
+
+    await engine.flush();
+
+    expect(transport.sendBatch).toHaveBeenCalledTimes(5);
+    expect(new Set(sentWriteIds)).toEqual(new Set([writeId]));
+    const state = engine.getStates().get("q-1");
+    expect(state?.pending).toBeFalsy();
+    expect(state?.confirmed?.payload.answer).toBe("B");
+    expect(engine.getQuarantined()).toHaveLength(0);
+    expect(statuses).not.toContain("conflict_terminal");
+    expect(statuses).not.toContain("conflict_fenced");
+    expect(engine.getStatus()).toBe("synced");
+    engine.destroy();
+  });
+
   it("recovers local drafts and overlays onto server snapshot", async () => {
     // Simulate pre-existing checkpoint in localStorage
     localStorage.setItem(

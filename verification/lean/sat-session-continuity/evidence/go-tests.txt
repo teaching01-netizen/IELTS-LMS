@@ -1,0 +1,22 @@
+=== RUN   TestAuthMiddlewareRefreshesLiveStudentCookieToAbsoluteDeadline
+=== RUN   TestAuthMiddlewareRefreshesLiveStudentCookieToAbsoluteDeadline/student
+=== RUN   TestAuthMiddlewareRefreshesLiveStudentCookieToAbsoluteDeadline/admin
+--- PASS: TestAuthMiddlewareRefreshesLiveStudentCookieToAbsoluteDeadline (0.00s)
+=== RUN   TestStudentSessionCookiesOutliveTheIdleWindow
+--- PASS: TestStudentSessionCookiesOutliveTheIdleWindow (0.00s)
+=== RUN   TestResponseWriteSectionLiveness
+=== RUN   TestResponseWriteSectionLiveness/snapshot_off_(v2Locker,_FOR_UPDATE)/live_section_admits_the_write
+=== RUN   TestResponseWriteSectionLiveness/snapshot_off_(v2Locker,_FOR_UPDATE)/paused_section_refuses
+=== RUN   TestResponseWriteSectionLiveness/snapshot_off_(v2Locker,_FOR_UPDATE)/planned_but_not_opened_section_refuses
+=== RUN   TestResponseWriteSectionLiveness/snapshot_off_(v2Locker,_FOR_UPDATE)/completed_section_refuses
+=== RUN   TestResponseWriteSectionLiveness/snapshot_off_(v2Locker,_FOR_UPDATE)/missing_section_row_refuses
+=== RUN   TestResponseWriteSectionLiveness/snapshot_off_(v2Locker,_FOR_UPDATE)/expired_SAT_personal_module_clock_refuses_before_worker_reconciliation
+=== RUN   TestResponseWriteSectionLiveness/snapshot_on_(snapshotLocker,_lock-free_reads)/live_section_admits_the_write
+=== RUN   TestResponseWriteSectionLiveness/snapshot_on_(snapshotLocker,_lock-free_reads)/paused_section_refuses
+=== RUN   TestResponseWriteSectionLiveness/snapshot_on_(snapshotLocker,_lock-free_reads)/planned_but_not_opened_section_refuses
+=== RUN   TestResponseWriteSectionLiveness/snapshot_on_(snapshotLocker,_lock-free_reads)/completed_section_refuses
+=== RUN   TestResponseWriteSectionLiveness/snapshot_on_(snapshotLocker,_lock-free_reads)/missing_section_row_refuses
+=== RUN   TestResponseWriteSectionLiveness/snapshot_on_(snapshotLocker,_lock-free_reads)/expired_SAT_personal_module_clock_refuses_before_worker_reconciliation
+--- PASS: TestResponseWriteSectionLiveness (0.00s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/api	1.153s

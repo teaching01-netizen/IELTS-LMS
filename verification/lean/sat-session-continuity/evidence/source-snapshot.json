@@ -1,0 +1,17 @@
+{
+  "base_commit": "71fab6d61f85ff908a0af636d6fafcd45bdfa89a",
+  "working_tree": "uncommitted: this verification folder + new engine regression test",
+  "source_sha256": {
+    "backend/go/cmd/api/main.go": "62bbc767d709eab24c6f32995a69e13ad7cc4c1ad866b2fbe64c242174ecf282",
+    "backend/go/cmd/api/handlers_auth.go": "91b75bb1255561ff235137b19ce0d45ab8c9d2697ade170c7c2757052bb54945",
+    "backend/go/cmd/api/student_entry_recovery.go": "2af0ea9eb5b924f1b2f87756869db9fcd320cda74034980feca348d5ce399e95",
+    "backend/go/cmd/api/handlers_auth_cookie_test.go": "6cc5f713b3661f0b724406b4b1643bbe31d9f7499c56bc9f9698610c932f7b51",
+    "backend/go/cmd/api/auth_middleware_session_liveness_test.go": "6c28b68ef07c364f732d11e9acfe2aa75046943a55b271cd0f94a9fd0dc7c42b",
+    "backend/go/internal/auth/sessionlookup_cache_impl.go": "be87f7e029f6713d2c0d9496f4d8f4b4ec48dcb818d30afc6afeee74ba1cb692",
+    "backend/go/internal/platform/config/config.go": "dd5f389b031b91284170c703d5cc651d5d97315a316d57e67a5f4c7e32896a41",
+    "src/features/student-delivery/api/assessmentDeliveryApi.ts": "ea4272f5a6e8f5cb271285554e27aa0de907f572f043b8ee4da2784f6f8398a6",
+    "src/services/attemptCredentialAdapter.ts": "51f59ebdd42732abd531d353e17b0b1b89bd4d5acc940caf248fe88abf90ff2b",
+    "src/shared/durability/DurableResponseEngine.ts": "a3f8b06c3eeb64318b578cffb5420f0f68cbc2c9e8b6dcfec4fee6e5b3a09d25",
+    "src/shared/durability/__tests__/DurableResponseEngine.test.ts": "437bf693afc4f62b931f3fc28711eb152c8dfb05bc8528b38920a2d16a3c65d5"
+  }
+}

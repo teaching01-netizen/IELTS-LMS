@@ -1,0 +1,10 @@
+ ✓ src/shared/durability/__tests__/useResponseDurabilityStatus.test.ts (8 tests) 43ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.moduleScope.test.ts (13 tests) 23ms
+ ✓ src/features/student-delivery/api/assessmentDeliveryApi.test.ts (13 tests) 110ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.controlEpoch.test.ts (20 tests) 140ms
+ ✓ src/shared/durability/__tests__/durabilityTelemetry.test.ts (19 tests) 298ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.test.ts (26 tests) 342ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.preservation.test.ts (23 tests) 369ms
+ ✓ src/shared/durability/__tests__/DurableResponseEngine.debounce.test.ts (4 tests) 13ms
+ Test Files  8 passed (8)
+      Tests  126 passed (126)

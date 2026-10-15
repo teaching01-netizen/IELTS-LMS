@@ -1,0 +1,18 @@
+✔ [2/7] Built Model
+✔ [3/7] Built Continuity
+✔ [4/7] Built Counterexamples
+✔ [5/7] Built Retention
+ℹ [6/7] Built SatSessionContinuity
+info: ./././proof/SatSessionContinuity.lean:9:0: 'SatSessionContinuity.active_student_always_served' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatSessionContinuity.lean:10:0: 'SatSessionContinuity.prod_active_student_always_served' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatSessionContinuity.lean:12:0: 'SatSessionContinuity.idleBound_logs_out_active_student' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatSessionContinuity.lean:13:0: 'SatSessionContinuity.idleBound_rejects_saves' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatSessionContinuity.lean:14:0: 'SatSessionContinuity.fixed_policy_serves_three_hours' does not depend on any axioms
+info: ./././proof/SatSessionContinuity.lean:15:0: 'SatSessionContinuity.old_policy_fails_three_hours' does not depend on any axioms
+info: ./././proof/SatSessionContinuity.lean:17:0: 'SatSessionContinuity.Retention.answer_never_silently_lost' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatSessionContinuity.lean:18:0: 'SatSessionContinuity.Retention.saved_answer_scored' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatSessionContinuity.lean:19:0: 'SatSessionContinuity.Retention.answer_accounted' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatSessionContinuity.lean:20:0: 'SatSessionContinuity.Retention.ackLost_then_closed_is_duplicate' depends on axioms: [propext, Quot.sound]
+info: ./././proof/SatSessionContinuity.lean:21:0: 'SatSessionContinuity.Retention.wipe_breaks_retention' depends on axioms: [propext]
+info: ./././proof/SatSessionContinuity.lean:22:0: 'SatSessionContinuity.Retention.nonvacuous_trace' depends on axioms: [propext, Quot.sound]
+Build completed successfully.

@@ -1,0 +1,12 @@
+'SatSessionContinuity.active_student_always_served' depends on axioms: [propext, Quot.sound]
+'SatSessionContinuity.prod_active_student_always_served' depends on axioms: [propext, Quot.sound]
+'SatSessionContinuity.idleBound_logs_out_active_student' depends on axioms: [propext, Quot.sound]
+'SatSessionContinuity.idleBound_rejects_saves' depends on axioms: [propext, Quot.sound]
+'SatSessionContinuity.fixed_policy_serves_three_hours' does not depend on any axioms
+'SatSessionContinuity.old_policy_fails_three_hours' does not depend on any axioms
+'SatSessionContinuity.Retention.answer_never_silently_lost' depends on axioms: [propext, Quot.sound]
+'SatSessionContinuity.Retention.saved_answer_scored' depends on axioms: [propext, Quot.sound]
+'SatSessionContinuity.Retention.answer_accounted' depends on axioms: [propext, Quot.sound]
+'SatSessionContinuity.Retention.ackLost_then_closed_is_duplicate' depends on axioms: [propext, Quot.sound]
+'SatSessionContinuity.Retention.wipe_breaks_retention' depends on axioms: [propext]
+'SatSessionContinuity.Retention.nonvacuous_trace' depends on axioms: [propext, Quot.sound]
